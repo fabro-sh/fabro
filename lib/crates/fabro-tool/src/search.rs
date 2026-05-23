@@ -449,6 +449,7 @@ mod tests {
             labels:           HashMap::from([("group".to_string(), group.to_string())]),
             lifecycle:        RunLifecycle {
                 status: RunStatus::Submitted,
+                approval: None,
                 pending_control: None,
                 queue_position: None,
                 error: None,

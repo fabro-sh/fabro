@@ -47,7 +47,7 @@ mock.module("../lib/queries", () => ({
       id:               "run_1",
       goal:             "Run 1",
       title:            "Run 1",
-      workflow:         { slug: "default", name: "Default" },
+      workflow:         { slug: "default", name: "Default", graph_name: null, node_count: 0, edge_count: 0 },
       automation:       null,
       repository:       { name: "fabro", origin_url: null, provider: "unknown" },
       created_by:       null,
@@ -55,6 +55,7 @@ mock.module("../lib/queries", () => ({
       labels:           {},
       lifecycle:        {
         status:          { kind: currentRunStatus },
+        approval:        null,
         pending_control: null,
         queue_position:  null,
         error:           null,

@@ -60,7 +60,7 @@ The revised plan therefore needs to solve four things explicitly:
 - Control priority and conflict rules
   - Priority is `cancel > pause > unpause`.
   - `pending_control` remains a single value and later accepted requests overwrite lower-priority pending requests.
-  - `cancel` is accepted from `submitted`, `queued`, `starting`, `running`, or `paused`.
+  - `cancel` is accepted from `submitted`, `runnable`, `starting`, `running`, or `paused`.
   - A `cancel` request overwrites a pending `pause` or `unpause`.
   - `pause` is accepted only when observed status is `running` and `pending_control` is `null`.
   - `unpause` is accepted only when observed status is `paused` and `pending_control` is `null`.
@@ -209,9 +209,9 @@ The revised plan therefore needs to solve four things explicitly:
   - server appends worker-streamed events in order and SSE reflects the appended stream
   - worker stderr is captured into the per-run log file
 - Cancel tests
-  - starting a queued run spawns a worker subprocess and records PID and PGID
+  - starting a runnable run spawns a worker subprocess and records PID and PGID
   - `POST /runs/{id}/cancel` appends `run.cancel.requested`, sets `pending_control=cancel`, sends `SIGTERM`, and later converges to durable `failed` with `status_reason=cancelled`
-  - cancelling a submitted or queued run reaches durable `failed/cancelled` without spawning a worker
+  - cancelling a submitted or runnable run reaches durable `failed/cancelled` without spawning a worker
   - an unresponsive worker is escalated from worker `SIGTERM` to process-group `SIGKILL`
 - Pause and unpause tests
   - `POST /runs/{id}/pause` on a running worker appends `run.pause.requested`, sets `pending_control=pause`, and later projects `paused`

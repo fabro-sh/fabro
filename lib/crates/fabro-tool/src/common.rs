@@ -328,6 +328,7 @@ mod tests {
             labels:           HashMap::new(),
             lifecycle:        RunLifecycle {
                 status:          RunStatus::Submitted,
+                approval:        None,
                 pending_control: None,
                 queue_position:  None,
                 error:           None,

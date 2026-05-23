@@ -58,7 +58,7 @@ async fn sse_stream_contains_expected_event_types() {
         create_and_start_run_from_manifest(&app, minimal_manifest_json_with_dry_run(SIMPLE_DOT))
             .await;
 
-    wait_for_run_status_not_in(&app, &run_id, &["queued", "starting"]).await;
+    wait_for_run_status_not_in(&app, &run_id, &["runnable", "starting"]).await;
 
     // Get SSE stream
     let req = Request::builder()
@@ -104,7 +104,7 @@ async fn sse_stream_contains_expected_event_types() {
     }
 
     // Because we subscribe while the run is only guaranteed to be past
-    // "queued", a live stream should include at least one stage event.
+    // "runnable", a live stream should include at least one stage event.
     // If the run completes before we attach with no unread events, an empty
     // stream is still a valid 200 response.
     if !event_types.is_empty() {

@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunApproval } from './run-approval';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunControlAction } from './run-control-action';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -25,6 +28,7 @@ import type { RunStatus } from './run-status';
 
 export interface RunLifecycle {
     'status': RunStatus;
+    'approval': RunApproval | null;
     'pending_control': RunControlAction | null;
     'queue_position': number | null;
     'error': RunError | null;

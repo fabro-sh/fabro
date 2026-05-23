@@ -14,10 +14,12 @@
 
 
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
-}
+/**
+ * Reason a pre-execution run is pending instead of runnable.
+ */
+
+export const PendingReason = {
+    APPROVAL_REQUIRED: 'approval_required'
+} as const;
+
+export type PendingReason = typeof PendingReason[keyof typeof PendingReason];

@@ -678,6 +678,10 @@ mod stage_events_tests {
             workflow_event::Event::RunSubmitted {
                 definition_blob: None,
             },
+            workflow_event::Event::RunRunnable {
+                source: fabro_types::RunRunnableSource::StartRequested,
+                actor:  None,
+            },
             workflow_event::Event::RunStarting,
             workflow_event::Event::RunRunning,
         ] {

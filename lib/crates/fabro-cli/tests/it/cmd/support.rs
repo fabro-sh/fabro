@@ -502,7 +502,8 @@ pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
         } else {
             match state.status {
                 fabro_types::RunStatus::Submitted => "submitted",
-                fabro_types::RunStatus::Queued => "queued",
+                fabro_types::RunStatus::Pending { .. } => "pending",
+                fabro_types::RunStatus::Runnable => "runnable",
                 fabro_types::RunStatus::Starting => "starting",
                 fabro_types::RunStatus::Running => "running",
                 fabro_types::RunStatus::Blocked { .. } => "blocked",
@@ -1045,6 +1046,15 @@ async fn append_seeded_simple_completion_events(
         base_url,
         &run.run_id,
         None,
+        "run.runnable",
+        serde_json::json!({ "source": "start_requested" }),
+    )
+    .await;
+    append_run_event(
+        client,
+        base_url,
+        &run.run_id,
+        None,
         "run.starting",
         serde_json::json!({}),
     )
@@ -1205,6 +1215,15 @@ async fn append_seeded_git_completion_events(
         base_url,
         &run.run_id,
         None,
+        "run.runnable",
+        serde_json::json!({ "source": "start_requested" }),
+    )
+    .await;
+    append_run_event(
+        client,
+        base_url,
+        &run.run_id,
+        None,
         "run.starting",
         serde_json::json!({}),
     )
@@ -1314,6 +1333,15 @@ async fn append_seeded_git_noop_events(
         base_url,
         &run.run_id,
         None,
+        "run.runnable",
+        serde_json::json!({ "source": "start_requested" }),
+    )
+    .await;
+    append_run_event(
+        client,
+        base_url,
+        &run.run_id,
+        None,
         "run.starting",
         serde_json::json!({}),
     )
@@ -1367,6 +1395,15 @@ async fn append_seeded_artifact_run_events(
             "worktree_dir": context.temp_dir.display().to_string(),
             "goal": "Exercise artifact commands",
         }),
+    )
+    .await;
+    append_run_event(
+        client,
+        base_url,
+        &run.run_id,
+        None,
+        "run.runnable",
+        serde_json::json!({ "source": "start_requested" }),
     )
     .await;
     append_run_event(

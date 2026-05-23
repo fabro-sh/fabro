@@ -7,7 +7,11 @@ let lastMutationOptions: { onSuccess?: (result: unknown) => void } | null = null
 
 const useSWRMutationMock = mock((_key: unknown, _fetcher: unknown, options: unknown) => {
   lastMutationOptions = options as { onSuccess?: (result: unknown) => void };
-  return {};
+  return {
+    trigger: mock(),
+    isMutating: false,
+    reset: mock(),
+  };
 });
 
 mock.module("swr", () => ({
@@ -16,20 +20,6 @@ mock.module("swr", () => ({
 
 mock.module("swr/mutation", () => ({
   default: useSWRMutationMock,
-}));
-
-mock.module("./api-client", () => ({
-  apiData: mock(),
-  authApi: {},
-  humanInTheLoopApi: {},
-  runsApi: {},
-}));
-
-mock.module("./run-actions", () => ({
-  archiveRun: mock(),
-  cancelRun: mock(),
-  isLifecycleActionError: () => false,
-  unarchiveRun: mock(),
 }));
 
 const { useArchiveRun } = await import("./mutations");

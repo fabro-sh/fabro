@@ -5,7 +5,7 @@ date: "2026-03-04"
 
 ## Concurrency limiter
 
-Set `max_concurrent_runs` in server config to control how many runs execute simultaneously. Additional runs queue automatically with `queued` and `starting` states visible in the UI and API.
+Set `max_concurrent_runs` in server config to control how many runs execute simultaneously. Additional start-requested runs wait as `runnable` before moving to `starting`, with both states visible in the UI and API.
 
 Previously, starting too many runs at once could overwhelm the machine. Now excess runs wait in a queue and start as capacity frees up.
 

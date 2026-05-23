@@ -52,6 +52,8 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/checkpoint", get(demo::checkpoint_stub))
         .route("/runs/{id}/cancel", post(demo::cancel_stub))
         .route("/runs/{id}/start", post(demo::start_run_stub))
+        .route("/runs/{id}/approve", post(demo::start_run_stub))
+        .route("/runs/{id}/deny", post(demo::deny_run_stub))
         .route("/runs/{id}/pause", post(demo::pause_stub))
         .route("/runs/{id}/unpause", post(demo::unpause_stub))
         .route("/runs/{id}/graph", get(demo::get_run_graph))

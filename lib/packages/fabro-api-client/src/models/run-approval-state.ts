@@ -14,10 +14,14 @@
 
 
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
-}
+/**
+ * State of a run\'s pre-execution approval request.
+ */
+
+export const RunApprovalState = {
+    PENDING: 'pending',
+    APPROVED: 'approved',
+    DENIED: 'denied'
+} as const;
+
+export type RunApprovalState = typeof RunApprovalState[keyof typeof RunApprovalState];

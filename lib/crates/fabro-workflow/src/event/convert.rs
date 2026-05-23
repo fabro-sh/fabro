@@ -82,7 +82,21 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 definition_blob: *definition_blob,
             })
         }
-        Event::RunQueued => EventBody::RunQueued(fabro_types::RunStatusEffectProps::default()),
+        Event::RunStartRequested { resume, .. } => {
+            EventBody::RunStartRequested(fabro_types::RunStartRequestedProps { resume: *resume })
+        }
+        Event::RunPending { reason, .. } => {
+            EventBody::RunPending(fabro_types::RunPendingProps { reason: *reason })
+        }
+        Event::RunApproved { .. } => {
+            EventBody::RunApproved(fabro_types::RunApprovedProps::default())
+        }
+        Event::RunDenied { reason, .. } => EventBody::RunDenied(fabro_types::RunDeniedProps {
+            reason: reason.clone(),
+        }),
+        Event::RunRunnable { source, .. } => {
+            EventBody::RunRunnable(fabro_types::RunRunnableProps { source: *source })
+        }
         Event::RunStarting => {
             EventBody::RunStarting(fabro_types::RunStatusTransitionProps::default())
         }

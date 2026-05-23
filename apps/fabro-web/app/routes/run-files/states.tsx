@@ -58,7 +58,7 @@ export function deriveEmptyKind(args: {
   const s = runStatus.toLowerCase();
 
   // Pre-work states: run has no base_sha / hasn't started producing a diff.
-  if (s === "submitted" || s === "queued" || s === "starting") {
+  if (s === "submitted" || s === "pending" || s === "runnable" || s === "starting") {
     return "starting";
   }
 

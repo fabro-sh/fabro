@@ -1422,7 +1422,7 @@ paths:
       operationId: cancelRun
       tags: [Runs]
       summary: Cancel Run
-      description: Cancels a running or queued run. Returns 409 if the run has already completed or been cancelled.
+      description: Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -1820,7 +1820,7 @@ paths:
       operationId: startRun
       tags: [Runs]
       summary: Start Run
-      description: Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+      description: Requests start for a submitted run. User-created runs become runnable; parent-generated child runs may become pending until approved. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -1847,6 +1847,80 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is not in submitted status
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/approve:
+    post:
+      operationId: approveRun
+      tags: [Runs]
+      summary: Approve Run
+      description: Approves a pending run that requires pre-execution approval and makes it runnable.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Run approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run is not pending approval
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/deny:
+    post:
+      operationId: denyRun
+      tags: [Runs]
+      summary: Deny Run
+      description: Denies a pending run that requires pre-execution approval and fails it with `approval_denied`.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DenyRunRequest"
+      responses:
+        "200":
+          description: Run denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run is not pending approval
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -6156,7 +6230,8 @@ components:
         `RunLifecycle.archived` so terminal status payloads remain intact.
       oneOf:
         - $ref: "#/components/schemas/RunStatusSubmitted"
-        - $ref: "#/components/schemas/RunStatusQueued"
+        - $ref: "#/components/schemas/RunStatusPending"
+        - $ref: "#/components/schemas/RunStatusRunnable"
         - $ref: "#/components/schemas/RunStatusStarting"
         - $ref: "#/components/schemas/RunStatusRunning"
         - $ref: "#/components/schemas/RunStatusBlocked"
@@ -6169,7 +6244,8 @@ components:
         propertyName: kind
         mapping:
           submitted: "#/components/schemas/RunStatusSubmitted"
-          queued: "#/components/schemas/RunStatusQueued"
+          pending: "#/components/schemas/RunStatusPending"
+          runnable: "#/components/schemas/RunStatusRunnable"
           starting: "#/components/schemas/RunStatusStarting"
           running: "#/components/schemas/RunStatusRunning"
           blocked: "#/components/schemas/RunStatusBlocked"
@@ -6189,7 +6265,20 @@ components:
           enum:
             - submitted
 
-    RunStatusQueued:
+    RunStatusPending:
+      type: object
+      required:
+        - kind
+        - reason
+      properties:
+        kind:
+          type: string
+          enum:
+            - pending
+        reason:
+          $ref: "#/components/schemas/PendingReason"
+
+    RunStatusRunnable:
       type: object
       required:
         - kind
@@ -6197,7 +6286,7 @@ components:
         kind:
           type: string
           enum:
-            - queued
+            - runnable
 
     RunStatusStarting:
       type: object
@@ -6306,12 +6395,26 @@ components:
       enum:
         - workflow_error
         - cancelled
+        - approval_denied
         - terminated
         - transient_infra
         - budget_exhausted
         - launch_failed
         - bootstrap_failed
         - sandbox_init_failed
+
+    PendingReason:
+      description: Reason a pre-execution run is pending instead of runnable.
+      type: string
+      enum:
+        - approval_required
+
+    RunRunnableSource:
+      description: Source that made a run runnable.
+      type: string
+      enum:
+        - start_requested
+        - approved
 
     FailureCategory:
       description: Product-level classification for grouping and retry policy.
@@ -6907,6 +7010,15 @@ components:
           type: boolean
           description: Resume from checkpoint instead of starting from submitted state.
           default: false
+
+    DenyRunRequest:
+      description: Request body for denying a pending run approval request.
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Optional human-readable reason for denying execution. Empty or whitespace-only values are stored as absent.
+          example: Not approved for execution
 
     UpdateRunRequest:
       description: Request body for updating mutable run metadata.
@@ -8278,10 +8390,14 @@ components:
 
     RunLifecycle:
       type: object
-      required: [status, pending_control, queue_position, error, archived, archived_at]
+      required: [status, approval, pending_control, queue_position, error, archived, archived_at]
       properties:
         status:
           $ref: "#/components/schemas/RunStatus"
+        approval:
+          oneOf:
+            - $ref: "#/components/schemas/RunApproval"
+            - type: "null"
         pending_control:
           oneOf:
             - $ref: "#/components/schemas/RunControlAction"
@@ -8297,6 +8413,30 @@ components:
         archived_at:
           type: ["string", "null"]
           format: date-time
+
+    RunApproval:
+      description: Pre-execution approval state for runs that require one-time human approval.
+      type: object
+      required: [state, requested_at, decided_at, denial_reason]
+      properties:
+        state:
+          $ref: "#/components/schemas/RunApprovalState"
+        requested_at:
+          type: string
+          format: date-time
+        decided_at:
+          type: ["string", "null"]
+          format: date-time
+        denial_reason:
+          type: ["string", "null"]
+
+    RunApprovalState:
+      description: State of a run's pre-execution approval request.
+      type: string
+      enum:
+        - pending
+        - approved
+        - denied
 
     RunModel:
       type: object
@@ -8420,7 +8560,8 @@ components:
       description: Board column status for a run in the list view.
       type: string
       enum:
-        - queued
+        - pending
+        - runnable
         - initializing
         - running
         - blocked
@@ -11075,7 +11216,7 @@ components:
         active:
           type: integer
           format: int64
-          description: Runs currently queued or executing.
+          description: Runs currently pending, runnable, or executing.
 
     SystemResourcesResponse:
       description: Server-visible runtime resource usage for the active Fabro process environment.

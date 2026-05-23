@@ -216,6 +216,12 @@ async fn seed_created_and_starting(
     })
     .await
     .unwrap();
+    append_event(run_store, &run_options.run_id, &Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     append_event(run_store, &run_options.run_id, &Event::RunStarting)
         .await
         .unwrap();

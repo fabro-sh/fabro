@@ -77,6 +77,12 @@ async fn append_completed_run_with_final_patch(
     })
     .await
     .expect("append RunCreated");
+    workflow_event::append_event(&run_store, run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .expect("append RunRunnable");
     workflow_event::append_event(&run_store, run_id, &workflow_event::Event::RunStarting)
         .await
         .expect("append RunStarting");

@@ -1,6 +1,6 @@
 import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
-export type RunPhaseKind = "submitted" | "queued" | "initializing";
+export type RunPhaseKind = "submitted" | "pending" | "runnable" | "initializing";
 
 export interface RunPhase {
   kind: RunPhaseKind;
@@ -11,7 +11,8 @@ export interface RunPhase {
 
 const PHASE_LABEL: Record<RunPhaseKind, string> = {
   submitted: "Submitted",
-  queued: "Queued",
+  pending: "Pending",
+  runnable: "Runnable",
   initializing: "Initializing",
 };
 
@@ -35,7 +36,9 @@ export function deriveRunPhases(
     return Number.isNaN(ms) ? null : ms;
   };
 
-  const queuedMs = firstTs("run.queued");
+  const startRequestedMs = firstTs("run.start_requested");
+  const pendingMs = firstTs("run.pending");
+  const runnableMs = firstTs("run.runnable");
   const startingMs = firstTs("run.starting");
   const runningMs = firstTs("run.running");
 
@@ -45,14 +48,23 @@ export function deriveRunPhases(
     kind: "submitted",
     label: PHASE_LABEL.submitted,
     startMs: createdMs,
-    endMs: queuedMs ?? startingMs ?? runningMs,
+    endMs: startRequestedMs ?? pendingMs ?? runnableMs ?? startingMs ?? runningMs,
   });
 
-  if (queuedMs != null) {
+  if (pendingMs != null) {
     phases.push({
-      kind: "queued",
-      label: PHASE_LABEL.queued,
-      startMs: queuedMs,
+      kind: "pending",
+      label: PHASE_LABEL.pending,
+      startMs: pendingMs,
+      endMs: runnableMs ?? startingMs ?? runningMs,
+    });
+  }
+
+  if (runnableMs != null) {
+    phases.push({
+      kind: "runnable",
+      label: PHASE_LABEL.runnable,
+      startMs: runnableMs,
       endMs: startingMs ?? runningMs,
     });
   }

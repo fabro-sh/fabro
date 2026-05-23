@@ -23,7 +23,11 @@ interface BoardEventOptions {
 
 const BOARD_STATUS_EVENTS = new Set([
   "run.submitted",
-  "run.queued",
+  "run.start_requested",
+  "run.pending",
+  "run.approved",
+  "run.denied",
+  "run.runnable",
   "run.starting",
   "run.running",
   "run.removing",

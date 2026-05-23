@@ -29,7 +29,7 @@ pub mod types {
         WebhookStrategy,
     };
     pub use fabro_types::status::{
-        BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason,
+        BlockedReason, FailureReason, PendingReason, RunControlAction, RunStatus, SuccessReason,
     };
     pub use fabro_types::{
         AskFabro, AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats,
@@ -39,16 +39,16 @@ pub mod types {
         PairStatus, PairTarget, PairTranscriptEntry, PairTranscriptResponse,
         PendingInterviewRecord, PreRunPushOutcome, Principal, PullRequest, PullRequestDetails,
         PullRequestDetailsStatus, PullRequestDetailsUnavailableReason, PullRequestLink,
-        PullRequestMeta, PullRequestResponse, QuestionType, RepositoryRef, Run,
-        RunClientProvenance, RunEvent, RunEventDetailContentKind, RunEventDetailResponse,
-        RunFailure, RunPairStatusResponse, RunProjection, RunProvenance, RunSandbox,
-        RunSandboxRuntime, RunServerProvenance, SandboxDetails, SandboxNetwork,
-        SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider, SandboxResources,
-        SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
-        SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId, SessionMessage,
-        SessionRecord, SessionStatus, SessionSummary, SessionTurn, StageCompletion, StageHandler,
-        StageOutcome, StageProjection, StageState, SystemActorKind, TurnId, UserPrincipal,
-        WorkflowSettings,
+        PullRequestMeta, PullRequestResponse, QuestionType, RepositoryRef, Run, RunApproval,
+        RunApprovalState, RunClientProvenance, RunEvent, RunEventDetailContentKind,
+        RunEventDetailResponse, RunFailure, RunPairStatusResponse, RunProjection, RunProvenance,
+        RunRunnableSource, RunSandbox, RunSandboxRuntime, RunServerProvenance, SandboxDetails,
+        SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider,
+        SandboxResources, SandboxService, SandboxServiceListResponse, SandboxState,
+        SandboxTimestamps, SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId,
+        SessionMessage, SessionRecord, SessionStatus, SessionSummary, SessionTurn, StageCompletion,
+        StageHandler, StageOutcome, StageProjection, StageState, SystemActorKind, TurnId,
+        UserPrincipal, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

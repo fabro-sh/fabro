@@ -15,7 +15,7 @@ function renderToJson(element: React.ReactElement): any {
 
 describe("deriveEmptyKind", () => {
   // Pre-work states → R4(a) "starting"
-  test.each(["submitted", "Submitted", "starting", "queued"])(
+  test.each(["submitted", "Submitted", "pending", "runnable", "starting"])(
     "%s maps to R4(a) 'starting'",
     (status) => {
       expect(
@@ -110,7 +110,8 @@ describe("deriveEmptyKind", () => {
     // alongside the decision table below.
     for (const status of [
       "submitted",
-      "queued",
+      "pending",
+      "runnable",
       "starting",
       "running",
       "blocked",

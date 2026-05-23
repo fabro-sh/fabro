@@ -497,7 +497,8 @@ fn reject_unpairable_status(status: RunStatus) -> Result<(), Response> {
             "run_not_pairable",
         )),
         RunStatus::Submitted
-        | RunStatus::Queued
+        | RunStatus::Pending { .. }
+        | RunStatus::Runnable
         | RunStatus::Starting
         | RunStatus::Paused { .. }
         | RunStatus::Failed { .. }

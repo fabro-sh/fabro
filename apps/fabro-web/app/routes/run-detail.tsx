@@ -65,7 +65,9 @@ import { useDemoMode } from "../lib/demo-mode";
 import { useSWRConfig } from "swr";
 import {
   useArchiveRun,
+  useApproveRun,
   useCancelRun,
+  useDenyRun,
   useInterruptRun,
   usePreviewRun,
   useUnarchiveRun,
@@ -79,6 +81,7 @@ import { useRunToasts } from "../hooks/use-run-toasts";
 import { useRun, useRunPullRequest, useRunQuestions, useRunState } from "../lib/queries";
 import {
   canArchive,
+  canApprove,
   canCancel,
   canDelete,
   canUnarchive,
@@ -157,7 +160,7 @@ type ToastApi = Pick<ReturnType<typeof useToast>, "push" | "dismiss">;
 
 const INITIAL_LIFECYCLE_TOAST_STATE: LifecycleToastState = {
   activeArchiveToastId: null,
-  lastProcessed: { cancel: null, archive: null, unarchive: null },
+  lastProcessed: { cancel: null, approve: null, deny: null, archive: null, unarchive: null },
 };
 
 export function lifecycleActionVisibility(status: string | null | undefined) {
@@ -398,6 +401,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const basePath = `/runs/${params.id}`;
   const previewMutation = usePreviewRun(params.id);
   const cancelMutation = useCancelRun(params.id);
+  const approveMutation = useApproveRun(params.id);
+  const denyMutation = useDenyRun(params.id);
   const archiveMutation = useArchiveRun(params.id);
   const unarchiveMutation = useUnarchiveRun(params.id);
   const interruptMutation = useInterruptRun(params.id);
@@ -459,6 +464,24 @@ export default function RunDetail({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     lifecycleToastStateRef.current = handleLifecycleToastResult(
+      "approve",
+      approveMutation.data,
+      lifecycleToastStateRef.current,
+      { push, dismiss },
+    );
+  }, [approveMutation.data, dismiss, push]);
+
+  useEffect(() => {
+    lifecycleToastStateRef.current = handleLifecycleToastResult(
+      "deny",
+      denyMutation.data,
+      lifecycleToastStateRef.current,
+      { push, dismiss },
+    );
+  }, [denyMutation.data, dismiss, push]);
+
+  useEffect(() => {
+    lifecycleToastStateRef.current = handleLifecycleToastResult(
       "unarchive",
       unarchiveMutation.data,
       lifecycleToastStateRef.current,
@@ -511,6 +534,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const visibility = lifecycleActionVisibility(run.lifecycleStatus);
   const previewPending = previewMutation.isMutating;
   const cancelPending = cancelMutation.isMutating;
+  const approvalActionVisible = canApprove(summary);
+  const approvePending = approveMutation.isMutating;
+  const denyPending = denyMutation.isMutating;
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
   const handleConfirmDelete = async () => {
@@ -659,6 +685,12 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           canArchive={visibility.showArchive}
           archivePending={archivePending}
           onArchive={() => void archiveMutation.trigger()}
+          canApprove={approvalActionVisible}
+          approvePending={approvePending}
+          onApprove={() => void approveMutation.trigger()}
+          canDeny={approvalActionVisible}
+          denyPending={denyPending}
+          onDeny={() => void denyMutation.trigger()}
           canUnarchive={visibility.showUnarchive}
           unarchivePending={unarchivePending}
           onUnarchive={() => void unarchiveMutation.trigger()}
@@ -847,6 +879,16 @@ export function handleLifecycleToastResult(
     return nextState;
   }
 
+  if (intent === "approve") {
+    toastApi.push({ message: "Run approved." });
+    return nextState;
+  }
+
+  if (intent === "deny") {
+    toastApi.push({ message: "Run denied." });
+    return nextState;
+  }
+
   if (state.activeArchiveToastId) {
     toastApi.dismiss(state.activeArchiveToastId);
   }
@@ -901,6 +943,12 @@ interface ActionsMenuProps {
   canArchive: boolean;
   archivePending: boolean;
   onArchive: () => void;
+  canApprove: boolean;
+  approvePending: boolean;
+  onApprove: () => void;
+  canDeny: boolean;
+  denyPending: boolean;
+  onDeny: () => void;
   canUnarchive: boolean;
   unarchivePending: boolean;
   onUnarchive: () => void;
@@ -918,6 +966,8 @@ function ActionsMenu(props: ActionsMenuProps) {
     canFocusSteer, onFocusSteer,
     canPreview, previewPending, onPreview,
     canArchive, archivePending, onArchive,
+    canApprove, approvePending, onApprove,
+    canDeny, denyPending, onDeny,
     canUnarchive, unarchivePending, onUnarchive,
     canDelete, deletePending, onDelete,
     canCancel, cancelPending, onCancel,
@@ -925,11 +975,11 @@ function ActionsMenu(props: ActionsMenuProps) {
 
   const hasOps =
     canPreview || canSendInterrupt || canFocusSteer;
-  const hasLifecycle = canArchive || canUnarchive;
-  const hasDestructive = canCancel || canDelete;
+  const hasLifecycle = canApprove || canArchive || canUnarchive;
+  const hasDestructive = canDeny || canCancel || canDelete;
   const hasAny = hasOps || hasLifecycle || hasDestructive;
   const anyPending =
-    previewPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
+    previewPending || approvePending || denyPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
   const separators = actionMenuSeparatorVisibility({ hasLifecycle, hasDestructive });
 
   if (!hasAny) return null;
@@ -981,6 +1031,18 @@ function ActionsMenu(props: ActionsMenuProps) {
         {separators.afterOperations && (
           <div className="my-1 h-px bg-line" role="separator" />
         )}
+        {canApprove && (
+          <MenuItem>
+            <button
+              type="button"
+              onClick={onApprove}
+              disabled={approvePending}
+              className={MENU_ITEM_CLASS}
+            >
+              {approvePending ? "Approving…" : "Approve"}
+            </button>
+          </MenuItem>
+        )}
         {canArchive && (
           <MenuItem>
             <button
@@ -1007,6 +1069,18 @@ function ActionsMenu(props: ActionsMenuProps) {
         )}
         {separators.beforeDestructive && (
           <div className="my-1 h-px bg-line" role="separator" />
+        )}
+        {canDeny && (
+          <MenuItem>
+            <button
+              type="button"
+              onClick={onDeny}
+              disabled={denyPending}
+              className={MENU_ITEM_DANGER_CLASS}
+            >
+              {denyPending ? "Denying…" : "Deny"}
+            </button>
+          </MenuItem>
         )}
         {canCancel && (
           <MenuItem>

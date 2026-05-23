@@ -15,7 +15,8 @@ use crate::support::{run_output_filters, run_projection_json, unique_run_id};
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
     let status = match status {
         "submitted" => serde_json::json!({ "kind": "submitted" }),
-        "queued" => serde_json::json!({ "kind": "queued" }),
+        "pending" => serde_json::json!({ "kind": "pending", "reason": "approval_required" }),
+        "runnable" => serde_json::json!({ "kind": "runnable" }),
         other => panic!("unsupported test status {other:?}"),
     };
     remote_run_summary_json(
@@ -162,7 +163,7 @@ fn detach_uses_explicit_server_target_and_prints_remote_run_id() {
             .path(format!("/api/v1/runs/{run_id}/start"));
         then.status(200)
             .header("Content-Type", "application/json")
-            .body(run_status_response(run_id.as_str(), "queued").to_string());
+            .body(run_status_response(run_id.as_str(), "runnable").to_string());
     });
 
     let workflow = context.install_fixture("simple.fabro");
@@ -214,7 +215,7 @@ fn run_parent_resolves_parent_and_sends_parent_id_in_manifest() {
             .path(format!("/api/v1/runs/{run_id}/start"));
         then.status(200)
             .header("Content-Type", "application/json")
-            .body(run_status_response(run_id.as_str(), "queued").to_string());
+            .body(run_status_response(run_id.as_str(), "runnable").to_string());
     });
 
     let workflow = context.install_fixture("simple.fabro");
@@ -264,7 +265,7 @@ fn detach_uses_configured_server_target_without_server_flag() {
             .path(format!("/api/v1/runs/{run_id}/start"));
         then.status(200)
             .header("Content-Type", "application/json")
-            .body(run_status_response(run_id.as_str(), "queued").to_string());
+            .body(run_status_response(run_id.as_str(), "runnable").to_string());
     });
     context.set_http_target(&server.base_url());
 
@@ -490,7 +491,7 @@ fn detach_cli_server_target_overrides_configured_server_target() {
             .path(format!("/api/v1/runs/{run_id}/start"));
         then.status(200)
             .header("Content-Type", "application/json")
-            .body(run_status_response(run_id.as_str(), "queued").to_string());
+            .body(run_status_response(run_id.as_str(), "runnable").to_string());
     });
     context.set_http_target(&config_server.base_url());
 
@@ -546,7 +547,7 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
             .path(format!("/api/v1/runs/{run_id}/start"));
         then.status(200)
             .header("Content-Type", "application/json")
-            .body(run_status_response(run_id.as_str(), "queued").to_string());
+            .body(run_status_response(run_id.as_str(), "runnable").to_string());
     });
     let first_page = server.mock(|when, then| {
         when.method("GET")

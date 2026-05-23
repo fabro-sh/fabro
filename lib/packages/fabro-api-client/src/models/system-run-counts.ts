@@ -23,7 +23,7 @@ export interface SystemRunCounts {
      */
     'total'?: number;
     /**
-     * Runs currently queued or executing.
+     * Runs currently pending, runnable, or executing.
      */
     'active'?: number;
 }

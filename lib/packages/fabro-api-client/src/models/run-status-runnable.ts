@@ -14,12 +14,12 @@
 
 
 
-export interface RunStatusQueued {
-    'kind': RunStatusQueuedKindEnum;
+export interface RunStatusRunnable {
+    'kind': RunStatusRunnableKindEnum;
 }
 
-export const RunStatusQueuedKindEnum = {
-    QUEUED: 'queued'
+export const RunStatusRunnableKindEnum = {
+    RUNNABLE: 'runnable'
 } as const;
 
-export type RunStatusQueuedKindEnum = typeof RunStatusQueuedKindEnum[keyof typeof RunStatusQueuedKindEnum];
+export type RunStatusRunnableKindEnum = typeof RunStatusRunnableKindEnum[keyof typeof RunStatusRunnableKindEnum];

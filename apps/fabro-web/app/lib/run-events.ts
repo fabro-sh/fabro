@@ -36,7 +36,11 @@ const subscriptions = new Map<string, SharedEventSubscription>();
 const TERMINAL_EVENTS = new Set(["run.completed", "run.failed"]);
 const RUN_SUMMARY_EVENTS = new Set([
   "run.submitted",
-  "run.queued",
+  "run.start_requested",
+  "run.pending",
+  "run.approved",
+  "run.denied",
+  "run.runnable",
   "run.starting",
   "run.running",
   "run.paused",

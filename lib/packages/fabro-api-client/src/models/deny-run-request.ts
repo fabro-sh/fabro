@@ -14,10 +14,12 @@
 
 
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
+/**
+ * Request body for denying a pending run approval request.
+ */
+export interface DenyRunRequest {
     /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
+     * Optional human-readable reason for denying execution. Empty or whitespace-only values are stored as absent.
      */
-    'skip_git_hooks': boolean;
+    'reason'?: string;
 }

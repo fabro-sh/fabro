@@ -77,6 +77,7 @@ models/delete-run-sandbox.ts
 models/delete-secret-request.ts
 models/demo-toggle-request.ts
 models/demo-toggle-response.ts
+models/deny-run-request.ts
 models/dev-token-login-request.ts
 models/dev-token-login-response.ts
 models/diagnostics-check.ts
@@ -210,6 +211,7 @@ models/pair-transcript-tool-call.ts
 models/pair-transcript-user-message.ts
 models/pair-transcript-warning.ts
 models/pending-interview-record.ts
+models/pending-reason.ts
 models/pre-run-push-outcome-failed.ts
 models/pre-run-push-outcome-not-attempted.ts
 models/pre-run-push-outcome-skipped-no-remote.ts
@@ -263,6 +265,8 @@ models/rewind-response.ts
 models/root-response-urls.ts
 models/root-response.ts
 models/run-agent-settings.ts
+models/run-approval-state.ts
+models/run-approval.ts
 models/run-artifact-entry.ts
 models/run-artifact-list-response.ts
 models/run-billing-stage.ts
@@ -310,6 +314,7 @@ models/run-projection.ts
 models/run-provenance.ts
 models/run-question.ts
 models/run-reference.ts
+models/run-runnable-source.ts
 models/run-sandbox-runtime.ts
 models/run-sandbox-settings.ts
 models/run-sandbox.ts
@@ -321,8 +326,9 @@ models/run-status-blocked.ts
 models/run-status-dead.ts
 models/run-status-failed.ts
 models/run-status-paused.ts
-models/run-status-queued.ts
+models/run-status-pending.ts
 models/run-status-removing.ts
+models/run-status-runnable.ts
 models/run-status-running.ts
 models/run-status-starting.ts
 models/run-status-submitted.ts
@@ -410,6 +416,10 @@ models/system-resources-response.ts
 models/system-run-counts.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
+models/todo-list-kind.ts
+models/todo-list-projection.ts
+models/todo-projection.ts
+models/todo-status.ts
 models/update-run-parent-request.ts
 models/update-run-request.ts
 models/user-response.ts

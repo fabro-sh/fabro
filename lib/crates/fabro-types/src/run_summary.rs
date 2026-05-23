@@ -135,6 +135,8 @@ pub struct RunModel {
 pub struct RunLifecycle {
     pub status:          RunStatus,
     #[serde(default)]
+    pub approval:        Option<RunApproval>,
+    #[serde(default)]
     pub pending_control: Option<RunControlAction>,
     #[serde(default)]
     pub queue_position:  Option<u32>,
@@ -143,6 +145,37 @@ pub struct RunLifecycle {
     pub archived:        bool,
     #[serde(default)]
     pub archived_at:     Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunApproval {
+    pub state:         RunApprovalState,
+    pub requested_at:  DateTime<Utc>,
+    #[serde(default)]
+    pub decided_at:    Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub denial_reason: Option<String>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum RunApprovalState {
+    Pending,
+    Approved,
+    Denied,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

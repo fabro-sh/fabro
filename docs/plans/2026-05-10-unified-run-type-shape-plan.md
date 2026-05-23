@@ -68,7 +68,7 @@ type RunLifecycle = {
 
 type RunStatus =
   | { kind: "submitted" }
-  | { kind: "queued" }
+  | { kind: "runnable" }
   | { kind: "starting" }
   | { kind: "running" }
   | { kind: "blocked"; blocked_reason: BlockedReason }
@@ -141,7 +141,7 @@ Use these derivation rules:
 
 - Board column:
   - `run.lifecycle.archived` -> `archived`
-  - `submitted` / `queued` -> `queued`
+  - `submitted` / `runnable` -> `runnable`
   - `starting` -> `initializing`
   - `running` / `paused` -> `running`
   - `blocked` -> `blocked`

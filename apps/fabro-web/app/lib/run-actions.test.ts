@@ -5,6 +5,7 @@ import type { Run, RunStatus } from "@qltysh/fabro-api-client";
 import {
   archiveRun,
   canArchive,
+  canApprove,
   canCancel,
   canUnarchive,
   cancelRun,
@@ -27,7 +28,7 @@ function makeRun(status: RunStatus, archived = false): Run {
     id:               "run-1",
     goal:             "Fix the build",
     title:            "Fix the build",
-    workflow:         { slug: "fix_build", name: "Fix Build" },
+    workflow:         { slug: "fix_build", name: "Fix Build", graph_name: null, node_count: 0, edge_count: 0 },
     automation:       null,
     repository:       null,
     created_by:       null,
@@ -35,6 +36,7 @@ function makeRun(status: RunStatus, archived = false): Run {
     labels:           {},
     lifecycle:        {
       status,
+      approval: null,
       pending_control: null,
       queue_position:  null,
       error:           null,
@@ -174,13 +176,16 @@ describe("run lifecycle actions", () => {
 
   test("mapError returns user-facing copy for lifecycle conflicts", () => {
     expect(mapError({ status: 409, errors: [] }, "cancel")).toBe("This run can no longer be cancelled.");
+    expect(mapError({ status: 409, errors: [] }, "approve")).toBe("This run is no longer pending approval.");
+    expect(mapError({ status: 409, errors: [] }, "deny")).toBe("This run is no longer pending approval.");
     expect(mapError({ status: 409, errors: [] }, "archive")).toBe("Only terminal runs can be archived.");
     expect(mapError({ status: 409, errors: [] }, "unarchive")).toBe("Active runs can't be unarchived.");
   });
 
   test("status predicates align with the documented run statuses", () => {
     expect(canCancel("submitted")).toBe(true);
-    expect(canCancel("queued")).toBe(true);
+    expect(canCancel("pending")).toBe(true);
+    expect(canCancel("runnable")).toBe(true);
     expect(canCancel("starting")).toBe(true);
     expect(canCancel("running")).toBe(true);
     expect(canCancel("paused")).toBe(true);
@@ -194,6 +199,23 @@ describe("run lifecycle actions", () => {
 
     expect(canUnarchive("archived")).toBe(true);
     expect(canUnarchive("failed")).toBe(false);
+  });
+
+  test("approval predicate requires pending status and pending approval state", () => {
+    expect(canApprove({
+      ...makeRun({ kind: "pending", reason: "approval_required" }),
+      lifecycle: {
+        ...makeRun({ kind: "pending", reason: "approval_required" }).lifecycle,
+        approval: {
+          state: "pending",
+          requested_at: "2026-05-23T12:00:00Z",
+          decided_at: null,
+          denial_reason: null,
+        },
+      },
+    })).toBe(true);
+    expect(canApprove(makeRun({ kind: "pending", reason: "approval_required" }))).toBe(false);
+    expect(canApprove(makeRun({ kind: "runnable" }))).toBe(false);
   });
 
   test("isTerminalCancelledRun distinguishes immediate cancel success from in-flight cancellation", () => {

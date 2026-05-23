@@ -18,8 +18,10 @@ import { mutateBoardRunCaches } from "./board-cache";
 import { queryKeys } from "./query-keys";
 import type { LifecycleAction, LifecycleActionError } from "./run-actions";
 import {
+  approveRun,
   archiveRun,
   cancelRun,
+  denyRun,
   isLifecycleActionError,
   unarchiveRun,
 } from "./run-actions";
@@ -61,6 +63,14 @@ export function usePreviewRun(id: string | undefined) {
 
 export function useCancelRun(id: string | undefined) {
   return useLifecycleMutation(id, "cancel", cancelRun);
+}
+
+export function useApproveRun(id: string | undefined) {
+  return useLifecycleMutation(id, "approve", approveRun);
+}
+
+export function useDenyRun(id: string | undefined) {
+  return useLifecycleMutation(id, "deny", (runId) => denyRun(runId));
 }
 
 export function useArchiveRun(id: string | undefined) {

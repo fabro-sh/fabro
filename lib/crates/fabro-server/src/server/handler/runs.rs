@@ -101,7 +101,8 @@ fn board_column(status: RunStatus, archived: bool) -> Option<BoardColumn> {
         return Some(BoardColumn::Archived);
     }
     match status {
-        RunStatus::Submitted | RunStatus::Queued => Some(BoardColumn::Queued),
+        RunStatus::Submitted | RunStatus::Pending { .. } => Some(BoardColumn::Pending),
+        RunStatus::Runnable => Some(BoardColumn::Runnable),
         RunStatus::Starting => Some(BoardColumn::Initializing),
         RunStatus::Running | RunStatus::Paused { .. } => Some(BoardColumn::Running),
         RunStatus::Blocked { .. } => Some(BoardColumn::Blocked),
@@ -114,8 +115,12 @@ fn board_column(status: RunStatus, archived: bool) -> Option<BoardColumn> {
 pub(crate) fn board_columns(include_archived: bool) -> Vec<BoardColumnDefinition> {
     let mut columns = vec![
         BoardColumnDefinition {
-            id:   BoardColumn::Queued,
-            name: "Queued".into(),
+            id:   BoardColumn::Pending,
+            name: "Pending".into(),
+        },
+        BoardColumnDefinition {
+            id:   BoardColumn::Runnable,
+            name: "Runnable".into(),
         },
         BoardColumnDefinition {
             id:   BoardColumn::Initializing,

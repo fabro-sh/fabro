@@ -1551,6 +1551,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_run_create_defaults_to_start_request_and_reports_pending_child() {
+        let (services, backend) = fabro_run_tool_services();
+        let mut registry = ToolRegistry::new();
+        register_fabro_run_tools(&mut registry, &services);
+        let tool = registry
+            .get(fabro_tool::FABRO_RUN_CREATE_TOOL_NAME)
+            .expect("create tool should be registered");
+
+        let output = (tool.executor)(
+            serde_json::json!({
+                "runs": [{
+                    "workflow": "child.fabro"
+                }]
+            }),
+            tool_context(),
+        )
+        .await
+        .expect("create tool should succeed");
+
+        assert!(output.contains("created 1 Fabro run(s), start requested for 1"));
+        assert_eq!(backend.started_run_ids.lock().unwrap().as_slice(), &[
+            child_run_id()
+        ]);
+    }
+
+    #[tokio::test]
     async fn agent_run_create_rejects_conflicting_parent_id() {
         let mut registry = ToolRegistry::new();
         let (services, _backend) = fabro_run_tool_services();
@@ -1635,6 +1661,7 @@ mod tests {
         let backend = Arc::new(MockRunToolBackend {
             child_id:           child_run_id(),
             created_parent_ids: Mutex::new(Vec::new()),
+            started_run_ids:    Mutex::new(Vec::new()),
         });
         let services = FabroRunToolServices {
             backend:            backend.clone(),
@@ -1670,6 +1697,17 @@ mod tests {
     }
 
     fn run(run_id: RunId, parent_id: Option<RunId>, children_count: u64) -> Run {
+        run_with_status(run_id, parent_id, children_count, RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        })
+    }
+
+    fn run_with_status(
+        run_id: RunId,
+        parent_id: Option<RunId>,
+        children_count: u64,
+        status: RunStatus,
+    ) -> Run {
         Run {
             id: run_id,
             parent_id,
@@ -1689,14 +1727,13 @@ mod tests {
             origin: RunOrigin::default(),
             labels: HashMap::new(),
             lifecycle: RunLifecycle {
-                status:          RunStatus::Succeeded {
-                    reason: SuccessReason::Completed,
-                },
+                status,
+                approval: None,
                 pending_control: None,
-                queue_position:  None,
-                error:           None,
-                archived:        false,
-                archived_at:     None,
+                queue_position: None,
+                error: None,
+                archived: false,
+                archived_at: None,
             },
             sandbox: None,
             models: Vec::new(),
@@ -1721,6 +1758,7 @@ mod tests {
     struct MockRunToolBackend {
         child_id:           RunId,
         created_parent_ids: Mutex<Vec<Option<RunId>>>,
+        started_run_ids:    Mutex<Vec<RunId>>,
     }
 
     #[async_trait]
@@ -1746,8 +1784,18 @@ mod tests {
             Ok(run(self.child_id, Some(current_run_id()), 0))
         }
 
-        async fn start_run(&self, _run_id: &RunId, _resume: bool) -> anyhow::Result<Run> {
-            unreachable!("agent create test uses start=false")
+        async fn start_run(&self, run_id: &RunId, resume: bool) -> anyhow::Result<Run> {
+            assert_eq!(*run_id, self.child_id);
+            assert!(!resume);
+            self.started_run_ids.lock().unwrap().push(*run_id);
+            Ok(run_with_status(
+                self.child_id,
+                Some(current_run_id()),
+                0,
+                RunStatus::Pending {
+                    reason: fabro_types::PendingReason::ApprovalRequired,
+                },
+            ))
         }
 
         async fn cancel_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {

@@ -60,8 +60,16 @@ pub enum EventBody {
     RunStarted(RunStartedProps),
     #[serde(rename = "run.submitted")]
     RunSubmitted(RunSubmittedProps),
-    #[serde(rename = "run.queued")]
-    RunQueued(RunStatusEffectProps),
+    #[serde(rename = "run.start_requested")]
+    RunStartRequested(RunStartRequestedProps),
+    #[serde(rename = "run.pending")]
+    RunPending(RunPendingProps),
+    #[serde(rename = "run.approved")]
+    RunApproved(RunApprovedProps),
+    #[serde(rename = "run.denied")]
+    RunDenied(RunDeniedProps),
+    #[serde(rename = "run.runnable")]
+    RunRunnable(RunRunnableProps),
     #[serde(rename = "run.starting")]
     RunStarting(RunStatusTransitionProps),
     #[serde(rename = "run.running")]
@@ -421,7 +429,11 @@ impl EventBody {
             Self::RunCreated(_) => "run.created",
             Self::RunStarted(_) => "run.started",
             Self::RunSubmitted(_) => "run.submitted",
-            Self::RunQueued(_) => "run.queued",
+            Self::RunStartRequested(_) => "run.start_requested",
+            Self::RunPending(_) => "run.pending",
+            Self::RunApproved(_) => "run.approved",
+            Self::RunDenied(_) => "run.denied",
+            Self::RunRunnable(_) => "run.runnable",
             Self::RunStarting(_) => "run.starting",
             Self::RunRunning(_) => "run.running",
             Self::RunInterrupt(_) => "run.interrupt",
@@ -603,7 +615,11 @@ fn is_known_event_name(event: &str) -> bool {
         "run.created"
             | "run.started"
             | "run.submitted"
-            | "run.queued"
+            | "run.start_requested"
+            | "run.pending"
+            | "run.approved"
+            | "run.denied"
+            | "run.runnable"
             | "run.starting"
             | "run.running"
             | "run.interrupt"
@@ -940,7 +956,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        AuthMethod, Edge, Graph, IdpIdentity, Node, RunBlobId, WorkflowSettings, fixtures,
+        AuthMethod, Edge, Graph, IdpIdentity, Node, PendingReason, RunBlobId, WorkflowSettings,
+        fixtures,
     };
 
     fn user_principal(login: &str) -> Principal {
@@ -1104,6 +1121,69 @@ mod tests {
             EventBody::RunSteer(props) if props.text == "try another approach"
         ));
         assert_eq!(parsed.to_value().unwrap(), line);
+    }
+
+    #[test]
+    fn pre_execution_lifecycle_events_round_trip() {
+        let cases = [
+            (
+                EventBody::RunStartRequested(RunStartRequestedProps { resume: false }),
+                json!("run.start_requested"),
+                json!({ "resume": false }),
+            ),
+            (
+                EventBody::RunPending(RunPendingProps {
+                    reason: PendingReason::ApprovalRequired,
+                }),
+                json!("run.pending"),
+                json!({ "reason": "approval_required" }),
+            ),
+            (
+                EventBody::RunApproved(RunApprovedProps::default()),
+                json!("run.approved"),
+                json!({}),
+            ),
+            (
+                EventBody::RunDenied(RunDeniedProps {
+                    reason: Some("Not approved for execution".to_string()),
+                }),
+                json!("run.denied"),
+                json!({ "reason": "Not approved for execution" }),
+            ),
+            (
+                EventBody::RunRunnable(RunRunnableProps {
+                    source: RunRunnableSource::Approved,
+                }),
+                json!("run.runnable"),
+                json!({ "source": "approved" }),
+            ),
+        ];
+
+        for (body, event_name, properties) in cases {
+            let event = RunEvent {
+                id: format!("evt_{}", event_name.as_str().unwrap()),
+                ts: DateTime::parse_from_rfc3339("2026-05-23T12:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                run_id: fixtures::RUN_1,
+                node_id: None,
+                node_label: None,
+                stage_id: None,
+                parallel_group_id: None,
+                parallel_branch_id: None,
+                session_id: None,
+                parent_session_id: None,
+                tool_call_id: None,
+                actor: Some(Principal::System {
+                    system_kind: crate::SystemActorKind::Engine,
+                }),
+                body,
+            };
+            let value = event.to_value().unwrap();
+            assert_eq!(value["event"], event_name);
+            assert_eq!(value["properties"], properties);
+            assert_eq!(RunEvent::from_value(value).unwrap(), event);
+        }
     }
 
     #[test]
@@ -1421,7 +1501,15 @@ mod tests {
 
     #[test]
     fn canonical_run_lifecycle_events_are_known() {
-        for event in ["run.queued", "run.blocked", "run.unblocked"] {
+        for event in [
+            "run.start_requested",
+            "run.pending",
+            "run.approved",
+            "run.denied",
+            "run.runnable",
+            "run.blocked",
+            "run.unblocked",
+        ] {
             assert!(
                 is_known_event_name(event),
                 "{event} should be a known event"
@@ -1517,14 +1605,14 @@ mod tests {
     }
 
     #[test]
-    fn run_queued_and_unblocked_round_trip_as_typed_events() {
+    fn run_runnable_and_unblocked_round_trip_as_typed_events() {
         for value in [
             json!({
-                "id": "evt_run_queued",
+                "id": "evt_run_runnable",
                 "ts": "2026-04-19T12:00:00.000Z",
                 "run_id": fixtures::RUN_1,
-                "event": "run.queued",
-                "properties": {}
+                "event": "run.runnable",
+                "properties": { "source": "start_requested" }
             }),
             json!({
                 "id": "evt_run_unblocked",

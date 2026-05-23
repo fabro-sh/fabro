@@ -128,7 +128,7 @@ pub(crate) async fn start_run_stub(
     (
         StatusCode::OK,
         Json(
-            serde_json::json!({"id": id, "status": "queued", "created_at": "2026-03-06T14:30:00Z"}),
+            serde_json::json!({"id": id, "status": "runnable", "created_at": "2026-03-06T14:30:00Z"}),
         ),
     )
         .into_response()
@@ -531,6 +531,22 @@ pub(crate) async fn cancel_stub(
         Json(serde_json::json!({
             "id": id,
             "status": { "kind": "failed", "reason": "cancelled" },
+            "created_at": "2026-03-06T14:30:00Z"
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn deny_run_stub(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "id": id,
+            "status": { "kind": "failed", "reason": "approval_denied" },
             "created_at": "2026-03-06T14:30:00Z"
         })),
     )
@@ -1046,8 +1062,8 @@ mod runs {
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
     use fabro_types::{
-        RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin, RunTimestamps,
-        StageId, WorkflowRef, WorkflowSettings,
+        PendingReason, RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin,
+        RunTimestamps, StageId, WorkflowRef, WorkflowSettings,
     };
 
     use super::ts;
@@ -1131,6 +1147,7 @@ mod runs {
             lifecycle: RunLifecycle {
                 status: parse_run_status(status, status_reason)
                     .unwrap_or_else(|| panic!("invalid demo run status: {status}")),
+                approval: None,
                 pending_control,
                 queue_position: None,
                 error: None,
@@ -1162,7 +1179,10 @@ mod runs {
     fn parse_run_status(status: &str, status_reason: Option<&str>) -> Option<RunStatus> {
         match status {
             "submitted" => Some(RunStatus::Submitted),
-            "queued" => Some(RunStatus::Queued),
+            "pending" => Some(RunStatus::Pending {
+                reason: PendingReason::ApprovalRequired,
+            }),
+            "runnable" => Some(RunStatus::Runnable),
             "starting" => Some(RunStatus::Starting),
             "running" => Some(RunStatus::Running),
             "blocked" => Some(RunStatus::Blocked {
@@ -1197,6 +1217,7 @@ mod runs {
         match reason {
             "workflow_error" => Some(FailureReason::WorkflowError),
             "cancelled" => Some(FailureReason::Cancelled),
+            "approval_denied" => Some(FailureReason::ApprovalDenied),
             "terminated" => Some(FailureReason::Terminated),
             "transient_infra" => Some(FailureReason::TransientInfra),
             "budget_exhausted" => Some(FailureReason::BudgetExhausted),
@@ -1215,8 +1236,12 @@ mod runs {
     pub(super) fn columns() -> Vec<BoardColumnDefinition> {
         vec![
             BoardColumnDefinition {
-                id:   BoardColumn::Queued,
-                name: "Queued".into(),
+                id:   BoardColumn::Pending,
+                name: "Pending".into(),
+            },
+            BoardColumnDefinition {
+                id:   BoardColumn::Runnable,
+                name: "Runnable".into(),
             },
             BoardColumnDefinition {
                 id:   BoardColumn::Initializing,
@@ -1333,7 +1358,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Add audit log retention policy",
-                "queued",
+                "runnable",
                 "2026-03-06T14:35:00Z",
                 None,
                 None,

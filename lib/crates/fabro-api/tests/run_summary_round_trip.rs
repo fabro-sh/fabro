@@ -49,6 +49,7 @@ fn run_summary_json_matches_openapi_shape() {
             status:          RunStatus::Succeeded {
                 reason: SuccessReason::PartialSuccess,
             },
+            approval:        None,
             pending_control: None,
             queue_position:  None,
             error:           None,
@@ -120,6 +121,7 @@ fn run_summary_json_matches_openapi_shape() {
                     "kind": "succeeded",
                     "reason": "partial_success"
                 },
+                "approval": null,
                 "pending_control": null,
                 "queue_position": null,
                 "error": null,
@@ -233,6 +235,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     assert_eq!(summary.timestamps.created_at, created_at);
     assert_eq!(summary.timestamps.last_event_at, None);
     assert_eq!(summary.lifecycle.status, RunStatus::Running);
+    assert_eq!(summary.lifecycle.approval, None);
     assert_eq!(summary.lifecycle.pending_control, None);
     assert_eq!(summary.timing.map(|t| t.wall_time_ms), None);
     assert_eq!(summary.billing, None);

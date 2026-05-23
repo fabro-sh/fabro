@@ -19,7 +19,8 @@
  */
 
 export const BoardColumn = {
-    QUEUED: 'queued',
+    PENDING: 'pending',
+    RUNNABLE: 'runnable',
     INITIALIZING: 'initializing',
     RUNNING: 'running',
     BLOCKED: 'blocked',

@@ -1,19 +1,22 @@
 use std::sync::Arc;
 
 use super::super::{
-    ApiError, AppState, FailureReason, ForkRequest, ForkResponse, IntoResponse, Json, Path,
-    Principal, RequireRunScopedOrRunTools, RequiredUser, Response, RewindRequest, RewindResponse,
-    Router, RunAnswerTransport, RunControlAction, RunExecutionMode, RunId, RunStatus,
-    StartRunRequest, State, StatusCode, Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE,
-    WorkflowError, append_control_request, durable_run_status, get, load_pending_control,
-    managed_run, operations, parse_run_id_path, persist_cancelled_run_status, post,
-    reject_if_archived, sleep, update_live_run_from_event, workflow_event,
+    ApiError, AppState, DenyRunRequest, FailureReason, ForkRequest, ForkResponse, IntoResponse,
+    Json, Path, PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser, Response,
+    RewindRequest, RewindResponse, Router, RunAnswerTransport, RunControlAction, RunExecutionMode,
+    RunId, RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode, Storage,
+    TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
+    clear_live_run_state, durable_run_status, get, load_pending_control, managed_run, operations,
+    parse_run_id_path, persist_cancelled_run_status, post, reject_if_archived, sleep,
+    update_live_run_from_event, workflow_event,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs/{id}/cancel", post(cancel_run))
         .route("/runs/{id}/start", post(start_run))
+        .route("/runs/{id}/approve", post(approve_run))
+        .route("/runs/{id}/deny", post(deny_run))
         .route("/runs/{id}/pause", post(pause_run))
         .route("/runs/{id}/unpause", post(unpause_run))
         .route("/runs/{id}/archive", post(archive_run))
@@ -36,7 +39,7 @@ async fn run_response(state: &AppState, id: RunId, status: StatusCode) -> Respon
 }
 
 async fn start_run(
-    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
+    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
     State(state): State<Arc<AppState>>,
     body: Option<Json<StartRunRequest>>,
 ) -> Response {
@@ -50,7 +53,8 @@ async fn start_run(
         if let Some(managed_run) = runs.get(&id) {
             if matches!(
                 managed_run.status,
-                RunStatus::Queued
+                RunStatus::Pending { .. }
+                    | RunStatus::Runnable
                     | RunStatus::Starting
                     | RunStatus::Running
                     | RunStatus::Blocked { .. }
@@ -60,6 +64,11 @@ async fn start_run(
                     StatusCode::CONFLICT,
                     if resume {
                         "an engine process is still running for this run — cannot resume"
+                    } else if matches!(
+                        managed_run.status,
+                        RunStatus::Pending { .. } | RunStatus::Runnable
+                    ) {
+                        "start has already been requested for this run"
                     } else {
                         "an engine process is still running for this run — cannot start"
                     },
@@ -90,10 +99,7 @@ async fn start_run(
         }
     } else {
         let status = run_state.status;
-        if !matches!(
-            status,
-            RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting
-        ) {
+        if !matches!(status, RunStatus::Submitted) {
             return ApiError::new(
                 StatusCode::CONFLICT,
                 format!("cannot start run: status is {status}, expected submitted"),
@@ -107,9 +113,43 @@ async fn start_run(
         .root()
         .to_path_buf();
     let dot_source = run_state.spec.graph_source.clone().unwrap_or_default();
+    let actor_for_event = Some(actor.clone());
     if let Err(err) =
-        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunQueued).await
+        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunStartRequested {
+            resume,
+            actor: actor_for_event.clone(),
+        })
+        .await
     {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+    let approval_required = !resume
+        && matches!(
+            actor,
+            Principal::Worker { run_id } if run_state.parent_id == Some(run_id)
+        );
+    let (next_status, next_event, notify_scheduler) = if approval_required {
+        (
+            RunStatus::Pending {
+                reason: PendingReason::ApprovalRequired,
+            },
+            workflow_event::Event::RunPending {
+                reason: PendingReason::ApprovalRequired,
+                actor:  actor_for_event,
+            },
+            false,
+        )
+    } else {
+        (
+            RunStatus::Runnable,
+            workflow_event::Event::RunRunnable {
+                source: RunRunnableSource::StartRequested,
+                actor:  actor_for_event,
+            },
+            true,
+        )
+    };
+    if let Err(err) = workflow_event::append_event(&run_store, &id, &next_event).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
@@ -119,7 +159,7 @@ async fn start_run(
             id,
             managed_run(
                 dot_source,
-                RunStatus::Queued,
+                next_status,
                 id.created_at(),
                 run_dir,
                 if resume {
@@ -129,6 +169,158 @@ async fn start_run(
                 },
             ),
         );
+    }
+
+    if notify_scheduler {
+        state.scheduler_notify.notify_one();
+    }
+    run_response(state.as_ref(), id, StatusCode::OK).await
+}
+
+async fn approve_run(
+    RequiredUser(user): RequiredUser,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
+        return response;
+    }
+    let Ok(run_store) = state.store.open_run(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    let run_state = match run_store.state().await {
+        Ok(state) => state,
+        Err(err) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to load run state: {err}"),
+            )
+            .into_response();
+        }
+    };
+    if !matches!(run_state.status, RunStatus::Pending {
+        reason: PendingReason::ApprovalRequired,
+    }) {
+        return ApiError::new(StatusCode::CONFLICT, "Run is not pending approval.").into_response();
+    }
+
+    let actor = Some(Principal::User(user));
+    for event in [
+        workflow_event::Event::RunApproved {
+            actor: actor.clone(),
+        },
+        workflow_event::Event::RunRunnable {
+            source: RunRunnableSource::Approved,
+            actor,
+        },
+    ] {
+        if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    }
+
+    let run_dir = Storage::new(state.server_storage_dir())
+        .run_scratch(&id)
+        .root()
+        .to_path_buf();
+    let dot_source = run_state.spec.graph_source.clone().unwrap_or_default();
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        if let Some(managed_run) = runs.get_mut(&id) {
+            managed_run.status = RunStatus::Runnable;
+            managed_run.run_dir = Some(run_dir);
+        } else {
+            runs.insert(
+                id,
+                managed_run(
+                    dot_source,
+                    RunStatus::Runnable,
+                    id.created_at(),
+                    run_dir,
+                    RunExecutionMode::Start,
+                ),
+            );
+        }
+    }
+
+    state.scheduler_notify.notify_one();
+    run_response(state.as_ref(), id, StatusCode::OK).await
+}
+
+async fn deny_run(
+    RequiredUser(user): RequiredUser,
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    body: Option<Json<DenyRunRequest>>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
+        return response;
+    }
+    let reason = body
+        .and_then(|Json(req)| req.reason)
+        .map(|reason| reason.trim().to_string())
+        .filter(|reason| !reason.is_empty());
+    let message = reason
+        .clone()
+        .unwrap_or_else(|| "Not approved for execution".to_string());
+    let Ok(run_store) = state.store.open_run(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    let run_state = match run_store.state().await {
+        Ok(state) => state,
+        Err(err) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to load run state: {err}"),
+            )
+            .into_response();
+        }
+    };
+    if !matches!(run_state.status, RunStatus::Pending {
+        reason: PendingReason::ApprovalRequired,
+    }) {
+        return ApiError::new(StatusCode::CONFLICT, "Run is not pending approval.").into_response();
+    }
+
+    let actor = Some(Principal::User(user));
+    let denied_event = workflow_event::Event::RunDenied {
+        reason: reason.clone(),
+        actor,
+    };
+    if let Err(err) = workflow_event::append_event(&run_store, &id, &denied_event).await {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+    let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+        &WorkflowError::engine(message.clone()),
+        fabro_types::RunTiming::default(),
+        FailureReason::ApprovalDenied,
+        None,
+        None,
+        None,
+        None,
+    );
+    if let Err(err) = workflow_event::append_event(&run_store, &id, &failure_event).await {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        if let Some(managed_run) = runs.get_mut(&id) {
+            managed_run.status = RunStatus::Failed {
+                reason: FailureReason::ApprovalDenied,
+            };
+            managed_run.error = Some(message);
+            clear_live_run_state(managed_run);
+        }
     }
 
     state.scheduler_notify.notify_one();
@@ -168,7 +360,8 @@ async fn cancel_run(
         match runs.get_mut(&id) {
             Some(managed_run) => match managed_run.status {
                 RunStatus::Submitted
-                | RunStatus::Queued
+                | RunStatus::Pending { .. }
+                | RunStatus::Runnable
                 | RunStatus::Starting
                 | RunStatus::Running
                 | RunStatus::Blocked { .. }
@@ -177,8 +370,10 @@ async fn cancel_run(
                         managed_run.answer_transport,
                         Some(RunAnswerTransport::InProcess { .. })
                     );
-                    let persist_cancelled_status =
-                        matches!(managed_run.status, RunStatus::Submitted | RunStatus::Queued);
+                    let persist_cancelled_status = matches!(
+                        managed_run.status,
+                        RunStatus::Submitted | RunStatus::Pending { .. } | RunStatus::Runnable
+                    );
                     if persist_cancelled_status {
                         managed_run.status = RunStatus::Failed {
                             reason: FailureReason::Cancelled,
@@ -205,7 +400,7 @@ async fn cancel_run(
     let Some((persist_cancelled_status, answer_transport, cancel_token, cancel_tx, worker_pid)) =
         cancel_target
     else {
-        return unmanaged_cancel_response(state.as_ref(), id).await;
+        return unmanaged_cancel_response(state.as_ref(), id, actor, pending_control).await;
     };
 
     if pending_control != Some(RunControlAction::Cancel) {
@@ -248,13 +443,33 @@ async fn cancel_run(
     run_response(state.as_ref(), id, StatusCode::OK).await
 }
 
-async fn unmanaged_cancel_response(state: &AppState, id: RunId) -> Response {
+async fn unmanaged_cancel_response(
+    state: &AppState,
+    id: RunId,
+    actor: Principal,
+    pending_control: Option<RunControlAction>,
+) -> Response {
     match durable_run_status(state, id).await {
         Ok(Some(status)) if status.is_terminal() => ApiError::new(
             StatusCode::CONFLICT,
             "Run is already terminal and cannot be cancelled.",
         )
         .into_response(),
+        Ok(Some(RunStatus::Submitted | RunStatus::Pending { .. } | RunStatus::Runnable)) => {
+            if pending_control != Some(RunControlAction::Cancel) {
+                if let Err(err) =
+                    append_control_request(state, id, RunControlAction::Cancel, Some(actor)).await
+                {
+                    return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                        .into_response();
+                }
+            }
+            match persist_cancelled_run_status(state, id).await {
+                Ok(()) => run_response(state, id, StatusCode::OK).await,
+                Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                    .into_response(),
+            }
+        }
         Ok(Some(_)) => {
             ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.").into_response()
         }
