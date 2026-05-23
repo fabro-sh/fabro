@@ -64,6 +64,7 @@ agent_profile = "anthropic"
 display_name = "Team Code Large"
 family = "team-code"
 default = true
+small_default = true
 aliases = ["team-code"]
 estimated_output_tps = 80
 
@@ -118,6 +119,8 @@ reasoning = false
 ```
 
 `api_id` is the model name sent to the provider API. Omit it when the Fabro model ID and provider model ID are the same.
+
+Model roles are separate: `default = true` controls normal model selection for workflow execution, while `small_default = true` marks the provider's small/cheap utility model for metadata tasks such as generated run titles. If a provider has no small default, Fabro falls back to that provider's normal default.
 
 Provider auth is declared in `[llm.providers.<id>.auth]` with ordered `env:<NAME>` or `vault:<NAME>` refs. The primary auth header defaults to `bearer`; override with `header = { custom = "Header-Name" }` for providers like Anthropic that use `x-api-key`. Omit the `[llm.providers.<id>.auth]` block entirely for providers that need no API key (e.g. Ollama). Custom headers for any provider — including providers that need only typed headers and no API-key auth — go in `extra_headers` as `{ env = "NAME" }`, `{ vault = "NAME" }`, or `{ literal = "value" }`.
 

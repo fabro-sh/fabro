@@ -3,7 +3,7 @@ use std::fmt;
 
 use fabro_util::text::strip_goal_decoration;
 
-const MAX_RUN_TITLE_CHARS: usize = 100;
+pub const MAX_RUN_TITLE_CHARS: usize = 100;
 const TRUNCATED_RUN_TITLE_CHARS: usize = MAX_RUN_TITLE_CHARS - 3;
 const UNTITLED_RUN: &str = "Untitled run";
 

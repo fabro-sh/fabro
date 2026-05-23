@@ -2378,6 +2378,254 @@ url = "http://127.0.0.1:32276"
 }
 
 #[tokio::test]
+async fn create_run_without_explicit_title_returns_deterministic_then_updates_generated_title() {
+    let llm = MockServer::start_async().await;
+    let title_mock = mock_openai_title_response(&llm, "Generated deploy title", None).await;
+    let state = TestAppStateBuilder::new()
+        .provider_base_url("openai", llm.url("/v1"))
+        .env_lookup(|_| None)
+        .build();
+    state
+        .vault
+        .write()
+        .await
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
+        .unwrap();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    let body = post_run_manifest(&app, minimal_manifest_json(MINIMAL_DOT)).await;
+    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
+
+    assert_eq!(body["title"], "Test");
+    wait_for_run_title(&state, run_id, "Generated deploy title").await;
+    assert_eq!(title_update_event_count(&state, run_id).await, 1);
+    title_mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn create_run_with_explicit_title_skips_generated_title_work() {
+    let llm = MockServer::start_async().await;
+    let title_mock = mock_openai_title_response(&llm, "Generated deploy title", None).await;
+    let state = TestAppStateBuilder::new()
+        .provider_base_url("openai", llm.url("/v1"))
+        .env_lookup(|_| None)
+        .build();
+    state
+        .vault
+        .write()
+        .await
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
+        .unwrap();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let mut manifest = minimal_manifest_json(MINIMAL_DOT);
+    manifest["title"] = json!("Caller title");
+
+    let body = post_run_manifest(&app, manifest).await;
+    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
+    // The spawn gate is synchronous in `create_run`, so once the response
+    // returns we know no title task was scheduled. No sleep needed.
+
+    assert_eq!(
+        state
+            .store
+            .get_cached_summary(&run_id, Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .title,
+        "Caller title"
+    );
+    assert_eq!(title_update_event_count(&state, run_id).await, 0);
+    title_mock.assert_calls_async(0).await;
+}
+
+#[tokio::test]
+async fn create_run_without_ready_llm_provider_skips_generated_title_work() {
+    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    let body = post_run_manifest(&app, minimal_manifest_json(MINIMAL_DOT)).await;
+    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
+
+    assert_eq!(
+        state
+            .store
+            .get_cached_summary(&run_id, Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .title,
+        "Test"
+    );
+    assert_eq!(title_update_event_count(&state, run_id).await, 0);
+}
+
+#[tokio::test]
+async fn generated_title_failure_leaves_deterministic_title_unchanged() {
+    let llm = MockServer::start_async().await;
+    let title_mock = llm
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/responses");
+            then.status(500)
+                .header("content-type", "application/json")
+                .json_body(json!({"error": {"message": "boom"}}));
+        })
+        .await;
+    let state = TestAppStateBuilder::new()
+        .provider_base_url("openai", llm.url("/v1"))
+        .env_lookup(|_| None)
+        .build();
+    state
+        .vault
+        .write()
+        .await
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
+        .unwrap();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    let body = post_run_manifest(&app, minimal_manifest_json(MINIMAL_DOT)).await;
+    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
+    wait_for_mock_hits(&title_mock, 1).await;
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+
+    assert_eq!(
+        state
+            .store
+            .get_cached_summary(&run_id, Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .title,
+        "Test"
+    );
+    assert_eq!(title_update_event_count(&state, run_id).await, 0);
+}
+
+#[tokio::test]
+async fn generated_title_does_not_overwrite_user_title_edit() {
+    let llm = MockServer::start_async().await;
+    let title_mock = mock_openai_title_response(
+        &llm,
+        "Generated deploy title",
+        Some(std::time::Duration::from_millis(150)),
+    )
+    .await;
+    let state = TestAppStateBuilder::new()
+        .provider_base_url("openai", llm.url("/v1"))
+        .env_lookup(|_| None)
+        .build();
+    state
+        .vault
+        .write()
+        .await
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
+        .unwrap();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    let body = post_run_manifest(&app, minimal_manifest_json(MINIMAL_DOT)).await;
+    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
+    let patch = Request::builder()
+        .method("PATCH")
+        .uri(api(&format!("/runs/{run_id}")))
+        .header("content-type", "application/json")
+        .body(Body::from(json!({"title": "User title"}).to_string()))
+        .unwrap();
+    let response = app.clone().oneshot(patch).await.unwrap();
+    response_json!(response, StatusCode::OK).await;
+
+    wait_for_mock_hits(&title_mock, 1).await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    assert_eq!(
+        state
+            .store
+            .get_cached_summary(&run_id, Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .title,
+        "User title"
+    );
+    assert_eq!(title_update_event_count(&state, run_id).await, 1);
+}
+
+async fn post_run_manifest(app: &Router, manifest: serde_json::Value) -> serde_json::Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api("/runs"))
+                .header("content-type", "application/json")
+                .body(Body::from(manifest.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_json!(response, StatusCode::CREATED).await
+}
+
+async fn mock_openai_title_response<'a>(
+    server: &'a MockServer,
+    title: &str,
+    delay: Option<std::time::Duration>,
+) -> httpmock::Mock<'a> {
+    let title = title.to_string();
+    server
+        .mock_async(move |when, then| {
+            when.method(POST).path("/v1/responses");
+            let then = then
+                .status(200)
+                .header("content-type", "application/json")
+                .json_body(openai_responses_payload(
+                    &json!({ "title": title }).to_string(),
+                ));
+            if let Some(delay) = delay {
+                then.delay(delay);
+            }
+        })
+        .await
+}
+
+async fn wait_for_run_title(state: &AppState, run_id: RunId, expected: &str) {
+    for _ in 0..50 {
+        let title = state
+            .store
+            .get_cached_summary(&run_id, Utc::now())
+            .await
+            .unwrap()
+            .unwrap()
+            .title;
+        if title == expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("run {run_id} title did not become {expected:?}");
+}
+
+async fn wait_for_mock_hits(mock: &httpmock::Mock<'_>, expected: usize) {
+    for _ in 0..50 {
+        if mock.calls_async().await >= expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("mock did not receive {expected} request(s)");
+}
+
+async fn title_update_event_count(state: &AppState, run_id: RunId) -> usize {
+    let run_store = state.store.open_run(&run_id).await.unwrap();
+    run_store
+        .list_events()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.event.event_name() == "run.title.updated")
+        .count()
+}
+
+#[tokio::test]
 async fn validate_endpoint_returns_workflow_summary_without_preflight_checks() {
     let app = test_app_with();
     let response = app

@@ -5881,6 +5881,7 @@ components:
         - estimated_output_tps
         - aliases
         - default
+        - small_default
         - configured
       properties:
         id:
@@ -5924,6 +5925,9 @@ components:
         default:
           type: boolean
           description: Whether this is the default model for its provider.
+        small_default:
+          type: boolean
+          description: Whether this is the provider's small/default utility model.
         configured:
           type: boolean
           description: |

@@ -48,6 +48,7 @@ fn provider_id_json_matches_openapi_shape_through_model() {
         estimated_output_tps: None,
         aliases:              Vec::new(),
         default:              false,
+        small_default:        false,
         configured:           true,
     };
 
