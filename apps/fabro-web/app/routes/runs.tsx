@@ -295,6 +295,7 @@ function PrCard({
   actions?: string[];
 }) {
   const lifecycleLabel = boardLifecycleStatusLabel(pr);
+  const hasActions = actions != null && actions.length > 0;
 
   return (
     <div className="group rounded-md border border-line bg-panel p-4 transition-all duration-200 hover:border-line-strong hover:shadow-lg hover:shadow-black/20">
@@ -321,7 +322,7 @@ function PrCard({
         <p className="text-sm leading-snug text-fg-2">{pr.title}</p>
       </Link>
 
-      {(pr.resources != null || pr.comments != null || pr.elapsed != null) && (
+      {(pr.resources != null || pr.comments != null || (pr.elapsed != null && !hasActions)) && (
         <div className="mt-3 flex items-center gap-3 font-mono text-xs">
           {pr.resources != null && (
             <span className="text-fg-3">{pr.resources}</span>
@@ -334,7 +335,7 @@ function PrCard({
               {pr.comments}
             </span>
           )}
-          {pr.elapsed != null && (
+          {pr.elapsed != null && !hasActions && (
             <span className="ml-auto font-mono text-fg-muted">{pr.elapsed}</span>
           )}
         </div>
@@ -346,7 +347,7 @@ function PrCard({
         <p className="mt-3 truncate text-xs italic text-amber/70">{pr.question}</p>
       )}
 
-      {actions != null && actions.length > 0 && (
+      {hasActions && (
         <div className="mt-3 flex items-center gap-1.5">
           {actions?.map((label) => (
             <button
@@ -381,6 +382,9 @@ function PrCard({
               {label}
             </button>
           ))}
+          {pr.elapsed != null && (
+            <span className="ml-auto font-mono text-xs text-fg-muted">{pr.elapsed}</span>
+          )}
         </div>
       )}
 
