@@ -206,6 +206,12 @@ impl DockerSandbox {
     }
 
     async fn download_file_bytes(&self, remote_path: &str) -> crate::Result<Vec<u8>> {
+        #[expect(
+            clippy::disallowed_types,
+            reason = "tar entries are synchronous in-memory readers; bytes are collected before any await"
+        )]
+        use std::io::Read as _;
+
         let container_id = self.container_id()?;
         let container_path = self.resolve_container_path(remote_path);
         let opts = DownloadFromContainerOptions {
@@ -224,12 +230,6 @@ impl DockerSandbox {
             })?;
             archive_bytes.extend_from_slice(&chunk);
         }
-
-        #[expect(
-            clippy::disallowed_types,
-            reason = "tar entries are synchronous in-memory readers; bytes are collected before any await"
-        )]
-        use std::io::Read as _;
 
         let mut archive = tar::Archive::new(Cursor::new(archive_bytes));
         let entries = archive.entries().map_err(|e| {

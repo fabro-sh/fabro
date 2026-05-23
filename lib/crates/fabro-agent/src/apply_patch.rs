@@ -504,6 +504,7 @@ mod tests {
     use fabro_llm::types::{
         ContentPart, FinishReason, Message as LlmMessage, Response, Role, TokenCounts, ToolCall,
     };
+    use tokio::fs;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -901,7 +902,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("src/lib.rs");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "fn hello() {\n    println!(\"old\");\n}\n").unwrap();
+        fs::write(&path, "fn hello() {\n    println!(\"old\");\n}\n")
+            .await
+            .unwrap();
         let env = LocalSandbox::new(dir.path().to_path_buf());
         let patch = "\
 *** Begin Patch
@@ -919,7 +922,7 @@ mod tests {
             "Success. Updated the following files:\nM src/lib.rs\n"
         );
         assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
+            fs::read_to_string(&path).await.unwrap(),
             "fn hello() {\n    println!(\"new\");\n}\n"
         );
     }
@@ -1039,7 +1042,7 @@ mod tests {
     async fn pure_addition_update_hunk_uses_raw_local_file_text() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("insert_only.txt");
-        std::fs::write(&path, "alpha\nomega\n").unwrap();
+        fs::write(&path, "alpha\nomega\n").await.unwrap();
         let env = LocalSandbox::new(dir.path().to_path_buf());
         let patch = "\
 *** Begin Patch
@@ -1056,7 +1059,7 @@ mod tests {
             "Success. Updated the following files:\nM insert_only.txt\n"
         );
         assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
+            fs::read_to_string(&path).await.unwrap(),
             "alpha\nomega\ninserted\n"
         );
     }
