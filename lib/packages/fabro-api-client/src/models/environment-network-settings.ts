@@ -13,11 +13,11 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { EnvironmentNetworkMode } from './environment-network-mode';
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
+export interface EnvironmentNetworkSettings {
+    'mode': EnvironmentNetworkMode;
+    'allow': Array<string>;
 }

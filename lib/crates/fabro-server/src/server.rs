@@ -45,7 +45,7 @@ use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 #[cfg(test)]
 use fabro_config::RunSettingsBuilder;
 use fabro_config::daemon::ServerDaemon;
-use fabro_config::{RunLayer, Storage};
+use fabro_config::{EnvironmentLayer, MergeMap, RunLayer, Storage};
 use fabro_interview::{
     Answer, AnswerSubmission, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
 };
@@ -623,6 +623,7 @@ pub struct AppState {
     pub(super) server_secrets: ServerSecrets,
     pub(crate) llm_source: Arc<dyn CredentialSource>,
     manifest_run_defaults: RwLock<Arc<RunLayer>>,
+    manifest_environment_defaults: RwLock<Arc<MergeMap<EnvironmentLayer>>>,
     manifest_run_settings: RwLock<std::result::Result<RunNamespace, SharedError>>,
     pub(crate) server_settings: RwLock<Arc<ServerSettings>>,
     catalog: RwLock<Arc<Catalog>>,
@@ -734,10 +735,11 @@ pub(crate) struct AppStateConfig {
 
 #[derive(Clone)]
 pub(crate) struct ResolvedAppStateSettings {
-    pub(crate) server_settings:       ServerSettings,
-    pub(crate) manifest_run_defaults: RunLayer,
-    pub(crate) manifest_run_settings: std::result::Result<RunNamespace, SharedError>,
-    pub(crate) llm_catalog_settings:  LlmCatalogSettings,
+    pub(crate) server_settings:               ServerSettings,
+    pub(crate) manifest_run_defaults:         RunLayer,
+    pub(crate) manifest_environment_defaults: MergeMap<EnvironmentLayer>,
+    pub(crate) manifest_run_settings:         std::result::Result<RunNamespace, SharedError>,
+    pub(crate) llm_catalog_settings:          LlmCatalogSettings,
 }
 
 fn accumulate_billing_rollup(
@@ -781,6 +783,15 @@ impl AppState {
                 .manifest_run_defaults
                 .read()
                 .expect("manifest run defaults lock poisoned"),
+        )
+    }
+
+    pub(crate) fn manifest_environment_defaults(&self) -> Arc<MergeMap<EnvironmentLayer>> {
+        Arc::clone(
+            &self
+                .manifest_environment_defaults
+                .read()
+                .expect("manifest environment defaults lock poisoned"),
         )
     }
 
@@ -1031,11 +1042,13 @@ impl AppState {
         let ResolvedAppStateSettings {
             server_settings,
             manifest_run_defaults,
+            manifest_environment_defaults,
             manifest_run_settings,
             llm_catalog_settings,
         } = resolved_settings;
         let server_settings = Arc::new(server_settings);
         let manifest_run_defaults = Arc::new(manifest_run_defaults);
+        let manifest_environment_defaults = Arc::new(manifest_environment_defaults);
         let catalog = Arc::new(
             Catalog::from_builtin_with_overrides(&llm_catalog_settings)
                 .context("building LLM model catalog")?,
@@ -1047,6 +1060,10 @@ impl AppState {
             .manifest_run_defaults
             .write()
             .expect("manifest run defaults lock poisoned") = manifest_run_defaults;
+        *self
+            .manifest_environment_defaults
+            .write()
+            .expect("manifest environment defaults lock poisoned") = manifest_environment_defaults;
         *self
             .manifest_run_settings
             .write()
@@ -1663,7 +1680,7 @@ fn system_sandbox_provider(
 ) -> String {
     manifest_run_settings.as_ref().map_or_else(
         |_| SandboxProvider::default().to_string(),
-        |settings| settings.sandbox.provider.clone(),
+        |settings| settings.environment.provider.to_string(),
     )
 }
 
@@ -1766,6 +1783,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     let (global_event_tx, _) = broadcast::channel(4096);
     let current_server_settings = Arc::new(resolved_settings.server_settings);
     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
+    let current_manifest_environment_defaults =
+        Arc::new(resolved_settings.manifest_environment_defaults);
     let current_manifest_run_settings = resolved_settings.manifest_run_settings;
     let current_catalog = Arc::new(
         Catalog::from_builtin_with_overrides(&resolved_settings.llm_catalog_settings)
@@ -1816,6 +1835,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         server_secrets,
         llm_source,
         manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
+        manifest_environment_defaults: RwLock::new(current_manifest_environment_defaults),
         manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
         catalog: RwLock::new(current_catalog),
@@ -1956,7 +1976,13 @@ async fn delete_run_sandbox_resource(
             })?;
     }
 
-    let preserve = projection.spec().settings.run.sandbox.preserve;
+    let preserve = projection
+        .spec()
+        .settings
+        .run
+        .environment
+        .lifecycle
+        .preserve;
     let Some(record) = projection.sandbox else {
         return Ok(DeleteRunOutcome::NoContent);
     };
@@ -3221,7 +3247,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         let run_spec = persisted.run_spec();
         let settings = &run_spec.settings.run;
         let clone_can_use_github_credentials = settings.execution.mode != RunMode::DryRun
-            && clone_sandbox_can_use_github_credentials(&settings.sandbox.provider)
+            && clone_sandbox_can_use_github_credentials(&settings.environment.provider.to_string())
             && run_spec
                 .repo_origin_url()
                 .is_some_and(|origin| !origin.trim().is_empty());

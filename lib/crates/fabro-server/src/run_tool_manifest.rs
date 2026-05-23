@@ -62,7 +62,7 @@ pub fn run_tool_manifest_args(spec: &ValidatedCreateRunSpec) -> Option<types::Ma
         model: spec.model.clone(),
         preserve_sandbox: spec.preserve_sandbox.filter(|value| *value),
         provider: spec.provider.clone(),
-        sandbox: spec.sandbox.clone(),
+        environment: spec.environment.clone(),
         verbose: None,
     };
     (!fabro_manifest::manifest_args_is_empty(&payload)).then_some(payload)
@@ -73,7 +73,7 @@ pub fn run_tool_run_overrides(spec: &ValidatedCreateRunSpec) -> Option<RunLayer>
         goal:             spec.goal.as_deref(),
         model:            spec.model.as_deref(),
         provider:         spec.provider.as_deref(),
-        sandbox:          spec.sandbox.as_deref(),
+        environment:      spec.environment.as_deref(),
         docker_image:     None,
         preserve_sandbox: spec.preserve_sandbox,
         dry_run:          spec.dry_run,
@@ -88,7 +88,7 @@ pub fn run_tool_run_overrides(spec: &ValidatedCreateRunSpec) -> Option<RunLayer>
     (run.goal.is_some()
         || !run.metadata.is_empty()
         || run.model.is_some()
-        || run.sandbox.is_some()
+        || run.environment.is_some()
         || run.execution.is_some())
     .then_some(run)
 }
@@ -118,7 +118,7 @@ mod tests {
             labels:           HashMap::new(),
             model:            None,
             provider:         None,
-            sandbox:          None,
+            environment:      None,
             dry_run:          None,
             auto_approve:     None,
             preserve_sandbox: None,
@@ -143,7 +143,7 @@ mod tests {
             labels:           HashMap::new(),
             model:            None,
             provider:         None,
-            sandbox:          None,
+            environment:      None,
             dry_run:          None,
             auto_approve:     None,
             preserve_sandbox: None,

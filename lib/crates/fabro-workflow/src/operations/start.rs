@@ -16,12 +16,12 @@ use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, SandboxProvider, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::settings::run::{
-    ApprovalMode, DaytonaNetworkLayer, DaytonaSettings, DockerSettings,
-    DockerfileSource as ResolvedDockerfileSource, HookDefinition as ResolvedHookDefinition,
-    HookEvent as ResolvedHookEvent, HookType as ResolvedHookType,
-    McpServerSettings as ResolvedMcpServerSettings, McpTransport as ResolvedMcpTransport,
-    PullRequestSettings, RunMode, RunModelSettings as ResolvedRunModelSettings,
-    RunNamespace as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
+    ApprovalMode, DockerfileSource as ResolvedDockerfileSource, EnvironmentNetworkMode,
+    HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
+    HookType as ResolvedHookType, McpServerSettings as ResolvedMcpServerSettings,
+    McpTransport as ResolvedMcpTransport, PullRequestSettings, RunEnvironmentSettings, RunMode,
+    RunModelSettings as ResolvedRunModelSettings, RunNamespace as ResolvedRunSettings,
+    TlsMode as ResolvedTlsMode,
 };
 use fabro_types::settings::{InterpString, ModelRegistry, ResolvedModelRef};
 use fabro_types::{ManifestPath, RunId};
@@ -316,7 +316,7 @@ impl RunSession {
 
         let resolved = &settings.run;
 
-        let sandbox_provider = resolve_sandbox_provider(resolved)?;
+        let sandbox_provider = resolve_sandbox_provider(resolved);
         let sandbox_provider =
             if resolved.execution.mode == RunMode::DryRun && !sandbox_provider.is_local() {
                 SandboxProvider::Local
@@ -366,7 +366,7 @@ impl RunSession {
         };
 
         let toml_env: HashMap<String, String> = resolved
-            .sandbox
+            .environment
             .env
             .iter()
             .map(|(k, v)| (k.clone(), resolve_interp(v)))
@@ -380,10 +380,7 @@ impl RunSession {
             origin_url: record.repo_origin_url().map(str::to_string),
         };
 
-        let devcontainer = resolved.sandbox.devcontainer.then(|| DevcontainerSpec {
-            enabled:     true,
-            resolve_dir: working_directory.clone(),
-        });
+        let devcontainer = None;
 
         let interviewer: Arc<dyn Interviewer> = if resolved.execution.approval == ApprovalMode::Auto
         {
@@ -427,8 +424,8 @@ impl RunSession {
             git,
             github_app: services.github_app.clone(),
             registry_override: services.registry_override,
-            preserve_sandbox: resolved.sandbox.preserve,
-            stop_on_terminal: resolved.sandbox.stop_on_terminal,
+            preserve_sandbox: resolved.environment.lifecycle.preserve,
+            stop_on_terminal: resolved.environment.lifecycle.stop_on_terminal,
             pr_config,
             pr_github_app: services.github_app,
             pr_origin_url: record.repo_origin_url().map(str::to_string),
@@ -515,33 +512,18 @@ async fn load_accepted_run_definition(
     serde_json::from_slice(&bytes).map_err(|err| Error::Parse(err.to_string()))
 }
 
-fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> Result<SandboxProvider, Error> {
-    Some(str::parse::<SandboxProvider>(
-        settings.sandbox.provider.as_str(),
-    ))
-    .transpose()
-    .map_err(|err| Error::Precondition(format!("Invalid sandbox provider: {err}")))?
-    .map_or_else(|| Ok(SandboxProvider::default()), Ok)
+fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> SandboxProvider {
+    SandboxProvider::from(settings.environment.provider)
 }
 
 fn resolve_daytona_config(settings: &ResolvedRunSettings) -> DaytonaConfig {
-    let mut config = settings
-        .sandbox
-        .daytona
-        .as_ref()
-        .map(|daytona| runtime_daytona_config(daytona, !settings.clone.enabled))
-        .unwrap_or_default();
+    let mut config = runtime_daytona_config(&settings.environment, !settings.clone.enabled);
     config.skip_clone = !settings.clone.enabled;
     config
 }
 
 fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions {
-    let mut config = settings
-        .sandbox
-        .docker
-        .as_ref()
-        .map(|docker| runtime_docker_config(docker, !settings.clone.enabled))
-        .unwrap_or_default();
+    let mut config = runtime_docker_config(&settings.environment, !settings.clone.enabled);
     config.skip_clone = !settings.clone.enabled;
     config
 }
@@ -676,28 +658,39 @@ fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings
     }
 }
 
-fn runtime_daytona_config(settings: &DaytonaSettings, skip_clone: bool) -> DaytonaConfig {
+fn runtime_daytona_config(settings: &RunEnvironmentSettings, skip_clone: bool) -> DaytonaConfig {
     DaytonaConfig {
-        auto_stop_interval: settings.auto_stop_interval,
+        auto_stop_interval: settings
+            .lifecycle
+            .auto_stop
+            .map(|duration| duration_to_minutes_i32(duration.as_std())),
         labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
         volumes: settings
             .volumes
             .iter()
             .map(|volume| DaytonaVolumeMount {
-                volume_id:  volume.volume_id.clone(),
+                volume_id:  volume.id.clone(),
                 mount_path: volume.mount_path.clone(),
                 subpath:    volume.subpath.clone(),
             })
             .collect(),
         snapshot: settings
-            .snapshot
+            .image
+            .reference
             .as_ref()
-            .map(|snapshot| DaytonaSnapshotSettings {
-                name:       snapshot.name.clone(),
-                cpu:        snapshot.cpu,
-                memory:     snapshot.memory_gb,
-                disk:       snapshot.disk_gb,
-                dockerfile: snapshot
+            .map(|name| DaytonaSnapshotSettings {
+                name:       name.clone(),
+                cpu:        settings.resources.cpu,
+                memory:     settings
+                    .resources
+                    .memory
+                    .map(|size| size_to_gb_i32(size.as_bytes())),
+                disk:       settings
+                    .resources
+                    .disk
+                    .map(|size| size_to_gb_i32(size.as_bytes())),
+                dockerfile: settings
+                    .image
                     .dockerfile
                     .as_ref()
                     .map(|dockerfile| match dockerfile {
@@ -709,34 +702,63 @@ fn runtime_daytona_config(settings: &DaytonaSettings, skip_clone: bool) -> Dayto
                         }
                     }),
             }),
-        network: settings.network.as_ref().map(|network| match network {
-            DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
-            DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
-            DaytonaNetworkLayer::AllowList { allow_list } => {
-                DaytonaNetwork::AllowList(allow_list.clone())
+        network: Some(match settings.network.mode {
+            EnvironmentNetworkMode::Block => DaytonaNetwork::Block,
+            EnvironmentNetworkMode::AllowAll => DaytonaNetwork::AllowAll,
+            EnvironmentNetworkMode::CidrAllowList => {
+                DaytonaNetwork::AllowList(settings.network.allow.clone())
             }
         }),
         skip_clone,
     }
 }
 
-fn runtime_docker_config(settings: &DockerSettings, skip_clone: bool) -> DockerSandboxOptions {
+fn runtime_docker_config(
+    settings: &RunEnvironmentSettings,
+    skip_clone: bool,
+) -> DockerSandboxOptions {
     let mut env_vars = settings
-        .env_vars
+        .env
         .iter()
         .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
         .collect::<Vec<_>>();
     env_vars.sort();
+    let default_options = DockerSandboxOptions::default();
 
     DockerSandboxOptions {
-        image: settings.image.clone(),
-        network_mode: settings.network_mode.clone(),
-        memory_limit: settings.memory_limit,
-        cpu_quota: settings.cpu_quota,
+        image: settings
+            .image
+            .reference
+            .clone()
+            .unwrap_or(default_options.image),
+        network_mode: match settings.network.mode {
+            EnvironmentNetworkMode::Block => Some("none".to_string()),
+            EnvironmentNetworkMode::AllowAll | EnvironmentNetworkMode::CidrAllowList => {
+                default_options.network_mode
+            }
+        },
+        memory_limit: settings
+            .resources
+            .memory
+            .and_then(|size| i64::try_from(size.as_bytes()).ok()),
+        cpu_quota: settings
+            .resources
+            .cpu
+            .map(|cpu| i64::from(cpu).saturating_mul(100_000)),
         env_vars,
         skip_clone,
         ..DockerSandboxOptions::default()
     }
+}
+
+fn duration_to_minutes_i32(duration: Duration) -> i32 {
+    let minutes = duration.as_secs() / 60;
+    i32::try_from(minutes).unwrap_or(i32::MAX)
+}
+
+fn size_to_gb_i32(bytes: u64) -> i32 {
+    let gb = bytes / 1_000_000_000;
+    i32::try_from(gb).unwrap_or(i32::MAX)
 }
 
 fn runtime_hook_definition(definition: &ResolvedHookDefinition) -> fabro_hooks::HookDefinition {
@@ -1135,12 +1157,13 @@ mod tests {
 
     use chrono::Utc;
     use fabro_config::{
-        DaytonaSandboxLayer, DaytonaVolumeLayer, RunCloneLayer, RunExecutionLayer, RunLayer,
-        RunSandboxLayer, WorkflowSettingsBuilder,
+        EnvironmentImageLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer,
+        EnvironmentVolumeLayer, RunCloneLayer, RunEnvironmentLayer, RunExecutionLayer, RunLayer,
+        StickyMap, WorkflowSettingsBuilder,
     };
     use fabro_store::Database;
-    use fabro_types::settings::ModelRef;
     use fabro_types::settings::run::RunMode;
+    use fabro_types::settings::{InterpString, ModelRef};
     use fabro_types::{ManifestPath, WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
 
@@ -1285,18 +1308,50 @@ reasoning = false
     }
 
     #[test]
+    fn runtime_docker_config_maps_environment_hints() {
+        let settings = settings_from_run_layer(RunLayer {
+            environment: Some(RunEnvironmentLayer {
+                image: Some(EnvironmentImageLayer {
+                    reference: Some("ubuntu:24.04".to_string()),
+                    ..EnvironmentImageLayer::default()
+                }),
+                resources: Some(EnvironmentResourcesLayer {
+                    cpu:    Some(4),
+                    memory: Some("2GB".parse().unwrap()),
+                    disk:   None,
+                }),
+                network: Some(EnvironmentNetworkLayer {
+                    mode:  Some("block".to_string()),
+                    allow: Vec::new(),
+                }),
+                env: StickyMap::from(HashMap::from([(
+                    "NODE_ENV".to_string(),
+                    InterpString::parse("test"),
+                )])),
+                ..RunEnvironmentLayer::default()
+            }),
+            ..RunLayer::default()
+        });
+
+        let config = resolve_docker_config(&settings.run);
+
+        assert_eq!(config.image, "ubuntu:24.04");
+        assert_eq!(config.cpu_quota, Some(400_000));
+        assert_eq!(config.memory_limit, Some(2_000_000_000));
+        assert_eq!(config.network_mode.as_deref(), Some("none"));
+        assert_eq!(config.env_vars, vec!["NODE_ENV=test"]);
+    }
+
+    #[test]
     fn runtime_daytona_config_preserves_volume_mounts() {
         let settings = settings_from_run_layer(RunLayer {
-            sandbox: Some(RunSandboxLayer {
-                daytona: Some(DaytonaSandboxLayer {
-                    volumes: Some(vec![DaytonaVolumeLayer {
-                        volume_id:  "vol_auth".to_string(),
-                        mount_path: "/home/daytona/.config".to_string(),
-                        subpath:    Some("agents".to_string()),
-                    }]),
-                    ..DaytonaSandboxLayer::default()
-                }),
-                ..RunSandboxLayer::default()
+            environment: Some(RunEnvironmentLayer {
+                volumes: Some(vec![EnvironmentVolumeLayer {
+                    id:         "vol_auth".to_string(),
+                    mount_path: "/home/daytona/.config".to_string(),
+                    subpath:    Some("agents".to_string()),
+                }]),
+                ..RunEnvironmentLayer::default()
             }),
             ..RunLayer::default()
         });

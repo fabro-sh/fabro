@@ -269,10 +269,12 @@ pub(crate) fn resolved_runtime_settings_for_tests(
     manifest_run_defaults: RunLayer,
     llm_catalog_settings: LlmCatalogSettings,
 ) -> ResolvedAppStateSettings {
+    let manifest_environment_defaults = fabro_config::MergeMap::default();
     ResolvedAppStateSettings {
         manifest_run_settings: RunSettingsBuilder::from_run_layer(&manifest_run_defaults)
             .map_err(|err| SharedError::new(anyhow::Error::new(err))),
         manifest_run_defaults,
+        manifest_environment_defaults,
         server_settings,
         llm_catalog_settings,
     }

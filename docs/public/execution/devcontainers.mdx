@@ -1,45 +1,33 @@
 ---
 title: "Devcontainers"
-description: "Run Fabro workflows inside development containers"
+description: "Using repository devcontainer metadata with Fabro environments"
 ---
 
-Fabro can use your project's [devcontainer](https://containers.dev/) configuration to set up sandbox environments. When enabled, Fabro resolves `devcontainer.json` from the repository, uses its Dockerfile to build the Daytona sandbox snapshot, runs lifecycle hooks inside the sandbox, and merges devcontainer environment variables into the sandbox environment.
+Named environments are the supported configuration surface for run execution. Define reusable environments under `[environments.<slug>]` and select one with `[run.environment] id = "..."`.
 
-## Enabling devcontainer support
+Devcontainer-specific run configuration (`[run.sandbox] devcontainer = true`) has been removed with the named environments configuration break. To use a devcontainer-style image today, build or reference it through an environment image:
 
-Set `devcontainer = true` in the `[run.sandbox]` section of your run config:
+```toml
+[run.environment]
+id = "dev"
 
-```toml title="run.toml"
-_version = 1
+[environments.dev]
+provider = "docker"
 
-[workflow]
-graph = "workflow.fabro"
-
-[run.sandbox]
-provider = "daytona"
-devcontainer = true
+[environments.dev.image]
+ref = "ghcr.io/acme/project-devcontainer:latest"
 ```
 
-Fabro looks for `.devcontainer/devcontainer.json` in the repository root. If found, it extracts the Dockerfile, lifecycle commands, and environment variables from the configuration.
+For Daytona snapshot creation, provide a Dockerfile path on the selected environment:
 
-## What Fabro uses from devcontainer.json
+```toml
+[run.environment]
+id = "cloud-dev"
 
-| Field | How Fabro uses it |
-|---|---|
-| `build.dockerfile` | Used as the Dockerfile for the Daytona sandbox snapshot. A deterministic snapshot name is generated from a hash of the Dockerfile content. |
-| `onCreateCommand` | Runs inside the sandbox after it's created |
-| `postCreateCommand` | Runs after `onCreateCommand` completes |
-| `postStartCommand` | Runs after the sandbox starts |
-| `containerEnv` | Merged into sandbox environment variables (TOML `[run.sandbox.env]` values take precedence on key collisions) |
+[environments.cloud-dev]
+provider = "daytona"
 
-Lifecycle commands (`onCreateCommand`, `postCreateCommand`, `postStartCommand`) execute sequentially inside the sandbox. If any command fails, the run aborts before the workflow starts.
-
-## Dockerfile limitations
-
-Fabro detects and reports unsupported `COPY` and `ADD` instructions in devcontainer base Dockerfiles. These instructions reference files from the build context, which isn't available when building Daytona snapshots. If your Dockerfile uses `COPY` or `ADD`, you'll need to restructure it to use `RUN` commands that fetch files at build time (e.g., via `curl` or `wget`).
-
-## Interaction with other sandbox settings
-
-When `devcontainer = true`, the devcontainer Dockerfile overrides any `snapshot.dockerfile` setting in `[run.sandbox.daytona]`. Other Daytona settings (`cpu`, `memory`, `disk`, `auto_stop_interval`, `labels`) still apply.
-
-Environment variables from `containerEnv` in the devcontainer config are merged with `[run.sandbox.env]` from the TOML config. On key collisions, the TOML config wins.
+[environments.cloud-dev.image]
+ref = "project-dev"
+dockerfile = { path = ".devcontainer/Dockerfile" }
+```

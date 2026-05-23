@@ -18,7 +18,7 @@ Fabro only reads `settings.toml`. Older `server.toml`, `user.toml`, and `cli.tom
 | Scope | Examples |
 |---|---|
 | Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
-| Shared run defaults (layered through `.fabro/project.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.sandbox]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
+| Shared run defaults (layered through `.fabro/project.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.environment]`, `[environments.<slug>]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
 
 The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
 
@@ -88,13 +88,16 @@ fallbacks = ["gemini", "openai"]
 [[run.prepare.steps]]
 script = "npm install"
 
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
 
-[run.sandbox.daytona]
-auto_stop_interval = 60
+[environments.cloud.lifecycle]
+auto_stop = "60m"
 
-[run.sandbox.daytona.labels]
+[environments.cloud.labels]
 team = "platform"
 
 [run.checkpoint]
@@ -121,7 +124,7 @@ Several `settings.toml` settings can be overridden via `fabro server start` flag
 | `--foreground` | — | Run in the foreground instead of daemonizing |
 | `--model` | — | Override default LLM model |
 | `--provider` | — | Override default LLM provider |
-| `--sandbox` | — | Override default sandbox provider |
+| `--environment` | — | Override default environment slug |
 | `--max-concurrent-runs` | `5` | Maximum concurrent run executions |
 | `--config` | `~/.fabro/settings.toml` | Path to server config file |
 
@@ -228,7 +231,7 @@ On a same-machine setup, `settings.toml` is the shared machine-default layer und
 
 On a remote setup, the client bundles workflow, project, and user config into the run manifest. The server then layers those bundled client configs over its own local defaults for run-shaped fields. Server-owned values like `[server.storage]`, `[server.api]`, `[server.web]`, and `[server.scheduler]` always come from the server machine's own `settings.toml` or `fabro server start` flags.
 
-Merge rules follow the normative matrix: TOML `[run.inputs]` tables replace wholesale, CLI `-I` / `--input` values replayed from run manifests merge per key at highest precedence, `[run.sandbox.env]` and `[run.sandbox.daytona.labels]` merge by key, `[run.prepare.steps]` replaces whole-list, and `[[run.hooks]]` merge by optional `id`. Most other fields use "higher-precedence wins" field-wise merging.
+Merge rules follow the normative matrix: TOML `[run.inputs]` tables replace wholesale, CLI `-I` / `--input` values replayed from run manifests merge per key at highest precedence, environment `env` and `labels` merge by key, environment `volumes` replace as a whole list, `[run.prepare.steps]` replaces whole-list, and `[[run.hooks]]` merge by optional `id`. Most other fields use "higher-precedence wins" field-wise merging.
 
 ### `[server.logging]` section
 

@@ -6572,11 +6572,12 @@ components:
           type: string
         provider:
           type: string
-        sandbox:
+        environment:
           type: string
+          description: Named environment slug to select for the run.
         docker_image:
           type: string
-          description: Per-run Docker sandbox image override.
+          description: Per-run environment image override.
         verbose:
           type: boolean
         dry_run:
@@ -10400,12 +10401,17 @@ components:
       required:
         - project
         - workflow
+        - environments
         - run
       properties:
         project:
           $ref: "#/components/schemas/ProjectNamespace"
         workflow:
           $ref: "#/components/schemas/WorkflowNamespace"
+        environments:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/EnvironmentSettings"
         run:
           $ref: "#/components/schemas/RunNamespace"
 
@@ -10460,7 +10466,7 @@ components:
         - clone
         - run_branch
         - meta_branch
-        - sandbox
+        - environment
         - notifications
         - interviews
         - agent
@@ -10500,8 +10506,8 @@ components:
           $ref: "#/components/schemas/RunBranchSettings"
         meta_branch:
           $ref: "#/components/schemas/RunMetaBranchSettings"
-        sandbox:
-          $ref: "#/components/schemas/RunSandboxSettings"
+        environment:
+          $ref: "#/components/schemas/RunEnvironmentSettings"
         notifications:
           type: object
           additionalProperties:
@@ -10670,87 +10676,122 @@ components:
         push:
           type: boolean
 
-    RunSandboxSettings:
+    RunEnvironmentSettings:
       type: object
-      required: [provider, preserve, stop_on_terminal, devcontainer, env, docker, daytona]
+      required: [id, provider, image, resources, network, lifecycle, labels, volumes, env]
       properties:
+        id:
+          type: string
         provider:
-          $ref: "#/components/schemas/SandboxProvider"
-        preserve:
-          type: boolean
-        stop_on_terminal:
-          type: boolean
-        devcontainer:
-          type: boolean
+          $ref: "#/components/schemas/EnvironmentProvider"
+        image:
+          $ref: "#/components/schemas/EnvironmentImageSettings"
+        resources:
+          $ref: "#/components/schemas/EnvironmentResourcesSettings"
+        network:
+          $ref: "#/components/schemas/EnvironmentNetworkSettings"
+        lifecycle:
+          $ref: "#/components/schemas/EnvironmentLifecycleSettings"
+        labels:
+          $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/InterpString"
-        docker:
-          oneOf:
-            - $ref: "#/components/schemas/DockerSettings"
-            - type: "null"
-        daytona:
-          oneOf:
-            - $ref: "#/components/schemas/DaytonaSettings"
-            - type: "null"
 
-    DockerSettings:
+    EnvironmentSettings:
       type: object
-      required: [image, network_mode, memory_limit, cpu_quota, env_vars]
+      required: [provider, image, resources, network, lifecycle, labels, volumes, env]
       properties:
+        provider:
+          $ref: "#/components/schemas/EnvironmentProvider"
         image:
-          type: string
-        network_mode:
-          type: ["string", "null"]
-        memory_limit:
-          type: ["integer", "null"]
-          format: int64
-        cpu_quota:
-          type: ["integer", "null"]
-          format: int64
-        env_vars:
+          $ref: "#/components/schemas/EnvironmentImageSettings"
+        resources:
+          $ref: "#/components/schemas/EnvironmentResourcesSettings"
+        network:
+          $ref: "#/components/schemas/EnvironmentNetworkSettings"
+        lifecycle:
+          $ref: "#/components/schemas/EnvironmentLifecycleSettings"
+        labels:
+          $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
+        env:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/InterpString"
 
-    DaytonaSettings:
-      type: object
-      required: [auto_stop_interval, labels, snapshot, network]
-      properties:
-        auto_stop_interval:
-          type: ["integer", "null"]
-          format: int32
-        labels:
-          $ref: "#/components/schemas/StringMap"
-        snapshot:
-          oneOf:
-            - $ref: "#/components/schemas/DaytonaSnapshotSettings"
-            - type: "null"
-        network:
-          oneOf:
-            - $ref: "#/components/schemas/DaytonaNetworkLayer"
-            - type: "null"
+    EnvironmentProvider:
+      description: Desired environment provider.
+      type: string
+      enum: [local, docker, daytona]
 
-    DaytonaSnapshotSettings:
+    EnvironmentImageSettings:
       type: object
-      required: [name, cpu, memory_gb, disk_gb, dockerfile]
+      required: [ref, dockerfile]
       properties:
-        name:
-          type: string
-        cpu:
-          type: ["integer", "null"]
-          format: int32
-        memory_gb:
-          type: ["integer", "null"]
-          format: int32
-        disk_gb:
-          type: ["integer", "null"]
-          format: int32
+        ref:
+          type: ["string", "null"]
         dockerfile:
           oneOf:
             - $ref: "#/components/schemas/DockerfileSource"
             - type: "null"
+
+    EnvironmentResourcesSettings:
+      type: object
+      required: [cpu, memory, disk]
+      properties:
+        cpu:
+          type: ["integer", "null"]
+          format: int32
+        memory:
+          type: ["string", "null"]
+        disk:
+          type: ["string", "null"]
+
+    EnvironmentNetworkSettings:
+      type: object
+      required: [mode, allow]
+      properties:
+        mode:
+          $ref: "#/components/schemas/EnvironmentNetworkMode"
+        allow:
+          type: array
+          items:
+            type: string
+
+    EnvironmentNetworkMode:
+      type: string
+      enum: [allow_all, block, cidr_allow_list]
+
+    EnvironmentLifecycleSettings:
+      type: object
+      required: [preserve, stop_on_terminal, auto_stop]
+      properties:
+        preserve:
+          type: boolean
+        stop_on_terminal:
+          type: boolean
+        auto_stop:
+          type: ["string", "null"]
+
+    EnvironmentVolumeSettings:
+      type: object
+      required: [id, mount_path, subpath]
+      properties:
+        id:
+          type: string
+        mount_path:
+          type: string
+        subpath:
+          type: ["string", "null"]
 
     DockerfileSource:
       oneOf:
@@ -10776,23 +10817,6 @@ components:
           enum: [path]
         path:
           type: string
-
-    DaytonaNetworkLayer:
-      description: Daytona network access policy.
-      oneOf:
-        - type: string
-          enum: [block, allow_all]
-        - type: object
-          required: [allow_list]
-          properties:
-            allow_list:
-              type: object
-              required: [allow_list]
-              properties:
-                allow_list:
-                  type: array
-                  items:
-                    type: string
 
     NotificationRouteSettings:
       type: object

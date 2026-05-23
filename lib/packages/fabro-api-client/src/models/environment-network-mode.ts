@@ -14,10 +14,11 @@
 
 
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
-}
+
+export const EnvironmentNetworkMode = {
+    ALLOW_ALL: 'allow_all',
+    BLOCK: 'block',
+    CIDR_ALLOW_LIST: 'cidr_allow_list'
+} as const;
+
+export type EnvironmentNetworkMode = typeof EnvironmentNetworkMode[keyof typeof EnvironmentNetworkMode];

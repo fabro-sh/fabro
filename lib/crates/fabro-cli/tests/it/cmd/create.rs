@@ -363,8 +363,8 @@ fn create_persists_requested_overrides_into_store() {
         "gpt-5",
         "--provider",
         "openai",
-        "--sandbox",
-        "local",
+        "--environment",
+        "default",
         "--label",
         "env=dev",
         "--label",
@@ -410,9 +410,10 @@ fn create_persists_requested_overrides_into_store() {
                 "model": resolved_run.model.name.as_ref().map(fabro_types::settings::InterpString::as_source),
                 "provider": resolved_run.model.provider.as_ref().map(fabro_types::settings::InterpString::as_source),
             },
-            "sandbox": {
-                "provider": resolved_run.sandbox.provider,
-                "preserve": resolved_run.sandbox.preserve,
+            "environment": {
+                "id": resolved_run.environment.id,
+                "provider": resolved_run.environment.provider.to_string(),
+                "preserve": resolved_run.environment.lifecycle.preserve,
             },
         },
         "labels": labels,
@@ -429,8 +430,9 @@ fn create_persists_requested_overrides_into_store() {
           "model": "gpt-5",
           "provider": "openai"
         },
-        "sandbox": {
-          "provider": "local",
+        "environment": {
+          "id": "default",
+          "provider": "docker",
           "preserve": true
         }
       },

@@ -708,7 +708,7 @@ fn requires_github_credentials(run: &RunNamespace) -> bool {
         return true;
     }
     run.execution.mode != RunMode::DryRun
-        && clone_sandbox_requires_github_credentials(&run.sandbox.provider)
+        && clone_sandbox_requires_github_credentials(&run.environment.provider.to_string())
 }
 
 fn clone_sandbox_requires_github_credentials(provider: &str) -> bool {
@@ -1147,8 +1147,8 @@ mod tests {
 
         use fabro_types::settings::InterpString;
         use fabro_types::settings::run::{
-            RunIntegrationsGithubSettings, RunIntegrationsSettings, RunMode, RunNamespace,
-            RunSandboxSettings,
+            EnvironmentProvider, RunIntegrationsGithubSettings, RunIntegrationsSettings, RunMode,
+            RunNamespace,
         };
 
         use super::super::requires_github_credentials;
@@ -1160,10 +1160,9 @@ mod tests {
         ) -> RunNamespace {
             let mut run = RunNamespace::default();
             run.execution.mode = mode;
-            run.sandbox = RunSandboxSettings {
-                provider: provider.to_string(),
-                ..RunSandboxSettings::default()
-            };
+            run.environment.provider = provider
+                .parse::<EnvironmentProvider>()
+                .expect("test provider should parse");
             run.integrations = RunIntegrationsSettings {
                 github: RunIntegrationsGithubSettings { permissions },
             };

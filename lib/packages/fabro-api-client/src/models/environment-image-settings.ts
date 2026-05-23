@@ -13,11 +13,11 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { DockerfileSource } from './dockerfile-source';
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
+export interface EnvironmentImageSettings {
+    'ref': string | null;
+    'dockerfile': DockerfileSource | null;
 }

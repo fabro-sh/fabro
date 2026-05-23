@@ -14,10 +14,14 @@
 
 
 
-export interface RunCheckpointSettings {
-    'exclude_globs': Array<string>;
-    /**
-     * When true, Fabro-managed run-branch checkpoint commits bypass local Git commit hooks. Does not affect Fabro `[[run.hooks]]` or metadata-branch snapshots. Defaults to false.
-     */
-    'skip_git_hooks': boolean;
-}
+/**
+ * Desired environment provider.
+ */
+
+export const EnvironmentProvider = {
+    LOCAL: 'local',
+    DOCKER: 'docker',
+    DAYTONA: 'daytona'
+} as const;
+
+export type EnvironmentProvider = typeof EnvironmentProvider[keyof typeof EnvironmentProvider];

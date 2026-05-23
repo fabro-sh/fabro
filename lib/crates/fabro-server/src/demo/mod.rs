@@ -1041,8 +1041,9 @@ mod runs {
 
     use fabro_api::types::*;
     use fabro_types::settings::run::{
-        DaytonaSettings, DaytonaSnapshotSettings, RunGoal, RunModelSettings, RunNamespace,
-        RunPrepareSettings, RunSandboxSettings,
+        EnvironmentImageSettings, EnvironmentLifecycleSettings, EnvironmentProvider,
+        EnvironmentResourcesSettings, EnvironmentSettings, RunEnvironmentSettings, RunGoal,
+        RunModelSettings, RunNamespace, RunPrepareSettings,
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
     use fabro_types::{
@@ -1714,12 +1715,33 @@ mod runs {
 
     pub(super) fn settings() -> serde_json::Value {
         let settings = WorkflowSettings {
-            project:  ProjectNamespace::default(),
-            workflow: WorkflowNamespace {
+            project:      ProjectNamespace::default(),
+            workflow:     WorkflowNamespace {
                 graph: "workflow.fabro".into(),
                 ..WorkflowNamespace::default()
             },
-            run:      RunNamespace {
+            environments: HashMap::from([("api-server".to_string(), EnvironmentSettings {
+                provider: EnvironmentProvider::Daytona,
+                image: EnvironmentImageSettings {
+                    reference:  Some("api-server-dev".into()),
+                    dockerfile: None,
+                },
+                resources: EnvironmentResourcesSettings {
+                    cpu:    Some(4),
+                    memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
+                    disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
+                },
+                lifecycle: EnvironmentLifecycleSettings {
+                    preserve:         false,
+                    stop_on_terminal: true,
+                    auto_stop:        Some(
+                        "60m".parse().expect("hardcoded demo duration should parse"),
+                    ),
+                },
+                labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
+                ..EnvironmentSettings::default()
+            })]),
+            run:          RunNamespace {
                 goal: Some(RunGoal::Inline(InterpString::parse(
                     "Add rate limiting to auth endpoints",
                 ))),
@@ -1733,30 +1755,30 @@ mod runs {
                     commands:   vec!["bun install".into(), "bun run typecheck".into()],
                     timeout_ms: 120_000,
                 },
-                sandbox: RunSandboxSettings {
-                    provider:         "daytona".into(),
-                    preserve:         false,
-                    stop_on_terminal: true,
-                    devcontainer:     false,
-                    env:              HashMap::new(),
-                    docker:           None,
-                    daytona:          Some(DaytonaSettings {
-                        auto_stop_interval: Some(60),
-                        labels:             HashMap::from([(
-                            "project".to_string(),
-                            "api-server".to_string(),
-                        )]),
-                        volumes:            Vec::new(),
-                        snapshot:           Some(DaytonaSnapshotSettings {
-                            name:       "api-server-dev".into(),
-                            cpu:        Some(4),
-                            memory_gb:  Some(8),
-                            disk_gb:    Some(10),
+                environment: RunEnvironmentSettings::from_environment(
+                    "api-server".to_string(),
+                    EnvironmentSettings {
+                        provider: EnvironmentProvider::Daytona,
+                        image: EnvironmentImageSettings {
+                            reference:  Some("api-server-dev".into()),
                             dockerfile: None,
-                        }),
-                        network:            None,
-                    }),
-                },
+                        },
+                        resources: EnvironmentResourcesSettings {
+                            cpu:    Some(4),
+                            memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
+                            disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
+                        },
+                        lifecycle: EnvironmentLifecycleSettings {
+                            preserve:         false,
+                            stop_on_terminal: true,
+                            auto_stop:        Some(
+                                "60m".parse().expect("hardcoded demo duration should parse"),
+                            ),
+                        },
+                        labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
+                        ..EnvironmentSettings::default()
+                    },
+                ),
                 ..RunNamespace::default()
             },
         };

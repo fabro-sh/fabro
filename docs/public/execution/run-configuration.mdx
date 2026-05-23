@@ -56,25 +56,30 @@ script = "git clone https://github.com/fabro-sh/fabro repo"
 [[run.prepare.steps]]
 script = "cd repo && npm install"
 
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
+
+[environments.cloud.lifecycle]
 preserve = false
+auto_stop = "60m"
 
-[run.sandbox.daytona]
-auto_stop_interval = 60
-
-[run.sandbox.daytona.labels]
+[environments.cloud.labels]
 project = "fabro"
 env = "ci"
 
-[run.sandbox.daytona.snapshot]
-name = "node-20"
+[environments.cloud.image]
+ref = "node-20"
+dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
+
+[environments.cloud.resources]
 cpu = 4
 memory = "8GB"
 disk = "20GB"
-dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 
-[run.sandbox.env]
+[environments.cloud.env]
 API_KEY = "{{ env.MY_API_KEY }}"
 NODE_ENV = "production"
 
@@ -222,94 +227,66 @@ push = true
 | `enabled` | When `false`, Fabro skips metadata branch snapshots. |
 | `push` | When `false`, Fabro writes metadata snapshots locally but does not push `fabro/meta/<id>` to the remote. |
 
-### `[run.sandbox]`
+### `[run.environment]` and `[environments.<slug>]`
 
-Configure how agent tools (bash, file edits) are executed.
+Runs select a reusable named environment by slug. Environment catalogs can be
+defined in `settings.toml`, `.fabro/project.toml`, or `workflow.toml`.
 
 ```toml title="run.toml"
-[run.sandbox]
-provider = "docker"
+[run.environment]
+id = "ci"
+
+[environments.ci]
+provider = "docker" # local | docker | daytona
+
+[environments.ci.image]
+ref = "buildpack-deps:noble"
+
+[environments.ci.resources]
+cpu = 2
+memory = "4GB"
+
+[environments.ci.lifecycle]
 preserve = true
+stop_on_terminal = true
+
+[environments.ci.env]
+NODE_ENV = "production"
 ```
 
-| Field | Description |
-|---|---|
-| `provider` | Sandbox mode: `docker` (default), `local`, or `daytona`. |
-| `preserve` | When `true`, keep the sandbox alive after the run finishes. Useful for debugging. |
-| `devcontainer` | When `true`, use the repo's `devcontainer.json` to configure the sandbox. See [Devcontainers](/execution/devcontainers). |
+Sparse run-level overrides live under `[run.environment.*]` and apply to the
+selected environment only:
 
-#### `[run.sandbox.docker]`
-
-Additional settings when using the Docker sandbox:
-
-```toml title="run.toml"
-[run.sandbox]
-provider = "docker"
-
-[run.sandbox.docker]
-image = "buildpack-deps:noble"
-network_mode = "bridge"
-memory_limit = "4GB"
-cpu_quota = 200000
-```
-
-| Field | Description |
-|---|---|
-| `image` | Docker image used for the run container. Defaults to `buildpack-deps:noble`. |
-| `network_mode` | Docker network mode. Defaults to `bridge`. |
-| `memory_limit` | Memory limit using human-readable units such as `"4GB"` or `"512MiB"`. |
-| `cpu_quota` | Docker CPU quota in microseconds per 100ms period. Defaults to `200000`. |
-| `env_vars` | Provider-level environment variables passed to the Docker container. For workflow tool execution, prefer `[run.sandbox.env]`. |
-
-#### `[run.sandbox.daytona]`
-
-Additional settings when using the Daytona cloud sandbox:
-
-```toml title="run.toml"
-[run.sandbox.daytona]
-auto_stop_interval = 60
-
-[run.sandbox.daytona.labels]
-project = "fabro"
-env = "staging"
-
-[[run.sandbox.daytona.volumes]]
-volume_id = "vol-agent-state"
-mount_path = "/home/daytona/agent-state"
-subpath = "agent-auth"
-
-[run.sandbox.daytona.snapshot]
-name = "my-snapshot"
-cpu = 4
+```toml
+[run.environment.resources]
 memory = "8GB"
-disk = "20GB"
-dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
-# Or reference an external Dockerfile:
-# dockerfile = { path = "./Dockerfile" }
 ```
 
 | Field | Description |
 |---|---|
-| `auto_stop_interval` | Minutes of inactivity before the sandbox auto-stops. |
-| `labels` | Key-value labels attached to the sandbox for filtering and identification. Labels merge across layers (sticky merge-by-key). |
-| `volumes` | Existing Daytona volumes to mount at sandbox creation. Each entry requires `volume_id` and `mount_path`; `subpath` is optional. Fabro does not create or manage volume lifecycle. |
-| `snapshot.name` | Snapshot name to create or use for the sandbox. |
-| `snapshot.cpu` | CPU cores for the snapshot (integer). |
-| `snapshot.memory` | Memory size using human-readable units: `"8GB"`, `"16GiB"`, or bare integers that default to GB. |
-| `snapshot.disk` | Disk size using the same units as `memory`. |
-| `snapshot.dockerfile` | Dockerfile content (inline string) or path (`{ path = "..." }`) for building the snapshot image. Paths are resolved relative to the TOML file's directory. |
-| `network` | Network access mode: `"allow_all"` (default), `"block"`, or `{ allow_list = ["..."] }`. See [Sandboxing](/administration/sandboxing#network-access-control). |
+| `run.environment.id` | Environment slug to select. Defaults to `default`. |
+| `environments.<slug>.provider` | Required provider: `local`, `docker`, or `daytona`. |
+| `image.ref` | Docker image or Daytona snapshot name. |
+| `image.dockerfile` | Inline Dockerfile or `{ path = "Dockerfile" }`; for Daytona, requires `image.ref`. |
+| `resources.cpu` / `memory` / `disk` | Best-effort resource hints. Unsupported provider fields warn and continue. |
+| `network.mode` | `allow_all`, `block`, or `cidr_allow_list`. Local cannot enforce blocked/CIDR networking; Docker cannot enforce CIDR allow-lists. |
+| `network.allow` | CIDRs for `cidr_allow_list`; entries are validated as CIDRs. |
+| `lifecycle.preserve` | Keep the created sandbox after the run finishes. |
+| `lifecycle.stop_on_terminal` | Stop the sandbox when the run reaches a terminal state. |
+| `lifecycle.auto_stop` | Daytona auto-stop duration, such as `"30m"`. |
+| `labels` | Provider labels. Merge by key across layers. |
+| `volumes` | Provider volume hints. Lists replace wholesale across layers. |
+| `env` | Environment variables passed to command and agent execution. Merge by key across layers. |
 
-#### Local sandbox
+When `provider = "local"`, Fabro runs directly in the resolved working
+directory. If you want local isolation, create or enter a separate clone or Git
+worktree yourself.
 
-When `run.sandbox.provider = "local"`, Fabro runs directly in the resolved working directory. If you want local isolation, create or enter a separate clone or Git worktree yourself, then run with `--sandbox local`.
-
-#### `[run.sandbox.env]`
-
-Pass environment variables into sandbox command and agent execution. Values can be literal strings or host environment references using `{{ env.VARNAME }}` syntax:
+Environment variable values can be literal strings or host environment
+references using `{{ env.VARNAME }}` syntax:
 
 ```toml title="run.toml"
-[run.sandbox.env]
+[environments.ci.env]
 API_KEY = "{{ env.MY_API_KEY }}"
 NODE_ENV = "production"
 SERVICE_URL = "https://api.{{ env.REGION }}.example.com"
@@ -321,7 +298,7 @@ SERVICE_URL = "https://api.{{ env.REGION }}.example.com"
 | `"{{ env.VARNAME }}"` | Whole-value reference resolved from the host environment at consumption time |
 | `"prefix-{{ env.X }}-suffix"` | Substring interpolation; multiple tokens per string are supported |
 
-Missing host variables produce a hard error pointing at the specific field and unresolved token. `run.sandbox.env` is a sticky merge-by-key map: entries from all layers combine, with higher-precedence layers overriding individual keys.
+Missing host variables produce a hard error pointing at the specific field and unresolved token.
 
 ### `[run.integrations.github.permissions]`
 
@@ -514,7 +491,7 @@ Settings can come from multiple sources. Fabro resolves them in this order (firs
 | Source | Priority |
 |---|---|
 | Node-level [stylesheet](/workflows/stylesheets) | Highest |
-| CLI flags (`--model`, `--provider`, `--sandbox`) | |
+| CLI flags (`--model`, `--provider`, `--environment`) | |
 | Run config TOML (`workflow.toml` or equivalent) | |
 | Project defaults (`.fabro/project.toml`) | |
 | Machine defaults (`~/.fabro/settings.toml`) | |
@@ -535,14 +512,17 @@ _version = 1
 [run.model]
 name = "claude-sonnet-4-5"
 
-[run.sandbox]
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
 provider = "daytona"
 
-[run.sandbox.daytona.snapshot]
-name = "my-project-snapshot"
+[environments.cloud.image]
+ref = "my-project-snapshot"
 ```
 
-Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), TOML `run.inputs` tables replace wholesale, CLI input flags merge per key at highest precedence, `run.sandbox.env` sticky-merges by key, and `run.prepare.steps` replaces whole-list.
+Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), TOML `run.inputs` tables replace wholesale, CLI input flags merge per key at highest precedence, environment `env` and `labels` merge by key, environment `volumes` replace as a whole list, and `run.prepare.steps` replaces whole-list.
 
 ### Machine defaults
 
