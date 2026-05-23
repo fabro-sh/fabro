@@ -59,9 +59,11 @@ import {
   useCancelRun,
   useInterruptRun,
   usePreviewRun,
+  useRetryRun,
   useUnarchiveRun,
   type LifecycleMutationResult,
   type PreviewMutationResult,
+  type RetryMutationResult,
 } from "../lib/mutations";
 import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
 import { queryKeys } from "../lib/query-keys";
@@ -72,11 +74,13 @@ import {
   canArchive,
   canCancel,
   canDelete,
+  canRetry,
   canUnarchive,
   deleteErrorMessage,
   deleteRun,
   isTerminalCancelledRun,
   mapError,
+  retryErrorMessage,
   type LifecycleAction,
   type LifecycleActionError,
 } from "../lib/run-actions";
@@ -382,6 +386,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const cancelMutation = useCancelRun(params.id);
   const archiveMutation = useArchiveRun(params.id);
   const unarchiveMutation = useUnarchiveRun(params.id);
+  const retryMutation = useRetryRun(params.id);
   const interruptMutation = useInterruptRun(params.id);
   const navigate = useNavigate();
   const { mutate } = useSWRConfig();
@@ -399,6 +404,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     })
     .filter((t) => (!t.demoOnly || demoMode) && (!t.requiresSandbox || hasSandbox));
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
+  const lastRetryResultRef = useRef<RetryMutationResult | null>(null);
   const steerBarRef = useRef<SteerBarHandle | null>(null);
   const now = useTickingNow(30_000);
   const fullHeight = matches.some(
@@ -448,6 +454,15 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     );
   }, [dismiss, push, unarchiveMutation.data]);
 
+  useEffect(() => {
+    lastRetryResultRef.current = handleRetryResult(
+      retryMutation.data,
+      lastRetryResultRef.current,
+      { push, dismiss },
+      navigate,
+    );
+  }, [dismiss, navigate, push, retryMutation.data]);
+
   if (runQuery.isLoading && !run) {
     return <div className="py-12" />;
   }
@@ -495,6 +510,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const cancelPending = cancelMutation.isMutating;
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
+  const retryPending = retryMutation.isMutating;
   const handleConfirmDelete = async () => {
     setDeletePending(true);
     try {
@@ -630,6 +646,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           canArchive={visibility.showArchive}
           archivePending={archivePending}
           onArchive={() => void archiveMutation.trigger()}
+          canRetry={!demoMode && canRetry(summary)}
+          retryPending={retryPending}
+          onRetry={() => void retryMutation.trigger()}
           canUnarchive={visibility.showUnarchive}
           unarchivePending={unarchivePending}
           onUnarchive={() => void unarchiveMutation.trigger()}
@@ -833,6 +852,22 @@ export function handleLifecycleToastResult(
   return { ...nextState, activeArchiveToastId: null };
 }
 
+export function handleRetryResult(
+  result: RetryMutationResult | undefined,
+  lastProcessed: RetryMutationResult | null,
+  toastApi: ToastApi,
+  navigate: (path: string) => void,
+): RetryMutationResult | null {
+  if (!result || lastProcessed === result) return lastProcessed;
+  if (result.ok === true) {
+    toastApi.push({ message: "Retry started." });
+    navigate(`/runs/${result.run.id}`);
+  } else {
+    toastApi.push({ message: retryErrorMessage(result.error), tone: "error" });
+  }
+  return result;
+}
+
 function ConnectMenu() {
   return (
     <Menu as="div" className="shrink-0">
@@ -872,6 +907,9 @@ interface ActionsMenuProps {
   canArchive: boolean;
   archivePending: boolean;
   onArchive: () => void;
+  canRetry: boolean;
+  retryPending: boolean;
+  onRetry: () => void;
   canUnarchive: boolean;
   unarchivePending: boolean;
   onUnarchive: () => void;
@@ -889,6 +927,7 @@ function ActionsMenu(props: ActionsMenuProps) {
     canFocusSteer, onFocusSteer,
     canPreview, previewPending, onPreview,
     canArchive, archivePending, onArchive,
+    canRetry, retryPending, onRetry,
     canUnarchive, unarchivePending, onUnarchive,
     canDelete, deletePending, onDelete,
     canCancel, cancelPending, onCancel,
@@ -896,11 +935,11 @@ function ActionsMenu(props: ActionsMenuProps) {
 
   const hasOps =
     canPreview || canSendInterrupt || canFocusSteer;
-  const hasLifecycle = canArchive || canUnarchive;
+  const hasLifecycle = canRetry || canArchive || canUnarchive;
   const hasDestructive = canCancel || canDelete;
   const hasAny = hasOps || hasLifecycle || hasDestructive;
   const anyPending =
-    previewPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
+    previewPending || retryPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
   const separators = actionMenuSeparatorVisibility({ hasLifecycle, hasDestructive });
 
   if (!hasAny) return null;
@@ -951,6 +990,18 @@ function ActionsMenu(props: ActionsMenuProps) {
         </MenuItem>
         {separators.afterOperations && (
           <div className="my-1 h-px bg-line" role="separator" />
+        )}
+        {canRetry && (
+          <MenuItem>
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={retryPending}
+              className={MENU_ITEM_CLASS}
+            >
+              {retryPending ? "Retrying…" : "Retry"}
+            </button>
+          </MenuItem>
         )}
         {canArchive && (
           <MenuItem>

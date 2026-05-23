@@ -43,6 +43,14 @@ export async function unarchiveRun(id: string, request?: Request): Promise<Run> 
   return runLifecycleAction(id, "unarchive", request);
 }
 
+export async function retryRun(id: string, request?: Request): Promise<Run> {
+  try {
+    return await apiData(() => runsApi.retryRun(id, requestSignalOptions(request)));
+  } catch (error) {
+    throw lifecycleActionErrorFromError(error);
+  }
+}
+
 export async function deleteRun(id: string, request?: Request): Promise<void> {
   try {
     await apiResponse(() => runsApi.deleteRun(id, undefined, requestSignalOptions(request)));
@@ -64,6 +72,13 @@ export function canUnarchive(status: string | null | undefined): boolean {
   return status === "archived";
 }
 
+export function canRetry(run: Pick<Run, "lifecycle"> | null | undefined): boolean {
+  if (!run || run.lifecycle.archived) return false;
+  const status = run.lifecycle.status;
+  if (status.kind === "dead") return true;
+  return status.kind === "failed" && status.reason !== "cancelled";
+}
+
 export function canDelete(status: string | null | undefined): boolean {
   return status === "archived";
 }
@@ -82,6 +97,20 @@ export function deleteErrorMessage(error: unknown): string {
     if (detail) return detail;
   }
   return "Couldn't delete the run right now. Try again.";
+}
+
+export function retryErrorMessage(error: unknown): string {
+  if (isLifecycleActionError(error)) {
+    if (error.status === 404) {
+      return "This run no longer exists.";
+    }
+    if (error.status === 409) {
+      return "This run can no longer be retried.";
+    }
+    const detail = error.errors[0]?.detail?.trim();
+    if (detail) return detail;
+  }
+  return "Couldn't retry the run right now. Try again.";
 }
 
 export function mapError(error: unknown, action: LifecycleAction): string {

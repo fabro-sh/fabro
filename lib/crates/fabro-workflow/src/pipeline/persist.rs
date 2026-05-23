@@ -173,6 +173,7 @@ mod tests {
             manifest_blob:    None,
             git:              record.git.clone(),
             fork_source_ref:  record.fork_source_ref.clone(),
+            retried_from:     None,
             parent_id:        None,
             web_url:          None,
         })

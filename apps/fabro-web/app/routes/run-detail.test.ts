@@ -53,6 +53,7 @@ const {
   default: RunDetail,
   focusSteerAfterMenuClose,
   handleLifecycleToastResult,
+  handleRetryResult,
   lifecycleActionVisibility,
 } = await import("./run-detail");
 mock.restore();
@@ -111,6 +112,7 @@ function makeRunSummary(
     pull_request:     pullRequest,
     current_question: null,
     superseded_by:    null,
+    retried_from:     null,
     links:            { web: null },
   };
 }
@@ -382,7 +384,7 @@ describe("RunDetail full-height child routes", () => {
     const outletWrappers = renderer.root.findAll(
       (node) =>
         node.type === "div" &&
-        hasClasses(node.props.className, ["pt-3", "min-h-0", "flex-1"]),
+        hasClasses(node.props.className, ["pt-3.5", "min-h-0", "flex-1"]),
     );
     expect(outletWrappers).toHaveLength(1);
   });
@@ -399,6 +401,50 @@ describe("RunDetail full-height child routes", () => {
 
     const badges = tabCountBadges(renderer);
     expect(badges.map((badge) => badge.children.join(""))).toContain("7");
+  });
+
+  test("successful retry result navigates to the new run once", () => {
+    const pushed: Array<{ message: string; tone?: string }> = [];
+    const navigated: string[] = [];
+    const result: RetryMutationResult = {
+      intent: "retry",
+      ok:     true,
+      run:    {
+        ...makeRunSummary("queued"),
+        id:           "run_retry",
+        retried_from: "run_1",
+      },
+    };
+
+    const next = handleRetryResult(
+      result,
+      null,
+      {
+        push:    (toast) => {
+          pushed.push(toast);
+          return "toast-1";
+        },
+        dismiss: () => undefined,
+      },
+      (path) => navigated.push(path),
+    );
+    const replay = handleRetryResult(
+      result,
+      next,
+      {
+        push:    (toast) => {
+          pushed.push(toast);
+          return "toast-2";
+        },
+        dismiss: () => undefined,
+      },
+      (path) => navigated.push(path),
+    );
+
+    expect(next).toBe(result);
+    expect(replay).toBe(result);
+    expect(pushed).toEqual([{ message: "Retry started." }]);
+    expect(navigated).toEqual(["/runs/run_retry"]);
   });
 
   test("shows the Sandbox tab when the run has a sandbox", async () => {
@@ -541,7 +587,7 @@ describe("RunDetail full-height child routes", () => {
       (node) =>
         node.type === "div" &&
         hasClasses(node.props.className, [
-          "pt-3",
+          "pt-3.5",
           "pb-[var(--fabro-interview-dock-clearance)]",
         ]),
     );

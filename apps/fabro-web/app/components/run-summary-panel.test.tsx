@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import TestRenderer, { act } from "react-test-renderer";
+import { MemoryRouter } from "react-router";
 
 import {
   RunSummaryPanelView,
@@ -136,6 +137,29 @@ describe("RunSummaryPanelView", () => {
   test("renders artifacts count when positive", () => {
     const tree = render({ run: makeRun(), artifactsCount: 3 });
     expect(instanceText(cellAfterLabel(tree, "Artifacts"))).toBe("3");
+  });
+
+  test("renders Retried from link when present", () => {
+    let tree: TestRenderer.ReactTestRenderer | undefined;
+    act(() => {
+      tree = TestRenderer.create(
+        <MemoryRouter>
+          <RunSummaryPanelView
+            run={makeRun({ retried_from: "01KRETRYFROMRUNID" })}
+            runLoading={false}
+            sandboxState={null}
+            sandboxResources={null}
+            sandboxLoading={false}
+            artifactsCount={null}
+            artifactsLoading={false}
+          />
+        </MemoryRouter>,
+      );
+    });
+    const cell = cellAfterLabel(tree!, "Retried from");
+    const link = cell.find((node) => node.type === "a");
+    expect(link.props.href).toBe("/runs/01KRETRYFROMRUNID");
+    expect(instanceText(link)).toBe("01KRETRY");
   });
 
   test("renders user actor with login initial", () => {

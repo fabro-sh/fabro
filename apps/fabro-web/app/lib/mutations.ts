@@ -21,6 +21,7 @@ import {
   archiveRun,
   cancelRun,
   isLifecycleActionError,
+  retryRun,
   unarchiveRun,
 } from "./run-actions";
 
@@ -47,6 +48,18 @@ export type LifecycleMutationResult =
       error: LifecycleActionError | null;
     };
 
+export type RetryMutationResult =
+  | {
+      intent: "retry";
+      ok: true;
+      run: Run;
+    }
+  | {
+      intent: "retry";
+      ok: false;
+      error: LifecycleActionError | null;
+    };
+
 export function usePreviewRun(id: string | undefined) {
   return useSWRMutation(
     id ? queryKeys.runs.preview(id) : null,
@@ -69,6 +82,38 @@ export function useArchiveRun(id: string | undefined) {
 
 export function useUnarchiveRun(id: string | undefined) {
   return useLifecycleMutation(id, "unarchive", unarchiveRun);
+}
+
+export function useRetryRun(id: string | undefined) {
+  const { mutate } = useSWRConfig();
+  return useSWRMutation(
+    id ? queryKeys.runs.retry(id) : null,
+    async (): Promise<RetryMutationResult> => {
+      if (!id) {
+        return { intent: "retry", ok: false, error: null };
+      }
+      try {
+        return { intent: "retry", ok: true, run: await retryRun(id) };
+      } catch (error) {
+        return {
+          intent: "retry",
+          ok: false,
+          error: isLifecycleActionError(error) ? error : null,
+        };
+      }
+    },
+    {
+      onSuccess: (result) => {
+        if (!id || !result.ok) return;
+        void mutate(queryKeys.runs.detail(id));
+        void mutate(queryKeys.runs.detail(result.run.id), result.run, { revalidate: false });
+        if (result.run.parent_id) {
+          void mutate(queryKeys.runs.children(result.run.parent_id));
+        }
+        mutateBoardRunCaches(mutate);
+      },
+    },
+  );
 }
 
 function useLifecycleMutation(

@@ -39,6 +39,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             manifest_blob,
             git,
             fork_source_ref,
+            retried_from,
             parent_id,
             web_url,
             ..
@@ -58,6 +59,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             manifest_blob:    *manifest_blob,
             git:              git.clone(),
             fork_source_ref:  fork_source_ref.clone(),
+            retried_from:     *retried_from,
             parent_id:        *parent_id,
             web_url:          web_url.clone(),
         }),
@@ -2322,6 +2324,7 @@ mod tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            retried_from:     None,
             parent_id:        None,
             web_url:          None,
         });

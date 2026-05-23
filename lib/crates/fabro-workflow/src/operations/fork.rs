@@ -166,6 +166,7 @@ async fn persist_forked_run(
         manifest_blob:    spec.manifest_blob,
         git:              spec.git.clone(),
         fork_source_ref:  spec.fork_source_ref.clone(),
+        retried_from:     None,
         parent_id:        None,
         web_url:          None,
     })
@@ -380,6 +381,7 @@ mod tests {
                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
             }),
             fork_source_ref:  None,
+            retried_from:     None,
             parent_id:        None,
             web_url:          None,
         })

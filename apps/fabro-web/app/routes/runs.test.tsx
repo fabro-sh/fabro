@@ -53,6 +53,7 @@ function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
     pull_request:     null,
     current_question: questionText ? { text: questionText } : null,
     superseded_by:    null,
+    retried_from:     null,
     links:            { web: null },
   };
 }

@@ -2684,6 +2684,7 @@ async fn append_default_run_created(run_store: &fabro_store::RunDatabase, run_id
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
+        retried_from: None,
         parent_id: None,
         web_url: None,
     })
@@ -3032,6 +3033,7 @@ async fn list_run_stages_distinguishes_visits() {
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         },
@@ -3932,14 +3934,14 @@ async fn pr_test_app_with_completed_run(
     repo_origin_url: Option<&str>,
 ) -> (Arc<AppState>, Router, RunId) {
     let (state, app, run_id) = pr_test_app(token, github_api_base_url);
-    create_completed_run_ready_for_pull_request(
+    Box::pin(create_completed_run_ready_for_pull_request(
         &state,
         run_id,
         repo_origin_url,
         Some("main"),
         Some("fabro/run/42"),
         "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
-    )
+    ))
     .await;
     (state, app, run_id)
 }
@@ -4032,6 +4034,7 @@ async fn create_completed_run_ready_for_pull_request(
             manifest_blob: None,
             git,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         },
@@ -5690,14 +5693,14 @@ async fn create_run_pull_request_creates_and_persists_record() {
         .unwrap();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
-    create_completed_run_ready_for_pull_request(
+    Box::pin(create_completed_run_ready_for_pull_request(
         &state,
         run_id,
         Some("git@github.com:acme/widgets.git"),
         Some("main"),
         Some("fabro/run/42"),
         "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
-    )
+    ))
     .await;
 
     let response = app
@@ -5783,7 +5786,7 @@ async fn create_run_pull_request_returns_conflict_when_record_exists() {
 
 #[tokio::test]
 async fn create_run_pull_request_rejects_missing_repo_origin() {
-    let (_state, app, run_id) = pr_test_app_with_completed_run(None, None, None).await;
+    let (_state, app, run_id) = Box::pin(pr_test_app_with_completed_run(None, None, None)).await;
 
     let response = app
         .oneshot(
@@ -5809,9 +5812,12 @@ async fn create_run_pull_request_rejects_missing_repo_origin() {
 
 #[tokio::test]
 async fn create_run_pull_request_returns_service_unavailable_without_github_credentials() {
-    let (_state, app, run_id) =
-        pr_test_app_with_completed_run(None, None, Some("https://github.com/acme/widgets.git"))
-            .await;
+    let (_state, app, run_id) = Box::pin(pr_test_app_with_completed_run(
+        None,
+        None,
+        Some("https://github.com/acme/widgets.git"),
+    ))
+    .await;
 
     let response = app
         .oneshot(
@@ -5837,11 +5843,11 @@ async fn create_run_pull_request_returns_service_unavailable_without_github_cred
 
 #[tokio::test]
 async fn create_run_pull_request_rejects_non_github_origin_url() {
-    let (_state, app, run_id) = pr_test_app_with_completed_run(
+    let (_state, app, run_id) = Box::pin(pr_test_app_with_completed_run(
         Some("ghu_test"),
         None,
         Some("https://gitlab.com/acme/widgets.git"),
-    )
+    ))
     .await;
 
     let response = app
@@ -7845,6 +7851,133 @@ async fn start_run_conflict_when_not_submitted() {
 }
 
 #[tokio::test]
+async fn retry_failed_run_creates_and_queues_new_run() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let source_run_id = RunId::new();
+    create_durable_run_with_events(&state, source_run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::workflow_run_failed_from_error(
+            &WorkflowError::engine("boom"),
+            fabro_types::RunTiming::wall_only(10),
+            FailureReason::WorkflowError,
+            None,
+            None,
+            None,
+            None,
+        ),
+    ])
+    .await;
+    let source_events_before = state
+        .store
+        .open_run(&source_run_id)
+        .await
+        .unwrap()
+        .list_events()
+        .await
+        .unwrap()
+        .len();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{source_run_id}/retry")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::CREATED).await;
+    let new_run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+    assert_ne!(new_run_id, source_run_id);
+    assert_eq!(body["retried_from"], source_run_id.to_string());
+    assert_eq!(body["created_by"]["kind"], "user");
+    assert_eq!(body["created_by"]["login"], "dev");
+    assert_eq!(run_json_status(&body)["kind"], "queued");
+
+    let source_store = state.store.open_run(&source_run_id).await.unwrap();
+    assert_eq!(
+        source_store.list_events().await.unwrap().len(),
+        source_events_before
+    );
+    assert_eq!(
+        source_store.state().await.unwrap().status,
+        RunStatus::Failed {
+            reason: FailureReason::WorkflowError,
+        }
+    );
+
+    let new_state = state
+        .store
+        .open_run(&new_run_id)
+        .await
+        .unwrap()
+        .state()
+        .await
+        .unwrap();
+    assert_eq!(new_state.retried_from, Some(source_run_id));
+    assert_eq!(new_state.status, RunStatus::Queued);
+    assert!(new_state.checkpoints.is_empty());
+}
+
+#[tokio::test]
+async fn retry_missing_run_returns_not_found() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{}/retry", fixtures::RUN_64)))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn retry_non_retryable_run_returns_conflict() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let source_run_id = RunId::new();
+    create_durable_run_with_events(&state, source_run_id, &[
+        workflow_event::Event::WorkflowRunCompleted {
+            timing:               fabro_types::RunTiming::wall_only(10),
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{source_run_id}/retry")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_status!(response, StatusCode::CONFLICT).await;
+}
+
+#[tokio::test]
 async fn cancel_run_succeeds() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
@@ -9042,6 +9175,7 @@ async fn delete_run_with_preserved_sandbox_returns_handoff() {
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         },
@@ -9109,6 +9243,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         },

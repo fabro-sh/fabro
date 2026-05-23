@@ -410,6 +410,10 @@ models/system-resources-response.ts
 models/system-run-counts.ts
 models/timeline-entry-response.ts
 models/tls-mode.ts
+models/todo-list-kind.ts
+models/todo-list-projection.ts
+models/todo-projection.ts
+models/todo-status.ts
 models/update-run-parent-request.ts
 models/update-run-request.ts
 models/user-response.ts

@@ -78,6 +78,10 @@ export interface RunProjection {
     'sandbox'?: RunSandbox | null;
     'pull_request'?: PullRequestLink | null;
     'superseded_by'?: string | null;
+    /**
+     * Source run ID when this run was created by manual retry.
+     */
+    'retried_from'?: string | null;
     'pending_interviews': { [key: string]: PendingInterviewRecord; };
     /**
      * Projected todo / task lists, keyed by `list_id` (`openai_plan:<session_id>` or `anthropic_tasks:<root_session_id>`). Built by replaying `todo.created`, `todo.updated`, and `todo.deleted` events.

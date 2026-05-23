@@ -940,6 +940,46 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
+         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and queues it for execution. The source run is left unchanged. Cancelled, active, succeeded, and archived runs are not retryable.
+         * @summary Retry Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retryRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('retryRun', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/retry`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
@@ -1594,6 +1634,19 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and queues it for execution. The source run is left unchanged. Cancelled, active, succeeded, and archived runs are not retryable.
+         * @summary Retry Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async retryRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Run>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retryRun(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.retryRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
@@ -1935,6 +1988,16 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.retrieveRunGraphSource(id, options).then((request) => request(axios, basePath));
         },
         /**
+         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and queues it for execution. The source run is left unchanged. Cancelled, active, succeeded, and archived runs are not retryable.
+         * @summary Retry Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retryRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
+            return localVarFp.retryRun(id, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
@@ -2264,6 +2327,17 @@ export class RunsApi extends BaseAPI {
      */
     public retrieveRunGraphSource(id: string, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).retrieveRunGraphSource(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and queues it for execution. The source run is left unchanged. Cancelled, active, succeeded, and archived runs are not retryable.
+     * @summary Retry Run
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public retryRun(id: string, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).retryRun(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

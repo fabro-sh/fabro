@@ -534,6 +534,7 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
 
     let mut projection = RunProjection::new(title, spec, stored.ts);
     projection.parent_id = props.parent_id;
+    projection.retried_from = props.retried_from;
     projection.web_url.clone_from(&props.web_url);
     projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.sandbox));
     Ok(projection)
@@ -723,6 +724,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
         pull_request: state.pull_request.clone(),
         current_question,
         superseded_by: state.superseded_by,
+        retried_from: state.retried_from,
         links: RunLinks {
             web: state.web_url.clone(),
         },
@@ -1049,6 +1051,28 @@ mod tests {
             .apply_event(&test_raw_event(2, "run.running", &json!({}), None))
             .unwrap();
         state
+    }
+
+    #[test]
+    fn legacy_run_created_projects_retried_from_none() {
+        let event = test_raw_event(
+            1,
+            "run.created",
+            &json!({
+                "settings": WorkflowSettings::default(),
+                "graph": Graph::new("test"),
+                "labels": {},
+                "run_dir": "/tmp/run"
+            }),
+            None,
+        );
+
+        let projection = RunProjection::apply_events(&[event]).unwrap();
+        assert_eq!(projection.retried_from, None);
+        assert_eq!(
+            build_summary(&projection, &fixtures::RUN_1).retried_from,
+            None
+        );
     }
 
     fn test_raw_event(

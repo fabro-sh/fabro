@@ -46,6 +46,8 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fork_source_ref:  Option<ForkSourceRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        retried_from:     Option<RunId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_id:        Option<RunId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         web_url:          Option<String>,

@@ -13,6 +13,7 @@ import type {
   SandboxResources,
   SandboxState,
 } from "@qltysh/fabro-api-client";
+import { Link } from "react-router";
 
 import {
   formatBytesAsMemory,
@@ -223,6 +224,17 @@ export function RunSummaryPanelView({
             <EmDash />
           )}
         </Cell>
+
+        {run?.retried_from && (
+          <Cell label="Retried from">
+            <Link
+              to={`/runs/${encodeURIComponent(run.retried_from)}`}
+              className="font-mono text-sm text-teal-500 hover:text-teal-300"
+            >
+              {run.retried_from.slice(0, 8)}
+            </Link>
+          </Cell>
+        )}
       </div>
     </div>
   );

@@ -632,7 +632,7 @@ async fn create_run(
         .into_response()
 }
 
-fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunProvenance {
+pub(super) fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunProvenance {
     RunProvenance {
         server:  Some(RunServerProvenance {
             version: FABRO_VERSION.to_string(),

@@ -32,6 +32,8 @@ pub struct RunProjection {
     pub sandbox:            Option<RunSandbox>,
     pub pull_request:       Option<PullRequestLink>,
     pub superseded_by:      Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retried_from:       Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
     /// Projected todo / task lists, keyed by `list_id` (`openai_plan:<session>`
     /// or `anthropic_tasks:<root_session>`). Maintained by replaying
@@ -184,6 +186,7 @@ impl RunProjection {
             sandbox: None,
             pull_request: None,
             superseded_by: None,
+            retried_from: None,
             pending_interviews: BTreeMap::new(),
             todos_by_list: BTreeMap::new(),
             stages: HashMap::new(),
