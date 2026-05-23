@@ -131,18 +131,9 @@ impl ToolRegistry {
         policy: Option<&dyn ToolAccessPolicy>,
         exposure_mode: ToolExposureMode,
     ) -> Vec<ToolDefinition> {
-        let Some(policy) = policy else {
-            return self.definitions();
-        };
-
-        self.tools
-            .values()
-            .filter(|tool| {
-                policy
-                    .access_for_tool(&tool.definition.name)
-                    .is_exposed(exposure_mode)
-            })
-            .map(|tool| tool.definition.clone())
+        self.definitions_with_source_for_policy(policy, exposure_mode)
+            .into_iter()
+            .map(|tool| tool.definition)
             .collect()
     }
 
@@ -152,16 +143,14 @@ impl ToolRegistry {
         policy: Option<&dyn ToolAccessPolicy>,
         exposure_mode: ToolExposureMode,
     ) -> Vec<ToolDefinitionWithSource> {
-        let Some(policy) = policy else {
-            return self.definitions_with_source();
-        };
-
         self.tools
             .values()
             .filter(|tool| {
-                policy
-                    .access_for_tool(&tool.definition.name)
-                    .is_exposed(exposure_mode)
+                policy.is_none_or(|policy| {
+                    policy
+                        .access_for_tool(&tool.definition.name)
+                        .is_exposed(exposure_mode)
+                })
             })
             .map(|tool| ToolDefinitionWithSource {
                 definition: tool.definition.clone(),

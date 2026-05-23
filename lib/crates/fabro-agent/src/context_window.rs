@@ -7,17 +7,13 @@ use fabro_llm::token_count::{
 };
 use fabro_llm::types::{Request, Role, Warning as LlmWarning};
 use fabro_types::{
-    StageContextWindowBreakdownProjection, StageContextWindowCategory,
-    StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
-    StageContextWindowWarning,
+    StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
+    StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowWarning,
 };
 
 use crate::memory::MemoryDocument;
 use crate::skills::{Skill, format_skills_prompt_section};
 use crate::tool_registry::{ToolDefinitionWithSource, ToolSource};
-
-const LOCAL_BREAKDOWN_SOURCE: &str = "local_estimate";
-const SCALED_BREAKDOWN_SOURCE: &str = "scaled_local_estimate";
 
 #[derive(Clone, Copy)]
 pub(crate) struct ContextWindowSnapshotInput<'a> {
@@ -57,7 +53,6 @@ pub(crate) fn build_local_snapshot(
         context_window_tokens: u64::try_from(input.context_window_tokens).unwrap_or(u64::MAX),
         count_method: StageContextWindowCountMethod::LocalEstimate,
         staleness: StageContextWindowStaleness::Live,
-        breakdown_source: LOCAL_BREAKDOWN_SOURCE,
         warnings,
     })
 }
@@ -206,12 +201,10 @@ impl BreakdownBuilder {
         let breakdown = self
             .tokens
             .into_iter()
-            .map(|(category, tokens)| StageContextWindowBreakdownProjection {
+            .map(|(category, tokens)| StageContextWindowBreakdownItem {
                 category,
-                label: category_label(category).to_string(),
                 tokens,
                 usage_percent: usage_percent(tokens, meta.context_window_tokens),
-                source: meta.breakdown_source.to_string(),
             })
             .collect();
         StageContextWindowProjection {
@@ -236,82 +229,53 @@ struct SnapshotMeta {
     context_window_tokens: u64,
     count_method:          StageContextWindowCountMethod,
     staleness:             StageContextWindowStaleness,
-    breakdown_source:      &'static str,
     warnings:              Vec<StageContextWindowWarning>,
 }
 
+/// Proportionally scale a local breakdown so it sums to `target_total`. Any
+/// rounding leftover is absorbed by the last bucket; this is a best-effort
+/// estimate, not exact apportionment.
 fn scale_breakdown(
-    breakdown: &[StageContextWindowBreakdownProjection],
+    breakdown: &[StageContextWindowBreakdownItem],
     target_total: u64,
     context_window_tokens: u64,
-) -> Vec<StageContextWindowBreakdownProjection> {
+) -> Vec<StageContextWindowBreakdownItem> {
     let local_total = breakdown.iter().map(|item| item.tokens).sum::<u64>();
-    if target_total == local_total {
-        return breakdown
-            .iter()
-            .cloned()
-            .map(|mut item| {
-                item.source = SCALED_BREAKDOWN_SOURCE.to_string();
-                item
-            })
-            .collect();
-    }
     if breakdown.is_empty() || local_total == 0 {
         return (target_total > 0)
-            .then(|| StageContextWindowBreakdownProjection {
+            .then(|| StageContextWindowBreakdownItem {
                 category:      StageContextWindowCategory::Other,
-                label:         category_label(StageContextWindowCategory::Other).to_string(),
                 tokens:        target_total,
                 usage_percent: usage_percent(target_total, context_window_tokens),
-                source:        SCALED_BREAKDOWN_SOURCE.to_string(),
             })
             .into_iter()
             .collect();
     }
 
-    let mut scaled = Vec::with_capacity(breakdown.len());
-    let mut allocated = 0u64;
-    let mut remainders = Vec::with_capacity(breakdown.len());
-    let local_total_u128 = u128::from(local_total);
-    for (index, item) in breakdown.iter().enumerate() {
-        let numerator = u128::from(item.tokens).saturating_mul(u128::from(target_total));
-        let tokens = u64::try_from(numerator / local_total_u128).unwrap_or(u64::MAX);
-        allocated = allocated.saturating_add(tokens);
-        remainders.push((index, numerator % local_total_u128));
-        scaled.push(StageContextWindowBreakdownProjection {
-            category: item.category,
-            label: item.label.clone(),
-            tokens,
-            usage_percent: 0.0,
-            source: SCALED_BREAKDOWN_SOURCE.to_string(),
-        });
-    }
+    let mut scaled: Vec<_> = breakdown
+        .iter()
+        .map(|item| {
+            let scaled = u128::from(item.tokens).saturating_mul(u128::from(target_total))
+                / u128::from(local_total);
+            let tokens = u64::try_from(scaled).unwrap_or(u64::MAX);
+            StageContextWindowBreakdownItem {
+                category: item.category,
+                tokens,
+                usage_percent: usage_percent(tokens, context_window_tokens),
+            }
+        })
+        .collect();
 
-    let mut remaining = target_total.saturating_sub(allocated);
-    remainders.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-    for (index, _) in remainders {
-        if remaining == 0 {
-            break;
+    // Push any rounding leftover into the last bucket so totals match exactly.
+    let allocated: u64 = scaled.iter().map(|item| item.tokens).sum();
+    if let Some(last) = scaled.last_mut() {
+        let leftover = target_total.saturating_sub(allocated);
+        if leftover > 0 {
+            last.tokens = last.tokens.saturating_add(leftover);
+            last.usage_percent = usage_percent(last.tokens, context_window_tokens);
         }
-        scaled[index].tokens = scaled[index].tokens.saturating_add(1);
-        remaining -= 1;
-    }
-    for item in &mut scaled {
-        item.usage_percent = usage_percent(item.tokens, context_window_tokens);
     }
     scaled
-}
-
-fn category_label(category: StageContextWindowCategory) -> &'static str {
-    match category {
-        StageContextWindowCategory::SystemPrompt => "System prompt",
-        StageContextWindowCategory::Tools => "Tools",
-        StageContextWindowCategory::McpTools => "MCP tools",
-        StageContextWindowCategory::Skills => "Skills",
-        StageContextWindowCategory::Memory => "Memory",
-        StageContextWindowCategory::Conversation => "Conversation",
-        StageContextWindowCategory::Other => "Other",
-    }
 }
 
 fn usage_percent(tokens: u64, denominator: u64) -> f64 {
@@ -444,19 +408,15 @@ mod tests {
             generated_at:          Utc::now(),
             event_seq:             None,
             breakdown:             vec![
-                StageContextWindowBreakdownProjection {
+                StageContextWindowBreakdownItem {
                     category:      StageContextWindowCategory::SystemPrompt,
-                    label:         "System prompt".to_string(),
                     tokens:        10,
                     usage_percent: 0.0,
-                    source:        LOCAL_BREAKDOWN_SOURCE.to_string(),
                 },
-                StageContextWindowBreakdownProjection {
+                StageContextWindowBreakdownItem {
                     category:      StageContextWindowCategory::Conversation,
-                    label:         "Conversation".to_string(),
                     tokens:        20,
                     usage_percent: 0.0,
-                    source:        LOCAL_BREAKDOWN_SOURCE.to_string(),
                 },
             ],
             warnings:              Vec::new(),
@@ -473,12 +433,6 @@ mod tests {
         assert_eq!(
             scaled.breakdown.iter().map(|item| item.tokens).sum::<u64>(),
             101
-        );
-        assert!(
-            scaled
-                .breakdown
-                .iter()
-                .all(|item| item.source == SCALED_BREAKDOWN_SOURCE)
         );
     }
 }

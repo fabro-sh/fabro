@@ -7935,16 +7935,11 @@ components:
       type: object
       required:
         - category
-        - label
         - tokens
         - usage_percent
-        - source
       properties:
         category:
           $ref: "#/components/schemas/StageContextWindowCategory"
-        label:
-          type: string
-          example: System prompt
         tokens:
           type: integer
           format: uint64
@@ -7955,10 +7950,6 @@ components:
           format: double
           minimum: 0
           example: 7.5
-        source:
-          type: string
-          description: Content-free source label for the category count.
-          example: scaled_local_estimate
 
     StageContextWindowProjection:
       description: Durable content-free context-window snapshot projected onto an agent stage.

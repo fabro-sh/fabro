@@ -61,7 +61,6 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.graph("run-1", "TB"),
       queryKeys.runs.detail("run-1"),
       queryKeys.runs.stageEvents("run-1", "verify@2"),
-      queryKeys.runs.stageContextWindow("run-1", "verify@2"),
     ]);
   });
 
@@ -69,7 +68,6 @@ describe("queryKeysForRunEvent", () => {
     expect(queryKeysForRunEvent("run-1", "agent.session.activated", "agent@1")).toEqual([
       queryKeys.runs.events("run-1", 1000),
       queryKeys.runs.stageEvents("run-1", "agent@1"),
-      queryKeys.runs.stageContextWindow("run-1", "agent@1"),
     ]);
   });
 
@@ -77,18 +75,15 @@ describe("queryKeysForRunEvent", () => {
     expect(queryKeysForRunEvent("run-1", "agent.interrupt.injected", "nap@1")).toEqual([
       queryKeys.runs.events("run-1", 1000),
       queryKeys.runs.stageEvents("run-1", "nap@1"),
-      queryKeys.runs.stageContextWindow("run-1", "nap@1"),
     ]);
   });
 
   test("pair messages invalidate the stage events query", () => {
     expect(queryKeysForRunEvent("run-1", "agent.pair.user_message", "nap@1")).toEqual([
       queryKeys.runs.stageEvents("run-1", "nap@1"),
-      queryKeys.runs.stageContextWindow("run-1", "nap@1"),
     ]);
     expect(queryKeysForRunEvent("run-1", "agent.pair.system_message", "nap@1")).toEqual([
       queryKeys.runs.stageEvents("run-1", "nap@1"),
-      queryKeys.runs.stageContextWindow("run-1", "nap@1"),
     ]);
   });
 
@@ -116,7 +111,6 @@ describe("queryKeysForRunEvent", () => {
       queryKeys.runs.state("run-1"),
       queryKeys.runs.events("run-1", 1000),
       queryKeys.runs.stageEvents("run-1", "code@1"),
-      queryKeys.runs.stageContextWindow("run-1", "code@1"),
     ]);
   });
 });

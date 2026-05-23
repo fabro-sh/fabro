@@ -161,10 +161,8 @@ fn stage_projection_round_trips_representative_json() {
             "breakdown": [
                 {
                     "category": "system_prompt",
-                    "label": "System prompt",
                     "tokens": 30000,
-                    "usage_percent": 7.5,
-                    "source": "scaled_local_estimate"
+                    "usage_percent": 7.5
                 }
             ],
             "warnings": []
@@ -194,10 +192,8 @@ fn stage_context_window_response_round_trips_representative_json() {
         "breakdown": [
             {
                 "category": "system_prompt",
-                "label": "System prompt",
                 "tokens": 30000,
-                "usage_percent": 7.5,
-                "source": "scaled_local_estimate"
+                "usage_percent": 7.5
             }
         ],
         "warnings": [

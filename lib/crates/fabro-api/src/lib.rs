@@ -50,12 +50,11 @@ pub mod types {
         SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId, SessionMessage,
         SessionRecord, SessionStatus, SessionSummary, SessionTurn, SkillsProjection,
         StageCompletion, StageContextWindow, StageContextWindowBreakdownItem,
-        StageContextWindowBreakdownProjection, StageContextWindowCategory,
-        StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
-        StageContextWindowUnavailableReason, StageContextWindowWarning, StageHandler,
-        StageModelUsage, StageOutcome, StageProjection, StageState, SubAgentProjection,
-        SubAgentStatus, SystemActorKind, TodoListProjection, TurnId, UserPrincipal,
-        WorkflowSettings,
+        StageContextWindowCategory, StageContextWindowCountMethod, StageContextWindowProjection,
+        StageContextWindowStaleness, StageContextWindowUnavailableReason,
+        StageContextWindowWarning, StageHandler, StageModelUsage, StageOutcome, StageProjection,
+        StageState, SubAgentProjection, SubAgentStatus, SystemActorKind, TodoListProjection,
+        TurnId, UserPrincipal, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;

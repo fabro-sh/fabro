@@ -155,7 +155,6 @@ export function queryKeysForRunEvent(
     ];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
-      keys.push(queryKeys.runs.stageContextWindow(runId, stageId));
     }
     return keys;
   }
@@ -164,7 +163,6 @@ export function queryKeysForRunEvent(
     const keys: Key[] = [queryKeys.runs.events(runId, 1000)];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
-      keys.push(queryKeys.runs.stageContextWindow(runId, stageId));
     }
     return keys;
   }
@@ -179,12 +177,7 @@ export function queryKeysForRunEvent(
   }
 
   if (STAGE_ACTIVITY_EVENTS.has(event)) {
-    return stageId
-      ? [
-          queryKeys.runs.stageEvents(runId, stageId),
-          queryKeys.runs.stageContextWindow(runId, stageId),
-        ]
-      : [];
+    return stageId ? [queryKeys.runs.stageEvents(runId, stageId)] : [];
   }
 
   if (TODO_EVENTS.has(event)) {
@@ -194,7 +187,6 @@ export function queryKeysForRunEvent(
     ];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));
-      keys.push(queryKeys.runs.stageContextWindow(runId, stageId));
     }
     return keys;
   }

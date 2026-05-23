@@ -2173,12 +2173,10 @@ mod tests {
                     .unwrap()
                     .with_timezone(&Utc),
                 event_seq:             None,
-                breakdown:             vec![crate::StageContextWindowBreakdownProjection {
+                breakdown:             vec![crate::StageContextWindowBreakdownItem {
                     category:      crate::StageContextWindowCategory::SystemPrompt,
-                    label:         "System prompt".to_string(),
                     tokens:        30_000,
                     usage_percent: 7.5,
-                    source:        "scaled_local_estimate".to_string(),
                 }],
                 warnings:              vec![crate::StageContextWindowWarning {
                     code:    "local_token_estimate".to_string(),

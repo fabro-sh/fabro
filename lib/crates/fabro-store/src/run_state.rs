@@ -1116,7 +1116,7 @@ mod tests {
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
         FailureReason, Graph, McpServerStatus, Outcome, PendingReason, PullRequestLink,
         QuestionType, ReasoningEffort, RunApprovalState, RunBlobId, RunControlAction, RunDiff,
-        RunEvent, RunSize, RunSpec, RunStatus, Speed, StageContextWindowBreakdownProjection,
+        RunEvent, RunSize, RunSpec, RunStatus, Speed, StageContextWindowBreakdownItem,
         StageContextWindowCategory, StageContextWindowCountMethod, StageContextWindowProjection,
         StageContextWindowStaleness, StageContextWindowWarning, StageModelUsage, StageOutcome,
         StageState, SubAgentStatus, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
@@ -4189,12 +4189,10 @@ mod tests {
                 staleness: StageContextWindowStaleness::Live,
                 generated_at: Utc::now(),
                 event_seq: None,
-                breakdown: vec![StageContextWindowBreakdownProjection {
+                breakdown: vec![StageContextWindowBreakdownItem {
                     category:      StageContextWindowCategory::Conversation,
-                    label:         "Conversation".to_string(),
                     tokens:        input_tokens,
                     usage_percent: input_tokens as f64 * 100.0 / 400_000.0,
-                    source:        "local_estimate".to_string(),
                 }],
                 warnings: vec![StageContextWindowWarning {
                     code:    "local_token_estimate".to_string(),

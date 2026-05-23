@@ -215,15 +215,11 @@ pub struct StageContextWindowWarning {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct StageContextWindowBreakdownProjection {
+pub struct StageContextWindowBreakdownItem {
     pub category:      StageContextWindowCategory,
-    pub label:         String,
     pub tokens:        u64,
     pub usage_percent: f64,
-    pub source:        String,
 }
-
-pub type StageContextWindowBreakdownItem = StageContextWindowBreakdownProjection;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StageContextWindowProjection {
@@ -238,7 +234,7 @@ pub struct StageContextWindowProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_seq:             Option<u32>,
     #[serde(default)]
-    pub breakdown:             Vec<StageContextWindowBreakdownProjection>,
+    pub breakdown:             Vec<StageContextWindowBreakdownItem>,
     #[serde(default)]
     pub warnings:              Vec<StageContextWindowWarning>,
 }
@@ -267,7 +263,7 @@ pub struct StageContextWindow {
     #[serde(default)]
     pub event_seq:             Option<u32>,
     #[serde(default)]
-    pub breakdown:             Vec<StageContextWindowBreakdownProjection>,
+    pub breakdown:             Vec<StageContextWindowBreakdownItem>,
     #[serde(default)]
     pub warnings:              Vec<StageContextWindowWarning>,
 }

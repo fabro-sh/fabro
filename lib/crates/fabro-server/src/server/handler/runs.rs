@@ -22,7 +22,7 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_types::{
     Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, StageContextWindow,
     StageContextWindowStaleness, StageContextWindowUnavailableReason, StageHandler,
-    StageModelUsage, StageProjection, StageState, SystemActorKind, parse_blob_ref,
+    StageModelUsage, StageProjection, SystemActorKind, parse_blob_ref,
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
@@ -1059,7 +1059,7 @@ async fn get_run_stage_context_window(
     };
 
     let mut response = StageContextWindow::available(stage_id, snapshot);
-    if !is_live_stage(stage.state) {
+    if stage.state.is_terminal() {
         response.staleness = StageContextWindowStaleness::Stored;
     }
     Json(response).into_response()
@@ -1075,13 +1075,6 @@ fn is_agent_context_window_stage(stage: &StageProjection) -> bool {
     stage.provider_used.as_ref().is_some_and(|usage| {
         usage.mode == StageModelUsage::MODE_AGENT || usage.mode == StageModelUsage::MODE_ACP
     })
-}
-
-fn is_live_stage(state: StageState) -> bool {
-    matches!(
-        state,
-        StageState::Pending | StageState::Running | StageState::Retrying
-    )
 }
 
 async fn get_run_stage_command_log(

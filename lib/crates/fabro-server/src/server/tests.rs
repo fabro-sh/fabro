@@ -21,7 +21,7 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
-    SandboxProvider, StageContextWindowBreakdownProjection, StageContextWindowCategory,
+    SandboxProvider, StageContextWindowBreakdownItem, StageContextWindowCategory,
     StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
     StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
     WorkflowSettings, fixtures,
@@ -3039,12 +3039,10 @@ fn context_window_snapshot(
         staleness: StageContextWindowStaleness::Live,
         generated_at: Utc::now(),
         event_seq: None,
-        breakdown: vec![StageContextWindowBreakdownProjection {
+        breakdown: vec![StageContextWindowBreakdownItem {
             category:      StageContextWindowCategory::Conversation,
-            label:         "Conversation".to_string(),
             tokens:        input_tokens,
             usage_percent: input_tokens as f64 * 100.0 / 400_000.0,
-            source:        "scaled_local_estimate".to_string(),
         }],
         warnings,
     }

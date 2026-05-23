@@ -21,11 +21,6 @@ import type { StageContextWindowCategory } from './stage-context-window-category
  */
 export interface StageContextWindowBreakdownItem {
     'category': StageContextWindowCategory;
-    'label': string;
     'tokens': number;
     'usage_percent': number;
-    /**
-     * Content-free source label for the category count.
-     */
-    'source': string;
 }
