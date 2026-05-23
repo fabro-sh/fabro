@@ -4578,7 +4578,7 @@ components:
       description: Field to sort by. Defaults to `created_at`.
       schema:
         type: string
-        enum: [created_at, updated_at, status, elapsed]
+        enum: [created_at, updated_at, status, elapsed, repo, title, workflow, changes]
         default: created_at
       example: created_at
 

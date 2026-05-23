@@ -87,6 +87,10 @@ enum RunsSortKey {
     UpdatedAt,
     Status,
     Elapsed,
+    Repo,
+    Title,
+    Workflow,
+    Changes,
 }
 
 #[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
@@ -180,11 +184,42 @@ fn sort_runs(runs: &mut [fabro_types::Run], key: RunsSortKey, direction: RunsSor
                 ac.cmp(&bc)
             }
             RunsSortKey::Elapsed => run_elapsed_ms(a, now).cmp(&run_elapsed_ms(b, now)),
+            RunsSortKey::Repo => run_repo_key(a).cmp(&run_repo_key(b)),
+            RunsSortKey::Title => run_title_key(a).cmp(&run_title_key(b)),
+            RunsSortKey::Workflow => run_workflow_key(a).cmp(&run_workflow_key(b)),
+            RunsSortKey::Changes => run_changes_total(a).cmp(&run_changes_total(b)),
         };
         let primary = if asc { primary } else { primary.reverse() };
         // Stable tiebreak: newer ULIDs (and thus newer runs) first.
         primary.then_with(|| b.id.cmp(&a.id))
     });
+}
+
+fn run_repo_key(run: &fabro_types::Run) -> String {
+    run.repository
+        .as_ref()
+        .map(|repo| repo.name.to_lowercase())
+        .unwrap_or_default()
+}
+
+fn run_title_key(run: &fabro_types::Run) -> String {
+    run.title.trim().to_lowercase()
+}
+
+fn run_workflow_key(run: &fabro_types::Run) -> String {
+    let wf = &run.workflow;
+    wf.name
+        .as_deref()
+        .or(wf.graph_name.as_deref())
+        .or(wf.slug.as_deref())
+        .map(str::to_lowercase)
+        .unwrap_or_default()
+}
+
+fn run_changes_total(run: &fabro_types::Run) -> i64 {
+    run.diff
+        .as_ref()
+        .map_or(0, |diff| diff.additions + diff.deletions)
 }
 
 async fn link_run_parent(

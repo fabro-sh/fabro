@@ -2536,7 +2536,11 @@ export const ListRunsSortEnum = {
     CREATED_AT: 'created_at',
     UPDATED_AT: 'updated_at',
     STATUS: 'status',
-    ELAPSED: 'elapsed'
+    ELAPSED: 'elapsed',
+    REPO: 'repo',
+    TITLE: 'title',
+    WORKFLOW: 'workflow',
+    CHANGES: 'changes'
 } as const;
 export type ListRunsSortEnum = typeof ListRunsSortEnum[keyof typeof ListRunsSortEnum];
 export const ListRunsDirectionEnum = {
