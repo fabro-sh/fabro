@@ -2,7 +2,7 @@
 //!
 //! `[run]` is the shared execution domain. It may appear in all three config
 //! files and layer normally. Subdomains cover model selection, git author,
-//! prepare steps, execution posture, checkpoint policy, sandbox selection,
+//! prepare steps, execution posture, checkpoint policy, environment selection,
 //! notifications, interviews, agent knobs, hooks, SCM targeting, pull-request
 //! behavior, and artifact collection.
 
@@ -468,11 +468,73 @@ impl RunEnvironmentSettings {
             env: environment.env,
         }
     }
+
+    /// Resolve every environment value's `{{ env.* }}` tokens via `lookup`,
+    /// falling back to the original source string when resolution fails.
+    #[must_use]
+    pub fn resolve_env<F>(&self, mut lookup: F) -> HashMap<String, String>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        self.env
+            .iter()
+            .map(|(name, value)| {
+                let resolved = value
+                    .resolve(&mut lookup)
+                    .map_or_else(|_| value.as_source(), |resolved| resolved.value);
+                (name.clone(), resolved)
+            })
+            .collect()
+    }
 }
 
 impl Default for RunEnvironmentSettings {
     fn default() -> Self {
         Self::from_environment("default".to_string(), EnvironmentSettings::default())
+    }
+}
+
+#[cfg(test)]
+mod run_environment_settings_tests {
+    use super::{HashMap, InterpString, RunEnvironmentSettings};
+
+    fn settings(env: &[(&str, &str)]) -> RunEnvironmentSettings {
+        RunEnvironmentSettings {
+            env: env
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), InterpString::parse(v)))
+                .collect(),
+            ..RunEnvironmentSettings::default()
+        }
+    }
+
+    #[test]
+    fn resolve_env_substitutes_env_tokens_via_lookup() {
+        let s = settings(&[("NODE_ENV", "{{ env.NODE_ENV }}"), ("STATIC", "value")]);
+        let resolved = s.resolve_env(|name| match name {
+            "NODE_ENV" => Some("test".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(resolved.get("NODE_ENV"), Some(&"test".to_string()));
+        assert_eq!(resolved.get("STATIC"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn resolve_env_falls_back_to_source_when_lookup_fails() {
+        let s = settings(&[("NODE_ENV", "{{ env.MISSING_NODE_ENV }}")]);
+        let resolved = s.resolve_env(|_| None);
+
+        assert_eq!(
+            resolved.get("NODE_ENV"),
+            Some(&"{{ env.MISSING_NODE_ENV }}".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_env_is_empty_for_empty_settings() {
+        let s: HashMap<String, String> = settings(&[]).resolve_env(|_| None);
+        assert!(s.is_empty());
     }
 }
 

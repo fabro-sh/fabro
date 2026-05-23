@@ -363,12 +363,7 @@ impl RunSession {
             }
         };
 
-        let toml_env: HashMap<String, String> = resolved
-            .environment
-            .env
-            .iter()
-            .map(|(k, v)| (k.clone(), resolve_interp(v)))
-            .collect();
+        let toml_env = resolved.environment.resolve_env(process_env_var);
         let github_permissions: Option<HashMap<String, String>> =
             (!services.github_permissions.is_empty()).then(|| services.github_permissions.clone());
         let sandbox_env = SandboxEnvSpec {
@@ -457,12 +452,6 @@ async fn configured_providers_for_start(
             .collect(),
         Err(_) => Vec::new(),
     }
-}
-
-fn resolve_interp(value: &InterpString) -> String {
-    value
-        .resolve(process_env_var)
-        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
 }
 
 fn git_checkpoint_options_from_start(

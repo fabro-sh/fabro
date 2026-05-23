@@ -161,7 +161,7 @@ fn start_detached_human_run(
         .args([
             "run",
             "--detach",
-            "--sandbox",
+            "--environment",
             "local",
             "--provider",
             "openai",
@@ -391,7 +391,7 @@ fn attach_advances_when_pending_question_is_answered_elsewhere() {
         .args([
             "run",
             "--detach",
-            "--sandbox",
+            "--environment",
             "local",
             "--provider",
             "openai",
@@ -516,7 +516,7 @@ fn attach_before_completion_streams_to_finished_state() {
         "--detach",
         "--provider",
         "openai",
-        "--sandbox",
+        "--environment",
         "local",
         "slow.fabro",
     ]);
@@ -637,7 +637,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
         .args([
             "run",
             "--detach",
-            "--sandbox",
+            "--environment",
             "local",
             "--provider",
             "openai",

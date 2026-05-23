@@ -10,8 +10,7 @@ use fabro_util::error::SharedError;
 use crate::defaults::DEFAULTS_LAYER;
 use crate::load::load_settings_path;
 use crate::resolve::{
-    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server,
-    resolve_workflow,
+    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server, resolve_workflow,
 };
 use crate::user::load_settings_config;
 use crate::{

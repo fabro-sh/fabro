@@ -3,8 +3,6 @@
 //! These mappings are consumed by both the workflow run-start path and the
 //! server preflight path, so they live here next to their destination types.
 
-#[cfg(feature = "docker")]
-use fabro_types::settings::interp::InterpString;
 #[cfg(feature = "daytona")]
 use fabro_types::settings::run::DockerfileSource as ResolvedDockerfileSource;
 use fabro_types::settings::run::{EnvironmentNetworkMode, RunEnvironmentSettings};
@@ -55,16 +53,18 @@ pub fn daytona_config_from_environment(
                     .resources
                     .disk
                     .map(|size| size_to_gb_i32(size.as_bytes())),
-                dockerfile: settings.image.dockerfile.as_ref().map(|dockerfile| {
-                    match dockerfile {
+                dockerfile: settings
+                    .image
+                    .dockerfile
+                    .as_ref()
+                    .map(|dockerfile| match dockerfile {
                         ResolvedDockerfileSource::Inline(text) => {
                             SandboxDockerfileSource::Inline(text.clone())
                         }
                         ResolvedDockerfileSource::Path { path } => {
                             SandboxDockerfileSource::Path { path: path.clone() }
                         }
-                    }
-                }),
+                    }),
             }),
         network: Some(match settings.network.mode {
             EnvironmentNetworkMode::Block => DaytonaNetwork::Block,
@@ -84,9 +84,9 @@ pub fn docker_config_from_environment(
     skip_clone: bool,
 ) -> DockerSandboxOptions {
     let mut env_vars = settings
-        .env
-        .iter()
-        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
+        .resolve_env(process_env_var)
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>();
     env_vars.sort();
     let default_options = DockerSandboxOptions::default();
@@ -115,13 +115,6 @@ pub fn docker_config_from_environment(
         skip_clone,
         ..DockerSandboxOptions::default()
     }
-}
-
-#[cfg(feature = "docker")]
-fn resolve_interp(value: &InterpString) -> String {
-    value
-        .resolve(process_env_var)
-        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
 }
 
 #[cfg(feature = "docker")]

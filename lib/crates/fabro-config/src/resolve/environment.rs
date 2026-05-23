@@ -33,7 +33,10 @@ pub(crate) fn resolve_run_environment(
         return RunEnvironmentSettings::from_environment(id, EnvironmentSettings::default());
     };
 
-    let merged = layer.clone().into_environment_override().combine(base.clone());
+    let merged = layer
+        .clone()
+        .into_environment_override()
+        .combine(base.clone());
     let environment = resolve_environment_layer(&merged, "run.environment", errors);
     validate_provider_capabilities(&environment, "run.environment", errors);
     RunEnvironmentSettings::from_environment(id, environment)
