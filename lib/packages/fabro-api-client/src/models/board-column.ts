@@ -15,7 +15,7 @@
 
 
 /**
- * Board column status for a run in the list view.
+ * Status bucket for a run, shared by list and kanban renderings and by the `status` query parameter on `GET /api/v1/runs`. The `archived` bucket is orthogonal to the `include_archived` flag — passing `status=archived` is equivalent to opting archived runs in.
  */
 
 export const BoardColumn = {
@@ -25,7 +25,8 @@ export const BoardColumn = {
     BLOCKED: 'blocked',
     SUCCEEDED: 'succeeded',
     FAILED: 'failed',
-    ARCHIVED: 'archived'
+    ARCHIVED: 'archived',
+    REMOVING: 'removing'
 } as const;
 
 export type BoardColumn = typeof BoardColumn[keyof typeof BoardColumn];

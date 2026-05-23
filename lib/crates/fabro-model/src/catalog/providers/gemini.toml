@@ -94,6 +94,7 @@ training = "2025-01-01"
 knowledge_cutoff = "January 2025"
 estimated_output_tps = 200
 aliases = ["gemini-flash-lite"]
+small_default = true
 
 [models."gemini-3.1-flash-lite-preview".limits]
 context_window = 1048576

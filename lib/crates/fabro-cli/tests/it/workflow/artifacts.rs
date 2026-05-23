@@ -49,7 +49,7 @@ include = ["assets/**"]
 
     context
         .run_cmd()
-        .args(["--auto-approve", "--sandbox", "local"])
+        .args(["--auto-approve", "--environment", "local"])
         .arg(context.temp_dir.join("run.toml"))
         .assert()
         .success();

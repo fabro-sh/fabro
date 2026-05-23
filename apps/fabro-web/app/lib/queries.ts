@@ -4,9 +4,11 @@ import type {
   AuthConfigResponse,
   AuthMeResponse,
   AuthSessionsResponse,
+  BoardColumn,
   CommandLogResponse,
   EventEnvelope,
-  PaginatedBoardRunList,
+  ListRunsDirectionEnum,
+  ListRunsSortEnum,
   PaginatedRunCommitList,
   PaginatedRunFileList,
   PaginatedRunList,
@@ -63,8 +65,17 @@ const immutableOptions: SWRConfiguration = {
   revalidateOnReconnect: false,
 };
 
-type BoardRunsEnvelope = PaginatedEnvelope<PaginatedBoardRunList["data"][number]> &
-  Pick<PaginatedBoardRunList, "columns">;
+export interface RunsListFilters {
+  status?: BoardColumn[];
+  sort?: ListRunsSortEnum;
+  direction?: ListRunsDirectionEnum;
+  includeArchived?: boolean;
+}
+
+export interface RunsPageOptions extends RunsListFilters {
+  limit?: number;
+  offset?: number;
+}
 
 export function useAuthConfig() {
   return useSWR<AuthConfigResponse>(
@@ -105,13 +116,42 @@ export function useSystemResources() {
   );
 }
 
-export function useBoardsRuns(includeArchived: boolean = false) {
-  return useSWR<BoardRunsEnvelope>(
-    queryKeys.boards.runs(includeArchived),
+export function useAllRuns(filters: RunsListFilters = {}, enabled = true) {
+  return useSWR<PaginatedEnvelope<Run>>(
+    enabled ? queryKeys.runs.all(filters) : null,
     () =>
-      fetchAllPages("board runs", (limit, offset) =>
-        apiData(() => runsApi.listBoardRuns(limit, offset, includeArchived)),
+      fetchAllPages("runs", (limit, offset) =>
+        apiData(() =>
+          runsApi.listRuns(
+            limit,
+            offset,
+            filters.includeArchived ?? false,
+            undefined,
+            filters.status,
+            filters.sort,
+            filters.direction,
+          ),
+        ),
       ),
+  );
+}
+
+export function useRunsPage(opts: RunsPageOptions = {}, enabled = true) {
+  return useSWR<PaginatedRunList>(
+    enabled ? queryKeys.runs.page(opts) : null,
+    () =>
+      apiData(() =>
+        runsApi.listRuns(
+          opts.limit,
+          opts.offset,
+          opts.includeArchived ?? false,
+          undefined,
+          opts.status,
+          opts.sort,
+          opts.direction,
+        ),
+      ),
+    { keepPreviousData: true },
   );
 }
 

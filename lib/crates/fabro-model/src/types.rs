@@ -67,6 +67,8 @@ pub struct Model {
     pub aliases:              Vec<String>,
     #[serde(default)]
     pub default:              bool,
+    #[serde(default)]
+    pub small_default:        bool,
     /// Whether the server has any credential configured for this model's
     /// provider at the time of the response. Always `false` in static catalog
     /// data; populated by `GET /models` per request.
@@ -150,6 +152,10 @@ impl Model {
     pub fn is_default(&self) -> bool {
         self.default
     }
+
+    pub fn is_small_default(&self) -> bool {
+        self.small_default
+    }
 }
 
 #[cfg(test)]
@@ -178,5 +184,6 @@ mod tests {
         assert_eq!(info.estimated_output_tps(), Some(25.0));
         assert!(!info.aliases().is_empty());
         assert!(!info.is_default());
+        assert!(!info.is_small_default());
     }
 }

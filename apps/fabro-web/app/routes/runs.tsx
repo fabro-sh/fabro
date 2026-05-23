@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ArchiveBoxIcon, ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpDownIcon, ChevronUpIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
-import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions, Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
 import {
   DndContext,
@@ -21,18 +21,24 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, columnForRun, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnForRun, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem, toRunWithStatus } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus } from "../data/runs";
 import { formatRelativeTime } from "../lib/format";
 import { EmptyState } from "../components/state";
 import { InlineMarkdown } from "../components/inline-markdown";
 import { PullRequestChip } from "../components/pull-request-chip";
 import { useToast } from "../components/toast";
-import { mutateBoardRunCaches } from "../lib/board-cache";
+import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
-import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
+import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
 import { archiveRun, canArchive } from "../lib/run-actions";
-import type { BoardColumn, PaginatedBoardRunList } from "@qltysh/fabro-api-client";
+import type {
+  BoardColumn,
+  ListRunsDirectionEnum,
+  ListRunsSortEnum,
+  PaginatedRunList,
+  Run,
+} from "@qltysh/fabro-api-client";
 
 export { shouldRefreshBoardForEvent };
 
@@ -52,15 +58,14 @@ const columnStyles: Record<BoardColumn, ColumnStyle> = {
   succeeded:    { actions: [] },
   failed:       { actions: [] },
   archived:     { actions: [] },
+  removing:     { actions: [] },
 };
 
 const defaultColumnStyle: ColumnStyle = { actions: [] };
-const defaultColumnColors = { dot: "bg-fg-muted", text: "text-fg-muted" };
+const defaultColumnColors = { label: "", dot: "bg-fg-muted", text: "text-fg-muted" };
 
 interface BoardRunsResponse {
-  columns: PaginatedBoardRunList["columns"];
-  data: PaginatedBoardRunList["data"];
-  meta: PaginatedBoardRunList["meta"];
+  data: Run[];
 }
 
 type Column = {
@@ -72,26 +77,34 @@ type Column = {
   items: RunItem[];
 };
 
-function buildSkeletonColumns(includeArchived: boolean): Column[] {
-  return columnStatuses
-    .filter((id) => includeArchived || id !== "archived")
-    .map((id) => {
-      const colors = columnStatusDisplay[id];
-      return {
-        id,
-        name: colors.label,
-        dot: colors.dot,
-        text: colors.text,
-        ...(columnStyles[id] ?? defaultColumnStyle),
-        items: [],
-      };
-    });
+function visibleBoardColumnIds(includeArchived: boolean): readonly BoardColumn[] {
+  return columnStatuses.filter(
+    (id) => id !== "removing" && (includeArchived || id !== "archived"),
+  );
 }
 
-export function buildBoardColumns(response: BoardRunsResponse): Column[] {
-  const grouped = new Map<string, RunItem[]>();
-  for (const col of response.columns) {
-    grouped.set(col.id, []);
+function buildSkeletonColumns(includeArchived: boolean): Column[] {
+  return visibleBoardColumnIds(includeArchived).map((id) => {
+    const colors = columnStatusDisplay[id];
+    return {
+      id,
+      name: colors.label,
+      dot: colors.dot,
+      text: colors.text,
+      ...(columnStyles[id] ?? defaultColumnStyle),
+      items: [],
+    };
+  });
+}
+
+export function buildBoardColumns(
+  response: BoardRunsResponse,
+  includeArchived: boolean,
+): Column[] {
+  const columnIds = visibleBoardColumnIds(includeArchived);
+  const grouped = new Map<BoardColumn, RunItem[]>();
+  for (const id of columnIds) {
+    grouped.set(id, []);
   }
   for (const apiRun of response.data) {
     const column = columnForRun(apiRun);
@@ -100,16 +113,15 @@ export function buildBoardColumns(response: BoardRunsResponse): Column[] {
     }
   }
 
-  return response.columns.map((col) => {
-    const id = col.id;
+  return columnIds.map((id) => {
     const colors = columnStatusDisplay[id] ?? defaultColumnColors;
     return {
       id,
-      name: col.name,
+      name: colors.label,
       dot: colors.dot,
       text: colors.text,
       ...(columnStyles[id] ?? defaultColumnStyle),
-      items: grouped.get(col.id) ?? [],
+      items: grouped.get(id) ?? [],
     };
   });
 }
@@ -269,7 +281,8 @@ function ChecksStatus({ checks }: { checks: CheckRun[] }) {
 }
 
 export const handle = {
-  wide: true,
+  wide:       true,
+  hideHeader: true,
 };
 
 function PrCard({
@@ -282,6 +295,7 @@ function PrCard({
   actions?: string[];
 }) {
   const lifecycleLabel = boardLifecycleStatusLabel(pr);
+  const hasActions = actions != null && actions.length > 0;
 
   return (
     <div className="group rounded-md border border-line bg-panel p-4 transition-all duration-200 hover:border-line-strong hover:shadow-lg hover:shadow-black/20">
@@ -308,7 +322,7 @@ function PrCard({
         <p className="text-sm leading-snug text-fg-2">{pr.title}</p>
       </Link>
 
-      {(pr.resources != null || pr.comments != null || pr.elapsed != null) && (
+      {(pr.resources != null || pr.comments != null || (pr.elapsed != null && !hasActions)) && (
         <div className="mt-3 flex items-center gap-3 font-mono text-xs">
           {pr.resources != null && (
             <span className="text-fg-3">{pr.resources}</span>
@@ -321,7 +335,7 @@ function PrCard({
               {pr.comments}
             </span>
           )}
-          {pr.elapsed != null && (
+          {pr.elapsed != null && !hasActions && (
             <span className="ml-auto font-mono text-fg-muted">{pr.elapsed}</span>
           )}
         </div>
@@ -333,7 +347,7 @@ function PrCard({
         <p className="mt-3 truncate text-xs italic text-amber/70">{pr.question}</p>
       )}
 
-      {actions != null && actions.length > 0 && (
+      {hasActions && (
         <div className="mt-3 flex items-center gap-1.5">
           {actions?.map((label) => (
             <button
@@ -368,6 +382,9 @@ function PrCard({
               {label}
             </button>
           ))}
+          {pr.elapsed != null && (
+            <span className="ml-auto font-mono text-xs text-fg-muted">{pr.elapsed}</span>
+          )}
         </div>
       )}
 
@@ -466,7 +483,7 @@ function ColumnActionsMenu({ column }: { column: Column }) {
       }
     } finally {
       setPending(false);
-      mutateBoardRunCaches(mutate);
+      mutateRunListCaches(mutate);
     }
   }
 
@@ -567,6 +584,68 @@ function parseView(raw: string | null): ViewMode {
   return raw === "list" ? "list" : "columns";
 }
 
+const SORT_KEYS = ["created_at", "updated_at", "status", "elapsed"] as const satisfies readonly ListRunsSortEnum[];
+
+function parseSort(raw: string | null): ListRunsSortEnum {
+  return (SORT_KEYS as readonly string[]).includes(raw ?? "")
+    ? (raw as ListRunsSortEnum)
+    : "created_at";
+}
+
+function parseDirection(raw: string | null): ListRunsDirectionEnum {
+  return raw === "asc" ? "asc" : "desc";
+}
+
+function parsePage(raw: string | null): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+}
+
+const TOGGLEABLE_COLUMNS = ["elapsed", "repo", "workflow", "created", "updated", "changes", "pr"] as const;
+type ToggleableColumn = typeof TOGGLEABLE_COLUMNS[number];
+
+const toggleableColumnLabels: Record<ToggleableColumn, string> = {
+  elapsed:  "Elapsed",
+  repo:     "Repo",
+  workflow: "Workflow",
+  created:  "Created",
+  updated:  "Updated",
+  changes:  "Changes",
+  pr:       "PR",
+};
+
+function parseHiddenColumns(raw: string | null): Set<ToggleableColumn> {
+  const hidden = new Set<ToggleableColumn>();
+  if (!raw) return hidden;
+  for (const value of raw.split(",")) {
+    const trimmed = value.trim();
+    if ((TOGGLEABLE_COLUMNS as readonly string[]).includes(trimmed)) {
+      hidden.add(trimmed as ToggleableColumn);
+    }
+  }
+  return hidden;
+}
+
+function serializeHiddenColumns(hidden: Set<ToggleableColumn>): string | null {
+  if (hidden.size === 0) return null;
+  return TOGGLEABLE_COLUMNS.filter((col) => hidden.has(col)).join(",");
+}
+
+const LIST_PAGE_SIZES = [10, 25, 50, 100] as const;
+const DEFAULT_LIST_PAGE_SIZE = 25;
+
+function parsePageSize(raw: string | null): number {
+  const n = Number(raw);
+  return (LIST_PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_LIST_PAGE_SIZE;
+}
+
+const sortColumnLabels: Record<ListRunsSortEnum, string> = {
+  created_at: "Created",
+  updated_at: "Updated",
+  status:     "Status",
+  elapsed:    "Elapsed",
+};
+
 function createdCutoffMsFor(filter: CreatedFilter): number | null {
   const now = Date.now();
   switch (filter) {
@@ -648,6 +727,495 @@ export function RunRow({ run }: { run: RunWithStatus }) {
         )}
       </span>
     </div>
+  );
+}
+
+function RunTableRow({
+  run,
+  hiddenColumns,
+}: {
+  run:           RunWithStatus;
+  hiddenColumns: Set<ToggleableColumn>;
+}) {
+  const lifecycleLabel = listLifecycleStatusLabel(run);
+  const statusDisplay = columnStatusDisplay[run.status];
+  const show = (col: ToggleableColumn) => !hiddenColumns.has(col);
+
+  return (
+    <tr className="group relative border-b border-line transition-colors last:border-b-0 hover:bg-overlay/40">
+      <td className="whitespace-nowrap px-3 py-2.5">
+        <span className="inline-flex items-center gap-2">
+          <span className={`size-1.5 shrink-0 rounded-full ${statusDisplay.dot}`} aria-hidden="true" />
+          <span className={`font-mono text-xs ${statusDisplay.text}`}>{run.statusLabel}</span>
+        </span>
+      </td>
+      {show("elapsed") && (
+        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted">
+          {run.elapsed}
+        </td>
+      )}
+      {show("repo") && (
+        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs font-medium text-teal-500">
+          {run.repo}
+        </td>
+      )}
+      <td className="w-full max-w-0 px-3 py-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <Link
+            to={`/runs/${run.id}`}
+            className="min-w-0 truncate text-sm text-fg-2 before:absolute before:inset-0 hover:text-fg"
+          >
+            <InlineMarkdown content={run.title} className="truncate" />
+          </Link>
+          {lifecycleLabel != null && (
+            <span className="relative z-10 rounded-full border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
+              {lifecycleLabel}
+            </span>
+          )}
+          {run.comments != null && run.comments > 0 && (
+            <span className="relative z-10 inline-flex shrink-0 items-center gap-1 font-mono text-xs text-fg-muted">
+              <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
+                <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
+              </svg>
+              {run.comments}
+            </span>
+          )}
+        </div>
+      </td>
+      {show("workflow") && (
+        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-3">{run.workflow}</td>
+      )}
+      {show("created") && (
+        <td
+          className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted"
+          title={run.createdAt ?? undefined}
+        >
+          {run.createdAt != null ? formatRelativeTime(run.createdAt) : ""}
+        </td>
+      )}
+      {show("updated") && (
+        <td
+          className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-fg-muted"
+          title={run.lastEventAt ?? undefined}
+        >
+          {run.lastEventAt != null ? formatRelativeTime(run.lastEventAt) : ""}
+        </td>
+      )}
+      {show("changes") && (
+        <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs tabular-nums">
+          {run.additions != null && <span className="text-mint">+{run.additions.toLocaleString()}</span>}
+          {run.additions != null && run.deletions != null && " "}
+          {run.deletions != null && <span className="text-coral">-{run.deletions.toLocaleString()}</span>}
+        </td>
+      )}
+      {show("pr") && (
+        <td className="whitespace-nowrap px-3 py-2.5 text-right">
+          {run.pullRequestUrl && run.number != null && (
+            <span className="relative z-10 inline-flex items-center justify-end gap-1.5">
+              <PullRequestChip number={run.number} url={run.pullRequestUrl}>
+                {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
+              </PullRequestChip>
+            </span>
+          )}
+        </td>
+      )}
+    </tr>
+  );
+}
+
+type RunsListViewProps = {
+  data:             PaginatedRunList | undefined;
+  isLoading:        boolean;
+  hasGitHubAuth:    boolean;
+  serverUrl:        string | undefined;
+  sort:             ListRunsSortEnum;
+  direction:        ListRunsDirectionEnum;
+  page:             number;
+  pageSize:         number;
+  hiddenColumns:    Set<ToggleableColumn>;
+  onSortClick:      (key: ListRunsSortEnum) => void;
+  onPageChange:     (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+  query:            string;
+  repoFilter:       string;
+  workflowFilter:   string;
+  createdCutoffMs:  number | null;
+};
+
+function SortHeader({
+  label,
+  sortKey,
+  activeSort,
+  direction,
+  align = "left",
+  onClick,
+}: {
+  label:      string;
+  sortKey:    ListRunsSortEnum;
+  activeSort: ListRunsSortEnum;
+  direction:  ListRunsDirectionEnum;
+  align?:     "left" | "right";
+  onClick:    (key: ListRunsSortEnum) => void;
+}) {
+  const isActive = activeSort === sortKey;
+  const ariaSort: "ascending" | "descending" | "none" = isActive
+    ? direction === "asc"
+      ? "ascending"
+      : "descending"
+    : "none";
+  return (
+    <th
+      scope="col"
+      aria-sort={ariaSort}
+      className={`whitespace-nowrap px-3 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"}`}
+    >
+      <button
+        type="button"
+        onClick={() => onClick(sortKey)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-fg-2 ${isActive ? "text-fg-2" : "text-fg-3"} ${align === "right" ? "ml-auto" : ""}`}
+      >
+        <span>{label}</span>
+        {isActive ? (
+          direction === "asc" ? (
+            <ChevronUpIcon className="size-3.5 text-fg-3" aria-hidden="true" />
+          ) : (
+            <ChevronDownIcon className="size-3.5 text-fg-3" aria-hidden="true" />
+          )
+        ) : (
+          <ChevronUpDownIcon className="size-3.5 text-fg-muted" aria-hidden="true" />
+        )}
+      </button>
+    </th>
+  );
+}
+
+function RunsListView({
+  data,
+  isLoading,
+  hasGitHubAuth,
+  serverUrl,
+  sort,
+  direction,
+  page,
+  pageSize,
+  hiddenColumns,
+  onSortClick,
+  onPageChange,
+  onPageSizeChange,
+  query,
+  repoFilter,
+  workflowFilter,
+  createdCutoffMs,
+}: RunsListViewProps) {
+  const show = (col: ToggleableColumn) => !hiddenColumns.has(col);
+  const rows: RunWithStatus[] = useMemo(() => {
+    const apiRuns = data?.data ?? [];
+    return apiRuns
+      .map(toRunWithStatus)
+      .filter(
+        (item) =>
+          (repoFilter === "all" || item.repo === repoFilter) &&
+          (workflowFilter === "all" || item.workflow === workflowFilter) &&
+          (createdCutoffMs == null ||
+            (item.createdAt != null && Date.parse(item.createdAt) >= createdCutoffMs)) &&
+          (!query ||
+            item.title.toLowerCase().includes(query) ||
+            item.repo.toLowerCase().includes(query) ||
+            item.lifecycleStatusLabel?.toLowerCase().includes(query) ||
+            (item.number != null && `#${item.number}`.includes(query))),
+      );
+  }, [data, repoFilter, workflowFilter, createdCutoffMs, query]);
+
+  const hasMore = data?.meta.has_more ?? false;
+  const total = data?.meta.total ?? null;
+  const pageCount = total != null ? Math.max(1, Math.ceil(total / pageSize)) : null;
+  const hasRows = rows.length > 0;
+  const apiRunCount = data?.data.length ?? 0;
+  const isEmptyServerSide = data !== undefined && apiRunCount === 0 && page === 1;
+
+  if (isEmptyServerSide && !isLoading) {
+    return (
+      <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="-mx-4 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-6 lg:-mx-8">
+        <div className="inline-block min-w-full px-4 py-2 align-middle sm:px-6 lg:px-8">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line text-xs font-medium text-fg-3">
+                <SortHeader label="Status" sortKey="status" activeSort={sort} direction={direction} onClick={onSortClick} />
+                {show("elapsed") && (
+                  <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} onClick={onSortClick} />
+                )}
+                {show("repo") && (
+                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Repo</th>
+                )}
+                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Title</th>
+                {show("workflow") && (
+                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Workflow</th>
+                )}
+                {show("created") && (
+                  <SortHeader label="Created" sortKey="created_at" activeSort={sort} direction={direction} onClick={onSortClick} />
+                )}
+                {show("updated") && (
+                  <SortHeader label="Updated" sortKey="updated_at" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
+                )}
+                {show("changes") && (
+                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">Changes</th>
+                )}
+                {show("pr") && (
+                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">PR</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((run) => (
+                <RunTableRow key={run.id} run={run} hiddenColumns={hiddenColumns} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {!hasRows && !isLoading && (
+        <div className="py-8">
+          <EmptyState
+            title="No matching runs"
+            description={
+              apiRunCount === 0
+                ? "Try a different page, sort, or filter combination."
+                : "Try clearing the search, repo, or workflow filter."
+            }
+          />
+        </div>
+      )}
+      <ListPager
+        page={page}
+        pageSize={pageSize}
+        pageCount={pageCount}
+        hasMore={hasMore}
+        disabled={isLoading}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
+    </div>
+  );
+}
+
+function ListPager({
+  page,
+  pageSize,
+  pageCount,
+  hasMore,
+  disabled,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page:             number;
+  pageSize:         number;
+  pageCount:        number | null;
+  hasMore:          boolean;
+  disabled:         boolean;
+  onPageChange:     (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+}) {
+  const onFirstPage = page <= 1;
+  const onLastPage = pageCount != null ? page >= pageCount : !hasMore;
+  return (
+    <nav
+      aria-label="Pagination"
+      className="flex items-center justify-between gap-6 pt-2 text-sm text-fg-3"
+    >
+      <div className="flex items-center gap-3">
+        <label htmlFor="runs-page-size" className="text-fg-3">
+          Rows per page
+        </label>
+        <div className="relative">
+          <select
+            id="runs-page-size"
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            disabled={disabled}
+            className="appearance-none rounded-md border border-line bg-panel/80 py-1.5 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0 disabled:opacity-60"
+          >
+            {LIST_PAGE_SIZES.map((size) => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </select>
+          <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
+        </div>
+      </div>
+
+      <span className="text-fg-3">
+        Page {page}
+        {pageCount != null ? <> of {pageCount}</> : null}
+      </span>
+
+      <div className="flex items-center gap-1.5">
+        <PagerButton
+          label="First page"
+          onClick={() => onPageChange(1)}
+          disabled={disabled || onFirstPage}
+        >
+          <ChevronDoubleLeftIcon className="size-4" aria-hidden="true" />
+        </PagerButton>
+        <PagerButton
+          label="Previous page"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={disabled || onFirstPage}
+        >
+          <ChevronLeftIcon className="size-4" aria-hidden="true" />
+        </PagerButton>
+        <PagerButton
+          label="Next page"
+          onClick={() => onPageChange(page + 1)}
+          disabled={disabled || onLastPage}
+        >
+          <ChevronRightIcon className="size-4" aria-hidden="true" />
+        </PagerButton>
+        <PagerButton
+          label="Last page"
+          onClick={() => pageCount != null && onPageChange(pageCount)}
+          disabled={disabled || onLastPage || pageCount == null}
+        >
+          <ChevronDoubleRightIcon className="size-4" aria-hidden="true" />
+        </PagerButton>
+      </div>
+    </nav>
+  );
+}
+
+function PagerButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label:    string;
+  onClick:  () => void;
+  disabled: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex size-8 items-center justify-center rounded-md border border-line bg-panel/80 text-fg-3 transition-colors enabled:hover:bg-panel enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+type FilterOption<T extends string> = { value: T; label: string };
+
+function FilterButton<T extends string>({
+  label,
+  value,
+  allValue,
+  options,
+  onChange,
+}: {
+  label:    string;
+  value:    T;
+  allValue: T;
+  options:  FilterOption<T>[];
+  onChange: (next: T) => void;
+}) {
+  const active = value !== allValue;
+  const activeLabel = options.find((opt) => opt.value === value)?.label;
+  return (
+    <Menu as="div" className="relative">
+      <MenuButton
+        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
+          active
+            ? "border-line-strong bg-panel text-fg-2"
+            : "border-line bg-panel/80 text-fg-muted hover:text-fg-3"
+        }`}
+      >
+        <PlusCircleIcon className="size-4" aria-hidden="true" />
+        <span>{active ? `${label}: ${activeLabel}` : label}</span>
+      </MenuButton>
+      <MenuItems
+        anchor="bottom start"
+        className="z-20 mt-1 max-h-72 min-w-[12rem] overflow-y-auto rounded-md border border-line bg-panel py-1 text-xs shadow-lg focus:outline-none"
+      >
+        {options.map((option) => (
+          <MenuItem key={option.value}>
+            {({ focus }) => (
+              <button
+                type="button"
+                onClick={() => onChange(option.value)}
+                className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left ${
+                  focus ? "bg-overlay" : ""
+                } ${option.value === value ? "text-teal-500" : "text-fg-2"}`}
+              >
+                <span className="truncate">{option.label}</span>
+                {option.value === value && (
+                  <CheckIcon className="size-4 shrink-0" aria-hidden="true" />
+                )}
+              </button>
+            )}
+          </MenuItem>
+        ))}
+      </MenuItems>
+    </Menu>
+  );
+}
+
+function ColumnPickerButton({
+  hidden,
+  onChange,
+}: {
+  hidden:   Set<ToggleableColumn>;
+  onChange: (next: Set<ToggleableColumn>) => void;
+}) {
+  const visible = TOGGLEABLE_COLUMNS.filter((col) => !hidden.has(col));
+  return (
+    <Listbox
+      value={visible}
+      onChange={(next: ToggleableColumn[]) => {
+        const nextHidden = new Set<ToggleableColumn>(TOGGLEABLE_COLUMNS);
+        for (const col of next) nextHidden.delete(col);
+        onChange(nextHidden);
+      }}
+      multiple
+    >
+      <ListboxButton className="inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium text-fg-muted transition-colors hover:text-fg-3">
+        <AdjustmentsHorizontalIcon className="size-4" aria-hidden="true" />
+        <span>View</span>
+      </ListboxButton>
+      <ListboxOptions
+        anchor="bottom end"
+        className="z-20 mt-1 min-w-[10rem] rounded-md border border-line bg-panel py-1 text-xs shadow-lg focus:outline-none"
+      >
+        {TOGGLEABLE_COLUMNS.map((col) => (
+          <ListboxOption
+            key={col}
+            value={col}
+            className={({ focus }) =>
+              `flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 text-fg-2 ${focus ? "bg-overlay" : ""}`
+            }
+          >
+            {({ selected }) => (
+              <>
+                <span>{toggleableColumnLabels[col]}</span>
+                {selected ? (
+                  <CheckIcon className="size-4 shrink-0 text-teal-500" aria-hidden="true" />
+                ) : (
+                  <span className="size-4 shrink-0" aria-hidden="true" />
+                )}
+              </>
+            )}
+          </ListboxOption>
+        ))}
+      </ListboxOptions>
+    </Listbox>
   );
 }
 
@@ -777,6 +1345,14 @@ export default function Runs() {
   const createdFilter = parseCreatedFilter(searchParams.get("created"));
   const includeArchived = searchParams.get("archived") === "1";
   const view = parseView(searchParams.get("view"));
+  const sort = parseSort(searchParams.get("sort"));
+  const direction = parseDirection(searchParams.get("direction"));
+  const page = parsePage(searchParams.get("page"));
+  const pageSize = parsePageSize(searchParams.get("size"));
+  const hiddenColumns = useMemo(
+    () => parseHiddenColumns(searchParams.get("hide")),
+    [searchParams],
+  );
 
   const updateParam = useCallback(
     (key: string, value: string | null) => {
@@ -802,8 +1378,45 @@ export default function Runs() {
   const setCreatedFilter = (value: CreatedFilter) => updateParam("created", value === "all" ? null : value);
   const setIncludeArchived = (value: boolean) => updateParam("archived", value ? "1" : null);
   const setView = (value: ViewMode) => updateParam("view", value === "columns" ? null : value);
+  const setPage = useCallback(
+    (next: number) => updateParam("page", next > 1 ? String(next) : null),
+    [updateParam],
+  );
+  const setPageSize = useCallback(
+    (next: number) => {
+      updateParam("size", next === DEFAULT_LIST_PAGE_SIZE ? null : String(next));
+      updateParam("page", null);
+    },
+    [updateParam],
+  );
+  const setHiddenColumns = useCallback(
+    (next: Set<ToggleableColumn>) => updateParam("hide", serializeHiddenColumns(next)),
+    [updateParam],
+  );
+  const handleSortClick = useCallback(
+    (key: ListRunsSortEnum) => {
+      if (sort === key) {
+        updateParam("direction", direction === "asc" ? null : "asc");
+      } else {
+        updateParam("sort", key === "created_at" ? null : key);
+        updateParam("direction", null);
+      }
+      updateParam("page", null);
+    },
+    [sort, direction, updateParam],
+  );
 
-  const boardRuns = useBoardsRuns(includeArchived);
+  const boardRuns = useAllRuns({ includeArchived }, view === "columns");
+  const listRunsPage = useRunsPage(
+    {
+      includeArchived,
+      sort,
+      direction,
+      limit:  pageSize,
+      offset: (page - 1) * pageSize,
+    },
+    view === "list",
+  );
   const authConfig = useAuthConfig();
   const systemInfo = useSystemInfo();
   const isLandingReady =
@@ -813,7 +1426,7 @@ export default function Runs() {
   const initialColumns = useMemo(
     () =>
       boardRuns.data
-        ? buildBoardColumns(boardRuns.data)
+        ? buildBoardColumns(boardRuns.data, includeArchived)
         : buildSkeletonColumns(includeArchived),
     [boardRuns.data, includeArchived],
   );
@@ -885,8 +1498,8 @@ export default function Runs() {
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="space-y-4">
-        <div className="flex gap-3">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-64">
             <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
             <input
               type="text"
@@ -898,50 +1511,35 @@ export default function Runs() {
               className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
             />
           </div>
-          <div className="relative">
-            <select
-              name="created"
-              aria-label="Filter by created time"
-              value={createdFilter}
-              onChange={(e) => setCreatedFilter(e.target.value as CreatedFilter)}
-              className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
-            >
-              {createdFilterOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          </div>
-          <div className="relative">
-            <select
-              name="repo"
-              aria-label="Filter by repository"
-              value={repoFilter}
-              onChange={(e) => setRepoFilter(e.target.value)}
-              className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
-            >
-              <option value="all">All repos</option>
-              {allRepos.map((repo: string) => (
-                <option key={repo} value={repo}>{repo}</option>
-              ))}
-            </select>
-            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          </div>
-          <div className="relative">
-            <select
-              name="workflow"
-              aria-label="Filter by workflow"
-              value={workflowFilter}
-              onChange={(e) => setWorkflowFilter(e.target.value)}
-              className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
-            >
-              <option value="all">All workflows</option>
-              {allWorkflows.map((workflow: string) => (
-                <option key={workflow} value={workflow}>{workflow}</option>
-              ))}
-            </select>
-            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          </div>
+
+          <FilterButton
+            label="Time"
+            value={createdFilter}
+            allValue="all"
+            options={createdFilterOptions}
+            onChange={setCreatedFilter}
+          />
+          <FilterButton
+            label="Repo"
+            value={repoFilter}
+            allValue="all"
+            options={[
+              { value: "all", label: "All repos" },
+              ...allRepos.map((repo) => ({ value: repo, label: repo })),
+            ]}
+            onChange={setRepoFilter}
+          />
+          <FilterButton
+            label="Workflow"
+            value={workflowFilter}
+            allValue="all"
+            options={[
+              { value: "all", label: "All workflows" },
+              ...allWorkflows.map((workflow) => ({ value: workflow, label: workflow })),
+            ]}
+            onChange={setWorkflowFilter}
+          />
+
           <button
             type="button"
             onClick={() => setIncludeArchived(!includeArchived)}
@@ -952,6 +1550,11 @@ export default function Runs() {
             <ArchiveBoxIcon className="size-4" aria-hidden="true" />
             <span>Show archived</span>
           </button>
+
+          <div className="ml-auto flex items-center gap-2">
+          {view === "list" && (
+            <ColumnPickerButton hidden={hiddenColumns} onChange={setHiddenColumns} />
+          )}
           <div role="group" aria-label="Run list view" className="flex rounded-md border border-line bg-panel/80 p-0.5">
             <button
               type="button"
@@ -975,6 +1578,7 @@ export default function Runs() {
                 <path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75Zm0 5a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
               </svg>
             </button>
+          </div>
           </div>
         </div>
 
@@ -1002,30 +1606,24 @@ export default function Runs() {
             ) : null}
           </>
         ) : (
-          <>
-            {filteredRuns > 0 && (
-              <div className="grid gap-2" style={{ gridTemplateColumns: RUNS_LIST_GRID_TEMPLATE }}>
-                {visibleColumns.flatMap((col) =>
-                  col.items.map((item) => (
-                    <RunRow key={item.id} run={{ ...item, status: col.id, statusLabel: col.name }} />
-                  )),
-                )}
-              </div>
-            )}
-            {isLandingReady && totalRuns === 0 ? (
-              <RunsLandingEmpty
-                hasGitHubAuth={hasGitHubAuth}
-                serverUrl={serverUrl}
-              />
-            ) : totalRuns > 0 && filteredRuns === 0 ? (
-              <div className="py-8">
-                <EmptyState
-                  title="No matching runs"
-                  description="Try clearing the search or repo filter."
-                />
-              </div>
-            ) : null}
-          </>
+          <RunsListView
+            data={listRunsPage.data}
+            isLoading={listRunsPage.data === undefined && listRunsPage.isLoading}
+            hasGitHubAuth={hasGitHubAuth}
+            serverUrl={serverUrl}
+            sort={sort}
+            direction={direction}
+            page={page}
+            pageSize={pageSize}
+            hiddenColumns={hiddenColumns}
+            onSortClick={handleSortClick}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            query={lowerQuery}
+            repoFilter={repoFilter}
+            workflowFilter={workflowFilter}
+            createdCutoffMs={createdCutoffMs}
+          />
         )}
       </div>
     </DndContext>

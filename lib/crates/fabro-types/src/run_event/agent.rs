@@ -1,3 +1,4 @@
+use fabro_model::{ReasoningEffort, Speed};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -29,13 +30,17 @@ pub enum SessionCapability {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionActivatedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread_id:    Option<String>,
+    pub thread_id:        Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:     Option<String>,
+    pub provider:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model:        Option<String>,
-    pub capabilities: Vec<SessionCapability>,
-    pub visit:        u32,
+    pub model:            Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed:            Option<Speed>,
+    pub capabilities:     Vec<SessionCapability>,
+    pub visit:            u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

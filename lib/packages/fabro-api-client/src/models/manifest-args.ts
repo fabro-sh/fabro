@@ -20,9 +20,12 @@
 export interface ManifestArgs {
     'model'?: string;
     'provider'?: string;
-    'sandbox'?: string;
     /**
-     * Per-run Docker sandbox image override.
+     * Named environment slug to select for the run.
+     */
+    'environment'?: string;
+    /**
+     * Per-run environment image override.
      */
     'docker_image'?: string;
     'verbose'?: boolean;

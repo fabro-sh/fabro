@@ -18,6 +18,9 @@
 import type { StageHandler } from './stage-handler';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { StageModelUsage } from './stage-model-usage';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { StageState } from './stage-state';
 
 /**
@@ -46,6 +49,7 @@ export interface RunStage {
      * 1-based visit count; bumped each time the workflow re-enters this node.
      */
     'visit': number;
+    'provider_used'?: StageModelUsage | null;
     /**
      * Wall-clock time the latest attempt of this stage started, if known.
      */

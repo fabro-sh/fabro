@@ -31,7 +31,6 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs", get(demo::list_runs).post(demo::create_run_stub))
         .route("/runs/resolve", get(demo::resolve_run))
-        .route("/boards/runs", get(demo::list_board_runs))
         .route("/attach", get(demo::attach_events_stub))
         .route("/runs/{id}", get(demo::get_run_status))
         .route("/runs/{id}/questions", get(demo::get_questions_stub))

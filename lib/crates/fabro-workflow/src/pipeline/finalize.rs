@@ -742,6 +742,7 @@ mod tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            retried_from:     None,
             parent_id:        None,
             web_url:          None,
         })
