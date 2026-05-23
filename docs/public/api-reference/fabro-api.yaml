@@ -7898,15 +7898,11 @@ components:
       required:
         - server_name
         - status
-        - tool_count
       properties:
         server_name:
           type: string
         status:
           $ref: "#/components/schemas/McpServerStatus"
-        tool_count:
-          type: integer
-          minimum: 0
 
     McpServerStatus:
       description: Projected MCP server readiness status.

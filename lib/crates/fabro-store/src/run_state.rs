@@ -489,11 +489,7 @@ impl RunProjectionReducer for RunProjection {
                 else {
                     return Ok(());
                 };
-                if let Some(subagent) = stage
-                    .subagents
-                    .iter_mut()
-                    .find(|subagent| subagent.agent_id == props.agent_id)
-                {
+                if let Some(subagent) = subagent_mut(stage, &props.agent_id) {
                     subagent.status = SubAgentStatus::Completed {
                         success:    props.success,
                         turns_used: props.turns_used,
@@ -505,11 +501,7 @@ impl RunProjectionReducer for RunProjection {
                 else {
                     return Ok(());
                 };
-                if let Some(subagent) = stage
-                    .subagents
-                    .iter_mut()
-                    .find(|subagent| subagent.agent_id == props.agent_id)
-                {
+                if let Some(subagent) = subagent_mut(stage, &props.agent_id) {
                     subagent.status = SubAgentStatus::Failed {
                         error: props.error.clone(),
                     };
@@ -520,11 +512,7 @@ impl RunProjectionReducer for RunProjection {
                 else {
                     return Ok(());
                 };
-                if let Some(subagent) = stage
-                    .subagents
-                    .iter_mut()
-                    .find(|subagent| subagent.agent_id == props.agent_id)
-                {
+                if let Some(subagent) = subagent_mut(stage, &props.agent_id) {
                     subagent.status = SubAgentStatus::Closed;
                 }
             }
@@ -555,7 +543,6 @@ impl RunProjectionReducer for RunProjection {
                     status:      McpServerStatus::Ready {
                         tools: props.tools.clone(),
                     },
-                    tool_count:  props.tool_count,
                 });
             }
             EventBody::AgentMcpFailed(props) => {
@@ -568,7 +555,6 @@ impl RunProjectionReducer for RunProjection {
                     status:      McpServerStatus::Failed {
                         error: props.error.clone(),
                     },
-                    tool_count:  0,
                 });
             }
             _ => {}
@@ -615,19 +601,27 @@ fn apply_todo_updated(stage: &mut StageProjection, props: &TodoUpdatedProps) {
 }
 
 fn apply_todo_deleted(stage: &mut StageProjection, props: &TodoDeletedProps) {
-    let should_clear = if let Some(list) = stage
+    let Some(list) = stage
         .todos
         .as_mut()
         .filter(|list| list.list_id == props.list_id)
-    {
-        list.remove(&props.todo_id);
-        list.items.is_empty()
-    } else {
-        false
+    else {
+        return;
     };
-    if should_clear {
+    list.remove(&props.todo_id);
+    if list.items.is_empty() {
         stage.todos = None;
     }
+}
+
+fn subagent_mut<'a>(
+    stage: &'a mut StageProjection,
+    agent_id: &str,
+) -> Option<&'a mut SubAgentProjection> {
+    stage
+        .subagents
+        .iter_mut()
+        .find(|subagent| subagent.agent_id == agent_id)
 }
 
 fn upsert_mcp_server(stage: &mut StageProjection, server: McpServerProjection) {
@@ -3756,7 +3750,7 @@ mod tests {
             let stage = state.stage(&stage_id).unwrap();
             assert_eq!(stage.mcp_servers.len(), 2);
             assert_eq!(stage.mcp_servers[0].server_name, "filesystem");
-            assert_eq!(stage.mcp_servers[0].tool_count, 1);
+            assert_eq!(stage.mcp_servers[0].tool_count(), 1);
             assert_eq!(stage.mcp_servers[0].status, McpServerStatus::Ready {
                 tools: vec![AgentMcpToolSummary {
                     name:          "read_file".to_string(),
@@ -3764,7 +3758,7 @@ mod tests {
                 }],
             });
             assert_eq!(stage.mcp_servers[1].server_name, "github");
-            assert_eq!(stage.mcp_servers[1].tool_count, 0);
+            assert_eq!(stage.mcp_servers[1].tool_count(), 0);
             assert_eq!(stage.mcp_servers[1].status, McpServerStatus::Failed {
                 error: "missing token".to_string(),
             });
