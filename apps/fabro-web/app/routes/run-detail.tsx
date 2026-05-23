@@ -732,8 +732,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       <div
         className={
           fullHeight
-            ? "pt-3.5 flex min-h-0 flex-1 flex-col"
-            : "pt-3.5 pb-[var(--fabro-interview-dock-clearance)]"
+            ? "pt-3 flex min-h-0 flex-1 flex-col"
+            : "pt-3 pb-[var(--fabro-interview-dock-clearance)]"
         }
       >
         <Outlet />
