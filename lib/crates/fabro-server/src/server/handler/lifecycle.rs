@@ -578,9 +578,9 @@ async fn retry_run(
     let new_run_id = RunId::new();
     let input = operations::RetryRunInput {
         source_run_id: id,
-        new_run_id:    Some(new_run_id),
-        provenance:    Some(run_provenance(&headers, &actor)),
-        web_url:       state.run_web_url(&new_run_id),
+        new_run_id,
+        provenance: Some(run_provenance(&headers, &actor)),
+        web_url: state.run_web_url(&new_run_id),
     };
     match Box::pin(operations::retry_run(&state.store, &input)).await {
         Ok(outcome) => {

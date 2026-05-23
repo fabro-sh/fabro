@@ -9,7 +9,7 @@ import {
 } from "./api-client";
 import type { RunStatus } from "../data/runs";
 
-export type LifecycleAction = "cancel" | "archive" | "unarchive";
+export type LifecycleAction = "cancel" | "archive" | "unarchive" | "retry";
 
 export interface LifecycleActionError {
   status: number;
@@ -99,20 +99,6 @@ export function deleteErrorMessage(error: unknown): string {
   return "Couldn't delete the run right now. Try again.";
 }
 
-export function retryErrorMessage(error: unknown): string {
-  if (isLifecycleActionError(error)) {
-    if (error.status === 404) {
-      return "This run no longer exists.";
-    }
-    if (error.status === 409) {
-      return "This run can no longer be retried.";
-    }
-    const detail = error.errors[0]?.detail?.trim();
-    if (detail) return detail;
-  }
-  return "Couldn't retry the run right now. Try again.";
-}
-
 export function mapError(error: unknown, action: LifecycleAction): string {
   if (isLifecycleActionError(error)) {
     if (error.status === 404) {
@@ -126,6 +112,8 @@ export function mapError(error: unknown, action: LifecycleAction): string {
           return "Only terminal runs can be archived.";
         case "unarchive":
           return "Active runs can't be unarchived.";
+        case "retry":
+          return "This run can no longer be retried.";
       }
     }
 
@@ -142,6 +130,8 @@ export function mapError(error: unknown, action: LifecycleAction): string {
       return "Couldn't archive the run right now. Try again.";
     case "unarchive":
       return "Couldn't unarchive the run right now. Try again.";
+    case "retry":
+      return "Couldn't retry the run right now. Try again.";
   }
 }
 

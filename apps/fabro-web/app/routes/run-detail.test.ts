@@ -53,7 +53,6 @@ const {
   default: RunDetail,
   focusSteerAfterMenuClose,
   handleLifecycleToastResult,
-  handleRetryResult,
   lifecycleActionVisibility,
 } = await import("./run-detail");
 mock.restore();
@@ -406,7 +405,7 @@ describe("RunDetail full-height child routes", () => {
   test("successful retry result navigates to the new run once", () => {
     const pushed: Array<{ message: string; tone?: string }> = [];
     const navigated: string[] = [];
-    const result: RetryMutationResult = {
+    const result: RunDetailActionResult = {
       intent: "retry",
       ok:     true,
       run:    {
@@ -415,10 +414,15 @@ describe("RunDetail full-height child routes", () => {
         retried_from: "run_1",
       },
     };
+    const initialState: LifecycleToastState = {
+      activeArchiveToastId: null,
+      lastProcessed:        { cancel: null, archive: null, unarchive: null, retry: null },
+    };
 
-    const next = handleRetryResult(
+    const next = handleLifecycleToastResult(
+      "retry",
       result,
-      null,
+      initialState,
       {
         push:    (toast) => {
           pushed.push(toast);
@@ -428,7 +432,8 @@ describe("RunDetail full-height child routes", () => {
       },
       (path) => navigated.push(path),
     );
-    const replay = handleRetryResult(
+    const replay = handleLifecycleToastResult(
+      "retry",
       result,
       next,
       {
@@ -441,8 +446,8 @@ describe("RunDetail full-height child routes", () => {
       (path) => navigated.push(path),
     );
 
-    expect(next).toBe(result);
-    expect(replay).toBe(result);
+    expect(next.lastProcessed.retry).toBe(result);
+    expect(replay).toBe(next);
     expect(pushed).toEqual([{ message: "Retry started." }]);
     expect(navigated).toEqual(["/runs/run_retry"]);
   });

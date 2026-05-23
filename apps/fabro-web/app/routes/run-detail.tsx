@@ -63,7 +63,6 @@ import {
   useUnarchiveRun,
   type LifecycleMutationResult,
   type PreviewMutationResult,
-  type RetryMutationResult,
 } from "../lib/mutations";
 import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
 import { queryKeys } from "../lib/query-keys";
@@ -80,7 +79,6 @@ import {
   deleteRun,
   isTerminalCancelledRun,
   mapError,
-  retryErrorMessage,
   type LifecycleAction,
   type LifecycleActionError,
 } from "../lib/run-actions";
@@ -152,7 +150,7 @@ type ToastApi = Pick<ReturnType<typeof useToast>, "push" | "dismiss">;
 
 const INITIAL_LIFECYCLE_TOAST_STATE: LifecycleToastState = {
   activeArchiveToastId: null,
-  lastProcessed: { cancel: null, archive: null, unarchive: null },
+  lastProcessed: { cancel: null, archive: null, unarchive: null, retry: null },
 };
 
 export function lifecycleActionVisibility(status: string | null | undefined) {
@@ -404,7 +402,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     })
     .filter((t) => (!t.demoOnly || demoMode) && (!t.requiresSandbox || hasSandbox));
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
-  const lastRetryResultRef = useRef<RetryMutationResult | null>(null);
   const steerBarRef = useRef<SteerBarHandle | null>(null);
   const now = useTickingNow(30_000);
   const fullHeight = matches.some(
@@ -455,9 +452,10 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   }, [dismiss, push, unarchiveMutation.data]);
 
   useEffect(() => {
-    lastRetryResultRef.current = handleRetryResult(
+    lifecycleToastStateRef.current = handleLifecycleToastResult(
+      "retry",
       retryMutation.data,
-      lastRetryResultRef.current,
+      lifecycleToastStateRef.current,
       { push, dismiss },
       navigate,
     );
@@ -816,6 +814,7 @@ export function handleLifecycleToastResult(
   result: RunDetailActionResult | undefined,
   state: LifecycleToastState,
   toastApi: ToastApi,
+  navigate?: (path: string) => void,
 ): LifecycleToastState {
   if (!result || result.intent !== intent) return state;
   if (state.lastProcessed[intent] === result) return state;
@@ -837,6 +836,12 @@ export function handleLifecycleToastResult(
     return nextState;
   }
 
+  if (intent === "retry") {
+    toastApi.push({ message: "Retry started." });
+    navigate?.(`/runs/${result.run.id}`);
+    return nextState;
+  }
+
   if (state.activeArchiveToastId) {
     toastApi.dismiss(state.activeArchiveToastId);
   }
@@ -850,22 +855,6 @@ export function handleLifecycleToastResult(
 
   toastApi.push({ message: "Run restored." });
   return { ...nextState, activeArchiveToastId: null };
-}
-
-export function handleRetryResult(
-  result: RetryMutationResult | undefined,
-  lastProcessed: RetryMutationResult | null,
-  toastApi: ToastApi,
-  navigate: (path: string) => void,
-): RetryMutationResult | null {
-  if (!result || lastProcessed === result) return lastProcessed;
-  if (result.ok === true) {
-    toastApi.push({ message: "Retry started." });
-    navigate(`/runs/${result.run.id}`);
-  } else {
-    toastApi.push({ message: retryErrorMessage(result.error), tone: "error" });
-  }
-  return result;
 }
 
 function ConnectMenu() {

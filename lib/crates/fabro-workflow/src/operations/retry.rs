@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use fabro_store::Database;
-use fabro_types::{FailureReason, RunId, RunProvenance, RunStatus};
+use fabro_types::{FailureReason, RunId, RunProvenance, RunSpec, RunStatus};
 
 use super::archive::ensure_not_archived;
 use super::run_store::map_open_run_error;
@@ -11,7 +11,7 @@ use crate::event::{self, Event};
 #[derive(Debug, Clone)]
 pub struct RetryRunInput {
     pub source_run_id: RunId,
-    pub new_run_id:    Option<RunId>,
+    pub new_run_id:    RunId,
     pub provenance:    Option<RunProvenance>,
     pub web_url:       Option<String>,
 }
@@ -27,6 +27,7 @@ pub async fn retry_run(
     input: &RetryRunInput,
 ) -> std::result::Result<RetryOutcome, Error> {
     let source_run_id = input.source_run_id;
+    let new_run_id = input.new_run_id;
     let source_store = store
         .open_run(&source_run_id)
         .await
@@ -39,10 +40,25 @@ pub async fn retry_run(
     ensure_not_archived(source.archived_at.is_some(), &source_run_id)?;
     ensure_retryable(source.status, &source_run_id)?;
 
-    let mut spec = source.spec.clone();
-    let new_run_id = input.new_run_id.unwrap_or_default();
-    spec.run_id = new_run_id;
-    spec.provenance = input.provenance.clone();
+    let title = source.title().into_owned();
+    let parent_id = source.parent_id;
+    let RunSpec {
+        run_id: _,
+        settings,
+        graph,
+        graph_source,
+        workflow_slug,
+        source_directory,
+        labels,
+        provenance: _,
+        manifest_blob,
+        definition_blob,
+        git,
+        fork_source_ref,
+    } = source.spec;
+
+    let settings = serde_json::to_value(&settings).map_err(|err| Error::engine(err.to_string()))?;
+    let graph = serde_json::to_value(&graph).map_err(|err| Error::engine(err.to_string()))?;
 
     let retry_store = store
         .create_run(&new_run_id)
@@ -50,32 +66,30 @@ pub async fn retry_run(
         .map_err(|err| Error::engine(err.to_string()))?;
 
     event::append_event(&retry_store, &new_run_id, &Event::RunCreated {
-        run_id:           new_run_id,
-        title:            Some(source.title().into_owned()),
-        settings:         serde_json::to_value(&spec.settings)
-            .map_err(|err| Error::engine(err.to_string()))?,
-        graph:            serde_json::to_value(&spec.graph)
-            .map_err(|err| Error::engine(err.to_string()))?,
-        workflow_source:  spec.graph_source.clone(),
-        workflow_config:  None,
-        labels:           spec.labels.clone().into_iter().collect::<BTreeMap<_, _>>(),
-        run_dir:          String::new(),
-        source_directory: spec.source_directory.clone(),
-        workflow_slug:    spec.workflow_slug.clone(),
-        db_prefix:        None,
-        provenance:       spec.provenance.clone(),
-        manifest_blob:    spec.manifest_blob,
-        git:              spec.git.clone(),
-        fork_source_ref:  spec.fork_source_ref.clone(),
-        retried_from:     Some(source_run_id),
-        parent_id:        source.parent_id,
-        web_url:          input.web_url.clone(),
+        run_id: new_run_id,
+        title: Some(title),
+        settings,
+        graph,
+        workflow_source: graph_source,
+        workflow_config: None,
+        labels: labels.into_iter().collect::<BTreeMap<_, _>>(),
+        run_dir: String::new(),
+        source_directory,
+        workflow_slug,
+        db_prefix: None,
+        provenance: input.provenance.clone(),
+        manifest_blob,
+        git,
+        fork_source_ref,
+        retried_from: Some(source_run_id),
+        parent_id,
+        web_url: input.web_url.clone(),
     })
     .await
     .map_err(|err| Error::engine(err.to_string()))?;
 
     event::append_event(&retry_store, &new_run_id, &Event::RunSubmitted {
-        definition_blob: spec.definition_blob,
+        definition_blob,
     })
     .await
     .map_err(|err| Error::engine(err.to_string()))?;
@@ -321,7 +335,7 @@ mod tests {
 
         let outcome = retry_run(&store, &RetryRunInput {
             source_run_id,
-            new_run_id: None,
+            new_run_id: RunId::new(),
             provenance: Some(provenance("retry-user")),
             web_url: Some("http://localhost:3000/runs/retry".to_string()),
         })
@@ -452,7 +466,7 @@ mod tests {
         for run_id in [succeeded, active, cancelled, archived] {
             let err = retry_run(&store, &RetryRunInput {
                 source_run_id: run_id,
-                new_run_id:    None,
+                new_run_id:    RunId::new(),
                 provenance:    None,
                 web_url:       None,
             })
@@ -470,7 +484,7 @@ mod tests {
         let store = memory_store();
         let err = retry_run(&store, &RetryRunInput {
             source_run_id: fixtures::RUN_1,
-            new_run_id:    None,
+            new_run_id:    RunId::new(),
             provenance:    None,
             web_url:       None,
         })

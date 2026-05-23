@@ -1,5 +1,5 @@
 import useSWRMutation from "swr/mutation";
-import { useSWRConfig } from "swr";
+import { useSWRConfig, type ScopedMutator } from "swr";
 import type {
   PreviewUrlResponse,
   Run,
@@ -48,18 +48,6 @@ export type LifecycleMutationResult =
       error: LifecycleActionError | null;
     };
 
-export type RetryMutationResult =
-  | {
-      intent: "retry";
-      ok: true;
-      run: Run;
-    }
-  | {
-      intent: "retry";
-      ok: false;
-      error: LifecycleActionError | null;
-    };
-
 export function usePreviewRun(id: string | undefined) {
   return useSWRMutation(
     id ? queryKeys.runs.preview(id) : null,
@@ -85,41 +73,19 @@ export function useUnarchiveRun(id: string | undefined) {
 }
 
 export function useRetryRun(id: string | undefined) {
-  const { mutate } = useSWRConfig();
-  return useSWRMutation(
-    id ? queryKeys.runs.retry(id) : null,
-    async (): Promise<RetryMutationResult> => {
-      if (!id) {
-        return { intent: "retry", ok: false, error: null };
-      }
-      try {
-        return { intent: "retry", ok: true, run: await retryRun(id) };
-      } catch (error) {
-        return {
-          intent: "retry",
-          ok: false,
-          error: isLifecycleActionError(error) ? error : null,
-        };
-      }
-    },
-    {
-      onSuccess: (result) => {
-        if (!id || !result.ok) return;
-        void mutate(queryKeys.runs.detail(id));
-        void mutate(queryKeys.runs.detail(result.run.id), result.run, { revalidate: false });
-        if (result.run.parent_id) {
-          void mutate(queryKeys.runs.children(result.run.parent_id));
-        }
-        mutateBoardRunCaches(mutate);
-      },
-    },
-  );
+  return useLifecycleMutation(id, "retry", retryRun, (run, mutate) => {
+    void mutate(queryKeys.runs.detail(run.id), run, { revalidate: false });
+    if (run.parent_id) {
+      void mutate(queryKeys.runs.children(run.parent_id));
+    }
+  });
 }
 
 function useLifecycleMutation(
   id: string | undefined,
   intent: LifecycleAction,
   action: (id: string) => Promise<Run>,
+  onSuccessExtra?: (run: Run, mutate: ScopedMutator) => void,
 ) {
   const { mutate } = useSWRConfig();
   const key = id ? queryKeys.runs[intent](id) : null;
@@ -142,9 +108,13 @@ function useLifecycleMutation(
     {
       onSuccess: (result) => {
         if (!id || !result.ok) return;
-        void mutate(queryKeys.runs.detail(id));
+        if (intent !== "retry") {
+          // Retry doesn't mutate the source run, so skip invalidating its detail/billing keys.
+          void mutate(queryKeys.runs.detail(id));
+          void mutate(queryKeys.runs.billing(id));
+        }
         mutateBoardRunCaches(mutate);
-        void mutate(queryKeys.runs.billing(id));
+        onSuccessExtra?.(result.run, mutate);
       },
     },
   );
