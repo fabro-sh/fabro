@@ -16,6 +16,7 @@ pub mod envfile;
 pub mod error;
 pub mod home;
 pub mod input_overrides;
+mod legacy_sandbox_migration;
 mod load;
 pub mod logging;
 pub mod parse;
