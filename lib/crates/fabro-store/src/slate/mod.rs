@@ -115,17 +115,14 @@ impl Database {
 
     async fn get_active_run(&self, run_id: &RunId) -> Option<RunDatabase> {
         let active_runs = self.active_runs.lock().await;
-        active_runs
-            .get(run_id)
-            .cloned()
-            .map(RunDatabase::from_inner)
+        active_run_from(&active_runs, run_id)
     }
 
-    async fn cache_active_run(&self, run_store: &RunDatabase) {
-        self.active_runs
-            .lock()
-            .await
-            .insert(run_store.run_id(), run_store.inner_arc());
+    fn cache_active_run(
+        active_runs: &mut HashMap<RunId, Arc<RunDatabaseInner>>,
+        run_store: &RunDatabase,
+    ) {
+        active_runs.insert(run_store.run_id(), run_store.inner_arc());
     }
 
     async fn remove_active_run(&self, run_id: &RunId) -> Option<RunDatabase> {
@@ -139,16 +136,19 @@ impl Database {
     pub async fn create_run(&self, run_id: &RunId) -> Result<RunDatabase> {
         self.warm_projection_cache().await?;
         let db = self.open_db().await?;
-        let run_exists = RunDatabase::has_any_events(&db, run_id).await?;
+        // Keep the active-writer miss and insert atomic. Otherwise concurrent
+        // callers can create independent writers with the same recovered seq.
+        let mut active_runs = self.active_runs.lock().await;
 
-        if let Some(active) = self.get_active_run(run_id).await {
-            if run_exists && !active.matches_run(run_id) {
+        if let Some(active) = active_run_from(&active_runs, run_id) {
+            if !active.matches_run(run_id) {
                 return Err(Error::RunAlreadyExists(run_id.to_string()));
             }
             self.catalog_index().await?.add(run_id).await?;
             return Ok(active);
         }
 
+        let run_exists = RunDatabase::has_any_events(&db, run_id).await?;
         if run_exists {
             return Err(Error::RunAlreadyExists(run_id.to_string()));
         }
@@ -156,14 +156,18 @@ impl Database {
         self.catalog_index().await?.add(run_id).await?;
         let run_store =
             RunDatabase::open_writer(*run_id, db, Arc::clone(&self.projection_cache)).await?;
-        self.cache_active_run(&run_store).await;
+        Self::cache_active_run(&mut active_runs, &run_store);
         Ok(run_store)
     }
 
     pub async fn open_run(&self, run_id: &RunId) -> Result<RunDatabase> {
         self.warm_projection_cache().await?;
         let db = self.open_db().await?;
-        if let Some(active) = self.get_active_run(run_id).await {
+        // Keep the active-writer miss and insert atomic. Otherwise concurrent
+        // callers can create independent writers with the same recovered seq.
+        let mut active_runs = self.active_runs.lock().await;
+
+        if let Some(active) = active_run_from(&active_runs, run_id) {
             if !active.matches_run(run_id) {
                 return Err(Error::Other(format!(
                     "active run cache mismatch for run_id {run_id:?}"
@@ -176,7 +180,7 @@ impl Database {
         }
         let run_store =
             RunDatabase::open_writer(*run_id, db, Arc::clone(&self.projection_cache)).await?;
-        self.cache_active_run(&run_store).await;
+        Self::cache_active_run(&mut active_runs, &run_store);
         Ok(run_store)
     }
 
@@ -451,6 +455,16 @@ pub(crate) fn normalize_base_prefix(prefix: String) -> String {
     } else {
         format!("{prefix}/")
     }
+}
+
+fn active_run_from(
+    active_runs: &HashMap<RunId, Arc<RunDatabaseInner>>,
+    run_id: &RunId,
+) -> Option<RunDatabase> {
+    active_runs
+        .get(run_id)
+        .cloned()
+        .map(RunDatabase::from_inner)
 }
 
 #[cfg(test)]
