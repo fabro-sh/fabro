@@ -13,11 +13,15 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { BoardColumn } from './board-column';
 
-export interface BoardColumnDefinition {
-    'id': BoardColumn;
-    'name': string;
-}
+/**
+ * Desired environment provider.
+ */
+
+export const EnvironmentProvider = {
+    LOCAL: 'local',
+    DOCKER: 'docker',
+    DAYTONA: 'daytona'
+} as const;
+
+export type EnvironmentProvider = typeof EnvironmentProvider[keyof typeof EnvironmentProvider];

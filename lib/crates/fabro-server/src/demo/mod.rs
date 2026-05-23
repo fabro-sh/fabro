@@ -57,28 +57,6 @@ pub(crate) async fn list_runs(
     paginated_response(runs::summaries(), &pagination)
 }
 
-pub(crate) async fn list_board_runs(
-    _auth: RequiredUser,
-    State(_state): State<Arc<AppState>>,
-    Query(pagination): Query<PaginationParams>,
-) -> Response {
-    let items = runs::summaries();
-    let limit = pagination.limit.clamp(1, 100) as usize;
-    let offset = pagination.offset as usize;
-    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
-    let has_more = data.len() > limit;
-    data.truncate(limit);
-    (
-        StatusCode::OK,
-        Json(json!({
-            "columns": runs::columns(),
-            "data": data,
-            "meta": { "has_more": has_more }
-        })),
-    )
-        .into_response()
-}
-
 pub(crate) async fn create_run_stub(
     _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
@@ -172,7 +150,10 @@ pub(crate) async fn get_stage_events(
         StatusCode::OK,
         Json(PaginatedEventList {
             data: matches,
-            meta: PaginationMeta { has_more },
+            meta: PaginationMeta {
+                has_more,
+                total: None,
+            },
         }),
     )
         .into_response()
@@ -1057,13 +1038,14 @@ mod runs {
 
     use fabro_api::types::*;
     use fabro_types::settings::run::{
-        DaytonaSettings, DaytonaSnapshotSettings, RunGoal, RunModelSettings, RunNamespace,
-        RunPrepareSettings, RunSandboxSettings,
+        EnvironmentImageSettings, EnvironmentLifecycleSettings, EnvironmentProvider,
+        EnvironmentResourcesSettings, EnvironmentSettings, RunEnvironmentSettings, RunGoal,
+        RunModelSettings, RunNamespace, RunPrepareSettings,
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
     use fabro_types::{
         PendingReason, RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin,
-        RunTimestamps, StageId, WorkflowRef, WorkflowSettings,
+        RunSize, RunTimestamps, StageId, WorkflowRef, WorkflowSettings,
     };
 
     use super::ts;
@@ -1167,11 +1149,13 @@ mod runs {
             billing: total_usd_micros.map(|total_usd_micros| RunBillingSummary {
                 total_usd_micros: Some(total_usd_micros),
             }),
+            size: RunSize::from_total_usd_micros(total_usd_micros),
             ask_fabro: Default::default(),
             diff: None,
             pull_request: None,
             current_question: None,
             superseded_by: None,
+            retried_from: None,
             links: RunLinks { web: None },
         }
     }
@@ -1231,39 +1215,6 @@ mod runs {
     fn duration_ms_from_secs(secs: f64) -> Option<u64> {
         let duration = Duration::try_from_secs_f64(secs).ok()?;
         duration.as_millis().try_into().ok()
-    }
-
-    pub(super) fn columns() -> Vec<BoardColumnDefinition> {
-        vec![
-            BoardColumnDefinition {
-                id:   BoardColumn::Pending,
-                name: "Pending".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Runnable,
-                name: "Runnable".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Initializing,
-                name: "Initializing".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Running,
-                name: "Running".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Blocked,
-                name: "Blocked".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Succeeded,
-                name: "Succeeded".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Failed,
-                name: "Failed".into(),
-            },
-        ]
     }
 
     pub(super) fn summaries() -> Vec<Run> {
@@ -1378,6 +1329,7 @@ mod runs {
                 Some(72_000),
                 None,
                 StageHandler::Command,
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("propose-changes", 1),
@@ -1386,6 +1338,7 @@ mod runs {
                 Some(154_000),
                 None,
                 StageHandler::Agent,
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("review-changes", 1),
@@ -1394,6 +1347,7 @@ mod runs {
                 Some(45_000),
                 None,
                 StageHandler::Agent,
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("apply-changes", 1),
@@ -1402,6 +1356,7 @@ mod runs {
                 Some(118_000),
                 None,
                 StageHandler::Command,
+                None,
             ),
             run_stage_from_stage_id(
                 &StageId::new("apply-changes", 2),
@@ -1410,6 +1365,7 @@ mod runs {
                 None,
                 None,
                 StageHandler::Command,
+                None,
             ),
         ]
     }
@@ -1456,6 +1412,8 @@ mod runs {
                     mode:     None,
                     provider: None,
                     model:    None,
+                    reasoning_effort: None,
+                    speed: None,
                 }),
             ),
             make_envelope(
@@ -1738,6 +1696,27 @@ mod runs {
     }
 
     pub(super) fn settings() -> serde_json::Value {
+        let environment = EnvironmentSettings {
+            provider: EnvironmentProvider::Daytona,
+            image: EnvironmentImageSettings {
+                reference:  Some("api-server-dev".into()),
+                dockerfile: None,
+            },
+            resources: EnvironmentResourcesSettings {
+                cpu:    Some(4),
+                memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
+                disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
+            },
+            lifecycle: EnvironmentLifecycleSettings {
+                preserve:         false,
+                stop_on_terminal: true,
+                auto_stop:        Some(
+                    "60m".parse().expect("hardcoded demo duration should parse"),
+                ),
+            },
+            labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
+            ..EnvironmentSettings::default()
+        };
         let settings = WorkflowSettings {
             project:  ProjectNamespace::default(),
             workflow: WorkflowNamespace {
@@ -1758,30 +1737,10 @@ mod runs {
                     commands:   vec!["bun install".into(), "bun run typecheck".into()],
                     timeout_ms: 120_000,
                 },
-                sandbox: RunSandboxSettings {
-                    provider:         "daytona".into(),
-                    preserve:         false,
-                    stop_on_terminal: true,
-                    devcontainer:     false,
-                    env:              HashMap::new(),
-                    docker:           None,
-                    daytona:          Some(DaytonaSettings {
-                        auto_stop_interval: Some(60),
-                        labels:             HashMap::from([(
-                            "project".to_string(),
-                            "api-server".to_string(),
-                        )]),
-                        volumes:            Vec::new(),
-                        snapshot:           Some(DaytonaSnapshotSettings {
-                            name:       "api-server-dev".into(),
-                            cpu:        Some(4),
-                            memory_gb:  Some(8),
-                            disk_gb:    Some(10),
-                            dockerfile: None,
-                        }),
-                        network:            None,
-                    }),
-                },
+                environment: RunEnvironmentSettings::from_environment(
+                    "api-server".to_string(),
+                    environment,
+                ),
                 ..RunNamespace::default()
             },
         };

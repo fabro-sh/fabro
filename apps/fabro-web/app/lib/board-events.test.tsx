@@ -8,7 +8,6 @@ import {
   createCrossTabSseCoordinator,
   type BroadcastChannelLike,
 } from "./cross-tab-sse";
-import { queryKeys } from "./query-keys";
 import type { Key } from "swr";
 import type { EventSourceLike } from "./sse";
 
@@ -71,7 +70,13 @@ describe("subscribeToBoardEvents", () => {
     source.emit({ event: "run.running" });
 
     expect(created).toEqual(["/api/v1/attach"]);
-    expect(keys).toEqual([queryKeys.boards.runs(false), queryKeys.boards.runs(true)]);
+    expect(keys).toHaveLength(1);
+    expect(typeof keys[0]).toBe("function");
+    const matcher = keys[0] as (k: unknown) => boolean;
+    expect(matcher(["runs", "all", { includeArchived: false }])).toBe(true);
+    expect(matcher(["runs", "all", { includeArchived: true }])).toBe(true);
+    expect(matcher(["runs", "page", {}])).toBe(true);
+    expect(matcher(["runs", "detail", "abc"])).toBe(false);
 
     firstCleanup();
     expect(source.closed).toBe(false);
@@ -101,7 +106,13 @@ describe("subscribeToBoardEvents", () => {
     source.emit({ event: "run.running" });
 
     expect(created).toEqual(["/api/v1/attach"]);
-    expect(keys).toEqual([queryKeys.boards.runs(false), queryKeys.boards.runs(true)]);
+    expect(keys).toHaveLength(1);
+    expect(typeof keys[0]).toBe("function");
+    const matcher = keys[0] as (k: unknown) => boolean;
+    expect(matcher(["runs", "all", { includeArchived: false }])).toBe(true);
+    expect(matcher(["runs", "all", { includeArchived: true }])).toBe(true);
+    expect(matcher(["runs", "page", {}])).toBe(true);
+    expect(matcher(["runs", "detail", "abc"])).toBe(false);
 
     firstCleanup();
     expect(source.closed).toBe(false);

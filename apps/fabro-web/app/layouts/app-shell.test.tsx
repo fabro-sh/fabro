@@ -2,22 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { getVisibleNavigation } from "./app-shell";
 
 describe("getVisibleNavigation", () => {
-  test("shows all nav items in demo mode with Automations first", () => {
+  test("shows Automations first in demo mode followed by Runs and Settings", () => {
     const items = getVisibleNavigation(true);
     const names = items.map((i) => i.name);
-    expect(names[0]).toBe("Automations");
-    expect(names).toContain("Chats");
-    expect(names).toContain("Runs");
-    expect(names).toContain("Insights");
-    expect(names).toContain("Settings");
+    expect(names).toEqual(["Automations", "Runs", "Settings"]);
   });
 
-  test("hides Automations, Chats, and Insights in production mode", () => {
+  test("hides Automations in production mode", () => {
     const items = getVisibleNavigation(false);
     const names = items.map((i) => i.name);
     expect(names).not.toContain("Automations");
-    expect(names).not.toContain("Chats");
-    expect(names).not.toContain("Insights");
     expect(names).toContain("Runs");
     expect(names).toContain("Settings");
   });

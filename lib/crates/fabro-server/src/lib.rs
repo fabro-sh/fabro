@@ -31,6 +31,7 @@ mod run_files;
 mod run_files_security;
 mod run_manifest;
 mod run_selector;
+mod run_title_generation;
 pub mod run_tool_manifest;
 pub mod security_headers;
 pub mod serve;

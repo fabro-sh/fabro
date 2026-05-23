@@ -16,7 +16,7 @@ mod generated {
 pub mod types {
     pub use fabro_model::{
         Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
-        Provider, ReasoningEffortFeature, Speed as BillingSpeed,
+        Provider, ReasoningEffort, ReasoningEffortFeature, Speed as BillingSpeed,
     };
     pub use fabro_types::settings::ServerNamespace;
     pub use fabro_types::settings::server::{
@@ -32,22 +32,25 @@ pub mod types {
         BlockedReason, FailureReason, PendingReason, RunControlAction, RunStatus, SuccessReason,
     };
     pub use fabro_types::{
+        ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
         AskFabro, AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats,
         DiffSummary, DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
         FailureSignature, GitContext, IdpIdentity, InterviewOption, InterviewQuestionRecord,
-        PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord, PairStartRequest,
-        PairStatus, PairTarget, PairTranscriptEntry, PairTranscriptResponse,
-        PendingInterviewRecord, PreRunPushOutcome, Principal, PullRequest, PullRequestDetails,
-        PullRequestDetailsStatus, PullRequestDetailsUnavailableReason, PullRequestLink,
-        PullRequestMeta, PullRequestResponse, QuestionType, RepositoryRef, Run, RunApproval,
-        RunApprovalState, RunClientProvenance, RunEvent, RunEventDetailContentKind,
-        RunEventDetailResponse, RunFailure, RunPairStatusResponse, RunProjection, RunProvenance,
-        RunRunnableSource, RunSandbox, RunSandboxRuntime, RunServerProvenance, SandboxDetails,
-        SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider,
-        SandboxResources, SandboxService, SandboxServiceListResponse, SandboxState,
-        SandboxTimestamps, SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId,
-        SessionMessage, SessionRecord, SessionStatus, SessionSummary, SessionTurn, StageCompletion,
-        StageHandler, StageOutcome, StageProjection, StageState, SystemActorKind, TurnId,
+        McpServerProjection, McpServerStatus, PairId, PairMessageId, PairMessageRecord,
+        PairMessageRequest, PairRecord, PairStartRequest, PairStatus, PairTarget,
+        PairTranscriptEntry, PairTranscriptResponse, PendingInterviewRecord, PreRunPushOutcome,
+        Principal, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
+        PullRequestDetailsUnavailableReason, PullRequestLink, PullRequestMeta, PullRequestResponse,
+        QuestionType, RepositoryRef, Run, RunApproval, RunApprovalState, RunClientProvenance,
+        RunEvent, RunEventDetailContentKind, RunEventDetailResponse, RunFailure,
+        RunPairStatusResponse, RunProjection, RunProvenance, RunRunnableSource, RunSandbox,
+        RunSandboxRuntime, RunServerProvenance, RunSize, SandboxDetails, SandboxNetwork,
+        SandboxNetworkPolicy, SandboxNetworkPolicyMode, SandboxProvider, SandboxResources,
+        SandboxService, SandboxServiceListResponse, SandboxState, SandboxTimestamps,
+        SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId, SessionMessage,
+        SessionRecord, SessionStatus, SessionSummary, SessionTurn, SkillsProjection,
+        StageCompletion, StageHandler, StageModelUsage, StageOutcome, StageProjection, StageState,
+        SubAgentProjection, SubAgentStatus, SystemActorKind, TodoListProjection, TurnId,
         UserPrincipal, WorkflowSettings,
     };
 

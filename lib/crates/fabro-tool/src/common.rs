@@ -342,11 +342,13 @@ mod tests {
             },
             timing:           None,
             billing:          None,
+            size:             fabro_types::RunSize::default(),
             ask_fabro:        fabro_types::AskFabro::default(),
             diff:             None,
             pull_request:     None,
             current_question: None,
             superseded_by:    None,
+            retried_from:     None,
             links:            RunLinks { web: None },
         };
 

@@ -37,6 +37,8 @@ pub struct RunCreatedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_source_ref:  Option<ForkSourceRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retried_from:     Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id:        Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_url:          Option<String>,

@@ -75,7 +75,7 @@ Node handlers execute tools (bash commands, file edits) inside a **sandbox**. Fa
 | `local` | Tools run directly on the host machine |
 | `daytona` | Tools run in a cloud VM with SSH access |
 
-The sandbox is configured per-run via CLI flags (`--sandbox docker`) or the run config TOML. See [Environments](/execution/environments) for details on each provider.
+Runs select a named environment via CLI flags (`--environment ci`) or run config TOML (`[run.environment] id = "ci"`). Fabro then creates a concrete sandbox from that environment. See [Environments](/execution/environments) for details.
 
 ## Events and observability
 

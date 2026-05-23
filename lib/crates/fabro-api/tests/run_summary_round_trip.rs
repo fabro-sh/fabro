@@ -5,12 +5,14 @@ use chrono::{TimeZone, Utc};
 use fabro_api::types::{
     RepositoryRef as ApiRepositoryRef, Run as ApiRun, RunApproval as ApiRunApproval,
     RunApprovalState as ApiRunApprovalState, RunRunnableSource as ApiRunRunnableSource,
+    RunSize as ApiRunSize,
 };
 use fabro_types::status::{RunStatus, SuccessReason};
 use fabro_types::{
     AskFabro, AskFabroUnavailableReason, DiffSummary, PullRequestLink, RepositoryProvider,
     RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary, RunId, RunLifecycle,
-    RunLinks, RunOrigin, RunRunnableSource, RunTimestamps, RunTiming, WorkflowRef,
+    RunLinks, RunOrigin, RunRunnableSource, RunSize, RunTimestamps, RunTiming, WorkflowRef,
+    fixtures,
 };
 use serde_json::json;
 
@@ -21,6 +23,7 @@ fn run_summary_reuses_domain_types() {
     assert_same_type::<ApiRunApproval, RunApproval>();
     assert_same_type::<ApiRunApprovalState, RunApprovalState>();
     assert_same_type::<ApiRunRunnableSource, RunRunnableSource>();
+    assert_same_type::<ApiRunSize, RunSize>();
 }
 
 #[test]
@@ -52,6 +55,7 @@ fn approval_json_matches_openapi_shape() {
         serde_json::to_value(RunRunnableSource::Approved).unwrap(),
         json!("approved")
     );
+    assert_eq!(serde_json::to_value(RunSize::Xs).unwrap(), json!("XS"));
 }
 
 #[test]
@@ -106,6 +110,7 @@ fn run_summary_json_matches_openapi_shape() {
         billing:          Some(RunBillingSummary {
             total_usd_micros: Some(123),
         }),
+        size:             RunSize::Xs,
         ask_fabro:        AskFabro {
             available:          false,
             unavailable_reason: Some(AskFabroUnavailableReason::SandboxNotReady),
@@ -123,6 +128,7 @@ fn run_summary_json_matches_openapi_shape() {
         }),
         current_question: None,
         superseded_by:    None,
+        retried_from:     Some(fixtures::RUN_2),
         links:            RunLinks { web: None },
     };
 
@@ -183,6 +189,7 @@ fn run_summary_json_matches_openapi_shape() {
             "billing": {
                 "total_usd_micros": 123
             },
+            "size": "XS",
             "ask_fabro": {
                 "available": false,
                 "unavailable_reason": "sandbox_not_ready",
@@ -201,6 +208,7 @@ fn run_summary_json_matches_openapi_shape() {
             },
             "current_question": null,
             "superseded_by": null,
+            "retried_from": fixtures::RUN_2.to_string(),
             "links": {
                 "web": null
             }
@@ -278,6 +286,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     assert_eq!(summary.billing, None);
     assert_eq!(summary.ask_fabro, AskFabro::default());
     assert_eq!(summary.superseded_by, None);
+    assert_eq!(summary.retried_from, None);
     assert_eq!(summary.diff, None);
     assert_eq!(summary.pull_request, None);
 }

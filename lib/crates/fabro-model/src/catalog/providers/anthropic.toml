@@ -140,6 +140,7 @@ knowledge_cutoff = "May 2025"
 estimated_output_tps = 100
 aliases = ["haiku", "claude-haiku"]
 probe = true
+small_default = true
 
 [models."claude-haiku-4-5".limits]
 context_window = 200000

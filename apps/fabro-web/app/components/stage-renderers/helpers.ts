@@ -215,12 +215,14 @@ export function parseFanInOutcome(events: EventEnvelope[], notes: string | null)
   for (const event of events) {
     if (event.event === "stage.prompt") {
       const mode = getString(event.properties ?? {}, "mode");
-      if (mode === "fan_in") hasReducerTranscript = true;
+      if (mode === "fan_in") {
+        hasReducerTranscript = true;
+        const model = getString(event.properties ?? {}, "model");
+        if (model) reducerModel = model;
+      }
     }
     if (event.event === "prompt.completed") {
       hasReducerTranscript = true;
-      const model = getString(event.properties ?? {}, "model");
-      if (model) reducerModel = model;
     }
   }
   return {

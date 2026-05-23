@@ -147,7 +147,7 @@ async fn ensure_server_running_with_bind(
         no_web: false,
         model: None,
         provider: None,
-        sandbox: None,
+        environment: None,
         max_concurrent_runs: server_max_concurrent_runs_override(),
         config: Some(config_path.to_path_buf()),
         #[cfg(debug_assertions)]
@@ -322,8 +322,8 @@ async fn execute_daemon(
     if serve_args.no_web {
         cmd.arg("--no-web");
     }
-    if let Some(ref sandbox) = serve_args.sandbox {
-        cmd.args(["--sandbox", &sandbox.to_string()]);
+    if let Some(ref environment) = serve_args.environment {
+        cmd.args(["--environment", environment]);
     }
     if let Some(max) = serve_args.max_concurrent_runs {
         cmd.args(["--max-concurrent-runs", &max.to_string()]);
@@ -589,7 +589,7 @@ destination = "{destination}"
             no_web: false,
             model: None,
             provider: None,
-            sandbox: None,
+            environment: None,
             max_concurrent_runs: None,
             config: Some(config_path.to_path_buf()),
             #[cfg(debug_assertions)]

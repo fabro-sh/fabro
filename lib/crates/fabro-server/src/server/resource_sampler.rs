@@ -138,7 +138,7 @@ impl ResourceSampler {
 
         let summaries = state
             .store
-            .list_runs(&fabro_store::ListRunsQuery::default())
+            .list_runs(&fabro_store::ListRunsQuery::default(), chrono::Utc::now())
             .await
             .context("failed to list runs for resource sampling")?;
         let storage_path = storage_path.to_path_buf();

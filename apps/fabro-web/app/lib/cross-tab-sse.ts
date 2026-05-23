@@ -1,11 +1,10 @@
-import type { Key } from "swr";
-
 import { queryKeys } from "./query-keys";
 import {
   createBrowserEventSource,
   type EventInvalidation,
   type EventPayload,
   type EventSourceLike,
+  type KeyOrMatcher,
   type MutateFn,
   sseKeyDedupeId,
 } from "./sse";
@@ -114,7 +113,7 @@ interface SubscribeOptions<TPayload extends EventPayload> {
   subscriptionKey: string;
   mutate: MutateFn;
   resolveInvalidation: (payload: TPayload) => EventInvalidation;
-  resyncKeys: () => Key[];
+  resyncKeys: () => KeyOrMatcher[];
   fallbackSubscribe: () => () => void;
   debounceMs?: number;
 }
@@ -134,11 +133,11 @@ interface LocalSubscription {
   refcount: number;
   mutators: Map<MutateFn, number>;
   fallbacks: Map<MutateFn, FallbackEntry>;
-  pendingKeys: Map<string, Key>;
+  pendingKeys: Map<string, KeyOrMatcher>;
   debounceTimer: ReturnType<typeof setTimeout> | null;
   debounceMs: number;
   resolveInvalidation: (payload: EventPayload) => EventInvalidation;
-  resyncKeys: () => Key[];
+  resyncKeys: () => KeyOrMatcher[];
 }
 
 interface LeaderState {
@@ -690,7 +689,7 @@ export class CrossTabSseCoordinator {
 
   private queueInvalidations(
     subscription: LocalSubscription,
-    keys: Key[],
+    keys: KeyOrMatcher[],
     { immediate = false }: { immediate?: boolean } = {},
   ) {
     if (keys.length === 0) return;

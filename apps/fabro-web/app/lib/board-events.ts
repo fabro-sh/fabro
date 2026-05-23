@@ -5,7 +5,7 @@ import {
   subscribeToCrossTabSse,
   type CrossTabSseCoordinator,
 } from "./cross-tab-sse";
-import { boardRunCacheKeys } from "./board-cache";
+import { runListCacheMatchers } from "./board-cache";
 import { queryKeys } from "./query-keys";
 import {
   createBrowserEventSource,
@@ -90,7 +90,7 @@ function boardInvalidation(payload: EventPayload) {
 }
 
 function boardRunKeys() {
-  return boardRunCacheKeys();
+  return runListCacheMatchers();
 }
 
 export function useBoardEvents() {

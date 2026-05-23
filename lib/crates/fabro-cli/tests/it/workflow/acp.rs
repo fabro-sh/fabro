@@ -40,7 +40,7 @@ fn acp_backend_workflow() {
 
     context
         .run_cmd()
-        .args(["--auto-approve", "--sandbox", "local"])
+        .args(["--auto-approve", "--environment", "local"])
         .arg(&workflow)
         .assert()
         .success();
@@ -78,10 +78,12 @@ fn acp_backend_workflow() {
     assert!(
         stages.values().any(|stage| {
             stage["provider_used"]["mode"] == "acp"
-                && stage["provider_used"]["config_name"] == "fake"
-                && stage["provider_used"].get("provider").is_none()
+                && stage["provider_used"]["provider"] == "acp"
+                && stage["provider_used"]["model"] == "fake"
+                && stage["provider_used"].get("reasoning_effort").is_none()
+                && stage["provider_used"].get("speed").is_none()
         }),
-        "run projection should include ACP process metadata without provider: {stages:?}"
+        "run projection should include ACP model usage metadata: {stages:?}"
     );
 }
 
@@ -119,7 +121,7 @@ fn acp_backend_does_not_inject_registered_provider_credentials() {
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("OPENAI_API_KEY")
         .env_remove("GEMINI_API_KEY")
-        .args(["--auto-approve", "--sandbox", "local"])
+        .args(["--auto-approve", "--environment", "local"])
         .arg(&workflow)
         .assert()
         .success();
@@ -193,7 +195,7 @@ include = ["verification-artifacts/**"]
 
     context
         .run_cmd()
-        .args(["--auto-approve", "--sandbox", "local"])
+        .args(["--auto-approve", "--environment", "local"])
         .arg(context.temp_dir.join("run.toml"))
         .assert()
         .success();

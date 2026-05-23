@@ -15,19 +15,16 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { BoardColumnDefinition } from './board-column-definition';
+import type { AgentMcpToolSummary } from './agent-mcp-tool-summary';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PaginationMeta } from './pagination-meta';
+import type { McpServerStatusFailed } from './mcp-server-status-failed';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { Run } from './run';
+import type { McpServerStatusReady } from './mcp-server-status-ready';
 
 /**
- * Paginated list of board runs with shared canonical fields plus board metadata.
+ * @type McpServerStatus
+ * Projected MCP server readiness status.
  */
-export interface PaginatedBoardRunList {
-    'columns': Array<BoardColumnDefinition>;
-    'data': Array<Run>;
-    'meta': PaginationMeta;
-}
+export type McpServerStatus = { kind: 'failed' } & McpServerStatusFailed | { kind: 'ready' } & McpServerStatusReady;

@@ -30,7 +30,7 @@ fn local_run_lifecycle() {
         .run_cmd()
         .args([
             "--auto-approve",
-            "--sandbox",
+            "--environment",
             "local",
             fixture("command_pipeline.fabro").to_str().unwrap(),
         ])

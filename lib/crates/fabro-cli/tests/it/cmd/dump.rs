@@ -103,7 +103,7 @@ fn dump_exports_large_command_output_backed_by_blob_refs() {
     let mut run_cmd = context.run_cmd();
     run_cmd.current_dir(&context.temp_dir);
     run_cmd.timeout(Duration::from_secs(30));
-    run_cmd.args(["--run-id", run_id.as_str(), "--sandbox", "local"]);
+    run_cmd.args(["--run-id", run_id.as_str(), "--environment", "local"]);
     run_cmd.arg(&workflow);
     let run_output = run_cmd.output().expect("command should execute");
     assert!(
@@ -177,8 +177,13 @@ graph = "mixed-export.fabro"
 [run]
 goal = "Generate oversized command output and artifacts"
 
-[run.sandbox]
+[run.environment]
+id = "local"
+
+[environments.local]
 provider = "local"
+
+[environments.local.lifecycle]
 preserve = true
 
 [run.artifacts]
@@ -194,7 +199,7 @@ include = ["assets/**"]
     run_cmd.args([
         "--run-id",
         run_id.as_str(),
-        "--sandbox",
+        "--environment",
         "local",
         "run.toml",
     ]);

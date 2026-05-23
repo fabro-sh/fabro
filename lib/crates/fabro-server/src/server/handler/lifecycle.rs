@@ -1,15 +1,18 @@
 use std::sync::Arc;
 
+use chrono::Utc;
+
 use super::super::{
-    ApiError, AppState, DenyRunRequest, FailureReason, ForkRequest, ForkResponse, IntoResponse,
-    Json, Path, PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser, Response,
-    RewindRequest, RewindResponse, Router, RunAnswerTransport, RunControlAction, RunExecutionMode,
-    RunId, RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode, Storage,
-    TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
+    ApiError, AppState, DenyRunRequest, FailureReason, ForkRequest, ForkResponse, HeaderMap,
+    IntoResponse, Json, Path, PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser,
+    Response, RewindRequest, RewindResponse, Router, RunAnswerTransport, RunControlAction,
+    RunExecutionMode, RunId, RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode,
+    Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
     clear_live_run_state, durable_run_status, get, load_pending_control, managed_run, operations,
     parse_run_id_path, persist_cancelled_run_status, post, reject_if_archived, sleep,
     update_live_run_from_event, workflow_event,
 };
+use super::runs::run_provenance;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -21,13 +24,14 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/unpause", post(unpause_run))
         .route("/runs/{id}/archive", post(archive_run))
         .route("/runs/{id}/rewind", post(rewind_run))
+        .route("/runs/{id}/retry", post(retry_run))
         .route("/runs/{id}/fork", post(fork_run))
         .route("/runs/{id}/timeline", get(run_timeline))
         .route("/runs/{id}/unarchive", post(unarchive_run))
 }
 
 async fn run_response(state: &AppState, id: RunId, status: StatusCode) -> Response {
-    match state.store.get_cached_summary(&id).await {
+    match state.store.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(summary)) => {
             (status, Json(state.decorate_run_summary(summary).await)).into_response()
         }
@@ -48,6 +52,18 @@ async fn start_run(
     }
     let resume = body.is_some_and(|Json(req)| req.resume);
 
+    match queue_run_start(state.as_ref(), id, resume, actor).await {
+        Ok(()) => run_response(state.as_ref(), id, StatusCode::OK).await,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn queue_run_start(
+    state: &AppState,
+    id: RunId,
+    resume: bool,
+    actor: Principal,
+) -> Result<(), ApiError> {
     {
         let runs = state.runs.lock().expect("runs lock poisoned");
         if let Some(managed_run) = runs.get(&id) {
@@ -60,7 +76,7 @@ async fn start_run(
                     | RunStatus::Blocked { .. }
                     | RunStatus::Paused { .. }
             ) {
-                return ApiError::new(
+                return Err(ApiError::new(
                     StatusCode::CONFLICT,
                     if resume {
                         "an engine process is still running for this run — cannot resume"
@@ -72,39 +88,38 @@ async fn start_run(
                     } else {
                         "an engine process is still running for this run — cannot start"
                     },
-                )
-                .into_response();
+                ));
             }
         }
     }
 
     let Ok(run_store) = state.store.open_run(&id).await else {
-        return ApiError::not_found("Run not found.").into_response();
+        return Err(ApiError::not_found("Run not found."));
     };
     let run_state = match run_store.state().await {
         Ok(state) => state,
         Err(err) => {
-            return ApiError::new(
+            return Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to load run state: {err}"),
-            )
-            .into_response();
+            ));
         }
     };
 
     if resume {
         if run_state.current_checkpoint().is_none() {
-            return ApiError::new(StatusCode::CONFLICT, "no checkpoint to resume from")
-                .into_response();
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "no checkpoint to resume from",
+            ));
         }
     } else {
         let status = run_state.status;
         if !matches!(status, RunStatus::Submitted) {
-            return ApiError::new(
+            return Err(ApiError::new(
                 StatusCode::CONFLICT,
                 format!("cannot start run: status is {status}, expected submitted"),
-            )
-            .into_response();
+            ));
         }
     }
 
@@ -115,8 +130,8 @@ async fn start_run(
     let dot_source = run_state.spec.graph_source.clone().unwrap_or_default();
     let approval_required = !resume
         && matches!(
-            actor,
-            Principal::Worker { run_id } if run_state.parent_id == Some(run_id)
+            &actor,
+            Principal::Worker { run_id } if run_state.parent_id == Some(*run_id)
         );
     if let Err(err) =
         workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunStartRequested {
@@ -125,7 +140,10 @@ async fn start_run(
         })
         .await
     {
-        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        ));
     }
     let (next_status, next_event) = if approval_required {
         (
@@ -144,7 +162,10 @@ async fn start_run(
         })
     };
     if let Err(err) = workflow_event::append_event(&run_store, &id, &next_event).await {
-        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        ));
     }
 
     {
@@ -168,7 +189,7 @@ async fn start_run(
     if !approval_required {
         state.scheduler_notify.notify_one();
     }
-    run_response(state.as_ref(), id, StatusCode::OK).await
+    Ok(())
 }
 
 async fn approve_run(
@@ -756,6 +777,36 @@ async fn fork_run(
             }),
         )
             .into_response(),
+        Err(err) => workflow_operation_error_response(err),
+    }
+}
+
+async fn retry_run(
+    RequiredUser(user): RequiredUser,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let actor = Principal::User(user);
+    let new_run_id = RunId::new();
+    let input = operations::RetryRunInput {
+        source_run_id: id,
+        new_run_id,
+        provenance: Some(run_provenance(&headers, &actor)),
+        web_url: state.run_web_url(&new_run_id),
+    };
+    match Box::pin(operations::retry_run(&state.store, &input)).await {
+        Ok(outcome) => {
+            let new_run_id = outcome.new_run_id;
+            if let Err(err) = queue_run_start(state.as_ref(), new_run_id, false, actor).await {
+                return err.into_response();
+            }
+            run_response(state.as_ref(), new_run_id, StatusCode::CREATED).await
+        }
         Err(err) => workflow_operation_error_response(err),
     }
 }
