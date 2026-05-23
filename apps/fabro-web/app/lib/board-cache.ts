@@ -1,15 +1,18 @@
-import type { Key } from "swr";
+import type { KeyMatcher, KeyOrMatcher } from "./sse";
 
-import { queryKeys } from "./query-keys";
+type Mutator = (key: KeyOrMatcher) => unknown;
 
-type MutateBoardRuns = (key: Key) => unknown;
+const isRunListKey: KeyMatcher = (key) =>
+  Array.isArray(key) &&
+  key[0] === "runs" &&
+  (key[1] === "all" || key[1] === "page");
 
-export function boardRunCacheKeys(): Key[] {
-  return [queryKeys.boards.runs(false), queryKeys.boards.runs(true)];
+export function runListCacheMatchers(): KeyOrMatcher[] {
+  return [isRunListKey];
 }
 
-export function mutateBoardRunCaches(mutate: MutateBoardRuns) {
-  for (const key of boardRunCacheKeys()) {
-    void mutate(key);
+export function mutateRunListCaches(mutate: Mutator) {
+  for (const matcher of runListCacheMatchers()) {
+    void mutate(matcher);
   }
 }

@@ -41,7 +41,7 @@ All IDs reference the origin document, but this plan is the source of truth for 
 - **R3** Do not expose checkpoint operations (resume, rewind, fork) or HITL question answering in this pass.
 - **R4** Do not expose these actions on board kanban cards or as bulk selection in this pass.
 - **R5** State-aware visibility:
-  cancel visible for `submitted|queued|starting|running|paused` as the primary affordance; archive for terminal non-archived runs; unarchive for archived runs.
+  cancel visible for `submitted|runnable|starting|running|paused` as the primary affordance; archive for terminal non-archived runs; unarchive for archived runs.
 - **R6** Blocked runs hide the primary cancel button and instead show an inline notice with question text plus CLI guidance. Cancel remains reachable through a de-emphasized secondary affordance inside that notice.
 - **R7** The detail page subscribes to the run's SSE stream so affordances update live without a manual refresh.
 - **R8** Cancel fires immediately. There is no client-side pending timer, no undo window, and no pre-fire `GET /runs/{id}` recheck in this plan.
@@ -77,7 +77,7 @@ All IDs reference the origin document, but this plan is the source of truth for 
 - **API helpers:** `apps/fabro-web/app/api.ts` exports both `apiJson` and `apiFetch`. `apiJson` discards the response body on non-2xx. That is incompatible with lifecycle actions because these flows need the server error envelope for 404/409 handling. Lifecycle mutation helpers in this plan therefore use `apiFetch` and parse the body manually.
 - **Status taxonomy:** `apps/fabro-web/app/data/runs.ts` exports `RunStatus`, `runStatusDisplay`, and `mapRunSummaryToRunItem`. Use those status strings rather than open-coding new ones.
 - **Blocked question data:** `GET /api/v1/runs/{id}/questions` returns a `PaginatedApiQuestionList` in `docs/api-reference/fabro-api.yaml`. This plan intentionally shows the **first** pending question's `text` when the run is blocked; the blocked notice is informational only and does not attempt multi-question navigation or answering.
-- **Server cancel semantics:** for `submitted`/`queued`, cancel may synchronously return a terminal failed/cancelled state; for `starting`/`running`/`blocked`/`paused`, the response may keep the same lifecycle status and the eventual transition lands later via SSE.
+- **Server cancel semantics:** for `submitted`/`runnable`, cancel may synchronously return a terminal failed/cancelled state; for `starting`/`running`/`blocked`/`paused`, the response may keep the same lifecycle status and the eventual transition lands later via SSE.
 - **Per-run `/attach` stream limitations:** the stream closes on terminal run events and has a few other silent-termination paths. This plan accepts the existing already-terminal stale-tab limitation for archive/unarchive instead of changing the server subscription contract.
 
 ### Institutional Learnings
@@ -409,7 +409,7 @@ graph TB
 - `SECONDARY_BUTTON_CLASS` from `apps/fabro-web/app/components/ui.tsx`
 
 **Test scenarios:**
-- Cancel renders for `submitted`, `queued`, `starting`, `running`, and `paused`.
+- Cancel renders for `submitted`, `runnable`, `starting`, `running`, and `paused`.
 - Cancel is hidden for `blocked`, `succeeded`, `failed`, `dead`, and `archived`.
 - Submitting cancel sends `intent=cancel` through the route action.
 - While the cancel submission is pending, only that button disables.

@@ -57,28 +57,6 @@ pub(crate) async fn list_runs(
     paginated_response(runs::summaries(), &pagination)
 }
 
-pub(crate) async fn list_board_runs(
-    _auth: RequiredUser,
-    State(_state): State<Arc<AppState>>,
-    Query(pagination): Query<PaginationParams>,
-) -> Response {
-    let items = runs::summaries();
-    let limit = pagination.limit.clamp(1, 100) as usize;
-    let offset = pagination.offset as usize;
-    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
-    let has_more = data.len() > limit;
-    data.truncate(limit);
-    (
-        StatusCode::OK,
-        Json(json!({
-            "columns": runs::columns(),
-            "data": data,
-            "meta": { "has_more": has_more }
-        })),
-    )
-        .into_response()
-}
-
 pub(crate) async fn create_run_stub(
     _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,
@@ -128,7 +106,7 @@ pub(crate) async fn start_run_stub(
     (
         StatusCode::OK,
         Json(
-            serde_json::json!({"id": id, "status": "queued", "created_at": "2026-03-06T14:30:00Z"}),
+            serde_json::json!({"id": id, "status": "runnable", "created_at": "2026-03-06T14:30:00Z"}),
         ),
     )
         .into_response()
@@ -172,7 +150,10 @@ pub(crate) async fn get_stage_events(
         StatusCode::OK,
         Json(PaginatedEventList {
             data: matches,
-            meta: PaginationMeta { has_more },
+            meta: PaginationMeta {
+                has_more,
+                total: None,
+            },
         }),
     )
         .into_response()
@@ -531,6 +512,22 @@ pub(crate) async fn cancel_stub(
         Json(serde_json::json!({
             "id": id,
             "status": { "kind": "failed", "reason": "cancelled" },
+            "created_at": "2026-03-06T14:30:00Z"
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn deny_run_stub(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "id": id,
+            "status": { "kind": "failed", "reason": "approval_denied" },
             "created_at": "2026-03-06T14:30:00Z"
         })),
     )
@@ -1047,8 +1044,8 @@ mod runs {
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
     use fabro_types::{
-        RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin, RunTimestamps,
-        StageId, WorkflowRef, WorkflowSettings,
+        PendingReason, RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin,
+        RunSize, RunTimestamps, StageId, WorkflowRef, WorkflowSettings,
     };
 
     use super::ts;
@@ -1132,6 +1129,7 @@ mod runs {
             lifecycle: RunLifecycle {
                 status: parse_run_status(status, status_reason)
                     .unwrap_or_else(|| panic!("invalid demo run status: {status}")),
+                approval: None,
                 pending_control,
                 queue_position: None,
                 error: None,
@@ -1151,11 +1149,13 @@ mod runs {
             billing: total_usd_micros.map(|total_usd_micros| RunBillingSummary {
                 total_usd_micros: Some(total_usd_micros),
             }),
+            size: RunSize::from_total_usd_micros(total_usd_micros),
             ask_fabro: Default::default(),
             diff: None,
             pull_request: None,
             current_question: None,
             superseded_by: None,
+            retried_from: None,
             links: RunLinks { web: None },
         }
     }
@@ -1163,7 +1163,10 @@ mod runs {
     fn parse_run_status(status: &str, status_reason: Option<&str>) -> Option<RunStatus> {
         match status {
             "submitted" => Some(RunStatus::Submitted),
-            "queued" => Some(RunStatus::Queued),
+            "pending" => Some(RunStatus::Pending {
+                reason: PendingReason::ApprovalRequired,
+            }),
+            "runnable" => Some(RunStatus::Runnable),
             "starting" => Some(RunStatus::Starting),
             "running" => Some(RunStatus::Running),
             "blocked" => Some(RunStatus::Blocked {
@@ -1198,6 +1201,7 @@ mod runs {
         match reason {
             "workflow_error" => Some(FailureReason::WorkflowError),
             "cancelled" => Some(FailureReason::Cancelled),
+            "approval_denied" => Some(FailureReason::ApprovalDenied),
             "terminated" => Some(FailureReason::Terminated),
             "transient_infra" => Some(FailureReason::TransientInfra),
             "budget_exhausted" => Some(FailureReason::BudgetExhausted),
@@ -1211,35 +1215,6 @@ mod runs {
     fn duration_ms_from_secs(secs: f64) -> Option<u64> {
         let duration = Duration::try_from_secs_f64(secs).ok()?;
         duration.as_millis().try_into().ok()
-    }
-
-    pub(super) fn columns() -> Vec<BoardColumnDefinition> {
-        vec![
-            BoardColumnDefinition {
-                id:   BoardColumn::Queued,
-                name: "Queued".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Initializing,
-                name: "Initializing".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Running,
-                name: "Running".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Blocked,
-                name: "Blocked".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Succeeded,
-                name: "Succeeded".into(),
-            },
-            BoardColumnDefinition {
-                id:   BoardColumn::Failed,
-                name: "Failed".into(),
-            },
-        ]
     }
 
     pub(super) fn summaries() -> Vec<Run> {
@@ -1334,7 +1309,7 @@ mod runs {
                 "implement",
                 "Implement",
                 "Add audit log retention policy",
-                "queued",
+                "runnable",
                 "2026-03-06T14:35:00Z",
                 None,
                 None,

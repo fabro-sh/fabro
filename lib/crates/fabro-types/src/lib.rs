@@ -98,7 +98,7 @@ pub use run_event::{
     AgentMcpToolSummary, AgentMemoryFileProps, AgentSkillActivationSource, AgentSkillSummary,
     EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
     RunEvent, RunNoticeCode, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason,
-    SessionCapability, TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps,
+    RunRunnableSource, SessionCapability, TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps,
 };
 pub use run_failure::RunFailure;
 pub use run_id::{RunId, fixtures};
@@ -109,8 +109,9 @@ pub use run_projection::{
 };
 pub use run_sandbox::{RunSandbox, RunSandboxRuntime};
 pub use run_summary::{
-    AskFabro, AskFabroUnavailableReason, AutomationRef, Run, RunBillingSummary, RunError,
-    RunLifecycle, RunLinks, RunModel, RunOrigin, RunOriginKind, RunTimestamps, WorkflowRef,
+    AskFabro, AskFabroUnavailableReason, AutomationRef, Run, RunApproval, RunApprovalState,
+    RunBillingSummary, RunError, RunLifecycle, RunLinks, RunModel, RunOrigin, RunOriginKind,
+    RunSize, RunTimestamps, WorkflowRef,
 };
 pub use run_title::{
     MAX_RUN_TITLE_CHARS, RunTitleError, infer_run_title, normalize_explicit_run_title,
@@ -134,9 +135,8 @@ pub use stage_handler::StageHandler;
 pub use stage_id::{InvalidStageVisit, ParallelBranchId, StageId};
 pub use start::StartRecord;
 pub use status::{
-    BlockedReason, FailureReason, InvalidTransition, ParseFailureReasonError,
-    ParseSuccessReasonError, RunControlAction, RunStatus, RunStatusKind, SuccessReason,
-    TerminalStatus,
+    BlockedReason, FailureReason, InvalidTransition, PendingReason, RunControlAction, RunStatus,
+    RunStatusKind, SuccessReason, TerminalStatus,
 };
 pub use steering::SteeringMessage;
 pub use timing::{RunTiming, StageTiming};

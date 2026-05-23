@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{BilledTokenCounts, ExecOutputTail, RunNoticeLevel};
-use crate::status::{BlockedReason, SuccessReason};
+use crate::status::{BlockedReason, PendingReason, SuccessReason};
 use crate::{
     DiffSummary, ForkSourceRef, GitContext, Graph, PairId, PairTarget, RunBlobId, RunControlAction,
     RunFailure, RunId, RunProvenance, RunTiming, WorkflowSettings,
@@ -36,6 +36,8 @@ pub struct RunCreatedProps {
     pub git:              Option<GitContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_source_ref:  Option<ForkSourceRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retried_from:     Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id:        Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -135,6 +137,54 @@ pub struct RunPairFailedProps {
 pub struct RunSubmittedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition_blob: Option<RunBlobId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunStartRequestedProps {
+    pub resume: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunPendingProps {
+    pub reason: PendingReason,
+}
+
+#[allow(
+    clippy::empty_structs_with_brackets,
+    reason = "This type must serialize as {} rather than null."
+)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RunApprovedProps {}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunDeniedProps {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum RunRunnableSource {
+    StartRequested,
+    Approved,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunRunnableProps {
+    pub source: RunRunnableSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

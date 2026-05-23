@@ -22,4 +22,8 @@ export interface PaginationMeta {
      * Whether additional pages of results are available.
      */
     'has_more': boolean;
+    /**
+     * Total number of items matching the current filters. Optional — only populated by endpoints that compute the full count cheaply (e.g. in-memory filtering). When omitted, clients should rely on `has_more` and cursor through pages.
+     */
+    'total'?: number;
 }

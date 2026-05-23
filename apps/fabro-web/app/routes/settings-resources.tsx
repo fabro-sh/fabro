@@ -67,7 +67,7 @@ function RunsPanel() {
     <Panel title="Runs">
       <Row
         title="Active"
-        help="Runs currently queued or executing against the scheduler ceiling."
+        help="Runs currently pending, runnable, or executing against the scheduler ceiling."
       >
         <UsageMeter percent={percent} label={`${active} / ${max} active`} />
       </Row>

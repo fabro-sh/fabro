@@ -1,6 +1,8 @@
 import type { Key, MutatorCallback } from "swr";
 
-export type MutateFn = (key: Key) => ReturnType<MutatorCallback>;
+export type KeyMatcher = (key: Key) => boolean;
+export type KeyOrMatcher = Key | KeyMatcher;
+export type MutateFn = (key: KeyOrMatcher) => ReturnType<MutatorCallback>;
 
 export interface EventPayload {
   event?: string;
@@ -13,7 +15,7 @@ export interface EventSourceLike {
 }
 
 export interface EventInvalidation {
-  keys: Key[];
+  keys: KeyOrMatcher[];
   close?: boolean;
   immediate?: boolean;
 }
@@ -25,12 +27,12 @@ export interface SharedEventSubscription {
   refcount: number;
   mutators: Map<MutateFn, number>;
   resolvers: Map<symbol, EventResolver>;
-  pendingKeys: Map<string, Key>;
+  pendingKeys: Map<string, KeyOrMatcher>;
   debounceTimer: ReturnType<typeof setTimeout> | null;
 }
 
-export function sseKeyDedupeId(key: Key): string {
-  return stringifyKeyValue(key);
+export function sseKeyDedupeId(key: KeyOrMatcher): string {
+  return typeof key === "function" ? `fn:${key.toString()}` : stringifyKeyValue(key);
 }
 
 export function createBrowserEventSource(url: string): EventSourceLike {
@@ -78,7 +80,7 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
         return;
       }
 
-      const keys = new Map<string, Key>();
+      const keys = new Map<string, KeyOrMatcher>();
       let close = false;
       let immediate = false;
       for (const resolver of current.resolvers.values()) {
@@ -128,7 +130,7 @@ export function subscribeToSharedEventSource<TPayload extends EventPayload>({
 
 function queueInvalidations(
   subscription: SharedEventSubscription,
-  keys: Key[],
+  keys: KeyOrMatcher[],
   {
     debounceMs,
     immediate,

@@ -2882,21 +2882,52 @@ async fn create_durable_run_with_events(
     let has_starting = events
         .iter()
         .any(|event| matches!(event, workflow_event::Event::RunStarting));
+    let has_runnable = events
+        .iter()
+        .any(|event| matches!(event, workflow_event::Event::RunRunnable { .. }));
     let has_running = events
         .iter()
         .any(|event| matches!(event, workflow_event::Event::RunRunning));
+    let mut inserted_runnable = has_runnable;
+    let mut inserted_starting = has_starting;
     for event in events {
-        if needs_running
-            && !has_starting
+        if !inserted_runnable
             && matches!(
                 event,
-                workflow_event::Event::WorkflowRunCompleted { .. }
+                workflow_event::Event::RunStarting
+                    | workflow_event::Event::RunRunning
+                    | workflow_event::Event::RunBlocked { .. }
+                    | workflow_event::Event::RunPaused
+                    | workflow_event::Event::WorkflowRunCompleted { .. }
+                    | workflow_event::Event::WorkflowRunFailed { .. }
+            )
+        {
+            workflow_event::append_event(
+                &run_store,
+                &run_id,
+                &workflow_event::Event::RunRunnable {
+                    source: fabro_types::RunRunnableSource::StartRequested,
+                    actor:  None,
+                },
+            )
+            .await
+            .unwrap();
+            inserted_runnable = true;
+        }
+        if !inserted_starting
+            && matches!(
+                event,
+                workflow_event::Event::RunRunning
+                    | workflow_event::Event::RunBlocked { .. }
+                    | workflow_event::Event::RunPaused
+                    | workflow_event::Event::WorkflowRunCompleted { .. }
                     | workflow_event::Event::WorkflowRunFailed { .. }
             )
         {
             workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
                 .await
                 .unwrap();
+            inserted_starting = true;
         }
         if needs_running
             && !has_running
@@ -2933,6 +2964,7 @@ async fn append_default_run_created(run_store: &fabro_store::RunDatabase, run_id
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
+        retried_from: None,
         parent_id: None,
         web_url: None,
     })
@@ -2977,6 +3009,7 @@ async fn create_slack_notification_run(
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
+        retried_from: None,
         parent_id: None,
         web_url: None,
     })
@@ -3138,6 +3171,12 @@ channel = "#deploys"
         Some("Deploy workflow"),
     );
     let run_store = create_slack_notification_run(&state, run_id, settings, "deploy", None).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -3196,6 +3235,12 @@ channel = "#deploys"
         Some("Deploy workflow"),
     );
     let run_store = create_slack_notification_run(&state, run_id, settings, "deploy", None).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -3352,6 +3397,12 @@ channel = "#deploys"
         Some("Deploy workflow"),
     );
     let run_store = create_slack_notification_run(&state, run_id, settings, "deploy", None).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -3899,6 +3950,7 @@ async fn list_run_stages_distinguishes_visits() {
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         },
@@ -4651,6 +4703,12 @@ async fn append_raw_run_event(
 async fn create_unreadable_durable_run(state: &Arc<AppState>, run_id: RunId) {
     let run_store = state.store.create_run(&run_id).await.unwrap();
     append_default_run_created(&run_store, run_id).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -4799,14 +4857,14 @@ async fn pr_test_app_with_completed_run(
     repo_origin_url: Option<&str>,
 ) -> (Arc<AppState>, Router, RunId) {
     let (state, app, run_id) = pr_test_app(token, github_api_base_url);
-    create_completed_run_ready_for_pull_request(
+    Box::pin(create_completed_run_ready_for_pull_request(
         &state,
         run_id,
         repo_origin_url,
         Some("main"),
         Some("fabro/run/42"),
         "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
-    )
+    ))
     .await;
     (state, app, run_id)
 }
@@ -4899,6 +4957,7 @@ async fn create_completed_run_ready_for_pull_request(
             manifest_blob: None,
             git,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         },
@@ -6565,14 +6624,14 @@ async fn create_run_pull_request_creates_and_persists_record() {
         .unwrap();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
-    create_completed_run_ready_for_pull_request(
+    Box::pin(create_completed_run_ready_for_pull_request(
         &state,
         run_id,
         Some("git@github.com:acme/widgets.git"),
         Some("main"),
         Some("fabro/run/42"),
         "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
-    )
+    ))
     .await;
 
     let response = app
@@ -6658,7 +6717,7 @@ async fn create_run_pull_request_returns_conflict_when_record_exists() {
 
 #[tokio::test]
 async fn create_run_pull_request_rejects_missing_repo_origin() {
-    let (_state, app, run_id) = pr_test_app_with_completed_run(None, None, None).await;
+    let (_state, app, run_id) = Box::pin(pr_test_app_with_completed_run(None, None, None)).await;
 
     let response = app
         .oneshot(
@@ -6684,9 +6743,12 @@ async fn create_run_pull_request_rejects_missing_repo_origin() {
 
 #[tokio::test]
 async fn create_run_pull_request_returns_service_unavailable_without_github_credentials() {
-    let (_state, app, run_id) =
-        pr_test_app_with_completed_run(None, None, Some("https://github.com/acme/widgets.git"))
-            .await;
+    let (_state, app, run_id) = Box::pin(pr_test_app_with_completed_run(
+        None,
+        None,
+        Some("https://github.com/acme/widgets.git"),
+    ))
+    .await;
 
     let response = app
         .oneshot(
@@ -6712,11 +6774,11 @@ async fn create_run_pull_request_returns_service_unavailable_without_github_cred
 
 #[tokio::test]
 async fn create_run_pull_request_rejects_non_github_origin_url() {
-    let (_state, app, run_id) = pr_test_app_with_completed_run(
+    let (_state, app, run_id) = Box::pin(pr_test_app_with_completed_run(
         Some("ghu_test"),
         None,
         Some("https://gitlab.com/acme/widgets.git"),
-    )
+    ))
     .await;
 
     let response = app
@@ -7070,6 +7132,12 @@ async fn cache_backed_run_endpoints_reflect_events_appended_after_warmup() {
     state.store.warm_projection_cache().await.unwrap();
 
     let run_store = state.store.open_run(&run_id).await.unwrap();
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -8276,7 +8344,6 @@ async fn worker_token_is_rejected_on_user_only_routes() {
         (Method::POST, "/validate".to_string()),
         (Method::POST, "/graph/render".to_string()),
         (Method::GET, "/attach".to_string()),
-        (Method::GET, "/boards/runs".to_string()),
         (Method::DELETE, format!("/runs/{run_id}")),
         (Method::GET, format!("/runs/{run_id}/attach")),
         (Method::GET, format!("/runs/{run_id}/checkpoint")),
@@ -8511,7 +8578,7 @@ async fn create_run_rejects_invalid_titles() {
 }
 
 #[tokio::test]
-async fn start_run_transitions_to_queued() {
+async fn start_run_transitions_to_runnable() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -8534,7 +8601,7 @@ async fn start_run_transitions_to_queued() {
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
     assert_eq!(body["title"], "Test");
 
     let status = state
@@ -8546,7 +8613,153 @@ async fn start_run_transitions_to_queued() {
         .await
         .unwrap()
         .status;
-    assert_eq!(status, RunStatus::Queued);
+    assert_eq!(status, RunStatus::Runnable);
+}
+
+#[tokio::test]
+async fn worker_started_child_run_requires_approval_before_becoming_runnable() {
+    let (state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let mut child_manifest = minimal_manifest_json(MINIMAL_DOT);
+    child_manifest["parent_id"] = json!(parent_run_id.to_string());
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs",
+            &worker_token,
+            &child_manifest,
+        ))
+        .await
+        .unwrap();
+    let child_body = response_json!(response, StatusCode::CREATED).await;
+    let child_run_id = child_body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{child_run_id}/start"),
+            &worker_token,
+            &json!({ "resume": false }),
+        ))
+        .await
+        .unwrap();
+    let pending_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(
+        run_json_status(&pending_body),
+        &json!({
+            "kind": "pending",
+            "reason": "approval_required"
+        })
+    );
+    assert_eq!(
+        pending_body["lifecycle"]["approval"]["state"].as_str(),
+        Some("pending")
+    );
+
+    {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        assert_eq!(
+            runs.get(&child_run_id).map(|run| run.status),
+            Some(RunStatus::Pending {
+                reason: fabro_types::PendingReason::ApprovalRequired,
+            })
+        );
+    }
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            &format!("/runs/{child_run_id}/approve"),
+            &user_jwt,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let approved_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(
+        run_json_status(&approved_body),
+        &json!({ "kind": "runnable" })
+    );
+    assert_eq!(
+        approved_body["lifecycle"]["approval"]["state"].as_str(),
+        Some("approved")
+    );
+    assert!(
+        approved_body["lifecycle"]["approval"]["decided_at"]
+            .as_str()
+            .is_some()
+    );
+
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    assert_eq!(
+        runs.get(&child_run_id).map(|run| run.status),
+        Some(RunStatus::Runnable)
+    );
+}
+
+#[tokio::test]
+async fn denying_pending_child_run_fails_with_approval_denied() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let mut child_manifest = minimal_manifest_json(MINIMAL_DOT);
+    child_manifest["parent_id"] = json!(parent_run_id.to_string());
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs",
+            &worker_token,
+            &child_manifest,
+        ))
+        .await
+        .unwrap();
+    let child_body = response_json!(response, StatusCode::CREATED).await;
+    let child_run_id = child_body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{child_run_id}/start"),
+            &worker_token,
+            &json!({ "resume": false }),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{child_run_id}/deny"),
+            &user_jwt,
+            &json!({ "reason": "  " }),
+        ))
+        .await
+        .unwrap();
+    let denied_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(
+        run_json_status(&denied_body),
+        &json!({
+            "kind": "failed",
+            "reason": "approval_denied"
+        })
+    );
+    assert_eq!(
+        denied_body["lifecycle"]["approval"]["state"].as_str(),
+        Some("denied")
+    );
+    assert!(denied_body["lifecycle"]["approval"]["denial_reason"].is_null());
 }
 
 #[tokio::test]
@@ -8607,7 +8820,10 @@ async fn patch_run_title_updates_active_and_archived_runs() {
 
     let run_store = state.store.open_run(&run_id).await.unwrap();
     for event in [
-        workflow_event::Event::RunQueued,
+        workflow_event::Event::RunRunnable {
+            source: fabro_types::RunRunnableSource::StartRequested,
+            actor:  None,
+        },
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
     ] {
@@ -8701,7 +8917,7 @@ async fn start_run_conflict_when_not_submitted() {
     let body = body_json(response.into_body()).await;
     let run_id = body["id"].as_str().unwrap();
 
-    // Start it (transitions to queued)
+    // Start it (transitions to runnable)
     let req = Request::builder()
         .method("POST")
         .uri(api(&format!("/runs/{run_id}/start")))
@@ -8716,6 +8932,133 @@ async fn start_run_conflict_when_not_submitted() {
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::CONFLICT).await;
+}
+
+#[tokio::test]
+async fn retry_failed_run_creates_and_queues_new_run() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let source_run_id = RunId::new();
+    create_durable_run_with_events(&state, source_run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::workflow_run_failed_from_error(
+            &WorkflowError::engine("boom"),
+            fabro_types::RunTiming::wall_only(10),
+            FailureReason::WorkflowError,
+            None,
+            None,
+            None,
+            None,
+        ),
+    ])
+    .await;
+    let source_events_before = state
+        .store
+        .open_run(&source_run_id)
+        .await
+        .unwrap()
+        .list_events()
+        .await
+        .unwrap()
+        .len();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{source_run_id}/retry")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::CREATED).await;
+    let new_run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+    assert_ne!(new_run_id, source_run_id);
+    assert_eq!(body["retried_from"], source_run_id.to_string());
+    assert_eq!(body["created_by"]["kind"], "user");
+    assert_eq!(body["created_by"]["login"], "dev");
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
+
+    let source_store = state.store.open_run(&source_run_id).await.unwrap();
+    assert_eq!(
+        source_store.list_events().await.unwrap().len(),
+        source_events_before
+    );
+    assert_eq!(
+        source_store.state().await.unwrap().status,
+        RunStatus::Failed {
+            reason: FailureReason::WorkflowError,
+        }
+    );
+
+    let new_state = state
+        .store
+        .open_run(&new_run_id)
+        .await
+        .unwrap()
+        .state()
+        .await
+        .unwrap();
+    assert_eq!(new_state.retried_from, Some(source_run_id));
+    assert_eq!(new_state.status, RunStatus::Runnable);
+    assert!(new_state.checkpoints.is_empty());
+}
+
+#[tokio::test]
+async fn retry_missing_run_returns_not_found() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{}/retry", fixtures::RUN_64)))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn retry_non_retryable_run_returns_conflict() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let source_run_id = RunId::new();
+    create_durable_run_with_events(&state, source_run_id, &[
+        workflow_event::Event::WorkflowRunCompleted {
+            timing:               fabro_types::RunTiming::wall_only(10),
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{source_run_id}/retry")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
     assert_status!(response, StatusCode::CONFLICT).await;
 }
 
@@ -9925,6 +10268,7 @@ async fn delete_run_with_preserved_sandbox_returns_handoff() {
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         },
@@ -9992,6 +10336,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         },
@@ -10466,7 +10811,7 @@ level = "debug"
 }
 
 #[tokio::test]
-async fn cancel_queued_run_succeeds() {
+async fn cancel_runnable_run_succeeds() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -10497,26 +10842,26 @@ async fn cancel_queued_run_succeeds() {
     assert_eq!(run_json_status(&body)["kind"], "failed");
     assert_eq!(run_json_status(&body)["reason"], "cancelled");
 
-    // Cancelled runs appear on the board in the "failed" column
+    // Cancelled runs appear in the runs list with a "failed" status
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = body_json(response.into_body()).await;
     let run_id_str = run_id.to_string();
-    let board_item = body["data"]
+    let list_item = body["data"]
         .as_array()
         .unwrap()
         .iter()
         .find(|item| run_json_id(item) == Some(run_id_str.as_str()));
     assert!(
-        board_item.is_some(),
-        "cancelled run should appear on the board"
+        list_item.is_some(),
+        "cancelled run should appear in the list"
     );
     assert_eq!(
-        run_json_status(board_item.unwrap())["kind"].as_str(),
+        run_json_status(list_item.unwrap())["kind"].as_str(),
         Some("failed"),
         "cancelled run should preserve the failed lifecycle status"
     );
@@ -10614,7 +10959,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
     assert_eq!(run_json_pending_control(&body).as_str(), Some("pause"));
 
     // Verify pending_control via /runs/{id} (board no longer includes this field)
@@ -10627,11 +10972,10 @@ async fn pause_run_sets_pending_control_on_board_response() {
     let body = body_json(response.into_body()).await;
     assert_eq!(run_json_pending_control(&body).as_str(), Some("pause"));
 
-    // Verify the run appears on the board (store has Submitted status →
-    // "queued" column)
+    // Verify the run appears in the runs list with runnable status.
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
@@ -10735,7 +11079,7 @@ async fn unpause_run_sets_pending_control() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
     assert_eq!(run_json_pending_control(&body).as_str(), Some("unpause"));
 
     let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
@@ -11004,7 +11348,7 @@ id = "local"
         if matches!(
             live_status_before_cancel,
             Some(
-                RunStatus::Queued
+                RunStatus::Runnable
                     | RunStatus::Starting
                     | RunStatus::Running
                     | RunStatus::Blocked { .. }
@@ -11019,7 +11363,7 @@ id = "local"
         matches!(
             live_status_before_cancel,
             Some(
-                RunStatus::Queued
+                RunStatus::Runnable
                     | RunStatus::Starting
                     | RunStatus::Running
                     | RunStatus::Blocked { .. }
@@ -11116,15 +11460,15 @@ async fn cancel_before_run_transitions_to_running_returns_empty_attach_stream() 
 }
 
 #[tokio::test]
-async fn queue_position_reported_for_queued_runs() {
+async fn queue_position_reported_for_runnable_runs() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
-    // Create and start two runs (no scheduler, both stay queued)
+    // Create and start two runs (no scheduler, both stay runnable)
     let first_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
     let second_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
-    // Queue position is tracked in memory even when queued runs are also
+    // Queue position is tracked in memory even when runnable runs are also
     // visible on the board.
     let runs = state.runs.lock().expect("runs lock poisoned");
     let positions = compute_queue_positions(&runs);
@@ -11146,12 +11490,10 @@ async fn concurrency_limit_respected() {
     // Give scheduler time to pick up the first run
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    // The board only shows runs with a visible board column. With
-    // max_concurrent_runs=1, at most one run should land in the live
-    // "running" column.
+    // With max_concurrent_runs=1, at most one run should be live "running".
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
@@ -11159,16 +11501,16 @@ async fn concurrency_limit_respected() {
     let items = body["data"].as_array().unwrap();
     let active_count = items
         .iter()
-        .filter(|item| item["column"].as_str() == Some("running"))
+        .filter(|item| run_json_status(item)["kind"].as_str() == Some("running"))
         .count();
     assert!(
         active_count <= 1,
-        "expected at most 1 active run on the board, got {active_count}"
+        "expected at most 1 active run, got {active_count}"
     );
 }
 
 #[tokio::test]
-async fn submit_answer_to_queued_run_returns_conflict() {
+async fn submit_answer_to_unstarted_run_returns_conflict() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(state);
 
@@ -11183,7 +11525,7 @@ async fn submit_answer_to_queued_run_returns_conflict() {
     let body = body_json(response.into_body()).await;
     let run_id = body["id"].as_str().unwrap().to_string();
 
-    // Try to submit an answer to a queued run
+    // Try to submit an answer to a run with no active worker.
     let req = Request::builder()
         .method("POST")
         .uri(api(&format!("/runs/{run_id}/questions/q1/answer")))
@@ -11309,12 +11651,12 @@ reasoning = false
 }
 
 #[tokio::test]
-async fn demo_boards_runs_returns_run_list_items() {
+async fn demo_list_runs_returns_run_list_items() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(state);
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .header("X-Fabro-Demo", "1")
         .body(Body::empty())
         .unwrap();
@@ -11434,12 +11776,11 @@ async fn demo_workflows_return_list_detail_and_runs() {
 }
 
 #[tokio::test]
-async fn boards_runs_returns_run_list_items_with_board_columns() {
+async fn list_runs_returns_run_list_items() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
-    // Set run to running so it appears on the board
     {
         let id = run_id.parse::<RunId>().unwrap();
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -11449,7 +11790,7 @@ async fn boards_runs_returns_run_list_items_with_board_columns() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -11458,7 +11799,7 @@ async fn boards_runs_returns_run_list_items_with_board_columns() {
     let item = data
         .iter()
         .find(|i| run_json_id(i) == Some(&run_id))
-        .expect("run should be in board");
+        .expect("run should be in list");
     assert!(item["goal"].is_string());
     assert!(item["title"].is_string());
     assert!(item["repository"].is_object());
@@ -11473,12 +11814,12 @@ async fn boards_runs_returns_run_list_items_with_board_columns() {
 }
 
 #[tokio::test]
-async fn boards_runs_excludes_removing_status() {
+async fn list_runs_excludes_removing_status_by_default() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
 
-    // A run in Removing status should not appear on the board
+    // A run in Removing status should not appear by default
     create_durable_run_with_events(&state, run_id, &[
         workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -11491,20 +11832,37 @@ async fn boards_runs_excludes_removing_status() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let data = body["data"].as_array().expect("data should be array");
+    assert!(
+        !data
+            .iter()
+            .any(|i| run_json_id(i) == Some(&run_id.to_string())),
+        "removing run should not appear by default"
+    );
+
+    // ?status=removing opts the bucket in.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?status=removing"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
     let data = body["data"].as_array().expect("data should be array");
-    let found = data
-        .iter()
-        .any(|i| i["run_id"].as_str() == Some(&run_id.to_string()));
-    assert!(!found, "removing run should not appear on the board");
+    assert!(
+        data.iter()
+            .any(|i| run_json_id(i) == Some(&run_id.to_string())),
+        "?status=removing should opt removing runs in"
+    );
 }
 
 #[tokio::test]
-async fn boards_runs_excludes_archived_by_default() {
+async fn list_runs_excludes_archived_by_default() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
@@ -11532,7 +11890,7 @@ async fn boards_runs_excludes_archived_by_default() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -11541,18 +11899,13 @@ async fn boards_runs_excludes_archived_by_default() {
     assert!(
         !data
             .iter()
-            .any(|i| i["run_id"].as_str() == Some(&run_id.to_string())),
+            .any(|i| run_json_id(i) == Some(&run_id.to_string())),
         "archived run should be hidden when include_archived is unset",
-    );
-    let columns = body["columns"].as_array().expect("columns should be array");
-    assert!(
-        !columns.iter().any(|c| c["id"].as_str() == Some("archived")),
-        "archived column should not appear in default response",
     );
 }
 
 #[tokio::test]
-async fn boards_runs_includes_archived_when_flag_set() {
+async fn list_runs_includes_archived_when_flag_set() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let archived_id = fixtures::RUN_1;
@@ -11600,7 +11953,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs?include_archived=true"))
+        .uri(api("/runs?include_archived=true"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -11625,21 +11978,6 @@ async fn boards_runs_includes_archived_when_flag_set() {
         run_json_status(succeeded_item)["kind"].as_str().unwrap(),
         "succeeded"
     );
-
-    let columns = body["columns"].as_array().expect("columns should be array");
-    let column_ids: Vec<_> = columns
-        .iter()
-        .map(|c| c["id"].as_str().unwrap().to_string())
-        .collect();
-    assert_eq!(column_ids, vec![
-        "queued",
-        "initializing",
-        "running",
-        "blocked",
-        "succeeded",
-        "failed",
-        "archived",
-    ],);
 }
 
 #[tokio::test]
@@ -11719,7 +12057,7 @@ async fn get_run_exposes_canonical_operator_statuses() {
 }
 
 #[tokio::test]
-async fn boards_runs_maps_statuses_to_columns() {
+async fn list_runs_preserves_underlying_run_status_payloads() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -11814,7 +12152,7 @@ async fn boards_runs_maps_statuses_to_columns() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -11860,23 +12198,12 @@ async fn boards_runs_maps_statuses_to_columns() {
     );
     assert!(
         blocked_item["current_question"].is_object(),
-        "blocked board item should include the current question"
-    );
-
-    // Verify columns are included in the response
-    let columns = body["columns"].as_array().expect("columns should be array");
-    assert!(!columns.is_empty());
-    assert!(columns.iter().any(|c| c["id"].as_str() == Some("running")));
-    assert!(columns.iter().any(|c| c["id"].as_str() == Some("blocked")));
-    assert!(
-        columns
-            .iter()
-            .any(|c| c["id"].as_str() == Some("succeeded"))
+        "blocked item should include the current question"
     );
 }
 
 #[tokio::test]
-async fn boards_runs_includes_live_board_metadata_from_run_state() {
+async fn list_runs_includes_live_metadata_from_run_state() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = create_and_start_run(&app, MINIMAL_DOT)
@@ -11927,7 +12254,7 @@ async fn boards_runs_includes_live_board_metadata_from_run_state() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs"))
+        .uri(api("/runs"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -11948,7 +12275,7 @@ async fn boards_runs_includes_live_board_metadata_from_run_state() {
 }
 
 #[tokio::test]
-async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
+async fn list_runs_page_limit_preserves_metadata_for_paged_items() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -11987,7 +12314,7 @@ async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api("/boards/runs?page[limit]=1"))
+        .uri(api("/runs?page[limit]=1"))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
@@ -12005,6 +12332,213 @@ async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
 }
 
 #[tokio::test]
+async fn list_runs_status_filter_accepts_repeated_values() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    // Running run (will map to BoardColumn::Running)
+    let running_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, running_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    // Succeeded run (BoardColumn::Succeeded)
+    let succeeded_id = fixtures::RUN_2;
+    create_durable_run_with_events(&state, succeeded_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::WorkflowRunCompleted {
+            timing:               fabro_types::RunTiming::wall_only(1000),
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    // Pending run (BoardColumn::Pending via Submitted)
+    let pending_id = fixtures::RUN_3;
+    create_durable_run_with_events(&state, pending_id, &[workflow_event::Event::RunSubmitted {
+        definition_blob: None,
+    }])
+    .await;
+
+    // Single value: only running.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?status=running"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let ids: Vec<&str> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .collect();
+    assert!(ids.contains(&running_id.to_string().as_str()));
+    assert!(!ids.contains(&succeeded_id.to_string().as_str()));
+    assert!(!ids.contains(&pending_id.to_string().as_str()));
+
+    // Repeated values: running + succeeded.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?status=running&status=succeeded"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let ids: Vec<&str> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .collect();
+    assert!(ids.contains(&running_id.to_string().as_str()));
+    assert!(ids.contains(&succeeded_id.to_string().as_str()));
+    assert!(!ids.contains(&pending_id.to_string().as_str()));
+}
+
+#[tokio::test]
+async fn list_runs_sort_direction_reverses_order_with_stable_tiebreak() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    // All fixtures share timestamp=0; the id-desc tiebreak controls order.
+    let ids = [fixtures::RUN_1, fixtures::RUN_2, fixtures::RUN_3];
+    for id in &ids {
+        create_durable_run_with_events(&state, *id, &[
+            workflow_event::Event::RunSubmitted {
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting,
+            workflow_event::Event::RunRunning,
+        ])
+        .await;
+    }
+
+    // Default (sort=created_at desc): tiebreak puts higher ids first.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let observed: Vec<String> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .map(str::to_string)
+        .collect();
+    let mut expected: Vec<String> = ids.iter().map(std::string::ToString::to_string).collect();
+    expected.sort_by(|a, b| b.cmp(a)); // desc by id
+    assert_eq!(observed, expected, "default desc order with id tiebreak");
+
+    // Ascending: timestamps still tie, then id desc tiebreak still applies.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?sort=created_at&direction=asc"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let observed: Vec<String> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        observed, expected,
+        "asc still uses id-desc tiebreak for tied keys"
+    );
+}
+
+#[tokio::test]
+async fn list_runs_sort_by_status_groups_by_bucket() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    // BoardColumn enum order: pending < runnable < initializing < running <
+    // blocked < succeeded < failed < archived < removing. Use three distinct
+    // buckets.
+    let pending_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, pending_id, &[workflow_event::Event::RunSubmitted {
+        definition_blob: None,
+    }])
+    .await;
+
+    let succeeded_id = fixtures::RUN_2;
+    create_durable_run_with_events(&state, succeeded_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::WorkflowRunCompleted {
+            timing:               fabro_types::RunTiming::wall_only(1000),
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    let running_id = fixtures::RUN_3;
+    create_durable_run_with_events(&state, running_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+
+    // sort=status asc: pending < running < succeeded.
+    let req = Request::builder()
+        .method("GET")
+        .uri(api("/runs?sort=status&direction=asc"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let observed: Vec<String> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(run_json_id)
+        .map(str::to_string)
+        .collect();
+    assert_eq!(observed, vec![
+        pending_id.to_string(),
+        running_id.to_string(),
+        succeeded_id.to_string(),
+    ]);
+}
+
+#[tokio::test]
 async fn filtered_global_events_streams_only_matching_run_ids() {
     let run_one = fixtures::RUN_1;
     let run_two = fixtures::RUN_2;
@@ -12016,14 +12550,18 @@ async fn filtered_global_events_streams_only_matching_run_ids() {
         .send(test_event_envelope(
             1,
             run_two,
-            EventBody::RunQueued(fabro_types::run_event::RunStatusEffectProps::default()),
+            EventBody::RunRunnable(fabro_types::run_event::RunRunnableProps {
+                source: fabro_types::RunRunnableSource::StartRequested,
+            }),
         ))
         .unwrap();
     event_tx
         .send(test_event_envelope(
             2,
             run_one,
-            EventBody::RunQueued(fabro_types::run_event::RunStatusEffectProps::default()),
+            EventBody::RunRunnable(fabro_types::run_event::RunRunnableProps {
+                source: fabro_types::RunRunnableSource::StartRequested,
+            }),
         ))
         .unwrap();
     drop(event_tx);

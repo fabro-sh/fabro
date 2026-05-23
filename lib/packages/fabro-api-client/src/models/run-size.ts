@@ -15,15 +15,15 @@
 
 
 /**
- * Counts of known runs in the active server process.
+ * Run size bucket derived from current best-effort billed usage.
  */
-export interface SystemRunCounts {
-    /**
-     * Total runs tracked by the server process.
-     */
-    'total'?: number;
-    /**
-     * Runs currently pending, runnable, or executing.
-     */
-    'active'?: number;
-}
+
+export const RunSize = {
+    XS: 'XS',
+    S: 'S',
+    M: 'M',
+    L: 'L',
+    XL: 'XL'
+} as const;
+
+export type RunSize = typeof RunSize[keyof typeof RunSize];

@@ -22,7 +22,7 @@ use fabro_types::settings::run::{
     TlsMode as ResolvedTlsMode,
 };
 use fabro_types::settings::{InterpString, ModelRegistry, ResolvedModelRef};
-use fabro_types::{ManifestPath, RunId};
+use fabro_types::{ManifestPath, RunId, RunRunnableSource};
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -139,11 +139,33 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, E
     let status = state.status;
     if !matches!(
         status,
-        RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting
+        RunStatus::Submitted | RunStatus::Runnable | RunStatus::Starting
     ) {
         return Err(Error::Precondition(format!(
-            "cannot start run: status is {status}, expected submitted"
+            "cannot start run: status is {status}, expected submitted or runnable"
         )));
+    }
+    if matches!(status, RunStatus::Submitted) {
+        append_event_to_sink(
+            &services.event_sink,
+            &services.run_id,
+            &Event::RunStartRequested {
+                resume: false,
+                actor:  None,
+            },
+        )
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?;
+        append_event_to_sink(
+            &services.event_sink,
+            &services.run_id,
+            &Event::RunRunnable {
+                source: RunRunnableSource::StartRequested,
+                actor:  None,
+            },
+        )
+        .await
+        .map_err(|err| Error::engine(err.to_string()))?;
     }
 
     Box::pin(execute_persisted_run(run_dir, None, services)).await
@@ -1693,6 +1715,12 @@ reasoning = false
             node_visits: checkpoint.node_visits.clone().into_iter().collect(),
             diff: None,
             diff_summary: None,
+        })
+        .await
+        .unwrap();
+        crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::RunRunnable {
+            source: RunRunnableSource::StartRequested,
+            actor:  None,
         })
         .await
         .unwrap();

@@ -1036,9 +1036,38 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "ts": "[TIMESTAMP]"
       },
       {
-        "event": "run.queued",
+        "actor": {
+          "auth_method": "dev_token",
+          "identity": {
+            "issuer": "fabro:dev",
+            "subject": "dev"
+          },
+          "kind": "user",
+          "login": "dev"
+        },
+        "event": "run.start_requested",
         "id": "[EVENT_ID]",
-        "properties": {},
+        "properties": {
+          "resume": false
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "actor": {
+          "auth_method": "dev_token",
+          "identity": {
+            "issuer": "fabro:dev",
+            "subject": "dev"
+          },
+          "kind": "user",
+          "login": "dev"
+        },
+        "event": "run.runnable",
+        "id": "[EVENT_ID]",
+        "properties": {
+          "source": "start_requested"
+        },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

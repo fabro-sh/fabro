@@ -27,8 +27,8 @@ pub use fabro_api::types::{
     CompletionContentPart, CompletionMessage, CompletionMessageRole, CompletionResponse,
     CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     CreateRunPullRequestRequest, CreateSecretRequest, DeleteRunResponse, DeleteRunSandbox,
-    DeleteSecretRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ForkRequest,
-    ForkResponse, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
+    DeleteSecretRequest, DenyRunRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow,
+    ForkRequest, ForkResponse, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
     MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
     PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, Provider,
     ProviderList, PruneRunEntry, PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection,
@@ -82,8 +82,9 @@ use fabro_types::settings::server::{
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
-    PairMessageId, PairTarget, Principal, PullRequestLink, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability, StageModelUsage,
+    PairMessageId, PairTarget, PendingReason, Principal, PullRequestLink, QuestionType, RunBlobId,
+    RunControlAction, RunEvent, RunId, RunRunnableSource, ServerSettings, SessionCapability,
+    StageModelUsage,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -201,7 +202,10 @@ impl<T: serde::Serialize> ListResponse<T> {
     pub fn new(data: T) -> Self {
         Self {
             data,
-            meta: PaginationMeta { has_more: false },
+            meta: PaginationMeta {
+                has_more: false,
+                total:    None,
+            },
         }
     }
 }
@@ -212,7 +216,6 @@ struct ManagedRun {
     status: RunStatus,
     error: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
-    enqueued_at: Instant,
     // Populated when running:
     answer_transport: Option<RunAnswerTransport>,
     accepted_questions: HashSet<String>,
@@ -2447,12 +2450,12 @@ fn remove_run_dir(run_dir: &std::path::Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, i64> {
-    let mut queued: Vec<(&RunId, &ManagedRun)> = runs
+    let mut runnable: Vec<(&RunId, &ManagedRun)> = runs
         .iter()
-        .filter(|(_, r)| r.status == RunStatus::Queued)
+        .filter(|(_, r)| r.status == RunStatus::Runnable)
         .collect();
-    queued.sort_by_key(|(_, r)| r.created_at);
-    queued
+    runnable.sort_by_key(|(_, r)| r.created_at);
+    runnable
         .into_iter()
         .enumerate()
         .map(|(i, (id, _))| (*id, i64::try_from(i + 1).unwrap()))
@@ -2628,8 +2631,7 @@ fn failure_for_incomplete_run(
 fn should_reconcile_run_on_startup(status: RunStatus) -> bool {
     matches!(
         status,
-        RunStatus::Queued
-            | RunStatus::Starting
+        RunStatus::Starting
             | RunStatus::Running
             | RunStatus::Blocked { .. }
             | RunStatus::Paused { .. }
@@ -2876,7 +2878,6 @@ fn managed_run(
         status,
         error: None,
         created_at,
-        enqueued_at: Instant::now(),
         answer_transport: None,
         accepted_questions: HashSet::new(),
         active_api_targets: HashMap::new(),
@@ -2940,7 +2941,12 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
 
     match &event.body {
         EventBody::RunSubmitted(_) => managed_run.status = RunStatus::Submitted,
-        EventBody::RunQueued(_) => managed_run.status = RunStatus::Queued,
+        EventBody::RunPending(props) => {
+            managed_run.status = RunStatus::Pending {
+                reason: props.reason,
+            };
+        }
+        EventBody::RunRunnable(_) => managed_run.status = RunStatus::Runnable,
         EventBody::RunStarting(_) => managed_run.status = RunStatus::Starting,
         EventBody::RunRunning(_) => managed_run.status = RunStatus::Running,
         EventBody::RunBlocked(props) => {
@@ -3420,7 +3426,7 @@ fn answer_from_request(
     }
 }
 
-/// Execute a single run: transitions queued → starting → running →
+/// Execute a single run: transitions runnable → starting → running →
 /// completed/failed/cancelled.
 async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     if state.is_shutting_down() {
@@ -3437,10 +3443,10 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
 
 async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, run_dir, event_tx, cancel_token, execution_mode, queued_for) = {
+    let (cancel_rx, run_dir, event_tx, cancel_token, execution_mode) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = match runs.get_mut(&run_id) {
-            Some(r) if r.status == RunStatus::Queued => r,
+            Some(r) if r.status == RunStatus::Runnable => r,
             _ => return,
         };
         let Some(run_dir) = managed_run.run_dir.clone() else {
@@ -3462,10 +3468,8 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             managed_run.event_tx.clone(),
             cancel_token,
             managed_run.execution_mode,
-            managed_run.enqueued_at.elapsed(),
         )
     };
-    let _ = queued_for;
 
     // Create interviewer and event plumbing (this is the "provisioning" phase)
     let interviewer = Arc::new(ControlInterviewer::new());
@@ -3731,7 +3735,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             return;
         }
         let managed_run = match runs.get_mut(&run_id) {
-            Some(run) if run.status == RunStatus::Queued => run,
+            Some(run) if run.status == RunStatus::Runnable => run,
             _ => return,
         };
         let Some(run_dir) = managed_run.run_dir.clone() else {
@@ -3995,7 +3999,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     state.scheduler_notify.notify_one();
 }
 
-/// Background task that promotes queued runs when capacity is available.
+/// Background task that promotes runnable runs when capacity is available.
 pub fn spawn_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
@@ -4006,43 +4010,45 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
             if state.is_shutting_down() {
                 break;
             }
-            // Promote as many queued runs as capacity allows
-            loop {
+            let runs_to_start = {
+                let runs = state.runs.lock().expect("runs lock poisoned");
+                let active = runs
+                    .values()
+                    .filter(|r| {
+                        matches!(
+                            r.status,
+                            RunStatus::Starting
+                                | RunStatus::Running
+                                | RunStatus::Blocked { .. }
+                                | RunStatus::Paused { .. }
+                        )
+                    })
+                    .count();
+                let available = state.max_concurrent_runs.saturating_sub(active);
+                if available == 0 {
+                    Vec::new()
+                } else {
+                    let mut runnable: Vec<_> = runs
+                        .iter()
+                        .filter(|(_, r)| r.status == RunStatus::Runnable)
+                        .map(|(id, r)| (*id, r.created_at))
+                        .collect();
+                    runnable.sort_by_key(|(_, created_at)| *created_at);
+                    runnable
+                        .into_iter()
+                        .take(available)
+                        .map(|(id, _)| id)
+                        .collect::<Vec<_>>()
+                }
+            };
+            for id in runs_to_start {
                 if state.is_shutting_down() {
                     break;
                 }
-                let run_to_start = {
-                    let runs = state.runs.lock().expect("runs lock poisoned");
-                    let active = runs
-                        .values()
-                        .filter(|r| {
-                            matches!(
-                                r.status,
-                                RunStatus::Starting
-                                    | RunStatus::Running
-                                    | RunStatus::Blocked { .. }
-                                    | RunStatus::Paused { .. }
-                            )
-                        })
-                        .count();
-                    if active >= state.max_concurrent_runs {
-                        break;
-                    }
-                    runs.iter()
-                        .filter(|(_, r)| r.status == RunStatus::Queued)
-                        .min_by_key(|(_, r)| r.created_at)
-                        .map(|(id, _)| *id)
-                };
-                match run_to_start {
-                    Some(id) => {
-                        let state_clone = Arc::clone(&state);
-                        tokio::spawn(
-                            execute_run(state_clone, id)
-                                .instrument(tracing::info_span!("run", id = %id)),
-                        );
-                    }
-                    None => break,
-                }
+                let state_clone = Arc::clone(&state);
+                tokio::spawn(
+                    execute_run(state_clone, id).instrument(tracing::info_span!("run", id = %id)),
+                );
             }
         }
     });

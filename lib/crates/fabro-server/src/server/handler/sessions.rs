@@ -250,7 +250,10 @@ async fn list_session_events(
             data.truncate(limit);
             Json(PaginatedEventList {
                 data,
-                meta: PaginationMeta { has_more },
+                meta: PaginationMeta {
+                    has_more,
+                    total: None,
+                },
             })
             .into_response()
         }

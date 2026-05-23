@@ -8,13 +8,13 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use axum_extra::extract::Query as ExtraQuery;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use fabro_api::types::{
-    BoardColumn, BoardColumnDefinition, RunManifest, SubmitAnswerRequest, UpdateRunParentRequest,
-    UpdateRunRequest,
+    BoardColumn, RunManifest, SubmitAnswerRequest, UpdateRunParentRequest, UpdateRunRequest,
 };
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
@@ -57,7 +57,6 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs", get(list_runs).post(create_run))
         .route("/runs/resolve", get(resolve_run))
-        .route("/boards/runs", get(list_board_runs))
         .route(
             "/runs/{id}",
             get(get_run_status).patch(update_run).delete(delete_run),
@@ -80,6 +79,24 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .merge(manifest_routes())
 }
 
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RunsSortKey {
+    #[default]
+    CreatedAt,
+    UpdatedAt,
+    Status,
+    Elapsed,
+}
+
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RunsSortDirection {
+    Asc,
+    #[default]
+    Desc,
+}
+
 #[derive(serde::Deserialize)]
 struct ListRunsParams {
     #[serde(rename = "page[limit]", default = "default_page_limit")]
@@ -90,6 +107,12 @@ struct ListRunsParams {
     include_archived: bool,
     #[serde(default)]
     parent_id:        Option<RunId>,
+    #[serde(default)]
+    status:           Vec<BoardColumn>,
+    #[serde(default)]
+    sort:             RunsSortKey,
+    #[serde(default)]
+    direction:        RunsSortDirection,
 }
 
 impl ListRunsParams {
@@ -99,114 +122,69 @@ impl ListRunsParams {
             offset: self.offset,
         }
     }
+
+    fn status_filter(&self) -> Option<HashSet<BoardColumn>> {
+        if self.status.is_empty() {
+            None
+        } else {
+            Some(self.status.iter().copied().collect())
+        }
+    }
 }
 
-fn board_column(status: RunStatus, archived: bool) -> Option<BoardColumn> {
+pub(crate) fn board_column(status: RunStatus, archived: bool) -> BoardColumn {
     if archived {
-        return Some(BoardColumn::Archived);
+        return BoardColumn::Archived;
     }
     match status {
-        RunStatus::Submitted | RunStatus::Queued => Some(BoardColumn::Queued),
-        RunStatus::Starting => Some(BoardColumn::Initializing),
-        RunStatus::Running | RunStatus::Paused { .. } => Some(BoardColumn::Running),
-        RunStatus::Blocked { .. } => Some(BoardColumn::Blocked),
-        RunStatus::Succeeded { .. } => Some(BoardColumn::Succeeded),
-        RunStatus::Failed { .. } | RunStatus::Dead => Some(BoardColumn::Failed),
-        RunStatus::Removing => None,
+        RunStatus::Submitted | RunStatus::Pending { .. } => BoardColumn::Pending,
+        RunStatus::Runnable => BoardColumn::Runnable,
+        RunStatus::Starting => BoardColumn::Initializing,
+        RunStatus::Running | RunStatus::Paused { .. } => BoardColumn::Running,
+        RunStatus::Blocked { .. } => BoardColumn::Blocked,
+        RunStatus::Succeeded { .. } => BoardColumn::Succeeded,
+        RunStatus::Failed { .. } | RunStatus::Dead => BoardColumn::Failed,
+        RunStatus::Removing => BoardColumn::Removing,
     }
 }
 
-pub(crate) fn board_columns(include_archived: bool) -> Vec<BoardColumnDefinition> {
-    let mut columns = vec![
-        BoardColumnDefinition {
-            id:   BoardColumn::Queued,
-            name: "Queued".into(),
-        },
-        BoardColumnDefinition {
-            id:   BoardColumn::Initializing,
-            name: "Initializing".into(),
-        },
-        BoardColumnDefinition {
-            id:   BoardColumn::Running,
-            name: "Running".into(),
-        },
-        BoardColumnDefinition {
-            id:   BoardColumn::Blocked,
-            name: "Blocked".into(),
-        },
-        BoardColumnDefinition {
-            id:   BoardColumn::Succeeded,
-            name: "Succeeded".into(),
-        },
-        BoardColumnDefinition {
-            id:   BoardColumn::Failed,
-            name: "Failed".into(),
-        },
-    ];
-    if include_archived {
-        columns.push(BoardColumnDefinition {
-            id:   BoardColumn::Archived,
-            name: "Archived".into(),
-        });
-    }
-    columns
+fn run_elapsed_ms(run: &fabro_types::Run, now: DateTime<Utc>) -> i64 {
+    let start = run
+        .timestamps
+        .started_at
+        .unwrap_or(run.timestamps.created_at);
+    let end = run.timestamps.completed_at.unwrap_or(now);
+    (end - start).num_milliseconds().max(0)
 }
 
-async fn list_board_runs(
-    _auth: RequiredUser,
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<ListRunsParams>,
-) -> Response {
-    let entries = match state
-        .store
-        .list_cached_runs(
-            &fabro_store::ListRunsQuery {
-                parent_id: params.parent_id,
-                ..fabro_store::ListRunsQuery::default()
-            },
-            Utc::now(),
-        )
-        .await
-    {
-        Ok(runs) => runs,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-    let include_archived = params.include_archived;
-    let board_summaries: Vec<_> = entries
-        .into_iter()
-        .filter_map(|entry| {
-            let column = board_column(
-                entry.summary.lifecycle.status,
-                entry.summary.lifecycle.archived,
-            )?;
-            if column == BoardColumn::Archived && !include_archived {
-                return None;
+fn sort_runs(runs: &mut [fabro_types::Run], key: RunsSortKey, direction: RunsSortDirection) {
+    let now = Utc::now();
+    let asc = matches!(direction, RunsSortDirection::Asc);
+    runs.sort_by(|a, b| {
+        let primary = match key {
+            RunsSortKey::CreatedAt => a.timestamps.created_at.cmp(&b.timestamps.created_at),
+            RunsSortKey::UpdatedAt => {
+                let av = a
+                    .timestamps
+                    .last_event_at
+                    .unwrap_or(a.timestamps.created_at);
+                let bv = b
+                    .timestamps
+                    .last_event_at
+                    .unwrap_or(b.timestamps.created_at);
+                av.cmp(&bv)
             }
-            Some(entry)
-        })
-        .collect();
-    let (page_summaries, has_more) = paginate_items(board_summaries, &params.pagination());
-    let data = state
-        .decorate_run_summaries(
-            page_summaries
-                .into_iter()
-                .map(|entry| entry.summary)
-                .collect(),
-        )
-        .await;
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "columns": board_columns(include_archived),
-            "data": data,
-            "meta": { "has_more": has_more }
-        })),
-    )
-        .into_response()
+            RunsSortKey::Status => {
+                let ac = board_column(a.lifecycle.status, a.lifecycle.archived);
+                let bc = board_column(b.lifecycle.status, b.lifecycle.archived);
+                ac.cmp(&bc)
+            }
+            RunsSortKey::Elapsed => run_elapsed_ms(a, now).cmp(&run_elapsed_ms(b, now)),
+        };
+        let primary = if asc { primary } else { primary.reverse() };
+        // Stable tiebreak: newer ULIDs (and thus newer runs) first.
+        primary.then_with(|| b.id.cmp(&a.id))
+    });
 }
 
 async fn link_run_parent(
@@ -348,9 +326,9 @@ async fn updated_run_response(state: &AppState, run_id: &RunId) -> Response {
 async fn list_runs(
     _auth: RequiredRunToolActor,
     State(state): State<Arc<AppState>>,
-    Query(params): Query<ListRunsParams>,
+    ExtraQuery(params): ExtraQuery<ListRunsParams>,
 ) -> Response {
-    match state
+    let entries = match state
         .store
         .list_cached_runs(
             &fabro_store::ListRunsQuery {
@@ -361,28 +339,44 @@ async fn list_runs(
         )
         .await
     {
-        Ok(entries) => {
-            let include_archived = params.include_archived;
-            let items = entries
-                .into_iter()
-                .map(|entry| entry.summary)
-                .filter(|summary| include_archived || !summary.lifecycle.archived)
-                .collect::<Vec<_>>();
-            let (data, has_more) = paginate_items(items, &params.pagination());
-            let data = state.decorate_run_summaries(data).await;
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "data": data,
-                    "meta": { "has_more": has_more }
-                })),
-            )
-                .into_response()
-        }
+        Ok(entries) => entries,
         Err(err) => {
-            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
         }
-    }
+    };
+
+    let status_filter = params.status_filter();
+    let include_archived = params.include_archived;
+
+    let filtered: Vec<fabro_types::Run> = entries
+        .into_iter()
+        .map(|entry| entry.summary)
+        .filter(|run| {
+            let column = board_column(run.lifecycle.status, run.lifecycle.archived);
+            match &status_filter {
+                Some(set) => set.contains(&column),
+                None => {
+                    column != BoardColumn::Removing
+                        && (include_archived || column != BoardColumn::Archived)
+                }
+            }
+        })
+        .collect();
+
+    let mut decorated = state.decorate_run_summaries(filtered).await;
+    sort_runs(&mut decorated, params.sort, params.direction);
+    let total = decorated.len() as u64;
+    let (data, has_more) = paginate_items(decorated, &params.pagination());
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "data": data,
+            "meta": { "has_more": has_more, "total": total }
+        })),
+    )
+        .into_response()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -766,7 +760,7 @@ fn spawn_generated_title_task(task: GeneratedTitleTask) {
     });
 }
 
-fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunProvenance {
+pub(super) fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunProvenance {
     RunProvenance {
         server:  Some(RunServerProvenance {
             version: FABRO_VERSION.to_string(),

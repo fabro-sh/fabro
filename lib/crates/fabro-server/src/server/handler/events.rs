@@ -214,7 +214,10 @@ async fn list_run_events(
                 events.truncate(limit);
                 Json(PaginatedEventList {
                     data: events,
-                    meta: PaginationMeta { has_more },
+                    meta: PaginationMeta {
+                        has_more,
+                        total: None,
+                    },
                 })
                 .into_response()
             }
@@ -247,7 +250,10 @@ async fn list_run_stage_events(
                 events.truncate(limit);
                 Json(PaginatedEventList {
                     data: events,
-                    meta: PaginationMeta { has_more },
+                    meta: PaginationMeta {
+                        has_more,
+                        total: None,
+                    },
                 })
                 .into_response()
             }
@@ -567,6 +573,7 @@ mod stage_events_tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            retried_from:     None,
             parent_id:        None,
             web_url:          None,
         })
@@ -677,6 +684,10 @@ mod stage_events_tests {
         for event in [
             workflow_event::Event::RunSubmitted {
                 definition_blob: None,
+            },
+            workflow_event::Event::RunRunnable {
+                source: fabro_types::RunRunnableSource::StartRequested,
+                actor:  None,
             },
             workflow_event::Event::RunStarting,
             workflow_event::Event::RunRunning,

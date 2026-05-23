@@ -8,7 +8,7 @@
 - Make `/api/v1/runs`, `/api/v1/runs/{id}`, mutation responses, and `/api/v1/runs/{id}/state` use one truthful operator vocabulary.
 - Keep `/api/v1/boards/runs` explicitly lossy and web-optimized.
 - Add `BlockedReason`, starting with `human_input_required`.
-- Add explicit lifecycle events for `run.queued`, `run.blocked`, and `run.unblocked`.
+- Add explicit lifecycle events for `run.runnable`, `run.blocked`, and `run.unblocked`.
 - No alerting/email work in this pass.
 
 ## Scope And Decisions
@@ -18,7 +18,7 @@
 Use one shared run status vocabulary across the durable projection, operator APIs, generated clients, and CLI:
 
 - `submitted`
-- `queued`
+- `runnable`
 - `starting`
 - `running`
 - `blocked`
@@ -60,7 +60,7 @@ Board columns after this change:
 
 Board mapping rules:
 
-- `submitted`, `queued`, `starting` -> `initializing`
+- `submitted`, `runnable`, `starting` -> `initializing`
 - `running`, `paused` -> `running`
 - `blocked` -> `blocked`
 - `succeeded` -> `succeeded`
@@ -92,7 +92,7 @@ Update the shared contract in:
 Required changes:
 
 - Collapse OpenAPI `RunStatus` and `InternalRunStatus` into one shared `RunStatus` schema with the canonical operator vocabulary above.
-- Add `Queued` and `Blocked` variants to the Rust `RunStatus` enum in `status.rs`. Update `is_active()` to include both (they are incomplete active states). Update `is_terminal()`, `can_transition_to()`, `Display`, and `FromStr` accordingly.
+- Add `Runnable` and `Blocked` variants to the Rust `RunStatus` enum in `status.rs`. Update `is_active()` to include both (they are incomplete active states). Update `is_terminal()`, `can_transition_to()`, `Display`, and `FromStr` accordingly.
 - This is an intentional breaking API change: remove public `completed` and `cancelled`, add public `blocked`, `removing`, `succeeded`, and `dead`, and rename `RunStatusRecord.reason` to `status_reason` with no compatibility layer.
 - Add `BlockedReason` schema with initial value `human_input_required`.
 - Add `blocked_reason` to:
@@ -118,7 +118,7 @@ Add event-backed lifecycle support in:
 
 Add new explicit lifecycle events:
 
-- `run.queued`
+- `run.runnable`
 - `run.blocked`
 - `run.unblocked`
 
@@ -126,11 +126,11 @@ Payload decisions:
 
 - `run.blocked` carries `blocked_reason`.
 - `run.unblocked` is a minimal effect event; it does not repeat `blocked_reason`.
-- `run.queued` mirrors existing status-transition event style.
+- `run.runnable` mirrors existing status-transition event style.
 
 Event ordering and rules:
 
-- Emit `run.queued` from the server `start`/`resume` path at the moment the run is inserted into managed queued state. Persist it to the durable run event log there; do not synthesize `queued` later in projection replay.
+- Emit `run.runnable` from the server `start`/`resume` path at the moment the run is inserted into managed runnable state. Persist it to the durable run event log there; do not synthesize `runnable` later in projection replay.
 - Emit `run.started` later, when execution begins.
 - Keep `run.starting` and `run.running` as the worker bootstrap/execution transitions.
 - `run.blocked` and `run.unblocked` must be durable `run.*` events appended through the normal workflow event sink, not SSE-only notifications and not projection-synthesized state.
@@ -164,8 +164,8 @@ Pause/unpause decisions:
 
 Transition helper updates in `status.rs`:
 
-- add `submitted -> queued`
-- add `queued -> starting`
+- add `submitted -> runnable`
+- add `runnable -> starting`
 - add `running -> blocked`
 - add `blocked -> running`
 - add `blocked -> paused` (immediate pause from blocked)
@@ -206,7 +206,7 @@ Operator API changes:
 - Include `blocked_reason` alongside `status_reason` and `pending_control`.
 - Because `ManagedRun.status` uses the generated API `RunStatus`, this enum collapse intentionally requires broad match-arm updates throughout `lib/crates/fabro-server/src/server.rs`, `lib/crates/fabro-server/src/demo/mod.rs`, and generated client consumers.
 - Return the actual current status from mutation endpoints rather than a target status:
-  - `start` returns `queued`
+  - `start` returns `runnable`
   - `pause` from `blocked` returns `paused`
   - `unpause` back to unresolved human input returns `blocked`
   - cooperative `pause` from `running` still returns `running` with `pending_control=pause` until the worker reaches a pause point
@@ -219,11 +219,11 @@ Raw state endpoint changes:
 
 Live managed-run reconciliation:
 
-- Update `update_live_run_from_event()` in `server.rs` for `run.queued`, `run.blocked`, and `run.unblocked`.
+- Update `update_live_run_from_event()` in `server.rs` for `run.runnable`, `run.blocked`, and `run.unblocked`.
 - Keep `Blocked` treated as an incomplete active state for shutdown/startup handling in this pass.
 - Allow blocked runs to be cancelled through the existing cancel endpoint.
 - Update `pause_run` to accept `Blocked` in addition to `Running`, implementing the immediate-pause path (appending `run.paused` directly rather than sending a control signal to the worker).
-- Update `should_reconcile_run_on_startup` to include `Blocked` and `Queued`.
+- Update `should_reconcile_run_on_startup` to include `Blocked` and `Runnable`.
 
 ### 4. Web Board Projection And UI
 
@@ -237,7 +237,7 @@ Update the web-only board projection in:
 Required changes:
 
 - Replace `waiting` with `blocked` in the board projection and UI types.
-- Add `queued` and `blocked` to the `RunStatus` type and `runStatusDisplay` record in `apps/fabro-web/app/data/runs.ts` with appropriate labels and colors.
+- Add `runnable` and `blocked` to the `RunStatus` type and `runStatusDisplay` record in `apps/fabro-web/app/data/runs.ts` with appropriate labels and colors.
 - Update OpenAPI `BoardColumn`, server board responses, and web `ColumnStatus` types to remove `working`, `review`, and `merge`.
 - Keep board columns `initializing | running | blocked | succeeded | failed`.
 - Map statuses per the board contract above.
@@ -252,7 +252,7 @@ Board refresh behavior:
 
 - Preserve the current status-refresh triggers and add the new ones. `STATUS_EVENTS` in `apps/fabro-web/app/routes/runs.tsx` should include:
   - `run.submitted`
-  - `run.queued`
+  - `run.runnable`
   - `run.starting`
   - `run.running`
   - `run.removing`
@@ -283,7 +283,7 @@ Update CLI consumers in:
 Required changes:
 
 - Treat `/api/v1/runs` as truthful and stop inventing fallback status in `server_runs.rs`.
-- Add display/color handling for `Queued` and `Blocked`.
+- Add display/color handling for `Runnable` and `Blocked`.
 - Keep `Succeeded` as the success exit state for CLI wait behavior in this pass.
 - Keep `Dead` as a real displayable terminal state when it is actually present.
 - Stop using `Dead` as a synthetic fallback for missing server summary status now that `status` is non-null.
@@ -294,10 +294,10 @@ Required changes:
 ### Shared Types And Event Model
 
 - `lib/crates/fabro-types/src/run_event/mod.rs`
-  - round-trip serialization for `run.queued`, `run.blocked`, and `run.unblocked`
+  - round-trip serialization for `run.runnable`, `run.blocked`, and `run.unblocked`
   - `run.blocked` payload includes `blocked_reason`
 - `lib/crates/fabro-types/src/status.rs`
-  - transition tests for `submitted -> queued`, `running -> blocked`, and `blocked -> running`
+  - transition tests for `submitted -> runnable`, `running -> blocked`, and `blocked -> running`
   - paused overlay path still flows through explicit event order rather than a direct `paused -> blocked` transition
 - `lib/crates/fabro-workflow/src/handler/human.rs`
   - first pending interview emits `interview.started` then durable `run.blocked`
@@ -309,7 +309,7 @@ Required changes:
 ### Durable Projection And Server
 
 - `lib/crates/fabro-store/src/run_state.rs`
-  - `run.queued` sets `status=Queued`
+  - `run.runnable` sets `status=Runnable`
   - `run.blocked` sets `status=Blocked` and `blocked_reason=HumanInputRequired`
   - `run.unblocked` while status is `Blocked` clears `blocked_reason` and restores `Running`
   - paused-over-blocked preserves `blocked_reason` while `status=Paused`
@@ -325,25 +325,25 @@ Required changes:
   - blocked runs are cancellable
   - startup/shutdown handling still treats blocked runs as incomplete active work in this pass
   - `/api/v1/runs/{id}/state` includes `pending_interviews`
-  - `start`/`resume` append durable `run.queued` when enqueueing
+  - `start`/`resume` append durable `run.runnable` when enqueueing
   - board response emits `blocked` column, blocked question text, paused-in-running, removing off-board, and dead-in-failed
 
 ### Web UI
 
 - `apps/fabro-web/app/data/runs.test.ts`
-  - accepts `blocked`, `queued`, `removing`, `succeeded`, and `dead`
+  - accepts `blocked`, `runnable`, `removing`, `succeeded`, and `dead`
   - removes dependency on `waiting`
 - `apps/fabro-web/app/routes/runs.test.tsx`
   - blocked runs render in the `blocked` lane
   - paused runs remain in the `running` lane
   - blocked card shows oldest unresolved question text
-  - `STATUS_EVENTS` retains `run.starting` and `run.running` while adding the new blocked/queued events
+  - `STATUS_EVENTS` retains `run.starting` and `run.running` while adding the new blocked/runnable events
   - question text refreshes correctly on `interview.*` events without a status change
 
 ### CLI
 
 - `lib/crates/fabro-cli/src/commands/runs/list.rs`
-  - `Queued` and `Blocked` render with expected labels/colors
+  - `Runnable` and `Blocked` render with expected labels/colors
   - `Dead` remains renderable when actually returned by the API
 - `lib/crates/fabro-cli/src/commands/run/wait.rs`
   - `Succeeded` remains the success exit state

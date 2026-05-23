@@ -211,8 +211,15 @@ async fn seed_created_and_starting(
         manifest_blob:    None,
         git:              run_options.pre_run_git.clone(),
         fork_source_ref:  run_options.fork_source_ref.clone(),
+        retried_from:     None,
         parent_id:        None,
         web_url:          None,
+    })
+    .await
+    .unwrap();
+    append_event(run_store, &run_options.run_id, &Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
     })
     .await
     .unwrap();

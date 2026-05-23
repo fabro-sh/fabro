@@ -1,13 +1,15 @@
 import { describe, expect, mock, test, beforeEach } from "bun:test";
 
-import { queryKeys } from "./query-keys";
-
 const mutateMock = mock((..._args: unknown[]) => Promise.resolve(undefined));
 let lastMutationOptions: { onSuccess?: (result: unknown) => void } | null = null;
 
 const useSWRMutationMock = mock((_key: unknown, _fetcher: unknown, options: unknown) => {
   lastMutationOptions = options as { onSuccess?: (result: unknown) => void };
-  return {};
+  return {
+    trigger: mock(),
+    isMutating: false,
+    reset: mock(),
+  };
 });
 
 mock.module("swr", () => ({
@@ -26,9 +28,12 @@ mock.module("./api-client", () => ({
 }));
 
 mock.module("./run-actions", () => ({
+  approveRun: mock(),
   archiveRun: mock(),
   cancelRun: mock(),
+  denyRun: mock(),
   isLifecycleActionError: () => false,
+  retryRun: mock(),
   unarchiveRun: mock(),
 }));
 
@@ -41,7 +46,7 @@ beforeEach(() => {
 });
 
 describe("lifecycle mutations", () => {
-  test("successful archive invalidates both board run caches", () => {
+  test("successful archive invalidates run list caches via a matcher", () => {
     useArchiveRun("run-1");
 
     lastMutationOptions?.onSuccess?.({
@@ -50,8 +55,14 @@ describe("lifecycle mutations", () => {
       run: {},
     });
 
-    const keys = mutateMock.mock.calls.map((call) => call[0]);
-    expect(keys).toContainEqual(queryKeys.boards.runs(false));
-    expect(keys).toContainEqual(queryKeys.boards.runs(true));
+    const matchers = mutateMock.mock.calls
+      .map((call) => call[0])
+      .filter((arg): arg is (key: unknown) => boolean => typeof arg === "function");
+    expect(matchers.length).toBeGreaterThan(0);
+    const matcher = matchers[0];
+    expect(matcher!(["runs", "all", { includeArchived: false }])).toBe(true);
+    expect(matcher!(["runs", "all", { includeArchived: true }])).toBe(true);
+    expect(matcher!(["runs", "page", { sort: "created_at" }])).toBe(true);
+    expect(matcher!(["runs", "detail", "run-1"])).toBe(false);
   });
 });

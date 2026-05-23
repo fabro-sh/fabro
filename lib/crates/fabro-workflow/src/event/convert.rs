@@ -39,6 +39,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             manifest_blob,
             git,
             fork_source_ref,
+            retried_from,
             parent_id,
             web_url,
             ..
@@ -58,6 +59,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             manifest_blob:    *manifest_blob,
             git:              git.clone(),
             fork_source_ref:  fork_source_ref.clone(),
+            retried_from:     *retried_from,
             parent_id:        *parent_id,
             web_url:          web_url.clone(),
         }),
@@ -82,7 +84,21 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 definition_blob: *definition_blob,
             })
         }
-        Event::RunQueued => EventBody::RunQueued(fabro_types::RunStatusEffectProps::default()),
+        Event::RunStartRequested { resume, .. } => {
+            EventBody::RunStartRequested(fabro_types::RunStartRequestedProps { resume: *resume })
+        }
+        Event::RunPending { reason, .. } => {
+            EventBody::RunPending(fabro_types::RunPendingProps { reason: *reason })
+        }
+        Event::RunApproved { .. } => {
+            EventBody::RunApproved(fabro_types::RunApprovedProps::default())
+        }
+        Event::RunDenied { reason, .. } => EventBody::RunDenied(fabro_types::RunDeniedProps {
+            reason: reason.clone(),
+        }),
+        Event::RunRunnable { source, .. } => {
+            EventBody::RunRunnable(fabro_types::RunRunnableProps { source: *source })
+        }
         Event::RunStarting => {
             EventBody::RunStarting(fabro_types::RunStatusTransitionProps::default())
         }
@@ -2332,6 +2348,7 @@ mod tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            retried_from:     None,
             parent_id:        None,
             web_url:          None,
         });

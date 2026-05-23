@@ -61,14 +61,16 @@ Workflows are submitted via the REST API and executed in the background. The exa
 curl -X POST http://localhost:3000/api/v1/runs
 ```
 
-The server returns immediately with a run ID. A background scheduler promotes queued runs to `Running` in FIFO order, up to the concurrency limit.
+The server returns immediately with a run ID. After a start request, a background scheduler promotes `runnable` runs to `running` in FIFO order, up to the concurrency limit. Parent-generated child runs can remain `pending` until a user approves them.
 
 ## Run lifecycle
 
-1. **Submit** — `POST /api/v1/runs` creates the run with status `Queued`.
-2. **Schedule** — The scheduler picks up queued runs up to `max_concurrent_runs`.
-3. **Execute** — The engine walks the graph, streaming events to all subscribers.
-4. **Complete** — The run transitions to `Completed`, `Failed`, or `Cancelled`.
+1. **Submit** — `POST /api/v1/runs` creates the run with status `submitted`.
+2. **Start request** — `POST /api/v1/runs/{id}/start` makes normal runs `runnable`; parent-generated child runs may become `pending` with `approval_required`.
+3. **Approve if needed** — Approving a pending child run makes it `runnable`; denying it fails with `approval_denied`.
+4. **Schedule** — The scheduler picks up `runnable` runs up to `max_concurrent_runs`.
+5. **Execute** — The engine walks the graph, streaming events to all subscribers.
+6. **Complete** — The run transitions to `succeeded`, `failed`, or `dead`.
 
 ## Web UI
 

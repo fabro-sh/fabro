@@ -88,7 +88,7 @@ DELETE /api/v1/automations/{id}
 
 ## Stage 6: Scheduler And Run Creation
 
-- [ ] Add an automation scheduler service in `fabro-server` separate from the existing queued-run scheduler.
+- [ ] Add an automation scheduler service in `fabro-server` separate from the existing runnable-run scheduler.
 - [ ] On startup and settings reload, evaluate enabled automations, compute due schedules, and create runs for due entries.
 - [ ] Add server-side materialization for automation targets: clone or fetch the configured GitHub repo/ref into a temporary workspace, resolve the workflow slug with existing project workflow discovery rules, build a `RunManifest`, then reuse the existing run creation/start path.
 - [ ] Set run provenance to identify the automation ID and system actor.

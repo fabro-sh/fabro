@@ -7,7 +7,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use fabro_api::types;
 use fabro_types::{
     PairId, PairMessageRecord, PairMessageRequest, PairRecord, PairTranscriptResponse, Run, RunId,
-    RunPairStatusResponse, RunStatus, StageId,
+    RunPairStatusResponse, StageId,
 };
 use fabro_util::exit::{self, ExitClass};
 use schemars::JsonSchema;
@@ -250,7 +250,7 @@ pub(crate) fn run_summary_result(run: &Run) -> RunSummaryResult {
         workflow_name:       run.workflow.name.clone(),
         workflow_graph_name: run.workflow.graph_name.clone(),
         workflow_slug:       run.workflow.slug.clone(),
-        status:              run_status_kind(run.lifecycle.status).to_string(),
+        status:              run.lifecycle.status.kind().to_string(),
         archived:            run.lifecycle.archived,
         created_at:          run.timestamps.created_at.to_rfc3339(),
         started_at:          run
@@ -284,10 +284,6 @@ pub(crate) fn parse_datetime_filter(name: &str, raw: &str) -> ToolResult<DateTim
     Ok(DateTime::from_naive_utc_and_offset(datetime, Utc))
 }
 
-pub(crate) fn run_status_kind(status: RunStatus) -> &'static str {
-    status.kind().into()
-}
-
 fn format_tool_error(err: &anyhow::Error) -> String {
     let mut rendered = format!("{err:#}");
     if exit::exit_class_for(err) == Some(ExitClass::AuthRequired)
@@ -301,7 +297,7 @@ fn format_tool_error(err: &anyhow::Error) -> String {
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
-    use fabro_types::{RunLifecycle, RunLinks, RunOrigin, RunTimestamps, WorkflowRef};
+    use fabro_types::{RunLifecycle, RunLinks, RunOrigin, RunStatus, RunTimestamps, WorkflowRef};
 
     use super::*;
 
@@ -328,6 +324,7 @@ mod tests {
             labels:           HashMap::new(),
             lifecycle:        RunLifecycle {
                 status:          RunStatus::Submitted,
+                approval:        None,
                 pending_control: None,
                 queue_position:  None,
                 error:           None,
@@ -345,11 +342,13 @@ mod tests {
             },
             timing:           None,
             billing:          None,
+            size:             fabro_types::RunSize::default(),
             ask_fabro:        fabro_types::AskFabro::default(),
             diff:             None,
             pull_request:     None,
             current_question: None,
             superseded_by:    None,
+            retried_from:     None,
             links:            RunLinks { web: None },
         };
 

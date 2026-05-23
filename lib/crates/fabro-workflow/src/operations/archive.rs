@@ -153,6 +153,7 @@ mod tests {
     async fn seed_succeeded(store: &Database, run_id: &RunId) {
         let run_store = store.create_run(run_id).await.unwrap();
         seed_created(&run_store, run_id).await;
+        seed_runnable(&run_store, run_id).await;
         event::append_event(&run_store, run_id, &Event::RunStarting)
             .await
             .unwrap();
@@ -177,6 +178,7 @@ mod tests {
     async fn seed_failed(store: &Database, run_id: &RunId) {
         let run_store = store.create_run(run_id).await.unwrap();
         seed_created(&run_store, run_id).await;
+        seed_runnable(&run_store, run_id).await;
         event::append_event(&run_store, run_id, &Event::RunStarting)
             .await
             .unwrap();
@@ -200,6 +202,7 @@ mod tests {
     async fn seed_running(store: &Database, run_id: &RunId) {
         let run_store = store.create_run(run_id).await.unwrap();
         seed_created(&run_store, run_id).await;
+        seed_runnable(&run_store, run_id).await;
         event::append_event(&run_store, run_id, &Event::RunStarting)
             .await
             .unwrap();
@@ -226,8 +229,18 @@ mod tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            retried_from:     None,
             parent_id:        None,
             web_url:          None,
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn seed_runnable(run_store: &fabro_store::RunDatabase, run_id: &RunId) {
+        event::append_event(run_store, run_id, &Event::RunRunnable {
+            source: fabro_types::RunRunnableSource::StartRequested,
+            actor:  None,
         })
         .await
         .unwrap();

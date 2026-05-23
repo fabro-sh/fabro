@@ -10,8 +10,6 @@ import {
 import {
   Bars3Icon,
   BeakerIcon,
-  ChartBarIcon,
-  ChatBubbleLeftRightIcon,
   Cog6ToothIcon,
   PlayIcon,
   SparklesIcon,
@@ -27,22 +25,12 @@ import { useAuthMe } from "../lib/queries";
 
 const allNavigation = [
   { name: "Automations", href: "/automations", icon: SparklesIcon, demoOnly: true },
-  {
-    name: "Chats",
-    href: "/chats/new",
-    icon: ChatBubbleLeftRightIcon,
-    demoOnly: true,
-    // /chats/new is the click target, but the entry stays active on any
-    // /chats/:id child route as well.
-    activePathPrefix: "/chats",
-  },
   { name: "Runs", href: "/runs", icon: PlayIcon, demoOnly: false },
-  { name: "Insights", href: "/insights", icon: ChartBarIcon, demoOnly: true },
   { name: "Settings", href: "/settings", icon: Cog6ToothIcon, demoOnly: false },
 ];
 
 function activeFor(item: (typeof allNavigation)[number], pathname: string): boolean {
-  return pathname.startsWith(item.activePathPrefix ?? item.href);
+  return pathname.startsWith(item.href);
 }
 
 export function getVisibleNavigation(demoMode: boolean) {

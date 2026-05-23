@@ -13,11 +13,13 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { BoardColumn } from './board-column';
 
-export interface BoardColumnDefinition {
-    'id': BoardColumn;
-    'name': string;
+export interface RunStatusRunnable {
+    'kind': RunStatusRunnableKindEnum;
 }
+
+export const RunStatusRunnableKindEnum = {
+    RUNNABLE: 'runnable'
+} as const;
+
+export type RunStatusRunnableKindEnum = typeof RunStatusRunnableKindEnum[keyof typeof RunStatusRunnableKindEnum];

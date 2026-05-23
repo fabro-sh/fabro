@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use ::fabro_types::{
     BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
     ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind, PairTarget,
-    ParallelBranchId, Principal, PullRequestLink, RunBlobId, RunFailure, RunId, RunNoticeLevel,
-    RunPairEndedReason, RunPairFailedReason, RunProvenance, RunTiming, SandboxProvider, StageId,
-    StageTiming, SuccessReason, run_event as fabro_types,
+    ParallelBranchId, PendingReason, Principal, PullRequestLink, RunBlobId, RunFailure, RunId,
+    RunNoticeLevel, RunPairEndedReason, RunPairFailedReason, RunProvenance, RunRunnableSource,
+    RunTiming, SandboxProvider, StageId, StageTiming, SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use fabro_model::{ReasoningEffort, Speed};
@@ -47,6 +47,8 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fork_source_ref:  Option<ForkSourceRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        retried_from:     Option<RunId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_id:        Option<RunId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         web_url:          Option<String>,
@@ -69,7 +71,31 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         definition_blob: Option<RunBlobId>,
     },
-    RunQueued,
+    RunStartRequested {
+        resume: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:  Option<Principal>,
+    },
+    RunPending {
+        reason: PendingReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:  Option<Principal>,
+    },
+    RunApproved {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<Principal>,
+    },
+    RunDenied {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:  Option<Principal>,
+    },
+    RunRunnable {
+        source: RunRunnableSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor:  Option<Principal>,
+    },
     RunStarting,
     RunRunning,
     RunInterrupt {
@@ -785,8 +811,20 @@ impl Event {
             Self::RunSubmitted { definition_blob } => {
                 info!(?definition_blob, "Run submitted");
             }
-            Self::RunQueued => {
-                info!("Run queued");
+            Self::RunStartRequested { resume, .. } => {
+                info!(resume, "Run start requested");
+            }
+            Self::RunPending { reason, .. } => {
+                info!(?reason, "Run pending");
+            }
+            Self::RunApproved { .. } => {
+                info!("Run approved");
+            }
+            Self::RunDenied { reason, .. } => {
+                info!(?reason, "Run denied");
+            }
+            Self::RunRunnable { source, .. } => {
+                info!(?source, "Run runnable");
             }
             Self::RunStarting => {
                 info!("Run starting");

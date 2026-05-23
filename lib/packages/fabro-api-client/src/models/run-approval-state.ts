@@ -14,12 +14,14 @@
 
 
 
-export interface RunStatusQueued {
-    'kind': RunStatusQueuedKindEnum;
-}
+/**
+ * State of a run\'s pre-execution approval request.
+ */
 
-export const RunStatusQueuedKindEnum = {
-    QUEUED: 'queued'
+export const RunApprovalState = {
+    PENDING: 'pending',
+    APPROVED: 'approved',
+    DENIED: 'denied'
 } as const;
 
-export type RunStatusQueuedKindEnum = typeof RunStatusQueuedKindEnum[keyof typeof RunStatusQueuedKindEnum];
+export type RunApprovalState = typeof RunApprovalState[keyof typeof RunApprovalState];

@@ -2,11 +2,11 @@ use std::any::{TypeId, type_name};
 
 use fabro_api::types::{
     BlockedReason as ApiBlockedReason, FailureReason as ApiFailureReason,
-    RunControlAction as ApiRunControlAction, RunStatus as ApiRunStatus,
-    SuccessReason as ApiSuccessReason,
+    PendingReason as ApiPendingReason, RunControlAction as ApiRunControlAction,
+    RunStatus as ApiRunStatus, SuccessReason as ApiSuccessReason,
 };
 use fabro_types::status::{
-    BlockedReason, FailureReason, RunControlAction, RunStatus, SuccessReason,
+    BlockedReason, FailureReason, PendingReason, RunControlAction, RunStatus, SuccessReason,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -16,6 +16,7 @@ fn status_family_reuses_domain_types() {
     assert_same_type::<ApiRunStatus, RunStatus>();
     assert_same_type::<ApiSuccessReason, SuccessReason>();
     assert_same_type::<ApiFailureReason, FailureReason>();
+    assert_same_type::<ApiPendingReason, PendingReason>();
     assert_same_type::<ApiBlockedReason, BlockedReason>();
     assert_same_type::<ApiRunControlAction, RunControlAction>();
 }
@@ -29,9 +30,18 @@ fn run_status_json_matches_openapi_shape() {
         }),
     );
     assert_json(
-        RunStatus::Queued,
+        RunStatus::Pending {
+            reason: PendingReason::ApprovalRequired,
+        },
         json!({
-            "kind": "queued"
+            "kind": "pending",
+            "reason": "approval_required"
+        }),
+    );
+    assert_json(
+        RunStatus::Runnable,
+        json!({
+            "kind": "runnable"
         }),
     );
     assert_json(
@@ -104,12 +114,18 @@ fn success_reason_json_tokens_match_openapi() {
 fn failure_reason_json_tokens_match_openapi() {
     assert_string_json(FailureReason::WorkflowError, "workflow_error");
     assert_string_json(FailureReason::Cancelled, "cancelled");
+    assert_string_json(FailureReason::ApprovalDenied, "approval_denied");
     assert_string_json(FailureReason::Terminated, "terminated");
     assert_string_json(FailureReason::TransientInfra, "transient_infra");
     assert_string_json(FailureReason::BudgetExhausted, "budget_exhausted");
     assert_string_json(FailureReason::LaunchFailed, "launch_failed");
     assert_string_json(FailureReason::BootstrapFailed, "bootstrap_failed");
     assert_string_json(FailureReason::SandboxInitFailed, "sandbox_init_failed");
+}
+
+#[test]
+fn pending_reason_json_tokens_match_openapi() {
+    assert_string_json(PendingReason::ApprovalRequired, "approval_required");
 }
 
 #[test]

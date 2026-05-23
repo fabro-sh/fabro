@@ -1,5 +1,4 @@
 use std::fmt;
-use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr};
@@ -21,7 +20,8 @@ use strum::{Display, EnumString, IntoStaticStr};
 #[strum(serialize_all = "snake_case")]
 pub enum RunStatusKind {
     Submitted,
-    Queued,
+    Pending,
+    Runnable,
     Starting,
     Running,
     Blocked,
@@ -36,7 +36,8 @@ pub enum RunStatusKind {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunStatus {
     Submitted,
-    Queued,
+    Pending { reason: PendingReason },
+    Runnable,
     Starting,
     Running,
     Blocked { blocked_reason: BlockedReason },
@@ -75,7 +76,8 @@ impl RunStatus {
         matches!(
             self,
             Self::Submitted
-                | Self::Queued
+                | Self::Pending { .. }
+                | Self::Runnable
                 | Self::Starting
                 | Self::Running
                 | Self::Blocked { .. }
@@ -120,9 +122,10 @@ impl RunStatus {
         }
         matches!(
             (self, to),
-            (Self::Submitted, Self::Queued | Self::Starting)
+            (Self::Submitted, Self::Pending { .. } | Self::Runnable)
                 | (
-                    Self::Queued
+                    Self::Pending { .. }
+                        | Self::Runnable
                         | Self::Starting
                         | Self::Running
                         | Self::Blocked { .. }
@@ -131,9 +134,16 @@ impl RunStatus {
                         | Self::Failed { .. },
                     Self::Submitted
                 )
-                | (Self::Queued, Self::Starting)
-                | (Self::Submitted | Self::Queued, Self::Failed {
-                    reason: FailureReason::Cancelled,
+                | (Self::Pending { .. }, Self::Runnable)
+                | (Self::Runnable, Self::Starting)
+                | (
+                    Self::Submitted | Self::Pending { .. } | Self::Runnable,
+                    Self::Failed {
+                        reason: FailureReason::Cancelled,
+                    }
+                )
+                | (Self::Pending { .. }, Self::Failed {
+                    reason: FailureReason::ApprovalDenied,
                 })
                 | (
                     Self::Starting | Self::Paused { .. } | Self::Blocked { .. },
@@ -141,7 +151,6 @@ impl RunStatus {
                 )
                 | (
                     Self::Starting
-                        | Self::Queued
                         | Self::Running
                         | Self::Blocked { .. }
                         | Self::Paused { .. }
@@ -175,7 +184,8 @@ impl From<RunStatus> for RunStatusKind {
     fn from(status: RunStatus) -> Self {
         match status {
             RunStatus::Submitted => Self::Submitted,
-            RunStatus::Queued => Self::Queued,
+            RunStatus::Pending { .. } => Self::Pending,
+            RunStatus::Runnable => Self::Runnable,
             RunStatus::Starting => Self::Starting,
             RunStatus::Running => Self::Running,
             RunStatus::Blocked { .. } => Self::Blocked,
@@ -192,7 +202,8 @@ impl fmt::Display for RunStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Submitted => f.write_str("submitted"),
-            Self::Queued => f.write_str("queued"),
+            Self::Pending { reason } => write!(f, "pending({reason})"),
+            Self::Runnable => f.write_str("runnable"),
             Self::Starting => f.write_str("starting"),
             Self::Running => f.write_str("running"),
             Self::Blocked { blocked_reason } => write!(f, "blocked({blocked_reason})"),
@@ -221,50 +232,44 @@ impl fmt::Display for InvalidTransition {
 
 impl std::error::Error for InvalidTransition {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum PendingReason {
+    ApprovalRequired,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum SuccessReason {
     Completed,
     PartialSuccess,
 }
 
-impl fmt::Display for SuccessReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Completed => "completed",
-            Self::PartialSuccess => "partial_success",
-        })
-    }
-}
-
-impl FromStr for SuccessReason {
-    type Err = ParseSuccessReasonError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "completed" => Ok(Self::Completed),
-            "partial_success" => Ok(Self::PartialSuccess),
-            _ => Err(ParseSuccessReasonError(s.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ParseSuccessReasonError(String);
-
-impl fmt::Display for ParseSuccessReasonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid success reason: {:?}", self.0)
-    }
-}
-
-impl std::error::Error for ParseSuccessReasonError {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum FailureReason {
     WorkflowError,
     Cancelled,
+    ApprovalDenied,
     Terminated,
     TransientInfra,
     BudgetExhausted,
@@ -272,50 +277,6 @@ pub enum FailureReason {
     BootstrapFailed,
     SandboxInitFailed,
 }
-
-impl fmt::Display for FailureReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::WorkflowError => "workflow_error",
-            Self::Cancelled => "cancelled",
-            Self::Terminated => "terminated",
-            Self::TransientInfra => "transient_infra",
-            Self::BudgetExhausted => "budget_exhausted",
-            Self::LaunchFailed => "launch_failed",
-            Self::BootstrapFailed => "bootstrap_failed",
-            Self::SandboxInitFailed => "sandbox_init_failed",
-        })
-    }
-}
-
-impl FromStr for FailureReason {
-    type Err = ParseFailureReasonError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "workflow_error" => Ok(Self::WorkflowError),
-            "cancelled" => Ok(Self::Cancelled),
-            "terminated" => Ok(Self::Terminated),
-            "transient_infra" => Ok(Self::TransientInfra),
-            "budget_exhausted" => Ok(Self::BudgetExhausted),
-            "launch_failed" => Ok(Self::LaunchFailed),
-            "bootstrap_failed" => Ok(Self::BootstrapFailed),
-            "sandbox_init_failed" => Ok(Self::SandboxInitFailed),
-            _ => Err(ParseFailureReasonError(s.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ParseFailureReasonError(String);
-
-impl fmt::Display for ParseFailureReasonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid failure reason: {:?}", self.0)
-    }
-}
-
-impl std::error::Error for ParseFailureReasonError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -344,18 +305,13 @@ impl From<TerminalStatus> for RunStatus {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum BlockedReason {
     HumanInputRequired,
-}
-
-impl fmt::Display for BlockedReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::HumanInputRequired => "human_input_required",
-        })
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,18 +326,27 @@ pub enum RunControlAction {
 mod tests {
     use std::str::FromStr;
 
-    use super::{BlockedReason, FailureReason, InvalidTransition, RunStatus, SuccessReason};
+    use super::{
+        BlockedReason, FailureReason, InvalidTransition, PendingReason, RunStatus, SuccessReason,
+    };
 
     #[test]
-    fn queued_and_blocked_are_active() {
-        let queued = RunStatus::Queued;
+    fn pending_runnable_and_blocked_are_active() {
+        let pending = RunStatus::Pending {
+            reason: PendingReason::ApprovalRequired,
+        };
+        let runnable = RunStatus::Runnable;
         let blocked = RunStatus::Blocked {
             blocked_reason: BlockedReason::HumanInputRequired,
         };
 
-        assert_eq!(queued.to_string(), "queued");
-        assert!(queued.is_active());
-        assert!(!queued.is_terminal());
+        assert_eq!(pending.to_string(), "pending(approval_required)");
+        assert!(pending.is_active());
+        assert!(!pending.is_terminal());
+
+        assert_eq!(runnable.to_string(), "runnable");
+        assert!(runnable.is_active());
+        assert!(!runnable.is_terminal());
 
         assert_eq!(blocked.to_string(), "blocked(human_input_required)");
         assert!(blocked.is_active());
@@ -391,7 +356,10 @@ mod tests {
     #[test]
     fn canonical_blocked_transitions_are_allowed() {
         let submitted = RunStatus::Submitted;
-        let queued = RunStatus::Queued;
+        let pending = RunStatus::Pending {
+            reason: PendingReason::ApprovalRequired,
+        };
+        let runnable = RunStatus::Runnable;
         let running = RunStatus::Running;
         let blocked = RunStatus::Blocked {
             blocked_reason: BlockedReason::HumanInputRequired,
@@ -403,18 +371,30 @@ mod tests {
             reason: FailureReason::WorkflowError,
         };
 
-        assert!(submitted.can_transition_to(queued));
-        assert!(submitted.can_transition_to(RunStatus::Starting));
+        assert!(submitted.can_transition_to(pending));
+        assert!(submitted.can_transition_to(runnable));
+        assert!(!submitted.can_transition_to(RunStatus::Starting));
         assert!(submitted.can_transition_to(RunStatus::Failed {
             reason: FailureReason::Cancelled,
         }));
-        assert!(queued.can_transition_to(RunStatus::Submitted));
+        assert!(pending.can_transition_to(RunStatus::Submitted));
+        assert!(runnable.can_transition_to(RunStatus::Submitted));
         assert!(failed.can_transition_to(RunStatus::Submitted));
-        assert!(queued.can_transition_to(RunStatus::Starting));
-        assert!(queued.can_transition_to(RunStatus::Failed {
+        assert!(pending.can_transition_to(runnable));
+        assert!(runnable.can_transition_to(RunStatus::Starting));
+        assert!(pending.can_transition_to(RunStatus::Failed {
             reason: FailureReason::Cancelled,
         }));
-        assert!(queued.can_transition_to(RunStatus::Failed {
+        assert!(pending.can_transition_to(RunStatus::Failed {
+            reason: FailureReason::ApprovalDenied,
+        }));
+        assert!(!pending.can_transition_to(RunStatus::Failed {
+            reason: FailureReason::Terminated,
+        }));
+        assert!(runnable.can_transition_to(RunStatus::Failed {
+            reason: FailureReason::Cancelled,
+        }));
+        assert!(!runnable.can_transition_to(RunStatus::Failed {
             reason: FailureReason::Terminated,
         }));
         assert!(running.can_transition_to(blocked));
@@ -434,6 +414,11 @@ mod tests {
         let failure = FailureReason::from_str("cancelled").expect("cancelled should parse");
         assert_eq!(failure, FailureReason::Cancelled);
         assert_eq!(failure.to_string(), "cancelled");
+
+        let pending =
+            PendingReason::from_str("approval_required").expect("approval_required should parse");
+        assert_eq!(pending, PendingReason::ApprovalRequired);
+        assert_eq!(pending.to_string(), "approval_required");
     }
 
     #[test]
@@ -441,7 +426,10 @@ mod tests {
         let removing = RunStatus::Removing;
         for status in [
             RunStatus::Submitted,
-            RunStatus::Queued,
+            RunStatus::Pending {
+                reason: PendingReason::ApprovalRequired,
+            },
+            RunStatus::Runnable,
             RunStatus::Starting,
             RunStatus::Running,
             RunStatus::Blocked {

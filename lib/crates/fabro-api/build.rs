@@ -187,6 +187,7 @@ fn main() {
     settings.with_interface(InterfaceStyle::Builder);
     let replacements: &[(&str, &str, &[TypeImpl])] = &[
         ("RunStatus", "fabro_types::status::RunStatus", &[]),
+        ("PendingReason", "fabro_types::status::PendingReason", &[]),
         ("SuccessReason", "fabro_types::status::SuccessReason", &[]),
         ("FailureReason", "fabro_types::status::FailureReason", &[]),
         ("FailureCategory", "fabro_types::FailureCategory", &[]),
@@ -200,6 +201,10 @@ fn main() {
             &[],
         ),
         ("Run", "fabro_types::Run", &[]),
+        ("RunApproval", "fabro_types::RunApproval", &[]),
+        ("RunApprovalState", "fabro_types::RunApprovalState", &[]),
+        ("RunRunnableSource", "fabro_types::RunRunnableSource", &[]),
+        ("RunSize", "fabro_types::RunSize", &[]),
         ("DiffSummary", "fabro_types::DiffSummary", &[]),
         ("RepositoryRef", "fabro_types::RepositoryRef", &[]),
         ("WorkflowSettings", "fabro_types::WorkflowSettings", &[]),

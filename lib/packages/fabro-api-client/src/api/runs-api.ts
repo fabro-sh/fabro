@@ -22,11 +22,15 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
+import type { BoardColumn } from '../models';
+// @ts-ignore
 import type { CloseRunPullRequestResponse } from '../models';
 // @ts-ignore
 import type { CreateRunPullRequestRequest } from '../models';
 // @ts-ignore
 import type { DeleteRunResponse } from '../models';
+// @ts-ignore
+import type { DenyRunRequest } from '../models';
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
@@ -39,8 +43,6 @@ import type { LinkRunPullRequestRequest } from '../models';
 import type { MergeRunPullRequestRequest } from '../models';
 // @ts-ignore
 import type { MergeRunPullRequestResponse } from '../models';
-// @ts-ignore
-import type { PaginatedBoardRunList } from '../models';
 // @ts-ignore
 import type { PaginatedRunList } from '../models';
 // @ts-ignore
@@ -74,6 +76,46 @@ import type { ValidateResponse } from '../models';
  */
 export const RunsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
+        /**
+         * Approves a pending run that requires pre-execution approval and makes it runnable.
+         * @summary Approve Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        approveRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('approveRun', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/approve`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
         /**
          * Marks a terminal run (`succeeded`, `failed`, or `dead`) as `archived`. Archived runs are hidden from default listings and are read-only until unarchived. Idempotent on already-archived runs. Returns 409 if the run is not terminal.
          * @summary Archive Run
@@ -115,7 +157,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Cancels a running or queued run. Returns 409 if the run has already completed or been cancelled.
+         * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
          * @summary Cancel Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -319,6 +361,49 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Denies a pending run that requires pre-execution approval and fails it with `approval_denied`.
+         * @summary Deny Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {DenyRunRequest} [denyRunRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        denyRun: async (id: string, denyRunRequest?: DenyRunRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('denyRun', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/deny`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(denyRunRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -539,67 +624,19 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
-         * @summary List Board Runs
-         * @param {number} [pageLimit] Maximum number of items to return per page.
-         * @param {number} [pageOffset] Number of items to skip before returning results.
-         * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        listBoardRuns: async (pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/v1/boards/runs`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication SessionCookie required
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            if (pageLimit !== undefined) {
-                localVarQueryParameter['page[limit]'] = pageLimit;
-            }
-
-            if (pageOffset !== undefined) {
-                localVarQueryParameter['page[offset]'] = pageOffset;
-            }
-
-            if (includeArchived !== undefined) {
-                localVarQueryParameter['include_archived'] = includeArchived;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Archived runs are hidden by default; pass `include_archived=true` to include them in the response.
+         * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Supports per-status filtering and sorting for both list and kanban renderings. Archived runs are hidden by default; pass `include_archived=true` (or `status=archived`) to include them. Runs in the `removing` bucket are hidden unless explicitly requested via `status=removing`.
          * @summary List Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
          * @param {string} [parentId] Return only runs currently linked to this orchestration parent.
+         * @param {Array<BoardColumn>} [status] Filter runs by status bucket. Repeatable. When omitted, runs in the &#x60;removing&#x60; bucket are hidden; pass &#x60;status&#x3D;removing&#x60; to include them. Archived runs are hidden unless &#x60;include_archived&#x3D;true&#x60; or &#x60;status&#x3D;archived&#x60; is passed.
+         * @param {ListRunsSortEnum} [sort] Field to sort by. Defaults to &#x60;created_at&#x60;.
+         * @param {ListRunsDirectionEnum} [direction] Sort direction. Defaults to &#x60;desc&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRuns: async (pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listRuns: async (pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, status?: Array<BoardColumn>, sort?: ListRunsSortEnum, direction?: ListRunsDirectionEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/v1/runs`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -632,6 +669,18 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
 
             if (parentId !== undefined) {
                 localVarQueryParameter['parent_id'] = parentId;
+            }
+
+            if (status) {
+                localVarQueryParameter['status'] = status;
+            }
+
+            if (sort !== undefined) {
+                localVarQueryParameter['sort'] = sort;
+            }
+
+            if (direction !== undefined) {
+                localVarQueryParameter['direction'] = direction;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -940,6 +989,46 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
+         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Cancelled, active, succeeded, and archived runs are not retryable.
+         * @summary Retry Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retryRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('retryRun', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/retry`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
@@ -1024,7 +1113,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+         * Requests start for a submitted run. User-created runs become runnable; parent-generated child runs may become pending until approved. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
          * @summary Start Run
          * @param {string} id Unique run identifier (ULID).
          * @param {StartRunRequest} [startRunRequest]
@@ -1322,6 +1411,19 @@ export const RunsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = RunsApiAxiosParamCreator(configuration)
     return {
         /**
+         * Approves a pending run that requires pre-execution approval and makes it runnable.
+         * @summary Approve Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async approveRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Run>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.approveRun(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.approveRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Marks a terminal run (`succeeded`, `failed`, or `dead`) as `archived`. Archived runs are hidden from default listings and are read-only until unarchived. Idempotent on already-archived runs. Returns 409 if the run is not terminal.
          * @summary Archive Run
          * @param {string} id Unique run identifier (ULID).
@@ -1335,7 +1437,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Cancels a running or queued run. Returns 409 if the run has already completed or been cancelled.
+         * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
          * @summary Cancel Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1399,6 +1501,20 @@ export const RunsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.deleteRun(id, force, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.deleteRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Denies a pending run that requires pre-execution approval and fails it with `approval_denied`.
+         * @summary Deny Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {DenyRunRequest} [denyRunRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async denyRun(id: string, denyRunRequest?: DenyRunRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Run>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.denyRun(id, denyRunRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.denyRun']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1470,32 +1586,20 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
-         * @summary List Board Runs
-         * @param {number} [pageLimit] Maximum number of items to return per page.
-         * @param {number} [pageOffset] Number of items to skip before returning results.
-         * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async listBoardRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedBoardRunList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listBoardRuns(pageLimit, pageOffset, includeArchived, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunsApi.listBoardRuns']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Archived runs are hidden by default; pass `include_archived=true` to include them in the response.
+         * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Supports per-status filtering and sorting for both list and kanban renderings. Archived runs are hidden by default; pass `include_archived=true` (or `status=archived`) to include them. Runs in the `removing` bucket are hidden unless explicitly requested via `status=removing`.
          * @summary List Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
          * @param {string} [parentId] Return only runs currently linked to this orchestration parent.
+         * @param {Array<BoardColumn>} [status] Filter runs by status bucket. Repeatable. When omitted, runs in the &#x60;removing&#x60; bucket are hidden; pass &#x60;status&#x3D;removing&#x60; to include them. Archived runs are hidden unless &#x60;include_archived&#x3D;true&#x60; or &#x60;status&#x3D;archived&#x60; is passed.
+         * @param {ListRunsSortEnum} [sort] Field to sort by. Defaults to &#x60;created_at&#x60;.
+         * @param {ListRunsDirectionEnum} [direction] Sort direction. Defaults to &#x60;desc&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listRuns(pageLimit, pageOffset, includeArchived, parentId, options);
+        async listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, status?: Array<BoardColumn>, sort?: ListRunsSortEnum, direction?: ListRunsDirectionEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRuns(pageLimit, pageOffset, includeArchived, parentId, status, sort, direction, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.listRuns']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1594,6 +1698,19 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Cancelled, active, succeeded, and archived runs are not retryable.
+         * @summary Retry Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async retryRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Run>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retryRun(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.retryRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
@@ -1621,7 +1738,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+         * Requests start for a submitted run. User-created runs become runnable; parent-generated child runs may become pending until approved. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
          * @summary Start Run
          * @param {string} id Unique run identifier (ULID).
          * @param {StartRunRequest} [startRunRequest]
@@ -1723,6 +1840,16 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
     const localVarFp = RunsApiFp(configuration)
     return {
         /**
+         * Approves a pending run that requires pre-execution approval and makes it runnable.
+         * @summary Approve Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        approveRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
+            return localVarFp.approveRun(id, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Marks a terminal run (`succeeded`, `failed`, or `dead`) as `archived`. Archived runs are hidden from default listings and are read-only until unarchived. Idempotent on already-archived runs. Returns 409 if the run is not terminal.
          * @summary Archive Run
          * @param {string} id Unique run identifier (ULID).
@@ -1733,7 +1860,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.archiveRun(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Cancels a running or queued run. Returns 409 if the run has already completed or been cancelled.
+         * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
          * @summary Cancel Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1783,6 +1910,17 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          */
         deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<DeleteRunResponse> {
             return localVarFp.deleteRun(id, force, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Denies a pending run that requires pre-execution approval and fails it with `approval_denied`.
+         * @summary Deny Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {DenyRunRequest} [denyRunRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        denyRun(id: string, denyRunRequest?: DenyRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
+            return localVarFp.denyRun(id, denyRunRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Creates a new run from a checkpoint of the source run. The source run is left untouched.
@@ -1838,29 +1976,20 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.linkRunPullRequest(id, linkRunPullRequestRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
-         * @summary List Board Runs
-         * @param {number} [pageLimit] Maximum number of items to return per page.
-         * @param {number} [pageOffset] Number of items to skip before returning results.
-         * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        listBoardRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedBoardRunList> {
-            return localVarFp.listBoardRuns(pageLimit, pageOffset, includeArchived, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Archived runs are hidden by default; pass `include_archived=true` to include them in the response.
+         * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Supports per-status filtering and sorting for both list and kanban renderings. Archived runs are hidden by default; pass `include_archived=true` (or `status=archived`) to include them. Runs in the `removing` bucket are hidden unless explicitly requested via `status=removing`.
          * @summary List Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
          * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
          * @param {string} [parentId] Return only runs currently linked to this orchestration parent.
+         * @param {Array<BoardColumn>} [status] Filter runs by status bucket. Repeatable. When omitted, runs in the &#x60;removing&#x60; bucket are hidden; pass &#x60;status&#x3D;removing&#x60; to include them. Archived runs are hidden unless &#x60;include_archived&#x3D;true&#x60; or &#x60;status&#x3D;archived&#x60; is passed.
+         * @param {ListRunsSortEnum} [sort] Field to sort by. Defaults to &#x60;created_at&#x60;.
+         * @param {ListRunsDirectionEnum} [direction] Sort direction. Defaults to &#x60;desc&#x60;.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunList> {
-            return localVarFp.listRuns(pageLimit, pageOffset, includeArchived, parentId, options).then((request) => request(axios, basePath));
+        listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, status?: Array<BoardColumn>, sort?: ListRunsSortEnum, direction?: ListRunsDirectionEnum, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunList> {
+            return localVarFp.listRuns(pageLimit, pageOffset, includeArchived, parentId, status, sort, direction, options).then((request) => request(axios, basePath));
         },
         /**
          * Merges the stored pull request for a run on GitHub.
@@ -1935,6 +2064,16 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.retrieveRunGraphSource(id, options).then((request) => request(axios, basePath));
         },
         /**
+         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Cancelled, active, succeeded, and archived runs are not retryable.
+         * @summary Retry Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retryRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
+            return localVarFp.retryRun(id, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
@@ -1956,7 +2095,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.runPreflight(runManifest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+         * Requests start for a submitted run. User-created runs become runnable; parent-generated child runs may become pending until approved. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
          * @summary Start Run
          * @param {string} id Unique run identifier (ULID).
          * @param {StartRunRequest} [startRunRequest]
@@ -2035,6 +2174,17 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
  */
 export class RunsApi extends BaseAPI {
     /**
+     * Approves a pending run that requires pre-execution approval and makes it runnable.
+     * @summary Approve Run
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public approveRun(id: string, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).approveRun(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Marks a terminal run (`succeeded`, `failed`, or `dead`) as `archived`. Archived runs are hidden from default listings and are read-only until unarchived. Idempotent on already-archived runs. Returns 409 if the run is not terminal.
      * @summary Archive Run
      * @param {string} id Unique run identifier (ULID).
@@ -2046,7 +2196,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Cancels a running or queued run. Returns 409 if the run has already completed or been cancelled.
+     * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
      * @summary Cancel Run
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
@@ -2100,6 +2250,18 @@ export class RunsApi extends BaseAPI {
      */
     public deleteRun(id: string, force?: boolean, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).deleteRun(id, force, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Denies a pending run that requires pre-execution approval and fails it with `approval_denied`.
+     * @summary Deny Run
+     * @param {string} id Unique run identifier (ULID).
+     * @param {DenyRunRequest} [denyRunRequest]
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public denyRun(id: string, denyRunRequest?: DenyRunRequest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).denyRun(id, denyRunRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -2161,30 +2323,20 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves. Archived runs are hidden by default; pass `include_archived=true` to include them under the `archived` column.
-     * @summary List Board Runs
-     * @param {number} [pageLimit] Maximum number of items to return per page.
-     * @param {number} [pageOffset] Number of items to skip before returning results.
-     * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public listBoardRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).listBoardRuns(pageLimit, pageOffset, includeArchived, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Archived runs are hidden by default; pass `include_archived=true` to include them in the response.
+     * Returns durable run summaries from the backing store, including runs persisted before the current server boot. Supports per-status filtering and sorting for both list and kanban renderings. Archived runs are hidden by default; pass `include_archived=true` (or `status=archived`) to include them. Runs in the `removing` bucket are hidden unless explicitly requested via `status=removing`.
      * @summary List Runs
      * @param {number} [pageLimit] Maximum number of items to return per page.
      * @param {number} [pageOffset] Number of items to skip before returning results.
      * @param {boolean} [includeArchived] Whether to include archived runs in the response. Defaults to &#x60;false&#x60;.
      * @param {string} [parentId] Return only runs currently linked to this orchestration parent.
+     * @param {Array<BoardColumn>} [status] Filter runs by status bucket. Repeatable. When omitted, runs in the &#x60;removing&#x60; bucket are hidden; pass &#x60;status&#x3D;removing&#x60; to include them. Archived runs are hidden unless &#x60;include_archived&#x3D;true&#x60; or &#x60;status&#x3D;archived&#x60; is passed.
+     * @param {ListRunsSortEnum} [sort] Field to sort by. Defaults to &#x60;created_at&#x60;.
+     * @param {ListRunsDirectionEnum} [direction] Sort direction. Defaults to &#x60;desc&#x60;.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).listRuns(pageLimit, pageOffset, includeArchived, parentId, options).then((request) => request(this.axios, this.basePath));
+    public listRuns(pageLimit?: number, pageOffset?: number, includeArchived?: boolean, parentId?: string, status?: Array<BoardColumn>, sort?: ListRunsSortEnum, direction?: ListRunsDirectionEnum, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).listRuns(pageLimit, pageOffset, includeArchived, parentId, status, sort, direction, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -2267,6 +2419,17 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
+     * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Cancelled, active, succeeded, and archived runs are not retryable.
+     * @summary Retry Run
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public retryRun(id: string, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).retryRun(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
      * @summary Rewind Run
      * @param {string} id Unique run identifier (ULID).
@@ -2290,7 +2453,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
+     * Requests start for a submitted run. User-created runs become runnable; parent-generated child runs may become pending until approved. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
      * @summary Start Run
      * @param {string} id Unique run identifier (ULID).
      * @param {StartRunRequest} [startRunRequest]
@@ -2369,6 +2532,18 @@ export class RunsApi extends BaseAPI {
     }
 }
 
+export const ListRunsSortEnum = {
+    CREATED_AT: 'created_at',
+    UPDATED_AT: 'updated_at',
+    STATUS: 'status',
+    ELAPSED: 'elapsed'
+} as const;
+export type ListRunsSortEnum = typeof ListRunsSortEnum[keyof typeof ListRunsSortEnum];
+export const ListRunsDirectionEnum = {
+    ASC: 'asc',
+    DESC: 'desc'
+} as const;
+export type ListRunsDirectionEnum = typeof ListRunsDirectionEnum[keyof typeof ListRunsDirectionEnum];
 export const RetrieveRunGraphDirectionEnum = {
     LR: 'LR',
     TB: 'TB',

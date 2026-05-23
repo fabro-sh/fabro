@@ -5,13 +5,13 @@ date: "2026-04-04"
 
 ## Separate run create and start
 
-The `POST /api/v1/runs` endpoint now creates a run in `submitted` status without immediately queuing it. A new `POST /api/v1/runs/{id}/start` endpoint transitions the run to `queued` and notifies the scheduler. This two-step lifecycle gives API consumers more control — you can inspect or modify a run's configuration between creation and execution.
+The `POST /api/v1/runs` endpoint now creates a run in `submitted` status without immediately making it runnable. A new `POST /api/v1/runs/{id}/start` endpoint transitions the run to `runnable` and notifies the scheduler. This two-step lifecycle gives API consumers more control — you can inspect or modify a run's configuration between creation and execution.
 
 ## More
 
 <Accordion title="API">
 - `POST /api/v1/runs` now returns a run in `submitted` status
-- New `POST /api/v1/runs/{id}/start` endpoint queues a submitted run for execution
+- New `POST /api/v1/runs/{id}/start` endpoint makes a submitted run runnable for execution
 - Removed unused `GET /api/v1/runs/{id}/context` endpoint
 </Accordion>
 

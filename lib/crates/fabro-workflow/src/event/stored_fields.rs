@@ -61,6 +61,11 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             ..StoredEventFields::default()
         },
         Event::RunCancelRequested { actor }
+        | Event::RunStartRequested { actor, .. }
+        | Event::RunPending { actor, .. }
+        | Event::RunApproved { actor }
+        | Event::RunDenied { actor, .. }
+        | Event::RunRunnable { actor, .. }
         | Event::RunPauseRequested { actor }
         | Event::RunUnpauseRequested { actor }
         | Event::RunInterrupt { actor }

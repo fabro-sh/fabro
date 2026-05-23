@@ -14,7 +14,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     id:               "01ABC",
     goal:             "Fix the build",
     title:            "Fix the build",
-    workflow:         { slug: "fix_build", name: "Fix Build", graph_name: "FixBuild" },
+    workflow:         { slug: "fix_build", name: "Fix Build", graph_name: "FixBuild", node_count: 0, edge_count: 0 },
     automation:       null,
     repository:       { name: "myrepo", origin_url: null, provider: "unknown" },
     created_by:       null,
@@ -22,6 +22,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     labels:           {},
     lifecycle:        {
       status:          { kind: "running" },
+      approval:        null,
       pending_control: null,
       queue_position:  null,
       error:           null,
@@ -44,10 +45,12 @@ function makeRun(overrides: Partial<Run> = {}): Run {
       active_time_ms:    0,
     },
     billing:          { total_usd_micros: 500000 },
+    size:             "XS",
     diff:             null,
     pull_request:     null,
     current_question: null,
     superseded_by:    null,
+    retried_from:     null,
     links:            { web: null },
     ...overrides,
   };
@@ -57,6 +60,7 @@ function withStatus(status: ApiRunStatus): Pick<Run, "lifecycle"> {
   return {
     lifecycle: {
       status,
+      approval: null,
       pending_control: null,
       queue_position:  null,
       error:           null,
@@ -125,7 +129,7 @@ describe("mapRunToRunItem", () => {
       id:               "01DEF",
       goal:             "",
       title:            "",
-      workflow:         { slug: null, name: null, graph_name: null },
+      workflow:         { slug: null, name: null, graph_name: null, node_count: 0, edge_count: 0 },
       source_directory: null,
       repository:       { name: "unknown", origin_url: null, provider: "unknown" },
       ...withStatus({ kind: "submitted" }),
@@ -148,20 +152,22 @@ describe("mapRunToRunItem", () => {
 
   test("falls back to graph name and slug for workflow labels", () => {
     const graphFallback = mapRunToRunItem(
-      makeRun({ workflow: { slug: "fix_build", name: null, graph_name: "FixBuild" } }),
+       makeRun({ workflow: { slug: "fix_build", name: null, graph_name: "FixBuild", node_count: 0, edge_count: 0 } }),
     );
     const slugFallback = mapRunToRunItem(
-      makeRun({ workflow: { slug: "fix_build", name: null, graph_name: null } }),
+       makeRun({ workflow: { slug: "fix_build", name: null, graph_name: null, node_count: 0, edge_count: 0 } }),
     );
 
     expect(graphFallback.workflow).toBe("FixBuild");
     expect(slugFallback.workflow).toBe("fix_build");
   });
 
-  test("recognizes canonical blocked and queued run statuses", () => {
-    expect(isRunStatus("queued")).toBe(true);
+  test("recognizes canonical blocked, pending, and runnable run statuses", () => {
+    expect(isRunStatus("pending")).toBe(true);
+    expect(isRunStatus("runnable")).toBe(true);
     expect(isRunStatus("blocked")).toBe(true);
-    expect(runStatusDisplay).toHaveProperty("queued");
+    expect(runStatusDisplay).toHaveProperty("pending");
+    expect(runStatusDisplay).toHaveProperty("runnable");
     expect(runStatusDisplay).toHaveProperty("blocked");
   });
 

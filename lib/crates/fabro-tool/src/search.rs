@@ -449,6 +449,7 @@ mod tests {
             labels:           HashMap::from([("group".to_string(), group.to_string())]),
             lifecycle:        RunLifecycle {
                 status: RunStatus::Submitted,
+                approval: None,
                 pending_control: None,
                 queue_position: None,
                 error: None,
@@ -466,11 +467,13 @@ mod tests {
             },
             timing:           None,
             billing:          None,
+            size:             fabro_types::RunSize::default(),
             ask_fabro:        fabro_types::AskFabro::default(),
             diff:             None,
             pull_request:     None,
             current_question: None,
             superseded_by:    None,
+            retried_from:     None,
             links:            RunLinks { web: None },
         }
     }

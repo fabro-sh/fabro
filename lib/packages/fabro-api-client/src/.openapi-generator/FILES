@@ -50,7 +50,6 @@ models/billing-model-ref.ts
 models/billing-speed.ts
 models/billing-stage-ref.ts
 models/blocked-reason.ts
-models/board-column-definition.ts
 models/board-column.ts
 models/check-run-status.ts
 models/check-run.ts
@@ -75,6 +74,7 @@ models/delete-run-sandbox.ts
 models/delete-secret-request.ts
 models/demo-toggle-request.ts
 models/demo-toggle-response.ts
+models/deny-run-request.ts
 models/dev-token-login-request.ts
 models/dev-token-login-response.ts
 models/diagnostics-check.ts
@@ -190,7 +190,6 @@ models/object-store-local-settings.ts
 models/object-store-s3-settings.ts
 models/object-store-settings.ts
 models/paginated-api-question-list.ts
-models/paginated-board-run-list.ts
 models/paginated-event-list.ts
 models/paginated-history-entry-list.ts
 models/paginated-model-list.ts
@@ -219,6 +218,7 @@ models/pair-transcript-tool-call.ts
 models/pair-transcript-user-message.ts
 models/pair-transcript-warning.ts
 models/pending-interview-record.ts
+models/pending-reason.ts
 models/pre-run-push-outcome-failed.ts
 models/pre-run-push-outcome-not-attempted.ts
 models/pre-run-push-outcome-skipped-no-remote.ts
@@ -273,6 +273,8 @@ models/rewind-response.ts
 models/root-response-urls.ts
 models/root-response.ts
 models/run-agent-settings.ts
+models/run-approval-state.ts
+models/run-approval.ts
 models/run-artifact-entry.ts
 models/run-artifact-list-response.ts
 models/run-billing-stage.ts
@@ -321,18 +323,21 @@ models/run-projection.ts
 models/run-provenance.ts
 models/run-question.ts
 models/run-reference.ts
+models/run-runnable-source.ts
 models/run-sandbox-runtime.ts
 models/run-sandbox.ts
 models/run-scm-settings.ts
 models/run-server-provenance.ts
+models/run-size.ts
 models/run-spec.ts
 models/run-stage.ts
 models/run-status-blocked.ts
 models/run-status-dead.ts
 models/run-status-failed.ts
 models/run-status-paused.ts
-models/run-status-queued.ts
+models/run-status-pending.ts
 models/run-status-removing.ts
+models/run-status-runnable.ts
 models/run-status-running.ts
 models/run-status-starting.ts
 models/run-status-submitted.ts

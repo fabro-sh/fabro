@@ -641,6 +641,14 @@ mod tests {
         run.append_event(&event_payload(
             label,
             "2026-03-27T12:00:01Z",
+            "run.runnable",
+            &serde_json::json!({ "source": "start_requested" }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            label,
+            "2026-03-27T12:00:02Z",
             "run.starting",
             &serde_json::json!({}),
         ))
@@ -648,7 +656,7 @@ mod tests {
         .unwrap();
         run.append_event(&event_payload(
             label,
-            "2026-03-27T12:00:02Z",
+            "2026-03-27T12:00:03Z",
             "run.running",
             &serde_json::json!({}),
         ))
@@ -1090,6 +1098,14 @@ mod tests {
 
         run.append_event(&event_payload(
             "run-1",
+            "2026-03-27T12:00:01Z",
+            "run.runnable",
+            &serde_json::json!({ "source": "start_requested" }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
             "2026-03-27T12:00:02Z",
             "run.starting",
             &serde_json::json!({}),
@@ -1120,7 +1136,7 @@ mod tests {
         .unwrap();
 
         let recent = reader.list_events_from_with_limit(4, 10).await.unwrap();
-        assert_eq!(recent.len(), 1);
+        assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].seq, 4);
     }
 
@@ -1163,7 +1179,7 @@ mod tests {
         );
         assert_eq!(entries[0].summary.lifecycle.status, RunStatus::Running);
         assert_eq!(entries[0].projection.spec().run_id, test_run_id("run-2"));
-        assert_eq!(entries[0].last_seq, 3);
+        assert_eq!(entries[0].last_seq, 4);
 
         let filtered = reopened
             .list_cached_runs(
@@ -1299,6 +1315,14 @@ mod tests {
         run.append_event(&event_payload(
             "run-1",
             "2026-03-27T12:00:01Z",
+            "run.runnable",
+            &serde_json::json!({ "source": "start_requested" }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:01Z",
             "run.starting",
             &serde_json::json!({}),
         ))
@@ -1372,7 +1396,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(cached.summary.lifecycle.status, RunStatus::Running);
-        assert_eq!(cached.last_seq, 6);
+        assert_eq!(cached.last_seq, 7);
         assert_eq!(
             cached
                 .projection
@@ -1446,8 +1470,8 @@ mod tests {
         run.append_event(&event_payload(
             "run-1",
             "2026-03-27T12:00:01Z",
-            "run.queued",
-            &serde_json::json!({}),
+            "run.runnable",
+            &serde_json::json!({ "source": "start_requested" }),
         ))
         .await
         .unwrap();

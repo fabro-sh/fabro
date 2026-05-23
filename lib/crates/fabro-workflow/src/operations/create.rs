@@ -245,6 +245,7 @@ async fn persist_created_run(
             manifest_blob,
             git: record.git.clone(),
             fork_source_ref: record.fork_source_ref.clone(),
+            retried_from: None,
             parent_id,
             web_url,
         },

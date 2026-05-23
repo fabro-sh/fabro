@@ -15,15 +15,12 @@
 
 
 /**
- * Counts of known runs in the active server process.
+ * Source that made a run runnable.
  */
-export interface SystemRunCounts {
-    /**
-     * Total runs tracked by the server process.
-     */
-    'total'?: number;
-    /**
-     * Runs currently pending, runnable, or executing.
-     */
-    'active'?: number;
-}
+
+export const RunRunnableSource = {
+    START_REQUESTED: 'start_requested',
+    APPROVED: 'approved'
+} as const;
+
+export type RunRunnableSource = typeof RunRunnableSource[keyof typeof RunRunnableSource];

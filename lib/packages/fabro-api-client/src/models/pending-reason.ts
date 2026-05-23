@@ -15,15 +15,11 @@
 
 
 /**
- * Counts of known runs in the active server process.
+ * Reason a pre-execution run is pending instead of runnable.
  */
-export interface SystemRunCounts {
-    /**
-     * Total runs tracked by the server process.
-     */
-    'total'?: number;
-    /**
-     * Runs currently pending, runnable, or executing.
-     */
-    'active'?: number;
-}
+
+export const PendingReason = {
+    APPROVAL_REQUIRED: 'approval_required'
+} as const;
+
+export type PendingReason = typeof PendingReason[keyof typeof PendingReason];

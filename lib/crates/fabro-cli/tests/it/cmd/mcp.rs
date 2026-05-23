@@ -578,7 +578,7 @@ async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
     )
     .await;
     let run_id = create["runs"][0]["run_id"].as_str().unwrap().to_string();
-    assert_eq!(create["runs"][0]["started"], true);
+    assert_eq!(create["runs"][0]["start_requested"], true);
 
     let search = call_tool_json(
         &client,
@@ -600,7 +600,7 @@ async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
           "workflow_name": null,
           "workflow_graph_name": "Simple",
           "workflow_slug": "simple",
-          "status": "queued",
+          "status": "runnable",
           "archived": false,
           "created_at": "[TIMESTAMP]",
           "started_at": null,

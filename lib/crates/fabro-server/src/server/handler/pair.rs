@@ -497,7 +497,8 @@ fn reject_unpairable_status(status: RunStatus) -> Result<(), Response> {
             "run_not_pairable",
         )),
         RunStatus::Submitted
-        | RunStatus::Queued
+        | RunStatus::Pending { .. }
+        | RunStatus::Runnable
         | RunStatus::Starting
         | RunStatus::Paused { .. }
         | RunStatus::Failed { .. }
@@ -1060,6 +1061,7 @@ mod tests {
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
+            retried_from: None,
             parent_id: None,
             web_url: None,
         })

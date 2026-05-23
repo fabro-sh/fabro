@@ -41,23 +41,27 @@ export interface RunItem {
 }
 
 export const columnStatuses = [
-  BoardColumn.QUEUED,
+  BoardColumn.PENDING,
+  BoardColumn.RUNNABLE,
   BoardColumn.INITIALIZING,
   BoardColumn.RUNNING,
   BoardColumn.BLOCKED,
   BoardColumn.SUCCEEDED,
   BoardColumn.FAILED,
   BoardColumn.ARCHIVED,
+  BoardColumn.REMOVING,
 ] as const satisfies readonly BoardColumn[];
 
 export const columnStatusDisplay: Record<BoardColumn, { label: string; dot: string; text: string }> = {
-  queued:       { label: "Queued",       dot: "bg-fg-muted",  text: "text-fg-muted" },
+  pending:      { label: "Pending",      dot: "bg-fg-muted",  text: "text-fg-muted" },
+  runnable:     { label: "Runnable",     dot: "bg-cyan-500",  text: "text-cyan-500" },
   initializing: { label: "Initializing", dot: "bg-amber",     text: "text-amber" },
   running:      { label: "Running",      dot: "bg-teal-500",  text: "text-teal-500" },
   blocked:      { label: "Blocked",      dot: "bg-amber",     text: "text-amber" },
   succeeded:    { label: "Succeeded",    dot: "bg-teal-300",  text: "text-teal-300" },
   failed:       { label: "Failed",       dot: "bg-coral",     text: "text-coral" },
   archived:     { label: "Archived",     dot: "bg-fg-muted",  text: "text-fg-muted" },
+  removing:     { label: "Removing",     dot: "bg-fg-muted",  text: "text-fg-muted" },
 };
 
 export interface RunWithStatus extends RunItem {
@@ -111,8 +115,10 @@ export function mapRunToRunItem(run: Run): RunItem {
 export function columnForStatus(status: ApiRunStatus | null | undefined): BoardColumn | null {
   switch (status?.kind) {
     case "submitted":
-    case "queued":
-      return "queued";
+    case "pending":
+      return "pending";
+    case "runnable":
+      return "runnable";
     case "starting":
       return "initializing";
     case "running":
@@ -126,6 +132,7 @@ export function columnForStatus(status: ApiRunStatus | null | undefined): BoardC
     case "dead":
       return "failed";
     case "removing":
+      return "removing";
     default:
       return null;
   }
@@ -138,7 +145,7 @@ export function columnForRun(run: Run): BoardColumn | null {
 
 export function toRunWithStatus(run: Run): RunWithStatus {
   const item = mapRunListItem(run);
-  const column = columnForRun(run) ?? "queued";
+  const column = columnForRun(run) ?? "pending";
   return {
     ...item,
     status: column,
@@ -154,7 +161,8 @@ export function deriveCiStatus(checks: CheckRun[]): CiStatus {
 
 export type RunStatus =
   | "submitted"
-  | "queued"
+  | "pending"
+  | "runnable"
   | "starting"
   | "running"
   | "blocked"
@@ -167,7 +175,8 @@ export type RunStatus =
 
 export const runStatusDisplay: Record<RunStatus, { label: string; dot: string; text: string }> = {
   submitted: { label: "Submitted", dot: "bg-fg-muted", text: "text-fg-muted" },
-  queued: { label: "Queued", dot: "bg-fg-muted", text: "text-fg-muted" },
+  pending: { label: "Pending", dot: "bg-fg-muted", text: "text-fg-muted" },
+  runnable: { label: "Runnable", dot: "bg-cyan-500", text: "text-cyan-500" },
   starting: { label: "Starting", dot: "bg-amber", text: "text-amber" },
   running: { label: "Running", dot: "bg-teal-500", text: "text-teal-500" },
   blocked: { label: "Blocked", dot: "bg-amber", text: "text-amber" },

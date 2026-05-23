@@ -392,12 +392,12 @@ pub struct CreateRunsResult {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CreatedRunResult {
-    pub run_id:         String,
-    pub parent_id:      Option<String>,
-    pub children_count: u64,
-    pub workflow:       String,
-    pub started:        bool,
-    pub status:         String,
+    pub run_id:          String,
+    pub parent_id:       Option<String>,
+    pub children_count:  u64,
+    pub workflow:        String,
+    pub start_requested: bool,
+    pub status:          String,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -446,8 +446,8 @@ pub async fn create_runs_with_options(
             .create_run_from_spec(&spec, &cwd, user_settings_path, parent_id)
             .await
             .map_err(|err| ToolError::from_anyhow(&err))?;
-        let started = spec.start.unwrap_or(true);
-        let summary = if started {
+        let start_requested = spec.start.unwrap_or(true);
+        let summary = if start_requested {
             backend
                 .start_run(&run_id, false)
                 .await
@@ -463,8 +463,8 @@ pub async fn create_runs_with_options(
             parent_id: summary.parent_id.map(|parent_id| parent_id.to_string()),
             children_count: summary.children_count,
             workflow: spec.workflow,
-            started,
-            status: common::run_status_kind(summary.lifecycle.status).to_string(),
+            start_requested,
+            status: summary.lifecycle.status.kind().to_string(),
         });
     }
     Ok(CreateRunsResult { runs: created })
@@ -492,9 +492,9 @@ async fn resolve_parent_run_id(
 }
 
 pub fn create_runs_text(result: &CreateRunsResult) -> String {
-    let started = result.runs.iter().filter(|run| run.started).count();
+    let start_requested = result.runs.iter().filter(|run| run.start_requested).count();
     format!(
-        "created {} Fabro run(s), started {started}",
+        "created {} Fabro run(s), start requested for {start_requested}",
         result.runs.len()
     )
 }
@@ -676,6 +676,7 @@ mod tests {
             parent_id,
             created_parent_ids: Mutex::new(Vec::new()),
             resolved_selectors: Mutex::new(Vec::new()),
+            started_run_ids: Mutex::new(Vec::new()),
         });
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
             runs: vec![
@@ -726,6 +727,7 @@ mod tests {
             parent_id,
             created_parent_ids: Mutex::new(Vec::new()),
             resolved_selectors: Mutex::new(Vec::new()),
+            started_run_ids: Mutex::new(Vec::new()),
         });
         let runs: Vec<CreateRunSpecInput> = (0..2)
             .map(|_| {
@@ -775,6 +777,7 @@ mod tests {
             parent_id,
             created_parent_ids: Mutex::new(Vec::new()),
             resolved_selectors: Mutex::new(Vec::new()),
+            started_run_ids: Mutex::new(Vec::new()),
         });
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
             runs: vec![
@@ -818,11 +821,72 @@ mod tests {
         assert!(backend.resolved_selectors.lock().unwrap().is_empty());
     }
 
+    #[tokio::test]
+    async fn create_runs_defaults_to_start_request_and_reports_pending_child_status() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let settings = temp.path().join("settings.toml");
+        let child_id = run_id("01KRBZW5C00000000000000001");
+        let parent_id = run_id("01KRBZW4DW0000000000000002");
+        let backend = Arc::new(MockCreateBackend {
+            child_id,
+            parent_id,
+            created_parent_ids: Mutex::new(Vec::new()),
+            resolved_selectors: Mutex::new(Vec::new()),
+            started_run_ids: Mutex::new(Vec::new()),
+        });
+        let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
+            runs: vec![
+                CreateRunSpec {
+                    workflow:         "simple.fabro".to_string(),
+                    cwd:              None,
+                    run_id:           None,
+                    parent_id:        Some(parent_id.to_string()),
+                    goal:             None,
+                    goal_file:        None,
+                    inputs:           HashMap::new(),
+                    labels:           HashMap::new(),
+                    dry_run:          Some(true),
+                    auto_approve:     Some(true),
+                    model:            None,
+                    provider:         None,
+                    environment:      None,
+                    preserve_sandbox: None,
+                    start:            None,
+                }
+                .into(),
+            ],
+        })
+        .expect("create params should validate");
+
+        let result = create_runs(backend.clone(), temp.path(), &settings, params)
+            .await
+            .expect("run should be created and start requested");
+
+        assert!(result.runs[0].start_requested);
+        assert_eq!(result.runs[0].status, "pending");
+        assert_eq!(backend.started_run_ids.lock().unwrap().as_slice(), &[
+            child_id
+        ]);
+        assert_eq!(
+            create_runs_text(&result),
+            "created 1 Fabro run(s), start requested for 1"
+        );
+    }
+
     fn run_id(raw: &str) -> RunId {
         raw.parse().expect("test run id should parse")
     }
 
     fn run(run_id: RunId, parent_id: Option<RunId>, children_count: u64) -> Run {
+        run_with_status(run_id, parent_id, children_count, RunStatus::Submitted)
+    }
+
+    fn run_with_status(
+        run_id: RunId,
+        parent_id: Option<RunId>,
+        children_count: u64,
+        status: RunStatus,
+    ) -> Run {
         Run {
             id: run_id,
             parent_id,
@@ -842,12 +906,13 @@ mod tests {
             origin: RunOrigin::default(),
             labels: HashMap::new(),
             lifecycle: RunLifecycle {
-                status:          RunStatus::Submitted,
+                status,
+                approval: None,
                 pending_control: None,
-                queue_position:  None,
-                error:           None,
-                archived:        false,
-                archived_at:     None,
+                queue_position: None,
+                error: None,
+                archived: false,
+                archived_at: None,
             },
             sandbox: None,
             models: Vec::new(),
@@ -860,11 +925,13 @@ mod tests {
             },
             timing: None,
             billing: None,
+            size: fabro_types::RunSize::default(),
             ask_fabro: fabro_types::AskFabro::default(),
             diff: None,
             pull_request: None,
             current_question: None,
             superseded_by: None,
+            retried_from: None,
             links: RunLinks { web: None },
         }
     }
@@ -874,6 +941,7 @@ mod tests {
         parent_id:          RunId,
         created_parent_ids: Mutex<Vec<Option<RunId>>>,
         resolved_selectors: Mutex<Vec<String>>,
+        started_run_ids:    Mutex<Vec<RunId>>,
     }
 
     #[async_trait]
@@ -903,8 +971,18 @@ mod tests {
             Ok(run(self.child_id, Some(self.parent_id), 0))
         }
 
-        async fn start_run(&self, _run_id: &RunId, _resume: bool) -> anyhow::Result<Run> {
-            unreachable!("test uses start=false")
+        async fn start_run(&self, run_id: &RunId, resume: bool) -> anyhow::Result<Run> {
+            assert_eq!(*run_id, self.child_id);
+            assert!(!resume);
+            self.started_run_ids.lock().unwrap().push(*run_id);
+            Ok(run_with_status(
+                self.child_id,
+                Some(self.parent_id),
+                0,
+                RunStatus::Pending {
+                    reason: fabro_types::PendingReason::ApprovalRequired,
+                },
+            ))
         }
 
         async fn cancel_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {

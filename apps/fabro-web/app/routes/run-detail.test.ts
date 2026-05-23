@@ -48,6 +48,28 @@ mock.module("../hooks/use-run-toasts", () => ({
   useRunToasts: () => undefined,
 }));
 
+const mutationState = () => ({
+  data:       null,
+  error:      null,
+  isMutating: false,
+  reset:      mock(() => undefined),
+  trigger:    mock(() => Promise.resolve(undefined)),
+});
+
+mock.module("../lib/mutations", () => ({
+  useArchiveRun:           mutationState,
+  useApproveRun:           mutationState,
+  useCancelRun:            mutationState,
+  useDenyRun:              mutationState,
+  useInterruptRun:         mutationState,
+  usePreviewRun:           mutationState,
+  useRetryRun:             mutationState,
+  useSteerRun:             mutationState,
+  useSubmitInterviewAnswer: mutationState,
+  useUpdateRunTitle:       mutationState,
+  useUnarchiveRun:         mutationState,
+}));
+
 const {
   actionMenuSeparatorVisibility,
   default: RunDetail,
@@ -71,18 +93,18 @@ function makeRunSummary(
     status === "succeeded"
       ? { kind: "succeeded", reason: "completed" }
       : status === "failed"
-        ? { kind: "failed", reason: "error" }
+        ? { kind: "failed", reason: "workflow_error" }
         : status === "dead"
           ? { kind: "dead" }
           : status === "blocked"
-            ? { kind: "blocked", reason: "interview", pending_question_id: null }
+            ? { kind: "blocked", blocked_reason: "human_input_required" }
             : { kind: status };
   const archived = status === "archived";
   return {
     id:               "run_1",
     goal:             "Run 1",
     title,
-    workflow:         { slug: "default", name: "Default" },
+    workflow:         { slug: "default", name: "Default", graph_name: null, node_count: 0, edge_count: 0 },
     automation:       null,
     repository:       { name: "fabro", origin_url: null, provider: "unknown" },
     created_by:       null,
@@ -90,6 +112,7 @@ function makeRunSummary(
     labels:           {},
     lifecycle:        {
       status:          archived ? { kind: "succeeded", reason: "completed" } : apiStatus,
+      approval:        null,
       pending_control: null,
       queue_position:  null,
       error:           null,
@@ -107,10 +130,12 @@ function makeRunSummary(
     },
     timing:           null,
     billing:          null,
+    size:             "XS",
     diff:             diffSummary,
     pull_request:     pullRequest,
     current_question: null,
     superseded_by:    null,
+    retried_from:     null,
     links:            { web: null },
   };
 }
@@ -201,7 +226,8 @@ function tabCountBadges(renderer: TestRenderer.ReactTestRenderer) {
 describe("lifecycleActionVisibility", () => {
   test("shows cancel for active cancellable states and hides it elsewhere", () => {
     expect(lifecycleActionVisibility("submitted").showPrimaryCancel).toBe(true);
-    expect(lifecycleActionVisibility("queued").showPrimaryCancel).toBe(true);
+    expect(lifecycleActionVisibility("pending").showPrimaryCancel).toBe(true);
+    expect(lifecycleActionVisibility("runnable").showPrimaryCancel).toBe(true);
     expect(lifecycleActionVisibility("starting").showPrimaryCancel).toBe(true);
     expect(lifecycleActionVisibility("running").showPrimaryCancel).toBe(true);
     expect(lifecycleActionVisibility("paused").showPrimaryCancel).toBe(true);
@@ -271,7 +297,14 @@ describe("handleLifecycleToastResult", () => {
 
   const initialState: LifecycleToastState = {
     activeArchiveToastId: null,
-    lastProcessed: { cancel: null, archive: null, unarchive: null },
+    lastProcessed: {
+      cancel:    null,
+      approve:   null,
+      deny:      null,
+      archive:   null,
+      unarchive: null,
+      retry:     null,
+    },
   };
 
   test("replaying the same cancel success result does not enqueue a duplicate toast", () => {
@@ -337,7 +370,14 @@ describe("handleLifecycleToastResult", () => {
     };
     const stateWithActiveToast: LifecycleToastState = {
       activeArchiveToastId: "toast-9",
-      lastProcessed: { cancel: null, archive: null, unarchive: null },
+      lastProcessed: {
+        cancel:    null,
+        approve:   null,
+        deny:      null,
+        archive:   null,
+        unarchive: null,
+        retry:     null,
+      },
     };
 
     const nextState = handleLifecycleToastResult("unarchive", result, stateWithActiveToast, api);
@@ -399,6 +439,63 @@ describe("RunDetail full-height child routes", () => {
 
     const badges = tabCountBadges(renderer);
     expect(badges.map((badge) => badge.children.join(""))).toContain("7");
+  });
+
+  test("successful retry result navigates to the new run once", () => {
+    const pushed: Array<{ message: string; tone?: string }> = [];
+    const navigated: string[] = [];
+    const result: RunDetailActionResult = {
+      intent: "retry",
+      ok:     true,
+      run:    {
+        ...makeRunSummary("runnable"),
+        id:           "run_retry",
+        retried_from: "run_1",
+      },
+    };
+    const initialState: LifecycleToastState = {
+      activeArchiveToastId: null,
+      lastProcessed:        {
+        cancel:    null,
+        approve:   null,
+        deny:      null,
+        archive:   null,
+        unarchive: null,
+        retry:     null,
+      },
+    };
+
+    const next = handleLifecycleToastResult(
+      "retry",
+      result,
+      initialState,
+      {
+        push:    (toast) => {
+          pushed.push(toast);
+          return "toast-1";
+        },
+        dismiss: () => undefined,
+      },
+      (path) => navigated.push(path),
+    );
+    const replay = handleLifecycleToastResult(
+      "retry",
+      result,
+      next,
+      {
+        push:    (toast) => {
+          pushed.push(toast);
+          return "toast-2";
+        },
+        dismiss: () => undefined,
+      },
+      (path) => navigated.push(path),
+    );
+
+    expect(next.lastProcessed.retry).toBe(result);
+    expect(replay).toBe(next);
+    expect(pushed).toEqual([{ message: "Retry started." }]);
+    expect(navigated).toEqual(["/runs/run_retry"]);
   });
 
   test("shows the Sandbox tab when the run has a sandbox", async () => {

@@ -16,7 +16,7 @@
 
 The OpenAPI spec declares `/boards/runs` returns `PaginatedRunList` containing `RunListItem` objects. However, the real `list_board_runs` handler currently returns `RunStatusResponse` objects (id, status, error, queue_position, created_at). The UI's runs board, run-detail, and run-overview loaders all consume `/boards/runs` and expect `RunListItem` fields (repository, title, workflow, status as `BoardColumn`, pull_request, timings, sandbox, question).
 
-**Decision:** Enrich the real `list_board_runs` handler to return `RunListItem`-shaped data by pulling `goal` (as title), `workflow_slug`/`workflow_name`, `host_repo_path` (as repository name), `duration_ms` (as timing), and `total_usd_micros` from `RunSummary`. Map `RunStatus` lifecycle values to `BoardColumn` values: `Running` -> `"working"`, `Paused` -> `"pending"`, `Completed` -> `"merge"`, everything else (`Submitted`, `Queued`, `Starting`, `Failed`, `Cancelled`) -> excluded from the board (they are not actionable board items).
+**Decision:** Enrich the real `list_board_runs` handler to return `RunListItem`-shaped data by pulling `goal` (as title), `workflow_slug`/`workflow_name`, `host_repo_path` (as repository name), `duration_ms` (as timing), and `total_usd_micros` from `RunSummary`. Map `RunStatus` lifecycle values to `BoardColumn` values: `Running` -> `"working"`, `Paused` -> `"pending"`, `Completed` -> `"merge"`, everything else (`Submitted`, `Runnable`, `Starting`, `Failed`, `Cancelled`) -> excluded from the board (they are not actionable board items).
 
 **Justification:** This aligns the real handler with the OpenAPI spec and avoids bifurcating the UI's data layer into two incompatible response shapes. The store already has the needed fields. Fields not available from the store (pull_request, sandbox, checks, question) are left `null`/absent -- the UI already handles their optionality with `?.` chains.
 
@@ -347,7 +347,7 @@ Replace the `list_board_runs` handler body with logic that:
    - `Running` -> `"working"`
    - `Paused` -> `"pending"`
    - `Completed` -> `"merge"`
-   - All others (`Submitted`, `Queued`, `Starting`, `Failed`, `Cancelled`) -> excluded from board
+   - All others (`Submitted`, `Runnable`, `Starting`, `Failed`, `Cancelled`) -> excluded from board
 4. Constructs `RunListItem`-shaped JSON for each included run:
 
 ```rust

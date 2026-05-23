@@ -86,7 +86,8 @@ async fn control_run(
                         .into_response();
                     }
                     RunStatus::Submitted
-                    | RunStatus::Queued
+                    | RunStatus::Pending { .. }
+                    | RunStatus::Runnable
                     | RunStatus::Starting
                     | RunStatus::Paused { .. } => {
                         return ApiError::with_code(

@@ -51,7 +51,8 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
             .filter(|run| {
                 matches!(
                     run.status,
-                    RunStatus::Queued
+                    RunStatus::Pending { .. }
+                        | RunStatus::Runnable
                         | RunStatus::Starting
                         | RunStatus::Running
                         | RunStatus::Blocked { .. }

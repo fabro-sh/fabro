@@ -76,7 +76,7 @@
 
 ### Test 5: Real `/boards/runs` excludes non-board statuses
 
-- **Name:** Runs with statuses that don't map to board columns (Submitted, Queued, Starting, Failed, Cancelled) are excluded from the board response
+- **Name:** Runs with statuses that don't map to board columns (Submitted, Runnable, Starting, Failed, Cancelled) are excluded from the board response
 - **Type:** boundary
 - **Disposition:** new
 - **Harness:** Rust HTTP integration harness

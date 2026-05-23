@@ -75,6 +75,10 @@ export interface RunProjection {
     'sandbox'?: RunSandbox | null;
     'pull_request'?: PullRequestLink | null;
     'superseded_by'?: string | null;
+    /**
+     * Source run ID when this run was created by manual retry.
+     */
+    'retried_from'?: string | null;
     'pending_interviews': { [key: string]: PendingInterviewRecord; };
     /**
      * Map from StageId (`node_id@visit`) to stage projection data.

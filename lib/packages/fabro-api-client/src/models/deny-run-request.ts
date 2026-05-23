@@ -15,15 +15,11 @@
 
 
 /**
- * Counts of known runs in the active server process.
+ * Request body for denying a pending run approval request.
  */
-export interface SystemRunCounts {
+export interface DenyRunRequest {
     /**
-     * Total runs tracked by the server process.
+     * Optional human-readable reason for denying execution. Empty or whitespace-only values are stored as absent.
      */
-    'total'?: number;
-    /**
-     * Runs currently pending, runnable, or executing.
-     */
-    'active'?: number;
+    'reason'?: string;
 }

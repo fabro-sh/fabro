@@ -21,6 +21,7 @@
 export const FailureReason = {
     WORKFLOW_ERROR: 'workflow_error',
     CANCELLED: 'cancelled',
+    APPROVAL_DENIED: 'approval_denied',
     TERMINATED: 'terminated',
     TRANSIENT_INFRA: 'transient_infra',
     BUDGET_EXHAUSTED: 'budget_exhausted',

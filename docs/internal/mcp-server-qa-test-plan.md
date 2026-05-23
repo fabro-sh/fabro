@@ -43,7 +43,7 @@ None currently open.
 Source: `run_tools/create.rs:124`
 
 ### Happy path
-- [x] **C1** Create one run from an existing workflow (e.g. `gh-list`); default `start=true` → expect `started=true`, `status` in `{queued, starting, running}`. — **PASS**. `status=queued`.
+- [x] **C1** Create one run from an existing workflow (e.g. `gh-list`); default `start=true` → expect `start_requested=true`, `status` in `{runnable, starting, running}`. — **PASS**. `status=runnable`.
 - [x] **C2** Create with `start=false` → expect `started=false`, `status=submitted`. — **PASS**. Run `01KRC4MP2NEQS9GJDE9FJ0EECH` kept as fixture for I3.
 - [x] **C3** Batch create 5 runs in one call → all return; result preserves array order. — **PASS**. ULIDs monotonically increasing.
 
@@ -181,7 +181,7 @@ Source: `run_tools/interact.rs:201`
 - [x] **I2** Non-existent run → fuzzy match error. — **PASS**.
 
 #### `start`
-- [x] **I3** Non-started run (from C2) → `start` transitions to `queued`. Second `start` → `an engine process is still running for this run — cannot start`. — **PASS**.
+- [x] **I3** Non-started run (from C2) → `start` transitions to `runnable`. Second `start` → `start has already been requested for this run`. — **PASS**.
 
 #### `message` (steer)
 - [ ] **I4** Steer a running LLM agent — **DEFERRED** (requires an active LLM agent stage; would burn LLM tokens; can be exercised manually once the answer bug below is resolved).

@@ -9,9 +9,9 @@ use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
     AgentBackend, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
-    RunTiming, StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
-    TodoListProjection,
+    ModelRef, PullRequestLink, RunApproval, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec,
+    RunStatus, RunTiming, StageCompletion, StageHandler, StageId, StageState, StageTiming,
+    StartRecord, TodoListProjection,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -26,6 +26,8 @@ pub struct RunProjection {
     pub start:              Option<StartRecord>,
     pub status:             RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval:           Option<RunApproval>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at:        Option<DateTime<Utc>>,
     pub status_updated_at:  DateTime<Utc>,
     pub last_event_at:      DateTime<Utc>,
@@ -35,6 +37,8 @@ pub struct RunProjection {
     pub sandbox:            Option<RunSandbox>,
     pub pull_request:       Option<PullRequestLink>,
     pub superseded_by:      Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retried_from:       Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
     stages:                 HashMap<StageId, StageProjection>,
 }
@@ -295,6 +299,7 @@ impl RunProjection {
             web_url: None,
             start: None,
             status: RunStatus::Submitted,
+            approval: None,
             archived_at: None,
             status_updated_at: created_at,
             last_event_at: created_at,
@@ -304,6 +309,7 @@ impl RunProjection {
             sandbox: None,
             pull_request: None,
             superseded_by: None,
+            retried_from: None,
             pending_interviews: BTreeMap::new(),
             stages: HashMap::new(),
         }
