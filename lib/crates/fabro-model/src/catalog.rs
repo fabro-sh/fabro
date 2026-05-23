@@ -494,7 +494,6 @@ pub struct CatalogModelSettings {
     pub agent_profile: AgentProfileKind,
     pub controls:      CatalogModelControls,
     pub speed_costs:   HashMap<Speed, ModelCosts>,
-    small_default:     bool,
     probe:             bool,
 }
 
@@ -919,16 +918,10 @@ impl Catalog {
     #[must_use]
     pub fn small_default_for_provider(&self, p: &ProviderId) -> Option<&Model> {
         let provider_id = self.provider(p).map_or(p, |provider| &provider.id);
-        if let Some(model) = self.models.iter().find(|model| {
-            &model.provider == provider_id
-                && self
-                    .model_settings
-                    .get(&model.id)
-                    .is_some_and(|settings| settings.small_default)
-        }) {
-            return Some(model);
-        }
-        self.default_for_provider(provider_id)
+        self.models
+            .iter()
+            .find(|m| &m.provider == provider_id && m.small_default)
+            .or_else(|| self.default_for_provider(provider_id))
     }
 
     /// Default model for the best-available provider (based on API keys),
@@ -1390,7 +1383,6 @@ fn build_model(
         agent_profile: settings.agent_profile.unwrap_or(provider.agent_profile),
         controls,
         speed_costs,
-        small_default: settings.small_default.unwrap_or_default(),
         probe: settings.probe.unwrap_or_default(),
     };
     Ok((model, catalog_settings))

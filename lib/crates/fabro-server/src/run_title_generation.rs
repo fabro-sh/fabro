@@ -11,17 +11,14 @@ use toml::Value as TomlValue;
 
 const MAX_GENERATED_TITLE_CHARS: usize = 100;
 const TRUNCATED_MARKER: &str = "...[truncated]";
-pub(crate) const MAX_PROMPT_SECTION_CHARS: usize = 4_000;
-pub(crate) const MAX_TITLE_PROMPT_CHARS: usize = 12_000;
+const MAX_PROMPT_SECTION_CHARS: usize = 4_000;
 
 pub(crate) struct TitlePromptInput<'a> {
     pub(crate) run_id:          &'a RunId,
     pub(crate) current_title:   &'a str,
     pub(crate) workflow_target: Option<&'a str>,
-    pub(crate) workflow_name:   Option<&'a str>,
-    pub(crate) workflow_goal:   &'a str,
     pub(crate) run_inputs:      &'a HashMap<String, TomlValue>,
-    pub(crate) graph:           &'a Graph,
+    pub(crate) workflow:        &'a WorkflowSummary,
 }
 
 pub(crate) struct GenerateTitleInput<'a> {
@@ -44,8 +41,12 @@ pub(crate) async fn generate_title_or_current(input: GenerateTitleInput<'_>) -> 
             per_step: Some(5.0),
         });
 
-    let Ok(result) = generate::generate_object(params, title_response_schema()).await else {
-        return current_title;
+    let result = match generate::generate_object(params, title_response_schema()).await {
+        Ok(result) => result,
+        Err(err) => {
+            tracing::debug!(error = %err, "Run title generation failed");
+            return current_title;
+        }
     };
     result
         .output
@@ -56,19 +57,19 @@ pub(crate) async fn generate_title_or_current(input: GenerateTitleInput<'_>) -> 
         .unwrap_or(current_title)
 }
 
-pub(crate) fn build_title_prompt(input: &TitlePromptInput<'_>) -> String {
+fn build_title_prompt(input: &TitlePromptInput<'_>) -> String {
     let workflow_identity = serde_json::json!({
         "run_id": input.run_id.to_string(),
         "current_deterministic_title": input.current_title,
         "target": input.workflow_target,
-        "name": input.workflow_name,
-        "goal": input.workflow_goal,
+        "name": input.workflow.graph_name,
+        "goal": input.workflow.goal,
     });
     let identity = pretty_json(&workflow_identity);
     let inputs = pretty_json(input.run_inputs);
-    let workflow = pretty_json(&workflow_summary(input.graph));
+    let workflow = pretty_json(input.workflow);
 
-    let prompt = format!(
+    format!(
         r#"Generate a concise, human-readable title for this Fabro workflow run.
 
 Base the title on the workflow identity, workflow goal, and run input values.
@@ -94,11 +95,10 @@ Workflow summary:
         truncate_section(&identity, MAX_PROMPT_SECTION_CHARS),
         truncate_section(&inputs, MAX_PROMPT_SECTION_CHARS),
         truncate_section(&workflow, MAX_PROMPT_SECTION_CHARS),
-    );
-    truncate_section(&prompt, MAX_TITLE_PROMPT_CHARS)
+    )
 }
 
-pub(crate) fn normalize_generated_title(title: &str) -> Option<String> {
+fn normalize_generated_title(title: &str) -> Option<String> {
     let trimmed = title.trim();
     if trimmed.is_empty() || trimmed.chars().any(char::is_control) {
         return None;
@@ -121,34 +121,36 @@ fn title_response_schema() -> serde_json::Value {
 }
 
 #[derive(Serialize)]
-struct WorkflowSummary {
-    graph_name:  String,
-    stage_count: usize,
-    edge_count:  usize,
-    stages:      Vec<StageSummary>,
+pub(crate) struct WorkflowSummary {
+    pub(crate) graph_name:  String,
+    pub(crate) goal:        String,
+    pub(crate) stage_count: usize,
+    pub(crate) edge_count:  usize,
+    pub(crate) stages:      Vec<StageSummary>,
 }
 
 #[derive(Serialize)]
-struct StageSummary {
+pub(crate) struct StageSummary {
     id:           String,
     label:        String,
-    handler_type: String,
+    handler_type: Option<String>,
 }
 
-fn workflow_summary(graph: &Graph) -> WorkflowSummary {
+pub(crate) fn workflow_summary(graph: &Graph) -> WorkflowSummary {
     let mut stages = graph
         .nodes
         .values()
         .map(|node| StageSummary {
             id:           node.id.clone(),
             label:        node.label().to_string(),
-            handler_type: node.handler_type().unwrap_or("unknown").to_string(),
+            handler_type: node.handler_type().map(str::to_string),
         })
         .collect::<Vec<_>>();
     stages.sort_by(|left, right| left.id.cmp(&right.id));
 
     WorkflowSummary {
         graph_name: graph.name.clone(),
+        goal: graph.goal().to_string(),
         stage_count: stages.len(),
         edge_count: graph.edges.len(),
         stages,
@@ -206,6 +208,7 @@ mod tests {
     fn prompt_includes_goal_inputs_and_workflow_summary_without_redaction() {
         let run_id = RunId::new();
         let graph = title_test_graph();
+        let summary = workflow_summary(&graph);
         let inputs = HashMap::from([
             (
                 "api_key".to_string(),
@@ -221,10 +224,8 @@ mod tests {
             run_id:          &run_id,
             current_title:   "Deploy API token SECRET_123 to production",
             workflow_target: Some("workflows/deploy.fabro"),
-            workflow_name:   Some("Ship"),
-            workflow_goal:   graph.goal(),
             run_inputs:      &inputs,
-            graph:           &graph,
+            workflow:        &summary,
         });
 
         assert!(prompt.contains("Deploy API token SECRET_123 to production"));
@@ -239,6 +240,7 @@ mod tests {
     fn prompt_bounds_large_input_and_workflow_sections() {
         let run_id = RunId::new();
         let graph = title_test_graph();
+        let summary = workflow_summary(&graph);
         let inputs = HashMap::from([(
             "large".to_string(),
             TomlValue::String("x".repeat(MAX_PROMPT_SECTION_CHARS * 2)),
@@ -248,14 +250,16 @@ mod tests {
             run_id:          &run_id,
             current_title:   "Current",
             workflow_target: Some("workflow.fabro"),
-            workflow_name:   Some("Ship"),
-            workflow_goal:   graph.goal(),
             run_inputs:      &inputs,
-            graph:           &graph,
+            workflow:        &summary,
         });
 
-        assert!(prompt.len() < MAX_TITLE_PROMPT_CHARS);
+        // Section truncation: per-section budget × 3 + small boilerplate.
+        assert!(prompt.chars().count() < MAX_PROMPT_SECTION_CHARS * 3 + 1_000);
         assert!(prompt.contains("...[truncated]"));
+        // One section was truncated, the others were not; ensure we don't
+        // emit a doubly-truncated marker run.
+        assert!(!prompt.contains("...[truncated]...[truncated]"));
     }
 
     #[test]
@@ -276,35 +280,8 @@ mod tests {
 
     #[tokio::test]
     async fn generation_uses_supplied_small_default_model_id() {
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let provider = Arc::new(CapturingProvider {
-            captured:      Arc::clone(&captured),
-            response_text: r#"{"title":"Generated title"}"#.to_string(),
-        });
-        let client = Arc::new(Client::new(
-            HashMap::from([("openai".to_string(), provider as Arc<dyn ProviderAdapter>)]),
-            Some("openai".to_string()),
-            Vec::new(),
-        ));
-        let run_id = RunId::new();
-        let graph = title_test_graph();
-        let inputs = HashMap::new();
-
-        let title = generate_title_or_current(GenerateTitleInput {
-            client,
-            model_id: "small-model".to_string(),
-            provider_id: ProviderId::openai(),
-            prompt: TitlePromptInput {
-                run_id:          &run_id,
-                current_title:   "Current",
-                workflow_target: Some("workflow.fabro"),
-                workflow_name:   Some("Ship"),
-                workflow_goal:   graph.goal(),
-                run_inputs:      &inputs,
-                graph:           &graph,
-            },
-        })
-        .await;
+        let (title, captured) =
+            title_with_mocked_response(r#"{"title":"Generated title"}"#).await;
 
         assert_eq!(title, "Generated title");
         let captured = captured.lock().unwrap();
@@ -315,28 +292,21 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_or_failed_generation_returns_current_title() {
-        let run_id = RunId::new();
-        let graph = title_test_graph();
-        let inputs = HashMap::new();
-
-        let invalid =
-            title_with_mocked_response(r#"{"title":"first\nsecond"}"#, &run_id, &graph, &inputs)
-                .await;
+        let (invalid, _) =
+            title_with_mocked_response(r#"{"title":"first\nsecond"}"#).await;
         assert_eq!(invalid, "Current");
 
-        let invalid_shape =
-            title_with_mocked_response(r#"{"name":"missing"}"#, &run_id, &graph, &inputs).await;
+        let (invalid_shape, _) =
+            title_with_mocked_response(r#"{"name":"missing"}"#).await;
         assert_eq!(invalid_shape, "Current");
     }
 
     async fn title_with_mocked_response(
         response_text: &str,
-        run_id: &RunId,
-        graph: &fabro_types::Graph,
-        inputs: &HashMap<String, TomlValue>,
-    ) -> String {
+    ) -> (String, Arc<Mutex<Vec<Request>>>) {
+        let captured = Arc::new(Mutex::new(Vec::new()));
         let provider = Arc::new(CapturingProvider {
-            captured:      Arc::new(Mutex::new(Vec::new())),
+            captured:      Arc::clone(&captured),
             response_text: response_text.to_string(),
         });
         let client = Arc::new(Client::new(
@@ -344,21 +314,24 @@ mod tests {
             Some("openai".to_string()),
             Vec::new(),
         ));
-        generate_title_or_current(GenerateTitleInput {
+        let run_id = RunId::new();
+        let graph = title_test_graph();
+        let summary = workflow_summary(&graph);
+        let inputs = HashMap::new();
+        let title = generate_title_or_current(GenerateTitleInput {
             client,
             model_id: "small-model".to_string(),
             provider_id: ProviderId::openai(),
             prompt: TitlePromptInput {
-                run_id,
-                current_title: "Current",
+                run_id:          &run_id,
+                current_title:   "Current",
                 workflow_target: Some("workflow.fabro"),
-                workflow_name: Some("Ship"),
-                workflow_goal: graph.goal(),
-                run_inputs: inputs,
-                graph,
+                run_inputs:      &inputs,
+                workflow:        &summary,
             },
         })
-        .await
+        .await;
+        (title, captured)
     }
 
     struct CapturingProvider {

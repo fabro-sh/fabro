@@ -2421,7 +2421,8 @@ async fn create_run_with_explicit_title_skips_generated_title_work() {
 
     let body = post_run_manifest(&app, manifest).await;
     let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    // The spawn gate is synchronous in `create_run`, so once the response
+    // returns we know no title task was scheduled. No sleep needed.
 
     assert_eq!(
         state
@@ -2444,7 +2445,6 @@ async fn create_run_without_ready_llm_provider_skips_generated_title_work() {
 
     let body = post_run_manifest(&app, minimal_manifest_json(MINIMAL_DOT)).await;
     let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
 
     assert_eq!(
         state
