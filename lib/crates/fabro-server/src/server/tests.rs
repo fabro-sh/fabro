@@ -11217,7 +11217,7 @@ async fn list_runs_sort_direction_reverses_order_with_stable_tiebreak() {
         .filter_map(run_json_id)
         .map(str::to_string)
         .collect();
-    let mut expected: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+    let mut expected: Vec<String> = ids.iter().map(std::string::ToString::to_string).collect();
     expected.sort_by(|a, b| b.cmp(a)); // desc by id
     assert_eq!(observed, expected, "default desc order with id tiebreak");
 
