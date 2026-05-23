@@ -370,14 +370,14 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
             command: resolve_mcp_command(script.as_ref(), command.as_ref()),
             env:     env
                 .iter()
-                .map(|(key, value)| (key.clone(), value.as_source()))
+                .map(|(key, value)| (key.clone(), resolve_or_source(value)))
                 .collect(),
         },
         McpEntryLayer::Http { url, headers, .. } => McpTransport::Http {
-            url:     url.as_source(),
+            url:     resolve_or_source(url),
             headers: headers
                 .iter()
-                .map(|(key, value)| (key.clone(), value.as_source()))
+                .map(|(key, value)| (key.clone(), resolve_or_source(value)))
                 .collect(),
         },
         McpEntryLayer::Sandbox {
@@ -391,7 +391,7 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
             port:    *port,
             env:     env
                 .iter()
-                .map(|(key, value)| (key.clone(), value.as_source()))
+                .map(|(key, value)| (key.clone(), resolve_or_source(value)))
                 .collect(),
         },
     };
@@ -432,11 +432,26 @@ fn resolve_mcp_command(
     command: Option<&Vec<InterpString>>,
 ) -> Vec<String> {
     if let Some(script) = script {
-        return vec!["sh".to_string(), "-c".to_string(), script.as_source()];
+        return vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            resolve_or_source(script),
+        ];
     }
     command
-        .map(|command| command.iter().map(InterpString::as_source).collect())
+        .map(|command| command.iter().map(resolve_or_source).collect())
         .unwrap_or_default()
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "MCP config interpolation uses process env for `{{ env.* }}` values, mirroring \
+              `fabro_workflow::operations::start::resolve_interp` for [run.sandbox.env]."
+)]
+fn resolve_or_source(value: &InterpString) -> String {
+    value
+        .resolve(|name| std::env::var(name).ok())
+        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
 }
 
 fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) -> HookDefinition {

@@ -33,3 +33,5 @@ rmcp = { workspace = true, features = [
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
+fabro-vault = { path = "../fabro-vault" }
+tempfile = "3"
