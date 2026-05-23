@@ -96,9 +96,10 @@ impl RunProjectionCacheState {
 /// Apply read-time overlays to a cached entry. Pure: does not touch the cache
 /// state, so it can run outside the cache mutex.
 fn apply_read_overlays(entry: &mut CachedRunProjection, now: DateTime<Utc>) {
-    // `Conclusion::timing` is the authoritative terminal snapshot; only fill
-    // in a derived live timing for runs that have not yet concluded.
-    if entry.projection.conclusion.is_none() {
+    // `Conclusion::timing` is the authoritative terminal snapshot and is
+    // already present in cached terminal summaries. Only fill missing timing
+    // with the best-effort live projection.
+    if entry.summary.timing.is_none() {
         entry.summary.timing = entry.projection.live_run_timing(now);
     }
 }
@@ -117,7 +118,7 @@ impl RunProjectionCache {
         query: &ListRunsQuery,
         now: DateTime<Utc>,
     ) -> Vec<CachedRunProjection> {
-        let mut entries = {
+        let entries = {
             let state = self.state.lock().await;
             let raw = match query.parent_id {
                 Some(parent_id) => state
@@ -133,10 +134,6 @@ impl RunProjectionCache {
                 .map(|entry| state.with_children_count(entry))
                 .collect::<Vec<_>>()
         };
-        // Apply per-entry live overlays outside the cache mutex.
-        for entry in &mut entries {
-            apply_read_overlays(entry, now);
-        }
         let mut entries = entries
             .into_iter()
             .filter(|entry| {
@@ -150,6 +147,11 @@ impl RunProjectionCache {
                 true
             })
             .collect::<Vec<_>>();
+        // Apply per-entry live overlays outside the cache mutex, after any
+        // date filtering so skipped entries do not sum stage timings.
+        for entry in &mut entries {
+            apply_read_overlays(entry, now);
+        }
         entries.sort_by(|left, right| {
             right
                 .run_id

@@ -949,9 +949,9 @@ mod tests {
         AgentAcpCancelledProps, AgentAcpCompletedProps, AgentAcpStartedProps,
         AgentAcpTimedOutProps, AgentMessageProps, AgentSessionActivatedProps,
         AgentSessionEndedProps, AgentSessionStartedProps, CheckpointCompletedProps,
-        InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunControlEffectProps,
-        StageCompletedProps, StageFailedProps, StagePromptProps, StageRetryingProps,
-        StageStartedProps,
+        InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunCompletedProps,
+        RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
+        StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
@@ -1125,6 +1125,81 @@ mod tests {
             state.live_run_timing(test_dt("2026-04-07T12:00:12.345Z")),
             Some(fabro_types::RunTiming::new(12_345, 720, 380))
         );
+    }
+
+    #[test]
+    fn live_run_timing_matches_conclusion_timing_at_conclusion_moment() {
+        let mut state = initialized_projection();
+        let started_at = test_dt("2026-04-07T12:00:00Z");
+        let completed_at = test_dt("2026-04-07T12:00:10Z");
+        state
+            .apply_event(&test_raw_event_at(
+                1,
+                "2026-04-07T12:00:00Z",
+                "run.started",
+                &json!({ "name": "Test run" }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event_at(
+                2,
+                "2026-04-07T12:00:00Z",
+                "run.starting",
+                &json!({}),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event_at(
+                3,
+                "2026-04-07T12:00:01Z",
+                "run.running",
+                &json!({}),
+                None,
+            ))
+            .unwrap();
+        state.stage_entry("plan", 1, first_event_seq(4)).timing =
+            Some(fabro_types::StageTiming::new(2_000, 700, 300));
+        state.stage_entry("code", 1, first_event_seq(5)).timing =
+            Some(fabro_types::StageTiming::new(3_000, 50, 200));
+
+        let conclusion_timing = fabro_types::RunTiming::new(
+            u64::try_from(
+                completed_at
+                    .signed_duration_since(started_at)
+                    .num_milliseconds(),
+            )
+            .unwrap(),
+            750,
+            500,
+        );
+        let mut completed = test_event(
+            6,
+            EventBody::RunCompleted(RunCompletedProps {
+                timing:               conclusion_timing,
+                artifact_count:       0,
+                status:               "succeeded".to_string(),
+                reason:               SuccessReason::Completed,
+                total_usd_micros:     None,
+                final_git_commit_sha: None,
+                final_patch:          None,
+                diff_summary:         None,
+                billing:              None,
+            }),
+            None,
+        );
+        completed.event.ts = completed_at;
+        state.apply_event(&completed).unwrap();
+
+        assert_eq!(
+            state
+                .conclusion
+                .as_ref()
+                .map(|conclusion| conclusion.timing),
+            Some(conclusion_timing)
+        );
+        assert_eq!(state.live_run_timing(completed_at), Some(conclusion_timing));
     }
 
     #[test]
