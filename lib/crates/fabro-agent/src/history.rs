@@ -32,12 +32,17 @@ impl History {
         self.turns.iter().map(Message::to_session_message).collect()
     }
 
+    /// Compact the history by replacing all but the trailing `preserve_count`
+    /// turns with a summary `System` message. Preserved assistant turns have
+    /// their `usage` reset to default so a later context-window estimate does
+    /// not treat pre-compaction provider-reported usage as the new baseline;
+    /// authoritative billing is recorded via emitted run events.
     pub fn compact(&mut self, preserve_count: usize, summary: String) {
         if self.turns.len() <= preserve_count {
             return;
         }
         let mut preserved = self.turns.split_off(self.turns.len() - preserve_count);
-        invalidate_assistant_usage(&mut preserved);
+        Self::invalidate_preserved_usage(&mut preserved);
         let discarded = std::mem::take(&mut self.turns);
         let extracted_user_messages =
             extract_recent_user_messages(discarded, COMPACTION_USER_MESSAGE_TOKEN_BUDGET);
@@ -48,6 +53,14 @@ impl History {
         self.turns.extend(extracted_user_messages);
         self.turns.extend(preserved);
         self.strip_opaque_provider_items();
+    }
+
+    fn invalidate_preserved_usage(preserved: &mut [Message]) {
+        for turn in preserved {
+            if let Message::Assistant { usage, .. } = turn {
+                **usage = TokenCounts::default();
+            }
+        }
     }
 
     /// Remove provider-specific opaque items that are no longer valid after
@@ -117,14 +130,6 @@ impl History {
                 },
             })
             .collect()
-    }
-}
-
-fn invalidate_assistant_usage(turns: &mut [Message]) {
-    for turn in turns {
-        if let Message::Assistant { usage, .. } = turn {
-            **usage = TokenCounts::default();
-        }
     }
 }
 

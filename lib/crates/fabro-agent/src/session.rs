@@ -1670,31 +1670,34 @@ impl Session {
     }
 
     async fn compact_if_needed(&mut self) {
-        let over_threshold = check_context_usage(
+        let Some(estimate) = check_context_usage(
             &self.system_prompt,
             &self.history,
             self.provider_profile.as_ref(),
             self.config.compaction_threshold_percent,
             &self.event_emitter,
             &self.id,
-        );
-        if over_threshold && self.config.enable_context_compaction {
-            if let Err(e) = compact_context(
-                &mut self.history,
-                &self.llm_client,
-                self.provider_profile.as_ref(),
-                &self.system_prompt,
-                &self.file_tracker,
-                self.config.compaction_preserve_turns,
-                &self.event_emitter,
-                &self.id,
-            )
-            .await
-            {
-                self.event_emitter.emit(self.id.clone(), AgentEvent::Error {
-                    error: Error::InvalidState(format!("Context compaction failed: {e}")),
-                });
-            }
+        ) else {
+            return;
+        };
+        if !self.config.enable_context_compaction {
+            return;
+        }
+        if let Err(e) = compact_context(
+            &mut self.history,
+            &self.llm_client,
+            self.provider_profile.as_ref(),
+            &self.file_tracker,
+            self.config.compaction_preserve_turns,
+            estimate,
+            &self.event_emitter,
+            &self.id,
+        )
+        .await
+        {
+            self.event_emitter.emit(self.id.clone(), AgentEvent::Error {
+                error: Error::InvalidState(format!("Context compaction failed: {e}")),
+            });
         }
     }
 
@@ -3658,9 +3661,9 @@ mod tests {
         response
     }
 
-    fn response_with_total_usage(response: Response, total_tokens: i64) -> Response {
+    fn response_with_input_tokens(response: Response, input_tokens: i64) -> Response {
         response_with_usage(response, TokenCounts {
-            input_tokens: total_tokens,
+            input_tokens,
             ..TokenCounts::default()
         })
     }
@@ -3719,7 +3722,7 @@ mod tests {
     #[tokio::test]
     async fn compaction_uses_assistant_usage_baseline_for_short_response() {
         let responses = vec![
-            response_with_total_usage(text_response("OK"), 90),
+            response_with_input_tokens(text_response("OK"), 90),
             text_response("Here is the summary of the conversation so far."),
             text_response("fallback"),
         ];
@@ -3833,7 +3836,7 @@ mod tests {
 
     #[tokio::test]
     async fn compaction_disabled_blocks_api_usage_baseline_compaction() {
-        let responses = vec![response_with_total_usage(text_response("OK"), 90)];
+        let responses = vec![response_with_input_tokens(text_response("OK"), 90)];
 
         let provider = Arc::new(MockLlmProvider::new(responses));
         let client = make_client(provider).await;
