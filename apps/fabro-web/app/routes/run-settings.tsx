@@ -56,7 +56,7 @@ export default function RunSettingsPage() {
         ) : view === "settings" ? (
           <>
             <WorkflowPanel snapshot={snapshot} />
-            <SandboxPanel snapshot={snapshot} />
+            <EnvironmentPanel snapshot={snapshot} />
             <GitPanel snapshot={snapshot} />
             <ArtifactsPanel snapshot={snapshot} />
           </>
@@ -135,32 +135,34 @@ function WorkflowPanel({ snapshot }: { snapshot: WorkflowSettings }) {
   );
 }
 
-function SandboxPanel({ snapshot }: { snapshot: WorkflowSettings }) {
-  const sandbox = getObject(getObject(snapshot, "run"), "sandbox");
-  const provider = getString(sandbox, "provider");
-  const docker = getObject(sandbox, "docker");
-  const dockerImage = getString(docker, "image");
+function EnvironmentPanel({ snapshot }: { snapshot: WorkflowSettings }) {
+  const environment = getObject(getObject(snapshot, "run"), "environment");
+  const provider = getString(environment, "provider");
+  const environmentId = getString(environment, "id");
+  const image = getObject(environment, "image");
+  const imageRef = getString(image, "ref");
+  const lifecycle = getObject(environment, "lifecycle");
   return (
-    <Panel title="Sandbox">
-      <Row title="Provider" help="Execution environment for this run.">
+    <Panel title="Environment">
+      <Row title="Name" help="Named environment selected for this run.">
+        {environmentId ? <Mono>{environmentId}</Mono> : <Muted>Default</Muted>}
+      </Row>
+      <Row title="Provider" help="Sandbox provider for this environment.">
         {provider ? <Badge>{provider}</Badge> : <Muted>Unknown</Muted>}
       </Row>
-      {provider === "docker" && dockerImage ? (
-        <Row title="Image" help="Docker image used for the sandbox.">
-          <Mono>{dockerImage}</Mono>
+      {imageRef ? (
+        <Row title="Image" help="Image or snapshot used for this environment.">
+          <Mono>{imageRef}</Mono>
         </Row>
       ) : null}
-      <Row title="Devcontainer" help="Whether .devcontainer setup is honored.">
-        <Toggle on={getBool(sandbox, "devcontainer") ?? false} />
-      </Row>
       <Row title="Preserve" help="Keep the sandbox after the run completes.">
-        <Toggle on={getBool(sandbox, "preserve") ?? false} />
+        <Toggle on={getBool(lifecycle, "preserve") ?? false} />
       </Row>
       <Row title="Stop on terminal" help="Stop the sandbox when the run reaches a terminal state.">
-        <Toggle on={getBool(sandbox, "stop_on_terminal") ?? false} />
+        <Toggle on={getBool(lifecycle, "stop_on_terminal") ?? false} />
       </Row>
       <Row title="Env" help="Environment variables injected into the sandbox.">
-        <Count n={objectKeyCount(sandbox, "env")} singular="var" plural="vars" />
+        <Count n={objectKeyCount(environment, "env")} singular="var" plural="vars" />
       </Row>
     </Panel>
   );
