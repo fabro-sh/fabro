@@ -199,9 +199,9 @@ impl RunSize {
     pub fn from_total_usd_micros(total_usd_micros: Option<i64>) -> Self {
         match total_usd_micros.unwrap_or(0) {
             ..=20_000_000 => Self::Xs,
-            ..=50_000_000 => Self::S,
-            ..=100_000_000 => Self::M,
-            ..=200_000_000 => Self::L,
+            20_000_001..=50_000_000 => Self::S,
+            50_000_001..=100_000_000 => Self::M,
+            100_000_001..=200_000_000 => Self::L,
             _ => Self::Xl,
         }
     }
