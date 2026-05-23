@@ -1,0 +1,8 @@
+---
+title: "Legacy sandbox config migration"
+date: "2026-05-23"
+---
+
+## Legacy sandbox config auto-migration
+
+Fabro now temporarily rewrites confidently migratable pre-v1.0 `[run.sandbox]` config files to the named environment syntax. A backup is written next to the original file before rewriting. Ambiguous or unsupported legacy keys fail with a targeted migration message instead of the generic TOML unknown-field error.
