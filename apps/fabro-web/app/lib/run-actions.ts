@@ -44,11 +44,7 @@ export async function unarchiveRun(id: string, request?: Request): Promise<Run> 
 }
 
 export async function retryRun(id: string, request?: Request): Promise<Run> {
-  try {
-    return await apiData(() => runsApi.retryRun(id, requestSignalOptions(request)));
-  } catch (error) {
-    throw lifecycleActionErrorFromError(error);
-  }
+  return runLifecycleAction(id, "retry", request);
 }
 
 export async function deleteRun(id: string, request?: Request): Promise<void> {
@@ -148,6 +144,8 @@ async function runLifecycleAction(
         return await apiData(() => runsApi.archiveRun(id, requestSignalOptions(request)));
       case "unarchive":
         return await apiData(() => runsApi.unarchiveRun(id, requestSignalOptions(request)));
+      case "retry":
+        return await apiData(() => runsApi.retryRun(id, requestSignalOptions(request)));
     }
   } catch (error) {
     throw lifecycleActionErrorFromError(error);
