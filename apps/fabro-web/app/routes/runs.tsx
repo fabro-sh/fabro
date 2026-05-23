@@ -585,7 +585,7 @@ function parseView(raw: string | null): ViewMode {
   return raw === "list" ? "list" : "columns";
 }
 
-const SORT_KEYS = ["created_at", "updated_at", "status", "elapsed"] as const satisfies readonly ListRunsSortEnum[];
+const SORT_KEYS = ["created_at", "updated_at", "status", "elapsed", "repo", "title", "workflow", "changes"] as const satisfies readonly ListRunsSortEnum[];
 
 function parseSort(raw: string | null): ListRunsSortEnum {
   return (SORT_KEYS as readonly string[]).includes(raw ?? "")
@@ -645,6 +645,10 @@ const sortColumnLabels: Record<ListRunsSortEnum, string> = {
   updated_at: "Updated",
   status:     "Status",
   elapsed:    "Elapsed",
+  repo:       "Repo",
+  title:      "Title",
+  workflow:   "Workflow",
+  changes:    "Changes",
 };
 
 function createdCutoffMsFor(filter: CreatedFilter): number | null {
@@ -952,11 +956,11 @@ function RunsListView({
                   <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} onClick={onSortClick} />
                 )}
                 {show("repo") && (
-                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Repo</th>
+                  <SortHeader label="Repo" sortKey="repo" activeSort={sort} direction={direction} onClick={onSortClick} />
                 )}
-                <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Title</th>
+                <SortHeader label="Title" sortKey="title" activeSort={sort} direction={direction} onClick={onSortClick} />
                 {show("workflow") && (
-                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">Workflow</th>
+                  <SortHeader label="Workflow" sortKey="workflow" activeSort={sort} direction={direction} onClick={onSortClick} />
                 )}
                 {show("created") && (
                   <SortHeader label="Created" sortKey="created_at" activeSort={sort} direction={direction} onClick={onSortClick} />
@@ -965,7 +969,7 @@ function RunsListView({
                   <SortHeader label="Updated" sortKey="updated_at" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
                 )}
                 {show("changes") && (
-                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">Changes</th>
+                  <SortHeader label="Changes" sortKey="changes" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
                 )}
                 {show("pr") && (
                   <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">PR</th>
