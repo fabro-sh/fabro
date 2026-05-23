@@ -87,16 +87,19 @@ impl RunProjectionCacheState {
             .map_or(0, |children| children.len() as u64)
     }
 
-    fn with_read_overlays(
-        &self,
-        mut entry: CachedRunProjection,
-        now: DateTime<Utc>,
-    ) -> CachedRunProjection {
+    fn with_children_count(&self, mut entry: CachedRunProjection) -> CachedRunProjection {
         entry.summary.children_count = self.count_children(&entry.run_id);
-        if entry.summary.timing.is_none() {
-            entry.summary.timing = entry.projection.live_run_timing(now);
-        }
         entry
+    }
+}
+
+/// Apply read-time overlays to a cached entry. Pure: does not touch the cache
+/// state, so it can run outside the cache mutex.
+fn apply_read_overlays(entry: &mut CachedRunProjection, now: DateTime<Utc>) {
+    // `Conclusion::timing` is the authoritative terminal snapshot; only fill
+    // in a derived live timing for runs that have not yet concluded.
+    if entry.projection.conclusion.is_none() {
+        entry.summary.timing = entry.projection.live_run_timing(now);
     }
 }
 
@@ -114,7 +117,7 @@ impl RunProjectionCache {
         query: &ListRunsQuery,
         now: DateTime<Utc>,
     ) -> Vec<CachedRunProjection> {
-        let entries = {
+        let mut entries = {
             let state = self.state.lock().await;
             let raw = match query.parent_id {
                 Some(parent_id) => state
@@ -127,9 +130,13 @@ impl RunProjectionCache {
                 None => state.entries.values().cloned().collect::<Vec<_>>(),
             };
             raw.into_iter()
-                .map(|entry| state.with_read_overlays(entry, now))
+                .map(|entry| state.with_children_count(entry))
                 .collect::<Vec<_>>()
         };
+        // Apply per-entry live overlays outside the cache mutex.
+        for entry in &mut entries {
+            apply_read_overlays(entry, now);
+        }
         let mut entries = entries
             .into_iter()
             .filter(|entry| {
@@ -155,22 +162,24 @@ impl RunProjectionCache {
 
     pub(crate) async fn get(&self, run_id: &RunId) -> Option<CachedRunProjection> {
         let state = self.state.lock().await;
-        state.entries.get(run_id).cloned().map(|mut entry| {
-            entry.summary.children_count = state.count_children(run_id);
-            entry
-        })
+        state
+            .entries
+            .get(run_id)
+            .cloned()
+            .map(|entry| state.with_children_count(entry))
     }
 
     pub(crate) async fn get_summary(&self, run_id: &RunId, now: DateTime<Utc>) -> Option<Run> {
-        let state = self.state.lock().await;
-        state.entries.get(run_id).map(|entry| {
-            let mut summary = entry.summary.clone();
-            summary.children_count = state.count_children(run_id);
-            if summary.timing.is_none() {
-                summary.timing = entry.projection.live_run_timing(now);
-            }
-            summary
-        })
+        let mut entry = {
+            let state = self.state.lock().await;
+            state
+                .entries
+                .get(run_id)
+                .cloned()
+                .map(|entry| state.with_children_count(entry))?
+        };
+        apply_read_overlays(&mut entry, now);
+        Some(entry.summary)
     }
 
     pub(crate) async fn apply_event(&self, run_id: &RunId, event: &EventEnvelope) -> Result<()> {

@@ -283,23 +283,15 @@ impl RunProjection {
                 .num_milliseconds()
                 .max(0),
         )
-        .unwrap_or(0);
-        let (inference_time_ms, tool_time_ms) = self
+        .expect("non-negative milliseconds fit in u64");
+        let active = self
             .stages
             .values()
             .filter_map(|stage| stage.timing)
-            .fold((0u64, 0u64), |(inference, tool), timing| {
-                (
-                    inference.saturating_add(timing.inference_time_ms),
-                    tool.saturating_add(timing.tool_time_ms),
-                )
+            .fold(RunTiming::default(), |acc, timing| {
+                acc.saturating_add(&RunTiming::from(timing))
             });
-
-        Some(RunTiming::new(
-            wall_time_ms,
-            inference_time_ms,
-            tool_time_ms,
-        ))
+        Some(active.with_wall_time(wall_time_ms))
     }
 
     pub fn current_checkpoint(&self) -> Option<&Checkpoint> {

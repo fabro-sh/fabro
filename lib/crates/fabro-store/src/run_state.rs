@@ -1128,64 +1128,6 @@ mod tests {
     }
 
     #[test]
-    fn live_run_timing_matches_conclusion_timing_at_conclusion_moment() {
-        let mut state = initialized_projection();
-        state
-            .apply_event(&test_raw_event_at(
-                1,
-                "2026-04-07T12:00:00Z",
-                "run.started",
-                &json!({ "name": "Test run" }),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_raw_event_at(
-                2,
-                "2026-04-07T12:00:00Z",
-                "run.starting",
-                &json!({}),
-                None,
-            ))
-            .unwrap();
-        state
-            .apply_event(&test_raw_event_at(
-                3,
-                "2026-04-07T12:00:01Z",
-                "run.running",
-                &json!({}),
-                None,
-            ))
-            .unwrap();
-
-        let expected = fabro_types::RunTiming::new(45_000, 123, 456);
-        state.stage_entry("plan", 1, first_event_seq(4)).timing =
-            Some(fabro_types::StageTiming::new(10_000, 100, 200));
-        state.stage_entry("code", 1, first_event_seq(5)).timing =
-            Some(fabro_types::StageTiming::new(20_000, 23, 256));
-        state
-            .apply_event(&test_raw_event_at(
-                6,
-                "2026-04-07T12:00:45Z",
-                "run.completed",
-                &json!({
-                    "timing": expected,
-                    "artifact_count": 0,
-                    "status": "succeeded",
-                    "reason": "completed"
-                }),
-                None,
-            ))
-            .unwrap();
-
-        let conclusion = state.conclusion.as_ref().unwrap();
-        assert_eq!(
-            state.live_run_timing(conclusion.timestamp),
-            Some(conclusion.timing)
-        );
-    }
-
-    #[test]
     fn last_event_at_tracks_most_recent_event_timestamp() {
         let mut state = initialized_projection();
         let later = test_raw_event_at(2, "2026-04-20T12:05:30Z", "run.starting", &json!({}), None);
