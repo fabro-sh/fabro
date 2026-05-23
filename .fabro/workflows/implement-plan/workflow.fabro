@@ -17,9 +17,8 @@ digraph ImplementPlan {
     implement         [label="Implement", prompt="Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.", model="gpt-55", reasoning_effort="xhigh"]
     simplify_opus     [label="Simplify (Opus)", prompt="@prompts/simplify.md"]
     simplify_gpt      [label="Simplify (GPT-55)", prompt="@prompts/simplify.md", model="gpt-55"]
-    verify            [label="Verify", shape=parallelogram, script="cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1", goal_gate=true, retry_target="fixup"]
-    fixup             [label="Fixup", prompt="The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.", max_visits=3]
-    fmt               [label="Format", shape=parallelogram, script="cargo +nightly-2026-04-14 fmt --all 2>&1", max_retries=0]
+    verify            [label="Verify", shape=parallelogram, script="git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\bActorRef\b|\bActorKind\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\s*==\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1", goal_gate=true, retry_target="fixup"]
+    fixup             [label="Fixup", prompt="The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures.", max_visits=3]
 
     start -> toolchain
     toolchain -> preflight_compile [condition="outcome=succeeded"]
@@ -30,8 +29,7 @@ digraph ImplementPlan {
     preflight_lint -> fix_lints
     fix_lints -> preflight_lint
     implement -> simplify_opus -> simplify_gpt -> verify
-    verify -> fmt   [condition="outcome=succeeded"]
+    verify -> exit  [condition="outcome=succeeded"]
     verify -> fixup
     fixup -> verify
-    fmt -> exit
 }

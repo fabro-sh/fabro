@@ -86,9 +86,19 @@ export function formatDurationMs(ms: number, fractionDigits = 1): string {
     const seconds = ms / 1000;
     return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(fractionDigits)}s`;
   }
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  if (ms < 3_600_000) {
+    const minutes = Math.floor(ms / 60_000);
+    const seconds = Math.round((ms % 60_000) / 1000);
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  if (ms < 86_400_000) {
+    const hours = Math.floor(ms / 3_600_000);
+    const minutes = Math.round((ms % 3_600_000) / 60_000);
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  const days = Math.floor(ms / 86_400_000);
+  const hours = Math.round((ms % 86_400_000) / 3_600_000);
+  return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
 }
 
 export function formatTokenCount(
