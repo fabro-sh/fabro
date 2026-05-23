@@ -5019,6 +5019,15 @@ components:
         has_more:
           type: boolean
           description: Whether additional pages of results are available.
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Total number of items matching the current filters. Optional —
+            only populated by endpoints that compute the full count cheaply
+            (e.g. in-memory filtering). When omitted, clients should rely on
+            `has_more` and cursor through pages.
           example: true
 
     PaginatedRunList:

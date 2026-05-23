@@ -214,7 +214,10 @@ async fn list_run_events(
                 events.truncate(limit);
                 Json(PaginatedEventList {
                     data: events,
-                    meta: PaginationMeta { has_more },
+                    meta: PaginationMeta {
+                        has_more,
+                        total: None,
+                    },
                 })
                 .into_response()
             }
@@ -247,7 +250,10 @@ async fn list_run_stage_events(
                 events.truncate(limit);
                 Json(PaginatedEventList {
                     data: events,
-                    meta: PaginationMeta { has_more },
+                    meta: PaginationMeta {
+                        has_more,
+                        total: None,
+                    },
                 })
                 .into_response()
             }

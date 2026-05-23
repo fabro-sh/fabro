@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ArchiveBoxIcon, ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ArchiveBoxIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
@@ -596,7 +596,13 @@ function parsePage(raw: string | null): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
 }
 
-const LIST_PAGE_SIZE = 20;
+const LIST_PAGE_SIZES = [10, 25, 50, 100] as const;
+const DEFAULT_LIST_PAGE_SIZE = 25;
+
+function parsePageSize(raw: string | null): number {
+  const n = Number(raw);
+  return (LIST_PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_LIST_PAGE_SIZE;
+}
 
 const sortColumnLabels: Record<ListRunsSortEnum, string> = {
   created_at: "Created",
@@ -756,19 +762,21 @@ function RunTableRow({ run }: { run: RunWithStatus }) {
 }
 
 type RunsListViewProps = {
-  data:            PaginatedRunList | undefined;
-  isLoading:       boolean;
-  hasGitHubAuth:   boolean;
-  serverUrl:       string | undefined;
-  sort:            ListRunsSortEnum;
-  direction:       ListRunsDirectionEnum;
-  page:            number;
-  onSortClick:     (key: ListRunsSortEnum) => void;
-  onPageChange:    (page: number) => void;
-  query:           string;
-  repoFilter:      string;
-  workflowFilter:  string;
-  createdCutoffMs: number | null;
+  data:             PaginatedRunList | undefined;
+  isLoading:        boolean;
+  hasGitHubAuth:    boolean;
+  serverUrl:        string | undefined;
+  sort:             ListRunsSortEnum;
+  direction:        ListRunsDirectionEnum;
+  page:             number;
+  pageSize:         number;
+  onSortClick:      (key: ListRunsSortEnum) => void;
+  onPageChange:     (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+  query:            string;
+  repoFilter:       string;
+  workflowFilter:   string;
+  createdCutoffMs:  number | null;
 };
 
 function SortHeader({
@@ -820,8 +828,10 @@ function RunsListView({
   sort,
   direction,
   page,
+  pageSize,
   onSortClick,
   onPageChange,
+  onPageSizeChange,
   query,
   repoFilter,
   workflowFilter,
@@ -846,6 +856,8 @@ function RunsListView({
   }, [data, repoFilter, workflowFilter, createdCutoffMs, query]);
 
   const hasMore = data?.meta.has_more ?? false;
+  const total = data?.meta.total ?? null;
+  const pageCount = total != null ? Math.max(1, Math.ceil(total / pageSize)) : null;
   const hasRows = rows.length > 0;
   const apiRunCount = data?.data.length ?? 0;
   const isEmptyServerSide = data !== undefined && apiRunCount === 0 && page === 1;
@@ -893,47 +905,124 @@ function RunsListView({
           />
         </div>
       )}
-      <ListPager page={page} hasMore={hasMore} disabled={isLoading} onPageChange={onPageChange} />
+      <ListPager
+        page={page}
+        pageSize={pageSize}
+        pageCount={pageCount}
+        hasMore={hasMore}
+        disabled={isLoading}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
     </div>
   );
 }
 
 function ListPager({
   page,
+  pageSize,
+  pageCount,
   hasMore,
   disabled,
   onPageChange,
+  onPageSizeChange,
 }: {
-  page:         number;
-  hasMore:      boolean;
-  disabled:     boolean;
-  onPageChange: (page: number) => void;
+  page:             number;
+  pageSize:         number;
+  pageCount:        number | null;
+  hasMore:          boolean;
+  disabled:         boolean;
+  onPageChange:     (page: number) => void;
+  onPageSizeChange: (size: number) => void;
 }) {
-  const prevDisabled = disabled || page <= 1;
-  const nextDisabled = disabled || !hasMore;
+  const onFirstPage = page <= 1;
+  const onLastPage = pageCount != null ? page >= pageCount : !hasMore;
   return (
     <nav
       aria-label="Pagination"
-      className="flex items-center justify-end gap-2 pt-1 text-xs"
+      className="flex items-center justify-between gap-6 pt-2 text-sm text-fg-3"
     >
-      <button
-        type="button"
-        onClick={() => onPageChange(Math.max(1, page - 1))}
-        disabled={prevDisabled}
-        className="inline-flex items-center gap-1 rounded-md border border-line bg-panel/80 px-3 py-1.5 font-medium text-fg-3 transition-colors enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-50"
-      >
-        ← Prev
-      </button>
-      <span className="font-mono text-fg-muted">Page {page}</span>
-      <button
-        type="button"
-        onClick={() => onPageChange(page + 1)}
-        disabled={nextDisabled}
-        className="inline-flex items-center gap-1 rounded-md border border-line bg-panel/80 px-3 py-1.5 font-medium text-fg-3 transition-colors enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-50"
-      >
-        Next →
-      </button>
+      <div className="flex items-center gap-3">
+        <label htmlFor="runs-page-size" className="text-fg-3">
+          Rows per page
+        </label>
+        <div className="relative">
+          <select
+            id="runs-page-size"
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            disabled={disabled}
+            className="appearance-none rounded-md border border-line bg-panel/80 py-1.5 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0 disabled:opacity-60"
+          >
+            {LIST_PAGE_SIZES.map((size) => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </select>
+          <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
+        </div>
+      </div>
+
+      <span className="text-fg-3">
+        Page {page}
+        {pageCount != null ? <> of {pageCount}</> : null}
+      </span>
+
+      <div className="flex items-center gap-1.5">
+        <PagerButton
+          label="First page"
+          onClick={() => onPageChange(1)}
+          disabled={disabled || onFirstPage}
+        >
+          <ChevronDoubleLeftIcon className="size-4" aria-hidden="true" />
+        </PagerButton>
+        <PagerButton
+          label="Previous page"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={disabled || onFirstPage}
+        >
+          <ChevronLeftIcon className="size-4" aria-hidden="true" />
+        </PagerButton>
+        <PagerButton
+          label="Next page"
+          onClick={() => onPageChange(page + 1)}
+          disabled={disabled || onLastPage}
+        >
+          <ChevronRightIcon className="size-4" aria-hidden="true" />
+        </PagerButton>
+        <PagerButton
+          label="Last page"
+          onClick={() => pageCount != null && onPageChange(pageCount)}
+          disabled={disabled || onLastPage || pageCount == null}
+        >
+          <ChevronDoubleRightIcon className="size-4" aria-hidden="true" />
+        </PagerButton>
+      </div>
     </nav>
+  );
+}
+
+function PagerButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label:    string;
+  onClick:  () => void;
+  disabled: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex size-8 items-center justify-center rounded-md border border-line bg-panel/80 text-fg-3 transition-colors enabled:hover:bg-panel enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -1066,6 +1155,7 @@ export default function Runs() {
   const sort = parseSort(searchParams.get("sort"));
   const direction = parseDirection(searchParams.get("direction"));
   const page = parsePage(searchParams.get("page"));
+  const pageSize = parsePageSize(searchParams.get("size"));
 
   const updateParam = useCallback(
     (key: string, value: string | null) => {
@@ -1095,6 +1185,13 @@ export default function Runs() {
     (next: number) => updateParam("page", next > 1 ? String(next) : null),
     [updateParam],
   );
+  const setPageSize = useCallback(
+    (next: number) => {
+      updateParam("size", next === DEFAULT_LIST_PAGE_SIZE ? null : String(next));
+      updateParam("page", null);
+    },
+    [updateParam],
+  );
   const handleSortClick = useCallback(
     (key: ListRunsSortEnum) => {
       if (sort === key) {
@@ -1114,8 +1211,8 @@ export default function Runs() {
       includeArchived,
       sort,
       direction,
-      limit:  LIST_PAGE_SIZE,
-      offset: (page - 1) * LIST_PAGE_SIZE,
+      limit:  pageSize,
+      offset: (page - 1) * pageSize,
     },
     view === "list",
   );
@@ -1325,8 +1422,10 @@ export default function Runs() {
             sort={sort}
             direction={direction}
             page={page}
+            pageSize={pageSize}
             onSortClick={handleSortClick}
             onPageChange={setPage}
+            onPageSizeChange={setPageSize}
             query={lowerQuery}
             repoFilter={repoFilter}
             workflowFilter={workflowFilter}

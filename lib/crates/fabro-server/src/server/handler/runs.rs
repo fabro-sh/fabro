@@ -358,13 +358,14 @@ async fn list_runs(
 
     let mut decorated = state.decorate_run_summaries(filtered).await;
     sort_runs(&mut decorated, params.sort, params.direction);
+    let total = decorated.len() as u64;
     let (data, has_more) = paginate_items(decorated, &params.pagination());
 
     (
         StatusCode::OK,
         Json(serde_json::json!({
             "data": data,
-            "meta": { "has_more": has_more }
+            "meta": { "has_more": has_more, "total": total }
         })),
     )
         .into_response()

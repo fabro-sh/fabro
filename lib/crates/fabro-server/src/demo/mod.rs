@@ -150,7 +150,10 @@ pub(crate) async fn get_stage_events(
         StatusCode::OK,
         Json(PaginatedEventList {
             data: matches,
-            meta: PaginationMeta { has_more },
+            meta: PaginationMeta {
+                has_more,
+                total: None,
+            },
         }),
     )
         .into_response()

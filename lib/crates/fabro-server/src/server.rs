@@ -200,7 +200,10 @@ impl<T: serde::Serialize> ListResponse<T> {
     pub fn new(data: T) -> Self {
         Self {
             data,
-            meta: PaginationMeta { has_more: false },
+            meta: PaginationMeta {
+                has_more: false,
+                total:    None,
+            },
         }
     }
 }
