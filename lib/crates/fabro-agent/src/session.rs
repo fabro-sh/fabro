@@ -564,7 +564,7 @@ impl Session {
         } else {
             let skills_dir = fabro_util::Home::from_env().skills_dir();
             let skills_str = skills_dir.to_string_lossy().to_string();
-            default_skill_dirs(Some(&skills_str), self.config.git_root.as_deref())
+            default_skill_dirs(Some(&skills_str), Some(&doc_root))
         };
         self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs, &cancel_token).await?;
         debug!(skill_count = self.skills.len(), "Skills discovered");

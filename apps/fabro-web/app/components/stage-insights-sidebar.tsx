@@ -246,22 +246,22 @@ function TodoSection({ todos }: { todos: TodoListProjection | null }) {
 }
 
 function TodoRow({ todo }: { todo: TodoProjection }) {
-  const { Icon, color, srLabel } = todoStatusVisual(todo.status);
+  const { Icon, color, srLabel, spin } = todoStatusVisual(todo.status);
   const muted = todo.status === TodoStatus.COMPLETED;
   return (
     <li className="flex items-start gap-1.5">
-      <Icon className={`mt-0.5 size-3.5 shrink-0 ${color}`} aria-label={srLabel} />
+      <Icon className={`mt-0.5 size-3.5 shrink-0 ${color} ${spin ? "animate-spin" : ""}`} aria-label={srLabel} />
       <span className={`min-w-0 text-xs ${muted ? "text-fg-muted line-through" : "text-fg-2"}`}>{todo.subject}</span>
     </li>
   );
 }
 
-function todoStatusVisual(status: TodoStatus): { Icon: IconType; color: string; srLabel: string } {
+function todoStatusVisual(status: TodoStatus): { Icon: IconType; color: string; srLabel: string; spin?: boolean } {
   switch (status) {
     case TodoStatus.COMPLETED:
       return { Icon: CheckCircleIcon, color: "text-mint", srLabel: "Completed" };
     case TodoStatus.IN_PROGRESS:
-      return { Icon: ArrowPathIcon, color: "text-teal-500", srLabel: "In progress" };
+      return { Icon: ArrowPathIcon, color: "text-teal-500", srLabel: "In progress", spin: true };
     case TodoStatus.DELETED:
       return { Icon: XCircleIcon, color: "text-fg-muted", srLabel: "Deleted" };
     case TodoStatus.PENDING:

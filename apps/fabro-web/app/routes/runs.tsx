@@ -693,6 +693,8 @@ interface RunsWorkspacePreferences {
   direction: ListRunsDirectionEnum;
   size: number;
   hide: string;
+  // URL-only: never persisted to localStorage.
+  page: number;
 }
 
 function defaultRunsWorkspacePreferences(): RunsWorkspacePreferences {
@@ -708,6 +710,7 @@ function defaultRunsWorkspacePreferences(): RunsWorkspacePreferences {
     direction: "desc",
     size:      DEFAULT_LIST_PAGE_SIZE,
     hide:      "",
+    page:      1,
   };
 }
 
@@ -754,6 +757,7 @@ function normalizeStoredRunsWorkspacePreferences(value: unknown): RunsWorkspaceP
     direction: parseDirection(stringValue(record.direction)),
     size:      parsePageSize(typeof size === "number" || typeof size === "string" ? String(size) : null),
     hide:      serializeHiddenColumns(hiddenColumns) ?? "",
+    page:      1,
   };
 }
 
@@ -770,6 +774,7 @@ function runsWorkspacePreferencesFromSearchParams(searchParams: URLSearchParams)
     direction: parseDirection(searchParams.get("direction")),
     size:      parsePageSize(searchParams.get("size")),
     hide:      serializeHiddenColumns(parseHiddenColumns(searchParams.get("hide"))) ?? "",
+    page:      parsePage(searchParams.get("page")),
   };
 }
 
@@ -785,6 +790,7 @@ function runsWorkspacePreferencesToSearchParams(preferences: RunsWorkspacePrefer
   if (preferences.direction === "asc") params.set("direction", "asc");
   if (preferences.size !== DEFAULT_LIST_PAGE_SIZE) params.set("size", String(preferences.size));
   if (preferences.hide !== "") params.set("hide", preferences.hide);
+  if (preferences.page > 1) params.set("page", String(preferences.page));
   return params;
 }
 
@@ -821,16 +827,15 @@ export function resolveRunsWorkspaceSearchParams(
   return stored.toString() === "" ? urlSearchParams : stored;
 }
 
-export function persistRunsWorkspaceSearchParams(
-  searchParams: URLSearchParams,
+export function persistRunsWorkspacePreferences(
+  preferences: RunsWorkspacePreferences,
   storage: Pick<Storage, "setItem"> | null = runsPreferencesStorage(),
 ) {
   if (storage == null) return;
+  // `page` is URL-only ephemeral view state; strip it before persisting.
+  const { page: _page, ...storable } = preferences;
   try {
-    storage.setItem(
-      RUNS_PREFERENCES_STORAGE_KEY,
-      JSON.stringify(runsWorkspacePreferencesFromSearchParams(searchParams)),
-    );
+    storage.setItem(RUNS_PREFERENCES_STORAGE_KEY, JSON.stringify(storable));
   } catch {
     // localStorage persistence is best effort only.
   }
@@ -1821,55 +1826,59 @@ export default function Runs() {
     [searchParams],
   );
 
-  const updateParam = useCallback(
-    (key: string, value: string | null) => {
-      const next = new URLSearchParams(searchParams);
-      if (value == null || value === "") {
-        next.delete(key);
-      } else {
-        next.set(key, value);
-      }
-      persistRunsWorkspaceSearchParams(next);
-      setSearchParams(next, { replace: true });
+  const updatePreferences = useCallback(
+    (updater: (prev: RunsWorkspacePreferences) => RunsWorkspacePreferences) => {
+      setSearchParams(
+        (prevParams) => {
+          const next = updater(runsWorkspacePreferencesFromSearchParams(prevParams));
+          persistRunsWorkspacePreferences(next);
+          return runsWorkspacePreferencesToSearchParams(next);
+        },
+        { replace: true },
+      );
     },
-    [searchParams, setSearchParams],
+    [setSearchParams],
   );
 
-  const setQuery = (value: string) => updateParam("search", value || null);
-  const setRepoFilter = (value: string) => updateParam("repo", value === "all" ? null : value);
-  const setWorkflowFilter = (value: string) => updateParam("workflow", value === "all" ? null : value);
-  const setCreatedFilter = (value: CreatedFilter) => updateParam("created", value === "all" ? null : value);
-  const setIncludeArchived = (value: boolean) => updateParam("archived", value ? "1" : null);
-  const setView = (value: ViewMode) => updateParam("view", value === "columns" ? null : value);
+  const setQuery = (value: string) =>
+    updatePreferences((prev) => ({ ...prev, search: value }));
+  const setRepoFilter = (value: string) =>
+    updatePreferences((prev) => ({ ...prev, repo: value }));
+  const setWorkflowFilter = (value: string) =>
+    updatePreferences((prev) => ({ ...prev, workflow: value }));
+  const setCreatedFilter = (value: CreatedFilter) =>
+    updatePreferences((prev) => ({ ...prev, created: value }));
+  const setIncludeArchived = (value: boolean) =>
+    updatePreferences((prev) => ({ ...prev, archived: value }));
+  const setView = (value: ViewMode) =>
+    updatePreferences((prev) => ({ ...prev, view: value }));
   const setPage = useCallback(
-    (next: number) => updateParam("page", next > 1 ? String(next) : null),
-    [updateParam],
+    (next: number) => updatePreferences((prev) => ({ ...prev, page: next })),
+    [updatePreferences],
   );
   const setPageSize = useCallback(
-    (next: number) => {
-      updateParam("size", next === DEFAULT_LIST_PAGE_SIZE ? null : String(next));
-      updateParam("page", null);
-    },
-    [updateParam],
+    (next: number) => updatePreferences((prev) => ({ ...prev, size: next, page: 1 })),
+    [updatePreferences],
   );
   const setHiddenColumns = useCallback(
-    (next: Set<ToggleableColumn>) => updateParam("hide", serializeHiddenColumns(next)),
-    [updateParam],
+    (next: Set<ToggleableColumn>) =>
+      updatePreferences((prev) => ({ ...prev, hide: serializeHiddenColumns(next) ?? "" })),
+    [updatePreferences],
   );
   const handleSortClick = useCallback(
-    (key: ListRunsSortEnum) => {
-      if (sort === key) {
-        updateParam("direction", direction === "asc" ? null : "asc");
-      } else {
-        updateParam("sort", key === "created_at" ? null : key);
-        updateParam("direction", null);
-      }
-      updateParam("page", null);
-    },
-    [sort, direction, updateParam],
+    (key: ListRunsSortEnum) =>
+      updatePreferences((prev) =>
+        prev.sort === key
+          ? { ...prev, direction: prev.direction === "asc" ? "desc" : "asc", page: 1 }
+          : { ...prev, sort: key, direction: "desc", page: 1 },
+      ),
+    [updatePreferences],
   );
 
+  const hydratedFromStorage = useRef(false);
   useEffect(() => {
+    if (hydratedFromStorage.current) return;
+    hydratedFromStorage.current = true;
     if (searchParams === urlSearchParams) return;
     setSearchParams(searchParams, { replace: true });
   }, [searchParams, urlSearchParams, setSearchParams]);
