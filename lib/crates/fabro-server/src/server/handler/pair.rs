@@ -14,18 +14,16 @@ use fabro_types::{
     PairTranscriptAssistantMessage, PairTranscriptDetailRef, PairTranscriptEntry,
     PairTranscriptError, PairTranscriptMeta, PairTranscriptResponse, PairTranscriptSystemMessage,
     PairTranscriptToolCall, PairTranscriptToolStatus, PairTranscriptUserMessage,
-    PairTranscriptWarning, Principal, RunId, StageId,
+    PairTranscriptWarning, RunId, StageId,
 };
 use fabro_workflow::run_status::RunStatus;
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
-use super::super::{
-    AppState, PairTransportError, durable_run_status, parse_run_id_path, reject_if_archived,
-};
+use super::super::{AppState, PairTransportError, durable_run_status, reject_if_archived};
 use super::events::EventListParams;
 use crate::error::ApiError;
-use crate::principal_middleware::RequiredUser;
+use crate::principal_middleware::RequireRunManagementTarget;
 
 const PAIR_CONFIRM_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -41,15 +39,9 @@ pub(super) fn routes() -> axum::Router<Arc<AppState>> {
 }
 
 async fn get_pair_status(
-    _auth: RequiredUser,
+    RequireRunManagementTarget(id, _actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
-
     let targets = live_pair_targets(state.as_ref(), &id);
     let current_pair = match reconstruct_pairs(state.as_ref(), &id).await {
         Ok(pairs) => pairs
@@ -69,15 +61,10 @@ async fn get_pair_status(
 }
 
 async fn start_pair(
-    auth: RequiredUser,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
     Json(req): Json<PairStartRequest>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
@@ -104,7 +91,6 @@ async fn start_pair(
     };
 
     let pair_id = PairId::new();
-    let actor = Principal::User(auth.0);
     match transport.start_pair(id, pair_id, target, actor).await {
         Ok(()) => {
             match wait_for_pair_record(state.as_ref(), &id, pair_id, PairStatus::Active, None).await
@@ -118,14 +104,10 @@ async fn start_pair(
 }
 
 async fn get_pair(
-    _auth: RequiredUser,
+    RequireRunManagementTarget(id, _actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
-    Path((id, pair_id)): Path<(String, String)>,
+    Path((_id, pair_id)): Path<(String, String)>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     let pair_id = match parse_pair_id(&pair_id) {
         Ok(pair_id) => pair_id,
         Err(response) => return response,
@@ -137,14 +119,10 @@ async fn get_pair(
 }
 
 async fn end_pair(
-    auth: RequiredUser,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
-    Path((id, pair_id)): Path<(String, String)>,
+    Path((_id, pair_id)): Path<(String, String)>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
@@ -167,7 +145,7 @@ async fn end_pair(
         return worker_unavailable("Run has no live worker control channel.");
     };
 
-    match transport.end_pair(pair_id, Principal::User(auth.0)).await {
+    match transport.end_pair(pair_id, actor).await {
         Ok(()) => {
             match wait_for_pair_record(
                 state.as_ref(),
@@ -187,15 +165,11 @@ async fn end_pair(
 }
 
 async fn send_pair_message(
-    auth: RequiredUser,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
-    Path((id, pair_id)): Path<(String, String)>,
+    Path((_id, pair_id)): Path<(String, String)>,
     Json(req): Json<PairMessageRequest>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
@@ -231,13 +205,7 @@ async fn send_pair_message(
     };
     let message_id = PairMessageId::new();
     match transport
-        .send_pair_message(
-            pair_id,
-            message_id,
-            text,
-            req.client_message_id,
-            Principal::User(auth.0),
-        )
+        .send_pair_message(pair_id, message_id, text, req.client_message_id, actor)
         .await
     {
         Ok(()) => {
@@ -252,15 +220,11 @@ async fn send_pair_message(
 }
 
 async fn get_transcript(
-    _auth: RequiredUser,
+    RequireRunManagementTarget(id, _actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
-    Path((id, pair_id)): Path<(String, String)>,
+    Path((_id, pair_id)): Path<(String, String)>,
     Query(params): Query<EventListParams>,
 ) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
     let pair_id = match parse_pair_id(&pair_id) {
         Ok(pair_id) => pair_id,
         Err(response) => return response,

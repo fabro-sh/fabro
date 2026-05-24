@@ -40,8 +40,8 @@ use super::super::{
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
-    RequireCommandLog, RequireRunScoped, RequireRunScopedOrRunTools, RequireRunStageScoped,
-    RequiredRunToolActor, RequiredUser,
+    RequireCommandLog, RequireRunManagementTarget, RequireRunScoped, RequireRunStageScoped,
+    RequiredRunManagementActor, RequiredUser,
 };
 use crate::run_files::{list_run_commits, list_run_files};
 use crate::run_manifest;
@@ -229,7 +229,7 @@ fn run_changes_total(run: &fabro_types::Run) -> i64 {
 }
 
 async fn link_run_parent(
-    RequireRunScopedOrRunTools(child_id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(child_id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
     Json(req): Json<UpdateRunParentRequest>,
 ) -> Response {
@@ -282,7 +282,7 @@ async fn link_run_parent(
 }
 
 async fn unlink_run_parent(
-    RequireRunScopedOrRunTools(child_id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(child_id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let _parent_link_guard = state.parent_link_lock.lock().await;
@@ -365,7 +365,7 @@ async fn updated_run_response(state: &AppState, run_id: &RunId) -> Response {
 }
 
 async fn list_runs(
-    _auth: RequiredRunToolActor,
+    _auth: RequiredRunManagementActor,
     State(state): State<Arc<AppState>>,
     ExtraQuery(params): ExtraQuery<ListRunsParams>,
 ) -> Response {
@@ -455,7 +455,7 @@ struct CommandLogResponseBody {
 }
 
 async fn resolve_run(
-    _auth: RequiredRunToolActor,
+    _auth: RequiredRunManagementActor,
     State(state): State<Arc<AppState>>,
     Query(query): Query<ResolveRunQuery>,
 ) -> Response {
@@ -585,7 +585,7 @@ async fn update_run(
 }
 
 async fn create_run(
-    RequiredRunToolActor(actor): RequiredRunToolActor,
+    RequiredRunManagementActor(actor): RequiredRunManagementActor,
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: Bytes,
@@ -904,7 +904,7 @@ async fn validate_run_manifest(
 }
 
 async fn get_run_status(
-    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, _actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     match state.store.get_cached_summary(&id, Utc::now()).await {
@@ -943,7 +943,7 @@ async fn get_run_settings(
 }
 
 async fn get_questions(
-    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, _actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     match state.store.get_cached_run(&id).await {
@@ -964,7 +964,7 @@ async fn get_questions(
 }
 
 async fn submit_answer(
-    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
     Path((_id, qid)): Path<(String, String)>,
     Json(req): Json<SubmitAnswerRequest>,
@@ -988,7 +988,7 @@ async fn submit_answer(
 }
 
 async fn get_run_state(
-    RequireRunScopedOrRunTools(id, _actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, _actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     match state.store.get_cached_run(&id).await {

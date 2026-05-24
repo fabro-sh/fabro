@@ -135,8 +135,8 @@ use crate::github_webhooks::{
 use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
-    AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,
-    RequireRunScopedOrRunTools, RequireRunStageScoped, RequireStageArtifact, RequiredUser,
+    AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunManagementTarget,
+    RequireRunScoped, RequireRunStageScoped, RequireStageArtifact, RequiredUser,
     principal_middleware,
 };
 use crate::request_id::{self, RequestId};

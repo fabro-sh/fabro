@@ -608,6 +608,50 @@ async fn create_run_with_bearer(app: &Router, bearer: &str) -> RunId {
     body["id"].as_str().unwrap().parse().unwrap()
 }
 
+fn pair_test_target() -> PairTarget {
+    PairTarget {
+        stage_id:   StageId::new("agent", 1),
+        node_label: "Agent".to_string(),
+    }
+}
+
+async fn append_pair_transcript_fixture(state: &Arc<AppState>, run_id: RunId) -> PairId {
+    let pair_id = "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap();
+    let run_store = state
+        .store
+        .open_run(&run_id)
+        .await
+        .expect("test run should be openable");
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::RunPairStarted {
+            pair_id,
+            target: pair_test_target(),
+            actor: None,
+        },
+    )
+    .await
+    .unwrap();
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::AgentPairUserMessage {
+            node_id: "agent".to_string(),
+            visit: 1,
+            session_id: "session-1".to_string(),
+            pair_id,
+            message_id: PairMessageId::new(),
+            client_message_id: None,
+            text: "hello pair".to_string(),
+            actor: None,
+        },
+    )
+    .await
+    .unwrap();
+    pair_id
+}
+
 fn bearer_request(method: Method, path: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -8555,6 +8599,127 @@ async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
         .await
         .unwrap();
     assert_status!(response, StatusCode::OK).await;
+}
+
+#[tokio::test]
+async fn run_tools_worker_can_read_pair_status_and_transcript_across_runs() {
+    let (state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&origin_run_id);
+    let pair_id = append_pair_transcript_fixture(&state, target_run_id).await;
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            &format!("/runs/{target_run_id}/pair"),
+            &worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let status_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(status_body["run_id"], target_run_id.to_string());
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            &format!("/runs/{target_run_id}/pair/{pair_id}/transcript"),
+            &worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let transcript_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(transcript_body["data"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn run_tools_worker_start_pair_reaches_worker_control_domain_across_runs() {
+    let (state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&origin_run_id);
+    let target = pair_test_target();
+    let _temp_dir = insert_running_control_run(&state, target_run_id, None);
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get_mut(&target_run_id)
+            .unwrap()
+            .active_api_targets
+            .insert(target.stage_id.clone(), target.clone());
+    }
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/pair"),
+            &worker_token,
+            &json!({ "stage_id": target.stage_id.to_string() }),
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::SERVICE_UNAVAILABLE).await;
+    assert_eq!(body["errors"][0]["code"], "worker_control_unavailable");
+}
+
+#[tokio::test]
+async fn cross_run_base_worker_remains_forbidden_from_pair_routes() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_worker_token(&origin_run_id);
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            &format!("/runs/{target_run_id}/pair"),
+            &worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::FORBIDDEN).await;
+}
+
+#[tokio::test]
+async fn run_tools_worker_cannot_call_user_only_non_mcp_routes() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&origin_run_id);
+
+    for (method, path) in [
+        (Method::POST, format!("/runs/{target_run_id}/approve")),
+        (Method::GET, format!("/runs/{target_run_id}/timeline")),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                method.clone(),
+                &path,
+                &worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                response.status(),
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+            ),
+            "{method} {path} unexpectedly accepted run-tools worker token with status {}",
+            response.status()
+        );
+    }
 }
 
 #[tokio::test]

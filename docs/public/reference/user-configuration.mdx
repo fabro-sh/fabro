@@ -440,7 +440,7 @@ permissions = "read-write"
 
 | Key | Type / values | Default | Description |
 |---|---|---|---|
-| `fabro_tools` | boolean | false | Allow workflow agents to use Fabro run-management tools. |
+| `fabro_tools` | boolean | false | Allow workflow agents to use the Fabro run-management MCP tool catalog: create, search, get, interact, gather, events, and pair. Agent-created runs are always children of the current run. |
 | `mcps` | table | None | Agent-scoped MCP server entries, keyed by name. |
 | `permissions` | "read-only" \| "read-write" \| "full" | "read-write" | Default tool permission level for workflow agents. |
 
