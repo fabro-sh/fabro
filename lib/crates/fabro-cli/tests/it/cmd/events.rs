@@ -1,4 +1,4 @@
-use fabro_test::{fabro_snapshot, test_context};
+use fabro_test::{fabro_snapshot, json_elapsed_ms_snapshot_filters, test_context};
 use serde_json::Value;
 
 use super::support::{setup_detached_dry_run, setup_seeded_completed_dry_run};
@@ -106,14 +106,10 @@ fn events_completed_run_reads_store_without_progress_jsonl() {
     let context = test_context!();
     let run = setup_seeded_completed_dry_run(&context);
 
-    let mut filters = context.filters();
+    let mut filters = json_elapsed_ms_snapshot_filters(context.filters());
     filters.push((
         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z".to_string(),
         "[TIMESTAMP]".to_string(),
-    ));
-    filters.push((
-        r#""duration_ms":\s*\d+"#.to_string(),
-        r#""duration_ms": [DURATION_MS]"#.to_string(),
     ));
     filters.push((
         r#""id":"[0-9a-f-]+""#.to_string(),
@@ -132,7 +128,7 @@ fn events_completed_run_reads_store_without_progress_jsonl() {
     exit_code: 0
     ----- stdout -----
     {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
-    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.completed","id":"[EVENT_ID]","properties":{"duration_ms":"[DURATION_MS]","provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     ----- stderr -----
     "#);
 }
@@ -141,14 +137,10 @@ fn events_completed_run_reads_store_without_progress_jsonl() {
 fn events_tail_limits_output() {
     let context = test_context!();
     let run = setup_seeded_completed_dry_run(&context);
-    let mut filters = context.filters();
+    let mut filters = json_elapsed_ms_snapshot_filters(context.filters());
     filters.push((
         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z".to_string(),
         "[TIMESTAMP]".to_string(),
-    ));
-    filters.push((
-        r#""duration_ms":\s*\d+"#.to_string(),
-        r#""duration_ms": [DURATION_MS]"#.to_string(),
     ));
     filters.push((
         r#""id":"[0-9a-f-]+""#.to_string(),
@@ -166,7 +158,7 @@ fn events_tail_limits_output() {
     exit_code: 0
     ----- stdout -----
     {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
-    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.completed","id":"[EVENT_ID]","properties":{"duration_ms":"[DURATION_MS]","provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     ----- stderr -----
     "#);
 }

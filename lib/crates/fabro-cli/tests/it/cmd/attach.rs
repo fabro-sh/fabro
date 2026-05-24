@@ -64,6 +64,45 @@ fn format_output_snapshot(output: &Output, filters: &[(String, String)]) -> Stri
     )
 }
 
+fn normalize_attach_json_progress_event(mut event: Value) -> Value {
+    if let Some(properties) = event.get_mut("properties").and_then(Value::as_object_mut) {
+        if properties.contains_key("manifest_blob") {
+            properties.insert(
+                "manifest_blob".to_string(),
+                Value::String("[BLOB_ID]".to_string()),
+            );
+        }
+        if properties.contains_key("definition_blob") {
+            properties.insert(
+                "definition_blob".to_string(),
+                Value::String("[BLOB_ID]".to_string()),
+            );
+        }
+    }
+    // Strip v2-shape server/version fields that the bridge emits,
+    // since the test fixture's socket path is randomised per run.
+    if let Some(settings) = event
+        .pointer_mut("/properties/settings")
+        .and_then(Value::as_object_mut)
+    {
+        settings.remove("_version");
+        settings.remove("server");
+        settings.remove("version");
+    }
+    if let Some(target) = event
+        .pointer_mut("/properties/settings/cli/target")
+        .and_then(Value::as_object_mut)
+    {
+        if target.contains_key("path") {
+            target.insert(
+                "path".to_string(),
+                Value::String("[CLI_SOCKET]".to_string()),
+            );
+        }
+    }
+    event
+}
+
 fn wait_for_output_signal(
     child: &mut std::process::Child,
     stdout: &mut impl Read,
@@ -734,44 +773,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("attach JSON output should be JSONL"))
-        .map(|mut event: Value| {
-            if let Some(properties) = event.get_mut("properties").and_then(Value::as_object_mut) {
-                if properties.contains_key("manifest_blob") {
-                    properties.insert(
-                        "manifest_blob".to_string(),
-                        Value::String("[BLOB_ID]".to_string()),
-                    );
-                }
-                if properties.contains_key("definition_blob") {
-                    properties.insert(
-                        "definition_blob".to_string(),
-                        Value::String("[BLOB_ID]".to_string()),
-                    );
-                }
-            }
-            // Strip v2-shape server/version fields that the bridge emits,
-            // since the test fixture's socket path is randomised per run.
-            if let Some(settings) = event
-                .pointer_mut("/properties/settings")
-                .and_then(Value::as_object_mut)
-            {
-                settings.remove("_version");
-                settings.remove("server");
-                settings.remove("version");
-            }
-            if let Some(target) = event
-                .pointer_mut("/properties/settings/cli/target")
-                .and_then(Value::as_object_mut)
-            {
-                if target.contains_key("path") {
-                    target.insert(
-                        "path".to_string(),
-                        Value::String("[CLI_SOCKET]".to_string()),
-                    );
-                }
-            }
-            event
-        })
+        .map(normalize_attach_json_progress_event)
         .collect();
     fabro_json_snapshot!(context, &progress, @r#"
     [
@@ -1195,10 +1197,10 @@ fn attach_json_errors_without_prompting_for_human_input() {
           },
           "status": "succeeded",
           "timing": {
-            "active_time_ms": 0,
-            "inference_time_ms": 0,
-            "tool_time_ms": 0,
-            "wall_time_ms": 0
+            "active_time_ms": "[ACTIVE_TIME_MS]",
+            "inference_time_ms": "[INFERENCE_TIME_MS]",
+            "tool_time_ms": "[TOOL_TIME_MS]",
+            "wall_time_ms": "[WALL_TIME_MS]"
           }
         },
         "run_id": "[ULID]",

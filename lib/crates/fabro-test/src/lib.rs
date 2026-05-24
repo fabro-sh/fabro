@@ -1874,6 +1874,25 @@ where
     source.snapshot_filters()
 }
 
+/// Add JSON elapsed-duration normalizations to a snapshot filter set.
+pub fn json_elapsed_ms_snapshot_filters(
+    mut filters: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    for (field, replacement) in [
+        ("duration_ms", "[DURATION_MS]"),
+        ("wall_time_ms", "[WALL_TIME_MS]"),
+        ("inference_time_ms", "[INFERENCE_TIME_MS]"),
+        ("tool_time_ms", "[TOOL_TIME_MS]"),
+        ("active_time_ms", "[ACTIVE_TIME_MS]"),
+    ] {
+        filters.push((
+            format!(r#""{field}"(\s*:\s*)\d+"#),
+            format!(r#""{field}"$1"{replacement}""#),
+        ));
+    }
+    filters
+}
+
 /// Add JSON-specific normalizations to a snapshot filter set.
 pub fn json_snapshot_filters(mut filters: Vec<(String, String)>) -> Vec<(String, String)> {
     filters.push((
@@ -1884,10 +1903,7 @@ pub fn json_snapshot_filters(mut filters: Vec<(String, String)>) -> Vec<(String,
         r#""id":\s*"[0-9a-f-]+""#.to_string(),
         r#""id": "[EVENT_ID]""#.to_string(),
     ));
-    filters.push((
-        r#""duration_ms":\s*\d+"#.to_string(),
-        r#""duration_ms": "[DURATION_MS]""#.to_string(),
-    ));
+    filters = json_elapsed_ms_snapshot_filters(filters);
     filters.push((
         r#""manifest_blob":\s*"[0-9a-f]{64}""#.to_string(),
         r#""manifest_blob": "[BLOB_ID]""#.to_string(),
@@ -2384,6 +2400,10 @@ mod tests {
             "id": "a68e40fe-0877-48a3-913f-6339b0d198cc",
             "created_at": "2026-04-24T12:34:56.789Z",
             "duration_ms": 12345,
+            "wall_time_ms": 23456,
+            "inference_time_ms": 34567,
+            "tool_time_ms": 45678,
+            "active_time_ms": 80245,
             "manifest_blob": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "definition_blob": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
             "run_dir": "[STORAGE_DIR]/scratch/20260424-01ARZ3NDEKTSV4RRFFQ69G5FAV",
@@ -2397,6 +2417,10 @@ mod tests {
   "id": "[EVENT_ID]",
   "created_at": "[TIMESTAMP]",
   "duration_ms": "[DURATION_MS]",
+  "wall_time_ms": "[WALL_TIME_MS]",
+  "inference_time_ms": "[INFERENCE_TIME_MS]",
+  "tool_time_ms": "[TOOL_TIME_MS]",
+  "active_time_ms": "[ACTIVE_TIME_MS]",
   "manifest_blob": "[BLOB_ID]",
   "definition_blob": "[BLOB_ID]",
   "run_dir": "[RUN_DIR]",
