@@ -147,12 +147,26 @@ pub struct ServerSandboxProvidersSettings {
     pub daytona: ServerSandboxProviderSettings,
 }
 
+impl ServerSandboxProvidersSettings {
+    /// Per-provider policy entry.
+    #[must_use]
+    pub fn for_provider(&self, provider: crate::SandboxProvider) -> &ServerSandboxProviderSettings {
+        match provider {
+            crate::SandboxProvider::Local => &self.local,
+            crate::SandboxProvider::Docker => &self.docker,
+            crate::SandboxProvider::Daytona => &self.daytona,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerSandboxProviderSettings {
     pub enabled: bool,
 }
 
 impl Default for ServerSandboxProviderSettings {
+    // The resolver defaults each provider to enabled; keep the struct default
+    // aligned with that so callers that bypass the resolver behave identically.
     fn default() -> Self {
         Self { enabled: true }
     }

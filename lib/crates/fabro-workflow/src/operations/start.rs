@@ -336,13 +336,8 @@ impl RunSession {
 
         let resolved = &settings.run;
 
-        let sandbox_provider = resolve_sandbox_provider(resolved);
         let sandbox_provider =
-            if resolved.execution.mode == RunMode::DryRun && !sandbox_provider.is_local() {
-                SandboxProvider::Local
-            } else {
-                sandbox_provider
-            };
+            resolve_sandbox_provider(resolved).effective_for(resolved.execution.mode);
         let catalog = Arc::clone(&services.catalog);
         let configured =
             configured_providers_for_start(services.vault.as_ref(), Arc::clone(&catalog)).await;

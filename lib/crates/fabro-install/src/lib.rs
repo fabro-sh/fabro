@@ -442,22 +442,18 @@ pub fn write_object_store_settings(
     }
 }
 
-fn write_sandbox_provider_enabled(
-    providers: &mut toml::Table,
-    provider: &str,
-    enabled: bool,
-) -> Result<()> {
-    let table = ensure_table(providers, provider)?;
-    table.insert("enabled".to_string(), toml::Value::Boolean(enabled));
-    Ok(())
-}
-
 fn write_sandbox_provider_policy(server: &mut toml::Table) -> Result<()> {
+    use fabro_types::SandboxProvider;
     let sandbox = ensure_table(server, "sandbox")?;
     let providers = ensure_table(sandbox, "providers")?;
-    write_sandbox_provider_enabled(providers, "local", true)?;
-    write_sandbox_provider_enabled(providers, "docker", true)?;
-    write_sandbox_provider_enabled(providers, "daytona", true)?;
+    for provider in [
+        SandboxProvider::Local,
+        SandboxProvider::Docker,
+        SandboxProvider::Daytona,
+    ] {
+        let entry = ensure_table(providers, &provider.to_string())?;
+        entry.insert("enabled".to_string(), toml::Value::Boolean(true));
+    }
     Ok(())
 }
 
