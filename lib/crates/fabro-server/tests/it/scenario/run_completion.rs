@@ -99,11 +99,14 @@ async fn agent_run_includes_project_skills_from_local_sandbox_working_directory(
         .join(".fabro")
         .join("skills")
         .join("local-server-project-skill");
-    std::fs::create_dir_all(&skill_dir).expect("project skill dir should create");
-    std::fs::write(
+    tokio::fs::create_dir_all(&skill_dir)
+        .await
+        .expect("project skill dir should create");
+    tokio::fs::write(
         skill_dir.join("SKILL.md"),
         "---\nname: local-server-project-skill\ndescription: Project-only skill\n---\nUse the project skill.\n",
     )
+    .await
     .expect("project skill should write");
 
     let twin = twin_openai().await;
