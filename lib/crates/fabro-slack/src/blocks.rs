@@ -326,36 +326,78 @@ pub fn run_lifecycle_blocks(
     kind: RunLifecycleKind,
     details: &RunLifecycleBlocks<'_>,
 ) -> Vec<Value> {
-    let text = run_lifecycle_text(kind, details);
-    vec![text_block(&truncate_to_limit(
-        &text,
-        SLACK_SECTION_TEXT_LIMIT,
-        HEADER_TRUNCATION_SUFFIX,
-    ))]
-}
-
-fn run_lifecycle_text(kind: RunLifecycleKind, details: &RunLifecycleBlocks<'_>) -> String {
     let title: &'static str = kind.into();
-    let mut text = format!("*{title}*");
-    let _ = write!(
-        text,
-        "\nWorkflow: {}",
-        lifecycle_field(details.workflow_label)
-    );
-    let _ = write!(text, "\nRun: `{}`", lifecycle_field(details.run_id));
-    if let Some(url) = details.run_url {
-        let _ = write!(text, "  ·  {}", slack_link(url, "Open in Fabro"));
-    }
-    if let Some(result) = details.result.filter(|value| !value.trim().is_empty()) {
-        let _ = write!(text, "\nResult: {}", lifecycle_field(result));
+    let mut blocks = vec![
+        json!({
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": title,
+                "emoji": true
+            }
+        }),
+        text_block(&format!("*{}*", lifecycle_field(details.workflow_label))),
+    ];
+
+    let mut fields = vec![
+        lifecycle_mrkdwn_field(
+            "Workflow",
+            &format!("`{}`", lifecycle_field(details.workflow_label)),
+        ),
+        lifecycle_mrkdwn_field("Run ID", &format!("`{}`", lifecycle_field(details.run_id))),
+    ];
+    if !matches!(kind, RunLifecycleKind::Failed) {
+        if let Some(result) = details.result.filter(|value| !value.trim().is_empty()) {
+            fields.push(lifecycle_mrkdwn_field("Result", &lifecycle_field(result)));
+        }
     }
     if let Some(duration_ms) = details.duration_ms {
-        let _ = write!(text, "\nDuration: {}", compact_duration(duration_ms));
+        fields.push(lifecycle_mrkdwn_field(
+            "Duration",
+            &compact_duration(duration_ms),
+        ));
     }
+    blocks.push(json!({
+        "type": "section",
+        "fields": fields
+    }));
+
+    if matches!(kind, RunLifecycleKind::Failed) {
+        if let Some(result) = details.result.filter(|value| !value.trim().is_empty()) {
+            blocks.push(text_block(&format!(
+                "*Failure*\n{}",
+                lifecycle_field(result)
+            )));
+        }
+    }
+
     if let Some(pull_request) = details.pull_request {
-        let _ = write!(text, "\nPR: {}", lifecycle_pull_request_text(&pull_request));
+        blocks.push(text_block(&format!(
+            "*Pull request*\n{}",
+            lifecycle_pull_request_text(&pull_request)
+        )));
     }
-    text
+
+    if let Some(url) = details.run_url {
+        blocks.push(json!({
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": slack_link(url, "Open in Fabro")
+                }
+            ]
+        }));
+    }
+
+    blocks
+}
+
+fn lifecycle_mrkdwn_field(label: &str, value: &str) -> Value {
+    json!({
+        "type": "mrkdwn",
+        "text": format!("*{label}*\n{value}")
+    })
 }
 
 fn lifecycle_field(text: &str) -> String {
@@ -433,11 +475,23 @@ mod tests {
     use super::*;
 
     fn lifecycle_text(blocks: &[Value]) -> String {
-        blocks
-            .iter()
-            .filter_map(|block| block["text"]["text"].as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
+        let mut texts = Vec::new();
+        for block in blocks {
+            if let Some(text) = block["text"]["text"].as_str() {
+                texts.push(text);
+            }
+            if let Some(fields) = block["fields"].as_array() {
+                texts.extend(fields.iter().filter_map(|field| field["text"].as_str()));
+            }
+            if let Some(elements) = block["elements"].as_array() {
+                texts.extend(elements.iter().filter_map(|element| {
+                    element["text"]
+                        .as_str()
+                        .or_else(|| element["text"]["text"].as_str())
+                }));
+            }
+        }
+        texts.join("\n")
     }
 
     #[test]
@@ -830,10 +884,14 @@ mod tests {
             pull_request:   None,
         });
 
+        assert_eq!(blocks[0]["type"], "header");
+        assert_eq!(blocks[0]["text"]["text"], "Fabro run started");
+        assert_eq!(blocks[1]["type"], "section");
+        assert_eq!(blocks[1]["text"]["text"], "*deploy*");
+        assert_eq!(blocks[2]["type"], "section");
         let text = lifecycle_text(&blocks);
-        assert!(text.contains("*Fabro run started*"));
-        assert!(text.contains("Workflow: deploy"));
-        assert!(text.contains("Run: `01HSTART`"));
+        assert!(text.contains("*Workflow*\n`deploy`"));
+        assert!(text.contains("*Run ID*\n`01HSTART`"));
         assert!(text.contains("<https://fabro.example/runs/01HSTART|Open in Fabro>"));
         assert!(!blocks.iter().any(|block| block["type"] == "actions"));
     }
@@ -853,11 +911,14 @@ mod tests {
             }),
         });
 
+        assert_eq!(blocks[0]["type"], "header");
+        assert_eq!(blocks[0]["text"]["text"], "Fabro run completed");
+        assert_eq!(blocks[1]["text"]["text"], "*release*");
         let text = lifecycle_text(&blocks);
-        assert!(text.contains("*Fabro run completed*"));
-        assert!(text.contains("Result: completed"));
-        assert!(text.contains("Duration: 1m 5s"));
-        assert!(text.contains("PR: <https://github.com/fabro-sh/fabro/pull/42|#42>"));
+        assert!(text.contains("*Result*\ncompleted"));
+        assert!(text.contains("*Duration*\n1m 5s"));
+        assert!(text.contains("*Pull request*"));
+        assert!(text.contains("<https://github.com/fabro-sh/fabro/pull/42|#42>"));
         assert!(text.contains("Ship &lt;prod&gt; &amp; notify"));
     }
 
@@ -872,10 +933,12 @@ mod tests {
             pull_request:   None,
         });
 
+        assert_eq!(blocks[0]["type"], "header");
+        assert_eq!(blocks[0]["text"]["text"], "Fabro run failed");
         let text = lifecycle_text(&blocks);
-        assert!(text.contains("*Fabro run failed*"));
-        assert!(text.contains("Result: workflow_error — command &lt;failed&gt; &amp; exited"));
-        assert!(text.contains("Duration: 1.2s"));
+        assert!(text.contains("*Failure*"));
+        assert!(text.contains("workflow_error — command &lt;failed&gt; &amp; exited"));
+        assert!(text.contains("*Duration*\n1.2s"));
     }
 
     #[test]
@@ -894,11 +957,15 @@ mod tests {
         assert!(text.contains("&lt;!here&gt;"));
         assert!(text.contains("01H&lt;&amp;&gt;"));
         assert!(text.contains("partial_success &lt;needs-review&gt; &amp; done"));
-        assert!(
-            text.chars().count() <= 3000,
-            "lifecycle block exceeded Slack section limit: {} chars",
-            text.chars().count()
-        );
+        for block in &blocks {
+            if let Some(text) = block["text"]["text"].as_str() {
+                assert!(
+                    text.chars().count() <= SLACK_SECTION_TEXT_LIMIT,
+                    "lifecycle block exceeded Slack section limit: {} chars",
+                    text.chars().count()
+                );
+            }
+        }
         assert!(text.contains(" …"));
     }
 
@@ -918,7 +985,8 @@ mod tests {
         });
 
         let text = lifecycle_text(&blocks);
-        assert!(text.contains("PR: <https://github.com/fabro-sh/fabro/pull/7|#7>"));
+        assert!(text.contains("*Pull request*"));
+        assert!(text.contains("<https://github.com/fabro-sh/fabro/pull/7|#7>"));
         assert!(!text.contains(" — "));
     }
 }
