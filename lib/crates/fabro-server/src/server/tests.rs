@@ -2202,10 +2202,7 @@ async fn subprocess_answer_transport_pair_commands_enqueue_control_messages() {
     let actor = Principal::System {
         system_kind: SystemActorKind::Engine,
     };
-    let target = PairTarget {
-        stage_id:   StageId::new("agent", 1),
-        node_label: "Agent".to_string(),
-    };
+    let target = pair_test_target();
 
     transport
         .start_pair(run_id, pair_id, target.clone(), actor.clone())
