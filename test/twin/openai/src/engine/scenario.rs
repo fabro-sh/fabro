@@ -62,11 +62,12 @@ pub struct ToolCallTemplate {
 
 #[derive(Clone, Debug)]
 pub struct RequestContext {
-    pub endpoint:   String,
-    pub model:      String,
-    pub stream:     bool,
-    pub metadata:   Map<String, Value>,
-    pub input_text: String,
+    pub endpoint:          String,
+    pub model:             String,
+    pub stream:            bool,
+    pub metadata:          Map<String, Value>,
+    pub input_text:        String,
+    pub instructions_text: String,
 }
 
 impl ScenarioScript {

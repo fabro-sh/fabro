@@ -2067,6 +2067,22 @@ impl TwinOpenAi {
             .expect("reset twin-openai namespace");
         assert_reqwest_status(response, fabro_http::StatusCode::OK, "POST /__admin/reset").await;
     }
+
+    pub async fn request_logs(&self, namespace: &str) -> serde_json::Value {
+        let response = test_http_client()
+            .get(format!("{}/__admin/requests", self.admin_url()))
+            .bearer_auth(namespace)
+            .send()
+            .await
+            .expect("fetch twin-openai request logs");
+        let response = expect_reqwest_status(
+            response,
+            fabro_http::StatusCode::OK,
+            "GET /__admin/requests",
+        )
+        .await;
+        response.json().await.expect("request logs should be JSON")
+    }
 }
 
 #[derive(Debug, Default, Clone)]

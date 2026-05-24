@@ -5,7 +5,7 @@ import {
   buildBoardColumns,
   loadStoredRunsWorkspaceSearchParams,
   placeArchivedColumnLast,
-  persistRunsWorkspaceSearchParams,
+  persistRunsWorkspacePreferences,
   RUNS_PREFERENCES_STORAGE_KEY,
   runsQuickStartCommands,
   shouldRefreshBoardForEvent,
@@ -279,11 +279,24 @@ describe("runs route workspace preferences", () => {
 
   test("persisting preferences omits page and stores canonical values", () => {
     const storage = new MemoryStorage();
-    const params = new URLSearchParams(
-      "view=columns&search=abc&created=1d&sort=made-up&direction=asc&size=100&page=9&hide=unknown,workflow,repo",
-    );
 
-    persistRunsWorkspaceSearchParams(params, storage);
+    persistRunsWorkspacePreferences(
+      {
+        version:   1,
+        view:      "columns",
+        search:    "abc",
+        repo:      "all",
+        workflow:  "all",
+        created:   "1d",
+        archived:  false,
+        sort:      "created_at",
+        direction: "asc",
+        size:      100,
+        hide:      "repo,workflow",
+        page:      9,
+      },
+      storage,
+    );
 
     expect(JSON.parse(storage.getItem(RUNS_PREFERENCES_STORAGE_KEY) ?? "{}")).toEqual({
       version:   1,

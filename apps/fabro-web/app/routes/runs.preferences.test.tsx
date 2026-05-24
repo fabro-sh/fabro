@@ -244,6 +244,28 @@ describe("Runs workspace preference restoration", () => {
     expect(JSON.parse(storage.getItem(RUNS_PREFERENCES_STORAGE_KEY) ?? "{}").view).toBe("columns");
   });
 
+  test("clicking a sort header in list view updates the URL while preserving other params", async () => {
+    const { renderer, router } = await renderRuns("/runs?view=list&archived=1");
+
+    await act(async () => {
+      compositeByName(renderer, "SortHeader", (props) => props.sortKey === "status").props.onClick("status");
+    });
+
+    expect(router.state.location.search).toContain("sort=status");
+    expect(router.state.location.search).toContain("view=list");
+    expect(router.state.location.search).toContain("archived=1");
+
+    // Clicking the same header again toggles direction to ascending.
+    await act(async () => {
+      compositeByName(renderer, "SortHeader", (props) => props.sortKey === "status").props.onClick("status");
+    });
+
+    expect(router.state.location.search).toContain("sort=status");
+    expect(router.state.location.search).toContain("direction=asc");
+    expect(router.state.location.search).toContain("view=list");
+    expect(router.state.location.search).toContain("archived=1");
+  });
+
   test("changing filters and hidden columns persists them", async () => {
     const { renderer } = await renderRuns("/runs?view=list");
 

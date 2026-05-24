@@ -125,11 +125,12 @@ impl AppState {
             .or_default()
             .request_logs
             .push(RequestLog {
-                endpoint:   request.endpoint,
-                model:      request.model,
-                stream:     request.stream,
-                input_text: request.input_text,
-                metadata:   request.metadata,
+                endpoint:          request.endpoint,
+                model:             request.model,
+                stream:            request.stream,
+                input_text:        request.input_text,
+                instructions_text: request.instructions_text,
+                metadata:          request.metadata,
             });
     }
 

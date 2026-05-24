@@ -11,6 +11,7 @@ pub struct ResponsesRequest {
     pub model:                String,
     #[serde(default)]
     pub input:                ResponseInput,
+    pub instructions:         Option<String>,
     #[serde(default)]
     pub stream:               bool,
     #[serde(default)]
@@ -38,6 +39,13 @@ impl ResponsesRequest {
         } else {
             text
         }
+    }
+
+    pub fn extract_instruction_text(&self) -> String {
+        self.instructions
+            .as_deref()
+            .map(normalize_whitespace)
+            .unwrap_or_default()
     }
 
     pub fn response_format(&self) -> Option<ResponseFormat> {
@@ -476,6 +484,16 @@ impl ChatCompletionsRequest {
         }
     }
 
+    pub fn extract_instruction_text(&self) -> String {
+        let pieces: Vec<String> = self
+            .messages
+            .iter()
+            .filter(|message| message.role == "system" || message.role == "developer")
+            .flat_map(ChatMessage::extract_texts)
+            .collect();
+        normalize_whitespace(&pieces.join(" "))
+    }
+
     pub fn response_format(&self) -> Option<ResponseFormat> {
         let format = self.response_format.as_ref()?;
         response_format_from_kind(
@@ -721,18 +739,26 @@ fn validate_tools(
             return Err(OpenAiError::invalid_request(param, "tool type is required"));
         };
 
-        if tool_type != "function" {
-            return Err(OpenAiError::invalid_request(
-                param,
-                "only function tools are supported",
-            ));
-        }
-
-        if function_tool_name(tool, surface).is_none() {
-            return Err(OpenAiError::invalid_request(
-                param,
-                "function tool name is required",
-            ));
+        match tool_type {
+            "function" => {
+                if function_tool_name(tool, surface).is_none() {
+                    return Err(OpenAiError::invalid_request(
+                        param,
+                        "function tool name is required",
+                    ));
+                }
+            }
+            "custom" if surface == ToolSurface::Responses => {
+                if function_tool_name(tool, surface).is_none() {
+                    return Err(OpenAiError::invalid_request(
+                        param,
+                        "custom tool name is required",
+                    ));
+                }
+            }
+            _ => {
+                return Err(OpenAiError::invalid_request(param, "unsupported tool type"));
+            }
         }
     }
 
