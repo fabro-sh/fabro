@@ -15,7 +15,7 @@ use fabro_types::{
     RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
     RunProjection, RunSandbox, RunSandboxRuntime, RunSize, RunSpec, RunStatus, RunTimestamps,
     SandboxProvider, StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome,
-    StageProjection, StageState, StartRecord, SubAgentProjection, SubAgentStatus,
+    StageProjection, StageState, StartRecord, SubAgentProjection, SubAgentStatus, TodoListKind,
     TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
@@ -484,18 +484,27 @@ impl RunProjectionReducer for RunProjection {
                 stage.parallel_results = Some(parallel_results);
             }
             EventBody::TodoCreated(props) => {
+                if !should_project_stage_todo_event(stored, props.list_kind) {
+                    return Ok(());
+                }
                 let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
                 apply_todo_created(stage, props);
             }
             EventBody::TodoUpdated(props) => {
+                if !should_project_stage_todo_event(stored, props.list_kind) {
+                    return Ok(());
+                }
                 let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
                 apply_todo_updated(stage, props);
             }
             EventBody::TodoDeleted(props) => {
+                if !should_project_stage_todo_event(stored, props.list_kind) {
+                    return Ok(());
+                }
                 let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
@@ -619,6 +628,10 @@ impl RunProjectionReducer for RunProjection {
 
         Ok(())
     }
+}
+
+fn should_project_stage_todo_event(stored: &RunEvent, list_kind: TodoListKind) -> bool {
+    !matches!(list_kind, TodoListKind::OpenAiPlan) || stored.parent_session_id.is_none()
 }
 
 fn apply_todo_created(stage: &mut StageProjection, props: &TodoCreatedProps) {
@@ -3932,6 +3945,13 @@ mod tests {
                 .expect("stage todos present")
         }
 
+        fn child_stage_event(seq: u32, body: EventBody, stage_id: StageId) -> EventEnvelope {
+            let mut event = test_stage_event(seq, body, stage_id);
+            event.event.session_id = Some(format!("child-session-{seq}"));
+            event.event.parent_session_id = Some("root-session".to_string());
+            event
+        }
+
         fn created(
             list: &str,
             list_kind: TodoListKind,
@@ -4089,6 +4109,163 @@ mod tests {
             assert_eq!(stage_todos(&state, &plan_one).items[0].subject, "p1");
             assert_eq!(stage_todos(&state, &plan_two).items[0].subject, "p2");
             assert_eq!(stage_todos(&state, &claude).items[0].subject, "claude task");
+        }
+
+        #[test]
+        fn root_openai_plan_remains_projected_after_child_plan_events() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+            let root_list = "openai_plan:root_session";
+            let child_list = "openai_plan:child_session";
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    created(
+                        root_list,
+                        TodoListKind::OpenAiPlan,
+                        "root-a",
+                        0,
+                        "root first",
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    2,
+                    created(
+                        root_list,
+                        TodoListKind::OpenAiPlan,
+                        "root-b",
+                        1,
+                        "root second",
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&child_stage_event(
+                    3,
+                    created(
+                        child_list,
+                        TodoListKind::OpenAiPlan,
+                        "child-a",
+                        0,
+                        "child first",
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&child_stage_event(
+                    4,
+                    created(
+                        child_list,
+                        TodoListKind::OpenAiPlan,
+                        "child-b",
+                        1,
+                        "child second",
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    5,
+                    updated_status(
+                        root_list,
+                        TodoListKind::OpenAiPlan,
+                        "root-a",
+                        TodoStatus::Completed,
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    6,
+                    updated_status(
+                        root_list,
+                        TodoListKind::OpenAiPlan,
+                        "root-b",
+                        TodoStatus::Completed,
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let projection = stage_todos(&state, &stage_id);
+            assert_eq!(projection.list_id, root_list);
+            assert_eq!(projection.kind, TodoListKind::OpenAiPlan);
+            assert_eq!(projection.items.len(), 2);
+            assert_eq!(projection.items[0].id, "root-a");
+            assert_eq!(projection.items[0].status, TodoStatus::Completed);
+            assert_eq!(projection.items[1].id, "root-b");
+            assert_eq!(projection.items[1].status, TodoStatus::Completed);
+        }
+
+        #[test]
+        fn child_openai_plan_events_do_not_create_stage_todos() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+            state
+                .apply_event(&child_stage_event(
+                    1,
+                    created(
+                        "openai_plan:child_session",
+                        TodoListKind::OpenAiPlan,
+                        "child-a",
+                        0,
+                        "child first",
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            assert!(
+                state
+                    .stage(&stage_id)
+                    .is_none_or(|stage| stage.todos.is_none())
+            );
+        }
+
+        #[test]
+        fn anthropic_child_session_task_events_still_project() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+            let list = "anthropic_tasks:root_session";
+            state
+                .apply_event(&child_stage_event(
+                    1,
+                    created(
+                        list,
+                        TodoListKind::AnthropicTasks,
+                        "task-a",
+                        0,
+                        "task first",
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&child_stage_event(
+                    2,
+                    updated_status(
+                        list,
+                        TodoListKind::AnthropicTasks,
+                        "task-a",
+                        TodoStatus::Completed,
+                    ),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let projection = stage_todos(&state, &stage_id);
+            assert_eq!(projection.list_id, list);
+            assert_eq!(projection.kind, TodoListKind::AnthropicTasks);
+            assert_eq!(projection.items.len(), 1);
+            assert_eq!(projection.items[0].id, "task-a");
+            assert_eq!(projection.items[0].status, TodoStatus::Completed);
         }
 
         #[test]
