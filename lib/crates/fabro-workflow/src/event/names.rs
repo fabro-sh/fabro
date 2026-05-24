@@ -86,7 +86,6 @@ pub fn event_name(event: &Event) -> &'static str {
             AgentEvent::CompactionStarted { .. } => "agent.compaction.started",
             AgentEvent::CompactionCompleted { .. } => "agent.compaction.completed",
             AgentEvent::LlmRetry { .. } => "agent.llm.retry",
-            AgentEvent::ContextWindowSnapshot(_) => "agent.context_window.snapshot",
             AgentEvent::SubAgentSpawned { .. } => "agent.sub.spawned",
             AgentEvent::SubAgentCompleted { .. } => "agent.sub.completed",
             AgentEvent::SubAgentFailed { .. } => "agent.sub.failed",
@@ -140,6 +139,7 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::CommandCompleted { .. } => "command.completed",
         Event::AgentSessionStarted { .. } => "agent.session.started",
         Event::AgentSessionActivated { .. } => "agent.session.activated",
+        Event::AgentToolsAvailable { .. } => "agent.tools.available",
         Event::AgentSessionDeactivated { .. } => "agent.session.deactivated",
         Event::AgentSessionEnded { .. } => "agent.session.ended",
         Event::AgentInterruptInjected { .. } => "agent.interrupt.injected",
@@ -201,6 +201,15 @@ mod tests {
                 tool_call_id:      None,
             }),
             "agent.sub.spawned"
+        );
+        assert_eq!(
+            event_name(&Event::AgentToolsAvailable {
+                node_id:    "code".to_string(),
+                visit:      1,
+                session_id: "session-1".to_string(),
+                tools:      Vec::new(),
+            }),
+            "agent.tools.available"
         );
     }
 

@@ -1,5 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::{Hash, Hasher};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::SystemTime;
 
@@ -8,18 +7,18 @@ use fabro_llm::client::Client;
 use fabro_llm::error::ProviderErrorKind;
 use fabro_llm::generate::StreamAccumulator;
 use fabro_llm::provider::StreamEventStream;
-use fabro_llm::token_count::{InputTokenCountMethod, InputTokenCountPreference};
 use fabro_llm::types::{
     ContentPart, Message as LlmMessage, ReasoningEffort, Request, RetryPolicy, StreamEvent,
-    TokenCounts, ToolChoice,
+    ToolChoice,
 };
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
+use fabro_mcp::http_transport;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
 use fabro_types::{
-    PermissionLevel, Principal, SessionMessage, SessionRecord, StageContextWindowProjection,
-    SteeringMessage,
+    AgentToolSummary, PermissionLevel, Principal, SessionMessage, SessionRecord,
+    StageContextWindowProjection, SteeringMessage,
 };
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
@@ -31,7 +30,7 @@ use crate::agent_profile::AgentProfile;
 use crate::compaction::{check_context_usage, compact_context};
 use crate::config::SessionOptions;
 use crate::context_window::{
-    ContextWindowSnapshotInput, build_local_snapshot, scaled_snapshot, warning, warnings_from_llm,
+    ContextWindowInput, build_local_snapshot, context_window_from_response_usage,
 };
 use crate::error::{Error, InterruptReason};
 use crate::event::Emitter;
@@ -305,13 +304,8 @@ impl ToolEnvProvider for StaticEnvProvider {
 }
 
 struct BuiltRequest {
-    request: Request,
-    tools:   Vec<ToolDefinitionWithSource>,
-}
-
-struct EmittedContextWindowSnapshot {
-    local_snapshot: StageContextWindowProjection,
-    fingerprint:    Option<u64>,
+    request:        Request,
+    context_window: StageContextWindowProjection,
 }
 
 pub struct Session {
@@ -332,7 +326,6 @@ pub struct Session {
     control_notify: Arc<Notify>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
     cancel_token: CancellationToken,
-    close_token: CancellationToken,
     round_token: Arc<RwLock<CancellationToken>>,
     interrupt_reason: Arc<Mutex<Option<InterruptReason>>>,
     memory: Vec<MemoryDocument>,
@@ -340,8 +333,6 @@ pub struct Session {
     skills: Vec<Skill>,
     system_prompt: String,
     activated_skill_context_observed: bool,
-    context_window_counted_fingerprints: HashSet<u64>,
-    context_window_response_usage_fingerprints: Arc<Mutex<HashSet<u64>>>,
     file_tracker: FileTracker,
     tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,
     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
@@ -372,7 +363,6 @@ impl Session {
             control_notify: Arc::new(Notify::new()),
             followup_queue: Arc::new(Mutex::new(VecDeque::new())),
             cancel_token: CancellationToken::new(),
-            close_token: CancellationToken::new(),
             round_token: Arc::new(RwLock::new(CancellationToken::new())),
             interrupt_reason: Arc::new(Mutex::new(None)),
             memory: Vec::new(),
@@ -380,8 +370,6 @@ impl Session {
             skills: Vec::new(),
             system_prompt: String::new(),
             activated_skill_context_observed: false,
-            context_window_counted_fingerprints: HashSet::new(),
-            context_window_response_usage_fingerprints: Arc::new(Mutex::new(HashSet::new())),
             file_tracker: FileTracker::default(),
             tool_env_provider: None,
             subagent_manager,
@@ -499,6 +487,34 @@ impl Session {
     #[must_use]
     pub fn permission_level(&self) -> Option<PermissionLevel> {
         self.config.permission_level
+    }
+
+    /// Effective tool list the model is exposed to after provider-profile
+    /// setup, optional registrations, MCP integration, and access-policy
+    /// filtering. This is the same path used to build outbound requests.
+    #[must_use]
+    pub fn effective_tools(&self) -> Vec<ToolDefinitionWithSource> {
+        self.provider_profile
+            .tool_registry()
+            .definitions_with_source_for_policy(
+                self.config.tool_access_policy.as_deref(),
+                self.config.tool_exposure_mode,
+            )
+    }
+
+    /// Public projection of `effective_tools()` for
+    /// `StageProjection.agent_tools` and the `agent.tools.available` event.
+    /// Sorted by name for deterministic snapshots; the underlying registry
+    /// stores tools in a `HashMap`.
+    #[must_use]
+    pub fn agent_tool_summaries(&self) -> Vec<AgentToolSummary> {
+        let mut summaries: Vec<_> = self
+            .effective_tools()
+            .iter()
+            .map(ToolDefinitionWithSource::to_agent_tool_summary)
+            .collect();
+        summaries.sort_by(|left, right| left.name.cmp(&right.name));
+        summaries
     }
 
     /// Initialize session by discovering project docs and capturing environment
@@ -678,13 +694,20 @@ impl Session {
                 return Err(Error::Interrupted(InterruptReason::Cancelled));
             }
             match &config.transport {
-                McpTransport::Sandbox { command, port, env } => {
+                McpTransport::Sandbox {
+                    protocol,
+                    command,
+                    port,
+                    env,
+                } => {
                     let port = *port;
                     match self
                         .start_sandbox_mcp_server(command, port, env, cancel_token)
                         .await?
                     {
                         Ok((url, headers)) => {
+                            let url = http_transport::sandbox_mcp_http_url(*protocol, &url)
+                                .map_err(|err| Error::InvalidState(err.to_string()))?;
                             info!(
                                 server = %config.name,
                                 url = %url,
@@ -692,7 +715,11 @@ impl Session {
                             );
                             resolved.push(McpServerSettings {
                                 name:                 config.name.clone(),
-                                transport:            McpTransport::Http { url, headers },
+                                transport:            McpTransport::Http {
+                                    protocol: *protocol,
+                                    url,
+                                    headers,
+                                },
                                 current_dir:          config.current_dir.clone(),
                                 clear_env:            config.clear_env,
                                 startup_timeout_secs: config.startup_timeout_secs,
@@ -1135,7 +1162,6 @@ impl Session {
 
     pub fn close(&mut self) -> bool {
         let was_open = self.state != SessionState::Closed;
-        self.close_token.cancel();
         self.transition(SessionState::Closed);
         was_open
     }
@@ -1335,7 +1361,7 @@ impl Session {
 
             // Build request
             let built_request = self.build_request();
-            let context_window_snapshot = self.emit_context_window_snapshots(&built_request);
+            let local_context_window = built_request.context_window.clone();
             let request = built_request.request;
 
             // Emit AssistantTextStart before LLM call
@@ -1606,7 +1632,10 @@ impl Session {
                 .cloned()
                 .collect();
             let usage = response.usage.clone();
-            self.emit_response_usage_context_window_snapshot(&context_window_snapshot, &usage);
+            let context_window = Some(context_window_from_response_usage(
+                &local_context_window,
+                &usage,
+            ));
 
             self.history.push(Message::Assistant {
                 content: text.clone(),
@@ -1633,6 +1662,7 @@ impl Session {
                     model,
                     usage: response.usage.clone(),
                     tool_call_count: tool_calls.len(),
+                    context_window,
                 });
 
             // Post-response compaction: trim context after appending assistant turn
@@ -1737,134 +1767,6 @@ impl Session {
         Ok(())
     }
 
-    fn emit_context_window_snapshots(
-        &mut self,
-        built_request: &BuiltRequest,
-    ) -> EmittedContextWindowSnapshot {
-        let provider = self.provider_profile.provider_id().to_string();
-        let model = self.provider_profile.model().to_string();
-        let local_snapshot = build_local_snapshot(ContextWindowSnapshotInput {
-            request: &built_request.request,
-            tools: &built_request.tools,
-            system_prompt: &self.system_prompt,
-            memory: &self.memory,
-            skills: &self.skills,
-            activated_skill_context_observed: self.activated_skill_context_observed,
-            provider: &provider,
-            model: &model,
-            context_window_tokens: self.provider_profile.context_window_size(),
-        });
-        self.event_emitter.emit(
-            self.id.clone(),
-            AgentEvent::ContextWindowSnapshot(local_snapshot.clone()),
-        );
-
-        let Some(fingerprint) = request_fingerprint(&built_request.request) else {
-            return EmittedContextWindowSnapshot {
-                local_snapshot,
-                fingerprint: None,
-            };
-        };
-        if !self.context_window_counted_fingerprints.insert(fingerprint) {
-            return EmittedContextWindowSnapshot {
-                local_snapshot,
-                fingerprint: Some(fingerprint),
-            };
-        }
-
-        let client = self.llm_client.clone();
-        let request = built_request.request.clone();
-        let session_id = self.id.clone();
-        let emitter = self.event_emitter.clone();
-        let local_for_count = local_snapshot.clone();
-        let close_token = self.close_token.clone();
-        let response_usage_fingerprints =
-            Arc::clone(&self.context_window_response_usage_fingerprints);
-        tokio::spawn(async move {
-            let count_result = tokio::select! {
-                biased;
-                () = close_token.cancelled() => return,
-                result = client.count_input_tokens(&request, InputTokenCountPreference::PreferProvider) => result,
-            };
-            if close_token.is_cancelled() {
-                return;
-            }
-            if response_usage_fingerprints
-                .lock()
-                .expect("context window response-usage fingerprint lock poisoned")
-                .contains(&fingerprint)
-            {
-                return;
-            }
-            let snapshot = match count_result {
-                Ok(count) if count.method == InputTokenCountMethod::ProviderApi => {
-                    let input_tokens = u64::try_from(count.input_tokens.max(0)).unwrap_or(u64::MAX);
-                    scaled_snapshot(
-                        &local_for_count,
-                        input_tokens,
-                        fabro_types::StageContextWindowCountMethod::ProviderApiScaledBreakdown,
-                        warnings_from_llm(&count.warnings),
-                    )
-                }
-                Ok(count) => {
-                    let mut warnings = local_for_count.warnings.clone();
-                    warnings.extend(warnings_from_llm(&count.warnings));
-                    let input_tokens = u64::try_from(count.input_tokens.max(0)).unwrap_or(u64::MAX);
-                    scaled_snapshot(
-                        &local_for_count,
-                        input_tokens,
-                        fabro_types::StageContextWindowCountMethod::LocalEstimate,
-                        warnings,
-                    )
-                }
-                Err(_) => {
-                    let mut warnings = local_for_count.warnings.clone();
-                    warnings.push(warning(
-                        "provider_token_count_unavailable",
-                        "provider input token counting was unavailable; retained local estimate",
-                    ));
-                    let mut snapshot = local_for_count.clone();
-                    snapshot.warnings = warnings;
-                    snapshot
-                }
-            };
-            emitter.emit(session_id, AgentEvent::ContextWindowSnapshot(snapshot));
-        });
-
-        EmittedContextWindowSnapshot {
-            local_snapshot,
-            fingerprint: Some(fingerprint),
-        }
-    }
-
-    fn emit_response_usage_context_window_snapshot(
-        &self,
-        context_window_snapshot: &EmittedContextWindowSnapshot,
-        usage: &TokenCounts,
-    ) {
-        let input_tokens = usage
-            .input_tokens
-            .saturating_add(usage.cache_read_tokens)
-            .saturating_add(usage.cache_write_tokens);
-        if input_tokens <= 0 {
-            return;
-        }
-        if let Some(fingerprint) = context_window_snapshot.fingerprint {
-            self.context_window_response_usage_fingerprints
-                .lock()
-                .expect("context window response-usage fingerprint lock poisoned")
-                .insert(fingerprint);
-        }
-        let snapshot = scaled_snapshot(
-            &context_window_snapshot.local_snapshot,
-            u64::try_from(input_tokens).unwrap_or(u64::MAX),
-            fabro_types::StageContextWindowCountMethod::ResponseUsageScaledBreakdown,
-            context_window_snapshot.local_snapshot.warnings.clone(),
-        );
-        self.event_emitter
-            .emit(self.id.clone(), AgentEvent::ContextWindowSnapshot(snapshot));
-    }
-
     async fn compact_if_needed(&mut self) {
         let Some(estimate) = check_context_usage(
             &self.system_prompt,
@@ -1966,13 +1868,7 @@ impl Session {
         }
         messages.extend(self.history.convert_to_messages());
 
-        let tools_with_source = self
-            .provider_profile
-            .tool_registry()
-            .definitions_with_source_for_policy(
-                self.config.tool_access_policy.as_deref(),
-                self.config.tool_exposure_mode,
-            );
+        let tools_with_source = self.effective_tools();
         let tools: Vec<_> = tools_with_source
             .iter()
             .map(|tool| tool.definition.clone())
@@ -2002,20 +1898,31 @@ impl Session {
             metadata: None,
             provider_options: None,
         };
+        let provider = self.provider_profile.provider_id().to_string();
+        let model = self.provider_profile.model().to_string();
+        let context_window = build_local_snapshot(ContextWindowInput {
+            request: &request,
+            tools: &tools_with_source,
+            system_prompt: &self.system_prompt,
+            memory: &self.memory,
+            skills: &self.skills,
+            activated_skill_context_observed: self.activated_skill_context_observed,
+            provider: &provider,
+            model: &model,
+            context_window_tokens: self.provider_profile.context_window_size(),
+        });
         BuiltRequest {
             request,
-            tools: tools_with_source,
+            context_window,
         }
     }
 
     fn inject_task_reminder_if_needed(&mut self) {
-        let tools = self
-            .provider_profile
-            .tool_registry()
-            .definitions_for_policy(
-                self.config.tool_access_policy.as_deref(),
-                self.config.tool_exposure_mode,
-            );
+        let tools: Vec<_> = self
+            .effective_tools()
+            .into_iter()
+            .map(|tool| tool.definition)
+            .collect();
         let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
         if let Some(reminder) = task_reminder::maybe_reminder(&self.history, &tool_names) {
             self.history.push(Message::System {
@@ -2031,13 +1938,6 @@ const fn is_auth_error(err: &LlmError) -> bool {
         err.provider_kind(),
         Some(ProviderErrorKind::Authentication | ProviderErrorKind::AccessDenied)
     )
-}
-
-fn request_fingerprint(request: &Request) -> Option<u64> {
-    let bytes = serde_json::to_vec(request).ok()?;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Some(hasher.finish())
 }
 
 /// Best-effort kill of a sandbox MCP server process group. Used when
@@ -2070,6 +1970,7 @@ mod tests {
         ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, TokenCounts, ToolCall,
         ToolDefinition,
     };
+    use fabro_types::StageContextWindowCountMethod;
     use futures::stream;
     use tokio::time::{sleep, timeout};
 
@@ -2574,16 +2475,48 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e.event, AgentEvent::UserInput { .. }))
         );
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e.event, AgentEvent::AssistantMessage { .. }))
+        let assistant_context_window = events.iter().find_map(|e| match &e.event {
+            AgentEvent::AssistantMessage { context_window, .. } => context_window.as_ref(),
+            _ => None,
+        });
+        let context_window =
+            assistant_context_window.expect("assistant message should carry context window data");
+        assert_eq!(
+            context_window.count_method,
+            StageContextWindowCountMethod::ResponseUsageScaledBreakdown
         );
         assert!(
             events
                 .iter()
                 .any(|e| matches!(e.event, AgentEvent::SessionEnded))
         );
+    }
+
+    #[tokio::test]
+    async fn assistant_message_context_window_uses_local_estimate_without_response_usage() {
+        let mut session = make_session(vec![response_with_usage(
+            text_response("Hello"),
+            TokenCounts::default(),
+        )])
+        .await;
+        let mut rx = session.subscribe();
+
+        session.process_input("Hi").await.unwrap();
+
+        let context_window = std::iter::from_fn(|| rx.try_recv().ok()).find_map(|event| {
+            if let AgentEvent::AssistantMessage { context_window, .. } = event.event {
+                context_window
+            } else {
+                None
+            }
+        });
+
+        let context_window = context_window.expect("assistant message should carry context window");
+        assert_eq!(
+            context_window.count_method,
+            StageContextWindowCountMethod::LocalEstimate
+        );
+        assert!(context_window.input_tokens > 0);
     }
 
     #[tokio::test]
@@ -3272,6 +3205,38 @@ mod tests {
         let tools = request.tools.as_ref().expect("tools should be exposed");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "read_file");
+    }
+
+    #[tokio::test]
+    async fn effective_tools_match_request_tool_filtering() {
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let mut registry = ToolRegistry::new();
+        registry.register(make_named_noop_tool("read_file"));
+        registry.register(make_named_noop_tool("apply_patch"));
+        registry.register(make_named_noop_tool("shell"));
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(NamedToolAccessPolicy::new(vec![
+                ("read_file", ToolAccess::Allowed),
+                ("apply_patch", ToolAccess::RequiresApproval),
+                ("shell", ToolAccess::Denied),
+            ]))),
+            tool_exposure_mode: ToolExposureMode::IncludeRequiresApproval,
+            ..SessionOptions::default()
+        };
+        let session = Session::new(client, profile, env, config, None);
+
+        let tools = session.effective_tools();
+        let mut tool_names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool.definition.name.as_str())
+            .collect();
+        tool_names.sort_unstable();
+
+        assert_eq!(tool_names, vec!["apply_patch", "read_file"]);
+        assert!(tools.iter().all(|tool| tool.source == ToolSource::Native));
     }
 
     #[tokio::test]

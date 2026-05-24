@@ -591,7 +591,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             billing:  billing.clone(),
         }),
         Event::Agent {
-            stage,
+            stage: _,
             visit,
             event,
             ..
@@ -610,6 +610,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 model,
                 usage,
                 tool_call_count,
+                context_window,
             } => {
                 let billing = billed_token_counts_from_llm(usage);
                 EventBody::AgentMessage(fabro_types::AgentMessageProps {
@@ -619,6 +620,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
                     tool_call_count: *tool_call_count,
                     visit: *visit,
                     message: None,
+                    context_window: context_window.clone(),
                 })
             }
             AgentEvent::ToolCallStarted {
@@ -711,13 +713,6 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 error:      serde_json::to_value(error).expect("serializable sdk error"),
                 visit:      *visit,
             }),
-            AgentEvent::ContextWindowSnapshot(snapshot) => EventBody::AgentContextWindowSnapshot(
-                fabro_types::AgentContextWindowSnapshotProps {
-                    stage_id: ::fabro_types::StageId::new(stage.clone(), *visit),
-                    visit:    *visit,
-                    snapshot: snapshot.clone(),
-                },
-            ),
             AgentEvent::SubAgentSpawned {
                 agent_id,
                 depth,
@@ -1174,6 +1169,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
             capabilities:     capabilities.clone(),
             visit:            *visit,
         }),
+        Event::AgentToolsAvailable { tools, visit, .. } => {
+            EventBody::AgentToolsAvailable(fabro_types::AgentToolsAvailableProps {
+                tools: tools.clone(),
+                visit: *visit,
+            })
+        }
         Event::AgentSessionDeactivated { visit, .. } => {
             EventBody::AgentSessionDeactivated(fabro_types::AgentSessionDeactivatedProps {
                 visit: *visit,
@@ -1592,6 +1593,31 @@ mod tests {
         assert_eq!(properties["tool_name"], "read_file");
         assert_eq!(properties["tool_call_id"], "call_1");
         assert_eq!(properties["visit"], 2);
+    }
+
+    #[test]
+    fn run_event_agent_tools_available_moves_session_and_stage_metadata_to_header() {
+        let stored = to_run_event(&fixtures::RUN_4, &Event::AgentToolsAvailable {
+            node_id:    "code".to_string(),
+            visit:      2,
+            session_id: "ses_root".to_string(),
+            tools:      vec![::fabro_types::AgentToolSummary {
+                name:        "apply_patch".to_string(),
+                description: "Apply a unified diff patch".to_string(),
+                source:      ::fabro_types::AgentToolSource::Native,
+                category:    ::fabro_types::AgentToolCategory::Write,
+                invoked:     false,
+            }],
+        });
+
+        assert_eq!(stored.event_name(), "agent.tools.available");
+        assert_eq!(stored.node_id.as_deref(), Some("code"));
+        assert_eq!(stored.stage_id, Some(StageId::new("code", 2)));
+        assert_eq!(stored.session_id.as_deref(), Some("ses_root"));
+        let properties = stored.properties().unwrap();
+        assert_eq!(properties["visit"], 2);
+        assert_eq!(properties["tools"][0]["name"], "apply_patch");
+        assert_eq!(properties["tools"][0]["category"], "write");
     }
 
     #[test]
@@ -2172,6 +2198,7 @@ mod tests {
                 },
                 usage:           LlmTokenCounts::default(),
                 tool_call_count: 0,
+                context_window:  None,
             },
             session_id:        Some("ses_agent".to_string()),
             parent_session_id: None,
@@ -2203,6 +2230,7 @@ mod tests {
                     ..LlmTokenCounts::default()
                 },
                 tool_call_count: 0,
+                context_window:  None,
             },
             session_id:        Some("ses_agent".to_string()),
             parent_session_id: None,
@@ -2217,6 +2245,55 @@ mod tests {
         assert_eq!(message.billing.input_tokens, 12);
         assert_eq!(message.billing.output_tokens, 34);
         assert_eq!(message.billing.total_usd_micros, None);
+    }
+
+    #[test]
+    fn agent_assistant_message_copies_context_window_to_props() {
+        let context_window = ::fabro_types::StageContextWindowProjection {
+            provider:              "openai".to_string(),
+            model:                 "gpt-5.4".to_string(),
+            context_window_tokens: 400_000,
+            input_tokens:          123,
+            usage_percent:         0.03075,
+            count_method:          ::fabro_types::StageContextWindowCountMethod::LocalEstimate,
+            staleness:             ::fabro_types::StageContextWindowStaleness::Live,
+            generated_at:          Utc::now(),
+            event_seq:             None,
+            breakdown:             vec![::fabro_types::StageContextWindowBreakdownItem {
+                category:      ::fabro_types::StageContextWindowCategory::Conversation,
+                tokens:        123,
+                usage_percent: 0.03075,
+            }],
+            warnings:              Vec::new(),
+        };
+        let stored = to_run_event(&fixtures::RUN_1, &Event::Agent {
+            stage:             "code".to_string(),
+            visit:             1,
+            event:             AgentEvent::AssistantMessage {
+                text:            "ok".to_string(),
+                model:           ModelRef {
+                    provider: ProviderId::openai(),
+                    model_id: "gpt-5.4".to_string(),
+                    speed:    None,
+                },
+                usage:           LlmTokenCounts::default(),
+                tool_call_count: 0,
+                context_window:  Some(context_window),
+            },
+            session_id:        Some("ses_agent".to_string()),
+            parent_session_id: None,
+            tool_call_id:      None,
+        });
+
+        let EventBody::AgentMessage(message) = stored.body else {
+            panic!("expected agent message body");
+        };
+        let context_window = message.context_window.expect("context window copied");
+        assert_eq!(context_window.input_tokens, 123);
+        assert_eq!(
+            context_window.count_method,
+            ::fabro_types::StageContextWindowCountMethod::LocalEstimate
+        );
     }
 
     #[test]

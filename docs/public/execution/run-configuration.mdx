@@ -346,6 +346,8 @@ channel = "#deploys"
 
 Each enabled Slack route posts once for each matching lifecycle event. Messages include the run ID, an Open in Fabro link when available, workflow label, terminal result, duration, and pull request details when those are already present in the run event stream.
 
+`run.failed` is emitted only when the run terminally fails. A failed stage that routes onward to a normal completion path produces `run.completed`, not `run.failed`.
+
 If a Slack route's channel is missing, empty, or references an unresolved environment variable, Fabro logs a warning and skips that route. Delivery failures are logged and never fail or alter the run.
 
 ### `[run.checkpoint]`
@@ -424,7 +426,11 @@ Configure workflow agent behavior that is not tied to a single stage.
 fabro_tools = true
 ```
 
-`fabro_tools` defaults to `false`. Set it to `true` only for runs whose agents should be able to create, search, inspect, and interact with Fabro runs through the built-in Fabro run tools. This setting is separate from normal agent `permissions` and from MCP server configuration.
+`fabro_tools` defaults to `false`. Set it to `true` only for runs whose agents should be able to use the same Fabro run-management MCP tool catalog exposed to human MCP clients: create, search, get, interact, gather, events, and pair.
+
+One workflow-agent exception is intentional: `fabro_run_create` always creates child runs parented to the current run. If an agent supplies `parent_id`, it must match the current run ID.
+
+This setting is separate from normal agent `permissions` and from MCP server configuration. `permissions` controls workspace tool access, while `[run.agent.mcps]` configures external MCP servers available to the agent.
 
 ### `[run.agent.mcps]`
 

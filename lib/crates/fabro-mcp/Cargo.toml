@@ -22,6 +22,8 @@ serde_json.workspace = true
 tokio.workspace = true
 futures.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
+sse-stream.workspace = true
 rmcp = { workspace = true, features = [
     "client",
     "macros",
@@ -32,4 +34,6 @@ rmcp = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+axum.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }
+tokio-stream.workspace = true

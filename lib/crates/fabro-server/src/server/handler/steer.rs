@@ -11,7 +11,7 @@ use fabro_workflow::run_status::RunStatus;
 
 use super::super::{AnswerTransportError, AppState, durable_run_status, reject_if_archived};
 use crate::error::ApiError;
-use crate::principal_middleware::RequireRunScopedOrRunTools;
+use crate::principal_middleware::RequireRunManagementTarget;
 
 pub(super) fn routes() -> axum::Router<Arc<AppState>> {
     axum::Router::new()
@@ -32,7 +32,7 @@ impl RunControlRequest {
 }
 
 async fn steer_run(
-    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
     Json(req): Json<SteerRunRequest>,
 ) -> Response {
@@ -53,7 +53,7 @@ async fn steer_run(
 }
 
 async fn interrupt_run(
-    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     control_run(actor, state, id, RunControlRequest::Interrupt).await

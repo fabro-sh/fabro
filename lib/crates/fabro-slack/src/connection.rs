@@ -37,7 +37,7 @@ pub fn process_message(
     let envelope: SocketEnvelope = if let Ok(e) = serde_json::from_str(text) {
         e
     } else {
-        warn!("Failed to parse WebSocket message as envelope");
+        warn!("Failed to parse Slack Socket Mode WebSocket message as envelope");
         return (None, ProcessOutcome::Continue, DispatchAction::Ignored);
     };
 
@@ -97,13 +97,13 @@ pub async fn run_event_loop(
         .map_err(|e| ConnectionError::WebSocket(e.to_string()))?;
 
     let (mut write, mut read) = ws_stream.split();
-    info!("Socket Mode WebSocket connected");
+    info!("Slack Socket Mode WebSocket connected");
 
     while let Some(msg) = read.next().await {
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
-                error!("WebSocket read error: {e}");
+                error!("Slack Socket Mode WebSocket read error: {e}");
                 return Err(ConnectionError::WebSocket(e.to_string()));
             }
         };
@@ -111,7 +111,7 @@ pub async fn run_event_loop(
         let text = match msg {
             Message::Text(t) => t,
             Message::Close(_) => {
-                info!("WebSocket closed by server");
+                info!("Slack Socket Mode WebSocket closed by server");
                 return Ok(());
             }
             Message::Ping(data) => {
@@ -125,7 +125,7 @@ pub async fn run_event_loop(
 
         if let Some(ack) = ack_json {
             if let Err(e) = write.send(Message::Text(ack.into())).await {
-                error!("Failed to send ack: {e}");
+                error!("Failed to send Slack Socket Mode ack: {e}");
             }
         }
 
@@ -140,18 +140,18 @@ pub async fn run_event_loop(
                 on_submit(submission);
             }
             DispatchAction::Connected => {
-                info!("Socket Mode handshake complete");
+                info!("Slack Socket Mode handshake complete");
             }
             DispatchAction::Reconnect | DispatchAction::Ignored => {}
         }
 
         if outcome == ProcessOutcome::Reconnect {
-            info!("Server requested disconnect, will reconnect");
+            info!("Slack Socket Mode server requested disconnect; reconnecting");
             return Ok(());
         }
     }
 
-    info!("WebSocket stream ended");
+    info!("Slack Socket Mode WebSocket stream ended");
     Ok(())
 }
 
@@ -173,7 +173,7 @@ pub async fn run(
                 url
             }
             Err(e) => {
-                error!("Failed to open Socket Mode connection: {e}");
+                error!("Failed to open Slack Socket Mode connection: {e}");
                 sleep(backoff).await;
                 backoff = (backoff * 2).min(max_backoff);
                 continue;
@@ -182,11 +182,11 @@ pub async fn run(
 
         match run_event_loop(&wss_url, thread_registry, &on_submit).await {
             Ok(()) => {
-                info!("Event loop ended, reconnecting...");
+                info!("Slack Socket Mode event loop ended; reconnecting");
                 backoff = std::time::Duration::from_secs(1);
             }
             Err(e) => {
-                error!("Event loop error: {e}, reconnecting...");
+                error!("Slack Socket Mode event loop error: {e}; reconnecting");
                 sleep(backoff).await;
                 backoff = (backoff * 2).min(max_backoff);
             }

@@ -3,9 +3,12 @@ use std::any::{TypeId, type_name};
 use fabro_api::types::{
     ActivatedSkill as ApiActivatedSkill, AgentMcpToolSummary as ApiAgentMcpToolSummary,
     AgentSkillActivationSource as ApiAgentSkillActivationSource,
-    AgentSkillSummary as ApiAgentSkillSummary, McpServerProjection as ApiMcpServerProjection,
-    McpServerStatus as ApiMcpServerStatus, PermissionLevel as ApiPermissionLevel,
-    SkillsProjection as ApiSkillsProjection, StageContextWindow as ApiStageContextWindow,
+    AgentSkillSummary as ApiAgentSkillSummary, AgentToolCategory as ApiAgentToolCategory,
+    AgentToolSource as ApiAgentToolSource, AgentToolSummary as ApiAgentToolSummary,
+    AgentToolsAvailableProps as ApiAgentToolsAvailableProps,
+    McpServerProjection as ApiMcpServerProjection, McpServerStatus as ApiMcpServerStatus,
+    PermissionLevel as ApiPermissionLevel, SkillsProjection as ApiSkillsProjection,
+    StageContextWindow as ApiStageContextWindow,
     StageContextWindowBreakdownItem as ApiStageContextWindowBreakdownItem,
     StageContextWindowCategory as ApiStageContextWindowCategory,
     StageContextWindowCountMethod as ApiStageContextWindowCountMethod,
@@ -18,6 +21,7 @@ use fabro_api::types::{
 };
 use fabro_types::{
     ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
+    AgentToolCategory, AgentToolSource, AgentToolSummary, AgentToolsAvailableProps,
     McpServerProjection, McpServerStatus, PermissionLevel, SkillsProjection, StageContextWindow,
     StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
     StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowUnavailableReason,
@@ -40,6 +44,10 @@ fn stage_projection_reuses_nested_agent_state_types() {
     assert_same_type::<ApiActivatedSkill, ActivatedSkill>();
     assert_same_type::<ApiAgentSkillSummary, AgentSkillSummary>();
     assert_same_type::<ApiAgentSkillActivationSource, AgentSkillActivationSource>();
+    assert_same_type::<ApiAgentToolSummary, AgentToolSummary>();
+    assert_same_type::<ApiAgentToolSource, AgentToolSource>();
+    assert_same_type::<ApiAgentToolCategory, AgentToolCategory>();
+    assert_same_type::<ApiAgentToolsAvailableProps, AgentToolsAvailableProps>();
     assert_same_type::<ApiMcpServerProjection, McpServerProjection>();
     assert_same_type::<ApiMcpServerStatus, McpServerStatus>();
     assert_same_type::<ApiAgentMcpToolSummary, AgentMcpToolSummary>();
@@ -135,6 +143,26 @@ fn stage_projection_round_trips_representative_json() {
             ]
         },
         "permission_level": "read-only",
+        "agent_tools": [
+            {
+                "name": "apply_patch",
+                "description": "Apply a unified diff patch",
+                "source": { "kind": "native" },
+                "category": "write",
+                "invoked": true
+            },
+            {
+                "name": "mcp__filesystem__read_file",
+                "description": "Read a file through MCP",
+                "source": {
+                    "kind": "mcp",
+                    "server_name": "filesystem",
+                    "original_name": "read_file"
+                },
+                "category": "other",
+                "invoked": false
+            }
+        ],
         "mcp_servers": [
             {
                 "server_name": "filesystem",
@@ -353,6 +381,47 @@ fn nested_agent_state_types_match_openapi_json_shape() {
     let api_mcp: ApiMcpServerProjection = serde_json::from_value(mcp_json).unwrap();
     assert_eq!(api_mcp, mcp_server);
     assert_eq!(mcp_server.tool_count, 1);
+}
+
+#[test]
+fn agent_tool_summary_matches_openapi_json_shape_without_parameter_schema() {
+    let tool = AgentToolSummary {
+        name:        "mcp__filesystem__read_file".to_string(),
+        description: "Read a file through MCP".to_string(),
+        source:      AgentToolSource::Mcp {
+            server_name:   "filesystem".to_string(),
+            original_name: "read_file".to_string(),
+        },
+        category:    AgentToolCategory::Other,
+        invoked:     false,
+    };
+
+    let tool_json = serde_json::to_value(&tool).unwrap();
+    assert_eq!(
+        tool_json,
+        json!({
+            "name": "mcp__filesystem__read_file",
+            "description": "Read a file through MCP",
+            "source": {
+                "kind": "mcp",
+                "server_name": "filesystem",
+                "original_name": "read_file"
+            },
+            "category": "other",
+            "invoked": false
+        })
+    );
+    assert!(tool_json.as_object().unwrap().get("parameters").is_none());
+    let api_tool: ApiAgentToolSummary = serde_json::from_value(tool_json).unwrap();
+    assert_eq!(api_tool, tool);
+
+    let props = AgentToolsAvailableProps {
+        tools: vec![tool],
+        visit: 2,
+    };
+    let props_json = serde_json::to_value(&props).unwrap();
+    let api_props: ApiAgentToolsAvailableProps = serde_json::from_value(props_json).unwrap();
+    assert_eq!(api_props, props);
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

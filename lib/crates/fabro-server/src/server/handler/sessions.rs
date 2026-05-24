@@ -1536,6 +1536,7 @@ mod tests {
             fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
             fabro_tool::FABRO_RUN_GET_TOOL_NAME,
             fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_PAIR_TOOL_NAME,
         ] {
             registry.register(stub_tool(name));
         }
@@ -1589,6 +1590,7 @@ mod tests {
             "web_fetch",
             fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
             fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_PAIR_TOOL_NAME,
         ] {
             assert_eq!(policy.access_for_tool(tool_name), ToolAccess::Denied);
         }

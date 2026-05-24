@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow};
-use fabro_http::{HeaderMap, HeaderName, HeaderValue};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::{RoleClient, RunningService, serve_client};
 use rmcp::transport::StreamableHttpClientTransport;
@@ -15,7 +14,9 @@ use tokio::time;
 use tracing::{debug, error, info, warn};
 
 use crate::client_handler::LoggingClientHandler;
-use crate::config::{McpServerSettings, McpTransport};
+use crate::config::{McpHttpProtocol, McpServerSettings, McpTransport};
+use crate::http_transport::headers_from_pairs;
+use crate::sse_client::SseClientTransport;
 
 enum ClientState {
     /// Transport created but handshake not yet performed.
@@ -29,6 +30,7 @@ enum ClientState {
 enum PendingTransport {
     Stdio(TokioChildProcess),
     Http(StreamableHttpClientTransport<fabro_http::HttpClient>),
+    Sse(SseClientTransport),
 }
 
 /// MCP client wrapping the rmcp SDK. Handles stdio and HTTP transports.
@@ -71,27 +73,30 @@ impl McpClient {
 
                 PendingTransport::Stdio(transport)
             }
-            McpTransport::Http { url, headers } => {
-                let http_config = StreamableHttpClientTransportConfig::with_uri(url.clone());
-
+            McpTransport::Http {
+                protocol,
+                url,
+                headers,
+            } => {
+                let headers = headers_from_pairs(headers)?;
                 let mut builder = fabro_http::HttpClientBuilder::new();
                 if !headers.is_empty() {
-                    let mut header_map = HeaderMap::new();
-                    for (key, value) in headers {
-                        let name = HeaderName::from_bytes(key.as_bytes())
-                            .with_context(|| format!("invalid header name '{key}'"))?;
-                        let val = HeaderValue::from_str(value)
-                            .with_context(|| format!("invalid header value for '{key}'"))?;
-                        header_map.insert(name, val);
-                    }
-                    builder = builder.default_headers(header_map);
+                    builder = builder.default_headers(headers);
                 }
 
                 let http_client = builder.build()?;
-                let transport =
-                    StreamableHttpClientTransport::with_client(http_client, http_config);
-
-                PendingTransport::Http(transport)
+                match protocol {
+                    McpHttpProtocol::StreamableHttp => {
+                        let http_config =
+                            StreamableHttpClientTransportConfig::with_uri(url.clone());
+                        let transport =
+                            StreamableHttpClientTransport::with_client(http_client, http_config);
+                        PendingTransport::Http(transport)
+                    }
+                    McpHttpProtocol::Sse => {
+                        PendingTransport::Sse(SseClientTransport::new(url, http_client)?)
+                    }
+                }
             }
             McpTransport::Sandbox { .. } => {
                 return Err(anyhow!(
@@ -104,6 +109,7 @@ impl McpClient {
         let transport_type = match &transport {
             PendingTransport::Stdio(_) => "stdio",
             PendingTransport::Http(_) => "http",
+            PendingTransport::Sse(_) => "sse",
         };
         debug!(server = %config.name, transport = transport_type, "Creating MCP client");
 
@@ -136,6 +142,7 @@ impl McpClient {
                 match transport {
                     PendingTransport::Stdio(t) => serve_client(handler.clone(), t).await,
                     PendingTransport::Http(t) => serve_client(handler.clone(), t).await,
+                    PendingTransport::Sse(t) => serve_client(handler.clone(), t).await,
                 }
             };
 
