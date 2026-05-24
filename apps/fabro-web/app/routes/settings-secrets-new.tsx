@@ -1,15 +1,14 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { useSWRConfig } from "swr";
-import { ArrowLeftIcon } from "@heroicons/react/16/solid";
+import { ChevronRightIcon, ChevronDownIcon } from "@heroicons/react/20/solid";
 import { SecretType } from "@qltysh/fabro-api-client";
 
 import { ApiError, apiData, secretsApi } from "../lib/api-client";
 import { queryKeys } from "../lib/query-keys";
-import { Panel, SettingsPageIntro } from "../components/settings-panel";
+import { Panel, Row } from "../components/settings-panel";
 import {
   ErrorMessage,
-  FormField,
   INPUT_CLASS,
   PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
@@ -31,16 +30,21 @@ function isFormType(
 export default function SettingsSecretsNew() {
   return (
     <div className="space-y-6">
-      <Link
-        to="/settings/secrets"
-        className="inline-flex items-center gap-1 text-sm text-fg-3 transition-colors hover:text-fg"
-      >
-        <ArrowLeftIcon className="size-4" aria-hidden="true" />
-        Back to secrets
-      </Link>
-      <SettingsPageIntro description="Store a new token or file secret on this Fabro server. The value is write-only — it can be replaced or deleted later, but never read back through the UI." />
+      <PageHeader />
       <CreateSecretForm />
     </div>
+  );
+}
+
+function PageHeader() {
+  return (
+    <nav className="flex items-center gap-1 text-sm text-fg-muted">
+      <Link to="/settings/secrets" className="text-fg-3 hover:text-fg">
+        Secrets
+      </Link>
+      <ChevronRightIcon className="size-3" aria-hidden="true" />
+      <span>New secret</span>
+    </nav>
   );
 }
 
@@ -95,83 +99,146 @@ function CreateSecretForm() {
   }
 
   return (
-    <Panel title="New secret">
-      <form onSubmit={onSubmit} className="space-y-4 px-4 py-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="Type" htmlFor="secret-type">
-            <select
-              id="secret-type"
-              value={type}
-              onChange={(event) => {
-                if (isFormType(event.target.value)) setType(event.target.value);
-              }}
-              className={INPUT_CLASS}
-            >
-              <option value={SecretType.TOKEN}>Token (environment variable)</option>
-              <option value={SecretType.FILE}>File</option>
-            </select>
-          </FormField>
-          <FormField label={nameLabel} htmlFor="secret-name" help={nameHelp}>
-            <input
-              id="secret-name"
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={namePlaceholder}
-              autoComplete="off"
-              spellCheck={false}
-              className={`${INPUT_CLASS} font-mono`}
-            />
-          </FormField>
-        </div>
-        <FormField
-          label="Value"
-          htmlFor="secret-value"
-          help={
-            isFile
-              ? "File contents. Stored as-is and never shown again."
-              : "The secret value. Stored as-is and never shown again."
-          }
+    <form onSubmit={onSubmit} className="space-y-6">
+      <Panel title="Secret">
+        <Row title={<Label required>Type</Label>} help="Tokens are exposed as environment variables; files are written to a path inside the sandbox.">
+          <SelectInput
+            name="type"
+            value={type}
+            onChange={(next) => {
+              if (isFormType(next)) setType(next);
+            }}
+            options={[
+              { value: SecretType.TOKEN, label: "Token (environment variable)" },
+              { value: SecretType.FILE,  label: "File" },
+            ]}
+          />
+        </Row>
+        <Row title={<Label required>{nameLabel}</Label>} help={nameHelp}>
+          <input
+            type="text"
+            name="name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder={namePlaceholder}
+            autoComplete="off"
+            spellCheck={false}
+            className={`${INPUT_CLASS} font-mono`}
+          />
+        </Row>
+        <Row
+          title={<Label required>Value</Label>}
+          help="Stored as-is and never shown again. Replace or delete it later if it needs to change."
         >
           <textarea
-            id="secret-value"
+            name="value"
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            rows={isFile ? 4 : 2}
+            rows={isFile ? 6 : 2}
             autoComplete="off"
             spellCheck={false}
             className={`${INPUT_CLASS} resize-y font-mono`}
           />
-        </FormField>
-        <FormField
-          label="Description"
-          htmlFor="secret-description"
-          help="Optional. Helps operators recognize what this secret is for."
-        >
+        </Row>
+        <Row title={<Label optional>Description</Label>} help="Helps operators recognize what this secret is for.">
           <input
-            id="secret-description"
             type="text"
+            name="description"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="Optional"
             className={INPUT_CLASS}
           />
-        </FormField>
-        {error ? <ErrorMessage message={error} /> : null}
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => navigate("/settings/secrets")}
-            disabled={submitting}
-            className={SECONDARY_BUTTON_CLASS}
-          >
-            Cancel
-          </button>
-          <button type="submit" disabled={!canSubmit} className={PRIMARY_BUTTON_CLASS}>
-            {submitting ? "Saving…" : "Save secret"}
-          </button>
-        </div>
-      </form>
-    </Panel>
+        </Row>
+      </Panel>
+
+      {error ? <ErrorMessage message={error} /> : null}
+
+      <FormFooter
+        submitting={submitting}
+        canSubmit={canSubmit}
+        onCancel={() => navigate("/settings/secrets")}
+      />
+    </form>
+  );
+}
+
+function Label({
+  children,
+  required,
+  optional,
+}: {
+  children: ReactNode;
+  required?: boolean;
+  optional?: boolean;
+}) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5">
+      <span>{children}</span>
+      {required ? (
+        <span aria-label="required" className="text-coral">
+          *
+        </span>
+      ) : null}
+      {optional ? <span className="text-xs font-normal text-fg-muted">Optional</span> : null}
+    </span>
+  );
+}
+
+function SelectInput({
+  name,
+  value,
+  onChange,
+  options,
+}: {
+  name: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: ReadonlyArray<{ value: string; label: string }>;
+}) {
+  return (
+    <div className="relative">
+      <select
+        name={name}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`${INPUT_CLASS} appearance-none pr-9`}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDownIcon
+        className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted"
+        aria-hidden="true"
+      />
+    </div>
+  );
+}
+
+function FormFooter({
+  submitting,
+  canSubmit,
+  onCancel,
+}: {
+  submitting: boolean;
+  canSubmit: boolean;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-3 pt-2">
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={submitting}
+        className={SECONDARY_BUTTON_CLASS}
+      >
+        Cancel
+      </button>
+      <button type="submit" disabled={!canSubmit} className={PRIMARY_BUTTON_CLASS}>
+        {submitting ? "Saving…" : "Save secret"}
+      </button>
+    </div>
   );
 }

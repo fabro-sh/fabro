@@ -11,6 +11,7 @@ import * as ChatsNew from "./routes/chats-new";
 import * as ChatsDetail from "./routes/chats-detail";
 import * as AskFabro from "./routes/ask-fabro";
 import * as Automations from "./routes/automations";
+import * as AutomationsNew from "./routes/automations-new";
 import * as AutomationDetail from "./routes/automation-detail";
 import * as AutomationDefinition from "./routes/automation-definition";
 import * as AutomationDiagram from "./routes/automation-diagram";
@@ -107,7 +108,8 @@ export const routes: RouteObject[] = [
           }),
           route("ask-fabro", AskFabro),
           route("automations", Automations),
-          route("automations/:name", AutomationDetail, {
+          route("automations/new", AutomationsNew),
+          route("automation/:name", AutomationDetail, {
             children: [
               indexRoute(AutomationDefinition),
               route("diagram", AutomationDiagram),

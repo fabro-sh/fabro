@@ -326,7 +326,7 @@ export default function AutomationDetail() {
   const workflowQuery = useWorkflow(name);
   const { pathname } = useLocation();
   const workflow = resolveWorkflow(name, workflowQuery.data);
-  const basePath = `/automations/${name}`;
+  const basePath = `/automation/${name}`;
 
   return (
     <div>

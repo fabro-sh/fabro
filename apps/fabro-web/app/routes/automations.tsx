@@ -24,13 +24,13 @@ export function meta({}: any) {
 export const handle = {
   headerExtra: (
     <div className="relative inline-flex rounded-md">
-      <button
-        type="button"
+      <Link
+        to="/automations/new"
         className="inline-flex items-center gap-1.5 rounded-l-md border border-r-0 border-mint/20 px-3 py-1.5 text-sm font-medium text-mint transition-colors hover:border-mint/50 hover:bg-mint/10 hover:text-fg"
       >
         <PlusIcon className="size-3.5" aria-hidden="true" />
         Create Automation
-      </button>
+      </Link>
       <Menu as="div" className="relative -ml-px flex">
         <MenuButton className="inline-flex items-center rounded-r-md border border-mint/20 px-1.5 text-mint transition-colors hover:border-mint/50 hover:bg-mint/10 hover:text-fg">
           <ChevronDownIcon className="size-3.5" aria-hidden="true" />
@@ -145,7 +145,7 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
   const Icon = workflow.icon;
   return (
     <div className="group flex items-center gap-4 rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
-      <Link to={`/automations/${workflow.slug}`} className="flex min-w-0 flex-1 items-center gap-4">
+      <Link to={`/automation/${workflow.slug}`} className="flex min-w-0 flex-1 items-center gap-4">
         <div
           className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-panel-alt/60"
           style={{ borderColor: `color-mix(in srgb, ${workflow.color} 20%, transparent)`, color: workflow.color }}

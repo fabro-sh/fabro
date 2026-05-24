@@ -32,7 +32,7 @@ Some tools are only available with certain LLM providers:
 | `edit_file` | Anthropic, Gemini | Replace a string in a file (find-and-replace) |
 | `apply_patch` | OpenAI | Apply a v4a-format patch to modify files |
 | `update_plan` | OpenAI | Maintain a multi-step plan for the current task |
-| `TaskCreate`, `TaskUpdate`, `TaskList` | Anthropic | Maintain a shared task list for the root agent session |
+| `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList` | Anthropic | Maintain a shared task list for the root agent session |
 | `read_many_files` | Gemini | Read multiple files in a single call |
 | `list_dir` | Gemini | List directory contents with depth control |
 
@@ -188,13 +188,15 @@ Maintains the current task plan. Available for OpenAI providers.
 
 The submitted list replaces the current plan for that OpenAI session. Fabro reconciles steps by exact step text, emits `todo.created`, `todo.updated`, and `todo.deleted` events for changes, and projects the current list into run state.
 
-### TaskCreate, TaskUpdate, and TaskList
+### TaskCreate, TaskUpdate, TaskGet, and TaskList
 
 Maintains a shared task list for Anthropic providers. The list is scoped to the root agent session, so sub-agents share the same task projection.
 
-`TaskCreate` creates a task with `subject`, `description`, optional `activeForm`, and optional metadata. `TaskUpdate` changes an existing task by `taskId`; setting `status` to `deleted` removes it from the projection. `TaskList` returns the current shared task list.
+`TaskCreate` creates a task with `subject`, `description`, optional `activeForm`, and optional metadata. `TaskUpdate` changes an existing task by `taskId`; setting `status` to `deleted` removes it from the projection. `TaskGet` returns full details for one task, while `TaskList` returns the current shared task list.
 
 Like `update_plan`, task changes are persisted as `todo.created`, `todo.updated`, and `todo.deleted` events and replay into run state.
+
+When an Anthropic session has not used `TaskCreate` or `TaskUpdate` for ten assistant turns, Fabro may inject a system reminder asking the agent to keep task state current. The reminder is only added when both tools are available and resets after the agent uses either tool.
 
 ## Read-before-write guardrail
 

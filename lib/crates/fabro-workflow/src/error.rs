@@ -160,7 +160,11 @@ impl miette::Diagnostic for SharedTemplateError {
 pub fn classify_failure_reason(reason: &str) -> FailureCategory {
     let lower = reason.to_lowercase();
 
-    if lower.contains("cancel") || lower.contains("interrupt") {
+    if lower.contains("interrupt")
+        || (lower.contains("cancel")
+            && !lower.contains("cancelling due to test failure")
+            && !lower.contains("canceling due to test failure"))
+    {
         return FailureCategory::Canceled;
     }
 
@@ -1234,6 +1238,16 @@ mod tests {
         assert_eq!(
             classify_failure_reason("operation cancelled by user"),
             FailureCategory::Canceled
+        );
+    }
+
+    #[test]
+    fn classify_reason_nextest_canceling_due_to_test_failure_is_deterministic() {
+        assert_eq!(
+            classify_failure_reason(
+                "Script failed with exit code: 100\n\nCancelling due to test failure: 7 tests still running"
+            ),
+            FailureCategory::Deterministic
         );
     }
 

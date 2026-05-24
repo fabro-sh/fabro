@@ -392,7 +392,8 @@ impl RunProjectionReducer for RunProjection {
                     stage.usage.replace_with_billed_usage(billing);
                     stage.model = Some(billing.model().clone());
                 }
-                stage.state = stage_state_from_failure(props.will_retry, failure_category);
+                stage.state =
+                    stage_state_from_failure(props.will_retry, failure_category, stage.termination);
             }
             EventBody::AgentMessage(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
@@ -1132,10 +1133,13 @@ fn finalize_unfinished_stages_after_run_failed(
 fn stage_state_from_failure(
     will_retry: bool,
     failure_category: Option<FailureCategory>,
+    command_termination: Option<CommandTermination>,
 ) -> StageState {
     if will_retry {
         StageState::Retrying
-    } else if failure_category == Some(FailureCategory::Canceled) {
+    } else if failure_category == Some(FailureCategory::Canceled)
+        && command_termination != Some(CommandTermination::Exited)
+    {
         StageState::Cancelled
     } else {
         StageState::Failed
@@ -1219,6 +1223,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use chrono::{DateTime, Utc};
+    use fabro_types::run_event::misc::CommandCompletedProps;
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         AgentAcpCancelledProps, AgentAcpCompletedProps, AgentAcpStartedProps,
@@ -3767,6 +3772,54 @@ mod tests {
         let stage = state.stage(&stage_id).unwrap();
         assert_eq!(stage.timing.map(|t| t.wall_time_ms), Some(10));
         assert_eq!(stage.state, StageState::Cancelled);
+    }
+
+    #[test]
+    fn exited_command_with_canceled_failure_category_records_failed_state() {
+        let mut state = initialized_projection();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_stage_event(
+                2,
+                EventBody::CommandCompleted(CommandCompletedProps {
+                    output:         "blob://sha256/test".to_string(),
+                    exit_code:      Some(100),
+                    duration_ms:    10,
+                    termination:    CommandTermination::Exited,
+                    output_bytes:   42,
+                    live_streaming: true,
+                }),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_event(
+                3,
+                EventBody::StageFailed(StageFailedProps {
+                    index:      0,
+                    failure:    Some(FailureDetail::new(
+                        "Script failed with exit code: 100\n\nCancelling due to test failure",
+                        FailureCategory::Canceled,
+                    )),
+                    will_retry: false,
+                    timing:     fabro_types::StageTiming::wall_only(10),
+                    billing:    None,
+                }),
+                Some("build"),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.termination, Some(CommandTermination::Exited));
+        assert_eq!(stage.state, StageState::Failed);
     }
 
     #[test]

@@ -18,8 +18,8 @@ No single model is best at everything. Fabro lets you assign the right model to 
 | `claude-sonnet-4-6` | anthropic | `sonnet`, `claude-sonnet` | 200K | $3.00 / $15.00 | 50 tok/s |
 | `claude-sonnet-4-5` | anthropic | | 200K | $3.00 / $15.00 | 50 tok/s |
 | `claude-haiku-4-5` | anthropic | `haiku`, `claude-haiku` | 200K | $0.80 / $4.00 | 100 tok/s |
-| `gpt-5.2` | openai | `gpt5` | 1M | $1.80 / $14.00 | 65 tok/s |
-| `gpt-5.3-codex` | openai | `codex` | 1M | $1.80 / $14.00 | 100 tok/s |
+| `gpt-5.2` | openai | `gpt5` | 1M | $1.75 / $14.00 | 65 tok/s |
+| `gpt-5.3-codex` | openai | `codex` | 1M | $1.75 / $14.00 | 100 tok/s |
 | `gpt-5.3-codex-spark` | openai | `codex-spark` | 128K | n/a | 1000 tok/s |
 | `gpt-5.4` | openai | `gpt54` | 1M | $2.50 / $15.00 | 70 tok/s |
 | `gpt-5.5` | openai | `gpt55` | 1M | $5.00 / $30.00 | 70 tok/s |
@@ -29,11 +29,11 @@ No single model is best at everything. Fabro lets you assign the right model to 
 | `gemini-3.1-pro-preview` | gemini | `gemini-pro` | 1M | $2.00 / $12.00 | 85 tok/s |
 | `gemini-3.1-pro-preview-customtools` | gemini | `gemini-customtools` | 1M | $2.00 / $12.00 | 85 tok/s |
 | `gemini-3-flash-preview` | gemini | `gemini-flash` | 1M | $0.50 / $3.00 | 150 tok/s |
-| `gemini-3.1-flash-lite-preview` | gemini | `gemini-flash-lite` | 1M | $0.20 / $1.50 | 200 tok/s |
+| `gemini-3.1-flash-lite-preview` | gemini | `gemini-flash-lite` | 1M | $0.25 / $1.50 | 200 tok/s |
 | `kimi-k2.5` | kimi | `kimi` | 262K | $0.60 / $3.00 | 50 tok/s |
 | `glm-4.7` | zai | `glm`, `glm4` | 203K | $0.60 / $2.20 | 100 tok/s |
 | `minimax-m2.5` | minimax | `minimax` | 197K | $0.30 / $1.20 | 45 tok/s |
-| `mercury-2` | inception | `mercury` | 131K | $0.20 / $0.80 | 1000 tok/s |
+| `mercury-2` | inception | `mercury` | 131K | $0.25 / $0.75 | 1000 tok/s |
 
 Each provider requires its own API key set via environment variable or matching vault token (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). See the [Quick Start](/getting-started/quick-start) for setup.
 
@@ -147,8 +147,8 @@ When no model or provider is specified, Fabro checks configured provider credent
 
 | Provider | Default model |
 |---|---|
-| `anthropic` | `claude-opus-4-7` |
-| `openai` | `gpt-5.5` |
+| `anthropic` | `claude-sonnet-4-6` |
+| `openai` | `gpt-5.4` |
 | `gemini` | `gemini-3.1-pro-preview` |
 | `kimi` | `kimi-k2.5` |
 | `zai` | `glm-4.7` |
