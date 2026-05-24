@@ -2832,8 +2832,8 @@ async fn finish_cancelled_run_before_execution(state: &Arc<AppState>, run_id: Ru
 }
 
 /// Reject the run before execution if its effective sandbox provider is
-/// disabled by server policy. Returns `true` when the run was failed.
-async fn fail_if_sandbox_provider_disabled(
+/// disabled by server policy. Returns `true` when the run was rejected.
+async fn reject_run_if_sandbox_provider_disabled(
     state: &Arc<AppState>,
     server_settings: &ServerSettings,
     run_id: RunId,
@@ -2843,7 +2843,7 @@ async fn fail_if_sandbox_provider_disabled(
     let Some(error) = run_manifest::sandbox_provider_policy_error(server_settings, provider) else {
         return false;
     };
-    tracing::error!(run_id = %run_id, error = %error, "Sandbox provider disabled by server policy");
+    tracing::warn!(run_id = %run_id, error = %error, "Sandbox provider disabled by server policy");
     fail_run_before_execution(state, run_id, FailureReason::LaunchFailed, error).await;
     true
 }
@@ -3597,7 +3597,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         finish_cancelled_run_before_execution(&state, run_id).await;
         return;
     }
-    if fail_if_sandbox_provider_disabled(
+    if reject_run_if_sandbox_provider_disabled(
         &state,
         &server_settings,
         run_id,
@@ -3831,7 +3831,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
     let agent_fabro_tools_enabled = run_state.spec.settings.run.agent.fabro_tools;
-    if fail_if_sandbox_provider_disabled(
+    if reject_run_if_sandbox_provider_disabled(
         &state,
         &state.server_settings(),
         run_id,
