@@ -578,6 +578,7 @@ mod tests {
             },
             usage:           TokenCounts::default(),
             tool_call_count: 0,
+            context_window:  None,
         })
     }
 

@@ -92,16 +92,6 @@ describe("queryKeysForRunEvent", () => {
     ]);
   });
 
-  test("context-window snapshots invalidate context window, run events, and stage events", () => {
-    expect(
-      queryKeysForRunEvent("run-1", "agent.context_window.snapshot", "agent@1"),
-    ).toEqual([
-      queryKeys.runs.events("run-1", 1000),
-      queryKeys.runs.stageEvents("run-1", "agent@1"),
-      queryKeys.runs.stageContextWindow("run-1", "agent@1"),
-    ]);
-  });
-
   test("todo events invalidate run state and run events", () => {
     for (const event of ["todo.created", "todo.updated", "todo.deleted"]) {
       expect(queryKeysForRunEvent("run-1", event)).toEqual([

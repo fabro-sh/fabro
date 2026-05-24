@@ -56,9 +56,9 @@ pub(crate) struct AuthContextSlot(pub(crate) Arc<Mutex<RequestAuthContext>>);
 pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
 
 pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
-pub(crate) struct RequiredRunToolActor(pub(crate) Principal);
+pub(crate) struct RequiredRunManagementActor(pub(crate) Principal);
 pub(crate) struct RequireRunScoped(pub(crate) RunId);
-pub(crate) struct RequireRunScopedOrRunTools(pub(crate) RunId, pub(crate) Principal);
+pub(crate) struct RequireRunManagementTarget(pub(crate) RunId, pub(crate) Principal);
 pub(crate) struct RequireRunBlob(pub(crate) RunId, pub(crate) RunBlobId);
 pub(crate) struct RequireRunStageScoped(pub(crate) RunId, pub(crate) String);
 pub(crate) struct RequireStageArtifact(pub(crate) RunId, pub(crate) StageId);
@@ -215,7 +215,7 @@ impl<S: Send + Sync> FromRequestParts<S> for RequiredUser {
     }
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for RequiredRunToolActor {
+impl<S: Send + Sync> FromRequestParts<S> for RequiredRunManagementActor {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
@@ -224,7 +224,7 @@ impl<S: Send + Sync> FromRequestParts<S> for RequiredRunToolActor {
             .get::<AuthContextSlot>()
             .cloned()
             .unwrap_or_else(AuthContextSlot::initial);
-        require_run_tool_actor(&slot).map(Self)
+        require_run_management_actor(&slot).map(Self)
     }
 }
 
@@ -245,7 +245,7 @@ impl FromRequestParts<Arc<AppState>> for RequireRunScoped {
     }
 }
 
-impl FromRequestParts<Arc<AppState>> for RequireRunScopedOrRunTools {
+impl FromRequestParts<Arc<AppState>> for RequireRunManagementTarget {
     type Rejection = Response;
 
     async fn from_request_parts(
@@ -262,9 +262,8 @@ impl FromRequestParts<Arc<AppState>> for RequireRunScopedOrRunTools {
             );
         };
         let run_id = parse_run_id_path(id)?;
-        let actor =
-            require_worker_or_user_for_run_or_run_tools(&auth_slot_from_parts(parts), &run_id)
-                .map_err(IntoResponse::into_response)?;
+        let actor = require_run_management_target(&auth_slot_from_parts(parts), &run_id)
+            .map_err(IntoResponse::into_response)?;
         Ok(Self(run_id, actor))
     }
 }
@@ -394,7 +393,7 @@ pub(crate) fn require_authenticated_user(
     }
 }
 
-pub(crate) fn require_run_tool_actor(slot: &AuthContextSlot) -> Result<Principal, ApiError> {
+pub(crate) fn require_run_management_actor(slot: &AuthContextSlot) -> Result<Principal, ApiError> {
     let context = slot.0.lock().expect("auth context lock poisoned");
     match &context.principal {
         Principal::User(user) => Ok(Principal::User(user.clone())),
@@ -419,7 +418,7 @@ fn require_worker_or_user_for_run(
     }
 }
 
-fn require_worker_or_user_for_run_or_run_tools(
+fn require_run_management_target(
     slot: &AuthContextSlot,
     route_run_id: &RunId,
 ) -> Result<Principal, ApiError> {
@@ -818,36 +817,77 @@ mod tests {
         assert_eq!(err.code(), Some("access_token_invalid"));
     }
 
+    fn test_user_principal() -> Principal {
+        Principal::user(
+            IdpIdentity::new("https://github.com", "12345").unwrap(),
+            "octocat".to_string(),
+            AuthMethod::Github,
+        )
+    }
+
     #[test]
-    fn run_tool_actor_rejects_base_worker_scope() {
+    fn run_management_actor_accepts_users_and_run_tools_workers() {
+        let user_slot = AuthContextSlot::initial();
+        let user = test_user_principal();
+        user_slot.replace(RequestAuthContext::authenticated(user.clone(), None));
+        assert_eq!(require_run_management_actor(&user_slot).unwrap(), user);
+
         let run_id = RunId::new();
-        let slot = AuthContextSlot::initial();
-        slot.replace(RequestAuthContext::authenticated(
-            Principal::Worker { run_id },
-            None,
+        let worker_slot = AuthContextSlot::initial();
+        worker_slot.replace(RequestAuthContext::authenticated_worker(
+            run_id,
+            WorkerScopeSet::run_worker_with_agent_run_tools(),
         ));
 
-        let err = require_run_tool_actor(&slot).unwrap_err();
+        assert_eq!(
+            require_run_management_actor(&worker_slot).unwrap(),
+            Principal::Worker { run_id },
+        );
+    }
+
+    #[test]
+    fn run_management_actor_rejects_base_worker_scope() {
+        let run_id = RunId::new();
+        let slot = AuthContextSlot::initial();
+        slot.replace(RequestAuthContext::authenticated_worker(
+            run_id,
+            WorkerScopeSet::run_worker(),
+        ));
+
+        let err = require_run_management_actor(&slot).unwrap_err();
 
         assert_eq!(err.status(), StatusCode::FORBIDDEN);
     }
 
     #[test]
-    fn run_tool_actor_accepts_worker_with_run_tools_scope() {
+    fn run_management_target_accepts_users() {
+        let slot = AuthContextSlot::initial();
+        let user = test_user_principal();
+        slot.replace(RequestAuthContext::authenticated(user.clone(), None));
+
+        assert_eq!(
+            require_run_management_target(&slot, &RunId::new()).unwrap(),
+            user,
+        );
+    }
+
+    #[test]
+    fn run_management_target_accepts_same_run_base_worker() {
         let run_id = RunId::new();
         let slot = AuthContextSlot::initial();
         slot.replace(RequestAuthContext::authenticated_worker(
             run_id,
-            WorkerScopeSet::run_worker_with_agent_run_tools(),
+            WorkerScopeSet::run_worker(),
         ));
 
-        assert_eq!(require_run_tool_actor(&slot).unwrap(), Principal::Worker {
-            run_id
-        },);
+        assert_eq!(
+            require_run_management_target(&slot, &run_id).unwrap(),
+            Principal::Worker { run_id },
+        );
     }
 
     #[test]
-    fn run_scoped_or_run_tools_accepts_cross_run_with_run_tools_scope() {
+    fn run_management_target_accepts_cross_run_with_run_tools_scope() {
         let token_run_id = RunId::new();
         let route_run_id = RunId::new();
         let slot = AuthContextSlot::initial();
@@ -857,10 +897,25 @@ mod tests {
         ));
 
         assert_eq!(
-            require_worker_or_user_for_run_or_run_tools(&slot, &route_run_id).unwrap(),
+            require_run_management_target(&slot, &route_run_id).unwrap(),
             Principal::Worker {
                 run_id: token_run_id,
             },
         );
+    }
+
+    #[test]
+    fn run_management_target_rejects_cross_run_base_worker() {
+        let token_run_id = RunId::new();
+        let route_run_id = RunId::new();
+        let slot = AuthContextSlot::initial();
+        slot.replace(RequestAuthContext::authenticated_worker(
+            token_run_id,
+            WorkerScopeSet::run_worker(),
+        ));
+
+        let err = require_run_management_target(&slot, &route_run_id).unwrap_err();
+
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
     }
 }

@@ -92,7 +92,9 @@ If the pending session disappears before an answer is submitted, the waiting que
 
 ### Slack
 
-Fabro's Slack integration uses the web interviewer under the hood. When a human gate fires, the pending question is rendered as a Slack message with interactive buttons. When a user clicks a button, the Slack event handler calls `submit_answer()` on the web interviewer, unblocking the workflow.
+Fabro's [Slack integration](/integrations/slack) uses the web interviewer under the hood. When a human gate fires, the pending question is rendered as a Slack message with interactive buttons. When a user clicks a button, the Slack event handler calls `submit_answer()` on the web interviewer, unblocking the workflow.
+
+Slack interview prompts require Slack server credentials and a destination channel. Most servers should configure `server.integrations.slack.default_channel`; lifecycle notifications use their own per-route channels instead.
 
 ### Auto-approve
 

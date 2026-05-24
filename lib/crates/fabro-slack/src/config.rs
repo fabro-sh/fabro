@@ -12,21 +12,59 @@ pub struct SlackCredentials {
     pub app_token: String,
 }
 
+#[derive(Debug, Clone)]
+pub enum SlackCredentialResolution {
+    Configured(SlackCredentials),
+    Missing { env_vars: Vec<&'static str> },
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "Slack credential resolution intentionally reads documented token env vars."
 )]
-fn non_empty_env(name: &str) -> Option<String> {
+fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|s| !s.is_empty())
 }
 
+fn non_empty(value: Option<String>) -> Option<String> {
+    value.filter(|s| !s.is_empty())
+}
+
+pub fn resolve_credentials_status_with_lookup(
+    lookup: impl Fn(&str) -> Option<String>,
+) -> SlackCredentialResolution {
+    let bot_token = non_empty(lookup(EnvVars::FABRO_SLACK_BOT_TOKEN));
+    let app_token = non_empty(lookup(EnvVars::FABRO_SLACK_APP_TOKEN));
+
+    match (bot_token, app_token) {
+        (Some(bot_token), Some(app_token)) => {
+            SlackCredentialResolution::Configured(SlackCredentials {
+                bot_token,
+                app_token,
+            })
+        }
+        (bot_token, app_token) => {
+            let mut env_vars = Vec::new();
+            if bot_token.is_none() {
+                env_vars.push(EnvVars::FABRO_SLACK_BOT_TOKEN);
+            }
+            if app_token.is_none() {
+                env_vars.push(EnvVars::FABRO_SLACK_APP_TOKEN);
+            }
+            SlackCredentialResolution::Missing { env_vars }
+        }
+    }
+}
+
+pub fn resolve_credentials_status() -> SlackCredentialResolution {
+    resolve_credentials_status_with_lookup(process_env_var)
+}
+
 pub fn resolve_credentials() -> Option<SlackCredentials> {
-    let bot_token = non_empty_env(EnvVars::FABRO_SLACK_BOT_TOKEN)?;
-    let app_token = non_empty_env(EnvVars::FABRO_SLACK_APP_TOKEN)?;
-    Some(SlackCredentials {
-        bot_token,
-        app_token,
-    })
+    match resolve_credentials_status() {
+        SlackCredentialResolution::Configured(credentials) => Some(credentials),
+        SlackCredentialResolution::Missing { .. } => None,
+    }
 }
 
 pub struct SlackRuntimeOptions {
@@ -62,6 +100,6 @@ mod tests {
 
     #[test]
     fn non_empty_env_filters_empty_strings() {
-        assert!(super::non_empty_env("__ARC_SLACK_TEST_UNSET__").is_none());
+        assert!(super::process_env_var("__ARC_SLACK_TEST_UNSET__").is_none());
     }
 }

@@ -679,14 +679,26 @@ pub enum McpTransport {
         env:     HashMap<String, String>,
     },
     Http {
-        url:     String,
-        headers: HashMap<String, String>,
+        #[serde(default)]
+        protocol: McpHttpProtocol,
+        url:      String,
+        headers:  HashMap<String, String>,
     },
     Sandbox {
-        command: Vec<String>,
-        port:    u16,
-        env:     HashMap<String, String>,
+        #[serde(default)]
+        protocol: McpHttpProtocol,
+        command:  Vec<String>,
+        port:     u16,
+        env:      HashMap<String, String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpHttpProtocol {
+    #[default]
+    StreamableHttp,
+    Sse,
 }
 
 #[expect(

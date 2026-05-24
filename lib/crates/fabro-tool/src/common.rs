@@ -90,7 +90,7 @@ pub trait FabroToolBackend: Send + Sync {
     ) -> anyhow::Result<()>;
 
     async fn get_run_pair_status(&self, _run_id: &RunId) -> anyhow::Result<RunPairStatusResponse> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn start_run_pair(
@@ -98,15 +98,15 @@ pub trait FabroToolBackend: Send + Sync {
         _run_id: &RunId,
         _stage_id: StageId,
     ) -> anyhow::Result<PairRecord> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn get_run_pair(&self, _run_id: &RunId, _pair_id: &PairId) -> anyhow::Result<PairRecord> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn end_run_pair(&self, _run_id: &RunId, _pair_id: &PairId) -> anyhow::Result<PairRecord> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn send_run_pair_message(
@@ -115,7 +115,7 @@ pub trait FabroToolBackend: Send + Sync {
         _pair_id: &PairId,
         _request: PairMessageRequest,
     ) -> anyhow::Result<PairMessageRecord> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn get_run_pair_transcript(
@@ -125,8 +125,12 @@ pub trait FabroToolBackend: Send + Sync {
         _since_seq: Option<u32>,
         _limit: Option<u32>,
     ) -> anyhow::Result<PairTranscriptResponse> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
+}
+
+fn pair_tool_unavailable_error() -> anyhow::Error {
+    ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into()
 }
 
 pub trait RunManifestBuilder: Send + Sync {
@@ -193,6 +197,10 @@ static TOOL_DEFINITIONS: LazyLock<Vec<ToolDefinition>> = LazyLock::new(|| {
         tool_definition::<crate::FabroRunGatherParams>(
             FABRO_RUN_GATHER_TOOL_NAME,
             "Wait for Fabro runs to reach terminal states, returning current state on timeout.",
+        ),
+        tool_definition::<crate::FabroRunPairParams>(
+            FABRO_RUN_PAIR_TOOL_NAME,
+            "Inspect, start, message, end, or read transcript for a live Fabro run pairing session.",
         ),
         tool_definition::<crate::FabroRunEventsParams>(
             FABRO_RUN_EVENTS_TOOL_NAME,
@@ -300,6 +308,62 @@ mod tests {
     use fabro_types::{RunLifecycle, RunLinks, RunOrigin, RunStatus, RunTimestamps, WorkflowRef};
 
     use super::*;
+
+    fn shared_tool_names() -> Vec<&'static str> {
+        tool_definitions()
+            .iter()
+            .map(|definition| definition.name)
+            .collect()
+    }
+
+    #[test]
+    fn shared_tool_definitions_include_run_management_catalog() {
+        assert_eq!(shared_tool_names(), vec![
+            FABRO_RUN_CREATE_TOOL_NAME,
+            FABRO_RUN_SEARCH_TOOL_NAME,
+            FABRO_RUN_GET_TOOL_NAME,
+            FABRO_RUN_INTERACT_TOOL_NAME,
+            FABRO_RUN_GATHER_TOOL_NAME,
+            FABRO_RUN_PAIR_TOOL_NAME,
+            FABRO_RUN_EVENTS_TOOL_NAME,
+        ]);
+    }
+
+    #[test]
+    fn pair_tool_definition_exposes_pair_schema() {
+        let definition = tool_definitions()
+            .iter()
+            .find(|definition| definition.name == FABRO_RUN_PAIR_TOOL_NAME)
+            .expect("pair tool should be in the shared catalog");
+        let schema = &definition.parameters;
+        let schema_text = schema.to_string();
+
+        assert_eq!(
+            definition.description,
+            "Inspect, start, message, end, or read transcript for a live Fabro run pairing session."
+        );
+        for field in [
+            "action",
+            "run_id",
+            "pair_id",
+            "stage_id",
+            "text",
+            "client_message_id",
+            "since_seq",
+            "limit",
+        ] {
+            assert!(
+                schema.pointer(&format!("/properties/{field}")).is_some(),
+                "pair schema should expose {field}: {schema}"
+            );
+        }
+        for action in ["status", "start", "get", "message", "end", "transcript"] {
+            assert!(
+                schema_text.contains(&format!("\"{action}\"")),
+                "pair schema should expose action {action}: {schema}"
+            );
+        }
+    }
 
     #[test]
     fn run_summary_result_includes_parent_metadata() {
