@@ -890,6 +890,7 @@ mod tests {
                     tool_call_count: 0,
                     visit:           1,
                     message:         None,
+                    context_window:  None,
                 }),
             ),
         )
@@ -921,6 +922,7 @@ mod tests {
                         tool_call_count: 0,
                         visit:           1,
                         message:         None,
+                        context_window:  None,
                     }),
                 ),
             )

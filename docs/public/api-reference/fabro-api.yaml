@@ -7971,6 +7971,40 @@ components:
           type: integer
           minimum: 1
 
+    AgentMessageProps:
+      description: Properties for the `agent.message` event.
+      type: object
+      required:
+        - text
+        - model
+        - billing
+        - tool_call_count
+        - visit
+      properties:
+        text:
+          type: string
+        model:
+          $ref: "#/components/schemas/BillingModelRef"
+        billing:
+          $ref: "#/components/schemas/BilledTokenCounts"
+        tool_call_count:
+          type: integer
+          minimum: 0
+        visit:
+          type: integer
+          minimum: 1
+        message:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+          description: Canonical replay-authoritative transcript message, when present.
+        context_window:
+          oneOf:
+            - $ref: "#/components/schemas/StageContextWindowProjection"
+            - type: "null"
+          description: Latest content-free context-window projection for this agent stage.
+
     RunSupersededByProps:
       description: Properties for the `run.superseded_by` audit event emitted on a rewound source run after archive succeeds.
       type: object

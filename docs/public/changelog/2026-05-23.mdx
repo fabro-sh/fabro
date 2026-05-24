@@ -31,11 +31,16 @@ Structured output validation is also stricter. Agent and prompt stages with `out
 
 ## Slack run lifecycle notifications
 
-Workflows can now send run lifecycle updates to Slack through `[run.notifications]`. Teams can keep a channel informed when a run starts, needs attention, finishes, or fails without wiring a separate webhook workflow.
+Workflows can now send run lifecycle updates to Slack through `[run.notifications]`. Teams can keep a channel informed when a run starts, finishes, or fails without wiring a separate webhook workflow.
 
 ```toml
-[run.notifications]
-slack = true
+[run.notifications.deploys]
+enabled = true
+provider = "slack"
+events = ["run.started", "run.completed", "run.failed"]
+
+[run.notifications.deploys.slack]
+channel = "#deploys"
 ```
 
 ## More

@@ -1430,6 +1430,7 @@ mod runs {
                     tool_call_count: 0,
                     visit:           1,
                     message:         None,
+                    context_window:  None,
                 }),
             ),
             make_envelope(
@@ -1498,6 +1499,7 @@ mod runs {
                     tool_call_count: 0,
                     visit:           1,
                     message:         None,
+                    context_window:  None,
                 }),
             ),
         ]

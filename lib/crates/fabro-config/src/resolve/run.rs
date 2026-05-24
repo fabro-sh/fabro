@@ -295,23 +295,31 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
                 .map(|(key, value)| (key.clone(), value.as_source()))
                 .collect(),
         },
-        McpEntryLayer::Http { url, headers, .. } => McpTransport::Http {
-            url:     url.as_source(),
-            headers: headers
+        McpEntryLayer::Http {
+            protocol,
+            url,
+            headers,
+            ..
+        } => McpTransport::Http {
+            protocol: *protocol,
+            url:      url.as_source(),
+            headers:  headers
                 .iter()
                 .map(|(key, value)| (key.clone(), value.as_source()))
                 .collect(),
         },
         McpEntryLayer::Sandbox {
+            protocol,
             script,
             command,
             port,
             env,
             ..
         } => McpTransport::Sandbox {
-            command: resolve_mcp_command(script.as_ref(), command.as_ref()),
-            port:    *port,
-            env:     env
+            protocol: *protocol,
+            command:  resolve_mcp_command(script.as_ref(), command.as_ref()),
+            port:     *port,
+            env:      env
                 .iter()
                 .map(|(key, value)| (key.clone(), value.as_source()))
                 .collect(),

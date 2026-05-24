@@ -5,7 +5,7 @@ use fabro_llm::token_count::{
     estimate_message_tokens, estimate_request_control_tokens, estimate_text_tokens,
     estimate_tool_definition_tokens, is_local_estimator_warning,
 };
-use fabro_llm::types::{Request, Role, Warning as LlmWarning};
+use fabro_llm::types::{Request, Role, TokenCounts, Warning as LlmWarning};
 use fabro_types::{
     StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
     StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowWarning,
@@ -16,7 +16,7 @@ use crate::skills::{Skill, format_skills_prompt_section};
 use crate::tool_registry::{ToolDefinitionWithSource, ToolSource};
 
 #[derive(Clone, Copy)]
-pub(crate) struct ContextWindowSnapshotInput<'a> {
+pub(crate) struct ContextWindowInput<'a> {
     pub request: &'a Request,
     pub tools: &'a [ToolDefinitionWithSource],
     pub system_prompt: &'a str,
@@ -29,9 +29,7 @@ pub(crate) struct ContextWindowSnapshotInput<'a> {
 }
 
 #[must_use]
-pub(crate) fn build_local_snapshot(
-    input: ContextWindowSnapshotInput<'_>,
-) -> StageContextWindowProjection {
+pub(crate) fn build_local_snapshot(input: ContextWindowInput<'_>) -> StageContextWindowProjection {
     let mut builder = BreakdownBuilder::default();
     let mut warnings = Vec::new();
 
@@ -117,8 +115,31 @@ const fn total_is_provider_authoritative(method: StageContextWindowCountMethod) 
     )
 }
 
+/// Build a projection from a previously-computed local snapshot and the
+/// token usage returned by the LLM response. If the response carried no
+/// usable input tokens, fall back to the local estimate unchanged.
 #[must_use]
-pub(crate) fn warnings_from_llm(warnings: &[LlmWarning]) -> Vec<StageContextWindowWarning> {
+pub(crate) fn context_window_from_response_usage(
+    local_snapshot: &StageContextWindowProjection,
+    usage: &TokenCounts,
+) -> StageContextWindowProjection {
+    let input_tokens = usage
+        .input_tokens
+        .saturating_add(usage.cache_read_tokens)
+        .saturating_add(usage.cache_write_tokens);
+    if input_tokens <= 0 {
+        return local_snapshot.clone();
+    }
+    scaled_snapshot(
+        local_snapshot,
+        u64::try_from(input_tokens).unwrap_or(u64::MAX),
+        StageContextWindowCountMethod::ResponseUsageScaledBreakdown,
+        local_snapshot.warnings.clone(),
+    )
+}
+
+#[must_use]
+fn warnings_from_llm(warnings: &[LlmWarning]) -> Vec<StageContextWindowWarning> {
     warnings
         .iter()
         .map(|warning| StageContextWindowWarning {
@@ -131,18 +152,10 @@ pub(crate) fn warnings_from_llm(warnings: &[LlmWarning]) -> Vec<StageContextWind
         .collect()
 }
 
-#[must_use]
-pub(crate) fn warning(code: &str, message: &str) -> StageContextWindowWarning {
-    StageContextWindowWarning {
-        code:    code.to_string(),
-        message: message.to_string(),
-    }
-}
-
 fn add_message_breakdown(
     builder: &mut BreakdownBuilder,
     warnings: &mut Vec<StageContextWindowWarning>,
-    input: &ContextWindowSnapshotInput<'_>,
+    input: &ContextWindowInput<'_>,
 ) {
     let memory_text = memory_prompt_suffix(input.memory);
     let skills_text = skills_prompt_suffix(input.skills);
@@ -394,7 +407,7 @@ mod tests {
             tools.iter().map(|tool| tool.definition.clone()).collect(),
         );
 
-        let snapshot = build_local_snapshot(ContextWindowSnapshotInput {
+        let snapshot = build_local_snapshot(ContextWindowInput {
             request: &req,
             tools: &tools,
             system_prompt: &system_prompt,

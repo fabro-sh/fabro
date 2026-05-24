@@ -1,5 +1,6 @@
 export * from './activated-skill';
 export * from './agent-mcp-tool-summary';
+export * from './agent-message-props';
 export * from './agent-permissions';
 export * from './agent-session-activated-props';
 export * from './agent-skill-activation-source';

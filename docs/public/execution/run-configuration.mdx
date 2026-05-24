@@ -346,6 +346,8 @@ channel = "#deploys"
 
 Each enabled Slack route posts once for each matching lifecycle event. Messages include the run ID, an Open in Fabro link when available, workflow label, terminal result, duration, and pull request details when those are already present in the run event stream.
 
+`run.failed` is emitted only when the run terminally fails. A failed stage that routes onward to a normal completion path produces `run.completed`, not `run.failed`.
+
 If a Slack route's channel is missing, empty, or references an unresolved environment variable, Fabro logs a warning and skips that route. Delivery failures are logged and never fail or alter the run.
 
 ### `[run.checkpoint]`

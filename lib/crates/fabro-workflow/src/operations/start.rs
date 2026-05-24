@@ -646,14 +646,25 @@ fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings
                 command: command.clone(),
                 env:     env.clone(),
             },
-            ResolvedMcpTransport::Http { url, headers } => McpTransport::Http {
-                url:     url.clone(),
-                headers: headers.clone(),
+            ResolvedMcpTransport::Http {
+                protocol,
+                url,
+                headers,
+            } => McpTransport::Http {
+                protocol: *protocol,
+                url:      url.clone(),
+                headers:  headers.clone(),
             },
-            ResolvedMcpTransport::Sandbox { command, port, env } => McpTransport::Sandbox {
-                command: command.clone(),
-                port:    *port,
-                env:     env.clone(),
+            ResolvedMcpTransport::Sandbox {
+                protocol,
+                command,
+                port,
+                env,
+            } => McpTransport::Sandbox {
+                protocol: *protocol,
+                command:  command.clone(),
+                port:     *port,
+                env:      env.clone(),
             },
         },
         current_dir:          None,

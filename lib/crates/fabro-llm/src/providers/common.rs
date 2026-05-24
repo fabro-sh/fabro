@@ -193,12 +193,22 @@ pub async fn send_and_read_response(
     provider: &str,
     error_code_field: &str,
 ) -> Result<(String, HeaderMap), Error> {
+    send_and_read_response_with_operation(request, provider, error_code_field, "provider_request")
+        .await
+}
+
+pub(crate) async fn send_and_read_response_with_operation(
+    request: fabro_http::RequestBuilder,
+    provider: &str,
+    error_code_field: &str,
+    operation: &str,
+) -> Result<(String, HeaderMap), Error> {
     let http_resp = request.send().await.map_err(|e| {
         if e.is_timeout() {
-            warn!(provider = %provider, error = %e, "Provider request timed out");
+            warn!(provider = %provider, operation = %operation, error = %e, "Provider request timed out");
             Error::request_timeout(format!("{provider}: {e}"), e)
         } else {
-            warn!(provider = %provider, error = %e, "Provider network error");
+            warn!(provider = %provider, operation = %operation, error = %e, "Provider network error");
             Error::network(e.to_string(), e)
         }
     })?;
@@ -212,7 +222,7 @@ pub async fn send_and_read_response(
         .map_err(|e| Error::network(e.to_string(), e))?;
 
     if !status.is_success() {
-        warn!(provider = %provider, status = status.as_u16(), "Provider returned error");
+        warn!(provider = %provider, operation = %operation, status = status.as_u16(), "Provider returned error");
         let (msg, code, raw) = parse_error_body(&body, error_code_field);
         return Err(error_from_status_code(
             status.as_u16(),

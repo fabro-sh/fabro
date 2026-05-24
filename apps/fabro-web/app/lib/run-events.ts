@@ -107,7 +107,6 @@ const TODO_EVENTS = new Set([
   "todo.updated",
   "todo.deleted",
 ]);
-const CONTEXT_WINDOW_SNAPSHOT_EVENT = "agent.context_window.snapshot";
 
 export function queryKeysForRunEvent(
   runId: string,
@@ -161,15 +160,6 @@ export function queryKeysForRunEvent(
   }
 
   if (STEERING_EVENTS.has(event)) {
-    const keys: Key[] = [queryKeys.runs.events(runId, 1000)];
-    if (stageId) {
-      keys.push(queryKeys.runs.stageEvents(runId, stageId));
-      keys.push(queryKeys.runs.stageContextWindow(runId, stageId));
-    }
-    return keys;
-  }
-
-  if (event === CONTEXT_WINDOW_SNAPSHOT_EVENT) {
     const keys: Key[] = [queryKeys.runs.events(runId, 1000)];
     if (stageId) {
       keys.push(queryKeys.runs.stageEvents(runId, stageId));

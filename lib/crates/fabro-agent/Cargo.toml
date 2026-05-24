@@ -63,3 +63,4 @@ paste = "1"
 fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
 fabro-macros = { path = "../fabro-macros" }
 fabro-test = { workspace = true }
+tracing-subscriber.workspace = true
