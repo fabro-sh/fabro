@@ -48,7 +48,7 @@ fn provider_json_matches_openapi_shape() {
 #[test]
 fn provider_omits_optional_fields_when_absent() {
     // Proves the required/optional split the OpenAPI `Provider` schema
-    // declares: the four `skip_serializing_if` fields drop out entirely, while
+    // declares: the five `skip_serializing_if` fields drop out entirely, while
     // the six required fields always serialize.
     let provider = Provider {
         id:                   ProviderId::new("custom"),
