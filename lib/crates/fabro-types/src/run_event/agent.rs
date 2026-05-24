@@ -6,7 +6,7 @@ use super::BilledTokenCounts;
 use crate::transcript::{ToolCall, ToolResult, TranscriptMessage};
 use crate::{
     MessageId, ModelRef, PairId, PairMessageId, PairSystemMessageKind, PermissionLevel,
-    StageContextWindowProjection, StageId, TurnId,
+    StageContextWindowProjection, TurnId,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,6 +77,10 @@ pub struct AgentMessageProps {
     /// payloads so older events still deserialize.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message:         Option<TranscriptMessage>,
+    /// Latest content-free context-window projection for this agent stage,
+    /// computed from the request that produced this assistant response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window:  Option<StageContextWindowProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -219,14 +223,6 @@ pub struct AgentLlmRetryProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentContextWindowSnapshotProps {
-    pub stage_id: StageId,
-    pub visit:    u32,
-    #[serde(flatten)]
-    pub snapshot: StageContextWindowProjection,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSubSpawnedProps {
     pub agent_id: String,
     pub depth:    usize,
@@ -357,6 +353,7 @@ mod tests {
         let props: AgentMessageProps = serde_json::from_value(v).unwrap();
         assert_eq!(props.text, "hello");
         assert!(props.message.is_none());
+        assert!(props.context_window.is_none());
     }
 
     #[test]
@@ -371,6 +368,7 @@ mod tests {
             tool_call_count: 0,
             visit:           1,
             message:         Some(msg.clone()),
+            context_window:  None,
         };
         let v = serde_json::to_value(&props).unwrap();
         assert_eq!(v["message"]["kind"], "agent");

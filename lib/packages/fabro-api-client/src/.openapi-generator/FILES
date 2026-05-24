@@ -23,6 +23,7 @@ configuration.ts
 index.ts
 models/activated-skill.ts
 models/agent-mcp-tool-summary.ts
+models/agent-message-props.ts
 models/agent-permissions.ts
 models/agent-session-activated-props.ts
 models/agent-skill-activation-source.ts

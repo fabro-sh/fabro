@@ -92,16 +92,6 @@ describe("queryKeys", () => {
     }
   });
 
-  test("context-window snapshot invalidates context window, run events, and stage events", () => {
-    expect(
-      queryKeysForRunEvent("run-1", "agent.context_window.snapshot", "stage-1"),
-    ).toEqual([
-      queryKeys.runs.events("run-1", 1000),
-      queryKeys.runs.stageEvents("run-1", "stage-1"),
-      queryKeys.runs.stageContextWindow("run-1", "stage-1"),
-    ]);
-  });
-
   test("agent activity events without a node_id invalidate nothing", () => {
     expect(queryKeysForRunEvent("run-1", "agent.message")).toEqual([]);
   });

@@ -16,7 +16,7 @@ use crate::skills::{Skill, format_skills_prompt_section};
 use crate::tool_registry::{ToolDefinitionWithSource, ToolSource};
 
 #[derive(Clone, Copy)]
-pub(crate) struct ContextWindowSnapshotInput<'a> {
+pub(crate) struct ContextWindowInput<'a> {
     pub request: &'a Request,
     pub tools: &'a [ToolDefinitionWithSource],
     pub system_prompt: &'a str,
@@ -29,9 +29,7 @@ pub(crate) struct ContextWindowSnapshotInput<'a> {
 }
 
 #[must_use]
-pub(crate) fn build_local_snapshot(
-    input: ContextWindowSnapshotInput<'_>,
-) -> StageContextWindowProjection {
+pub(crate) fn build_local_snapshot(input: ContextWindowInput<'_>) -> StageContextWindowProjection {
     let mut builder = BreakdownBuilder::default();
     let mut warnings = Vec::new();
 
@@ -131,18 +129,10 @@ pub(crate) fn warnings_from_llm(warnings: &[LlmWarning]) -> Vec<StageContextWind
         .collect()
 }
 
-#[must_use]
-pub(crate) fn warning(code: &str, message: &str) -> StageContextWindowWarning {
-    StageContextWindowWarning {
-        code:    code.to_string(),
-        message: message.to_string(),
-    }
-}
-
 fn add_message_breakdown(
     builder: &mut BreakdownBuilder,
     warnings: &mut Vec<StageContextWindowWarning>,
-    input: &ContextWindowSnapshotInput<'_>,
+    input: &ContextWindowInput<'_>,
 ) {
     let memory_text = memory_prompt_suffix(input.memory);
     let skills_text = skills_prompt_suffix(input.skills);
@@ -394,7 +384,7 @@ mod tests {
             tools.iter().map(|tool| tool.definition.clone()).collect(),
         );
 
-        let snapshot = build_local_snapshot(ContextWindowSnapshotInput {
+        let snapshot = build_local_snapshot(ContextWindowInput {
             request: &req,
             tools: &tools,
             system_prompt: &system_prompt,

@@ -402,6 +402,11 @@ impl RunProjectionReducer for RunProjection {
                 };
                 stage.usage.add_counts(&props.billing);
                 stage.model = Some(props.model.clone());
+                if let Some(context_window) = &props.context_window {
+                    let mut context_window = context_window.clone();
+                    context_window.event_seq = Some(event.seq);
+                    stage.context_window = Some(context_window);
+                }
             }
             EventBody::AgentSessionActivated(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
@@ -614,15 +619,6 @@ impl RunProjectionReducer for RunProjection {
                         projection.invoked = true;
                     }
                 }
-            }
-            EventBody::AgentContextWindowSnapshot(props) => {
-                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
-                else {
-                    return Ok(());
-                };
-                let mut snapshot = props.snapshot.clone();
-                snapshot.event_seq = Some(event.seq);
-                stage.context_window = Some(snapshot);
             }
             _ => {}
         }
@@ -1227,14 +1223,14 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         AgentAcpCancelledProps, AgentAcpCompletedProps, AgentAcpStartedProps,
-        AgentAcpTimedOutProps, AgentContextWindowSnapshotProps, AgentMcpFailedProps,
-        AgentMcpReadyProps, AgentMcpToolSummary, AgentMessageProps, AgentSessionActivatedProps,
-        AgentSessionEndedProps, AgentSessionStartedProps, AgentSkillActivatedProps,
-        AgentSkillActivationSource, AgentSkillSummary, AgentSkillsDiscoveredProps,
-        AgentSubClosedProps, AgentSubCompletedProps, AgentSubFailedProps, AgentSubSpawnedProps,
-        AgentToolStartedProps, CheckpointCompletedProps, InterviewCompletedProps, InterviewOption,
-        InterviewStartedProps, RunCompletedProps, RunControlEffectProps, StageCompletedProps,
-        StageFailedProps, StagePromptProps, StageRetryingProps, StageStartedProps,
+        AgentAcpTimedOutProps, AgentMcpFailedProps, AgentMcpReadyProps, AgentMcpToolSummary,
+        AgentMessageProps, AgentSessionActivatedProps, AgentSessionEndedProps,
+        AgentSessionStartedProps, AgentSkillActivatedProps, AgentSkillActivationSource,
+        AgentSkillSummary, AgentSkillsDiscoveredProps, AgentSubClosedProps, AgentSubCompletedProps,
+        AgentSubFailedProps, AgentSubSpawnedProps, AgentToolStartedProps, CheckpointCompletedProps,
+        InterviewCompletedProps, InterviewOption, InterviewStartedProps, RunCompletedProps,
+        RunControlEffectProps, StageCompletedProps, StageFailedProps, StagePromptProps,
+        StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
@@ -3462,6 +3458,7 @@ mod tests {
             tool_call_count: 0,
             visit: 1,
             message: None,
+            context_window: None,
         }
     }
 
@@ -4816,7 +4813,7 @@ mod tests {
         }
 
         #[test]
-        fn context_window_snapshots_replace_latest_for_matching_stage() {
+        fn agent_messages_replace_latest_context_window_for_matching_stage() {
             let mut state = initialized_projection();
             let stage_id = stage_id();
             let first = context_window_snapshot(10);
@@ -4825,22 +4822,14 @@ mod tests {
             state
                 .apply_event(&test_stage_event(
                     7,
-                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
-                        stage_id: stage_id.clone(),
-                        visit:    1,
-                        snapshot: first,
-                    }),
+                    EventBody::AgentMessage(agent_message_with_context_window(first)),
                     stage_id.clone(),
                 ))
                 .unwrap();
             state
                 .apply_event(&test_stage_event(
                     8,
-                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
-                        stage_id: stage_id.clone(),
-                        visit:    1,
-                        snapshot: second,
-                    }),
+                    EventBody::AgentMessage(agent_message_with_context_window(second)),
                     stage_id.clone(),
                 ))
                 .unwrap();
@@ -4852,25 +4841,44 @@ mod tests {
         }
 
         #[test]
-        fn context_window_snapshot_does_not_update_other_stage() {
+        fn agent_message_without_context_window_preserves_existing_context_window() {
             let mut state = initialized_projection();
-            let target = stage_id();
-            let other = StageId::new("review", 1);
+            let stage_id = stage_id();
 
             state
                 .apply_event(&test_stage_event(
                     7,
-                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
-                        stage_id: target.clone(),
-                        visit:    1,
-                        snapshot: context_window_snapshot(10),
-                    }),
-                    target.clone(),
+                    EventBody::AgentMessage(agent_message_with_context_window(
+                        context_window_snapshot(10),
+                    )),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    8,
+                    EventBody::AgentMessage(live_agent_message_props(live_counts(1, 1))),
+                    stage_id.clone(),
                 ))
                 .unwrap();
 
-            assert!(state.stage(&target).unwrap().context_window.is_some());
-            assert!(state.stage(&other).is_none());
+            let snapshot = state
+                .stage(&stage_id)
+                .unwrap()
+                .context_window
+                .as_ref()
+                .unwrap();
+            assert_eq!(snapshot.input_tokens, 10);
+            assert_eq!(snapshot.event_seq, Some(7));
+        }
+
+        fn agent_message_with_context_window(
+            context_window: StageContextWindowProjection,
+        ) -> AgentMessageProps {
+            AgentMessageProps {
+                context_window: Some(context_window),
+                ..live_agent_message_props(live_counts(1, 1))
+            }
         }
 
         fn context_window_snapshot(input_tokens: u64) -> StageContextWindowProjection {

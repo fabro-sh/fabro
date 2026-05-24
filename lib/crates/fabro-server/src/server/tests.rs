@@ -14,7 +14,7 @@ use fabro_config::bind::Bind;
 use fabro_interview::{
     AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlMessage,
 };
-use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest};
+use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest, TokenCounts};
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ModelRef, ProviderId, ReasoningEffort, Speed};
 use fabro_types::settings::ServerAuthMethod;
@@ -3023,12 +3023,22 @@ fn stage_completed_event(node_id: &str) -> workflow_event::Event {
 fn context_window_event(
     stage: &str,
     visit: u32,
-    snapshot: StageContextWindowProjection,
+    context_window: StageContextWindowProjection,
 ) -> workflow_event::Event {
     workflow_event::Event::Agent {
         stage: stage.to_string(),
         visit,
-        event: fabro_agent::AgentEvent::ContextWindowSnapshot(snapshot),
+        event: fabro_agent::AgentEvent::AssistantMessage {
+            text:            "assistant response".to_string(),
+            model:           ModelRef {
+                provider: ProviderId::openai(),
+                model_id: "gpt-5.4".to_string(),
+                speed:    None,
+            },
+            usage:           TokenCounts::default(),
+            tool_call_count: 0,
+            context_window:  Some(context_window),
+        },
         session_id: Some("session-1".to_string()),
         parent_session_id: None,
         tool_call_id: None,
@@ -3045,7 +3055,7 @@ fn context_window_snapshot(
         context_window_tokens: 400_000,
         input_tokens,
         usage_percent: input_tokens as f64 * 100.0 / 400_000.0,
-        count_method: StageContextWindowCountMethod::ProviderApiScaledBreakdown,
+        count_method: StageContextWindowCountMethod::ResponseUsageScaledBreakdown,
         staleness: StageContextWindowStaleness::Live,
         generated_at: Utc::now(),
         event_seq: None,
@@ -6602,7 +6612,7 @@ async fn get_run_stage_context_window_returns_live_projected_snapshot() {
     assert_eq!(body["stage_id"], "agent_node@1");
     assert_eq!(body["available"], true);
     assert_eq!(body["provider"], "openai");
-    assert_eq!(body["count_method"], "provider_api_scaled_breakdown");
+    assert_eq!(body["count_method"], "response_usage_scaled_breakdown");
     assert_eq!(body["staleness"], "live");
     assert_eq!(body["input_tokens"], 123_456);
     assert_eq!(body["breakdown"][0]["category"], "conversation");
