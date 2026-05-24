@@ -90,7 +90,7 @@ pub trait FabroToolBackend: Send + Sync {
     ) -> anyhow::Result<()>;
 
     async fn get_run_pair_status(&self, _run_id: &RunId) -> anyhow::Result<RunPairStatusResponse> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn start_run_pair(
@@ -98,15 +98,15 @@ pub trait FabroToolBackend: Send + Sync {
         _run_id: &RunId,
         _stage_id: StageId,
     ) -> anyhow::Result<PairRecord> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn get_run_pair(&self, _run_id: &RunId, _pair_id: &PairId) -> anyhow::Result<PairRecord> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn end_run_pair(&self, _run_id: &RunId, _pair_id: &PairId) -> anyhow::Result<PairRecord> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn send_run_pair_message(
@@ -115,7 +115,7 @@ pub trait FabroToolBackend: Send + Sync {
         _pair_id: &PairId,
         _request: PairMessageRequest,
     ) -> anyhow::Result<PairMessageRecord> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
 
     async fn get_run_pair_transcript(
@@ -125,8 +125,12 @@ pub trait FabroToolBackend: Send + Sync {
         _since_seq: Option<u32>,
         _limit: Option<u32>,
     ) -> anyhow::Result<PairTranscriptResponse> {
-        Err(ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into())
+        Err(pair_tool_unavailable_error())
     }
+}
+
+fn pair_tool_unavailable_error() -> anyhow::Error {
+    ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into()
 }
 
 pub trait RunManifestBuilder: Send + Sync {
