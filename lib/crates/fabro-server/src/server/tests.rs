@@ -632,6 +632,15 @@ fn json_bearer_request(
         .unwrap()
 }
 
+fn json_request(method: Method, path: &str, body: &serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(api(path))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap()
+}
+
 fn canonical_origin_settings(url: &str) -> ServerSettings {
     server_settings_from_toml(&format!(
         r#"
@@ -10510,6 +10519,337 @@ async fn archive_and_unarchive_updates_listing_visibility() {
         .expect("unarchived run should reappear in default listing");
     assert_eq!(run_json_status(restored_item)["kind"], "succeeded");
     assert_eq!(run_json_status(restored_item)["reason"], "completed");
+}
+
+fn run_submitted_event() -> workflow_event::Event {
+    workflow_event::Event::RunSubmitted {
+        definition_blob: None,
+    }
+}
+
+fn workflow_completed_event() -> workflow_event::Event {
+    workflow_event::Event::WorkflowRunCompleted {
+        timing:               fabro_types::RunTiming::wall_only(1000),
+        artifact_count:       0,
+        status:               "succeeded".to_string(),
+        reason:               SuccessReason::Completed,
+        total_usd_micros:     None,
+        final_git_commit_sha: None,
+        final_patch:          None,
+        diff_summary:         None,
+        billing:              None,
+    }
+}
+
+async fn create_succeeded_run(state: &Arc<AppState>, run_id: RunId) {
+    create_durable_run_with_events(state, run_id, &[
+        run_submitted_event(),
+        workflow_completed_event(),
+    ])
+    .await;
+}
+
+async fn create_running_run(state: &Arc<AppState>, run_id: RunId) {
+    create_durable_run_with_events(state, run_id, &[
+        run_submitted_event(),
+        workflow_event::Event::RunRunning,
+    ])
+    .await;
+}
+
+fn batch_lifecycle_body(run_ids: &[RunId]) -> serde_json::Value {
+    json!({
+        "run_ids": run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+    })
+}
+
+fn assert_batch_result(result: &serde_json::Value, run_id: RunId, ok: bool, outcome: &str) {
+    assert_eq!(result["run_id"], run_id.to_string());
+    assert_eq!(result["ok"], ok);
+    assert_eq!(result["outcome"], outcome);
+    if ok {
+        assert!(
+            result["run"].is_object(),
+            "successful result should include run: {result}"
+        );
+        assert!(
+            result["error"].is_null(),
+            "successful result should omit error: {result}"
+        );
+    } else {
+        assert!(
+            result["error"].is_object(),
+            "failed result should include error: {result}"
+        );
+        assert!(
+            result["run"].is_null(),
+            "failed result should omit run: {result}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn batch_archive_and_unarchive_updates_listing_visibility() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let first_id = RunId::new();
+    let second_id = RunId::new();
+    create_succeeded_run(&state, first_id).await;
+    create_succeeded_run(&state, second_id).await;
+
+    let archive_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/runs/archive",
+            &batch_lifecycle_body(&[first_id, second_id]),
+        ))
+        .await
+        .unwrap();
+    let archive_body = response_json!(archive_response, StatusCode::OK).await;
+    assert_eq!(archive_body["summary"]["requested"], 2);
+    assert_eq!(archive_body["summary"]["succeeded"], 2);
+    assert_eq!(archive_body["summary"]["failed"], 0);
+    let archive_results = archive_body["results"].as_array().unwrap();
+    assert_batch_result(&archive_results[0], first_id, true, "archived");
+    assert!(run_json_archived(&archive_results[0]["run"]));
+    assert_batch_result(&archive_results[1], second_id, true, "archived");
+    assert!(run_json_archived(&archive_results[1]["run"]));
+
+    let hidden_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api("/runs"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let hidden_body = response_json!(hidden_response, StatusCode::OK).await;
+    assert!(
+        hidden_body["data"].as_array().unwrap().iter().all(|item| {
+            let item_id = run_json_id(item);
+            item_id != Some(&first_id.to_string()) && item_id != Some(&second_id.to_string())
+        }),
+        "archived runs should be hidden from default listing"
+    );
+
+    let unarchive_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/runs/unarchive",
+            &batch_lifecycle_body(&[first_id, second_id]),
+        ))
+        .await
+        .unwrap();
+    let unarchive_body = response_json!(unarchive_response, StatusCode::OK).await;
+    assert_eq!(unarchive_body["summary"]["requested"], 2);
+    assert_eq!(unarchive_body["summary"]["succeeded"], 2);
+    assert_eq!(unarchive_body["summary"]["failed"], 0);
+    let unarchive_results = unarchive_body["results"].as_array().unwrap();
+    assert_batch_result(&unarchive_results[0], first_id, true, "unarchived");
+    assert!(!run_json_archived(&unarchive_results[0]["run"]));
+    assert_batch_result(&unarchive_results[1], second_id, true, "unarchived");
+    assert!(!run_json_archived(&unarchive_results[1]["run"]));
+
+    let restored_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api("/runs"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let restored_body = response_json!(restored_response, StatusCode::OK).await;
+    for run_id in [first_id, second_id] {
+        let restored_item = restored_body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| run_json_id(item) == Some(&run_id.to_string()))
+            .expect("unarchived run should reappear in default listing");
+        assert_eq!(run_json_status(restored_item)["kind"], "succeeded");
+    }
+}
+
+#[tokio::test]
+async fn batch_archive_reports_ordered_mixed_results_without_rollback() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let already_archived_id = RunId::new();
+    let terminal_id = RunId::new();
+    let running_id = RunId::new();
+    let missing_id = RunId::new();
+    create_succeeded_run(&state, already_archived_id).await;
+    create_succeeded_run(&state, terminal_id).await;
+    create_running_run(&state, running_id).await;
+
+    let already_archived_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{already_archived_id}/archive")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_status!(already_archived_response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/runs/archive",
+            &batch_lifecycle_body(&[already_archived_id, terminal_id, running_id, missing_id]),
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["summary"]["requested"], 4);
+    assert_eq!(body["summary"]["succeeded"], 2);
+    assert_eq!(body["summary"]["failed"], 2);
+    let results = body["results"].as_array().unwrap();
+    assert_batch_result(&results[0], already_archived_id, true, "already_archived");
+    assert_batch_result(&results[1], terminal_id, true, "archived");
+    assert_batch_result(&results[2], running_id, false, "conflict");
+    assert_eq!(results[2]["error"]["status"], "409");
+    assert_batch_result(&results[3], missing_id, false, "not_found");
+    assert_eq!(results[3]["error"]["status"], "404");
+
+    let terminal_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{terminal_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let terminal_body = response_json!(terminal_response, StatusCode::OK).await;
+    assert!(run_json_archived(&terminal_body));
+}
+
+#[tokio::test]
+async fn batch_unarchive_treats_terminal_not_archived_as_success() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let archived_id = RunId::new();
+    let not_archived_id = RunId::new();
+    create_succeeded_run(&state, archived_id).await;
+    create_succeeded_run(&state, not_archived_id).await;
+
+    let archive_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{archived_id}/archive")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_status!(archive_response, StatusCode::OK).await;
+
+    let response = app
+        .oneshot(json_request(
+            Method::POST,
+            "/runs/unarchive",
+            &batch_lifecycle_body(&[archived_id, not_archived_id]),
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["summary"]["requested"], 2);
+    assert_eq!(body["summary"]["succeeded"], 2);
+    assert_eq!(body["summary"]["failed"], 0);
+    let results = body["results"].as_array().unwrap();
+    assert_batch_result(&results[0], archived_id, true, "unarchived");
+    assert_batch_result(&results[1], not_archived_id, true, "not_archived");
+}
+
+#[tokio::test]
+async fn batch_lifecycle_rejects_invalid_requests_before_mutating_runs() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_succeeded_run(&state, run_id).await;
+    let too_many_ids = (0..251)
+        .map(|_| RunId::new().to_string())
+        .collect::<Vec<_>>();
+    let invalid_requests = [
+        json!({ "run_ids": [] }),
+        json!({ "run_ids": [run_id.to_string(), run_id.to_string()] }),
+        json!({ "run_ids": ["not-a-run-id"] }),
+        json!({ "run_ids": too_many_ids }),
+    ];
+
+    for body in invalid_requests {
+        let response = app
+            .clone()
+            .oneshot(json_request(Method::POST, "/runs/archive", &body))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::BAD_REQUEST).await;
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert!(!run_json_archived(&body));
+}
+
+#[tokio::test]
+async fn batch_lifecycle_requires_user_authentication() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_worker_token(&run_id);
+    let body = batch_lifecycle_body(&[run_id]);
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(json_request(Method::POST, "/runs/archive", &body))
+        .await
+        .unwrap();
+    assert_status!(unauthenticated, StatusCode::UNAUTHORIZED).await;
+
+    for path in ["/runs/archive", "/runs/unarchive"] {
+        let worker_response = app
+            .clone()
+            .oneshot(json_bearer_request(
+                Method::POST,
+                path,
+                &worker_token,
+                &body,
+            ))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                worker_response.status(),
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+            ),
+            "{path} unexpectedly accepted worker token with status {}",
+            worker_response.status()
+        );
+    }
 }
 
 #[tokio::test]

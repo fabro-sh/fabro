@@ -1,11 +1,14 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use chrono::Utc;
 
 use super::super::{
-    ApiError, AppState, DenyRunRequest, FailureReason, ForkRequest, ForkResponse, HeaderMap,
+    ApiError, AppState, BatchRunLifecycleRequest, BatchRunLifecycleResponse,
+    BatchRunLifecycleResult, BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary,
+    DenyRunRequest, ErrorResponseEntry, FailureReason, ForkRequest, ForkResponse, HeaderMap,
     IntoResponse, Json, Path, PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser,
-    Response, RewindRequest, RewindResponse, Router, RunAnswerTransport, RunControlAction,
+    Response, RewindRequest, RewindResponse, Router, Run, RunAnswerTransport, RunControlAction,
     RunExecutionMode, RunId, RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode,
     Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
     clear_live_run_state, durable_run_status, get, load_pending_control, managed_run, operations,
@@ -22,6 +25,8 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/deny", post(deny_run))
         .route("/runs/{id}/pause", post(pause_run))
         .route("/runs/{id}/unpause", post(unpause_run))
+        .route("/runs/archive", post(batch_archive_runs))
+        .route("/runs/unarchive", post(batch_unarchive_runs))
         .route("/runs/{id}/archive", post(archive_run))
         .route("/runs/{id}/rewind", post(rewind_run))
         .route("/runs/{id}/retry", post(retry_run))
@@ -684,6 +689,34 @@ async fn unarchive_run(
     run_archive_action(state, actor, id, ArchiveAction::Unarchive).await
 }
 
+async fn batch_archive_runs(
+    RequiredUser(user): RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BatchRunLifecycleRequest>,
+) -> Response {
+    batch_run_archive_action(
+        state,
+        Principal::User(user),
+        request,
+        ArchiveAction::Archive,
+    )
+    .await
+}
+
+async fn batch_unarchive_runs(
+    RequiredUser(user): RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BatchRunLifecycleRequest>,
+) -> Response {
+    batch_run_archive_action(
+        state,
+        Principal::User(user),
+        request,
+        ArchiveAction::Unarchive,
+    )
+    .await
+}
+
 async fn rewind_run(
     subject: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -874,6 +907,175 @@ fn workflow_operation_error_response(err: WorkflowError) -> Response {
 enum ArchiveAction {
     Archive,
     Unarchive,
+}
+
+const MAX_BATCH_RUN_LIFECYCLE_IDS: usize = 250;
+
+async fn batch_run_archive_action(
+    state: Arc<AppState>,
+    actor: Principal,
+    request: BatchRunLifecycleRequest,
+    action: ArchiveAction,
+) -> Response {
+    let ids = match validate_batch_run_ids(request) {
+        Ok(ids) => ids,
+        Err(err) => return err.into_response(),
+    };
+    let mut results = Vec::with_capacity(ids.len());
+
+    for id in ids {
+        results.push(batch_run_archive_item(state.as_ref(), actor.clone(), id, action).await);
+    }
+
+    let requested = results.len() as u64;
+    let succeeded = results.iter().filter(|result| result.ok).count() as u64;
+    (
+        StatusCode::OK,
+        Json(BatchRunLifecycleResponse {
+            results,
+            summary: BatchRunLifecycleSummary {
+                requested,
+                succeeded,
+                failed: requested - succeeded,
+            },
+        }),
+    )
+        .into_response()
+}
+
+fn validate_batch_run_ids(request: BatchRunLifecycleRequest) -> Result<Vec<RunId>, ApiError> {
+    if request.run_ids.is_empty() {
+        return Err(ApiError::bad_request(
+            "run_ids must contain at least one run ID.",
+        ));
+    }
+    if request.run_ids.len() > MAX_BATCH_RUN_LIFECYCLE_IDS {
+        return Err(ApiError::bad_request(format!(
+            "run_ids must contain no more than {MAX_BATCH_RUN_LIFECYCLE_IDS} run IDs.",
+        )));
+    }
+
+    let mut seen = HashSet::with_capacity(request.run_ids.len());
+    let mut ids = Vec::with_capacity(request.run_ids.len());
+    for raw in request.run_ids {
+        let id = raw.parse::<RunId>().map_err(|_| {
+            ApiError::bad_request(format!("run_ids contains invalid run ID: {raw}"))
+        })?;
+        if !seen.insert(id) {
+            return Err(ApiError::bad_request(
+                "run_ids must not contain duplicate IDs.",
+            ));
+        }
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+async fn batch_run_archive_item(
+    state: &AppState,
+    actor: Principal,
+    id: RunId,
+    action: ArchiveAction,
+) -> BatchRunLifecycleResult {
+    let result = match action {
+        ArchiveAction::Archive => operations::archive(&state.store, &id, Some(actor))
+            .await
+            .map(|outcome| match outcome {
+                operations::ArchiveOutcome::Archived { .. } => {
+                    BatchRunLifecycleResultOutcome::Archived
+                }
+                operations::ArchiveOutcome::AlreadyArchived => {
+                    BatchRunLifecycleResultOutcome::AlreadyArchived
+                }
+            }),
+        ArchiveAction::Unarchive => operations::unarchive(&state.store, &id, Some(actor))
+            .await
+            .map(|outcome| match outcome {
+                operations::UnarchiveOutcome::Unarchived { .. } => {
+                    BatchRunLifecycleResultOutcome::Unarchived
+                }
+                operations::UnarchiveOutcome::NotArchived { .. } => {
+                    BatchRunLifecycleResultOutcome::NotArchived
+                }
+            }),
+    };
+
+    match result {
+        Ok(outcome) => match load_decorated_run_after_lifecycle_action(state, id).await {
+            Ok(run) => batch_success_result(id, outcome, run),
+            Err(error) => batch_failure_result(id, BatchRunLifecycleResultOutcome::Error, error),
+        },
+        Err(WorkflowError::Precondition(message)) => batch_failure_result(
+            id,
+            BatchRunLifecycleResultOutcome::Conflict,
+            batch_error_entry(StatusCode::CONFLICT, message),
+        ),
+        Err(WorkflowError::RunNotFound(_)) => batch_failure_result(
+            id,
+            BatchRunLifecycleResultOutcome::NotFound,
+            batch_error_entry(StatusCode::NOT_FOUND, "Run not found."),
+        ),
+        Err(err) => batch_failure_result(
+            id,
+            BatchRunLifecycleResultOutcome::Error,
+            batch_error_entry(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+        ),
+    }
+}
+
+async fn load_decorated_run_after_lifecycle_action(
+    state: &AppState,
+    id: RunId,
+) -> Result<Run, ErrorResponseEntry> {
+    match state.store.get_cached_summary(&id, Utc::now()).await {
+        Ok(Some(summary)) => Ok(state.decorate_run_summary(summary).await),
+        Ok(None) => Err(batch_error_entry(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load run summary after lifecycle action.",
+        )),
+        Err(err) => Err(batch_error_entry(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )),
+    }
+}
+
+fn batch_success_result(
+    id: RunId,
+    outcome: BatchRunLifecycleResultOutcome,
+    run: Run,
+) -> BatchRunLifecycleResult {
+    BatchRunLifecycleResult {
+        run_id: id.to_string(),
+        ok: true,
+        outcome,
+        run: Some(run),
+        error: None,
+    }
+}
+
+fn batch_failure_result(
+    id: RunId,
+    outcome: BatchRunLifecycleResultOutcome,
+    error: ErrorResponseEntry,
+) -> BatchRunLifecycleResult {
+    BatchRunLifecycleResult {
+        run_id: id.to_string(),
+        ok: false,
+        outcome,
+        run: None,
+        error: Some(error),
+    }
+}
+
+fn batch_error_entry(status: StatusCode, detail: impl Into<String>) -> ErrorResponseEntry {
+    ErrorResponseEntry {
+        status:     status.as_u16().to_string(),
+        title:      status.canonical_reason().unwrap_or("Unknown").to_string(),
+        detail:     detail.into(),
+        code:       None,
+        request_id: None,
+    }
 }
 
 async fn run_archive_action(

@@ -1,4 +1,9 @@
-import type { ErrorResponseEntry, Run } from "@qltysh/fabro-api-client";
+import type {
+  BatchRunLifecycleRequest,
+  BatchRunLifecycleResponse,
+  ErrorResponseEntry,
+  Run,
+} from "@qltysh/fabro-api-client";
 
 import {
   ApiError,
@@ -56,6 +61,20 @@ export async function archiveRun(id: string, request?: Request): Promise<Run> {
 
 export async function unarchiveRun(id: string, request?: Request): Promise<Run> {
   return runLifecycleAction(id, "unarchive", request);
+}
+
+export async function archiveRuns(
+  runIds: string[],
+  request?: Request,
+): Promise<BatchRunLifecycleResponse> {
+  return batchRunLifecycleAction(runIds, "archive", request);
+}
+
+export async function unarchiveRuns(
+  runIds: string[],
+  request?: Request,
+): Promise<BatchRunLifecycleResponse> {
+  return batchRunLifecycleAction(runIds, "unarchive", request);
 }
 
 export async function retryRun(id: string, request?: Request): Promise<Run> {
@@ -176,6 +195,27 @@ async function runLifecycleAction(
         return await apiData(() => runsApi.unarchiveRun(id, requestSignalOptions(request)));
       case "retry":
         return await apiData(() => runsApi.retryRun(id, requestSignalOptions(request)));
+    }
+  } catch (error) {
+    throw lifecycleActionErrorFromError(error);
+  }
+}
+
+async function batchRunLifecycleAction(
+  runIds: string[],
+  action: "archive" | "unarchive",
+  request?: Request,
+): Promise<BatchRunLifecycleResponse> {
+  try {
+    // openapi-generator's TypeScript client represents `uniqueItems` arrays as
+    // Set<T>, but the HTTP wire contract is still a JSON array. Keep an array
+    // here so Axios serializes the request body correctly.
+    const body = { run_ids: runIds } as unknown as BatchRunLifecycleRequest;
+    switch (action) {
+      case "archive":
+        return await apiData(() => runsApi.batchArchiveRuns(body, requestSignalOptions(request)));
+      case "unarchive":
+        return await apiData(() => runsApi.batchUnarchiveRuns(body, requestSignalOptions(request)));
     }
   } catch (error) {
     throw lifecycleActionErrorFromError(error);

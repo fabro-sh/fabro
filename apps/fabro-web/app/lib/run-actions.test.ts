@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AxiosAdapter } from "axios";
-import type { Run, RunStatus } from "@qltysh/fabro-api-client";
+import type { BatchRunLifecycleResponse, Run, RunStatus } from "@qltysh/fabro-api-client";
 
 import {
   archiveRun,
+  archiveRuns,
   canArchive,
   canApprove,
   canCancel,
@@ -14,6 +15,7 @@ import {
   mapError,
   retryRun,
   unarchiveRun,
+  unarchiveRuns,
 } from "./run-actions";
 import { generatedAxios } from "./api-client";
 
@@ -21,6 +23,12 @@ type StubResponseInit = {
   status: number;
   body?: unknown;
   statusText?: string;
+};
+
+type CapturedRequest = {
+  url?: string;
+  method?: string;
+  data?: unknown;
 };
 
 const originalAdapter = generatedAxios.defaults.adapter;
@@ -65,8 +73,14 @@ function makeRun(status: RunStatus, archived = false): Run {
   };
 }
 
-function stubGeneratedAxiosOnce(init: StubResponseInit) {
+function stubGeneratedAxiosOnce(init: StubResponseInit): { requests: CapturedRequest[] } {
+  const requests: CapturedRequest[] = [];
   generatedAxios.defaults.adapter = (async (config) => {
+    requests.push({
+      url: config.url,
+      method: config.method,
+      data: config.data,
+    });
     if (init.status >= 400) {
       throw {
         isAxiosError: true,
@@ -87,6 +101,25 @@ function stubGeneratedAxiosOnce(init: StubResponseInit) {
       config,
     };
   }) as AxiosAdapter;
+  return { requests };
+}
+
+function batchResponse(
+  results: BatchRunLifecycleResponse["results"],
+): BatchRunLifecycleResponse {
+  const succeeded = results.filter((result) => result.ok).length;
+  return {
+    results,
+    summary: {
+      requested: results.length,
+      succeeded,
+      failed: results.length - succeeded,
+    },
+  };
+}
+
+function requestJsonBody(request: CapturedRequest): unknown {
+  return typeof request.data === "string" ? JSON.parse(request.data) : request.data;
 }
 
 async function expectLifecycleError(
@@ -139,6 +172,76 @@ describe("run lifecycle actions", () => {
     const result = await unarchiveRun("run-1");
     expect(result.lifecycle.status.kind).toBe("succeeded");
     expect(result.lifecycle.archived).toBe(false);
+  });
+
+  test("archiveRuns sends one batch request and parses results", async () => {
+    const stub = stubGeneratedAxiosOnce({
+      status: 200,
+      body: batchResponse([
+        {
+          run_id: "run-1",
+          ok: true,
+          outcome: "archived",
+          run: { ...makeRun({ kind: "succeeded", reason: "completed" }, true), id: "run-1" },
+        },
+        {
+          run_id: "run-2",
+          ok: true,
+          outcome: "already_archived",
+          run: { ...makeRun({ kind: "succeeded", reason: "completed" }, true), id: "run-2" },
+        },
+      ]),
+    });
+
+    const result = await archiveRuns(["run-1", "run-2"]);
+
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0]?.method?.toUpperCase()).toBe("POST");
+    expect(stub.requests[0]?.url).toBe("/api/v1/runs/archive");
+    expect(requestJsonBody(stub.requests[0]!)).toEqual({ run_ids: ["run-1", "run-2"] });
+    expect(result.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
+    expect(result.results.map((entry) => entry.outcome)).toEqual(["archived", "already_archived"]);
+  });
+
+  test("unarchiveRuns resolves mixed per-item results without throwing", async () => {
+    stubGeneratedAxiosOnce({
+      status: 200,
+      body: batchResponse([
+        {
+          run_id: "run-1",
+          ok: true,
+          outcome: "unarchived",
+          run: { ...makeRun({ kind: "succeeded", reason: "completed" }), id: "run-1" },
+        },
+        {
+          run_id: "run-missing",
+          ok: false,
+          outcome: "not_found",
+          error: { status: "404", title: "Not Found", detail: "Run not found." },
+        },
+      ]),
+    });
+
+    const result = await unarchiveRuns(["run-1", "run-missing"]);
+
+    expect(result.summary).toEqual({ requested: 2, succeeded: 1, failed: 1 });
+    expect(result.results[1]?.ok).toBe(false);
+    expect(result.results[1]?.error?.status).toBe("404");
+  });
+
+  test("batch lifecycle helpers preserve request-level error envelopes", async () => {
+    stubGeneratedAxiosOnce({
+      status: 400,
+      body: {
+        errors: [{ status: "400", title: "Bad Request", detail: "run_ids must contain at least one run ID." }],
+      },
+    });
+
+    const error = await expectLifecycleError(archiveRuns([]));
+    expect(error).toEqual({
+      status: 400,
+      errors: [{ status: "400", title: "Bad Request", detail: "run_ids must contain at least one run ID." }],
+    });
   });
 
   test("retryRun parses a 201 response", async () => {

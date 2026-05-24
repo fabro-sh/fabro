@@ -45,6 +45,10 @@ models/auth-session-user.ts
 models/auth-session.ts
 models/auth-sessions-response.ts
 models/automation-ref.ts
+models/batch-run-lifecycle-request.ts
+models/batch-run-lifecycle-response.ts
+models/batch-run-lifecycle-result.ts
+models/batch-run-lifecycle-summary.ts
 models/billed-token-counts.ts
 models/billing-by-model.ts
 models/billing-model-ref.ts

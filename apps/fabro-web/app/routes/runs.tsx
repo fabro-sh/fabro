@@ -31,8 +31,10 @@ import { useToast } from "../components/toast";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
-import { archiveRun, canArchive, canUnarchive, unarchiveRun } from "../lib/run-actions";
+import { archiveRuns, canArchive, canUnarchive, unarchiveRuns } from "../lib/run-actions";
 import type {
+  BatchRunLifecycleResponse,
+  BatchRunLifecycleSummary,
   BoardColumn,
   ListRunsDirectionEnum,
   ListRunsSortEnum,
@@ -64,6 +66,51 @@ const columnStyles: Record<BoardColumn, ColumnStyle> = {
 
 const defaultColumnStyle: ColumnStyle = { actions: [] };
 const defaultColumnColors = { label: "", dot: "bg-fg-muted", text: "text-fg-muted" };
+
+function runWord(n: number) {
+  return n === 1 ? "run" : "runs";
+}
+
+type BatchLifecycleLabel = "Archive" | "Unarchive";
+
+interface BatchLifecycleToastSummary {
+  toast: {
+    message: string;
+    tone?: "error";
+  };
+  allSucceeded: boolean;
+}
+
+export function summarizeBatchLifecycleAction(
+  label: BatchLifecycleLabel,
+  total: number,
+  summary: Pick<BatchRunLifecycleSummary, "succeeded" | "failed">,
+): BatchLifecycleToastSummary {
+  const succeeded = summary.succeeded;
+  const failed = summary.failed;
+  if (failed === 0) {
+    return {
+      toast: { message: `${label}d ${succeeded} ${runWord(succeeded)}.` },
+      allSucceeded: true,
+    };
+  }
+  if (succeeded === 0) {
+    return {
+      toast: {
+        message: `Couldn't ${label.toLowerCase()} ${total} ${runWord(total)}. Try again.`,
+        tone: "error",
+      },
+      allSucceeded: false,
+    };
+  }
+  return {
+    toast: {
+      message: `${label}d ${succeeded} of ${total} ${runWord(total)}. ${failed} failed.`,
+      tone: "error",
+    },
+    allSucceeded: false,
+  };
+}
 
 interface BoardRunsResponse {
   data: Run[];
@@ -463,25 +510,15 @@ function ColumnActionsMenu({ column }: { column: Column }) {
     setPending(true);
     const total = archivable.length;
     try {
-      const results = await Promise.allSettled(
-        archivable.map((item) => archiveRun(item.id)),
+      const response = await archiveRuns(archivable.map((item) => item.id));
+      push(summarizeBatchLifecycleAction("Archive", total, response.summary).toast);
+    } catch {
+      push(
+        summarizeBatchLifecycleAction("Archive", total, {
+          succeeded: 0,
+          failed:    total,
+        }).toast,
       );
-      const succeeded = results.filter((r) => r.status === "fulfilled").length;
-      const failed = total - succeeded;
-      const runWord = (n: number) => (n === 1 ? "run" : "runs");
-      if (failed === 0) {
-        push({ message: `Archived ${total} ${runWord(total)}.` });
-      } else if (succeeded === 0) {
-        push({
-          message: `Couldn't archive ${total} ${runWord(total)}. Try again.`,
-          tone: "error",
-        });
-      } else {
-        push({
-          message: `Archived ${succeeded} of ${total} runs. ${failed} failed.`,
-          tone: "error",
-        });
-      }
     } finally {
       setPending(false);
       mutateRunListCaches(mutate);
@@ -1408,12 +1445,10 @@ function BulkActionToolbar({
 
   if (count === 0) return null;
 
-  const runWord = (n: number) => (n === 1 ? "run" : "runs");
-
   async function runBulk(
     label: "Archive" | "Unarchive",
     eligible: RunWithStatus[],
-    action: (id: string) => Promise<unknown>,
+    action: (ids: string[]) => Promise<BatchRunLifecycleResponse>,
   ) {
     if (pending) return;
     if (eligible.length === 0) {
@@ -1422,23 +1457,19 @@ function BulkActionToolbar({
     }
     setPending(true);
     try {
-      const results = await Promise.allSettled(eligible.map((r) => action(r.id)));
-      const succeeded = results.filter((r) => r.status === "fulfilled").length;
-      const failed = eligible.length - succeeded;
-      if (failed === 0) {
-        push({ message: `${label}d ${succeeded} ${runWord(succeeded)}.` });
+      const response = await action(eligible.map((r) => r.id));
+      const summary = summarizeBatchLifecycleAction(label, eligible.length, response.summary);
+      push(summary.toast);
+      if (summary.allSucceeded) {
         onClear();
-      } else if (succeeded === 0) {
-        push({
-          message: `Couldn't ${label.toLowerCase()} ${eligible.length} ${runWord(eligible.length)}. Try again.`,
-          tone: "error",
-        });
-      } else {
-        push({
-          message: `${label}d ${succeeded} of ${eligible.length} ${runWord(eligible.length)}. ${failed} failed.`,
-          tone: "error",
-        });
       }
+    } catch {
+      push(
+        summarizeBatchLifecycleAction(label, eligible.length, {
+          succeeded: 0,
+          failed:    eligible.length,
+        }).toast,
+      );
     } finally {
       setPending(false);
       mutateRunListCaches(mutate);
@@ -1459,14 +1490,14 @@ function BulkActionToolbar({
         <BulkActionButton
           label="Archive"
           icon={<ArchiveBoxIcon className="size-4" aria-hidden="true" />}
-          disabled={pending || archivable.length === 0}
-          onClick={() => runBulk("Archive", archivable, archiveRun)}
+          disabled={pending}
+          onClick={() => runBulk("Archive", archivable, archiveRuns)}
         />
         <BulkActionButton
           label="Unarchive"
           icon={<ArrowUturnLeftIcon className="size-4" aria-hidden="true" />}
-          disabled={pending || unarchivable.length === 0}
-          onClick={() => runBulk("Unarchive", unarchivable, unarchiveRun)}
+          disabled={pending}
+          onClick={() => runBulk("Unarchive", unarchivable, unarchiveRuns)}
         />
         <button
           type="button"

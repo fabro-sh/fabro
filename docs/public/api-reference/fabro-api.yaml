@@ -1143,6 +1143,112 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/archive:
+    post:
+      operationId: batchArchiveRuns
+      tags: [Runs]
+      summary: Archive Runs
+      description: >
+        Marks up to 250 terminal runs as archived in one fail-soft,
+        non-transactional request. Each run is processed independently and
+        successful items emit the same per-run archive events as
+        `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even
+        when some items fail; inspect `results` and `summary` for per-run
+        outcomes. Invalid request bodies are rejected before mutating any run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchRunLifecycleRequest"
+      responses:
+        "200":
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchRunLifecycleResponse"
+        "400":
+          description: Invalid batch request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Request-level server error
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/unarchive:
+    post:
+      operationId: batchUnarchiveRuns
+      tags: [Runs]
+      summary: Unarchive Runs
+      description: >
+        Restores up to 250 archived runs in one fail-soft, non-transactional
+        request. Each run is processed independently and successful items emit
+        the same per-run unarchive events as
+        `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even
+        when some items fail; inspect `results` and `summary` for per-run
+        outcomes. Invalid request bodies are rejected before mutating any run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchRunLifecycleRequest"
+      responses:
+        "200":
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchRunLifecycleResponse"
+        "400":
+          description: Invalid batch request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Request-level server error
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/resolve:
     get:
       operationId: resolveRun
@@ -5183,6 +5289,94 @@ components:
             $ref: "#/components/schemas/Run"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
+
+    BatchRunLifecycleRequest:
+      description: Run IDs to archive or unarchive as one bounded fail-soft batch.
+      type: object
+      additionalProperties: false
+      required:
+        - run_ids
+      properties:
+        run_ids:
+          type: array
+          description: Run IDs to process, in result order.
+          minItems: 1
+          maxItems: 250
+          uniqueItems: true
+          items:
+            type: string
+            example: 01HZX6M29F1CD5YYMHT1F5D7WQ
+
+    BatchRunLifecycleResponse:
+      description: Per-run results for a fail-soft batch archive or unarchive request.
+      type: object
+      additionalProperties: false
+      required:
+        - results
+        - summary
+      properties:
+        results:
+          type: array
+          description: Results ordered exactly like the request `run_ids`.
+          items:
+            $ref: "#/components/schemas/BatchRunLifecycleResult"
+        summary:
+          $ref: "#/components/schemas/BatchRunLifecycleSummary"
+
+    BatchRunLifecycleResult:
+      description: Result for one run in a batch archive or unarchive request.
+      type: object
+      additionalProperties: false
+      required:
+        - run_id
+        - ok
+        - outcome
+      properties:
+        run_id:
+          type: string
+          description: Run ID from the request item.
+        ok:
+          type: boolean
+          description: Whether this item succeeded.
+        outcome:
+          type: string
+          enum:
+            - archived
+            - already_archived
+            - unarchived
+            - not_archived
+            - not_found
+            - conflict
+            - error
+          description: Machine-readable item outcome.
+        run:
+          $ref: "#/components/schemas/Run"
+          description: Decorated run summary for successful items when it can be loaded.
+        error:
+          $ref: "#/components/schemas/ErrorResponseEntry"
+          description: Structured item error for failed items.
+
+    BatchRunLifecycleSummary:
+      description: Aggregate counts for a batch archive or unarchive request.
+      type: object
+      additionalProperties: false
+      required:
+        - requested
+        - succeeded
+        - failed
+      properties:
+        requested:
+          type: integer
+          minimum: 0
+          description: Number of requested run IDs.
+        succeeded:
+          type: integer
+          minimum: 0
+          description: Number of item results with `ok=true`.
+        failed:
+          type: integer
+          minimum: 0
+          description: Number of item results with `ok=false`.
 
     PairId:
       type: string

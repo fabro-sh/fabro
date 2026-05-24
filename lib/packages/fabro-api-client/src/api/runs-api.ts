@@ -22,6 +22,10 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
+import type { BatchRunLifecycleRequest } from '../models';
+// @ts-ignore
+import type { BatchRunLifecycleResponse } from '../models';
+// @ts-ignore
 import type { BoardColumn } from '../models';
 // @ts-ignore
 import type { CloseRunPullRequestResponse } from '../models';
@@ -150,6 +154,88 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Marks up to 250 terminal runs as archived in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run archive events as `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+         * @summary Archive Runs
+         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        batchArchiveRuns: async (batchRunLifecycleRequest: BatchRunLifecycleRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'batchRunLifecycleRequest' is not null or undefined
+            assertParamExists('batchArchiveRuns', 'batchRunLifecycleRequest', batchRunLifecycleRequest)
+            const localVarPath = `/api/v1/runs/archive`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(batchRunLifecycleRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+         * @summary Unarchive Runs
+         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        batchUnarchiveRuns: async (batchRunLifecycleRequest: BatchRunLifecycleRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'batchRunLifecycleRequest' is not null or undefined
+            assertParamExists('batchUnarchiveRuns', 'batchRunLifecycleRequest', batchRunLifecycleRequest)
+            const localVarPath = `/api/v1/runs/unarchive`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(batchRunLifecycleRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -1437,6 +1523,32 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Marks up to 250 terminal runs as archived in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run archive events as `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+         * @summary Archive Runs
+         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async batchArchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BatchRunLifecycleResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.batchArchiveRuns(batchRunLifecycleRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.batchArchiveRuns']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+         * @summary Unarchive Runs
+         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async batchUnarchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BatchRunLifecycleResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.batchUnarchiveRuns(batchRunLifecycleRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.batchUnarchiveRuns']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
          * @summary Cancel Run
          * @param {string} id Unique run identifier (ULID).
@@ -1860,6 +1972,26 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.archiveRun(id, options).then((request) => request(axios, basePath));
         },
         /**
+         * Marks up to 250 terminal runs as archived in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run archive events as `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+         * @summary Archive Runs
+         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        batchArchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): AxiosPromise<BatchRunLifecycleResponse> {
+            return localVarFp.batchArchiveRuns(batchRunLifecycleRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+         * @summary Unarchive Runs
+         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        batchUnarchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): AxiosPromise<BatchRunLifecycleResponse> {
+            return localVarFp.batchUnarchiveRuns(batchRunLifecycleRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
          * @summary Cancel Run
          * @param {string} id Unique run identifier (ULID).
@@ -2193,6 +2325,28 @@ export class RunsApi extends BaseAPI {
      */
     public archiveRun(id: string, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).archiveRun(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Marks up to 250 terminal runs as archived in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run archive events as `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+     * @summary Archive Runs
+     * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public batchArchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).batchArchiveRuns(batchRunLifecycleRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+     * @summary Unarchive Runs
+     * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public batchUnarchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).batchUnarchiveRuns(batchRunLifecycleRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
