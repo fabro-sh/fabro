@@ -5280,7 +5280,6 @@ async fn list_models_filters_by_query_across_aliases() {
         .map(|model| model["id"].as_str().unwrap().to_string())
         .collect::<Vec<_>>();
     assert_eq!(model_ids, vec![
-        "gpt-5.2-codex".to_string(),
         "gpt-5.3-codex".to_string(),
         "gpt-5.3-codex-spark".to_string()
     ]);

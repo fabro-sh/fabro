@@ -1,0 +1,39 @@
+---
+title: "Batch delete and richer stage details"
+date: "2026-05-24"
+---
+
+## Delete runs in batches
+
+The runs list bulk toolbar now includes Delete for selected runs. API clients can use the matching batch delete endpoint to remove multiple runs in one request and get per-run results back.
+
+```http
+POST /api/v1/runs/delete
+```
+
+## Stage details are closer at hand
+
+Stage status, model, and event details are now available from hover popovers across the run overview graph, stage sidebar, and stage events toolbar. You can inspect stage metadata without leaving the current run view.
+
+Loaded stage events also gained Copy and Download actions. That makes it easier to move event output into an issue, support thread, or local investigation without selecting text from the page.
+
+## More
+
+<Accordion title="API">
+- New `POST /api/v1/runs/delete` endpoint deletes multiple runs and returns per-run results plus a summary
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed unfinished stages being left open after a run failure
+- Removed a non-functional demo-mode Connect dropdown
+- Suppressed the redundant Starting pill on the runs list
+</Accordion>
+
+<Accordion title="Improvements">
+- Added a run size badge to the run header
+- Unconfigured provider rows now link directly to a prefilled secret form
+- Removed retired OpenAI models from the catalog
+- Improved muted stage status pill contrast
+- Collapsed the stage events search field behind an icon by default
+- Updated the Automations nav icon
+</Accordion>

@@ -49,6 +49,8 @@ This gives Fabro a durable view of agent task state instead of treating todo upd
 <Accordion title="Workflows">
 - `fabro_run_create` now supports `goal_file` and preserves it as a file-backed run goal
 - `fabro_run_create` now accepts the advertised workflow-string shorthand in MCP clients
+- New `fabro_run_get` tool provides read-only run inspection without mutating workflow state
+- `run.checkpoint.skip_git_hooks` can bypass Git hooks during checkpoint commits
 - Pair user and system messages now appear in the stage Thread tab and activity timeline
 </Accordion>
 
@@ -57,11 +59,15 @@ This gives Fabro a durable view of agent task state instead of treating todo upd
 - Fixed Ask Fabro markdown spacing and heading sizes in narrow panels
 - Fixed reasoning deltas leaking into Ask Fabro output
 - Fixed archived run board updates not refreshing active and archived queries consistently
+- Fixed retryable mid-stream LLM failures being treated as terminal agent errors
+- Fixed agent edit operations by reading raw sandbox file contents before applying patches
 </Accordion>
 
 <Accordion title="Improvements">
 - The run stage sidebar can now collapse to an icon rail while preserving status indicators
 - Ask Fabro example prompts now use fuller, action-oriented text
+- Agent context observability now records memory, activated skills, and MCP tools as run events
+- Anthropic agent sessions now support task lookup and task reminders
 - Run board archived columns now stay in a predictable order after archive and unarchive actions
 - OpenAI `apply_patch` handling is now compatible with Codex-style patch grammar
 </Accordion>

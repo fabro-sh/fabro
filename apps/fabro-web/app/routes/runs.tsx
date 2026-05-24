@@ -175,10 +175,11 @@ function boardLifecycleStatusLabel(run: Pick<RunItem, "column" | "lifecycleStatu
   return run.lifecycleStatusLabel;
 }
 
-function listLifecycleStatusLabel(run: Pick<RunWithStatus, "statusLabel" | "lifecycleStatusLabel">): string | null {
+function listLifecycleStatusLabel(run: Pick<RunWithStatus, "status" | "statusLabel" | "lifecycleStatusLabel">): string | null {
   if (run.lifecycleStatusLabel == null || run.lifecycleStatusLabel === run.statusLabel) {
     return null;
   }
+  if (run.status === "initializing") return null;
   return run.lifecycleStatusLabel;
 }
 

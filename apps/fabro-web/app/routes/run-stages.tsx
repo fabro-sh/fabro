@@ -1416,12 +1416,9 @@ function EventsToolbar({
           <span className="font-mono">{modelUsageLabel}</span>
         </HoverCard>
       )}
-      <EventExportActions
-        events={events}
-        runId={runId}
-        stageId={stageId}
-        className={!showFilters && !modelUsageLabel ? "ml-auto" : ""}
-      />
+      {tab === "debug" && (
+        <EventExportActions events={events} runId={runId} stageId={stageId} />
+      )}
       {tab === "primary" && renderer === "command" && commandTurn && (
         <CommandStatus turn={commandTurn} />
       )}

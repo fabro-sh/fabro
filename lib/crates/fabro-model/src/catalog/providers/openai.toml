@@ -33,55 +33,6 @@ input_cost_per_mtok = 1.75
 output_cost_per_mtok = 14.0
 cache_input_cost_per_mtok = 0.175
 
-[models."gpt-5-mini"]
-provider = "openai"
-api_id = "gpt-5-mini"
-display_name = "GPT-5 Mini"
-family = "gpt-5"
-training = "2025-08-31"
-knowledge_cutoff = "April 2025"
-estimated_output_tps = 70
-aliases = ["gpt5-mini"]
-
-[models."gpt-5-mini".limits]
-context_window = 1047576
-max_output = 128000
-
-[models."gpt-5-mini".features]
-tools = true
-vision = true
-reasoning = true
-reasoning_effort = "levels"
-
-[models."gpt-5-mini".costs]
-input_cost_per_mtok = 0.25
-output_cost_per_mtok = 2.0
-cache_input_cost_per_mtok = 0.025
-
-[models."gpt-5.2-codex"]
-provider = "openai"
-api_id = "gpt-5.2-codex"
-display_name = "GPT-5.2 Codex"
-family = "gpt-5"
-training = "2025-08-31"
-knowledge_cutoff = "April 2025"
-estimated_output_tps = 100
-
-[models."gpt-5.2-codex".limits]
-context_window = 1047576
-max_output = 128000
-
-[models."gpt-5.2-codex".features]
-tools = true
-vision = true
-reasoning = true
-reasoning_effort = "levels"
-
-[models."gpt-5.2-codex".costs]
-input_cost_per_mtok = 1.75
-output_cost_per_mtok = 14.0
-cache_input_cost_per_mtok = 0.175
-
 [models."gpt-5.3-codex"]
 provider = "openai"
 api_id = "gpt-5.3-codex"

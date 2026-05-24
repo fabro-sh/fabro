@@ -120,7 +120,6 @@ fn list_query_aliases() {
     exit_code: 0
     ----- stdout -----
     MODEL                PROVIDER  ALIASES      CONTEXT          COST       SPEED 
-     gpt-5.2-codex        openai                      1m  $1.8 / $14.0   100 tok/s 
      gpt-5.3-codex        openai    codex             1m  $1.8 / $14.0   100 tok/s 
      gpt-5.3-codex-spark  openai    codex-spark     131k         - / -  1000 tok/s
     ----- stderr -----

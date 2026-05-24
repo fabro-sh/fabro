@@ -1,8 +1,69 @@
 ---
-title: "Legacy sandbox config migration"
+title: "Runs list, Slack notifications, and structured outputs"
 date: "2026-05-23"
 ---
 
-## Legacy sandbox config auto-migration
+<Warning>
+**Run lifecycle status values changed for API and CLI consumers.** The old `queued` state is now split into `pending` and `runnable`, and approval state is represented explicitly.
 
-Fabro now temporarily rewrites confidently migratable pre-v1.0 `[run.sandbox]` config files to the named environment syntax. A backup is written next to the original file before rewriting. Ambiguous or unsupported legacy keys fail with a targeted migration message instead of the generic TOML unknown-field error.
+To migrate:
+1. Update clients that switch on `queued` to handle `pending` and `runnable`.
+2. Use the approval fields on run summaries and projections when deciding whether a run is waiting for human action.
+</Warning>
+
+## Runs are easier to scan, sort, and recover
+
+The runs list now uses a denser table layout with server-side sorting, pagination, and a redesigned toolbar. You can sort by repo, title, workflow, and changes without waiting for the browser to process the full list.
+
+Failed and dead runs can now be retried from the run UI and API instead of being recreated by hand. The same run lifecycle work also separates pending runs from runnable runs, so approvals and blocked start conditions are clearer in the product and the API.
+
+## Batch run actions
+
+The runs list now supports multi-select archive and unarchive, with matching batch lifecycle endpoints for API clients. Workspace preferences remember the runs view choices you make, so list layout and filtering stay consistent across visits.
+
+Run size is now exposed on summaries and projections, which gives the UI and API a shared way to distinguish small, medium, and large runs. The web app uses that signal in the run header and list surfaces where scale matters for triage.
+
+## Agent stages expose more of what is happening
+
+Agent stage pages now include a stage insights sidebar, context-window snapshots, and richer stage projections for todos, subagents, skills, MCP tools, reasoning effort, speed, and model usage. This makes it easier to see why a stage is behaving a certain way without digging through raw events.
+
+Structured output validation is also stricter. Agent and prompt stages with `output_schema` now validate model output in the same context and ask the model to repair invalid responses before the workflow moves on.
+
+## Slack run lifecycle notifications
+
+Workflows can now send run lifecycle updates to Slack through `[run.notifications]`. Teams can keep a channel informed when a run starts, needs attention, finishes, or fails without wiring a separate webhook workflow.
+
+```toml
+[run.notifications]
+slack = true
+```
+
+## More
+
+<Accordion title="API">
+- New `POST /api/v1/runs/archive` and `POST /api/v1/runs/unarchive` endpoints apply lifecycle actions to multiple runs at once
+- Run summaries and projections now expose run size buckets
+- Stage projections now include agent todos, subagents, skills, MCP tools, context-window data, and model usage
+- `output_schema` validation errors now include structured repair context for agent and prompt stages
+</Accordion>
+
+<Accordion title="Workflows">
+- Named environments replace run-scoped sandbox config, with automatic migration for confidently supported legacy `[run.sandbox]` files
+- Legacy sandbox config migration writes a backup next to the original file before rewriting
+- Ambiguous legacy sandbox config now fails with a targeted migration message
+- Interview options now carry metadata through the API, console, Slack blocks, and agent question tools
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed the Quick Start screen flashing when navigating to `/runs` with archived preferences
+- Fixed implement-plan pull requests advancing before CI checks completed
+- Fixed an event append race covered by a regression test
+</Accordion>
+
+<Accordion title="Improvements">
+- Added a Waterfall view for run events with hover popovers and duration breakdowns
+- Added live timing overlays for in-flight runs
+- Generated run titles now use the lighter `small_default` model role asynchronously
+- Settings pages now show provider and integration logos, including upcoming Teams, Discord, and Jira integrations
+- Stage insights sidebar polish improved visit syntax, spacing, and quiet-state presentation
+</Accordion>
