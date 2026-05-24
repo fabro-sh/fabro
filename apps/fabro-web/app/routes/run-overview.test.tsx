@@ -19,6 +19,7 @@ mock.module("../lib/queries", () => ({
     isLoading: currentGraphLoading,
     mutate:    graphMutateMock,
   }),
+  useRunStageEvents: () => ({ data: undefined }),
 }));
 
 mock.module("../components/run-summary-panel", () => ({
