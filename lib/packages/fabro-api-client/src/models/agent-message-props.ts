@@ -32,9 +32,6 @@ export interface AgentMessageProps {
     'billing': BilledTokenCounts;
     'tool_call_count': number;
     'visit': number;
-    /**
-     * Canonical replay-authoritative transcript message, when present.
-     */
-    'message'?: { [key: string]: any; };
+    'message'?: { [key: string]: any; } | null;
     'context_window'?: StageContextWindowProjection | null;
 }

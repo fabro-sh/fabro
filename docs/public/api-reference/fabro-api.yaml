@@ -7994,8 +7994,10 @@ components:
           type: integer
           minimum: 1
         message:
-          type: ["object", "null"]
-          additionalProperties: true
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
           description: Canonical replay-authoritative transcript message, when present.
         context_window:
           oneOf:
