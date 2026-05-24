@@ -283,13 +283,18 @@ function todoStatusVisual(status: TodoStatus): { Icon: IconType; color: string; 
       return { Icon: XCircleIcon, color: "text-fg-muted", srLabel: "Deleted" };
     case TodoStatus.PENDING:
     default:
-      return { Icon: TodoPendingIcon, color: "text-fg-muted", srLabel: "Pending" };
+      return { Icon: EmptyCircleIcon, color: "text-fg-muted", srLabel: "Pending" };
   }
 }
 
-/** Empty circle for pending todos (matches Tailwind sizing). */
-function TodoPendingIcon({ className }: { className?: string }) {
-  return <span className={`inline-block rounded-full border border-current ${className ?? ""}`} />;
+/** Empty circle for pending/available states (matches Tailwind sizing). */
+function EmptyCircleIcon({ className }: { className?: string }) {
+  return (
+    <span
+      className={`inline-block rounded-full border border-current ${className ?? ""}`}
+      aria-hidden="true"
+    />
+  );
 }
 
 // ---------- Context window ----------
@@ -529,7 +534,7 @@ function AgentToolsSection({ tools }: { tools: AgentToolSummary[] }) {
               {tool.invoked ? (
                 <CheckCircleIcon className="size-3.5 shrink-0 text-mint" aria-label="Invoked" />
               ) : (
-                <ToolAvailableIcon className="size-3.5 shrink-0 text-fg-muted" />
+                <EmptyCircleIcon className="size-3.5 shrink-0 text-fg-muted" />
               )}
               <span className={nameClass}>{tool.name}</span>
               <span className="font-mono text-[10px] tabular-nums text-fg-muted">
@@ -562,10 +567,6 @@ function toolSourceLabel(source: AgentToolSummary["source"]): string {
     default:
       return "native";
   }
-}
-
-function ToolAvailableIcon({ className }: { className?: string }) {
-  return <span className={`inline-block rounded-full border border-current ${className ?? ""}`} aria-hidden="true" />;
 }
 
 // ---------- MCPs ----------

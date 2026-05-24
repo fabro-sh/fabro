@@ -18,8 +18,8 @@ use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
 use fabro_types::{
-    PermissionLevel, Principal, SessionMessage, SessionRecord, StageContextWindowProjection,
-    SteeringMessage,
+    AgentToolSummary, PermissionLevel, Principal, SessionMessage, SessionRecord,
+    StageContextWindowProjection, SteeringMessage,
 };
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
@@ -501,9 +501,32 @@ impl Session {
         self.config.permission_level
     }
 
+    /// Effective tool list the model is exposed to after provider-profile
+    /// setup, optional registrations, MCP integration, and access-policy
+    /// filtering. This is the same path used to build outbound requests.
     #[must_use]
-    pub fn available_tools(&self) -> Vec<ToolDefinitionWithSource> {
-        self.effective_tools()
+    pub fn effective_tools(&self) -> Vec<ToolDefinitionWithSource> {
+        self.provider_profile
+            .tool_registry()
+            .definitions_with_source_for_policy(
+                self.config.tool_access_policy.as_deref(),
+                self.config.tool_exposure_mode,
+            )
+    }
+
+    /// Public projection of `effective_tools()` for
+    /// `StageProjection.agent_tools` and the `agent.tools.available` event.
+    /// Sorted by name for deterministic snapshots; the underlying registry
+    /// stores tools in a `HashMap`.
+    #[must_use]
+    pub fn agent_tool_summaries(&self) -> Vec<AgentToolSummary> {
+        let mut summaries: Vec<_> = self
+            .effective_tools()
+            .iter()
+            .map(ToolDefinitionWithSource::to_agent_tool_summary)
+            .collect();
+        summaries.sort_by(|left, right| left.name.cmp(&right.name));
+        summaries
     }
 
     /// Initialize session by discovering project docs and capturing environment
@@ -2021,15 +2044,6 @@ impl Session {
             });
         }
     }
-
-    fn effective_tools(&self) -> Vec<ToolDefinitionWithSource> {
-        self.provider_profile
-            .tool_registry()
-            .definitions_with_source_for_policy(
-                self.config.tool_access_policy.as_deref(),
-                self.config.tool_exposure_mode,
-            )
-    }
 }
 
 const fn is_auth_error(err: &LlmError) -> bool {
@@ -3281,7 +3295,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn available_tools_uses_same_effective_registry_filter_as_requests() {
+    async fn effective_tools_match_request_tool_filtering() {
         let provider = Arc::new(CapturingLlmProvider::new());
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let mut registry = ToolRegistry::new();
@@ -3301,7 +3315,7 @@ mod tests {
         };
         let session = Session::new(client, profile, env, config, None);
 
-        let tools = session.available_tools();
+        let tools = session.effective_tools();
         let mut tool_names: Vec<&str> = tools
             .iter()
             .map(|tool| tool.definition.name.as_str())

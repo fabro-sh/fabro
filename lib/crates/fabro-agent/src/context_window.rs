@@ -382,7 +382,8 @@ mod tests {
         let tools = vec![
             tool("read_file", ToolSource::Native),
             tool("mcp__server__search", ToolSource::Mcp {
-                server_name: "server".to_string(),
+                server_name:   "server".to_string(),
+                original_name: "search".to_string(),
             }),
             tool("use_skill", ToolSource::Skill),
         ];

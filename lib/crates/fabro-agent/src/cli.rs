@@ -93,7 +93,7 @@ pub enum OutputFormat {
     Json,
 }
 
-pub use fabro_types::PermissionLevel;
+pub use fabro_types::{AgentToolCategory, PermissionLevel};
 
 impl AgentArgs {
     /// Fill `None` fields from settings.toml values, then hardcoded defaults.
@@ -155,6 +155,8 @@ fn build_tool_approval(
             "Allow {} ({category})? [y]es / [n]o / [a]lways: ",
             styles.bold.apply_to(tool_name),
         );
+        // `AgentToolCategory` derives strum::Display so it renders as the
+        // canonical snake_case label (e.g. "read", "write").
         std::io::stderr().flush().ok();
 
         let mut input = String::new();
@@ -166,7 +168,7 @@ fn build_tool_approval(
             "y" | "yes" => Ok(()),
             "a" | "always" => {
                 let mut lvl = level.lock().expect("permission lock poisoned");
-                *lvl = if category == "write" {
+                *lvl = if category == AgentToolCategory::Write {
                     PermissionLevel::ReadWrite
                 } else {
                     PermissionLevel::Full
@@ -816,62 +818,98 @@ mod tests {
 
     #[test]
     fn tool_category_read_tools() {
-        assert_eq!(tool_category("read_file"), "read");
-        assert_eq!(tool_category("read_many_files"), "read");
-        assert_eq!(tool_category("grep"), "read");
-        assert_eq!(tool_category("glob"), "read");
-        assert_eq!(tool_category("list_dir"), "read");
+        assert_eq!(tool_category("read_file"), AgentToolCategory::Read);
+        assert_eq!(tool_category("read_many_files"), AgentToolCategory::Read);
+        assert_eq!(tool_category("grep"), AgentToolCategory::Read);
+        assert_eq!(tool_category("glob"), AgentToolCategory::Read);
+        assert_eq!(tool_category("list_dir"), AgentToolCategory::Read);
     }
 
     #[test]
     fn tool_category_write_tools() {
-        assert_eq!(tool_category("write_file"), "write");
-        assert_eq!(tool_category("edit_file"), "write");
-        assert_eq!(tool_category("apply_patch"), "write");
+        assert_eq!(tool_category("write_file"), AgentToolCategory::Write);
+        assert_eq!(tool_category("edit_file"), AgentToolCategory::Write);
+        assert_eq!(tool_category("apply_patch"), AgentToolCategory::Write);
     }
 
     #[test]
     fn tool_category_shell() {
-        assert_eq!(tool_category("shell"), "shell");
+        assert_eq!(tool_category("shell"), AgentToolCategory::Shell);
     }
 
     #[test]
     fn tool_category_subagent_tools() {
-        assert_eq!(tool_category("spawn_agent"), "subagent");
-        assert_eq!(tool_category("send_input"), "subagent");
-        assert_eq!(tool_category("wait"), "subagent");
-        assert_eq!(tool_category("close_agent"), "subagent");
+        assert_eq!(tool_category("spawn_agent"), AgentToolCategory::Subagent);
+        assert_eq!(tool_category("send_input"), AgentToolCategory::Subagent);
+        assert_eq!(tool_category("wait"), AgentToolCategory::Subagent);
+        assert_eq!(tool_category("close_agent"), AgentToolCategory::Subagent);
     }
 
     #[test]
     fn tool_category_unknown_defaults_to_shell() {
-        assert_eq!(tool_category("some_random_tool"), "shell");
+        assert_eq!(tool_category("some_random_tool"), AgentToolCategory::Shell);
     }
 
     // is_auto_approved tests
 
     #[test]
     fn is_auto_approved_read_only() {
-        assert!(is_auto_approved(PermissionLevel::ReadOnly, "read"));
-        assert!(is_auto_approved(PermissionLevel::ReadOnly, "subagent"));
-        assert!(!is_auto_approved(PermissionLevel::ReadOnly, "write"));
-        assert!(!is_auto_approved(PermissionLevel::ReadOnly, "shell"));
+        assert!(is_auto_approved(
+            PermissionLevel::ReadOnly,
+            AgentToolCategory::Read
+        ));
+        assert!(is_auto_approved(
+            PermissionLevel::ReadOnly,
+            AgentToolCategory::Subagent
+        ));
+        assert!(!is_auto_approved(
+            PermissionLevel::ReadOnly,
+            AgentToolCategory::Write
+        ));
+        assert!(!is_auto_approved(
+            PermissionLevel::ReadOnly,
+            AgentToolCategory::Shell
+        ));
     }
 
     #[test]
     fn is_auto_approved_read_write() {
-        assert!(is_auto_approved(PermissionLevel::ReadWrite, "read"));
-        assert!(is_auto_approved(PermissionLevel::ReadWrite, "subagent"));
-        assert!(is_auto_approved(PermissionLevel::ReadWrite, "write"));
-        assert!(!is_auto_approved(PermissionLevel::ReadWrite, "shell"));
+        assert!(is_auto_approved(
+            PermissionLevel::ReadWrite,
+            AgentToolCategory::Read
+        ));
+        assert!(is_auto_approved(
+            PermissionLevel::ReadWrite,
+            AgentToolCategory::Subagent
+        ));
+        assert!(is_auto_approved(
+            PermissionLevel::ReadWrite,
+            AgentToolCategory::Write
+        ));
+        assert!(!is_auto_approved(
+            PermissionLevel::ReadWrite,
+            AgentToolCategory::Shell
+        ));
     }
 
     #[test]
     fn is_auto_approved_full() {
-        assert!(is_auto_approved(PermissionLevel::Full, "read"));
-        assert!(is_auto_approved(PermissionLevel::Full, "subagent"));
-        assert!(is_auto_approved(PermissionLevel::Full, "write"));
-        assert!(is_auto_approved(PermissionLevel::Full, "shell"));
+        assert!(is_auto_approved(
+            PermissionLevel::Full,
+            AgentToolCategory::Read
+        ));
+        assert!(is_auto_approved(
+            PermissionLevel::Full,
+            AgentToolCategory::Subagent
+        ));
+        assert!(is_auto_approved(
+            PermissionLevel::Full,
+            AgentToolCategory::Write
+        ));
+        assert!(is_auto_approved(
+            PermissionLevel::Full,
+            AgentToolCategory::Shell
+        ));
     }
 
     // build_tool_approval non-interactive tests
