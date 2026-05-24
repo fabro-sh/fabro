@@ -630,8 +630,18 @@ impl RunProjectionReducer for RunProjection {
     }
 }
 
+/// Decide whether a TODO event should mutate `StageProjection.todos`.
+///
+/// OpenAI plan lists are scoped per agent session (`openai_plan:<session_id>`),
+/// so a child/subagent session emits its own list events on the same stage.
+/// The stage sidebar represents the root stage agent, so we drop child OpenAI
+/// plan events here to keep the projection on the root session's list.
+/// Anthropic task lists are root-scoped (`anthropic_tasks:<root_session_id>`)
+/// and intentionally shared with subagents, so they always project.
 fn should_project_stage_todo_event(stored: &RunEvent, list_kind: TodoListKind) -> bool {
-    !matches!(list_kind, TodoListKind::OpenAiPlan) || stored.parent_session_id.is_none()
+    let is_child_openai_plan_event =
+        matches!(list_kind, TodoListKind::OpenAiPlan) && stored.parent_session_id.is_some();
+    !is_child_openai_plan_event
 }
 
 fn apply_todo_created(stage: &mut StageProjection, props: &TodoCreatedProps) {
