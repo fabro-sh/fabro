@@ -863,7 +863,7 @@ mod tests {
         );
         emit(&mut ui, stage_completed("plan", "Plan"));
 
-        insta::assert_snapshot!(rendered(&buffer), @"    ✓ Plan  $0.00   5s");
+        insta::assert_snapshot!(rendered(&buffer), @"    ✓ Plan  5s");
     }
 
     #[test]
@@ -1233,7 +1233,7 @@ mod tests {
         Running devcontainer postCreate (1 commands)...
           ✓ [1/1] npm run setup  1s
         Devcontainer: postCreate (1s)
-        ✓ Code  $0.00   5s  (1 turns, 0 tools, 1.5k toks)
+        ✓ Code  5s  (1 turns, 0 tools, 1.5k toks)
         "#);
     }
 
