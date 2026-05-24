@@ -207,7 +207,7 @@ async fn prune_runs(
     }
 
     for run_id in &prune_plan.run_ids {
-        if let Err(error) = delete_run_internal(&state, *run_id, true).await {
+        if let Err(error) = delete_run_internal(state.as_ref(), *run_id, true).await {
             return error.into_response();
         }
     }

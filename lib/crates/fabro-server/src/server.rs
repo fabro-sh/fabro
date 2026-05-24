@@ -2191,12 +2191,12 @@ enum SandboxDeleteOutcome {
 }
 
 async fn delete_run_internal(
-    state: &Arc<AppState>,
+    state: &AppState,
     id: RunId,
     force: bool,
 ) -> Result<DeleteRunOutcome, ApiError> {
     if !force {
-        reject_active_delete_without_force(state.as_ref(), &id).await?;
+        reject_active_delete_without_force(state, &id).await?;
     }
 
     let mut managed_run = if let Ok(mut runs) = state.runs.lock() {
@@ -2206,7 +2206,7 @@ async fn delete_run_internal(
     };
     let had_managed_run = managed_run.is_some();
     let durable_status = if managed_run.is_some() {
-        load_durable_run_status(state.as_ref(), &id).await
+        load_durable_run_status(state, &id).await
     } else {
         None
     };
@@ -2279,7 +2279,7 @@ async fn load_durable_run_status(state: &AppState, id: &RunId) -> Option<RunStat
 }
 
 async fn delete_run_sandbox_resource(
-    state: &Arc<AppState>,
+    state: &AppState,
     id: RunId,
     force: bool,
 ) -> Result<SandboxDeleteOutcome, ApiError> {

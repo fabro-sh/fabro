@@ -3725,7 +3725,9 @@ async fn delete_terminal_managed_run_does_not_send_cancel_signal() {
         .expect("runs lock poisoned")
         .insert(run_id, run);
 
-    delete_run_internal(&state, run_id, true).await.unwrap();
+    delete_run_internal(state.as_ref(), run_id, true)
+        .await
+        .unwrap();
 
     assert!(!cancel_token.is_cancelled());
 }

@@ -733,7 +733,7 @@ async fn batch_delete_runs(
 
     let mut results = Vec::with_capacity(ids.len());
     for id in ids {
-        results.push(batch_delete_run_item(&state, id, force).await);
+        results.push(batch_delete_run_item(state.as_ref(), id, force).await);
     }
 
     let requested = results.len() as u64;
@@ -944,7 +944,7 @@ enum ArchiveAction {
     Unarchive,
 }
 
-const MAX_BATCH_RUN_LIFECYCLE_IDS: usize = 250;
+const MAX_BATCH_RUN_IDS: usize = 250;
 
 async fn batch_run_archive_action(
     state: Arc<AppState>,
@@ -990,9 +990,9 @@ fn validate_batch_run_ids(run_ids: Vec<String>) -> Result<Vec<RunId>, ApiError> 
             "run_ids must contain at least one run ID.",
         ));
     }
-    if run_ids.len() > MAX_BATCH_RUN_LIFECYCLE_IDS {
+    if run_ids.len() > MAX_BATCH_RUN_IDS {
         return Err(ApiError::bad_request(format!(
-            "run_ids must contain no more than {MAX_BATCH_RUN_LIFECYCLE_IDS} run IDs.",
+            "run_ids must contain no more than {MAX_BATCH_RUN_IDS} run IDs.",
         )));
     }
 
@@ -1012,11 +1012,7 @@ fn validate_batch_run_ids(run_ids: Vec<String>) -> Result<Vec<RunId>, ApiError> 
     Ok(ids)
 }
 
-async fn batch_delete_run_item(
-    state: &Arc<AppState>,
-    id: RunId,
-    force: bool,
-) -> BatchDeleteRunsResult {
+async fn batch_delete_run_item(state: &AppState, id: RunId, force: bool) -> BatchDeleteRunsResult {
     match delete_run_internal(state, id, force).await {
         Ok(DeleteRunOutcome::Deleted) => {
             batch_delete_success(id, BatchDeleteRunsResultOutcome::Deleted, None)

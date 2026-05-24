@@ -32,10 +32,11 @@ use tokio::fs;
 use tracing::info;
 
 use super::super::{
-    AppState, ListResponse, PaginationParams, RunExecutionMode, answer_from_request,
-    api_question_from_pending_interview, default_page_limit, delete_run_internal,
-    load_pending_interview, managed_run, paginate_items, parse_run_id_path, parse_stage_id_path,
-    reject_if_archived, resolve_interp_string, submit_pending_interview_answer, workflow_event,
+    AppState, DeleteRunOutcome, ListResponse, PaginationParams, RunExecutionMode,
+    answer_from_request, api_question_from_pending_interview, default_page_limit,
+    delete_run_internal, load_pending_interview, managed_run, paginate_items, parse_run_id_path,
+    parse_stage_id_path, reject_if_archived, resolve_interp_string,
+    submit_pending_interview_answer, workflow_event,
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
@@ -508,11 +509,11 @@ async fn delete_run(
         Err(response) => return response,
     };
 
-    match delete_run_internal(&state, id, query.force).await {
-        Ok(
-            super::super::DeleteRunOutcome::Deleted | super::super::DeleteRunOutcome::AlreadyAbsent,
-        ) => StatusCode::NO_CONTENT.into_response(),
-        Ok(super::super::DeleteRunOutcome::Preserved(response)) => {
+    match delete_run_internal(state.as_ref(), id, query.force).await {
+        Ok(DeleteRunOutcome::Deleted | DeleteRunOutcome::AlreadyAbsent) => {
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(DeleteRunOutcome::Preserved(response)) => {
             (StatusCode::OK, Json(response)).into_response()
         }
         Err(error) => error.into_response(),
