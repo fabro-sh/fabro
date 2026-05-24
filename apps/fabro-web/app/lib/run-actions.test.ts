@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AxiosAdapter } from "axios";
-import type { BatchRunLifecycleResponse, Run, RunStatus } from "@qltysh/fabro-api-client";
+import type {
+  BatchDeleteRunsResponse,
+  BatchRunLifecycleResponse,
+  Run,
+  RunStatus,
+} from "@qltysh/fabro-api-client";
 
 import {
   archiveRun,
@@ -11,6 +16,7 @@ import {
   canRetry,
   canUnarchive,
   cancelRun,
+  deleteRuns,
   isTerminalCancelledRun,
   mapError,
   retryRun,
@@ -107,6 +113,20 @@ function stubGeneratedAxiosOnce(init: StubResponseInit): { requests: CapturedReq
 function batchResponse(
   results: BatchRunLifecycleResponse["results"],
 ): BatchRunLifecycleResponse {
+  const succeeded = results.filter((result) => result.ok).length;
+  return {
+    results,
+    summary: {
+      requested: results.length,
+      succeeded,
+      failed: results.length - succeeded,
+    },
+  };
+}
+
+function batchDeleteResponse(
+  results: BatchDeleteRunsResponse["results"],
+): BatchDeleteRunsResponse {
   const succeeded = results.filter((result) => result.ok).length;
   return {
     results,
@@ -227,6 +247,72 @@ describe("run lifecycle actions", () => {
     expect(result.summary).toEqual({ requested: 2, succeeded: 1, failed: 1 });
     expect(result.results[1]?.ok).toBe(false);
     expect(result.results[1]?.error?.status).toBe("404");
+  });
+
+  test("deleteRuns sends one batch request and parses results", async () => {
+    const stub = stubGeneratedAxiosOnce({
+      status: 200,
+      body: batchDeleteResponse([
+        {
+          run_id: "run-1",
+          ok: true,
+          outcome: "deleted",
+        },
+        {
+          run_id: "run-missing",
+          ok: true,
+          outcome: "already_absent",
+        },
+      ]),
+    });
+
+    const result = await deleteRuns(["run-1", "run-missing"]);
+
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0]?.method?.toUpperCase()).toBe("POST");
+    expect(stub.requests[0]?.url).toBe("/api/v1/runs/delete");
+    expect(requestJsonBody(stub.requests[0]!)).toEqual({
+      run_ids: ["run-1", "run-missing"],
+      force: false,
+    });
+    expect(result.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
+    expect(result.results.map((entry) => entry.outcome)).toEqual(["deleted", "already_absent"]);
+  });
+
+  test("deleteRuns sends force when requested", async () => {
+    const stub = stubGeneratedAxiosOnce({
+      status: 200,
+      body: batchDeleteResponse([
+        {
+          run_id: "run-1",
+          ok: true,
+          outcome: "deleted",
+        },
+      ]),
+    });
+
+    await deleteRuns(["run-1"], true);
+
+    expect(stub.requests).toHaveLength(1);
+    expect(requestJsonBody(stub.requests[0]!)).toEqual({
+      run_ids: ["run-1"],
+      force: true,
+    });
+  });
+
+  test("deleteRuns preserves request-level error envelopes", async () => {
+    stubGeneratedAxiosOnce({
+      status: 400,
+      body: {
+        errors: [{ status: "400", title: "Bad Request", detail: "run_ids must contain at least one run ID." }],
+      },
+    });
+
+    const error = await expectLifecycleError(deleteRuns([]));
+    expect(error).toEqual({
+      status: 400,
+      errors: [{ status: "400", title: "Bad Request", detail: "run_ids must contain at least one run ID." }],
+    });
   });
 
   test("batch lifecycle helpers preserve request-level error envelopes", async () => {

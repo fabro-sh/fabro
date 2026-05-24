@@ -1,4 +1,6 @@
 import type {
+  BatchDeleteRunsRequest,
+  BatchDeleteRunsResponse,
   BatchRunLifecycleRequest,
   BatchRunLifecycleResponse,
   ErrorResponseEntry,
@@ -75,6 +77,19 @@ export async function unarchiveRuns(
   request?: Request,
 ): Promise<BatchRunLifecycleResponse> {
   return batchRunLifecycleAction(runIds, "unarchive", request);
+}
+
+export async function deleteRuns(
+  runIds: string[],
+  force = false,
+  request?: Request,
+): Promise<BatchDeleteRunsResponse> {
+  try {
+    const body = { run_ids: runIds, force } as unknown as BatchDeleteRunsRequest;
+    return await apiData(() => runsApi.batchDeleteRuns(body, requestSignalOptions(request)));
+  } catch (error) {
+    throw lifecycleActionErrorFromError(error);
+  }
 }
 
 export async function retryRun(id: string, request?: Request): Promise<Run> {

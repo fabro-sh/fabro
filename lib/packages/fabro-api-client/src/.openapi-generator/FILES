@@ -45,6 +45,10 @@ models/auth-session-user.ts
 models/auth-session.ts
 models/auth-sessions-response.ts
 models/automation-ref.ts
+models/batch-delete-runs-request.ts
+models/batch-delete-runs-response.ts
+models/batch-delete-runs-result.ts
+models/batch-delete-runs-summary.ts
 models/batch-run-lifecycle-request.ts
 models/batch-run-lifecycle-response.ts
 models/batch-run-lifecycle-result.ts

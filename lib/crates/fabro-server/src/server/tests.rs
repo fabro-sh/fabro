@@ -10557,9 +10557,61 @@ async fn create_running_run(state: &Arc<AppState>, run_id: RunId) {
     .await;
 }
 
+async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId) {
+    let mut settings = fabro_types::WorkflowSettings::default();
+    settings.run.environment.lifecycle.preserve = true;
+    let graph = Graph::new("test");
+
+    create_durable_run_with_events(state, run_id, &[
+        workflow_event::Event::RunCreated {
+            run_id,
+            title: None,
+            settings: serde_json::to_value(settings).unwrap(),
+            graph: serde_json::to_value(graph).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: std::collections::BTreeMap::default(),
+            run_dir: "/tmp/fabro-run".to_string(),
+            source_directory: Some("/tmp/fabro-run".to_string()),
+            workflow_slug: Some("test".to_string()),
+            db_prefix: None,
+            provenance: None,
+            manifest_blob: None,
+            git: None,
+            fork_source_ref: None,
+            retried_from: None,
+            parent_id: None,
+            web_url: None,
+        },
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::SandboxInitialized {
+            provider:          SandboxProvider::Local,
+            id:                "sandbox-preserve-1".to_string(),
+            working_directory: "/tmp/fabro-preserved-sandbox".to_string(),
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
+        },
+    ])
+    .await;
+}
+
 fn batch_lifecycle_body(run_ids: &[RunId]) -> serde_json::Value {
     json!({
         "run_ids": run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+    })
+}
+
+fn batch_delete_body(run_ids: &[RunId], force: bool) -> serde_json::Value {
+    json!({
+        "run_ids": run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "force": force,
     })
 }
 
@@ -10584,6 +10636,23 @@ fn assert_batch_result(result: &serde_json::Value, run_id: RunId, ok: bool, outc
         assert!(
             result["run"].is_null(),
             "failed result should omit run: {result}"
+        );
+    }
+}
+
+fn assert_batch_delete_result(result: &serde_json::Value, run_id: RunId, ok: bool, outcome: &str) {
+    assert_eq!(result["run_id"], run_id.to_string());
+    assert_eq!(result["ok"], ok);
+    assert_eq!(result["outcome"], outcome);
+    if ok {
+        assert!(
+            result["error"].is_null(),
+            "successful delete result should omit error: {result}"
+        );
+    } else {
+        assert!(
+            result["error"].is_object(),
+            "failed delete result should include error: {result}"
         );
     }
 }
@@ -10850,6 +10919,249 @@ async fn batch_lifecycle_requires_user_authentication() {
             worker_response.status()
         );
     }
+}
+
+#[tokio::test]
+async fn batch_delete_removes_runs_and_reports_ordered_results() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let first_id = RunId::new();
+    let second_id = RunId::new();
+    create_succeeded_run(&state, first_id).await;
+    create_succeeded_run(&state, second_id).await;
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/runs/delete",
+            &batch_delete_body(&[first_id, second_id], false),
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["summary"]["requested"], 2);
+    assert_eq!(body["summary"]["succeeded"], 2);
+    assert_eq!(body["summary"]["failed"], 0);
+    let results = body["results"].as_array().unwrap();
+    assert_batch_delete_result(&results[0], first_id, true, "deleted");
+    assert_batch_delete_result(&results[1], second_id, true, "deleted");
+
+    for run_id in [first_id, second_id] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/{run_id}")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::NOT_FOUND).await;
+    }
+}
+
+#[tokio::test]
+async fn batch_delete_reports_mixed_results_without_rollback() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let terminal_id = RunId::new();
+    let running_id = RunId::new();
+    let missing_id = RunId::new();
+    create_succeeded_run(&state, terminal_id).await;
+    create_running_run(&state, running_id).await;
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/runs/delete",
+            &batch_delete_body(&[terminal_id, running_id, missing_id], false),
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["summary"]["requested"], 3);
+    assert_eq!(body["summary"]["succeeded"], 2);
+    assert_eq!(body["summary"]["failed"], 1);
+    let results = body["results"].as_array().unwrap();
+    assert_batch_delete_result(&results[0], terminal_id, true, "deleted");
+    assert_batch_delete_result(&results[1], running_id, false, "conflict");
+    assert_eq!(results[1]["error"]["status"], "409");
+    assert_batch_delete_result(&results[2], missing_id, true, "already_absent");
+
+    let deleted_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{terminal_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_status!(deleted_response, StatusCode::NOT_FOUND).await;
+
+    let running_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{running_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_status!(running_response, StatusCode::OK).await;
+}
+
+#[tokio::test]
+async fn batch_delete_force_removes_active_runs() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_running_run(&state, run_id).await;
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/runs/delete",
+            &batch_delete_body(&[run_id], true),
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["summary"]["requested"], 1);
+    assert_eq!(body["summary"]["succeeded"], 1);
+    assert_eq!(body["summary"]["failed"], 0);
+    let results = body["results"].as_array().unwrap();
+    assert_batch_delete_result(&results[0], run_id, true, "deleted");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn batch_delete_with_preserved_sandbox_returns_handoff() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_preserved_local_sandbox_run(&state, run_id).await;
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/runs/delete",
+            &batch_delete_body(&[run_id], true),
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["summary"]["requested"], 1);
+    assert_eq!(body["summary"]["succeeded"], 1);
+    assert_eq!(body["summary"]["failed"], 0);
+    let results = body["results"].as_array().unwrap();
+    assert_batch_delete_result(&results[0], run_id, true, "sandbox_preserved");
+    assert_eq!(results[0]["sandbox"]["provider"], "local");
+    assert_eq!(results[0]["sandbox"]["id"], "sandbox-preserve-1");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn batch_delete_rejects_invalid_requests_before_mutating_runs() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    create_succeeded_run(&state, run_id).await;
+    let too_many_ids = (0..251)
+        .map(|_| RunId::new().to_string())
+        .collect::<Vec<_>>();
+    let invalid_requests = [
+        json!({ "run_ids": [], "force": false }),
+        json!({ "run_ids": [run_id.to_string(), run_id.to_string()], "force": false }),
+        json!({ "run_ids": ["not-a-run-id"], "force": false }),
+        json!({ "run_ids": too_many_ids, "force": false }),
+    ];
+
+    for body in invalid_requests {
+        let response = app
+            .clone()
+            .oneshot(json_request(Method::POST, "/runs/delete", &body))
+            .await
+            .unwrap();
+        assert_status!(response, StatusCode::BAD_REQUEST).await;
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+}
+
+#[tokio::test]
+async fn batch_delete_requires_user_authentication() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_worker_token(&run_id);
+    let body = batch_delete_body(&[run_id], false);
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(json_request(Method::POST, "/runs/delete", &body))
+        .await
+        .unwrap();
+    assert_status!(unauthenticated, StatusCode::UNAUTHORIZED).await;
+
+    let worker_response = app
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs/delete",
+            &worker_token,
+            &body,
+        ))
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            worker_response.status(),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+        ),
+        "/runs/delete unexpectedly accepted worker token with status {}",
+        worker_response.status()
+    );
 }
 
 #[tokio::test]

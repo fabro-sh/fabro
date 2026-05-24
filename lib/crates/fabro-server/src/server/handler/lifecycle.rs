@@ -4,16 +4,18 @@ use std::sync::Arc;
 use chrono::Utc;
 
 use super::super::{
-    ApiError, AppState, AskFabroReadiness, BatchRunLifecycleRequest, BatchRunLifecycleResponse,
-    BatchRunLifecycleResult, BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary,
+    ApiError, AppState, AskFabroReadiness, BatchDeleteRunsRequest, BatchDeleteRunsResponse,
+    BatchDeleteRunsResult, BatchDeleteRunsResultOutcome, BatchDeleteRunsSummary,
+    BatchRunLifecycleRequest, BatchRunLifecycleResponse, BatchRunLifecycleResult,
+    BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary, DeleteRunOutcome, DeleteRunSandbox,
     DenyRunRequest, FailureReason, ForkRequest, ForkResponse, HeaderMap, IntoResponse, Json, Path,
     PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser, Response, RewindRequest,
     RewindResponse, Router, RunAnswerTransport, RunControlAction, RunExecutionMode, RunId,
     RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode, Storage,
     TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
-    clear_live_run_state, durable_run_status, get, load_pending_control, managed_run, operations,
-    parse_run_id_path, persist_cancelled_run_status, post, reject_if_archived, sleep,
-    update_live_run_from_event, workflow_event,
+    clear_live_run_state, delete_run_internal, durable_run_status, get, load_pending_control,
+    managed_run, operations, parse_run_id_path, persist_cancelled_run_status, post,
+    reject_if_archived, sleep, update_live_run_from_event, workflow_event,
 };
 use super::runs::run_provenance;
 
@@ -26,6 +28,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/pause", post(pause_run))
         .route("/runs/{id}/unpause", post(unpause_run))
         .route("/runs/archive", post(batch_archive_runs))
+        .route("/runs/delete", post(batch_delete_runs))
         .route("/runs/unarchive", post(batch_unarchive_runs))
         .route("/runs/{id}/archive", post(archive_run))
         .route("/runs/{id}/rewind", post(rewind_run))
@@ -717,6 +720,38 @@ async fn batch_unarchive_runs(
     .await
 }
 
+async fn batch_delete_runs(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BatchDeleteRunsRequest>,
+) -> Response {
+    let force = request.force;
+    let ids = match validate_batch_run_id_strings(request.run_ids) {
+        Ok(ids) => ids,
+        Err(err) => return err.into_response(),
+    };
+
+    let mut results = Vec::with_capacity(ids.len());
+    for id in ids {
+        results.push(batch_delete_run_item(&state, id, force).await);
+    }
+
+    let requested = results.len() as u64;
+    let succeeded = results.iter().filter(|result| result.ok).count() as u64;
+    (
+        StatusCode::OK,
+        Json(BatchDeleteRunsResponse {
+            results,
+            summary: BatchDeleteRunsSummary {
+                requested,
+                succeeded,
+                failed: requested - succeeded,
+            },
+        }),
+    )
+        .into_response()
+}
+
 async fn rewind_run(
     subject: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -950,20 +985,24 @@ async fn batch_run_archive_action(
 }
 
 fn validate_batch_run_ids(request: BatchRunLifecycleRequest) -> Result<Vec<RunId>, ApiError> {
-    if request.run_ids.is_empty() {
+    validate_batch_run_id_strings(request.run_ids)
+}
+
+fn validate_batch_run_id_strings(run_ids: Vec<String>) -> Result<Vec<RunId>, ApiError> {
+    if run_ids.is_empty() {
         return Err(ApiError::bad_request(
             "run_ids must contain at least one run ID.",
         ));
     }
-    if request.run_ids.len() > MAX_BATCH_RUN_LIFECYCLE_IDS {
+    if run_ids.len() > MAX_BATCH_RUN_LIFECYCLE_IDS {
         return Err(ApiError::bad_request(format!(
             "run_ids must contain no more than {MAX_BATCH_RUN_LIFECYCLE_IDS} run IDs.",
         )));
     }
 
-    let mut seen = HashSet::with_capacity(request.run_ids.len());
-    let mut ids = Vec::with_capacity(request.run_ids.len());
-    for raw in request.run_ids {
+    let mut seen = HashSet::with_capacity(run_ids.len());
+    let mut ids = Vec::with_capacity(run_ids.len());
+    for raw in run_ids {
         let id = raw.parse::<RunId>().map_err(|_| {
             ApiError::bad_request(format!("run_ids contains invalid run ID: {raw}"))
         })?;
@@ -975,6 +1014,53 @@ fn validate_batch_run_ids(request: BatchRunLifecycleRequest) -> Result<Vec<RunId
         ids.push(id);
     }
     Ok(ids)
+}
+
+async fn batch_delete_run_item(
+    state: &Arc<AppState>,
+    id: RunId,
+    force: bool,
+) -> BatchDeleteRunsResult {
+    match delete_run_internal(state, id, force).await {
+        Ok(DeleteRunOutcome::Deleted) => {
+            batch_delete_success(id, BatchDeleteRunsResultOutcome::Deleted, None)
+        }
+        Ok(DeleteRunOutcome::AlreadyAbsent) => {
+            batch_delete_success(id, BatchDeleteRunsResultOutcome::AlreadyAbsent, None)
+        }
+        Ok(DeleteRunOutcome::Preserved(response)) => batch_delete_success(
+            id,
+            BatchDeleteRunsResultOutcome::SandboxPreserved,
+            Some(response.sandbox),
+        ),
+        Err(error) => {
+            let outcome = match error.status() {
+                StatusCode::CONFLICT => BatchDeleteRunsResultOutcome::Conflict,
+                _ => BatchDeleteRunsResultOutcome::Error,
+            };
+            BatchDeleteRunsResult {
+                run_id: id.to_string(),
+                ok: false,
+                outcome,
+                sandbox: None,
+                error: Some(error.into_response_entry()),
+            }
+        }
+    }
+}
+
+fn batch_delete_success(
+    id: RunId,
+    outcome: BatchDeleteRunsResultOutcome,
+    sandbox: Option<DeleteRunSandbox>,
+) -> BatchDeleteRunsResult {
+    BatchDeleteRunsResult {
+        run_id: id.to_string(),
+        ok: true,
+        outcome,
+        sandbox,
+        error: None,
+    }
 }
 
 async fn batch_run_archive_item(

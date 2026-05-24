@@ -1196,6 +1196,57 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/delete:
+    post:
+      operationId: batchDeleteRuns
+      tags: [Runs]
+      summary: Delete Runs
+      description: >
+        Deletes up to 250 runs in one fail-soft, non-transactional request.
+        Each run is processed independently. A valid batch returns `200` even
+        when some items fail; inspect `results` and `summary` for per-run
+        outcomes. Invalid request bodies are rejected before mutating any run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchDeleteRunsRequest"
+      responses:
+        "200":
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchDeleteRunsResponse"
+        "400":
+          description: Invalid batch request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Request-level server error
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/unarchive:
     post:
       operationId: batchUnarchiveRuns
@@ -5358,6 +5409,96 @@ components:
 
     BatchRunLifecycleSummary:
       description: Aggregate counts for a batch archive or unarchive request.
+      type: object
+      additionalProperties: false
+      required:
+        - requested
+        - succeeded
+        - failed
+      properties:
+        requested:
+          type: integer
+          minimum: 0
+          description: Number of requested run IDs.
+        succeeded:
+          type: integer
+          minimum: 0
+          description: Number of item results with `ok=true`.
+        failed:
+          type: integer
+          minimum: 0
+          description: Number of item results with `ok=false`.
+
+    BatchDeleteRunsRequest:
+      description: Run IDs to delete as one bounded fail-soft batch.
+      type: object
+      additionalProperties: false
+      required:
+        - run_ids
+      properties:
+        run_ids:
+          type: array
+          description: Run IDs to process, in result order.
+          minItems: 1
+          maxItems: 250
+          uniqueItems: true
+          items:
+            type: string
+            example: 01HZX6M29F1CD5YYMHT1F5D7WQ
+        force:
+          type: boolean
+          description: Whether to force deletion of active runs. Defaults to `false`.
+          default: false
+
+    BatchDeleteRunsResponse:
+      description: Per-run results for a fail-soft batch delete request.
+      type: object
+      additionalProperties: false
+      required:
+        - results
+        - summary
+      properties:
+        results:
+          type: array
+          description: Results ordered exactly like the request `run_ids`.
+          items:
+            $ref: "#/components/schemas/BatchDeleteRunsResult"
+        summary:
+          $ref: "#/components/schemas/BatchDeleteRunsSummary"
+
+    BatchDeleteRunsResult:
+      description: Result for one run in a batch delete request.
+      type: object
+      additionalProperties: false
+      required:
+        - run_id
+        - ok
+        - outcome
+      properties:
+        run_id:
+          type: string
+          description: Run ID from the request item.
+        ok:
+          type: boolean
+          description: Whether this item succeeded.
+        outcome:
+          type: string
+          enum:
+            - deleted
+            - already_absent
+            - sandbox_preserved
+            - conflict
+            - error
+          description: Machine-readable item outcome.
+        sandbox:
+          $ref: "#/components/schemas/DeleteRunSandbox"
+          description: Sandbox handoff details when `outcome` is `sandbox_preserved`.
+        error:
+          $ref: "#/components/schemas/ErrorResponseEntry"
+          description: Structured item error for failed items.
+
+    BatchDeleteRunsSummary:
+      description: Aggregate counts for a batch delete request.
       type: object
       additionalProperties: false
       required:

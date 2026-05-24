@@ -509,11 +509,13 @@ async fn delete_run(
     };
 
     match delete_run_internal(&state, id, query.force).await {
-        Ok(super::super::DeleteRunOutcome::NoContent) => StatusCode::NO_CONTENT.into_response(),
+        Ok(
+            super::super::DeleteRunOutcome::Deleted | super::super::DeleteRunOutcome::AlreadyAbsent,
+        ) => StatusCode::NO_CONTENT.into_response(),
         Ok(super::super::DeleteRunOutcome::Preserved(response)) => {
             (StatusCode::OK, Json(response)).into_response()
         }
-        Err(response) => response,
+        Err(error) => error.into_response(),
     }
 }
 
