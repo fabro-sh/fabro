@@ -104,16 +104,18 @@ export function StageInsightsSidebar({ stage, contextWindow }: StageInsightsSide
       </div>
 
       <div className="mt-3 flex flex-col gap-4">
-        <CollapsibleSection
-          sectionKey="todos"
-          title="Todos"
-          icon={ListBulletIcon}
-          collapsed={collapsed}
-          count={`${todoStats.done}/${todoStats.total}`}
-          empty={todoStats.total === 0}
-        >
-          <TodoSection todos={todos} />
-        </CollapsibleSection>
+        {todoStats.total > 0 && (
+          <CollapsibleSection
+            sectionKey="todos"
+            title="Todos"
+            icon={ListBulletIcon}
+            collapsed={collapsed}
+            count={`${todoStats.done}/${todoStats.total}`}
+            empty={false}
+          >
+            <TodoSection todos={todos} />
+          </CollapsibleSection>
+        )}
 
         <ContextWindowSection collapsed={collapsed} snapshot={contextWindow ?? null} />
 
@@ -535,9 +537,12 @@ function McpSection({ servers }: { servers: McpServerProjection[] }) {
 function PermissionBadge({ level, collapsed }: { level: PermissionLevel | null; collapsed: boolean }) {
   const { Icon, label, color, title } = permissionVisual(level);
   if (collapsed) {
+    // Collapsed footer is a static affordance, not a danger signal —
+    // always use the neutral lock so a "Full access" stage doesn't
+    // splash red in the corner of the page.
     return (
       <div className="flex flex-col items-center gap-0.5" title={title}>
-        <Icon className={`size-4 shrink-0 ${color}`} aria-label={label} />
+        <LockClosedIcon className="size-4 shrink-0 text-fg-muted" aria-label={label} />
       </div>
     );
   }
@@ -559,12 +564,15 @@ function permissionVisual(level: PermissionLevel | null): {
   title: string;
 } {
   switch (level) {
+    // Permission badges are informational, not warning signals. The icon
+    // shape (lock / pencil / bolt) carries the level distinction; colors
+    // stay in the neutral foreground palette so no level looks alarming.
     case PermissionLevel.READ_ONLY:
       return { Icon: LockClosedIcon, color: "text-fg-3", label: "Read-only", title: "Agent can read but not modify files or run commands" };
     case PermissionLevel.READ_WRITE:
-      return { Icon: PencilSquareIcon, color: "text-amber", label: "Read/write", title: "Agent can read and modify files" };
+      return { Icon: PencilSquareIcon, color: "text-fg-2", label: "Read/write", title: "Agent can read and modify files" };
     case PermissionLevel.FULL:
-      return { Icon: BoltIcon, color: "text-coral", label: "Full access", title: "Agent can read, modify files, and run commands" };
+      return { Icon: BoltIcon, color: "text-fg-2", label: "Full access", title: "Agent can read, modify files, and run commands" };
     case null:
     default:
       return { Icon: LockClosedIcon, color: "text-fg-muted", label: "Unknown", title: "Permission level not yet reported" };
