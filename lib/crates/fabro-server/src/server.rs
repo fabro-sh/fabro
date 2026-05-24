@@ -138,8 +138,8 @@ use crate::github_webhooks::{
 use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
-    AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunScoped,
-    RequireRunScopedOrRunTools, RequireRunStageScoped, RequireStageArtifact, RequiredUser,
+    AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunManagementTarget,
+    RequireRunScoped, RequireRunStageScoped, RequireStageArtifact, RequiredUser,
     principal_middleware,
 };
 use crate::request_id::{self, RequestId};
@@ -2847,6 +2847,23 @@ async fn finish_cancelled_run_before_execution(state: &Arc<AppState>, run_id: Ru
     state.scheduler_notify.notify_one();
 }
 
+/// Reject the run before execution if its effective sandbox provider is
+/// disabled by server policy. Returns `true` when the run was rejected.
+async fn reject_run_if_sandbox_provider_disabled(
+    state: &Arc<AppState>,
+    server_settings: &ServerSettings,
+    run_id: RunId,
+    settings: &RunNamespace,
+) -> bool {
+    let provider = run_manifest::effective_sandbox_provider(settings);
+    let Some(error) = run_manifest::sandbox_provider_policy_error(server_settings, provider) else {
+        return false;
+    };
+    tracing::warn!(run_id = %run_id, error = %error, "Sandbox provider disabled by server policy");
+    fail_run_before_execution(state, run_id, FailureReason::LaunchFailed, error).await;
+    true
+}
+
 async fn fail_run_before_execution(
     state: &Arc<AppState>,
     run_id: RunId,
@@ -3596,6 +3613,16 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         finish_cancelled_run_before_execution(&state, run_id).await;
         return;
     }
+    if reject_run_if_sandbox_provider_disabled(
+        &state,
+        &server_settings,
+        run_id,
+        &persisted.run_spec().settings.run,
+    )
+    .await
+    {
+        return;
+    }
     let github_app_result = {
         let run_spec = persisted.run_spec();
         let settings = &run_spec.settings.run;
@@ -3820,6 +3847,16 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
     let agent_fabro_tools_enabled = run_state.spec.settings.run.agent.fabro_tools;
+    if reject_run_if_sandbox_provider_disabled(
+        &state,
+        &state.server_settings(),
+        run_id,
+        &run_state.spec.settings.run,
+    )
+    .await
+    {
+        return;
+    }
 
     let state_for_build = Arc::clone(&state);
     let run_dir_for_build = run_dir.clone();

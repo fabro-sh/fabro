@@ -57,6 +57,7 @@ pub use layers::{
     RunRunBranchLayer, RunScmLayer, ScmGitHubLayer, ServerApiLayer, ServerArtifactsLayer,
     ServerAuthGithubLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerIpAllowlistLayer,
     ServerIpAllowlistOverrideLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
+    ServerSandboxLayer, ServerSandboxProviderLayer, ServerSandboxProvidersLayer,
     ServerSchedulerLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer, SettingsLayer,
     SlackIntegrationLayer, StickyMap, StringOrSplice, WorkflowLayer,
 };

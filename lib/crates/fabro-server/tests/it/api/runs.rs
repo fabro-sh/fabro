@@ -52,6 +52,84 @@ async fn request_json(
     .await
 }
 
+fn daytona_manifest() -> serde_json::Value {
+    let mut manifest = minimal_manifest_json(MINIMAL_DOT);
+    manifest["args"] = serde_json::json!({ "environment": "daytona" });
+    manifest
+}
+
+fn daytona_disabled_settings() -> crate::helpers::TestAppSettings {
+    settings_from_toml(
+        r"
+_version = 1
+
+[server.sandbox.providers.daytona]
+enabled = false
+",
+    )
+}
+
+#[tokio::test]
+async fn create_run_rejects_disabled_sandbox_provider() {
+    let app = fabro_server::test_support::build_test_router(test_app_state_with_options(
+        daytona_disabled_settings(),
+        5,
+    ));
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(api("/runs"))
+        .header("content-type", "application/json")
+        .body(Body::from(daytona_manifest().to_string()))
+        .expect("create run request should build");
+    let body = response_json(
+        app.clone().oneshot(request).await.unwrap(),
+        StatusCode::BAD_REQUEST,
+        "POST /api/v1/runs",
+    )
+    .await;
+
+    assert_eq!(
+        body["errors"][0]["detail"],
+        "sandbox provider \"daytona\" is disabled by server.sandbox.providers.daytona.enabled"
+    );
+}
+
+#[tokio::test]
+async fn preflight_reports_disabled_sandbox_provider() {
+    let app = fabro_server::test_support::build_test_router(test_app_state_with_options(
+        daytona_disabled_settings(),
+        5,
+    ));
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(api("/preflight"))
+        .header("content-type", "application/json")
+        .body(Body::from(daytona_manifest().to_string()))
+        .expect("preflight request should build");
+    let body = response_json(
+        app.clone().oneshot(request).await.unwrap(),
+        StatusCode::OK,
+        "POST /api/v1/preflight",
+    )
+    .await;
+
+    assert_eq!(body["ok"], false);
+    let checks = body["checks"]["sections"][0]["checks"]
+        .as_array()
+        .expect("preflight checks should be an array");
+    let policy_check = checks
+        .iter()
+        .find(|check| check["name"] == "Sandbox Provider Policy")
+        .expect("policy check should be present");
+    assert_eq!(policy_check["status"], "error");
+    assert_eq!(
+        policy_check["summary"],
+        "sandbox provider \"daytona\" is disabled by server.sandbox.providers.daytona.enabled"
+    );
+}
+
 #[tokio::test]
 async fn run_responses_include_ask_fabro_affordance() {
     let settings = settings_from_toml(

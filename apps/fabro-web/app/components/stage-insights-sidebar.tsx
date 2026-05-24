@@ -19,6 +19,7 @@ import {
   PuzzlePieceIcon,
   ServerStackIcon,
   Squares2X2Icon,
+  WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
 import {
   AgentSkillActivationSource,
@@ -30,6 +31,7 @@ import {
 import type {
   ActivatedSkill,
   AgentSkillSummary,
+  AgentToolSummary,
   McpServerProjection,
   StageContextWindow,
   StageContextWindowBreakdownItem,
@@ -42,11 +44,12 @@ import { formatTokenCount } from "../lib/format";
 const COLLAPSED_STORAGE_KEY = "fabro:stage-insights-sidebar-collapsed";
 const SECTION_STORAGE_PREFIX = "fabro:stage-insights-section:";
 
-type SectionKey = "todos" | "context" | "skills" | "mcps";
+type SectionKey = "todos" | "context" | "tools" | "skills" | "mcps";
 
 const SECTIONS_DEFAULT_OPEN: Record<SectionKey, boolean> = {
   todos:   true,
   context: false,
+  tools:   false,
   skills:  false,
   mcps:    false,
 };
@@ -70,11 +73,13 @@ export function StageInsightsSidebar({ stage, contextWindow }: StageInsightsSide
 
   const todos = stage?.todos ?? null;
   const skills = stage?.skills ?? { activated: [], available: [] };
+  const agentTools = stage?.agent_tools ?? [];
   const mcpServers = stage?.mcp_servers ?? [];
   const permission = stage?.permission_level ?? null;
 
   const todoStats = countTodoStats(todos);
   const activatedSkillNames = new Set(skills.activated.map((s) => s.name));
+  const invokedToolCount = agentTools.filter((tool) => tool.invoked).length;
 
   return (
     <aside
@@ -118,6 +123,18 @@ export function StageInsightsSidebar({ stage, contextWindow }: StageInsightsSide
         )}
 
         <ContextWindowSection collapsed={collapsed} snapshot={contextWindow ?? null} />
+
+        <CollapsibleSection
+          sectionKey="tools"
+          title="Tools"
+          icon={WrenchScrewdriverIcon}
+          collapsed={collapsed}
+          count={`${invokedToolCount}/${agentTools.length}`}
+          empty={agentTools.length === 0}
+          hideCountWhenCollapsed
+        >
+          <AgentToolsSection tools={agentTools} />
+        </CollapsibleSection>
 
         <CollapsibleSection
           sectionKey="skills"
@@ -266,13 +283,18 @@ function todoStatusVisual(status: TodoStatus): { Icon: IconType; color: string; 
       return { Icon: XCircleIcon, color: "text-fg-muted", srLabel: "Deleted" };
     case TodoStatus.PENDING:
     default:
-      return { Icon: TodoPendingIcon, color: "text-fg-muted", srLabel: "Pending" };
+      return { Icon: EmptyCircleIcon, color: "text-fg-muted", srLabel: "Pending" };
   }
 }
 
-/** Empty circle for pending todos (matches Tailwind sizing). */
-function TodoPendingIcon({ className }: { className?: string }) {
-  return <span className={`inline-block rounded-full border border-current ${className ?? ""}`} />;
+/** Empty circle for pending/available states (matches Tailwind sizing). */
+function EmptyCircleIcon({ className }: { className?: string }) {
+  return (
+    <span
+      className={`inline-block rounded-full border border-current ${className ?? ""}`}
+      aria-hidden="true"
+    />
+  );
 }
 
 // ---------- Context window ----------
@@ -494,6 +516,57 @@ function SkillsSection({ activated, available, activatedNames }: SkillsSectionPr
 function SkillSourceIcon({ source }: { source: ActivatedSkill["source"] }) {
   const Icon = source === AgentSkillActivationSource.SLASH ? CommandLineIcon : PuzzlePieceIcon;
   return <Icon className="size-3.5 shrink-0 text-fg-muted" />;
+}
+
+// ---------- Tools ----------
+
+function AgentToolsSection({ tools }: { tools: AgentToolSummary[] }) {
+  if (tools.length === 0) return <p className="text-xs text-fg-muted">No tools reported.</p>;
+  return (
+    <ul role="list" className="space-y-2">
+      {tools.map((tool) => {
+        const nameClass = tool.invoked
+          ? "min-w-0 flex-1 truncate text-xs text-fg-2"
+          : "min-w-0 flex-1 truncate text-xs text-fg-muted";
+        return (
+          <li key={tool.name} className="space-y-0.5">
+            <div className="flex items-center gap-1.5">
+              {tool.invoked ? (
+                <CheckCircleIcon className="size-3.5 shrink-0 text-mint" aria-label="Invoked" />
+              ) : (
+                <EmptyCircleIcon className="size-3.5 shrink-0 text-fg-muted" />
+              )}
+              <span className={nameClass}>{tool.name}</span>
+              <span className="font-mono text-[10px] tabular-nums text-fg-muted">
+                {tool.invoked ? "used" : "available"}
+              </span>
+            </div>
+            <p className="text-[11px] leading-snug text-fg-muted">{tool.description}</p>
+            <div className="flex flex-wrap gap-1">
+              <span className="rounded bg-overlay px-1 py-0.5 text-[10px] uppercase tracking-wider text-fg-muted">
+                {toolSourceLabel(tool.source)}
+              </span>
+              <span className="rounded bg-overlay px-1 py-0.5 text-[10px] uppercase tracking-wider text-fg-muted">
+                {tool.category}
+              </span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function toolSourceLabel(source: AgentToolSummary["source"]): string {
+  switch (source.kind) {
+    case "mcp":
+      return `mcp:${source.server_name}`;
+    case "skill":
+      return "skill";
+    case "native":
+    default:
+      return "native";
+  }
 }
 
 // ---------- MCPs ----------

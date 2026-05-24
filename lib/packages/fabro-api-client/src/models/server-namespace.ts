@@ -36,6 +36,9 @@ import type { ServerListenSettings } from './server-listen-settings';
 import type { ServerLoggingSettings } from './server-logging-settings';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { ServerSandboxSettings } from './server-sandbox-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { ServerSchedulerSettings } from './server-scheduler-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -53,6 +56,7 @@ export interface ServerNamespace {
     'web': ServerWebSettings;
     'auth': ServerAuthSettings;
     'ip_allowlist': ServerIpAllowlistSettings;
+    'sandbox': ServerSandboxSettings;
     'storage': ServerStorageSettings;
     'artifacts': ServerArtifactsSettings;
     'slatedb': ServerSlateDbSettings;

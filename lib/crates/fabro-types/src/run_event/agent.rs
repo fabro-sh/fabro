@@ -1,12 +1,13 @@
 use fabro_model::{ReasoningEffort, Speed};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use strum::{Display, EnumString, IntoStaticStr};
 
 use super::BilledTokenCounts;
 use crate::transcript::{ToolCall, ToolResult, TranscriptMessage};
 use crate::{
     MessageId, ModelRef, PairId, PairMessageId, PairSystemMessageKind, PermissionLevel,
-    StageContextWindowProjection, StageId, TurnId,
+    StageContextWindowProjection, TurnId,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,6 +54,56 @@ pub struct AgentSessionDeactivatedProps {
     pub visit: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentToolsAvailableProps {
+    #[serde(default)]
+    pub tools: Vec<AgentToolSummary>,
+    pub visit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentToolSummary {
+    pub name:        String,
+    pub description: String,
+    pub source:      AgentToolSource,
+    pub category:    AgentToolCategory,
+    pub invoked:     bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentToolSource {
+    Native,
+    Mcp {
+        server_name:   String,
+        original_name: String,
+    },
+    Skill,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum AgentToolCategory {
+    Read,
+    Write,
+    Shell,
+    Subagent,
+    Other,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentProcessingEndProps {
     pub visit: u32,
@@ -77,6 +128,10 @@ pub struct AgentMessageProps {
     /// payloads so older events still deserialize.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message:         Option<TranscriptMessage>,
+    /// Latest content-free context-window projection for this agent stage,
+    /// computed from the request that produced this assistant response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window:  Option<StageContextWindowProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -219,14 +274,6 @@ pub struct AgentLlmRetryProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentContextWindowSnapshotProps {
-    pub stage_id: StageId,
-    pub visit:    u32,
-    #[serde(flatten)]
-    pub snapshot: StageContextWindowProjection,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSubSpawnedProps {
     pub agent_id: String,
     pub depth:    usize,
@@ -357,6 +404,7 @@ mod tests {
         let props: AgentMessageProps = serde_json::from_value(v).unwrap();
         assert_eq!(props.text, "hello");
         assert!(props.message.is_none());
+        assert!(props.context_window.is_none());
     }
 
     #[test]
@@ -371,6 +419,7 @@ mod tests {
             tool_call_count: 0,
             visit:           1,
             message:         Some(msg.clone()),
+            context_window:  None,
         };
         let v = serde_json::to_value(&props).unwrap();
         assert_eq!(v["message"]["kind"], "agent");

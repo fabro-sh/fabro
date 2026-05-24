@@ -3,6 +3,7 @@ import TestRenderer, { act } from "react-test-renderer";
 import { MemoryRouter } from "react-router";
 
 import {
+  AgentToolCategory,
   AgentSkillActivationSource,
   PermissionLevel,
   StageContextWindowCategory,
@@ -66,7 +67,7 @@ function makeContextWindow(overrides: Partial<StageContextWindow> = {}): StageCo
 let restoreWindow: (() => void) | null = null;
 beforeAll(() => {
   const store = new Map<string, string>();
-  for (const key of ["todos", "context", "skills", "mcps"]) {
+  for (const key of ["todos", "context", "tools", "skills", "mcps"]) {
     store.set(`fabro:stage-insights-section:${key}`, "1");
   }
   const stub = {
@@ -155,6 +156,50 @@ describe("StageInsightsSidebar", () => {
   test("renders permission badge for full access", () => {
     const dom = render(makeStage({ permission_level: PermissionLevel.FULL }), null);
     expect(dom).toContain("Full access");
+  });
+
+  test("renders projected agent tool names, descriptions, categories, and invoked state", () => {
+    const dom = render(
+      makeStage({
+        agent_tools: [
+          {
+            name:        "apply_patch",
+            description: "Apply a unified diff patch",
+            source:      { kind: "native" },
+            category:    AgentToolCategory.WRITE,
+            invoked:     true,
+          },
+          {
+            name:        "grep",
+            description: "Search file contents",
+            source:      { kind: "native" },
+            category:    AgentToolCategory.READ,
+            invoked:     false,
+          },
+        ],
+        permission_level: PermissionLevel.FULL,
+      }),
+      null,
+    );
+
+    expect(dom).toContain("1/2");
+    expect(dom).toContain("apply_patch");
+    expect(dom).toContain("Apply a unified diff patch");
+    expect(dom).toContain("write");
+    expect(dom).toContain("used");
+    expect(dom).toContain("grep");
+    expect(dom).toContain("Search file contents");
+    expect(dom).toContain("read");
+    expect(dom).toContain("available");
+    // Permission remains secondary compatibility metadata, not the source of
+    // the tool list.
+    expect(dom).toContain("Full access");
+  });
+
+  test("legacy stages without agent tools keep permission fallback only", () => {
+    const dom = render(makeStage({ permission_level: PermissionLevel.READ_WRITE }), null);
+    expect(dom).toContain("Read/write");
+    expect(dom).not.toContain("apply_patch");
   });
 
   test("renders mcp server used/total count, marks invoked servers as 'used'", () => {

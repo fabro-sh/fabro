@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
+use crate::settings::run::RunMode;
+
 /// Sandbox provider for agent tool operations.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Display, EnumString,
@@ -30,6 +32,17 @@ impl SandboxProvider {
     #[must_use]
     pub fn is_clone_based(&self) -> bool {
         matches!(self, Self::Docker | Self::Daytona)
+    }
+
+    /// Coerce non-local providers to `Local` under dry-run; otherwise
+    /// unchanged.
+    #[must_use]
+    pub fn effective_for(self, mode: RunMode) -> Self {
+        if mode == RunMode::DryRun && !self.is_local() {
+            Self::Local
+        } else {
+            self
+        }
     }
 }
 

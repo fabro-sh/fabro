@@ -619,6 +619,14 @@ pub enum Event {
         permission_level: Option<PermissionLevel>,
         capabilities:     Vec<fabro_types::SessionCapability>,
     },
+    /// Effective model-callable tools for a stage session after profile setup,
+    /// optional registrations, MCP integration, and access-policy filtering.
+    AgentToolsAvailable {
+        node_id:    String,
+        visit:      u32,
+        session_id: String,
+        tools:      Vec<fabro_types::AgentToolSummary>,
+    },
     /// A stage's steerable live session binding ended.
     AgentSessionDeactivated {
         node_id:    String,
@@ -1465,6 +1473,20 @@ impl Event {
                 ..
             } => {
                 debug!(node_id, visit, session_id, "Agent session activated");
+            }
+            Self::AgentToolsAvailable {
+                node_id,
+                visit,
+                session_id,
+                tools,
+            } => {
+                debug!(
+                    node_id,
+                    visit,
+                    session_id,
+                    tool_count = tools.len(),
+                    "Agent tools available"
+                );
             }
             Self::AgentSessionDeactivated {
                 node_id,

@@ -15,6 +15,7 @@ pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool
             let mgr = Arc::clone(manager);
             let name = qualified_name.clone();
             let server_name = info.server_name.clone();
+            let original_name = info.original_tool_name.clone();
             let tool_timeout = std::time::Duration::from_mins(2);
 
             RegisteredTool {
@@ -35,7 +36,10 @@ pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool
                         call_result_to_string(&result)
                     })
                 }),
-                source:     ToolSource::Mcp { server_name },
+                source:     ToolSource::Mcp {
+                    server_name,
+                    original_name,
+                },
             }
         })
         .collect()

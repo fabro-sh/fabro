@@ -7971,6 +7971,56 @@ components:
           type: integer
           minimum: 1
 
+    AgentMessageProps:
+      description: Properties for the `agent.message` event.
+      type: object
+      required:
+        - text
+        - model
+        - billing
+        - tool_call_count
+        - visit
+      properties:
+        text:
+          type: string
+        model:
+          $ref: "#/components/schemas/BillingModelRef"
+        billing:
+          $ref: "#/components/schemas/BilledTokenCounts"
+        tool_call_count:
+          type: integer
+          minimum: 0
+        visit:
+          type: integer
+          minimum: 1
+        message:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+          description: Canonical replay-authoritative transcript message, when present.
+        context_window:
+          oneOf:
+            - $ref: "#/components/schemas/StageContextWindowProjection"
+            - type: "null"
+          description: Latest content-free context-window projection for this agent stage.
+
+    AgentToolsAvailableProps:
+      description: Properties for the `agent.tools.available` event.
+      type: object
+      required:
+        - tools
+        - visit
+      properties:
+        tools:
+          type: array
+          description: Effective model-callable tools exposed to the stage session.
+          items:
+            $ref: "#/components/schemas/AgentToolSummary"
+        visit:
+          type: integer
+          minimum: 1
+
     RunSupersededByProps:
       description: Properties for the `run.superseded_by` audit event emitted on a rewound source run after archive succeeds.
       type: object
@@ -8550,6 +8600,13 @@ components:
             - $ref: "#/components/schemas/PermissionLevel"
             - type: "null"
           description: Agent tool permission level applied to this stage session.
+        agent_tools:
+          type: array
+          description: >
+            Effective model-callable tools exposed to this agent stage session.
+            Tool parameter schemas are intentionally omitted from this projection.
+          items:
+            $ref: "#/components/schemas/AgentToolSummary"
         mcp_servers:
           type: array
           description: MCP servers observed by this stage.
@@ -8688,6 +8745,83 @@ components:
       description: Source that activated an agent skill.
       type: string
       enum: [slash, tool]
+
+    AgentToolSummary:
+      description: Summary of one effective model-callable tool exposed to an agent stage.
+      type: object
+      required:
+        - name
+        - description
+        - source
+        - category
+        - invoked
+      properties:
+        name:
+          type: string
+          description: Exposed model-facing tool name, for example `apply_patch` or `mcp__filesystem__read_file`.
+        description:
+          type: string
+          description: Model-facing tool description.
+        source:
+          $ref: "#/components/schemas/AgentToolSource"
+        category:
+          $ref: "#/components/schemas/AgentToolCategory"
+        invoked:
+          type: boolean
+          description: True once this tool has been invoked during the stage.
+
+    AgentToolSource:
+      description: Origin of an effective agent tool.
+      oneOf:
+        - $ref: "#/components/schemas/AgentToolSourceNative"
+        - $ref: "#/components/schemas/AgentToolSourceMcp"
+        - $ref: "#/components/schemas/AgentToolSourceSkill"
+      discriminator:
+        propertyName: kind
+        mapping:
+          native: "#/components/schemas/AgentToolSourceNative"
+          mcp: "#/components/schemas/AgentToolSourceMcp"
+          skill: "#/components/schemas/AgentToolSourceSkill"
+
+    AgentToolSourceNative:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [native]
+
+    AgentToolSourceMcp:
+      type: object
+      required:
+        - kind
+        - server_name
+        - original_name
+      properties:
+        kind:
+          type: string
+          enum: [mcp]
+        server_name:
+          type: string
+          description: MCP server name that provided the tool.
+        original_name:
+          type: string
+          description: Tool name before MCP qualification.
+
+    AgentToolSourceSkill:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [skill]
+
+    AgentToolCategory:
+      description: Coarse tool category for display and grouping.
+      type: string
+      enum: [read, write, shell, subagent, other]
 
     McpServerProjection:
       description: Projected state for one MCP server observed by an agent stage.
@@ -11192,6 +11326,7 @@ components:
         - web
         - auth
         - ip_allowlist
+        - sandbox
         - storage
         - artifacts
         - slatedb
@@ -11209,6 +11344,8 @@ components:
           $ref: "#/components/schemas/ServerAuthSettings"
         ip_allowlist:
           $ref: "#/components/schemas/ServerIpAllowlistSettings"
+        sandbox:
+          $ref: "#/components/schemas/ServerSandboxSettings"
         storage:
           $ref: "#/components/schemas/ServerStorageSettings"
         artifacts:
@@ -11324,6 +11461,31 @@ components:
     GitHubMetaHooksEntry:
       type: string
       enum: [GitHubMetaHooks]
+
+    ServerSandboxSettings:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          $ref: "#/components/schemas/ServerSandboxProvidersSettings"
+
+    ServerSandboxProvidersSettings:
+      type: object
+      required: [local, docker, daytona]
+      properties:
+        local:
+          $ref: "#/components/schemas/ServerSandboxProviderSettings"
+        docker:
+          $ref: "#/components/schemas/ServerSandboxProviderSettings"
+        daytona:
+          $ref: "#/components/schemas/ServerSandboxProviderSettings"
+
+    ServerSandboxProviderSettings:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
 
     ServerStorageSettings:
       type: object

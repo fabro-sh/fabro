@@ -23,6 +23,8 @@ pub struct ServerLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ip_allowlist: Option<ServerIpAllowlistLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox:      Option<ServerSandboxLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage:      Option<ServerStorageLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts:    Option<ServerArtifactsLayer>,
@@ -107,6 +109,32 @@ pub struct ServerIpAllowlistOverrideLayer {
     pub entries:             Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trusted_proxy_count: Option<u32>,
+}
+
+/// `[server.sandbox]` — server-owned sandbox provider policy.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct ServerSandboxLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers: Option<ServerSandboxProvidersLayer>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct ServerSandboxProvidersLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local:   Option<ServerSandboxProviderLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker:  Option<ServerSandboxProviderLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daytona: Option<ServerSandboxProviderLayer>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct ServerSandboxProviderLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
 }
 
 /// `[server.storage]` — single managed local disk root.

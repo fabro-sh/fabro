@@ -246,6 +246,8 @@ pub enum AgentEvent {
         model:           ModelRef,
         usage:           TokenCounts,
         tool_call_count: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_window:  Option<StageContextWindowProjection>,
     },
     TextDelta {
         delta: String,
@@ -304,7 +306,6 @@ pub enum AgentEvent {
         delay_secs: f64,
         error:      LlmError,
     },
-    ContextWindowSnapshot(StageContextWindowProjection),
     SubAgentSpawned {
         agent_id: String,
         depth:    usize,
@@ -502,17 +503,6 @@ impl AgentEvent {
                     delay_secs,
                     error = %error,
                     "LLM request failed, retrying"
-                );
-            }
-            Self::ContextWindowSnapshot(snapshot) => {
-                debug!(
-                    session_id,
-                    provider = snapshot.provider.as_str(),
-                    model = snapshot.model.as_str(),
-                    input_tokens = snapshot.input_tokens,
-                    context_window_tokens = snapshot.context_window_tokens,
-                    count_method = %snapshot.count_method,
-                    "Context window snapshot"
                 );
             }
             Self::SubAgentSpawned {
@@ -891,6 +881,7 @@ mod tests {
             },
             usage:           usage.clone(),
             tool_call_count: 2,
+            context_window:  None,
         };
         match &event {
             AgentEvent::AssistantMessage {

@@ -198,6 +198,8 @@ pub enum EventBody {
     AgentSessionStarted(AgentSessionStartedProps),
     #[serde(rename = "agent.session.activated")]
     AgentSessionActivated(AgentSessionActivatedProps),
+    #[serde(rename = "agent.tools.available")]
+    AgentToolsAvailable(AgentToolsAvailableProps),
     #[serde(rename = "agent.session.deactivated")]
     AgentSessionDeactivated(AgentSessionDeactivatedProps),
     #[serde(rename = "agent.session.ended")]
@@ -238,8 +240,6 @@ pub enum EventBody {
     AgentCompactionCompleted(AgentCompactionCompletedProps),
     #[serde(rename = "agent.llm.retry")]
     AgentLlmRetry(AgentLlmRetryProps),
-    #[serde(rename = "agent.context_window.snapshot")]
-    AgentContextWindowSnapshot(AgentContextWindowSnapshotProps),
     #[serde(rename = "agent.sub.spawned")]
     AgentSubSpawned(AgentSubSpawnedProps),
     #[serde(rename = "agent.sub.completed")]
@@ -500,6 +500,7 @@ impl EventBody {
             Self::PromptCompleted(_) => "prompt.completed",
             Self::AgentSessionStarted(_) => "agent.session.started",
             Self::AgentSessionActivated(_) => "agent.session.activated",
+            Self::AgentToolsAvailable(_) => "agent.tools.available",
             Self::AgentSessionDeactivated(_) => "agent.session.deactivated",
             Self::AgentSessionEnded(_) => "agent.session.ended",
             Self::AgentProcessingEnd(_) => "agent.processing.end",
@@ -520,7 +521,6 @@ impl EventBody {
             Self::AgentCompactionStarted(_) => "agent.compaction.started",
             Self::AgentCompactionCompleted(_) => "agent.compaction.completed",
             Self::AgentLlmRetry(_) => "agent.llm.retry",
-            Self::AgentContextWindowSnapshot(_) => "agent.context_window.snapshot",
             Self::AgentSubSpawned(_) => "agent.sub.spawned",
             Self::AgentSubCompleted(_) => "agent.sub.completed",
             Self::AgentSubFailed(_) => "agent.sub.failed",
@@ -682,6 +682,7 @@ fn is_known_event_name(event: &str) -> bool {
             | "prompt.completed"
             | "agent.session.started"
             | "agent.session.activated"
+            | "agent.tools.available"
             | "agent.session.deactivated"
             | "agent.session.ended"
             | "agent.processing.end"
@@ -702,7 +703,6 @@ fn is_known_event_name(event: &str) -> bool {
             | "agent.compaction.started"
             | "agent.compaction.completed"
             | "agent.llm.retry"
-            | "agent.context_window.snapshot"
             | "agent.sub.spawned"
             | "agent.sub.completed"
             | "agent.sub.failed"
@@ -2156,43 +2156,95 @@ mod tests {
     }
 
     #[test]
-    fn agent_context_window_snapshot_serializes_with_canonical_name() {
-        let body = EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
-            stage_id: crate::StageId::new("implement", 1),
-            visit:    1,
-            snapshot: crate::StageContextWindowProjection {
-                provider:              "openai".to_string(),
-                model:                 "gpt-5.4".to_string(),
-                context_window_tokens: 400_000,
-                input_tokens:          123_456,
-                usage_percent:         30.864,
-                count_method:
-                    crate::StageContextWindowCountMethod::ProviderApiScaledBreakdown,
-                staleness:             crate::StageContextWindowStaleness::Live,
-                generated_at:          DateTime::parse_from_rfc3339("2026-05-23T12:34:56Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
-                event_seq:             None,
-                breakdown:             vec![crate::StageContextWindowBreakdownItem {
-                    category:      crate::StageContextWindowCategory::SystemPrompt,
-                    tokens:        30_000,
-                    usage_percent: 7.5,
-                }],
-                warnings:              vec![crate::StageContextWindowWarning {
-                    code:    "local_token_estimate".to_string(),
-                    message: "input token count is a local estimate".to_string(),
-                }],
+    fn agent_message_omits_context_window_when_absent() {
+        let body = EventBody::AgentMessage(AgentMessageProps {
+            text:            "ok".to_string(),
+            model:           crate::ModelRef {
+                provider: fabro_model::ProviderId::openai(),
+                model_id: "gpt-5.4".to_string(),
+                speed:    None,
             },
+            billing:         BilledTokenCounts::default(),
+            tool_call_count: 0,
+            visit:           1,
+            message:         None,
+            context_window:  None,
         });
+
         let value = serde_json::to_value(&body).unwrap();
-        assert_eq!(value["event"], "agent.context_window.snapshot");
-        assert_eq!(value["properties"]["stage_id"], "implement@1");
-        assert_eq!(
-            value["properties"]["breakdown"][0]["category"],
-            "system_prompt"
+        assert_eq!(value["event"], "agent.message");
+        assert!(
+            value["properties"]
+                .as_object()
+                .unwrap()
+                .get("context_window")
+                .is_none()
         );
         let parsed: EventBody = serde_json::from_value(value).unwrap();
-        assert_eq!(parsed.event_name(), "agent.context_window.snapshot");
+        assert_eq!(parsed.event_name(), "agent.message");
+    }
+
+    #[test]
+    fn agent_message_round_trips_optional_context_window() {
+        let context_window = crate::StageContextWindowProjection {
+            provider:              "openai".to_string(),
+            model:                 "gpt-5.4".to_string(),
+            context_window_tokens: 400_000,
+            input_tokens:          123_456,
+            usage_percent:         30.864,
+            count_method:
+                crate::StageContextWindowCountMethod::ResponseUsageScaledBreakdown,
+            staleness:             crate::StageContextWindowStaleness::Live,
+            generated_at:          DateTime::parse_from_rfc3339("2026-05-23T12:34:56Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            event_seq:             None,
+            breakdown:             vec![crate::StageContextWindowBreakdownItem {
+                category:      crate::StageContextWindowCategory::SystemPrompt,
+                tokens:        30_000,
+                usage_percent: 7.5,
+            }],
+            warnings:              vec![crate::StageContextWindowWarning {
+                code:    "local_token_estimate".to_string(),
+                message: "input token count is a local estimate".to_string(),
+            }],
+        };
+        let body = EventBody::AgentMessage(AgentMessageProps {
+            text:            "ok".to_string(),
+            model:           crate::ModelRef {
+                provider: fabro_model::ProviderId::openai(),
+                model_id: "gpt-5.4".to_string(),
+                speed:    None,
+            },
+            billing:         BilledTokenCounts::default(),
+            tool_call_count: 0,
+            visit:           1,
+            message:         None,
+            context_window:  Some(context_window),
+        });
+
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "agent.message");
+        assert_eq!(
+            value["properties"]["context_window"]["breakdown"][0]["category"],
+            "system_prompt"
+        );
+        assert_eq!(
+            value["properties"]["context_window"]["count_method"],
+            "response_usage_scaled_breakdown"
+        );
+        let parsed: EventBody = serde_json::from_value(value).unwrap();
+        match parsed {
+            EventBody::AgentMessage(props) => {
+                let context_window = props.context_window.expect("context window present");
+                assert_eq!(context_window.input_tokens, 123_456);
+                assert_eq!(
+                    context_window.count_method,
+                    crate::StageContextWindowCountMethod::ResponseUsageScaledBreakdown
+                );
+            }
+            other => panic!("expected AgentMessage body, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2259,6 +2311,78 @@ mod tests {
                 .get("tools")
                 .is_none(),
             "empty tools should be omitted for legacy parity"
+        );
+    }
+
+    #[test]
+    fn agent_tools_available_round_trips_without_parameter_schemas() {
+        let body = EventBody::AgentToolsAvailable(AgentToolsAvailableProps {
+            tools: vec![
+                AgentToolSummary {
+                    name:        "apply_patch".to_string(),
+                    description: "Apply a unified diff patch".to_string(),
+                    source:      AgentToolSource::Native,
+                    category:    AgentToolCategory::Write,
+                    invoked:     false,
+                },
+                AgentToolSummary {
+                    name:        "mcp__filesystem__read_file".to_string(),
+                    description: "Read a file through the filesystem MCP server".to_string(),
+                    source:      AgentToolSource::Mcp {
+                        server_name:   "filesystem".to_string(),
+                        original_name: "read_file".to_string(),
+                    },
+                    category:    AgentToolCategory::Other,
+                    invoked:     false,
+                },
+            ],
+            visit: 1,
+        });
+
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "agent.tools.available");
+        assert_eq!(value["properties"]["visit"], 1);
+        assert_eq!(value["properties"]["tools"][0]["name"], "apply_patch");
+        assert_eq!(value["properties"]["tools"][0]["source"]["kind"], "native");
+        assert_eq!(value["properties"]["tools"][0]["category"], "write");
+        assert!(
+            value["properties"]["tools"][0]
+                .as_object()
+                .unwrap()
+                .get("parameters")
+                .is_none(),
+            "StageProjection tool summaries must not expose full parameter schemas"
+        );
+
+        let parsed: EventBody = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed, body);
+    }
+
+    #[test]
+    fn agent_tool_source_and_category_use_public_json_shape() {
+        assert_eq!(
+            serde_json::to_value(AgentToolCategory::Read).unwrap(),
+            json!("read")
+        );
+        assert_eq!(
+            serde_json::to_value(AgentToolCategory::Subagent).unwrap(),
+            json!("subagent")
+        );
+        assert_eq!(
+            serde_json::to_value(AgentToolSource::Skill).unwrap(),
+            json!({ "kind": "skill" })
+        );
+        assert_eq!(
+            serde_json::to_value(AgentToolSource::Mcp {
+                server_name:   "github".to_string(),
+                original_name: "create_issue".to_string(),
+            })
+            .unwrap(),
+            json!({
+                "kind": "mcp",
+                "server_name": "github",
+                "original_name": "create_issue"
+            })
         );
     }
 }

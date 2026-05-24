@@ -29,6 +29,7 @@ pub struct ServerNamespace {
     pub web:          ServerWebSettings,
     pub auth:         ServerAuthSettings,
     pub ip_allowlist: ServerIpAllowlistSettings,
+    pub sandbox:      ServerSandboxSettings,
     pub storage:      ServerStorageSettings,
     pub artifacts:    ServerArtifactsSettings,
     pub slatedb:      ServerSlateDbSettings,
@@ -50,6 +51,7 @@ impl ServerNamespace {
             web:          ServerWebSettings::default(),
             auth:         ServerAuthSettings::default(),
             ip_allowlist: ServerIpAllowlistSettings::default(),
+            sandbox:      ServerSandboxSettings::default(),
             storage:      ServerStorageSettings::default(),
             artifacts:    ServerArtifactsSettings::default(),
             slatedb:      ServerSlateDbSettings::default(),
@@ -131,6 +133,43 @@ pub struct ServerIpAllowlistSettings {
 pub struct ServerIpAllowlistOverrideSettings {
     pub entries:             Option<Vec<IpAllowEntry>>,
     pub trusted_proxy_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerSandboxSettings {
+    pub providers: ServerSandboxProvidersSettings,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerSandboxProvidersSettings {
+    pub local:   ServerSandboxProviderSettings,
+    pub docker:  ServerSandboxProviderSettings,
+    pub daytona: ServerSandboxProviderSettings,
+}
+
+impl ServerSandboxProvidersSettings {
+    /// Per-provider policy entry.
+    #[must_use]
+    pub fn for_provider(&self, provider: crate::SandboxProvider) -> &ServerSandboxProviderSettings {
+        match provider {
+            crate::SandboxProvider::Local => &self.local,
+            crate::SandboxProvider::Docker => &self.docker,
+            crate::SandboxProvider::Daytona => &self.daytona,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerSandboxProviderSettings {
+    pub enabled: bool,
+}
+
+impl Default for ServerSandboxProviderSettings {
+    // The resolver defaults each provider to enabled; keep the struct default
+    // aligned with that so callers that bypass the resolver behave identically.
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

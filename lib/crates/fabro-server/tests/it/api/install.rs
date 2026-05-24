@@ -34,6 +34,22 @@ fn spa_fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/spa")
 }
 
+fn assert_sandbox_provider_policy_enabled(settings: &str) {
+    assert!(settings.contains("[server.sandbox.providers.local]"));
+    assert!(settings.contains("[server.sandbox.providers.docker]"));
+    assert!(settings.contains("[server.sandbox.providers.daytona]"));
+    assert!(settings.contains("enabled = true"));
+
+    let resolved = ServerSettingsBuilder::from_toml(settings)
+        .expect("settings should resolve")
+        .server
+        .sandbox
+        .providers;
+    assert!(resolved.local.enabled);
+    assert!(resolved.docker.enabled);
+    assert!(resolved.daytona.enabled);
+}
+
 async fn mock_daytona_auth_probe(server: &MockServer) -> httpmock::Mock<'_> {
     server
         .mock_async(|when, then| {
@@ -918,6 +934,7 @@ async fn token_install_finish_persists_settings_env_and_vault() {
         settings.contains("provider = \"docker\""),
         "settings.toml should record explicit docker sandbox provider"
     );
+    assert_sandbox_provider_policy_enabled(&settings);
     let resolved = ServerSettingsBuilder::from_toml(&settings)
         .expect("settings should resolve")
         .server;
@@ -2677,6 +2694,7 @@ async fn daytona_install_finish_writes_settings_and_vault_secret() {
         settings.contains("provider = \"daytona\""),
         "settings.toml should record daytona sandbox provider"
     );
+    assert_sandbox_provider_policy_enabled(&settings);
 
     let vault = Vault::load(Storage::new(temp_dir.path()).secrets_path()).unwrap();
     assert_eq!(vault.get("DAYTONA_API_KEY"), Some(api_key));

@@ -315,6 +315,16 @@ async fn execute_fabro_run_tool(
             let summary = fabro_tool::run_events_text(&result);
             render_fabro_tool_result(&summary, &result)
         }
+        fabro_tool::FABRO_RUN_PAIR_TOOL_NAME => {
+            let params = parse_fabro_tool_args::<fabro_tool::FabroRunPairParams>(name, args)?;
+            let result = fabro_tool::pair_run(
+                Arc::clone(&services.backend),
+                fabro_tool::ValidatedPairRun::try_from(params)?,
+            )
+            .await?;
+            let summary = fabro_tool::pair_run_text(&result);
+            render_fabro_tool_result(&summary, &result)
+        }
         _ => Err(fabro_tool::ToolError::message(format!(
             "unknown Fabro run tool `{name}`"
         ))),
@@ -494,6 +504,20 @@ fn last_assistant_response(session: &Session) -> String {
             None
         })
         .unwrap_or_default()
+}
+
+fn emit_agent_tools_available(
+    session: &Session,
+    node_id: &str,
+    stage_id: &StageId,
+    emitter: &Arc<Emitter>,
+) {
+    emitter.emit(&Event::AgentToolsAvailable {
+        node_id:    node_id.to_string(),
+        visit:      stage_id.visit(),
+        session_id: session.id().to_string(),
+        tools:      session.agent_tool_summaries(),
+    });
 }
 
 /// Spawn a task that subscribes to session events and:
@@ -1197,6 +1221,13 @@ impl CodergenBackend for AgentApiBackend {
                         return Err(err);
                     }
                 }
+                // Reused steerable sessions already emitted their effective
+                // tool list on first activation; the registry, access policy,
+                // and exposure mode are immutable for the session's lifetime,
+                // so re-emitting on every subsequent prompt is wasted work.
+                if !is_reused {
+                    emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
+                }
                 session
                     .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                     .await
@@ -1323,6 +1354,7 @@ impl CodergenBackend for AgentApiBackend {
                                 return Err(err);
                             }
                         }
+                        emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
                         match session
                             .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                             .await
@@ -1507,8 +1539,8 @@ mod tests {
     use fabro_llm::{Error as LlmError, ProviderErrorDetail, ProviderErrorKind};
     use fabro_tool::FabroToolBackend;
     use fabro_types::{
-        EventEnvelope, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunProjection, RunStatus,
-        RunTimestamps, SuccessReason, WorkflowRef,
+        EventEnvelope, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunPairStatusResponse,
+        RunProjection, RunStatus, RunTimestamps, SuccessReason, WorkflowRef,
     };
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
@@ -1730,6 +1762,7 @@ reasoning = false
             fabro_tool::FABRO_RUN_GATHER_TOOL_NAME,
             fabro_tool::FABRO_RUN_GET_TOOL_NAME,
             fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+            fabro_tool::FABRO_RUN_PAIR_TOOL_NAME,
             fabro_tool::FABRO_RUN_SEARCH_TOOL_NAME,
         ]);
 
@@ -1914,11 +1947,38 @@ reasoning = false
         ]);
     }
 
+    #[tokio::test]
+    async fn agent_run_pair_dispatches_to_shared_backend() {
+        let (services, backend) = fabro_run_tool_services();
+        let mut registry = ToolRegistry::new();
+        register_fabro_run_tools(&mut registry, &services);
+        let tool = registry
+            .get(fabro_tool::FABRO_RUN_PAIR_TOOL_NAME)
+            .expect("pair tool should be registered");
+
+        let output = (tool.executor)(
+            serde_json::json!({
+                "action": "status",
+                "run_id": child_run_id().to_string()
+            }),
+            tool_context(),
+        )
+        .await
+        .expect("pair status should succeed");
+
+        assert!(output.contains("read pair status for Fabro run"));
+        assert!(output.contains("\"action\": \"status\""));
+        assert_eq!(backend.pair_status_run_ids.lock().unwrap().as_slice(), &[
+            child_run_id()
+        ]);
+    }
+
     fn fabro_run_tool_services() -> (FabroRunToolServices, Arc<MockRunToolBackend>) {
         let backend = Arc::new(MockRunToolBackend {
-            child_id:           child_run_id(),
-            created_parent_ids: Mutex::new(Vec::new()),
-            started_run_ids:    Mutex::new(Vec::new()),
+            child_id:            child_run_id(),
+            created_parent_ids:  Mutex::new(Vec::new()),
+            started_run_ids:     Mutex::new(Vec::new()),
+            pair_status_run_ids: Mutex::new(Vec::new()),
         });
         let services = FabroRunToolServices {
             backend:            backend.clone(),
@@ -2015,9 +2075,10 @@ reasoning = false
     }
 
     struct MockRunToolBackend {
-        child_id:           RunId,
-        created_parent_ids: Mutex<Vec<Option<RunId>>>,
-        started_run_ids:    Mutex<Vec<RunId>>,
+        child_id:            RunId,
+        created_parent_ids:  Mutex<Vec<Option<RunId>>>,
+        started_run_ids:     Mutex<Vec<RunId>>,
+        pair_status_run_ids: Mutex<Vec<RunId>>,
     }
 
     #[async_trait]
@@ -2138,6 +2199,18 @@ reasoning = false
             _body: types::SubmitAnswerRequest,
         ) -> anyhow::Result<()> {
             unreachable!()
+        }
+
+        async fn get_run_pair_status(
+            &self,
+            run_id: &RunId,
+        ) -> anyhow::Result<RunPairStatusResponse> {
+            self.pair_status_run_ids.lock().unwrap().push(*run_id);
+            Ok(RunPairStatusResponse {
+                run_id:       *run_id,
+                current_pair: None,
+                targets:      Vec::new(),
+            })
         }
     }
 

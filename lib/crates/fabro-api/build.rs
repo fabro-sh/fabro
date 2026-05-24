@@ -260,6 +260,21 @@ fn main() {
             &[],
         ),
         (
+            "ServerSandboxSettings",
+            "fabro_types::settings::server::ServerSandboxSettings",
+            &[],
+        ),
+        (
+            "ServerSandboxProvidersSettings",
+            "fabro_types::settings::server::ServerSandboxProvidersSettings",
+            &[],
+        ),
+        (
+            "ServerSandboxProviderSettings",
+            "fabro_types::settings::server::ServerSandboxProviderSettings",
+            &[],
+        ),
+        (
             "ServerStorageSettings",
             "fabro_types::settings::server::ServerStorageSettings",
             &[],
@@ -364,6 +379,14 @@ fn main() {
         (
             "AgentSkillActivationSource",
             "fabro_types::AgentSkillActivationSource",
+            &[],
+        ),
+        ("AgentToolSummary", "fabro_types::AgentToolSummary", &[]),
+        ("AgentToolSource", "fabro_types::AgentToolSource", &[]),
+        ("AgentToolCategory", "fabro_types::AgentToolCategory", &[]),
+        (
+            "AgentToolsAvailableProps",
+            "fabro_types::AgentToolsAvailableProps",
             &[],
         ),
         (

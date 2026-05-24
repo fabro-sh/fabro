@@ -20,6 +20,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "query", "form", "multipart"] }
+sse-stream = "0.2"
 ulid = "1"
 uuid = { version = "1", features = ["v4", "v7", "v8"] }
 rand = "0.9"

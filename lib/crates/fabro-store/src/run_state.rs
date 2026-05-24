@@ -402,6 +402,11 @@ impl RunProjectionReducer for RunProjection {
                 };
                 stage.usage.add_counts(&props.billing);
                 stage.model = Some(props.model.clone());
+                if let Some(context_window) = &props.context_window {
+                    let mut context_window = context_window.clone();
+                    context_window.event_seq = Some(event.seq);
+                    stage.context_window = Some(context_window);
+                }
             }
             EventBody::AgentSessionActivated(props) => {
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
@@ -410,6 +415,13 @@ impl RunProjectionReducer for RunProjection {
                 };
                 stage.provider_used = Some(StageModelUsage::from_agent_session_activated(props));
                 stage.permission_level = props.permission_level;
+            }
+            EventBody::AgentToolsAvailable(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                stage.agent_tools.clone_from(&props.tools);
             }
             // `AgentAcpStarted` is the start-of-process signal for an external
             // ACP agent. `provider_used` is intentionally sourced from the
@@ -605,6 +617,13 @@ impl RunProjectionReducer for RunProjection {
                 else {
                     return Ok(());
                 };
+                if let Some(tool) = stage
+                    .agent_tools
+                    .iter_mut()
+                    .find(|tool| tool.name == props.tool_name)
+                {
+                    tool.invoked = true;
+                }
                 if let Some(server) = mcp_server_from_tool_name(&props.tool_name) {
                     if let Some(projection) = stage
                         .mcp_servers
@@ -614,15 +633,6 @@ impl RunProjectionReducer for RunProjection {
                         projection.invoked = true;
                     }
                 }
-            }
-            EventBody::AgentContextWindowSnapshot(props) => {
-                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
-                else {
-                    return Ok(());
-                };
-                let mut snapshot = props.snapshot.clone();
-                snapshot.event_seq = Some(event.seq);
-                stage.context_window = Some(snapshot);
             }
             _ => {}
         }
@@ -1227,14 +1237,15 @@ mod tests {
     use fabro_types::run_event::run::RunFailedProps;
     use fabro_types::run_event::{
         AgentAcpCancelledProps, AgentAcpCompletedProps, AgentAcpStartedProps,
-        AgentAcpTimedOutProps, AgentContextWindowSnapshotProps, AgentMcpFailedProps,
-        AgentMcpReadyProps, AgentMcpToolSummary, AgentMessageProps, AgentSessionActivatedProps,
-        AgentSessionEndedProps, AgentSessionStartedProps, AgentSkillActivatedProps,
-        AgentSkillActivationSource, AgentSkillSummary, AgentSkillsDiscoveredProps,
-        AgentSubClosedProps, AgentSubCompletedProps, AgentSubFailedProps, AgentSubSpawnedProps,
-        AgentToolStartedProps, CheckpointCompletedProps, InterviewCompletedProps, InterviewOption,
-        InterviewStartedProps, RunCompletedProps, RunControlEffectProps, StageCompletedProps,
-        StageFailedProps, StagePromptProps, StageRetryingProps, StageStartedProps,
+        AgentAcpTimedOutProps, AgentMcpFailedProps, AgentMcpReadyProps, AgentMcpToolSummary,
+        AgentMessageProps, AgentSessionActivatedProps, AgentSessionEndedProps,
+        AgentSessionStartedProps, AgentSkillActivatedProps, AgentSkillActivationSource,
+        AgentSkillSummary, AgentSkillsDiscoveredProps, AgentSubClosedProps, AgentSubCompletedProps,
+        AgentSubFailedProps, AgentSubSpawnedProps, AgentToolCategory, AgentToolSource,
+        AgentToolStartedProps, AgentToolSummary, AgentToolsAvailableProps,
+        CheckpointCompletedProps, InterviewCompletedProps, InterviewOption, InterviewStartedProps,
+        RunCompletedProps, RunControlEffectProps, StageCompletedProps, StageFailedProps,
+        StagePromptProps, StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
@@ -3462,6 +3473,7 @@ mod tests {
             tool_call_count: 0,
             visit: 1,
             message: None,
+            context_window: None,
         }
     }
 
@@ -4599,6 +4611,117 @@ mod tests {
             assert_eq!(legacy_stage.permission_level, None);
         }
 
+        fn agent_tool(name: &str, category: AgentToolCategory, invoked: bool) -> AgentToolSummary {
+            AgentToolSummary {
+                name: name.to_string(),
+                description: format!("{name} description"),
+                source: AgentToolSource::Native,
+                category,
+                invoked,
+            }
+        }
+
+        #[test]
+        fn agent_tools_available_replaces_stage_agent_tools() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentToolsAvailable(AgentToolsAvailableProps {
+                        tools: vec![
+                            agent_tool("read_file", AgentToolCategory::Read, false),
+                            agent_tool("apply_patch", AgentToolCategory::Write, false),
+                        ],
+                        visit: 1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    2,
+                    EventBody::AgentToolsAvailable(AgentToolsAvailableProps {
+                        tools: vec![agent_tool("grep", AgentToolCategory::Read, false)],
+                        visit: 1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.agent_tools, vec![agent_tool(
+                "grep",
+                AgentToolCategory::Read,
+                false
+            )]);
+        }
+
+        #[test]
+        fn agent_tool_started_marks_only_matching_available_tool_invoked() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentToolsAvailable(AgentToolsAvailableProps {
+                        tools: vec![
+                            agent_tool("read_file", AgentToolCategory::Read, false),
+                            agent_tool("apply_patch", AgentToolCategory::Write, false),
+                        ],
+                        visit: 1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    2,
+                    EventBody::AgentToolStarted(AgentToolStartedProps {
+                        tool_name:         "apply_patch".to_string(),
+                        tool_call_id:      "call_patch".to_string(),
+                        arguments:         serde_json::json!({}),
+                        visit:             1,
+                        tool_call:         None,
+                        turn_id:           None,
+                        parent_message_id: None,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert!(!stage.agent_tools[0].invoked);
+            assert!(stage.agent_tools[1].invoked);
+        }
+
+        #[test]
+        fn legacy_tool_started_without_available_tools_does_not_synthesize_tool_list() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentToolStarted(AgentToolStartedProps {
+                        tool_name:         "apply_patch".to_string(),
+                        tool_call_id:      "call_patch".to_string(),
+                        arguments:         serde_json::json!({}),
+                        visit:             1,
+                        tool_call:         None,
+                        turn_id:           None,
+                        parent_message_id: None,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert!(stage.agent_tools.is_empty());
+        }
+
         #[test]
         fn mcp_server_events_update_stage_projection() {
             let mut state = initialized_projection();
@@ -4816,7 +4939,7 @@ mod tests {
         }
 
         #[test]
-        fn context_window_snapshots_replace_latest_for_matching_stage() {
+        fn agent_messages_replace_latest_context_window_for_matching_stage() {
             let mut state = initialized_projection();
             let stage_id = stage_id();
             let first = context_window_snapshot(10);
@@ -4825,22 +4948,14 @@ mod tests {
             state
                 .apply_event(&test_stage_event(
                     7,
-                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
-                        stage_id: stage_id.clone(),
-                        visit:    1,
-                        snapshot: first,
-                    }),
+                    EventBody::AgentMessage(agent_message_with_context_window(first)),
                     stage_id.clone(),
                 ))
                 .unwrap();
             state
                 .apply_event(&test_stage_event(
                     8,
-                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
-                        stage_id: stage_id.clone(),
-                        visit:    1,
-                        snapshot: second,
-                    }),
+                    EventBody::AgentMessage(agent_message_with_context_window(second)),
                     stage_id.clone(),
                 ))
                 .unwrap();
@@ -4852,25 +4967,44 @@ mod tests {
         }
 
         #[test]
-        fn context_window_snapshot_does_not_update_other_stage() {
+        fn agent_message_without_context_window_preserves_existing_context_window() {
             let mut state = initialized_projection();
-            let target = stage_id();
-            let other = StageId::new("review", 1);
+            let stage_id = stage_id();
 
             state
                 .apply_event(&test_stage_event(
                     7,
-                    EventBody::AgentContextWindowSnapshot(AgentContextWindowSnapshotProps {
-                        stage_id: target.clone(),
-                        visit:    1,
-                        snapshot: context_window_snapshot(10),
-                    }),
-                    target.clone(),
+                    EventBody::AgentMessage(agent_message_with_context_window(
+                        context_window_snapshot(10),
+                    )),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    8,
+                    EventBody::AgentMessage(live_agent_message_props(live_counts(1, 1))),
+                    stage_id.clone(),
                 ))
                 .unwrap();
 
-            assert!(state.stage(&target).unwrap().context_window.is_some());
-            assert!(state.stage(&other).is_none());
+            let snapshot = state
+                .stage(&stage_id)
+                .unwrap()
+                .context_window
+                .as_ref()
+                .unwrap();
+            assert_eq!(snapshot.input_tokens, 10);
+            assert_eq!(snapshot.event_seq, Some(7));
+        }
+
+        fn agent_message_with_context_window(
+            context_window: StageContextWindowProjection,
+        ) -> AgentMessageProps {
+            AgentMessageProps {
+                context_window: Some(context_window),
+                ..live_agent_message_props(live_counts(1, 1))
+            }
         }
 
         fn context_window_snapshot(input_tokens: u64) -> StageContextWindowProjection {

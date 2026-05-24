@@ -9,7 +9,7 @@ use super::super::{
     BatchRunLifecycleRequest, BatchRunLifecycleResponse, BatchRunLifecycleResult,
     BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary, DeleteRunOutcome, DeleteRunSandbox,
     DenyRunRequest, FailureReason, ForkRequest, ForkResponse, HeaderMap, IntoResponse, Json, Path,
-    PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser, Response, RewindRequest,
+    PendingReason, Principal, RequireRunManagementTarget, RequiredUser, Response, RewindRequest,
     RewindResponse, Router, RunAnswerTransport, RunControlAction, RunExecutionMode, RunId,
     RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode, Storage,
     TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
@@ -51,7 +51,7 @@ async fn run_response(state: &AppState, id: RunId, status: StatusCode) -> Respon
 }
 
 async fn start_run(
-    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
     body: Option<Json<StartRunRequest>>,
 ) -> Response {
@@ -363,7 +363,7 @@ fn schedule_worker_kill(state: Arc<AppState>, run_id: RunId, worker_pid: u32) {
 }
 
 async fn cancel_run(
-    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
@@ -679,14 +679,14 @@ async fn unpause_run(
 }
 
 async fn archive_run(
-    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     run_archive_action(state, actor, id, ArchiveAction::Archive).await
 }
 
 async fn unarchive_run(
-    RequireRunScopedOrRunTools(id, actor): RequireRunScopedOrRunTools,
+    RequireRunManagementTarget(id, actor): RequireRunManagementTarget,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     run_archive_action(state, actor, id, ArchiveAction::Unarchive).await

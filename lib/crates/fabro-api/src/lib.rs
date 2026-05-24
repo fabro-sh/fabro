@@ -25,7 +25,8 @@ pub mod types {
         IpAllowEntry, LogDestination, ObjectStoreSettings, ServerApiSettings,
         ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
         ServerIntegrationsSettings, ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings,
-        ServerListenSettings, ServerLoggingSettings, ServerSchedulerSettings,
+        ServerListenSettings, ServerLoggingSettings, ServerSandboxProviderSettings,
+        ServerSandboxProvidersSettings, ServerSandboxSettings, ServerSchedulerSettings,
         ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
         WebhookStrategy,
     };
@@ -34,8 +35,9 @@ pub mod types {
     };
     pub use fabro_types::{
         ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
-        AskFabro, AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats,
-        DiffSummary, DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
+        AgentToolCategory, AgentToolSource, AgentToolSummary, AgentToolsAvailableProps, AskFabro,
+        AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats, DiffSummary,
+        DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
         FailureSignature, GitContext, IdpIdentity, InterviewOption, InterviewQuestionRecord,
         McpServerProjection, McpServerStatus, PairId, PairMessageId, PairMessageRecord,
         PairMessageRequest, PairRecord, PairStartRequest, PairStatus, PairTarget,

@@ -25,8 +25,8 @@ use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec}
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
-use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunMode, RunNamespace};
-use fabro_types::{ManifestPath, RunId, WorkflowSettings};
+use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
+use fabro_types::{ManifestPath, RunId, ServerSettings, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;
@@ -502,13 +502,26 @@ async fn build_preflight_report(
     let resolved_run = materialized.run;
     let server_settings = state.server_settings();
     let github_integration = &server_settings.server.integrations.github;
-    let sandbox_provider = resolve_sandbox_provider(&resolved_run);
-    let sandbox_provider =
-        if resolved_run.execution.mode == RunMode::DryRun && !sandbox_provider.is_local() {
-            SandboxProvider::Local
-        } else {
-            sandbox_provider
-        };
+    let sandbox_provider = effective_sandbox_provider(&resolved_run);
+    if let Some(error) = sandbox_provider_policy_error(&server_settings, sandbox_provider) {
+        checks.push(CheckResult {
+            name:        "Sandbox Provider Policy".into(),
+            status:      CheckStatus::Error,
+            summary:     error,
+            details:     Vec::new(),
+            remediation: None,
+        });
+        return Ok((
+            CheckReport {
+                title:    "Run Preflight".into(),
+                sections: vec![CheckSection {
+                    title: String::new(),
+                    checks,
+                }],
+            },
+            false,
+        ));
+    }
     run_environment_capability_check(&mut checks, &resolved_run);
     let needs_github_credentials =
         sandbox_provider.is_clone_based() || resolved_run.integrations.github.is_token_requested();
@@ -617,8 +630,25 @@ fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<Chec
     ]
 }
 
-fn resolve_sandbox_provider(settings: &RunNamespace) -> SandboxProvider {
-    SandboxProvider::from(settings.environment.provider)
+pub(crate) fn sandbox_provider_policy_error(
+    server_settings: &ServerSettings,
+    provider: SandboxProvider,
+) -> Option<String> {
+    let enabled = server_settings
+        .server
+        .sandbox
+        .providers
+        .for_provider(provider)
+        .enabled;
+    (!enabled).then(|| {
+        format!(
+            "sandbox provider \"{provider}\" is disabled by server.sandbox.providers.{provider}.enabled"
+        )
+    })
+}
+
+pub(crate) fn effective_sandbox_provider(settings: &RunNamespace) -> SandboxProvider {
+    SandboxProvider::from(settings.environment.provider).effective_for(settings.execution.mode)
 }
 
 fn resolve_daytona_config(settings: &RunNamespace) -> DaytonaConfig {

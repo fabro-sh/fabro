@@ -4,11 +4,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use fabro_llm::types::ToolDefinition;
+use fabro_types::{AgentToolCategory, AgentToolSource, AgentToolSummary};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{ToolAccessPolicy, ToolExposureMode};
 use crate::sandbox::Sandbox;
 use crate::session::ToolEnvProvider;
+use crate::tool_permissions;
 use crate::types::AgentEvent;
 
 /// Narrow handle a tool uses to publish typed agent events (e.g. todo
@@ -72,8 +74,13 @@ pub struct RegisteredTool {
 pub enum ToolSource {
     #[default]
     Native,
+    /// `original_name` is the raw upstream MCP tool name (before the
+    /// `mcp__<server>__` qualification applied by `fabro_mcp`). It is
+    /// supplied by the MCP integration that registers the tool, so consumers
+    /// never need to re-parse the qualified name.
     Mcp {
-        server_name: String,
+        server_name:   String,
+        original_name: String,
     },
     Skill,
 }
@@ -82,6 +89,39 @@ pub enum ToolSource {
 pub struct ToolDefinitionWithSource {
     pub definition: ToolDefinition,
     pub source:     ToolSource,
+}
+
+impl ToolDefinitionWithSource {
+    /// Project this tool into the public `AgentToolSummary` used by
+    /// `StageProjection.agent_tools` and the `agent.tools.available` event.
+    /// Drops the parameter schema; `invoked` defaults to `false` and is set
+    /// by the projection reducer when matching `agent.tool.started` events
+    /// replay.
+    #[must_use]
+    pub fn to_agent_tool_summary(&self) -> AgentToolSummary {
+        AgentToolSummary {
+            name:        self.definition.name.clone(),
+            description: self.definition.description.clone(),
+            source:      agent_tool_source(&self.source),
+            category:    tool_permissions::known_tool_category(&self.definition.name)
+                .unwrap_or(AgentToolCategory::Other),
+            invoked:     false,
+        }
+    }
+}
+
+fn agent_tool_source(source: &ToolSource) -> AgentToolSource {
+    match source {
+        ToolSource::Native => AgentToolSource::Native,
+        ToolSource::Mcp {
+            server_name,
+            original_name,
+        } => AgentToolSource::Mcp {
+            server_name:   server_name.clone(),
+            original_name: original_name.clone(),
+        },
+        ToolSource::Skill => AgentToolSource::Skill,
+    }
 }
 
 pub struct ToolRegistry {
@@ -384,5 +424,60 @@ mod tests {
         let registry = ToolRegistry::default();
         assert!(registry.names().is_empty());
         assert!(registry.definitions().is_empty());
+    }
+
+    fn tool_with_source(name: &str, source: ToolSource) -> ToolDefinitionWithSource {
+        ToolDefinitionWithSource {
+            definition: ToolDefinition {
+                name:        name.to_string(),
+                description: format!("{name} description"),
+                parameters:  serde_json::json!({
+                    "type": "object",
+                    "properties": { "path": { "type": "string" } }
+                }),
+            },
+            source,
+        }
+    }
+
+    #[test]
+    fn to_agent_tool_summary_maps_known_native_categories_and_drops_parameters() {
+        let cases = [
+            ("apply_patch", AgentToolCategory::Write),
+            ("grep", AgentToolCategory::Read),
+            ("glob", AgentToolCategory::Read),
+            ("spawn_agent", AgentToolCategory::Subagent),
+            ("shell", AgentToolCategory::Shell),
+            ("unknown_native", AgentToolCategory::Other),
+        ];
+        for (name, expected) in cases {
+            let summary = tool_with_source(name, ToolSource::Native).to_agent_tool_summary();
+            assert_eq!(summary.name, name);
+            assert_eq!(summary.description, format!("{name} description"));
+            assert_eq!(summary.source, AgentToolSource::Native);
+            assert_eq!(summary.category, expected);
+            assert!(!summary.invoked);
+
+            let json = serde_json::to_value(&summary).unwrap();
+            assert!(
+                json.as_object().unwrap().get("parameters").is_none(),
+                "agent tool summaries must not include parameter schemas"
+            );
+        }
+    }
+
+    #[test]
+    fn to_agent_tool_summary_carries_mcp_original_name_from_source() {
+        let summary = tool_with_source("mcp__filesystem__read_file", ToolSource::Mcp {
+            server_name:   "filesystem".to_string(),
+            original_name: "read_file".to_string(),
+        })
+        .to_agent_tool_summary();
+
+        assert_eq!(summary.source, AgentToolSource::Mcp {
+            server_name:   "filesystem".to_string(),
+            original_name: "read_file".to_string(),
+        });
+        assert_eq!(summary.category, AgentToolCategory::Other);
     }
 }

@@ -4,7 +4,8 @@ use fabro_types::settings::server::{
     IpAllowEntry, ObjectStoreProvider, ObjectStoreSettings, ServerApiSettings,
     ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
     ServerIntegrationsSettings, ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings,
-    ServerListenSettings, ServerLoggingSettings, ServerNamespace, ServerSchedulerSettings,
+    ServerListenSettings, ServerLoggingSettings, ServerNamespace, ServerSandboxProviderSettings,
+    ServerSandboxProvidersSettings, ServerSandboxSettings, ServerSchedulerSettings,
     ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
     WebhookStrategy,
 };
@@ -15,8 +16,8 @@ use crate::user::default_storage_dir;
 use crate::{
     IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer,
     ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerIpAllowlistLayer,
-    ServerIpAllowlistOverrideLayer, ServerLayer, ServerListenLayer, ServerSlateDbLayer,
-    ServerStorageLayer, ServerWebLayer,
+    ServerIpAllowlistOverrideLayer, ServerLayer, ServerListenLayer, ServerSandboxLayer,
+    ServerSandboxProviderLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer,
 };
 
 pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> ServerNamespace {
@@ -38,6 +39,7 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
         web,
         auth,
         ip_allowlist,
+        sandbox: resolve_sandbox(layer.sandbox.as_ref()),
         storage: storage.clone(),
         artifacts: resolve_artifacts(layer.artifacts.as_ref(), &storage.root, errors),
         slatedb: resolve_slatedb(layer.slatedb.as_ref(), &storage.root, errors),
@@ -61,6 +63,31 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
                 .unwrap_or_default(),
         },
         integrations,
+    }
+}
+
+fn resolve_sandbox(layer: Option<&ServerSandboxLayer>) -> ServerSandboxSettings {
+    let providers = layer.and_then(|sandbox| sandbox.providers.as_ref());
+    ServerSandboxSettings {
+        providers: ServerSandboxProvidersSettings {
+            local:   resolve_sandbox_provider(
+                providers.and_then(|providers| providers.local.as_ref()),
+            ),
+            docker:  resolve_sandbox_provider(
+                providers.and_then(|providers| providers.docker.as_ref()),
+            ),
+            daytona: resolve_sandbox_provider(
+                providers.and_then(|providers| providers.daytona.as_ref()),
+            ),
+        },
+    }
+}
+
+fn resolve_sandbox_provider(
+    layer: Option<&ServerSandboxProviderLayer>,
+) -> ServerSandboxProviderSettings {
+    ServerSandboxProviderSettings {
+        enabled: layer.and_then(|provider| provider.enabled).unwrap_or(true),
     }
 }
 

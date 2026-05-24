@@ -14,7 +14,7 @@ use fabro_config::bind::Bind;
 use fabro_interview::{
     AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlMessage,
 };
-use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest};
+use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest, TokenCounts};
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ModelRef, ProviderId, ReasoningEffort, Speed};
 use fabro_types::settings::ServerAuthMethod;
@@ -608,6 +608,50 @@ async fn create_run_with_bearer(app: &Router, bearer: &str) -> RunId {
     body["id"].as_str().unwrap().parse().unwrap()
 }
 
+fn pair_test_target() -> PairTarget {
+    PairTarget {
+        stage_id:   StageId::new("agent", 1),
+        node_label: "Agent".to_string(),
+    }
+}
+
+async fn append_pair_transcript_fixture(state: &Arc<AppState>, run_id: RunId) -> PairId {
+    let pair_id = "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap();
+    let run_store = state
+        .store
+        .open_run(&run_id)
+        .await
+        .expect("test run should be openable");
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::RunPairStarted {
+            pair_id,
+            target: pair_test_target(),
+            actor: None,
+        },
+    )
+    .await
+    .unwrap();
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::AgentPairUserMessage {
+            node_id: "agent".to_string(),
+            visit: 1,
+            session_id: "session-1".to_string(),
+            pair_id,
+            message_id: PairMessageId::new(),
+            client_message_id: None,
+            text: "hello pair".to_string(),
+            actor: None,
+        },
+    )
+    .await
+    .unwrap();
+    pair_id
+}
+
 fn bearer_request(method: Method, path: &str, bearer: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -912,6 +956,29 @@ id = "missing"
     assert_eq!(
         system_sandbox_provider(&manifest_run_settings),
         SandboxProvider::default().to_string()
+    );
+}
+
+#[test]
+fn sandbox_provider_policy_error_reports_disabled_provider() {
+    let settings = server_settings_from_toml(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.sandbox.providers.daytona]
+enabled = false
+"#,
+    );
+
+    assert_eq!(
+        crate::run_manifest::sandbox_provider_policy_error(&settings, SandboxProvider::Daytona)
+            .as_deref(),
+        Some(
+            "sandbox provider \"daytona\" is disabled by server.sandbox.providers.daytona.enabled"
+        )
     );
 }
 
@@ -2158,10 +2225,7 @@ async fn subprocess_answer_transport_pair_commands_enqueue_control_messages() {
     let actor = Principal::System {
         system_kind: SystemActorKind::Engine,
     };
-    let target = PairTarget {
-        stage_id:   StageId::new("agent", 1),
-        node_label: "Agent".to_string(),
-    };
+    let target = pair_test_target();
 
     transport
         .start_pair(run_id, pair_id, target.clone(), actor.clone())
@@ -3023,12 +3087,22 @@ fn stage_completed_event(node_id: &str) -> workflow_event::Event {
 fn context_window_event(
     stage: &str,
     visit: u32,
-    snapshot: StageContextWindowProjection,
+    context_window: StageContextWindowProjection,
 ) -> workflow_event::Event {
     workflow_event::Event::Agent {
         stage: stage.to_string(),
         visit,
-        event: fabro_agent::AgentEvent::ContextWindowSnapshot(snapshot),
+        event: fabro_agent::AgentEvent::AssistantMessage {
+            text:            "assistant response".to_string(),
+            model:           ModelRef {
+                provider: ProviderId::openai(),
+                model_id: "gpt-5.4".to_string(),
+                speed:    None,
+            },
+            usage:           TokenCounts::default(),
+            tool_call_count: 0,
+            context_window:  Some(context_window),
+        },
         session_id: Some("session-1".to_string()),
         parent_session_id: None,
         tool_call_id: None,
@@ -3045,7 +3119,7 @@ fn context_window_snapshot(
         context_window_tokens: 400_000,
         input_tokens,
         usage_percent: input_tokens as f64 * 100.0 / 400_000.0,
-        count_method: StageContextWindowCountMethod::ProviderApiScaledBreakdown,
+        count_method: StageContextWindowCountMethod::ResponseUsageScaledBreakdown,
         staleness: StageContextWindowStaleness::Live,
         generated_at: Utc::now(),
         event_seq: None,
@@ -6602,7 +6676,7 @@ async fn get_run_stage_context_window_returns_live_projected_snapshot() {
     assert_eq!(body["stage_id"], "agent_node@1");
     assert_eq!(body["available"], true);
     assert_eq!(body["provider"], "openai");
-    assert_eq!(body["count_method"], "provider_api_scaled_breakdown");
+    assert_eq!(body["count_method"], "response_usage_scaled_breakdown");
     assert_eq!(body["staleness"], "live");
     assert_eq!(body["input_tokens"], 123_456);
     assert_eq!(body["breakdown"][0]["category"], "conversation");
@@ -8555,6 +8629,127 @@ async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
         .await
         .unwrap();
     assert_status!(response, StatusCode::OK).await;
+}
+
+#[tokio::test]
+async fn run_tools_worker_can_read_pair_status_and_transcript_across_runs() {
+    let (state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&origin_run_id);
+    let pair_id = append_pair_transcript_fixture(&state, target_run_id).await;
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            &format!("/runs/{target_run_id}/pair"),
+            &worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let status_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(status_body["run_id"], target_run_id.to_string());
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            &format!("/runs/{target_run_id}/pair/{pair_id}/transcript"),
+            &worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let transcript_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(transcript_body["data"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn run_tools_worker_start_pair_reaches_worker_control_domain_across_runs() {
+    let (state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&origin_run_id);
+    let target = pair_test_target();
+    let _temp_dir = insert_running_control_run(&state, target_run_id, None);
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get_mut(&target_run_id)
+            .unwrap()
+            .active_api_targets
+            .insert(target.stage_id.clone(), target.clone());
+    }
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{target_run_id}/pair"),
+            &worker_token,
+            &json!({ "stage_id": target.stage_id.to_string() }),
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::SERVICE_UNAVAILABLE).await;
+    assert_eq!(body["errors"][0]["code"], "worker_control_unavailable");
+}
+
+#[tokio::test]
+async fn cross_run_base_worker_remains_forbidden_from_pair_routes() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_worker_token(&origin_run_id);
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            &format!("/runs/{target_run_id}/pair"),
+            &worker_token,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::FORBIDDEN).await;
+}
+
+#[tokio::test]
+async fn run_tools_worker_cannot_call_user_only_non_mcp_routes() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&origin_run_id);
+
+    for (method, path) in [
+        (Method::POST, format!("/runs/{target_run_id}/approve")),
+        (Method::GET, format!("/runs/{target_run_id}/timeline")),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(bearer_request(
+                method.clone(),
+                &path,
+                &worker_token,
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                response.status(),
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+            ),
+            "{method} {path} unexpectedly accepted run-tools worker token with status {}",
+            response.status()
+        );
+    }
 }
 
 #[tokio::test]

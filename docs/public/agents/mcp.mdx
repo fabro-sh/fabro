@@ -7,6 +7,8 @@ MCP ([Model Context Protocol](https://modelcontextprotocol.io/)) lets you connec
 
 Fabro can also run as an MCP server. MCP clients can use Fabro's run-management tools to create, inspect, control, wait for, and read events from workflow runs through the authenticated `fabro` CLI.
 
+Workflow agents can opt in to that same run-management tool catalog with `[run.agent] fabro_tools = true`. This is not the same as configuring external MCP servers for the agent, and it does not change the agent's normal workspace permissions. When a workflow agent calls `fabro_run_create`, created runs are always children of the current run; an explicit `parent_id` must match the current run ID.
+
 ## Fabro as an MCP server
 
 Use `fabro mcp init` to configure an MCP client to launch Fabro:
@@ -145,6 +147,7 @@ Authorization = "Bearer sk-xxx"
 | Field | Description | Default |
 |---|---|---|
 | `type` | Must be `"http"`. | — |
+| `protocol` | HTTP MCP protocol: `"streamable_http"` or legacy `"sse"`. | `"streamable_http"` |
 | `url` | The MCP server endpoint URL. | — |
 | `headers` | Optional HTTP headers (e.g., for authentication). | `{}` |
 | `startup_timeout` | Max duration to wait for the MCP handshake. | `"10s"` |
@@ -157,6 +160,7 @@ Runs the MCP server inside the workflow's sandbox (e.g., a [Daytona](/integratio
 ```toml
 [run.agent.mcps.playwright]
 type = "sandbox"
+protocol = "sse"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless", "--browser", "chromium"]
 port = 3100
 startup_timeout = "60s"
@@ -166,6 +170,7 @@ tool_timeout = "2m"
 | Field | Description | Default |
 |---|---|---|
 | `type` | Must be `"sandbox"`. | — |
+| `protocol` | HTTP MCP protocol exposed by the sandbox server: `"streamable_http"` or legacy `"sse"`. | `"streamable_http"` |
 | `command` | Array: the command to run inside the sandbox. Must include a flag that makes the server listen on `port`. | — |
 | `script` | Shell script alternative to `command`. | — |
 | `port` | The port the MCP server listens on inside the sandbox. | — |
@@ -244,6 +249,7 @@ include = ["screenshots/**"]
 
 [run.agent.mcps.playwright]
 type = "sandbox"
+protocol = "sse"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless", "--browser", "chromium"]
 port = 3100
 startup_timeout = "60s"
