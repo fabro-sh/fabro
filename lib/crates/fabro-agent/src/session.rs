@@ -9,15 +9,15 @@ use fabro_llm::generate::StreamAccumulator;
 use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{
     ContentPart, Message as LlmMessage, ReasoningEffort, Request, RetryPolicy, StreamEvent,
-    TokenCounts, ToolChoice,
+    ToolChoice,
 };
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
 use fabro_types::{
-    PermissionLevel, Principal, SessionMessage, SessionRecord, StageContextWindowCountMethod,
-    StageContextWindowProjection, SteeringMessage,
+    PermissionLevel, Principal, SessionMessage, SessionRecord, StageContextWindowProjection,
+    SteeringMessage,
 };
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
@@ -28,7 +28,9 @@ use tracing::{debug, info, warn};
 use crate::agent_profile::AgentProfile;
 use crate::compaction::{check_context_usage, compact_context};
 use crate::config::SessionOptions;
-use crate::context_window::{ContextWindowInput, build_local_snapshot, scaled_snapshot};
+use crate::context_window::{
+    ContextWindowInput, build_local_snapshot, context_window_from_response_usage,
+};
 use crate::error::{Error, InterruptReason};
 use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
@@ -1898,25 +1900,6 @@ impl Session {
     }
 }
 
-fn context_window_from_response_usage(
-    local_snapshot: &StageContextWindowProjection,
-    usage: &TokenCounts,
-) -> StageContextWindowProjection {
-    let input_tokens = usage
-        .input_tokens
-        .saturating_add(usage.cache_read_tokens)
-        .saturating_add(usage.cache_write_tokens);
-    if input_tokens <= 0 {
-        return local_snapshot.clone();
-    }
-    scaled_snapshot(
-        local_snapshot,
-        u64::try_from(input_tokens).unwrap_or(u64::MAX),
-        StageContextWindowCountMethod::ResponseUsageScaledBreakdown,
-        local_snapshot.warnings.clone(),
-    )
-}
-
 const fn is_auth_error(err: &LlmError) -> bool {
     matches!(
         err.provider_kind(),
@@ -1954,6 +1937,7 @@ mod tests {
         ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, TokenCounts, ToolCall,
         ToolDefinition,
     };
+    use fabro_types::StageContextWindowCountMethod;
     use futures::stream;
     use tokio::time::{sleep, timeout};
 
