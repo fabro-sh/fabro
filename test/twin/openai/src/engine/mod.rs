@@ -19,11 +19,12 @@ pub fn execute_responses_request(
 ) -> Result<ExecutionOutcome, OpenAiError> {
     request.validate()?;
     let context = RequestContext {
-        endpoint:   "responses".to_owned(),
-        model:      request.model.clone(),
-        stream:     request.stream,
-        metadata:   request.metadata.clone(),
-        input_text: request.extract_user_text(),
+        endpoint:          "responses".to_owned(),
+        model:             request.model.clone(),
+        stream:            request.stream,
+        metadata:          request.metadata.clone(),
+        input_text:        request.extract_user_text(),
+        instructions_text: request.extract_instruction_text(),
     };
     state.log_request(namespace, context.clone());
 
@@ -52,11 +53,12 @@ pub fn execute_chat_request(
 ) -> Result<ExecutionOutcome, OpenAiError> {
     request.validate()?;
     let context = RequestContext {
-        endpoint:   "chat.completions".to_owned(),
-        model:      request.model.clone(),
-        stream:     request.stream,
-        metadata:   serde_json::Map::new(),
-        input_text: request.extract_user_text(),
+        endpoint:          "chat.completions".to_owned(),
+        model:             request.model.clone(),
+        stream:            request.stream,
+        metadata:          serde_json::Map::new(),
+        input_text:        request.extract_user_text(),
+        instructions_text: request.extract_instruction_text(),
     };
     state.log_request(namespace, context.clone());
 
