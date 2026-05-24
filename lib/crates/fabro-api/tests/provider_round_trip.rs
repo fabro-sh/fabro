@@ -12,16 +12,17 @@ fn provider_reuses_canonical_type() {
 #[test]
 fn provider_json_matches_openapi_shape() {
     let provider = Provider {
-        id:            ProviderId::anthropic(),
-        display_name:  "Anthropic".to_string(),
-        adapter:       AdapterKind::Anthropic,
-        base_url:      Some("https://api.anthropic.test/v1".to_string()),
-        api_key_url:   Some("https://console.anthropic.com/settings/keys".to_string()),
-        priority:      100,
-        aliases:       vec!["claude".to_string()],
-        model_count:   7,
-        default_model: Some("claude-opus-4-7".to_string()),
-        configured:    true,
+        id:                   ProviderId::anthropic(),
+        display_name:         "Anthropic".to_string(),
+        adapter:              AdapterKind::Anthropic,
+        base_url:             Some("https://api.anthropic.test/v1".to_string()),
+        api_key_url:          Some("https://console.anthropic.com/settings/keys".to_string()),
+        priority:             100,
+        aliases:              vec!["claude".to_string()],
+        model_count:          7,
+        default_model:        Some("claude-opus-4-7".to_string()),
+        configured:           true,
+        expected_secret_name: Some("ANTHROPIC_API_KEY".to_string()),
     };
 
     let json = serde_json::to_value(&provider).unwrap();
@@ -38,6 +39,7 @@ fn provider_json_matches_openapi_shape() {
     assert_eq!(json["model_count"], 7);
     assert_eq!(json["default_model"], "claude-opus-4-7");
     assert_eq!(json["configured"], true);
+    assert_eq!(json["expected_secret_name"], "ANTHROPIC_API_KEY");
 
     let round_trip: ApiProvider = serde_json::from_value(json).unwrap();
     assert_eq!(round_trip, provider);
@@ -49,16 +51,17 @@ fn provider_omits_optional_fields_when_absent() {
     // declares: the four `skip_serializing_if` fields drop out entirely, while
     // the six required fields always serialize.
     let provider = Provider {
-        id:            ProviderId::new("custom"),
-        display_name:  "Custom".to_string(),
-        adapter:       AdapterKind::OpenAiCompatible,
-        base_url:      None,
-        api_key_url:   None,
-        priority:      0,
-        aliases:       Vec::new(),
-        model_count:   0,
-        default_model: None,
-        configured:    false,
+        id:                   ProviderId::new("custom"),
+        display_name:         "Custom".to_string(),
+        adapter:              AdapterKind::OpenAiCompatible,
+        base_url:             None,
+        api_key_url:          None,
+        priority:             0,
+        aliases:              Vec::new(),
+        model_count:          0,
+        default_model:        None,
+        configured:           false,
+        expected_secret_name: None,
     };
 
     let json = serde_json::to_value(&provider).unwrap();
@@ -67,6 +70,7 @@ fn provider_omits_optional_fields_when_absent() {
     assert!(!object.contains_key("api_key_url"));
     assert!(!object.contains_key("aliases"));
     assert!(!object.contains_key("default_model"));
+    assert!(!object.contains_key("expected_secret_name"));
     assert!(object.contains_key("id"));
     assert!(object.contains_key("display_name"));
     assert!(object.contains_key("adapter"));
