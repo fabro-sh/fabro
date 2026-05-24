@@ -27,6 +27,7 @@ import { formatRelativeTime } from "../lib/format";
 import { EmptyState } from "../components/state";
 import { InlineMarkdown } from "../components/inline-markdown";
 import { PullRequestChip } from "../components/pull-request-chip";
+import { plural } from "../components/settings-panel";
 import { useToast } from "../components/toast";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
@@ -67,48 +68,30 @@ const columnStyles: Record<BoardColumn, ColumnStyle> = {
 const defaultColumnStyle: ColumnStyle = { actions: [] };
 const defaultColumnColors = { label: "", dot: "bg-fg-muted", text: "text-fg-muted" };
 
-function runWord(n: number) {
-  return n === 1 ? "run" : "runs";
-}
-
 type BatchLifecycleLabel = "Archive" | "Unarchive";
 
-interface BatchLifecycleToastSummary {
-  toast: {
-    message: string;
-    tone?: "error";
-  };
-  allSucceeded: boolean;
+interface BatchLifecycleToast {
+  message: string;
+  tone?: "error";
 }
 
 export function summarizeBatchLifecycleAction(
   label: BatchLifecycleLabel,
-  total: number,
-  summary: Pick<BatchRunLifecycleSummary, "succeeded" | "failed">,
-): BatchLifecycleToastSummary {
-  const succeeded = summary.succeeded;
-  const failed = summary.failed;
+  summary: BatchRunLifecycleSummary,
+): BatchLifecycleToast {
+  const { requested, succeeded, failed } = summary;
   if (failed === 0) {
-    return {
-      toast: { message: `${label}d ${succeeded} ${runWord(succeeded)}.` },
-      allSucceeded: true,
-    };
+    return { message: `${label}d ${succeeded} ${plural(succeeded, "run", "runs")}.` };
   }
   if (succeeded === 0) {
     return {
-      toast: {
-        message: `Couldn't ${label.toLowerCase()} ${total} ${runWord(total)}. Try again.`,
-        tone: "error",
-      },
-      allSucceeded: false,
+      message: `Couldn't ${label.toLowerCase()} ${requested} ${plural(requested, "run", "runs")}. Try again.`,
+      tone:    "error",
     };
   }
   return {
-    toast: {
-      message: `${label}d ${succeeded} of ${total} ${runWord(total)}. ${failed} failed.`,
-      tone: "error",
-    },
-    allSucceeded: false,
+    message: `${label}d ${succeeded} of ${requested} ${plural(requested, "run", "runs")}. ${failed} failed.`,
+    tone:    "error",
   };
 }
 
@@ -511,13 +494,14 @@ function ColumnActionsMenu({ column }: { column: Column }) {
     const total = archivable.length;
     try {
       const response = await archiveRuns(archivable.map((item) => item.id));
-      push(summarizeBatchLifecycleAction("Archive", total, response.summary).toast);
+      push(summarizeBatchLifecycleAction("Archive", response.summary));
     } catch {
       push(
-        summarizeBatchLifecycleAction("Archive", total, {
+        summarizeBatchLifecycleAction("Archive", {
+          requested: total,
           succeeded: 0,
           failed:    total,
-        }).toast,
+        }),
       );
     } finally {
       setPending(false);
@@ -1452,23 +1436,26 @@ function BulkActionToolbar({
   ) {
     if (pending) return;
     if (eligible.length === 0) {
-      push({ message: `No selected ${runWord(count)} can be ${label.toLowerCase()}d.`, tone: "error" });
+      push({
+        message: `No selected ${plural(count, "run", "runs")} can be ${label.toLowerCase()}d.`,
+        tone:    "error",
+      });
       return;
     }
     setPending(true);
     try {
       const response = await action(eligible.map((r) => r.id));
-      const summary = summarizeBatchLifecycleAction(label, eligible.length, response.summary);
-      push(summary.toast);
-      if (summary.allSucceeded) {
+      push(summarizeBatchLifecycleAction(label, response.summary));
+      if (response.summary.failed === 0) {
         onClear();
       }
     } catch {
       push(
-        summarizeBatchLifecycleAction(label, eligible.length, {
+        summarizeBatchLifecycleAction(label, {
+          requested: eligible.length,
           succeeded: 0,
           failed:    eligible.length,
-        }).toast,
+        }),
       );
     } finally {
       setPending(false);
@@ -1484,7 +1471,7 @@ function BulkActionToolbar({
     >
       <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-panel py-2 pl-4 pr-2 text-sm text-fg-2 shadow-lg shadow-black/40">
         <span className="font-medium">
-          {count} {runWord(count)} selected
+          {count} {plural(count, "run", "runs")} selected
         </span>
         <span className="h-5 w-px bg-line" aria-hidden="true" />
         <BulkActionButton

@@ -177,31 +177,25 @@ describe("runs route board mapping", () => {
 
   test("summarizes successful batch archive and unarchive actions", () => {
     expect(
-      summarizeBatchLifecycleAction("Archive", 2, { succeeded: 2, failed: 0 }),
-    ).toEqual({
-      toast:        { message: "Archived 2 runs." },
-      allSucceeded: true,
-    });
+      summarizeBatchLifecycleAction("Archive", { requested: 2, succeeded: 2, failed: 0 }),
+    ).toEqual({ message: "Archived 2 runs." });
     expect(
-      summarizeBatchLifecycleAction("Unarchive", 1, { succeeded: 1, failed: 0 }),
-    ).toEqual({
-      toast:        { message: "Unarchived 1 run." },
-      allSucceeded: true,
-    });
+      summarizeBatchLifecycleAction("Unarchive", { requested: 1, succeeded: 1, failed: 0 }),
+    ).toEqual({ message: "Unarchived 1 run." });
   });
 
   test("summarizes partial and failed batch lifecycle actions", () => {
     expect(
-      summarizeBatchLifecycleAction("Archive", 3, { succeeded: 2, failed: 1 }),
+      summarizeBatchLifecycleAction("Archive", { requested: 3, succeeded: 2, failed: 1 }),
     ).toEqual({
-      toast:        { message: "Archived 2 of 3 runs. 1 failed.", tone: "error" },
-      allSucceeded: false,
+      message: "Archived 2 of 3 runs. 1 failed.",
+      tone:    "error",
     });
     expect(
-      summarizeBatchLifecycleAction("Unarchive", 2, { succeeded: 0, failed: 2 }),
+      summarizeBatchLifecycleAction("Unarchive", { requested: 2, succeeded: 0, failed: 2 }),
     ).toEqual({
-      toast:        { message: "Couldn't unarchive 2 runs. Try again.", tone: "error" },
-      allSucceeded: false,
+      message: "Couldn't unarchive 2 runs. Try again.",
+      tone:    "error",
     });
   });
 });

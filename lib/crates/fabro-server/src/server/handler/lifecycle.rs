@@ -4,13 +4,13 @@ use std::sync::Arc;
 use chrono::Utc;
 
 use super::super::{
-    ApiError, AppState, BatchRunLifecycleRequest, BatchRunLifecycleResponse,
+    ApiError, AppState, AskFabroReadiness, BatchRunLifecycleRequest, BatchRunLifecycleResponse,
     BatchRunLifecycleResult, BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary,
-    DenyRunRequest, ErrorResponseEntry, FailureReason, ForkRequest, ForkResponse, HeaderMap,
-    IntoResponse, Json, Path, PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser,
-    Response, RewindRequest, RewindResponse, Router, Run, RunAnswerTransport, RunControlAction,
-    RunExecutionMode, RunId, RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode,
-    Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
+    DenyRunRequest, FailureReason, ForkRequest, ForkResponse, HeaderMap, IntoResponse, Json, Path,
+    PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser, Response, RewindRequest,
+    RewindResponse, Router, RunAnswerTransport, RunControlAction, RunExecutionMode, RunId,
+    RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode, Storage,
+    TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
     clear_live_run_state, durable_run_status, get, load_pending_control, managed_run, operations,
     parse_run_id_path, persist_cancelled_run_status, post, reject_if_archived, sleep,
     update_live_run_from_event, workflow_event,
@@ -921,10 +921,16 @@ async fn batch_run_archive_action(
         Ok(ids) => ids,
         Err(err) => return err.into_response(),
     };
-    let mut results = Vec::with_capacity(ids.len());
 
+    // Resolve Ask Fabro readiness once per batch instead of inside each
+    // per-item summary lookup; readiness is identical for every run in the
+    // request and resolving it performs LLM credential work.
+    let readiness = state.ask_fabro_readiness().await;
+    let mut results = Vec::with_capacity(ids.len());
     for id in ids {
-        results.push(batch_run_archive_item(state.as_ref(), actor.clone(), id, action).await);
+        results.push(
+            batch_run_archive_item(state.as_ref(), &readiness, actor.clone(), id, action).await,
+        );
     }
 
     let requested = results.len() as u64;
@@ -973,108 +979,101 @@ fn validate_batch_run_ids(request: BatchRunLifecycleRequest) -> Result<Vec<RunId
 
 async fn batch_run_archive_item(
     state: &AppState,
+    readiness: &AskFabroReadiness,
     actor: Principal,
     id: RunId,
     action: ArchiveAction,
 ) -> BatchRunLifecycleResult {
-    let result = match action {
-        ArchiveAction::Archive => operations::archive(&state.store, &id, Some(actor))
-            .await
-            .map(|outcome| match outcome {
-                operations::ArchiveOutcome::Archived { .. } => {
-                    BatchRunLifecycleResultOutcome::Archived
-                }
-                operations::ArchiveOutcome::AlreadyArchived => {
-                    BatchRunLifecycleResultOutcome::AlreadyArchived
-                }
-            }),
-        ArchiveAction::Unarchive => operations::unarchive(&state.store, &id, Some(actor))
-            .await
-            .map(|outcome| match outcome {
-                operations::UnarchiveOutcome::Unarchived { .. } => {
-                    BatchRunLifecycleResultOutcome::Unarchived
-                }
-                operations::UnarchiveOutcome::NotArchived { .. } => {
-                    BatchRunLifecycleResultOutcome::NotArchived
-                }
-            }),
+    let outcome = match run_archive_operation(state, &id, Some(actor), action).await {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let api_error = archive_workflow_error_to_api_error(err);
+            let result_outcome = match api_error.status() {
+                StatusCode::NOT_FOUND => BatchRunLifecycleResultOutcome::NotFound,
+                StatusCode::CONFLICT => BatchRunLifecycleResultOutcome::Conflict,
+                _ => BatchRunLifecycleResultOutcome::Error,
+            };
+            return batch_result_failure(id, result_outcome, api_error);
+        }
     };
 
-    match result {
-        Ok(outcome) => match load_decorated_run_after_lifecycle_action(state, id).await {
-            Ok(run) => batch_success_result(id, outcome, run),
-            Err(error) => batch_failure_result(id, BatchRunLifecycleResultOutcome::Error, error),
+    match state.store.get_cached_summary(&id, Utc::now()).await {
+        Ok(Some(summary)) => BatchRunLifecycleResult {
+            run_id: id.to_string(),
+            ok: true,
+            outcome,
+            run: Some(readiness.decorate(summary)),
+            error: None,
         },
-        Err(WorkflowError::Precondition(message)) => batch_failure_result(
-            id,
-            BatchRunLifecycleResultOutcome::Conflict,
-            batch_error_entry(StatusCode::CONFLICT, message),
-        ),
-        Err(WorkflowError::RunNotFound(_)) => batch_failure_result(
-            id,
-            BatchRunLifecycleResultOutcome::NotFound,
-            batch_error_entry(StatusCode::NOT_FOUND, "Run not found."),
-        ),
-        Err(err) => batch_failure_result(
+        Ok(None) => batch_result_failure(
             id,
             BatchRunLifecycleResultOutcome::Error,
-            batch_error_entry(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load run summary after lifecycle action.",
+            ),
+        ),
+        Err(err) => batch_result_failure(
+            id,
+            BatchRunLifecycleResultOutcome::Error,
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
         ),
     }
 }
 
-async fn load_decorated_run_after_lifecycle_action(
-    state: &AppState,
-    id: RunId,
-) -> Result<Run, ErrorResponseEntry> {
-    match state.store.get_cached_summary(&id, Utc::now()).await {
-        Ok(Some(summary)) => Ok(state.decorate_run_summary(summary).await),
-        Ok(None) => Err(batch_error_entry(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load run summary after lifecycle action.",
-        )),
-        Err(err) => Err(batch_error_entry(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            err.to_string(),
-        )),
-    }
-}
-
-fn batch_success_result(
+fn batch_result_failure(
     id: RunId,
     outcome: BatchRunLifecycleResultOutcome,
-    run: Run,
-) -> BatchRunLifecycleResult {
-    BatchRunLifecycleResult {
-        run_id: id.to_string(),
-        ok: true,
-        outcome,
-        run: Some(run),
-        error: None,
-    }
-}
-
-fn batch_failure_result(
-    id: RunId,
-    outcome: BatchRunLifecycleResultOutcome,
-    error: ErrorResponseEntry,
+    error: ApiError,
 ) -> BatchRunLifecycleResult {
     BatchRunLifecycleResult {
         run_id: id.to_string(),
         ok: false,
         outcome,
         run: None,
-        error: Some(error),
+        error: Some(error.into_response_entry()),
     }
 }
 
-fn batch_error_entry(status: StatusCode, detail: impl Into<String>) -> ErrorResponseEntry {
-    ErrorResponseEntry {
-        status:     status.as_u16().to_string(),
-        title:      status.canonical_reason().unwrap_or("Unknown").to_string(),
-        detail:     detail.into(),
-        code:       None,
-        request_id: None,
+async fn run_archive_operation(
+    state: &AppState,
+    id: &RunId,
+    actor: Option<Principal>,
+    action: ArchiveAction,
+) -> Result<BatchRunLifecycleResultOutcome, WorkflowError> {
+    match action {
+        ArchiveAction::Archive => {
+            operations::archive(&state.store, id, actor)
+                .await
+                .map(|outcome| match outcome {
+                    operations::ArchiveOutcome::Archived { .. } => {
+                        BatchRunLifecycleResultOutcome::Archived
+                    }
+                    operations::ArchiveOutcome::AlreadyArchived => {
+                        BatchRunLifecycleResultOutcome::AlreadyArchived
+                    }
+                })
+        }
+        ArchiveAction::Unarchive => {
+            operations::unarchive(&state.store, id, actor)
+                .await
+                .map(|outcome| match outcome {
+                    operations::UnarchiveOutcome::Unarchived { .. } => {
+                        BatchRunLifecycleResultOutcome::Unarchived
+                    }
+                    operations::UnarchiveOutcome::NotArchived { .. } => {
+                        BatchRunLifecycleResultOutcome::NotArchived
+                    }
+                })
+        }
+    }
+}
+
+fn archive_workflow_error_to_api_error(err: WorkflowError) -> ApiError {
+    match err {
+        WorkflowError::Precondition(message) => ApiError::new(StatusCode::CONFLICT, message),
+        WorkflowError::RunNotFound(_) => ApiError::not_found("Run not found."),
+        err => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
     }
 }
 
@@ -1084,24 +1083,9 @@ async fn run_archive_action(
     id: RunId,
     action: ArchiveAction,
 ) -> Response {
-    let actor = Some(actor);
-    let result = match action {
-        ArchiveAction::Archive => operations::archive(&state.store, &id, actor)
-            .await
-            .map(|_| ()),
-        ArchiveAction::Unarchive => operations::unarchive(&state.store, &id, actor)
-            .await
-            .map(|_| ()),
-    };
-    match result {
-        Ok(()) => archive_status_response(state.as_ref(), id).await,
-        Err(WorkflowError::Precondition(message)) => {
-            ApiError::new(StatusCode::CONFLICT, message).into_response()
-        }
-        Err(WorkflowError::RunNotFound(_)) => ApiError::not_found("Run not found.").into_response(),
-        Err(err) => {
-            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-        }
+    match run_archive_operation(state.as_ref(), &id, Some(actor), action).await {
+        Ok(_) => archive_status_response(state.as_ref(), id).await,
+        Err(err) => archive_workflow_error_to_api_error(err).into_response(),
     }
 }
 

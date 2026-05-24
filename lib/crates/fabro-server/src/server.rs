@@ -965,12 +965,12 @@ pub struct AppState {
 
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
 
-struct AskFabroReadiness {
+pub(crate) struct AskFabroReadiness {
     default_model: Option<String>,
 }
 
 impl AskFabroReadiness {
-    fn decorate(&self, mut run: fabro_types::Run) -> fabro_types::Run {
+    pub(crate) fn decorate(&self, mut run: fabro_types::Run) -> fabro_types::Run {
         run.ask_fabro = self.ask_fabro_for(&run);
         run
     }
@@ -1204,7 +1204,7 @@ impl AppState {
             .collect()
     }
 
-    async fn ask_fabro_readiness(&self) -> AskFabroReadiness {
+    pub(crate) async fn ask_fabro_readiness(&self) -> AskFabroReadiness {
         let provider_ids = self.ready_llm_provider_ids().await;
         let default_model = if provider_ids.is_empty() {
             None

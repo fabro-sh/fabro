@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use fabro_api::types::ErrorResponseEntry;
 use fabro_vault::Error as VaultError;
 use serde::Serialize;
 
@@ -127,6 +128,24 @@ impl ApiError {
 
     pub(crate) fn code(&self) -> Option<&str> {
         self.code.as_deref()
+    }
+
+    /// Convert into the OpenAPI-generated `ErrorResponseEntry` wire form. This
+    /// is used by endpoints that return per-item errors inside a larger payload
+    /// (e.g. batch lifecycle responses), where the outer response is `200` but
+    /// individual items carry structured failures.
+    pub fn into_response_entry(self) -> ErrorResponseEntry {
+        ErrorResponseEntry {
+            status:     self.status.as_u16().to_string(),
+            title:      self
+                .status
+                .canonical_reason()
+                .unwrap_or("Unknown")
+                .to_string(),
+            detail:     self.detail,
+            code:       self.code,
+            request_id: None,
+        }
     }
 }
 
