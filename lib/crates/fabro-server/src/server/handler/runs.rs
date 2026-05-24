@@ -606,6 +606,12 @@ async fn create_run(
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
     let run_id = prepared.run_id.unwrap_or_else(RunId::new);
+    let provider = run_manifest::effective_sandbox_provider(&prepared.settings.run);
+    if let Some(error) =
+        run_manifest::sandbox_provider_policy_error(&state.server_settings(), provider)
+    {
+        return ApiError::bad_request(error).into_response();
+    }
     if let Some(parent_id) = prepared.parent_id {
         if parent_id == run_id {
             return ApiError::bad_request("A run cannot be its own parent.").into_response();

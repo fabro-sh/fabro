@@ -389,6 +389,9 @@ models/server-listen-tcp-settings.ts
 models/server-listen-unix-settings.ts
 models/server-logging-settings.ts
 models/server-namespace.ts
+models/server-sandbox-provider-settings.ts
+models/server-sandbox-providers-settings.ts
+models/server-sandbox-settings.ts
 models/server-scheduler-settings.ts
 models/server-settings.ts
 models/server-slate-db-settings.ts

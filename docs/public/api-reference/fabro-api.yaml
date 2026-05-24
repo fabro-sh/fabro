@@ -11192,6 +11192,7 @@ components:
         - web
         - auth
         - ip_allowlist
+        - sandbox
         - storage
         - artifacts
         - slatedb
@@ -11209,6 +11210,8 @@ components:
           $ref: "#/components/schemas/ServerAuthSettings"
         ip_allowlist:
           $ref: "#/components/schemas/ServerIpAllowlistSettings"
+        sandbox:
+          $ref: "#/components/schemas/ServerSandboxSettings"
         storage:
           $ref: "#/components/schemas/ServerStorageSettings"
         artifacts:
@@ -11324,6 +11327,31 @@ components:
     GitHubMetaHooksEntry:
       type: string
       enum: [GitHubMetaHooks]
+
+    ServerSandboxSettings:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          $ref: "#/components/schemas/ServerSandboxProvidersSettings"
+
+    ServerSandboxProvidersSettings:
+      type: object
+      required: [local, docker, daytona]
+      properties:
+        local:
+          $ref: "#/components/schemas/ServerSandboxProviderSettings"
+        docker:
+          $ref: "#/components/schemas/ServerSandboxProviderSettings"
+        daytona:
+          $ref: "#/components/schemas/ServerSandboxProviderSettings"
+
+    ServerSandboxProviderSettings:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
 
     ServerStorageSettings:
       type: object

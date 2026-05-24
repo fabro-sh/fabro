@@ -25,7 +25,8 @@ pub mod types {
         IpAllowEntry, LogDestination, ObjectStoreSettings, ServerApiSettings,
         ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
         ServerIntegrationsSettings, ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings,
-        ServerListenSettings, ServerLoggingSettings, ServerSchedulerSettings,
+        ServerListenSettings, ServerLoggingSettings, ServerSandboxProviderSettings,
+        ServerSandboxProvidersSettings, ServerSandboxSettings, ServerSchedulerSettings,
         ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
         WebhookStrategy,
     };

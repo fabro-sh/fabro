@@ -260,6 +260,21 @@ fn main() {
             &[],
         ),
         (
+            "ServerSandboxSettings",
+            "fabro_types::settings::server::ServerSandboxSettings",
+            &[],
+        ),
+        (
+            "ServerSandboxProvidersSettings",
+            "fabro_types::settings::server::ServerSandboxProvidersSettings",
+            &[],
+        ),
+        (
+            "ServerSandboxProviderSettings",
+            "fabro_types::settings::server::ServerSandboxProviderSettings",
+            &[],
+        ),
+        (
             "ServerStorageSettings",
             "fabro_types::settings::server::ServerStorageSettings",
             &[],

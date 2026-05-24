@@ -916,6 +916,29 @@ id = "missing"
 }
 
 #[test]
+fn sandbox_provider_policy_error_reports_disabled_provider() {
+    let settings = server_settings_from_toml(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.sandbox.providers.daytona]
+enabled = false
+"#,
+    );
+
+    assert_eq!(
+        crate::run_manifest::sandbox_provider_policy_error(&settings, SandboxProvider::Daytona)
+            .as_deref(),
+        Some(
+            "sandbox provider \"daytona\" is disabled by server.sandbox.providers.daytona.enabled"
+        )
+    );
+}
+
+#[test]
 fn clone_sandbox_credentials_are_available_for_clone_based_providers() {
     use fabro_types::settings::run::EnvironmentProvider;
     assert!(EnvironmentProvider::Docker.is_clone_based());

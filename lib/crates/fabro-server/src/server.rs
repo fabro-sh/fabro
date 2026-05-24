@@ -3580,6 +3580,15 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         finish_cancelled_run_before_execution(&state, run_id).await;
         return;
     }
+    let effective_provider =
+        run_manifest::effective_sandbox_provider(&persisted.run_spec().settings.run);
+    if let Some(error) =
+        run_manifest::sandbox_provider_policy_error(&server_settings, effective_provider)
+    {
+        tracing::error!(run_id = %run_id, error = %error, "Sandbox provider disabled by server policy");
+        fail_run_before_execution(&state, run_id, FailureReason::LaunchFailed, error).await;
+        return;
+    }
     let github_app_result = {
         let run_spec = persisted.run_spec();
         let settings = &run_spec.settings.run;
@@ -3804,6 +3813,15 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
     let agent_fabro_tools_enabled = run_state.spec.settings.run.agent.fabro_tools;
+    let server_settings = state.server_settings();
+    let effective_provider = run_manifest::effective_sandbox_provider(&run_state.spec.settings.run);
+    if let Some(error) =
+        run_manifest::sandbox_provider_policy_error(&server_settings, effective_provider)
+    {
+        tracing::error!(run_id = %run_id, error = %error, "Sandbox provider disabled by server policy");
+        fail_run_before_execution(&state, run_id, FailureReason::LaunchFailed, error).await;
+        return;
+    }
 
     let state_for_build = Arc::clone(&state);
     let run_dir_for_build = run_dir.clone();

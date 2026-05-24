@@ -17,7 +17,7 @@ Fabro only reads `settings.toml`. Older `server.toml`, `user.toml`, and `cli.tom
 
 | Scope | Examples |
 |---|---|
-| Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
+| Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.sandbox]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
 | Shared run defaults (layered through `.fabro/project.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.environment]`, `[environments.<slug>]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
 
 The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
@@ -45,6 +45,15 @@ methods = ["dev-token", "github"]
 
 [server.auth.github]
 allowed_usernames = ["alice", "bob"]
+
+[server.sandbox.providers.local]
+enabled = true
+
+[server.sandbox.providers.docker]
+enabled = true
+
+[server.sandbox.providers.daytona]
+enabled = true
 
 [server.integrations.github]
 app_id = "123456"
@@ -164,6 +173,24 @@ GitHub-specific auth policy.
 | `allowed_usernames` | GitHub usernames allowed to complete OAuth login |
 
 The GitHub OAuth client ID still lives under `[server.integrations.github].client_id`.
+
+### `[server.sandbox.providers]` section
+
+Controls which sandbox providers the server may launch. Missing provider entries default to
+`enabled = true` for backward compatibility. Disabling a provider rejects new runs whose effective
+provider is disabled; dry-run Docker/Daytona runs use the local provider and are governed by
+`server.sandbox.providers.local.enabled`.
+
+```toml title="settings.toml"
+[server.sandbox.providers.local]
+enabled = true
+
+[server.sandbox.providers.docker]
+enabled = true
+
+[server.sandbox.providers.daytona]
+enabled = true
+```
 
 ### `[server.slatedb]` section
 

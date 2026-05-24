@@ -7,6 +7,11 @@ Sandboxes isolate agent execution from the host machine. When an agent runs a sh
 
 Fabro supports three sandbox providers: `local` (no isolation), `docker` (container-level), and `daytona` (cloud VM). See [Environments](/execution/environments) for full provider-specific configuration.
 
+Operators can enable or disable which providers the server may launch with
+`[server.sandbox.providers.<provider>]` in `settings.toml`. Missing entries default to
+`enabled = true`; setting `enabled = false` rejects new runs whose effective provider is disabled.
+Dry-run Docker/Daytona runs execute locally, so they are governed by the `local` provider policy.
+
 ## Network access control
 
 For cloud sandboxes (Daytona), you can control outbound network access with `[environments.<slug>.network]`. Three modes are available: `"allow_all"` (default), `"block"`, and `"cidr_allow_list"` with an `allow = ["..."]` CIDR list.
