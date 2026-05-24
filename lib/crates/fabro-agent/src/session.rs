@@ -14,6 +14,7 @@ use fabro_llm::types::{
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
+use fabro_mcp::http_transport;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
 use fabro_types::{
     PermissionLevel, Principal, SessionMessage, SessionRecord, StageContextWindowProjection,
@@ -664,13 +665,20 @@ impl Session {
                 return Err(Error::Interrupted(InterruptReason::Cancelled));
             }
             match &config.transport {
-                McpTransport::Sandbox { command, port, env } => {
+                McpTransport::Sandbox {
+                    protocol,
+                    command,
+                    port,
+                    env,
+                } => {
                     let port = *port;
                     match self
                         .start_sandbox_mcp_server(command, port, env, cancel_token)
                         .await?
                     {
                         Ok((url, headers)) => {
+                            let url = http_transport::sandbox_mcp_http_url(*protocol, &url)
+                                .map_err(|err| Error::InvalidState(err.to_string()))?;
                             info!(
                                 server = %config.name,
                                 url = %url,
@@ -678,7 +686,11 @@ impl Session {
                             );
                             resolved.push(McpServerSettings {
                                 name:                 config.name.clone(),
-                                transport:            McpTransport::Http { url, headers },
+                                transport:            McpTransport::Http {
+                                    protocol: *protocol,
+                                    url,
+                                    headers,
+                                },
                                 current_dir:          config.current_dir.clone(),
                                 clear_env:            config.clear_env,
                                 startup_timeout_secs: config.startup_timeout_secs,

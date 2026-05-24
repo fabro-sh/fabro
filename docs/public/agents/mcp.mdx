@@ -145,6 +145,7 @@ Authorization = "Bearer sk-xxx"
 | Field | Description | Default |
 |---|---|---|
 | `type` | Must be `"http"`. | — |
+| `protocol` | HTTP MCP protocol: `"streamable_http"` or legacy `"sse"`. | `"streamable_http"` |
 | `url` | The MCP server endpoint URL. | — |
 | `headers` | Optional HTTP headers (e.g., for authentication). | `{}` |
 | `startup_timeout` | Max duration to wait for the MCP handshake. | `"10s"` |
@@ -157,6 +158,7 @@ Runs the MCP server inside the workflow's sandbox (e.g., a [Daytona](/integratio
 ```toml
 [run.agent.mcps.playwright]
 type = "sandbox"
+protocol = "sse"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless", "--browser", "chromium"]
 port = 3100
 startup_timeout = "60s"
@@ -166,6 +168,7 @@ tool_timeout = "2m"
 | Field | Description | Default |
 |---|---|---|
 | `type` | Must be `"sandbox"`. | — |
+| `protocol` | HTTP MCP protocol exposed by the sandbox server: `"streamable_http"` or legacy `"sse"`. | `"streamable_http"` |
 | `command` | Array: the command to run inside the sandbox. Must include a flag that makes the server listen on `port`. | — |
 | `script` | Shell script alternative to `command`. | — |
 | `port` | The port the MCP server listens on inside the sandbox. | — |
@@ -244,6 +247,7 @@ include = ["screenshots/**"]
 
 [run.agent.mcps.playwright]
 type = "sandbox"
+protocol = "sse"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless", "--browser", "chromium"]
 port = 3100
 startup_timeout = "60s"

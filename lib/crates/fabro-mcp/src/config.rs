@@ -1,1 +1,1 @@
-pub use fabro_types::settings::run::{McpServerSettings, McpTransport};
+pub use fabro_types::settings::run::{McpHttpProtocol, McpServerSettings, McpTransport};

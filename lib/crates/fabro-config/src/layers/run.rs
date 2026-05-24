@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use fabro_types::settings::run::{
-    AgentPermissions, ApprovalMode, HookEvent, MergeStrategy, RunMode,
+    AgentPermissions, ApprovalMode, HookEvent, McpHttpProtocol, MergeStrategy, RunMode,
 };
 use fabro_types::settings::{Duration, InterpString, ModelRef};
 use serde::{Deserialize, Serialize};
@@ -424,6 +424,8 @@ pub enum McpEntryLayer {
     Http {
         #[serde(default)]
         enabled:         Option<bool>,
+        #[serde(default)]
+        protocol:        McpHttpProtocol,
         url:             InterpString,
         #[serde(default)]
         headers:         HashMap<String, InterpString>,
@@ -449,6 +451,8 @@ pub enum McpEntryLayer {
     Sandbox {
         #[serde(default)]
         enabled:         Option<bool>,
+        #[serde(default)]
+        protocol:        McpHttpProtocol,
         #[serde(default)]
         script:          Option<InterpString>,
         #[serde(default)]

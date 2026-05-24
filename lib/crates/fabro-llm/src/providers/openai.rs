@@ -12,7 +12,7 @@ use crate::provider::{
 };
 use crate::providers::common::{
     self as common, parse_error_body, parse_rate_limit_headers, parse_retry_after,
-    send_and_read_response,
+    send_and_read_response, send_and_read_response_with_operation,
 };
 use crate::token_count::{InputTokenCount, InputTokenCountMethod};
 use crate::types::{
@@ -1265,7 +1265,13 @@ impl ProviderAdapter for Adapter {
         if let Some(t) = self.http.request_timeout {
             req = req.timeout(t);
         }
-        let (body, _headers) = send_and_read_response(req, "openai", "type").await?;
+        let (body, _headers) = send_and_read_response_with_operation(
+            req,
+            &self.provider_name,
+            "type",
+            "input_token_count",
+        )
+        .await?;
         let response: InputTokensResponse =
             serde_json::from_str(&body).map_err(|e| Error::Configuration {
                 message: format!("failed to parse OpenAI input token response: {e}"),
@@ -1411,8 +1417,13 @@ impl ProviderAdapter for Adapter {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     use httpmock::prelude::*;
+    use tracing::field::{Field, Visit};
+    use tracing::{Event, Subscriber, subscriber};
+    use tracing_subscriber::layer::{Context as SubscriberContext, SubscriberExt};
+    use tracing_subscriber::{Layer, Registry};
 
     use super::*;
     use crate::error::ProviderErrorKind;
@@ -1435,6 +1446,67 @@ mod tests {
             speed:            None,
             metadata:         None,
             provider_options: None,
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct CapturedLogEvents(Arc<Mutex<Vec<CapturedLogEvent>>>);
+
+    #[derive(Clone, Debug, Default)]
+    struct CapturedLogEvent {
+        message: Option<String>,
+        fields:  HashMap<String, String>,
+    }
+
+    struct CaptureLayer {
+        events: CapturedLogEvents,
+    }
+
+    impl<S> Layer<S> for CaptureLayer
+    where
+        S: Subscriber,
+    {
+        fn on_event(&self, event: &Event<'_>, _ctx: SubscriberContext<'_, S>) {
+            let mut visitor = LogFieldVisitor::default();
+            event.record(&mut visitor);
+            self.events.0.lock().unwrap().push(CapturedLogEvent {
+                message: visitor.message,
+                fields:  visitor.fields,
+            });
+        }
+    }
+
+    #[derive(Default)]
+    struct LogFieldVisitor {
+        message: Option<String>,
+        fields:  HashMap<String, String>,
+    }
+
+    impl LogFieldVisitor {
+        fn record_value(&mut self, field: &Field, value: String) {
+            if field.name() == "message" {
+                self.message = Some(value);
+            } else {
+                self.fields.insert(field.name().to_string(), value);
+            }
+        }
+    }
+
+    impl Visit for LogFieldVisitor {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.record_value(field, format!("{value:?}"));
+        }
+
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.record_value(field, value.to_string());
+        }
+
+        fn record_u64(&mut self, field: &Field, value: u64) {
+            self.record_value(field, value.to_string());
+        }
+
+        fn record_i64(&mut self, field: &Field, value: i64) {
+            self.record_value(field, value.to_string());
         }
     }
 
@@ -1594,6 +1666,56 @@ mod tests {
         mock.assert();
         assert_eq!(count.input_tokens, 789);
         assert_eq!(count.method, InputTokenCountMethod::ProviderApi);
+    }
+
+    #[tokio::test]
+    async fn count_input_tokens_logs_operation_on_provider_error() {
+        let events = CapturedLogEvents::default();
+        let subscriber = Registry::default().with(CaptureLayer {
+            events: events.clone(),
+        });
+        let _guard = subscriber::set_default(subscriber);
+
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/responses/input_tokens");
+            then.status(403)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "error": {
+                        "message": "input token counts are not enabled",
+                        "type": "permission_error",
+                        "code": "insufficient_permissions"
+                    }
+                }));
+        });
+        let adapter = Adapter::new("sk-test").with_base_url(server.base_url());
+
+        let err = adapter
+            .count_input_tokens(&minimal_request())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, Error::Provider {
+            kind: ProviderErrorKind::AccessDenied,
+            ..
+        }));
+
+        let captured = events.0.lock().unwrap();
+        let event = captured
+            .iter()
+            .find(|event| event.message.as_deref() == Some("Provider returned error"))
+            .expect("provider error log should be captured");
+
+        assert_eq!(
+            event.fields.get("provider").map(String::as_str),
+            Some("openai")
+        );
+        assert_eq!(event.fields.get("status").map(String::as_str), Some("403"));
+        assert_eq!(
+            event.fields.get("operation").map(String::as_str),
+            Some("input_token_count")
+        );
     }
 
     #[tokio::test]

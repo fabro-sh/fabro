@@ -67,7 +67,10 @@ use fabro_sandbox::details::sandbox_details;
 use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_sandbox::{Sandbox, SandboxProvider};
 use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
-use fabro_slack::config::resolve_credentials as resolve_slack_credentials;
+use fabro_slack::config::{
+    SlackCredentialResolution,
+    resolve_credentials_status_with_lookup as resolve_slack_credentials_status_with_lookup,
+};
 use fabro_slack::payload::SlackAnswerSubmission;
 use fabro_slack::threads::ThreadRegistry;
 use fabro_slack::{blocks as slack_blocks, connection as slack_connection};
@@ -2128,13 +2131,26 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
                     .map_err(anyhow::Error::from)
             })
             .transpose()?;
-        resolve_slack_credentials().map(|credentials| {
-            Arc::new(SlackService::new(
-                credentials.bot_token,
-                credentials.app_token,
-                default_channel,
-            ))
-        })
+        match resolve_slack_credentials_status_with_lookup(|name| server_secrets.get(name)) {
+            SlackCredentialResolution::Configured(credentials) => {
+                info!(
+                    default_channel_configured = default_channel.is_some(),
+                    "Slack integration enabled"
+                );
+                Some(Arc::new(SlackService::new(
+                    credentials.bot_token,
+                    credentials.app_token,
+                    default_channel,
+                )))
+            }
+            SlackCredentialResolution::Missing { env_vars } => {
+                info!(
+                    missing_env_vars = %env_vars.join(","),
+                    "Slack integration disabled; missing credentials"
+                );
+                None
+            }
+        }
     };
     let worker_tokens = worker_token_keys_from_server_secrets(&server_secrets)?;
     let github_api_base_url = github_api_base_url.unwrap_or_else(fabro_github::github_api_base_url);
