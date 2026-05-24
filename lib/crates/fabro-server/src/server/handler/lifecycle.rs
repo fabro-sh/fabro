@@ -726,7 +726,7 @@ async fn batch_delete_runs(
     Json(request): Json<BatchDeleteRunsRequest>,
 ) -> Response {
     let force = request.force;
-    let ids = match validate_batch_run_id_strings(request.run_ids) {
+    let ids = match validate_batch_run_ids(request.run_ids) {
         Ok(ids) => ids,
         Err(err) => return err.into_response(),
     };
@@ -952,7 +952,7 @@ async fn batch_run_archive_action(
     request: BatchRunLifecycleRequest,
     action: ArchiveAction,
 ) -> Response {
-    let ids = match validate_batch_run_ids(request) {
+    let ids = match validate_batch_run_ids(request.run_ids) {
         Ok(ids) => ids,
         Err(err) => return err.into_response(),
     };
@@ -984,11 +984,7 @@ async fn batch_run_archive_action(
         .into_response()
 }
 
-fn validate_batch_run_ids(request: BatchRunLifecycleRequest) -> Result<Vec<RunId>, ApiError> {
-    validate_batch_run_id_strings(request.run_ids)
-}
-
-fn validate_batch_run_id_strings(run_ids: Vec<String>) -> Result<Vec<RunId>, ApiError> {
+fn validate_batch_run_ids(run_ids: Vec<String>) -> Result<Vec<RunId>, ApiError> {
     if run_ids.is_empty() {
         return Err(ApiError::bad_request(
             "run_ids must contain at least one run ID.",

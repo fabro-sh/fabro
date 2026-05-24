@@ -2181,6 +2181,15 @@ enum DeleteRunOutcome {
     Preserved(DeleteRunResponse),
 }
 
+enum SandboxDeleteOutcome {
+    /// The durable run store did not exist; nothing to delete.
+    Absent,
+    /// The sandbox resource was cleaned up (or there was none to clean).
+    Cleaned,
+    /// Sandbox is being handed off to the operator instead of deleted.
+    Preserved(DeleteRunResponse),
+}
+
 async fn delete_run_internal(
     state: &Arc<AppState>,
     id: RunId,
@@ -2196,7 +2205,6 @@ async fn delete_run_internal(
         None
     };
     let had_managed_run = managed_run.is_some();
-    let durable_run_exists = state.store.open_run(&id).await.is_ok();
     let durable_status = if managed_run.is_some() {
         load_durable_run_status(state.as_ref(), &id).await
     } else {
@@ -2257,14 +2265,10 @@ async fn delete_run_internal(
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     match delete_outcome {
-        DeleteRunOutcome::Preserved(response) => Ok(DeleteRunOutcome::Preserved(response)),
-        DeleteRunOutcome::Deleted | DeleteRunOutcome::AlreadyAbsent => {
-            if had_managed_run || durable_run_exists {
-                Ok(DeleteRunOutcome::Deleted)
-            } else {
-                Ok(DeleteRunOutcome::AlreadyAbsent)
-            }
-        }
+        SandboxDeleteOutcome::Preserved(response) => Ok(DeleteRunOutcome::Preserved(response)),
+        SandboxDeleteOutcome::Cleaned => Ok(DeleteRunOutcome::Deleted),
+        SandboxDeleteOutcome::Absent if had_managed_run => Ok(DeleteRunOutcome::Deleted),
+        SandboxDeleteOutcome::Absent => Ok(DeleteRunOutcome::AlreadyAbsent),
     }
 }
 
@@ -2278,9 +2282,9 @@ async fn delete_run_sandbox_resource(
     state: &Arc<AppState>,
     id: RunId,
     force: bool,
-) -> Result<DeleteRunOutcome, ApiError> {
+) -> Result<SandboxDeleteOutcome, ApiError> {
     let Ok(run_store) = state.store.open_run(&id).await else {
-        return Ok(DeleteRunOutcome::AlreadyAbsent);
+        return Ok(SandboxDeleteOutcome::Absent);
     };
     let projection = match run_store.state().await {
         Ok(projection) => projection,
@@ -2290,7 +2294,7 @@ async fn delete_run_sandbox_resource(
                 error = %render_with_causes(&err.to_string(), &collect_causes(&err)),
                 "Skipping sandbox provider delete because run projection cannot be loaded"
             );
-            return Ok(DeleteRunOutcome::Deleted);
+            return Ok(SandboxDeleteOutcome::Cleaned);
         }
         Err(err) => {
             return Err(ApiError::new(
@@ -2315,13 +2319,13 @@ async fn delete_run_sandbox_resource(
         .lifecycle
         .preserve;
     let Some(record) = projection.sandbox else {
-        return Ok(DeleteRunOutcome::Deleted);
+        return Ok(SandboxDeleteOutcome::Cleaned);
     };
     let Some(runtime) = record.runtime.as_ref() else {
-        return Ok(DeleteRunOutcome::Deleted);
+        return Ok(SandboxDeleteOutcome::Cleaned);
     };
     if preserve {
-        return Ok(DeleteRunOutcome::Preserved(DeleteRunResponse {
+        return Ok(SandboxDeleteOutcome::Preserved(DeleteRunResponse {
             deleted:           true,
             sandbox_preserved: true,
             sandbox:           DeleteRunSandbox {
@@ -2340,7 +2344,7 @@ async fn delete_run_sandbox_resource(
                 error = %render_with_causes(&err.to_string(), &collect_causes(err.as_ref())),
                 "Skipping sandbox provider delete during run deletion"
             );
-            return Ok(DeleteRunOutcome::Deleted);
+            return Ok(SandboxDeleteOutcome::Cleaned);
         }
         Err(err) => {
             let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
@@ -2354,7 +2358,7 @@ async fn delete_run_sandbox_resource(
                 error = %err.display_with_causes(),
                 "Skipping failed sandbox provider delete during run deletion"
             );
-            return Ok(DeleteRunOutcome::Deleted);
+            return Ok(SandboxDeleteOutcome::Cleaned);
         }
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -2362,7 +2366,7 @@ async fn delete_run_sandbox_resource(
         ));
     }
 
-    Ok(DeleteRunOutcome::Deleted)
+    Ok(SandboxDeleteOutcome::Cleaned)
 }
 
 async fn reject_active_delete_without_force(

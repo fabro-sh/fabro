@@ -85,6 +85,9 @@ export async function deleteRuns(
   request?: Request,
 ): Promise<BatchDeleteRunsResponse> {
   try {
+    // See `batchRunLifecycleAction` for the `as unknown as` rationale:
+    // openapi-generator types `uniqueItems` arrays as `Set<T>` while the wire
+    // contract is a JSON array.
     const body = { run_ids: runIds, force } as unknown as BatchDeleteRunsRequest;
     return await apiData(() => runsApi.batchDeleteRuns(body, requestSignalOptions(request)));
   } catch (error) {

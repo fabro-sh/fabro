@@ -11280,48 +11280,7 @@ async fn delete_run_with_preserved_sandbox_returns_handoff() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = RunId::new();
-    let mut settings = fabro_types::WorkflowSettings::default();
-    settings.run.environment.lifecycle.preserve = true;
-    let graph = Graph::new("test");
-
-    create_durable_run_with_events(&state, run_id, &[
-        workflow_event::Event::RunCreated {
-            run_id,
-            title: None,
-            settings: serde_json::to_value(settings).unwrap(),
-            graph: serde_json::to_value(graph).unwrap(),
-            workflow_source: None,
-            workflow_config: None,
-            labels: std::collections::BTreeMap::default(),
-            run_dir: "/tmp/fabro-run".to_string(),
-            source_directory: Some("/tmp/fabro-run".to_string()),
-            workflow_slug: Some("test".to_string()),
-            db_prefix: None,
-            provenance: None,
-            manifest_blob: None,
-            git: None,
-            fork_source_ref: None,
-            retried_from: None,
-            parent_id: None,
-            web_url: None,
-        },
-        workflow_event::Event::RunSubmitted {
-            definition_blob: None,
-        },
-        workflow_event::Event::SandboxInitialized {
-            provider:          SandboxProvider::Local,
-            id:                "sandbox-preserve-1".to_string(),
-            working_directory: "/tmp/fabro-preserved-sandbox".to_string(),
-            repo_cloned:       None,
-            clone_origin_url:  None,
-            clone_branch:      None,
-            workspace_root:    None,
-            repos_root:        None,
-            primary_repo_path: None,
-            primary_repo_link: None,
-        },
-    ])
-    .await;
+    create_preserved_local_sandbox_run(&state, run_id).await;
 
     let req = Request::builder()
         .method("DELETE")
