@@ -3,11 +3,13 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
-use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, ToolSource};
+use fabro_agent::tool_registry::{
+    RegisteredTool, ToolContext, ToolDefinitionWithSource, ToolRegistry, ToolSource,
+};
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
     Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionOptions, StaticEnvProvider,
-    ToolEnvProvider, register_question_tools,
+    ToolEnvProvider, register_question_tools, tool_permissions,
 };
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::{AttrValue, Node};
@@ -21,7 +23,10 @@ use fabro_mcp::config::McpServerSettings;
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ModelRef, ProviderId};
 use fabro_types::settings::run::RunModelControls;
-use fabro_types::{PermissionLevel, RunId, SessionCapability, StageId};
+use fabro_types::{
+    AgentToolCategory, AgentToolSource, AgentToolSummary, PermissionLevel, RunId,
+    SessionCapability, StageId,
+};
 use serde::de::DeserializeOwned;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
@@ -494,6 +499,61 @@ fn last_assistant_response(session: &Session) -> String {
             None
         })
         .unwrap_or_default()
+}
+
+fn agent_tool_summaries_from_definitions(
+    tools: &[ToolDefinitionWithSource],
+) -> Vec<AgentToolSummary> {
+    let mut summaries: Vec<_> = tools
+        .iter()
+        .map(|tool| AgentToolSummary {
+            name:        tool.definition.name.clone(),
+            description: tool.definition.description.clone(),
+            source:      agent_tool_source(&tool.definition.name, &tool.source),
+            category:    agent_tool_category(&tool.definition.name),
+            invoked:     false,
+        })
+        .collect();
+    summaries.sort_by(|left, right| left.name.cmp(&right.name));
+    summaries
+}
+
+fn agent_tool_source(name: &str, source: &ToolSource) -> AgentToolSource {
+    match source {
+        ToolSource::Native => AgentToolSource::Native,
+        ToolSource::Mcp { server_name } => AgentToolSource::Mcp {
+            server_name:   server_name.clone(),
+            original_name: fabro_mcp::connection_manager::parse_qualified_name(name)
+                .map(|(_, original_name)| original_name)
+                .unwrap_or_else(|| name.to_string()),
+        },
+        ToolSource::Skill => AgentToolSource::Skill,
+    }
+}
+
+fn agent_tool_category(name: &str) -> AgentToolCategory {
+    match tool_permissions::known_tool_category(name) {
+        Some("read") => AgentToolCategory::Read,
+        Some("write") => AgentToolCategory::Write,
+        Some("shell") => AgentToolCategory::Shell,
+        Some("subagent") => AgentToolCategory::Subagent,
+        Some(_) | None => AgentToolCategory::Other,
+    }
+}
+
+fn emit_agent_tools_available(
+    session: &Session,
+    node_id: &str,
+    stage_id: &StageId,
+    emitter: &Arc<Emitter>,
+) {
+    let tools = agent_tool_summaries_from_definitions(&session.available_tools());
+    emitter.emit(&Event::AgentToolsAvailable {
+        node_id: node_id.to_string(),
+        visit: stage_id.visit(),
+        session_id: session.id().to_string(),
+        tools,
+    });
 }
 
 /// Spawn a task that subscribes to session events and:
@@ -1197,6 +1257,7 @@ impl CodergenBackend for AgentApiBackend {
                         return Err(err);
                     }
                 }
+                emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
                 session
                     .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                     .await
@@ -1323,6 +1384,7 @@ impl CodergenBackend for AgentApiBackend {
                                 return Err(err);
                             }
                         }
+                        emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
                         match session
                             .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                             .await
@@ -1500,6 +1562,7 @@ mod tests {
 
     use chrono::TimeZone;
     use fabro_agent::subagent::SessionFactory;
+    use fabro_agent::tool_registry::ToolDefinitionWithSource;
     use fabro_agent::{AgentProfile, LocalSandbox, ToolRegistry};
     use fabro_api::types;
     use fabro_auth::{EnvCredentialSource, VaultCredentialSource};
@@ -1564,6 +1627,68 @@ mod tests {
         ) -> String {
             "test".to_string()
         }
+    }
+
+    fn test_tool_with_source(name: &str, source: ToolSource) -> ToolDefinitionWithSource {
+        ToolDefinitionWithSource {
+            definition: LlmToolDefinition {
+                name:        name.to_string(),
+                description: format!("{name} description"),
+                parameters:  serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" }
+                    }
+                }),
+            },
+            source,
+        }
+    }
+
+    #[test]
+    fn agent_tool_summaries_map_known_native_categories_without_schemas() {
+        let summaries = agent_tool_summaries_from_definitions(&[
+            test_tool_with_source("apply_patch", ToolSource::Native),
+            test_tool_with_source("grep", ToolSource::Native),
+            test_tool_with_source("glob", ToolSource::Native),
+            test_tool_with_source("spawn_agent", ToolSource::Native),
+            test_tool_with_source("unknown_native", ToolSource::Native),
+        ]);
+
+        assert_eq!(summaries[0].name, "apply_patch");
+        assert_eq!(summaries[0].description, "apply_patch description");
+        assert_eq!(summaries[0].source, fabro_types::AgentToolSource::Native);
+        assert_eq!(summaries[0].category, fabro_types::AgentToolCategory::Write);
+        assert!(!summaries[0].invoked);
+        assert_eq!(summaries[1].category, fabro_types::AgentToolCategory::Read);
+        assert_eq!(summaries[2].category, fabro_types::AgentToolCategory::Read);
+        assert_eq!(
+            summaries[3].category,
+            fabro_types::AgentToolCategory::Subagent
+        );
+        assert_eq!(summaries[4].category, fabro_types::AgentToolCategory::Other);
+
+        let json = serde_json::to_value(&summaries[0]).unwrap();
+        assert!(
+            json.as_object().unwrap().get("parameters").is_none(),
+            "agent tool summaries should not include tool parameter schemas"
+        );
+    }
+
+    #[test]
+    fn agent_tool_summaries_map_mcp_source_and_original_name_from_qualified_name() {
+        let summaries = agent_tool_summaries_from_definitions(&[test_tool_with_source(
+            "mcp__filesystem__read_file",
+            ToolSource::Mcp {
+                server_name: "filesystem".to_string(),
+            },
+        )]);
+
+        assert_eq!(summaries[0].source, fabro_types::AgentToolSource::Mcp {
+            server_name:   "filesystem".to_string(),
+            original_name: "read_file".to_string(),
+        });
+        assert_eq!(summaries[0].category, fabro_types::AgentToolCategory::Other);
     }
 
     struct ShutdownTestProvider;

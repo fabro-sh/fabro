@@ -161,6 +161,12 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             session_id,
             ..
         }
+        | Event::AgentToolsAvailable {
+            node_id,
+            visit,
+            session_id,
+            ..
+        }
         | Event::AgentSessionDeactivated {
             node_id,
             visit,

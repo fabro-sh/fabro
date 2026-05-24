@@ -366,6 +366,14 @@ fn main() {
             "fabro_types::AgentSkillActivationSource",
             &[],
         ),
+        ("AgentToolSummary", "fabro_types::AgentToolSummary", &[]),
+        ("AgentToolSource", "fabro_types::AgentToolSource", &[]),
+        ("AgentToolCategory", "fabro_types::AgentToolCategory", &[]),
+        (
+            "AgentToolsAvailableProps",
+            "fabro_types::AgentToolsAvailableProps",
+            &[],
+        ),
         (
             "McpServerProjection",
             "fabro_types::McpServerProjection",

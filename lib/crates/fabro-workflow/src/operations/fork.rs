@@ -230,6 +230,7 @@ fn replay_event_for_fork_projection(body: &EventBody) -> bool {
             | EventBody::InterviewTimeout(_)
             | EventBody::InterviewInterrupted(_)
             | EventBody::AgentSessionActivated(_)
+            | EventBody::AgentToolsAvailable(_)
             | EventBody::AgentAcpStarted(_)
             | EventBody::AgentAcpCancelled(_)
             | EventBody::AgentAcpTimedOut(_)
@@ -308,6 +309,12 @@ mod tests {
                 permission_level: None,
                 capabilities:     vec![fabro_types::SessionCapability::Steer],
                 visit:            1,
+            })
+        ));
+        assert!(replay_event_for_fork_projection(
+            &EventBody::AgentToolsAvailable(fabro_types::run_event::AgentToolsAvailableProps {
+                tools: Vec::new(),
+                visit: 1,
             })
         ));
         assert!(!replay_event_for_fork_projection(

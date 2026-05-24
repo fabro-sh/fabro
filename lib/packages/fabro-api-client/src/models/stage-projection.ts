@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { AgentToolSummary } from './agent-tool-summary';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { BilledTokenCounts } from './billed-token-counts';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -96,6 +99,10 @@ export interface StageProjection {
      */
     'skills'?: SkillsProjection;
     'permission_level'?: PermissionLevel | null;
+    /**
+     * Effective model-callable tools exposed to this agent stage session. Tool parameter schemas are intentionally omitted from this projection.
+     */
+    'agent_tools'?: Array<AgentToolSummary>;
     /**
      * MCP servers observed by this stage.
      */

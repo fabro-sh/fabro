@@ -411,6 +411,13 @@ impl RunProjectionReducer for RunProjection {
                 stage.provider_used = Some(StageModelUsage::from_agent_session_activated(props));
                 stage.permission_level = props.permission_level;
             }
+            EventBody::AgentToolsAvailable(props) => {
+                let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
+                else {
+                    return Ok(());
+                };
+                stage.agent_tools.clone_from(&props.tools);
+            }
             // `AgentAcpStarted` is the start-of-process signal for an external
             // ACP agent. `provider_used` is intentionally sourced from the
             // subsequent `AgentSessionActivated` event, which carries the
@@ -605,6 +612,13 @@ impl RunProjectionReducer for RunProjection {
                 else {
                     return Ok(());
                 };
+                if let Some(tool) = stage
+                    .agent_tools
+                    .iter_mut()
+                    .find(|tool| tool.name == props.tool_name)
+                {
+                    tool.invoked = true;
+                }
                 if let Some(server) = mcp_server_from_tool_name(&props.tool_name) {
                     if let Some(projection) = stage
                         .mcp_servers
@@ -1232,9 +1246,11 @@ mod tests {
         AgentSessionEndedProps, AgentSessionStartedProps, AgentSkillActivatedProps,
         AgentSkillActivationSource, AgentSkillSummary, AgentSkillsDiscoveredProps,
         AgentSubClosedProps, AgentSubCompletedProps, AgentSubFailedProps, AgentSubSpawnedProps,
-        AgentToolStartedProps, CheckpointCompletedProps, InterviewCompletedProps, InterviewOption,
-        InterviewStartedProps, RunCompletedProps, RunControlEffectProps, StageCompletedProps,
-        StageFailedProps, StagePromptProps, StageRetryingProps, StageStartedProps,
+        AgentToolCategory, AgentToolSource, AgentToolStartedProps, AgentToolSummary,
+        AgentToolsAvailableProps, CheckpointCompletedProps, InterviewCompletedProps,
+        InterviewOption, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
+        StageCompletedProps, StageFailedProps, StagePromptProps, StageRetryingProps,
+        StageStartedProps,
     };
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
@@ -4597,6 +4613,117 @@ mod tests {
 
             let legacy_stage = legacy_state.stage(&stage_id).unwrap();
             assert_eq!(legacy_stage.permission_level, None);
+        }
+
+        fn agent_tool(name: &str, category: AgentToolCategory, invoked: bool) -> AgentToolSummary {
+            AgentToolSummary {
+                name: name.to_string(),
+                description: format!("{name} description"),
+                source: AgentToolSource::Native,
+                category,
+                invoked,
+            }
+        }
+
+        #[test]
+        fn agent_tools_available_replaces_stage_agent_tools() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentToolsAvailable(AgentToolsAvailableProps {
+                        tools: vec![
+                            agent_tool("read_file", AgentToolCategory::Read, false),
+                            agent_tool("apply_patch", AgentToolCategory::Write, false),
+                        ],
+                        visit: 1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    2,
+                    EventBody::AgentToolsAvailable(AgentToolsAvailableProps {
+                        tools: vec![agent_tool("grep", AgentToolCategory::Read, false)],
+                        visit: 1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert_eq!(stage.agent_tools, vec![agent_tool(
+                "grep",
+                AgentToolCategory::Read,
+                false
+            )]);
+        }
+
+        #[test]
+        fn agent_tool_started_marks_only_matching_available_tool_invoked() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentToolsAvailable(AgentToolsAvailableProps {
+                        tools: vec![
+                            agent_tool("read_file", AgentToolCategory::Read, false),
+                            agent_tool("apply_patch", AgentToolCategory::Write, false),
+                        ],
+                        visit: 1,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+            state
+                .apply_event(&test_stage_event(
+                    2,
+                    EventBody::AgentToolStarted(AgentToolStartedProps {
+                        tool_name:         "apply_patch".to_string(),
+                        tool_call_id:      "call_patch".to_string(),
+                        arguments:         serde_json::json!({}),
+                        visit:             1,
+                        tool_call:         None,
+                        turn_id:           None,
+                        parent_message_id: None,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert!(!stage.agent_tools[0].invoked);
+            assert!(stage.agent_tools[1].invoked);
+        }
+
+        #[test]
+        fn legacy_tool_started_without_available_tools_does_not_synthesize_tool_list() {
+            let mut state = initialized_projection();
+            let stage_id = stage_id();
+
+            state
+                .apply_event(&test_stage_event(
+                    1,
+                    EventBody::AgentToolStarted(AgentToolStartedProps {
+                        tool_name:         "apply_patch".to_string(),
+                        tool_call_id:      "call_patch".to_string(),
+                        arguments:         serde_json::json!({}),
+                        visit:             1,
+                        tool_call:         None,
+                        turn_id:           None,
+                        parent_message_id: None,
+                    }),
+                    stage_id.clone(),
+                ))
+                .unwrap();
+
+            let stage = state.stage(&stage_id).unwrap();
+            assert!(stage.agent_tools.is_empty());
         }
 
         #[test]

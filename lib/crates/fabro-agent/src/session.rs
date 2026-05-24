@@ -501,6 +501,11 @@ impl Session {
         self.config.permission_level
     }
 
+    #[must_use]
+    pub fn available_tools(&self) -> Vec<ToolDefinitionWithSource> {
+        self.effective_tools()
+    }
+
     /// Initialize session by discovering project docs and capturing environment
     /// context. Call before `process_input`.
     ///
@@ -1966,13 +1971,7 @@ impl Session {
         }
         messages.extend(self.history.convert_to_messages());
 
-        let tools_with_source = self
-            .provider_profile
-            .tool_registry()
-            .definitions_with_source_for_policy(
-                self.config.tool_access_policy.as_deref(),
-                self.config.tool_exposure_mode,
-            );
+        let tools_with_source = self.effective_tools();
         let tools: Vec<_> = tools_with_source
             .iter()
             .map(|tool| tool.definition.clone())
@@ -2009,13 +2008,11 @@ impl Session {
     }
 
     fn inject_task_reminder_if_needed(&mut self) {
-        let tools = self
-            .provider_profile
-            .tool_registry()
-            .definitions_for_policy(
-                self.config.tool_access_policy.as_deref(),
-                self.config.tool_exposure_mode,
-            );
+        let tools: Vec<_> = self
+            .effective_tools()
+            .into_iter()
+            .map(|tool| tool.definition)
+            .collect();
         let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
         if let Some(reminder) = task_reminder::maybe_reminder(&self.history, &tool_names) {
             self.history.push(Message::System {
@@ -2023,6 +2020,15 @@ impl Session {
                 timestamp: SystemTime::now(),
             });
         }
+    }
+
+    fn effective_tools(&self) -> Vec<ToolDefinitionWithSource> {
+        self.provider_profile
+            .tool_registry()
+            .definitions_with_source_for_policy(
+                self.config.tool_access_policy.as_deref(),
+                self.config.tool_exposure_mode,
+            )
     }
 }
 
@@ -3272,6 +3278,38 @@ mod tests {
         let tools = request.tools.as_ref().expect("tools should be exposed");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "read_file");
+    }
+
+    #[tokio::test]
+    async fn available_tools_uses_same_effective_registry_filter_as_requests() {
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let mut registry = ToolRegistry::new();
+        registry.register(make_named_noop_tool("read_file"));
+        registry.register(make_named_noop_tool("apply_patch"));
+        registry.register(make_named_noop_tool("shell"));
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(NamedToolAccessPolicy::new(vec![
+                ("read_file", ToolAccess::Allowed),
+                ("apply_patch", ToolAccess::RequiresApproval),
+                ("shell", ToolAccess::Denied),
+            ]))),
+            tool_exposure_mode: ToolExposureMode::IncludeRequiresApproval,
+            ..SessionOptions::default()
+        };
+        let session = Session::new(client, profile, env, config, None);
+
+        let tools = session.available_tools();
+        let mut tool_names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool.definition.name.as_str())
+            .collect();
+        tool_names.sort_unstable();
+
+        assert_eq!(tool_names, vec!["apply_patch", "read_file"]);
+        assert!(tools.iter().all(|tool| tool.source == ToolSource::Native));
     }
 
     #[tokio::test]

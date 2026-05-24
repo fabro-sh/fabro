@@ -1,6 +1,7 @@
 use fabro_model::{ReasoningEffort, Speed};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use strum::{Display, EnumString, IntoStaticStr};
 
 use super::BilledTokenCounts;
 use crate::transcript::{ToolCall, ToolResult, TranscriptMessage};
@@ -51,6 +52,56 @@ pub struct AgentSessionActivatedProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentSessionDeactivatedProps {
     pub visit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentToolsAvailableProps {
+    #[serde(default)]
+    pub tools: Vec<AgentToolSummary>,
+    pub visit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentToolSummary {
+    pub name:        String,
+    pub description: String,
+    pub source:      AgentToolSource,
+    pub category:    AgentToolCategory,
+    pub invoked:     bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentToolSource {
+    Native,
+    Mcp {
+        server_name:   String,
+        original_name: String,
+    },
+    Skill,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum AgentToolCategory {
+    Read,
+    Write,
+    Shell,
+    Subagent,
+    Other,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

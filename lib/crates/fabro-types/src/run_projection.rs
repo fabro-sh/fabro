@@ -9,10 +9,10 @@ use strum::{Display, EnumString, IntoStaticStr};
 use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
     AgentBackend, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
-    BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    ModelRef, PermissionLevel, PullRequestLink, RunApproval, RunControlAction, RunDiff, RunId,
-    RunSandbox, RunSpec, RunStatus, RunTiming, StageCompletion, StageHandler, StageId, StageState,
-    StageTiming, StartRecord, TodoListProjection,
+    AgentToolSummary, BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord,
+    InvalidTransition, ModelRef, PermissionLevel, PullRequestLink, RunApproval, RunControlAction,
+    RunDiff, RunId, RunSandbox, RunSpec, RunStatus, RunTiming, StageCompletion, StageHandler,
+    StageId, StageState, StageTiming, StartRecord, TodoListProjection,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -360,6 +360,8 @@ pub struct StageProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_level:  Option<PermissionLevel>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_tools:       Vec<AgentToolSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers:       Vec<McpServerProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window:    Option<StageContextWindowProjection>,
@@ -440,6 +442,7 @@ impl StageProjection {
             subagents: Vec::new(),
             skills: SkillsProjection::default(),
             permission_level: None,
+            agent_tools: Vec::new(),
             mcp_servers: Vec::new(),
             context_window: None,
             provider_used: None,
@@ -744,9 +747,10 @@ mod iter_stages_tests {
     use std::num::NonZeroU32;
 
     use chrono::Utc;
+    use serde_json::json;
 
     use super::RunProjection;
-    use crate::{Graph, RunId, RunSpec, WorkflowSettings};
+    use crate::{Graph, RunId, RunSpec, StageProjection, WorkflowSettings};
 
     fn seq(n: u32) -> NonZeroU32 {
         NonZeroU32::new(n).unwrap()
@@ -815,6 +819,23 @@ mod iter_stages_tests {
             .map(|(stage_id, _)| stage_id.node_id().to_string())
             .collect();
         assert_eq!(order, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn stage_projection_defaults_missing_agent_tools_to_empty_and_omits_empty_list() {
+        let value = json!({
+            "first_event_seq": 1,
+            "state": "running"
+        });
+
+        let stage: StageProjection = serde_json::from_value(value).unwrap();
+        assert!(stage.agent_tools.is_empty());
+
+        let serialized = serde_json::to_value(stage).unwrap();
+        assert!(
+            serialized.as_object().unwrap().get("agent_tools").is_none(),
+            "empty agent_tools should be omitted from StageProjection JSON"
+        );
     }
 
     #[test]

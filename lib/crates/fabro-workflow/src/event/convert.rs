@@ -1174,6 +1174,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
             capabilities:     capabilities.clone(),
             visit:            *visit,
         }),
+        Event::AgentToolsAvailable { tools, visit, .. } => {
+            EventBody::AgentToolsAvailable(fabro_types::AgentToolsAvailableProps {
+                tools: tools.clone(),
+                visit: *visit,
+            })
+        }
         Event::AgentSessionDeactivated { visit, .. } => {
             EventBody::AgentSessionDeactivated(fabro_types::AgentSessionDeactivatedProps {
                 visit: *visit,
@@ -1592,6 +1598,31 @@ mod tests {
         assert_eq!(properties["tool_name"], "read_file");
         assert_eq!(properties["tool_call_id"], "call_1");
         assert_eq!(properties["visit"], 2);
+    }
+
+    #[test]
+    fn run_event_agent_tools_available_moves_session_and_stage_metadata_to_header() {
+        let stored = to_run_event(&fixtures::RUN_4, &Event::AgentToolsAvailable {
+            node_id:    "code".to_string(),
+            visit:      2,
+            session_id: "ses_root".to_string(),
+            tools:      vec![::fabro_types::AgentToolSummary {
+                name:        "apply_patch".to_string(),
+                description: "Apply a unified diff patch".to_string(),
+                source:      ::fabro_types::AgentToolSource::Native,
+                category:    ::fabro_types::AgentToolCategory::Write,
+                invoked:     false,
+            }],
+        });
+
+        assert_eq!(stored.event_name(), "agent.tools.available");
+        assert_eq!(stored.node_id.as_deref(), Some("code"));
+        assert_eq!(stored.stage_id, Some(StageId::new("code", 2)));
+        assert_eq!(stored.session_id.as_deref(), Some("ses_root"));
+        let properties = stored.properties().unwrap();
+        assert_eq!(properties["visit"], 2);
+        assert_eq!(properties["tools"][0]["name"], "apply_patch");
+        assert_eq!(properties["tools"][0]["category"], "write");
     }
 
     #[test]

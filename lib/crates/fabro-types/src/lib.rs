@@ -96,9 +96,10 @@ pub use run::{
 pub use run_blob_id::RunBlobId;
 pub use run_event::{
     AgentMcpToolSummary, AgentMemoryFileProps, AgentSkillActivationSource, AgentSkillSummary,
-    EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
-    RunEvent, RunNoticeCode, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason,
-    RunRunnableSource, SessionCapability, TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps,
+    AgentToolCategory, AgentToolSource, AgentToolSummary, AgentToolsAvailableProps, EventBody,
+    ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase, RunEvent,
+    RunNoticeCode, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason, RunRunnableSource,
+    SessionCapability, TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps,
 };
 pub use run_failure::RunFailure;
 pub use run_id::{RunId, fixtures};

@@ -198,6 +198,8 @@ pub enum EventBody {
     AgentSessionStarted(AgentSessionStartedProps),
     #[serde(rename = "agent.session.activated")]
     AgentSessionActivated(AgentSessionActivatedProps),
+    #[serde(rename = "agent.tools.available")]
+    AgentToolsAvailable(AgentToolsAvailableProps),
     #[serde(rename = "agent.session.deactivated")]
     AgentSessionDeactivated(AgentSessionDeactivatedProps),
     #[serde(rename = "agent.session.ended")]
@@ -500,6 +502,7 @@ impl EventBody {
             Self::PromptCompleted(_) => "prompt.completed",
             Self::AgentSessionStarted(_) => "agent.session.started",
             Self::AgentSessionActivated(_) => "agent.session.activated",
+            Self::AgentToolsAvailable(_) => "agent.tools.available",
             Self::AgentSessionDeactivated(_) => "agent.session.deactivated",
             Self::AgentSessionEnded(_) => "agent.session.ended",
             Self::AgentProcessingEnd(_) => "agent.processing.end",
@@ -682,6 +685,7 @@ fn is_known_event_name(event: &str) -> bool {
             | "prompt.completed"
             | "agent.session.started"
             | "agent.session.activated"
+            | "agent.tools.available"
             | "agent.session.deactivated"
             | "agent.session.ended"
             | "agent.processing.end"
@@ -2259,6 +2263,78 @@ mod tests {
                 .get("tools")
                 .is_none(),
             "empty tools should be omitted for legacy parity"
+        );
+    }
+
+    #[test]
+    fn agent_tools_available_round_trips_without_parameter_schemas() {
+        let body = EventBody::AgentToolsAvailable(AgentToolsAvailableProps {
+            tools: vec![
+                AgentToolSummary {
+                    name:        "apply_patch".to_string(),
+                    description: "Apply a unified diff patch".to_string(),
+                    source:      AgentToolSource::Native,
+                    category:    AgentToolCategory::Write,
+                    invoked:     false,
+                },
+                AgentToolSummary {
+                    name:        "mcp__filesystem__read_file".to_string(),
+                    description: "Read a file through the filesystem MCP server".to_string(),
+                    source:      AgentToolSource::Mcp {
+                        server_name:   "filesystem".to_string(),
+                        original_name: "read_file".to_string(),
+                    },
+                    category:    AgentToolCategory::Other,
+                    invoked:     false,
+                },
+            ],
+            visit: 1,
+        });
+
+        let value = serde_json::to_value(&body).unwrap();
+        assert_eq!(value["event"], "agent.tools.available");
+        assert_eq!(value["properties"]["visit"], 1);
+        assert_eq!(value["properties"]["tools"][0]["name"], "apply_patch");
+        assert_eq!(value["properties"]["tools"][0]["source"]["kind"], "native");
+        assert_eq!(value["properties"]["tools"][0]["category"], "write");
+        assert!(
+            value["properties"]["tools"][0]
+                .as_object()
+                .unwrap()
+                .get("parameters")
+                .is_none(),
+            "StageProjection tool summaries must not expose full parameter schemas"
+        );
+
+        let parsed: EventBody = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed, body);
+    }
+
+    #[test]
+    fn agent_tool_source_and_category_use_public_json_shape() {
+        assert_eq!(
+            serde_json::to_value(AgentToolCategory::Read).unwrap(),
+            json!("read")
+        );
+        assert_eq!(
+            serde_json::to_value(AgentToolCategory::Subagent).unwrap(),
+            json!("subagent")
+        );
+        assert_eq!(
+            serde_json::to_value(AgentToolSource::Skill).unwrap(),
+            json!({ "kind": "skill" })
+        );
+        assert_eq!(
+            serde_json::to_value(AgentToolSource::Mcp {
+                server_name:   "github".to_string(),
+                original_name: "create_issue".to_string(),
+            })
+            .unwrap(),
+            json!({
+                "kind": "mcp",
+                "server_name": "github",
+                "original_name": "create_issue"
+            })
         );
     }
 }

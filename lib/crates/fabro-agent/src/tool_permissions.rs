@@ -1,11 +1,16 @@
 use fabro_types::PermissionLevel;
 
 pub fn tool_category(name: &str) -> &'static str {
+    known_tool_category(name).unwrap_or("shell")
+}
+
+pub fn known_tool_category(name: &str) -> Option<&'static str> {
     match name {
-        "read_file" | "read_many_files" | "grep" | "glob" | "list_dir" => "read",
-        "write_file" | "edit_file" | "apply_patch" => "write",
-        "spawn_agent" | "send_input" | "wait" | "close_agent" => "subagent",
-        _ => "shell",
+        "read_file" | "read_many_files" | "grep" | "glob" | "list_dir" => Some("read"),
+        "write_file" | "edit_file" | "apply_patch" => Some("write"),
+        "shell" => Some("shell"),
+        "spawn_agent" | "send_input" | "wait" | "close_agent" => Some("subagent"),
+        _ => None,
     }
 }
 
