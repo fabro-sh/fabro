@@ -3,7 +3,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use fabro_agent::CommandOutputCallback;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_types::CommandTermination;
+use fabro_types::{CommandTermination, StageTiming};
 
 use super::{EngineServices, Handler, NodeTimeoutPolicy};
 use crate::command_log::CommandLogRecorder;
@@ -178,6 +178,7 @@ impl Handler for CommandHandler {
                 serde_json::json!(finalized.output_ref),
             );
             outcome.notes = Some(format!("Script completed: {script}"));
+            outcome.timing = Some(StageTiming::new(0, 0, result.duration_ms));
             Ok(outcome)
         } else {
             let mut reason = format!(
@@ -190,6 +191,7 @@ impl Handler for CommandHandler {
                 keys::COMMAND_OUTPUT.to_string(),
                 serde_json::json!(finalized.output_ref),
             );
+            outcome.timing = Some(StageTiming::new(0, 0, result.duration_ms));
             Ok(outcome)
         }
     }
@@ -466,6 +468,33 @@ mod tests {
                 .contains("hello")
         );
         assert!(!outcome.context_updates.contains_key("command.stderr"));
+    }
+
+    #[tokio::test]
+    async fn script_handler_reports_command_duration_as_tool_timing() {
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("sleep 0.05; echo hello".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let run_dir = tempfile::tempdir().unwrap();
+
+        let services = make_services();
+        let outcome = handler
+            .execute(&node, &context, &graph, run_dir.path(), &services)
+            .await
+            .unwrap();
+
+        let timing = outcome.timing.expect("command outcome should carry timing");
+        assert_eq!(timing.inference_time_ms, 0);
+        assert!(
+            timing.tool_time_ms >= 25,
+            "expected command duration to be reported as tool time, got {timing:?}"
+        );
+        assert_eq!(timing.active_time_ms, timing.tool_time_ms);
     }
 
     #[tokio::test]

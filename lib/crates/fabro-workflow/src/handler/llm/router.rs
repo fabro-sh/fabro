@@ -161,6 +161,7 @@ mod tests {
                 usage:             None,
                 files_touched:     Vec::new(),
                 last_file_touched: None,
+                timing:            fabro_types::StageTiming::default(),
             })
         }
 
@@ -170,6 +171,7 @@ mod tests {
                 usage:             None,
                 files_touched:     Vec::new(),
                 last_file_touched: None,
+                timing:            fabro_types::StageTiming::default(),
             })
         }
 

@@ -556,6 +556,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn executor_copies_outcome_active_timing_into_node_result() {
+        struct TimedHandler;
+
+        #[async_trait]
+        impl NodeHandler<TestGraph> for TimedHandler {
+            async fn execute(
+                &self,
+                _node: &TestNode,
+                _context: &Context,
+                _graph: &TestGraph,
+            ) -> Result<Outcome> {
+                let mut outcome = Outcome::success();
+                outcome.timing = Some(fabro_types::StageTiming::new(999, 100, 50));
+                Ok(outcome)
+            }
+        }
+
+        struct TimingCapture(Arc<Mutex<Option<(u128, u128)>>>);
+
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for TimingCapture {
+            async fn after_node(
+                &self,
+                _node: &TestNode,
+                result: &mut NodeResult,
+                _state: &ExecutionState,
+            ) -> Result<()> {
+                *self.0.lock().unwrap() = Some((
+                    result.inference_time.as_millis(),
+                    result.tool_time.as_millis(),
+                ));
+                Ok(())
+            }
+        }
+
+        let captured = Arc::new(Mutex::new(None));
+        let g = linear_graph(&["work", "end"]);
+        let state = ExecutionState::new(&g).unwrap();
+        let executor =
+            ExecutorBuilder::new(Arc::new(TimedHandler) as Arc<dyn NodeHandler<TestGraph>>)
+                .lifecycle(Box::new(TimingCapture(Arc::clone(&captured))))
+                .build();
+
+        executor.run(&g, state).await.unwrap();
+
+        assert_eq!(*captured.lock().unwrap(), Some((100, 50)));
+    }
+
+    #[tokio::test]
     async fn executor_builder_sets_cancel_token() {
         let token = CancellationToken::new();
         token.cancel(); // already cancelled

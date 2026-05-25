@@ -10,7 +10,9 @@ use fabro_acp::{
 };
 use fabro_agent::{AgentEvent, Sandbox, StaticEnvProvider, SteeringItem, ToolEnvProvider};
 use fabro_graphviz::graph::Node;
-use fabro_types::{AgentBackend, Principal, SessionCapability, StageId, SteeringMessage};
+use fabro_types::{
+    AgentBackend, Principal, SessionCapability, StageId, StageTiming, SteeringMessage,
+};
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
@@ -231,6 +233,7 @@ impl AgentAcpBackend {
             usage: None,
             files_touched,
             last_file_touched,
+            timing: StageTiming::new(0, result.duration_ms, 0),
         })
     }
 

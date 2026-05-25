@@ -46,8 +46,8 @@ impl StageTiming {
         }
     }
 
-    /// Stages with no inference/tool work (human, wait, conditional, fan-in,
-    /// start, exit, parallel container) report wall time only.
+    /// Stages with no inference/tool work (human, wait, conditional, start,
+    /// exit, parallel container) report wall time only.
     #[must_use]
     pub fn wall_only(wall_time_ms: u64) -> Self {
         Self::new(wall_time_ms, 0, 0)

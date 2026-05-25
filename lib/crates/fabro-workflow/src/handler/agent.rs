@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_types::{RunId, StageModelUsage};
+use fabro_types::{RunId, StageModelUsage, StageTiming};
 pub(crate) use structured_output::extract_status_fields;
 use tokio_util::sync::CancellationToken;
 
@@ -23,9 +23,12 @@ use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt};
 pub enum CodergenResult {
     Text {
         text:              String,
-        usage:             Option<BilledModelUsage>,
+        usage:             Option<Box<BilledModelUsage>>,
         files_touched:     Vec<String>,
         last_file_touched: Option<String>,
+        /// Active timing observed by the backend. The wall field is ignored by
+        /// the executor on this hop; executor wall time remains authoritative.
+        timing:            StageTiming,
     },
     Full(Box<Outcome>),
 }
@@ -276,7 +279,7 @@ impl Handler for AgentHandler {
                     node_id: node.id.clone(),
                 }) as Arc<dyn fabro_agent::ToolHookCallback>
             });
-        let (response_text, stage_usage, backend_files_touched, last_file_touched) =
+        let (response_text, stage_usage, backend_files_touched, last_file_touched, timing) =
             if let Some(backend) = &self.backend {
                 let result = backend
                     .run(CodergenRunRequest {
@@ -298,7 +301,14 @@ impl Handler for AgentHandler {
                         usage,
                         files_touched,
                         last_file_touched,
-                    }) => (text, usage, files_touched, last_file_touched),
+                        timing,
+                    }) => (
+                        text,
+                        usage.map(|usage| *usage),
+                        files_touched,
+                        last_file_touched,
+                        timing,
+                    ),
                     Err(Error::Cancelled) => return Err(Error::Cancelled),
                     Err(e) if e.is_retryable() => {
                         return Err(e);
@@ -313,6 +323,7 @@ impl Handler for AgentHandler {
                     None,
                     Vec::new(),
                     None,
+                    StageTiming::default(),
                 )
             };
 
@@ -353,7 +364,7 @@ impl Handler for AgentHandler {
         );
 
         if let Some(schema) = structured_output::parse_node_output_schema(node)? {
-            match validate_agent_output_sources(
+            if let Ok(validated) = validate_agent_output_sources(
                 &schema,
                 &response_text,
                 &services.run.sandbox,
@@ -361,19 +372,14 @@ impl Handler for AgentHandler {
             )
             .await
             {
-                Ok(validated) => {
-                    structured_output::apply_validated_output(
-                        node,
-                        &schema,
-                        &validated,
-                        &mut outcome,
-                    );
-                }
-                Err(_) => {
-                    return Ok(structured_output::exhausted_failure_outcome(
-                        node.output_retries(),
-                    ));
-                }
+                structured_output::apply_validated_output(node, &schema, &validated, &mut outcome);
+            } else {
+                let mut failed =
+                    structured_output::exhausted_failure_outcome(node.output_retries());
+                failed.timing = Some(timing);
+                failed.usage = stage_usage;
+                failed.files_touched = backend_files_touched;
+                return Ok(failed);
             }
         } else {
             // 7b. Parse routing directives from response text, falling back to
@@ -399,6 +405,7 @@ impl Handler for AgentHandler {
         }
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
+        outcome.timing = Some(timing);
 
         Ok(outcome)
     }
@@ -656,6 +663,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -692,6 +700,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn codergen_handler_copies_backend_timing_to_outcome() {
+        struct TimingBackend;
+
+        #[async_trait]
+        impl CodergenBackend for TimingBackend {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                Ok(CodergenResult::Text {
+                    text:              "done".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
+                    last_file_touched: None,
+                    timing:            StageTiming::new(0, 200, 300),
+                })
+            }
+        }
+
+        let handler = AgentHandler::new(Some(Box::new(TimingBackend)));
+        let node = Node::new("step");
+        let context = test_context();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.timing, Some(StageTiming::new(0, 200, 300)));
+    }
+
+    #[tokio::test]
     async fn codergen_handler_extracts_status_from_last_file_touched() {
         struct LastFileBackend;
 
@@ -703,6 +742,7 @@ mod tests {
                     usage:             None,
                     files_touched:     vec!["results.md".to_string()],
                     last_file_touched: Some("results.md".to_string()),
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -793,6 +833,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -851,6 +892,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -907,6 +949,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -961,6 +1004,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -1005,6 +1049,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -1212,6 +1257,7 @@ Some text in between.
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -1272,6 +1318,7 @@ Some text in between.
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }

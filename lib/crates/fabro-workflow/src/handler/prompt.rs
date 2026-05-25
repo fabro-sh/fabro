@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_types::StageModelUsage;
+use fabro_types::{StageModelUsage, StageTiming};
 
 use super::agent::{
     CodergenBackend, CodergenResult, OneShotRequest, emit_stage_prompt, extract_status_fields,
@@ -117,7 +117,7 @@ impl Handler for PromptHandler {
         )?;
 
         // 3. Call LLM backend (one_shot)
-        let (response_text, stage_usage, backend_files_touched) =
+        let (response_text, stage_usage, backend_files_touched, timing) =
             if let Some(backend) = &self.backend {
                 let result = backend
                     .one_shot(OneShotRequest {
@@ -136,8 +136,9 @@ impl Handler for PromptHandler {
                         text,
                         usage,
                         files_touched,
+                        timing,
                         ..
-                    }) => (text, usage, files_touched),
+                    }) => (text, usage.map(|usage| *usage), files_touched, timing),
                     Err(Error::Cancelled) => return Err(Error::Cancelled),
                     Err(e) if e.is_retryable() => {
                         return Err(e);
@@ -151,6 +152,7 @@ impl Handler for PromptHandler {
                     format!("[Simulated] Response for stage: {}", node.id),
                     None,
                     Vec::new(),
+                    StageTiming::default(),
                 )
             };
 
@@ -192,26 +194,24 @@ impl Handler for PromptHandler {
         );
 
         if let Some(schema) = structured_output::parse_node_output_schema(node)? {
-            match structured_output::validate_response_text(&schema, &response_text) {
-                Ok(validated) => {
-                    structured_output::apply_validated_output(
-                        node,
-                        &schema,
-                        &validated,
-                        &mut outcome,
-                    );
-                }
-                Err(_) => {
-                    return Ok(structured_output::exhausted_failure_outcome(
-                        node.output_retries(),
-                    ));
-                }
+            if let Ok(validated) =
+                structured_output::validate_response_text(&schema, &response_text)
+            {
+                structured_output::apply_validated_output(node, &schema, &validated, &mut outcome);
+            } else {
+                let mut failed =
+                    structured_output::exhausted_failure_outcome(node.output_retries());
+                failed.timing = Some(timing);
+                failed.usage = stage_usage;
+                failed.files_touched = backend_files_touched;
+                return Ok(failed);
             }
         } else {
             extract_status_fields(&response_text, &mut outcome);
         }
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
+        outcome.timing = Some(timing);
 
         Ok(outcome)
     }
@@ -349,6 +349,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
 
@@ -388,6 +389,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prompt_handler_copies_backend_timing_to_outcome() {
+        struct TimingBackend;
+
+        #[async_trait]
+        impl CodergenBackend for TimingBackend {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                panic!("run() should not be called for prompt handler");
+            }
+
+            async fn one_shot(
+                &self,
+                _request: OneShotRequest<'_>,
+            ) -> Result<CodergenResult, Error> {
+                Ok(CodergenResult::Text {
+                    text:              "one-shot response".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
+                    last_file_touched: None,
+                    timing:            StageTiming::new(0, 200, 300),
+                })
+            }
+        }
+
+        let handler = PromptHandler::new(Some(Box::new(TimingBackend)));
+        let node = Node::new("classify");
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.timing, Some(StageTiming::new(0, 200, 300)));
+    }
+
+    #[tokio::test]
     async fn prompt_handler_custom_output_schema_updates_output_context_key() {
         struct CustomOutputBackend;
 
@@ -406,6 +445,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -453,6 +493,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -502,6 +543,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
 
@@ -561,6 +603,7 @@ mod tests {
                 usage:             None,
                 files_touched:     Vec::new(),
                 last_file_touched: None,
+                timing:            StageTiming::default(),
             })
         }
     }

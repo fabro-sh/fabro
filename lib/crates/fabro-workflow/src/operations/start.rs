@@ -30,13 +30,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
-use crate::error::Error;
+use crate::error::{self, Error};
 use crate::event::{
     Emitter, Event, EventBody, RunEventLogger, RunEventSink, RunNoticeLevel, append_event_to_sink,
 };
 use crate::handler::HandlerRegistry;
 use crate::handler::llm::routing;
-use crate::outcome::Outcome;
+use crate::outcome::{Outcome, StageOutcome};
 use crate::pipeline::{
     self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
     PullRequestOptions, SandboxEnvSpec, build_conclusion_from_store, classify_engine_result,
@@ -184,6 +184,7 @@ pub(super) async fn execute_persisted_run(
         let error = Error::engine(err.to_string());
         let _ = persist_detached_failure(
             run_id,
+            &run_store,
             &event_sink,
             run_dir,
             "bootstrap",
@@ -197,6 +198,7 @@ pub(super) async fn execute_persisted_run(
         let error = Error::engine(err.to_string());
         let _ = persist_detached_failure(
             run_id,
+            &run_store,
             &event_sink,
             run_dir,
             "bootstrap",
@@ -209,12 +211,14 @@ pub(super) async fn execute_persisted_run(
 
     let mut bootstrap_guard =
         DetachedRunBootstrapGuard::arm(run_id, run_dir, event_sink.clone(), cancel_token.clone());
+    bootstrap_guard.run_store = Some(run_store.clone());
 
     let persisted = match Persisted::load_from_store(&services.run_store, run_dir).await {
         Ok(persisted) => persisted,
         Err(err) => {
             let _ = persist_detached_failure(
                 run_id,
+                &run_store,
                 &event_sink,
                 run_dir,
                 "bootstrap",
@@ -232,6 +236,7 @@ pub(super) async fn execute_persisted_run(
         Err(err) => {
             let _ = persist_detached_failure(
                 run_id,
+                &run_store,
                 &event_sink,
                 run_dir,
                 "bootstrap",
@@ -245,8 +250,12 @@ pub(super) async fn execute_persisted_run(
     };
 
     bootstrap_guard.defuse();
-    let mut completion_guard =
-        DetachedRunCompletionGuard::arm(run_id, event_sink.clone(), cancel_token);
+    let mut completion_guard = DetachedRunCompletionGuard::arm(
+        run_id,
+        run_store.clone(),
+        event_sink.clone(),
+        cancel_token,
+    );
     let run_start = Instant::now();
     let started = Box::pin(session.run(persisted, checkpoint)).await;
 
@@ -281,7 +290,7 @@ async fn persist_terminal_engine_failure(
 ) {
     let engine_result: Result<Outcome, Error> = Err(error.clone());
     let (final_status, failure_reason, run_status) = classify_engine_result(&engine_result);
-    let _conclusion = build_conclusion_from_store(
+    let conclusion = build_conclusion_from_store(
         run_store,
         final_status,
         failure_reason,
@@ -295,12 +304,12 @@ async fn persist_terminal_engine_failure(
     };
     let failure_event = Event::workflow_run_failed_from_error(
         error,
-        fabro_types::RunTiming::wall_only(crate::millis_u64(duration)),
+        conclusion.timing,
         reason,
         None,
         None,
         None,
-        None,
+        conclusion.billing.clone(),
     );
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &failure_event).await {
         tracing::warn!(error = %err, "Failed to append terminal engine failure event");
@@ -893,6 +902,7 @@ impl RunSession {
 
 struct DetachedRunBootstrapGuard {
     run_id:       RunId,
+    run_store:    Option<RunStoreHandle>,
     event_sink:   RunEventSink,
     cancel_token: CancellationToken,
     active:       bool,
@@ -907,6 +917,7 @@ impl DetachedRunBootstrapGuard {
     ) -> Self {
         Self {
             run_id,
+            run_store: None,
             event_sink,
             cancel_token,
             active: true,
@@ -928,17 +939,33 @@ impl Drop for DetachedRunBootstrapGuard {
                 FailureReason::SandboxInitFailed
             };
             let run_id = self.run_id;
+            let run_store = self.run_store.clone();
             let event_sink = self.event_sink.clone();
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
+                    let (timing, billing) = if let Some(run_store) = run_store {
+                        let final_status = StageOutcome::Failed {
+                            retry_requested: false,
+                        };
+                        let failure = Some(error::run_failure_from_error(
+                            &Error::engine(reason.to_string()),
+                            reason,
+                        ));
+                        let conclusion =
+                            build_conclusion_from_store(&run_store, final_status, failure, 0, None)
+                                .await;
+                        (conclusion.timing, conclusion.billing)
+                    } else {
+                        (fabro_types::RunTiming::default(), None)
+                    };
                     let failure_event = Event::workflow_run_failed_from_error(
                         &Error::engine(reason.to_string()),
-                        fabro_types::RunTiming::default(),
+                        timing,
                         reason,
                         None,
                         None,
                         None,
-                        None,
+                        billing,
                     );
                     let _ = append_event_to_sink(&event_sink, &run_id, &failure_event).await;
                 });
@@ -953,15 +980,22 @@ const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalizat
 struct DetachedRunCompletionGuard {
     event_sink:   RunEventSink,
     run_id:       RunId,
+    run_store:    RunStoreHandle,
     cancel_token: CancellationToken,
     active:       bool,
 }
 
 impl DetachedRunCompletionGuard {
-    fn arm(run_id: RunId, event_sink: RunEventSink, cancel_token: CancellationToken) -> Self {
+    fn arm(
+        run_id: RunId,
+        run_store: RunStoreHandle,
+        event_sink: RunEventSink,
+        cancel_token: CancellationToken,
+    ) -> Self {
         Self {
             event_sink,
             run_id,
+            run_store,
             cancel_token,
             active: true,
         }
@@ -996,16 +1030,26 @@ impl Drop for DetachedRunCompletionGuard {
         };
         let event_sink = self.event_sink.clone();
         let run_id = self.run_id;
+        let run_store = self.run_store.clone();
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
+                let final_status = StageOutcome::Failed {
+                    retry_requested: false,
+                };
+                let failure = Some(error::run_failure_from_error(
+                    &Error::engine(message.to_string()),
+                    reason,
+                ));
+                let conclusion =
+                    build_conclusion_from_store(&run_store, final_status, failure, 0, None).await;
                 let failure_event = Event::workflow_run_failed_from_error(
                     &Error::engine(message.to_string()),
-                    fabro_types::RunTiming::default(),
+                    conclusion.timing,
                     reason,
                     None,
                     None,
                     None,
-                    None,
+                    conclusion.billing,
                 );
                 let _ = append_event_to_sink(&event_sink, &run_id, &failure_event).await;
                 let _ = append_event_to_sink(&event_sink, &run_id, &Event::RunNotice {
@@ -1022,6 +1066,7 @@ impl Drop for DetachedRunCompletionGuard {
 
 async fn persist_detached_failure(
     run_id: RunId,
+    run_store: &RunStoreHandle,
     event_sink: &RunEventSink,
     _run_dir: &Path,
     phase: &'static str,
@@ -1029,15 +1074,20 @@ async fn persist_detached_failure(
     error: &Error,
 ) -> Result<(), Error> {
     let message = error.to_string();
+    let final_status = StageOutcome::Failed {
+        retry_requested: false,
+    };
+    let failure = Some(error::run_failure_from_error(error, reason));
+    let conclusion = build_conclusion_from_store(run_store, final_status, failure, 0, None).await;
 
     let failure_event = Event::workflow_run_failed_from_error(
         error,
-        fabro_types::RunTiming::default(),
+        conclusion.timing,
         reason,
         None,
         None,
         None,
-        None,
+        conclusion.billing,
     );
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &failure_event).await {
         tracing::warn!(error = %err, "Failed to append detached failure event");
@@ -1072,18 +1122,18 @@ mod tests {
     use fabro_store::Database;
     use fabro_types::settings::run::RunMode;
     use fabro_types::settings::{InterpString, ModelRef};
-    use fabro_types::{ManifestPath, WorkflowSettings, fixtures};
+    use fabro_types::{BilledModelUsage, ManifestPath, StageTiming, WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
     use crate::context::Context;
     use crate::event::{Emitter, EventBody};
-    use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
     use crate::handler::manager_loop::SubWorkflowHandler;
     use crate::handler::start::StartHandler;
+    use crate::handler::{EngineServices, Handler, HandlerRegistry};
     use crate::operations::resume;
-    use crate::outcome::StageOutcome;
+    use crate::outcome::{Outcome, StageOutcome};
     use crate::records::CheckpointExt;
     use crate::workflow_bundle::{BundledWorkflow, WorkflowBundle};
 
@@ -1093,6 +1143,48 @@ mod tests {
         exit  [shape=Msquare]
         start -> exit
     }"#;
+
+    const TIMED_DOT: &str = r#"digraph Test {
+        graph [goal="Time active work"]
+        start [shape=Mdiamond]
+        work  [type="timed"]
+        exit  [shape=Msquare]
+        start -> work
+        work -> exit
+    }"#;
+
+    struct TimedOutcomeHandler;
+
+    fn timed_success_outcome() -> Outcome {
+        let mut outcome = Outcome::success();
+        outcome.timing = Some(StageTiming::new(0, 100, 50));
+        outcome
+    }
+
+    #[async_trait::async_trait]
+    impl Handler for TimedOutcomeHandler {
+        async fn execute(
+            &self,
+            _node: &fabro_graphviz::graph::Node,
+            _context: &Context,
+            _graph: &fabro_graphviz::graph::Graph,
+            _run_dir: &Path,
+            _services: &EngineServices,
+        ) -> Result<Outcome, Error> {
+            Ok(timed_success_outcome())
+        }
+
+        async fn simulate(
+            &self,
+            _node: &fabro_graphviz::graph::Node,
+            _context: &Context,
+            _graph: &fabro_graphviz::graph::Graph,
+            _run_dir: &Path,
+            _services: &EngineServices,
+        ) -> Result<Outcome, Error> {
+            Ok(timed_success_outcome())
+        }
+    }
 
     fn memory_store() -> Arc<Database> {
         Arc::new(Database::new(
@@ -1381,6 +1473,92 @@ reasoning = false
         }
     }
 
+    fn test_usage(model_id: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
+        serde_json::from_value(serde_json::json!({
+            "input": {
+                "usage": {
+                    "model": {
+                        "provider": "openai",
+                        "model_id": model_id
+                    },
+                    "tokens": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens
+                    }
+                },
+                "facts": { "algorithm": "openai" }
+            },
+            "total_usd_micros": input_tokens + output_tokens
+        }))
+        .unwrap()
+    }
+
+    async fn append_completed_stage(
+        run_store: &fabro_store::RunDatabase,
+        node_id: &str,
+        timing: fabro_types::StageTiming,
+        billing: Option<BilledModelUsage>,
+    ) {
+        crate::event::append_event(run_store, &fixtures::RUN_1, &Event::StageCompleted {
+            node_id: node_id.to_string(),
+            name: node_id.to_string(),
+            index: 0,
+            timing,
+            status: StageOutcome::Succeeded.to_string(),
+            preferred_label: None,
+            suggested_next_ids: Vec::new(),
+            billing,
+            failure: None,
+            notes: None,
+            files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: None,
+            attempt: 1,
+            max_attempts: 1,
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn mark_run_running(run_store: &fabro_store::RunDatabase) {
+        crate::event::append_event(run_store, &fixtures::RUN_1, &Event::RunStartRequested {
+            resume: false,
+            actor:  None,
+        })
+        .await
+        .unwrap();
+        crate::event::append_event(run_store, &fixtures::RUN_1, &Event::RunRunnable {
+            source: RunRunnableSource::StartRequested,
+            actor:  None,
+        })
+        .await
+        .unwrap();
+        crate::event::append_event(run_store, &fixtures::RUN_1, &Event::RunStarting)
+            .await
+            .unwrap();
+        crate::event::append_event(run_store, &fixtures::RUN_1, &Event::RunRunning)
+            .await
+            .unwrap();
+    }
+
+    async fn wait_for_conclusion(
+        run_store: &fabro_store::RunDatabase,
+    ) -> crate::records::Conclusion {
+        for _ in 0..50 {
+            if let Some(conclusion) = run_store.state().await.unwrap().conclusion {
+                return conclusion;
+            }
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        panic!("timed out waiting for run conclusion");
+    }
+
     #[tokio::test]
     async fn start_captures_checkpoint_git_sha_in_conclusion() {
         let temp = tempfile::tempdir().unwrap();
@@ -1433,6 +1611,188 @@ reasoning = false
             Some("sha-test")
         );
         assert_eq!(started.finalized.conclusion.status, StageOutcome::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn start_events_roll_up_outcome_active_timing() {
+        let temp = tempfile::tempdir().unwrap();
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
+        let stage_timing = Arc::new(Mutex::new(None));
+        let run_timing = Arc::new(Mutex::new(None));
+        {
+            let stage_timing = Arc::clone(&stage_timing);
+            let run_timing = Arc::clone(&run_timing);
+            emitter.on_event(move |event| match &event.body {
+                EventBody::StageCompleted(props) if event.node_id.as_deref() == Some("work") => {
+                    *stage_timing.lock().unwrap() = Some(props.timing);
+                }
+                EventBody::RunCompleted(props) => {
+                    *run_timing.lock().unwrap() = Some(props.timing);
+                }
+                _ => {}
+            });
+        }
+
+        let mut registry = test_registry();
+        registry.register("timed", Box::new(TimedOutcomeHandler));
+        let (_persisted, store) = persisted_workflow(TIMED_DOT, &storage_root).await;
+
+        let started = start(
+            &run_dir,
+            test_start_services(&store, &run_dir, emitter, Arc::new(registry)).await,
+        )
+        .await
+        .unwrap();
+
+        let stage_timing = stage_timing
+            .lock()
+            .unwrap()
+            .expect("work stage should emit stage.completed timing");
+        assert_eq!(stage_timing.inference_time_ms, 100);
+        assert_eq!(stage_timing.tool_time_ms, 50);
+        assert_eq!(stage_timing.active_time_ms, 150);
+
+        let run_timing = run_timing
+            .lock()
+            .unwrap()
+            .expect("successful run should emit run.completed timing");
+        assert_eq!(run_timing.inference_time_ms, 100);
+        assert_eq!(run_timing.tool_time_ms, 50);
+        assert_eq!(run_timing.active_time_ms, 150);
+        assert_eq!(started.finalized.conclusion.timing.inference_time_ms, 100);
+        assert_eq!(started.finalized.conclusion.timing.tool_time_ms, 50);
+        assert_eq!(started.finalized.conclusion.timing.active_time_ms, 150);
+    }
+
+    #[tokio::test]
+    async fn persist_terminal_engine_failure_uses_conclusion_timing_and_billing() {
+        let temp = tempfile::tempdir().unwrap();
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
+        mark_run_running(&run_store).await;
+        append_completed_stage(
+            &run_store,
+            "implement",
+            fabro_types::StageTiming::new(1_000, 200, 300),
+            Some(test_usage("gpt-5.4", 100, 50)),
+        )
+        .await;
+        append_completed_stage(
+            &run_store,
+            "review",
+            fabro_types::StageTiming::new(500, 25, 75),
+            None,
+        )
+        .await;
+        let run_store_handle: RunStoreHandle = run_store.clone().into();
+        let event_sink = RunEventSink::store(run_store.clone());
+
+        persist_terminal_engine_failure(
+            fixtures::RUN_1,
+            &run_store_handle,
+            &event_sink,
+            &run_dir,
+            &Error::engine("visit limit exceeded"),
+            Duration::from_millis(9_999),
+        )
+        .await;
+
+        let projection = run_store.state().await.unwrap();
+        let conclusion = projection
+            .conclusion
+            .expect("run.failed should populate conclusion");
+        assert_eq!(conclusion.timing.wall_time_ms, 9_999);
+        assert_eq!(conclusion.timing.inference_time_ms, 225);
+        assert_eq!(conclusion.timing.tool_time_ms, 375);
+        assert_eq!(conclusion.timing.active_time_ms, 600);
+        assert_eq!(
+            conclusion
+                .billing
+                .as_ref()
+                .map(|billing| billing.total_tokens),
+            Some(150),
+        );
+    }
+
+    #[tokio::test]
+    async fn bootstrap_guard_failure_uses_conclusion_timing_and_billing_when_store_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let (storage_root, run_dir) = storage_root_and_run_dir(&temp);
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
+        mark_run_running(&run_store).await;
+        append_completed_stage(
+            &run_store,
+            "implement",
+            fabro_types::StageTiming::new(1_000, 120, 80),
+            Some(test_usage("gpt-5.4", 40, 10)),
+        )
+        .await;
+        let run_store_handle: RunStoreHandle = run_store.clone().into();
+        let event_sink = RunEventSink::store(run_store.clone());
+
+        {
+            let mut guard = DetachedRunBootstrapGuard::arm(
+                fixtures::RUN_1,
+                &run_dir,
+                event_sink,
+                CancellationToken::new(),
+            );
+            guard.run_store = Some(run_store_handle);
+        }
+
+        let conclusion = wait_for_conclusion(&run_store).await;
+        assert_eq!(conclusion.timing.inference_time_ms, 120);
+        assert_eq!(conclusion.timing.tool_time_ms, 80);
+        assert_eq!(conclusion.timing.active_time_ms, 200);
+        assert_eq!(
+            conclusion
+                .billing
+                .as_ref()
+                .map(|billing| billing.total_tokens),
+            Some(50),
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_guard_failure_uses_conclusion_timing_and_billing() {
+        let temp = tempfile::tempdir().unwrap();
+        let (storage_root, _run_dir) = storage_root_and_run_dir(&temp);
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &storage_root).await;
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
+        mark_run_running(&run_store).await;
+        append_completed_stage(
+            &run_store,
+            "implement",
+            fabro_types::StageTiming::new(1_000, 70, 30),
+            Some(test_usage("gpt-5.4", 20, 5)),
+        )
+        .await;
+        let run_store_handle: RunStoreHandle = run_store.clone().into();
+        let event_sink = RunEventSink::store(run_store.clone());
+
+        {
+            let _guard = DetachedRunCompletionGuard::arm(
+                fixtures::RUN_1,
+                run_store_handle,
+                event_sink,
+                CancellationToken::new(),
+            );
+        }
+
+        let conclusion = wait_for_conclusion(&run_store).await;
+        assert_eq!(conclusion.timing.inference_time_ms, 70);
+        assert_eq!(conclusion.timing.tool_time_ms, 30);
+        assert_eq!(conclusion.timing.active_time_ms, 100);
+        assert_eq!(
+            conclusion
+                .billing
+                .as_ref()
+                .map(|billing| billing.total_tokens),
+            Some(25),
+        );
     }
 
     #[tokio::test]

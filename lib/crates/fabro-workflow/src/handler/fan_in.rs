@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
-use fabro_types::StageModelUsage;
+use fabro_types::{StageModelUsage, StageTiming};
 use tokio_util::sync::CancellationToken;
 
 use super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};
@@ -112,7 +112,9 @@ impl Handler for FanInHandler {
         };
 
         if all_failed {
-            return Ok(Outcome::fail_deterministic("all candidates failed"));
+            let mut outcome = Outcome::fail_deterministic("all candidates failed");
+            outcome.timing = Some(best.timing);
+            return Ok(outcome);
         }
 
         // --- Fast-forward to winner's HEAD when git isolation is active ---
@@ -144,6 +146,7 @@ impl Handler for FanInHandler {
             );
         }
         outcome.notes = Some(format!("Selected best candidate: {}", best.id));
+        outcome.timing = Some(best.timing);
 
         Ok(outcome)
     }
@@ -153,6 +156,7 @@ struct Candidate {
     id:     String,
     status: String,
     score:  f64,
+    timing: StageTiming,
 }
 
 fn status_rank(status: &str) -> u32 {
@@ -172,6 +176,7 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
             id:     "unknown".to_string(),
             status: "failed".to_string(),
             score:  0.0,
+            timing: StageTiming::default(),
         };
     }
 
@@ -192,6 +197,7 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
                 .get("score")
                 .and_then(serde_json::Value::as_f64)
                 .unwrap_or(0.0),
+            timing: StageTiming::default(),
         })
         .collect();
 
@@ -215,6 +221,7 @@ fn heuristic_select(results: &serde_json::Value) -> Candidate {
         id:     "unknown".to_string(),
         status: "failed".to_string(),
         score:  0.0,
+        timing: StageTiming::default(),
     })
 }
 
@@ -277,6 +284,7 @@ async fn llm_evaluate(
         .await
     {
         Ok(CodergenResult::Full(outcome)) => {
+            let timing = outcome.timing.unwrap_or_default();
             // If the backend returned a full Outcome, extract best_id from context_updates
             let best_id = outcome
                 .context_updates
@@ -298,12 +306,13 @@ async fn llm_evaluate(
                 &stage_scope,
             );
             Ok(Candidate {
-                id:     best_id,
+                id: best_id,
                 status: outcome.status.to_string(),
-                score:  0.0,
+                score: 0.0,
+                timing,
             })
         }
-        Ok(CodergenResult::Text { text, .. }) => {
+        Ok(CodergenResult::Text { text, timing, .. }) => {
             emitter.emit_scoped(
                 &Event::PromptCompleted {
                     node_id:  node_id.to_string(),
@@ -337,13 +346,16 @@ async fn llm_evaluate(
                             id: id.to_string(),
                             status,
                             score,
+                            timing,
                         });
                     }
                 }
             }
 
             // No match found; fall back to heuristic
-            Ok(heuristic_select(results))
+            let mut fallback = heuristic_select(results);
+            fallback.timing = timing;
+            Ok(fallback)
         }
         Err(_) => {
             // LLM call failed; fall back to heuristic
@@ -486,6 +498,7 @@ mod tests {
                     usage:             None,
                     files_touched:     Vec::new(),
                     last_file_touched: None,
+                    timing:            StageTiming::default(),
                 })
             }
         }
@@ -517,6 +530,52 @@ mod tests {
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_b"))
         );
+    }
+
+    #[tokio::test]
+    async fn fan_in_with_backend_copies_llm_timing_to_outcome() {
+        use tempfile::TempDir;
+
+        use crate::handler::agent::{CodergenBackend, CodergenRunRequest};
+
+        struct TimingBackend;
+
+        #[async_trait]
+        impl CodergenBackend for TimingBackend {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+                Ok(CodergenResult::Text {
+                    text:              "branch_b".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
+                    last_file_touched: None,
+                    timing:            StageTiming::new(0, 200, 300),
+                })
+            }
+        }
+
+        let handler = FanInHandler::new(Some(Box::new(TimingBackend)));
+        let mut node = Node::new("fan_in");
+        node.attrs.insert(
+            "prompt".to_string(),
+            fabro_graphviz::graph::AttrValue::String("Pick the best branch".to_string()),
+        );
+        let context = Context::new();
+        context.set(
+            keys::PARALLEL_RESULTS,
+            serde_json::json!([
+                {"id": "branch_a", "status": "succeeded"},
+                {"id": "branch_b", "status": "succeeded"},
+            ]),
+        );
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.timing, Some(StageTiming::new(0, 200, 300)));
     }
 
     #[tokio::test]

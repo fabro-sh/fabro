@@ -1783,6 +1783,7 @@ impl CodergenBackend for MockCodergenBackend {
             usage:             None,
             files_touched:     Vec::new(),
             last_file_touched: None,
+            timing:            fabro_types::StageTiming::default(),
         })
     }
 }
@@ -6496,6 +6497,7 @@ mod real_llm {
                 usage:             None,
                 files_touched:     Vec::new(),
                 last_file_touched: None,
+                timing:            fabro_types::StageTiming::default(),
             })
         }
     }

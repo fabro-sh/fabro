@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use fabro_auth::CredentialSource;
 use fabro_llm::client::Client;
@@ -68,6 +68,12 @@ pub enum SteeringItem {
     System {
         text: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SessionInputTiming {
+    pub inference: Duration,
+    pub tool:      Duration,
 }
 
 impl SteeringItem {
@@ -337,6 +343,8 @@ pub struct Session {
     tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,
     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,
+    last_input_inference_duration: Duration,
+    last_input_tool_duration: Duration,
 }
 
 impl Session {
@@ -374,6 +382,8 @@ impl Session {
             tool_env_provider: None,
             subagent_manager,
             completion_coordinator: None,
+            last_input_inference_duration: Duration::ZERO,
+            last_input_tool_duration: Duration::ZERO,
         }
     }
 
@@ -1188,6 +1198,14 @@ impl Session {
         &self.file_tracker
     }
 
+    #[must_use]
+    pub const fn last_input_timing(&self) -> SessionInputTiming {
+        SessionInputTiming {
+            inference: self.last_input_inference_duration,
+            tool:      self.last_input_tool_duration,
+        }
+    }
+
     pub async fn process_input(&mut self, input: &str) -> Result<(), Error> {
         self.process_input_with_runtime(input, AgentToolRuntime::default())
             .await
@@ -1198,6 +1216,8 @@ impl Session {
         input: &str,
         agent_tool_runtime: AgentToolRuntime,
     ) -> Result<(), Error> {
+        self.last_input_inference_duration = Duration::ZERO;
+        self.last_input_tool_duration = Duration::ZERO;
         if self.state == SessionState::Closed {
             return Err(Error::SessionClosed);
         }
@@ -1388,6 +1408,16 @@ impl Session {
             };
             let client = self.llm_client.clone();
             let cancel_token_for_select = self.cancel_token.clone();
+            let mut inference_start = Some(Instant::now());
+            macro_rules! record_inference_duration {
+                () => {
+                    if let Some(start) = inference_start.take() {
+                        self.last_input_inference_duration = self
+                            .last_input_inference_duration
+                            .saturating_add(start.elapsed());
+                    }
+                };
+            }
             let stream_outcome: Option<Result<StreamEventStream, Error>> = tokio::select! {
                 biased;
                 () = round_token.cancelled() => None,
@@ -1395,8 +1425,15 @@ impl Session {
                 stream = self.open_stream_with_retry(&client, &request, &retry_policy) => Some(stream),
             };
             let mut event_stream = if let Some(stream) = stream_outcome {
-                stream?
+                match stream {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        record_inference_duration!();
+                        return Err(err);
+                    }
+                }
             } else {
+                record_inference_duration!();
                 if self.cancel_token.is_cancelled() {
                     self.close();
                     return Err(self.interrupted_error());
@@ -1472,6 +1509,7 @@ impl Session {
                 // If terminal cancel fired, drop the stream and bail out.
                 if self.cancel_token.is_cancelled() {
                     drop(event_stream);
+                    record_inference_duration!();
                     self.close();
                     return Err(self.interrupted_error());
                 }
@@ -1538,7 +1576,13 @@ impl Session {
                             stream = self.open_stream_with_retry(&client, &request, &retry_policy) => Some(stream),
                         };
                         event_stream = if let Some(stream) = retry_outcome {
-                            stream?
+                            match stream {
+                                Ok(stream) => stream,
+                                Err(err) => {
+                                    record_inference_duration!();
+                                    return Err(err);
+                                }
+                            }
                         } else {
                             steer_interrupted =
                                 round_token.is_cancelled() && !self.cancel_token.is_cancelled();
@@ -1556,6 +1600,7 @@ impl Session {
                             },
                         );
                     }
+                    record_inference_duration!();
                     return Err(self.emit_llm_error(err));
                 }
 
@@ -1584,7 +1629,13 @@ impl Session {
                         stream = self.open_stream_with_retry(&client, &request, &retry_policy) => Some(stream),
                     };
                     event_stream = if let Some(stream) = retry_outcome {
-                        stream?
+                        match stream {
+                            Ok(stream) => stream,
+                            Err(err) => {
+                                record_inference_duration!();
+                                return Err(err);
+                            }
+                        }
                     } else {
                         steer_interrupted =
                             round_token.is_cancelled() && !self.cancel_token.is_cancelled();
@@ -1592,6 +1643,7 @@ impl Session {
                     };
                 }
             }
+            record_inference_duration!();
 
             // Mid-LLM steer interrupt: drop the unrecorded turn, clear any
             // partial visible output, and re-iterate. The next turn's
@@ -1702,6 +1754,7 @@ impl Session {
 
             // Execute tool calls (parallel or sequential based on provider)
             self.transition(SessionState::Executing);
+            let tool_start = Instant::now();
             let results = execute_tool_calls(
                 &tool_calls,
                 true,
@@ -1717,6 +1770,9 @@ impl Session {
                 agent_tool_runtime,
             )
             .await;
+            self.last_input_tool_duration = self
+                .last_input_tool_duration
+                .saturating_add(tool_start.elapsed());
             composite_watcher.abort();
             if tool_calls
                 .iter()
@@ -2091,6 +2147,47 @@ mod tests {
         }
     }
 
+    struct DelayedStreamProvider {
+        responses:  Vec<Response>,
+        delay:      Duration,
+        call_index: AtomicUsize,
+    }
+
+    impl DelayedStreamProvider {
+        fn new(responses: Vec<Response>, delay: Duration) -> Self {
+            Self {
+                responses,
+                delay,
+                call_index: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAdapter for DelayedStreamProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+
+        async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
+            Err(LlmError::Configuration {
+                message: "DelayedStreamProvider does not implement complete()".into(),
+                source:  None,
+            })
+        }
+
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
+            sleep(self.delay).await;
+            let idx = self.call_index.fetch_add(1, Ordering::SeqCst);
+            let response = if idx < self.responses.len() {
+                self.responses[idx].clone()
+            } else {
+                self.responses[self.responses.len() - 1].clone()
+            };
+            Ok(response_to_stream(response))
+        }
+    }
+
     async fn make_session_with_provider(provider: Arc<dyn ProviderAdapter>) -> Session {
         make_session_with_provider_and_manager(provider, None).await
     }
@@ -2163,6 +2260,56 @@ mod tests {
             assert_eq!(results[0].tool_call_id, "call_1");
             assert!(!results[0].is_error);
         }
+    }
+
+    #[tokio::test]
+    async fn last_input_timing_reports_inference_and_tool_per_call() {
+        let mut registry = ToolRegistry::new();
+        registry.register(RegisteredTool {
+            definition: ToolDefinition {
+                name:        "slow_tool".into(),
+                description: "Sleeps before returning".into(),
+                parameters:  serde_json::json!({"type": "object"}),
+            },
+            executor:   Arc::new(|_args, _ctx| {
+                Box::pin(async move {
+                    sleep(Duration::from_millis(30)).await;
+                    Ok("slept".to_string())
+                })
+            }),
+            source:     ToolSource::Native,
+        });
+        let provider = Arc::new(DelayedStreamProvider::new(
+            vec![
+                tool_call_response("slow_tool", "call_1", serde_json::json!({})),
+                text_response("Done!"),
+                text_response("Second response"),
+            ],
+            Duration::from_millis(20),
+        ));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
+
+        session.process_input("use the slow tool").await.unwrap();
+        let first = session.last_input_timing();
+        assert!(
+            first.inference >= Duration::from_millis(35),
+            "expected non-zero inference timing for first input, got {first:?}"
+        );
+        assert!(
+            first.tool >= Duration::from_millis(20),
+            "expected non-zero tool timing for first input, got {first:?}"
+        );
+
+        session.process_input("no tools this time").await.unwrap();
+        let second = session.last_input_timing();
+        assert!(
+            second.inference >= Duration::from_millis(15),
+            "expected per-input inference timing for second input, got {second:?}"
+        );
+        assert_eq!(second.tool, Duration::ZERO);
     }
 
     struct SequenceToolEnvProvider {

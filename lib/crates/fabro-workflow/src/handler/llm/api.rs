@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use fabro_agent::subagent::{SessionFactory, SubAgentManager};
@@ -21,7 +22,7 @@ use fabro_mcp::config::McpServerSettings;
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, FallbackTarget, ModelRef, ProviderId};
 use fabro_types::settings::run::RunModelControls;
-use fabro_types::{PermissionLevel, RunId, SessionCapability, StageId};
+use fabro_types::{PermissionLevel, RunId, SessionCapability, StageId, StageTiming};
 use serde::de::DeserializeOwned;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
@@ -117,6 +118,12 @@ enum AgentApiErrorDisposition {
 pub struct EffectiveRequestControls {
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) speed:            Option<Speed>,
+}
+
+fn active_stage_timing(inference: Duration, tool: Duration) -> StageTiming {
+    // The executor ignores this wall field and supplies its own stopwatch-based
+    // value when converting Outcome.timing into the emitted stage timing.
+    StageTiming::new(0, crate::millis_u64(inference), crate::millis_u64(tool))
 }
 
 fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentApiErrorDisposition {
@@ -1046,6 +1053,7 @@ impl CodergenBackend for AgentApiBackend {
             .map(structured_output::prompt_response_format);
         let mut repair_attempts = 0_i64;
         let mut total_usage = TokenCounts::default();
+        let mut inference_duration = Duration::ZERO;
 
         loop {
             let request = Request {
@@ -1065,7 +1073,8 @@ impl CodergenBackend for AgentApiBackend {
                 provider_options: None,
             };
 
-            let completion = self
+            let inference_start = Instant::now();
+            let completion_result = self
                 .complete_one_shot_request(
                     &client,
                     node,
@@ -1075,7 +1084,9 @@ impl CodergenBackend for AgentApiBackend {
                     controls,
                     fallback_chain,
                 )
-                .await?;
+                .await;
+            inference_duration = inference_duration.saturating_add(inference_start.elapsed());
+            let completion = completion_result?;
             total_usage += completion.response.usage.clone();
             let response_text = completion.response.text();
 
@@ -1108,9 +1119,10 @@ impl CodergenBackend for AgentApiBackend {
 
             return Ok(CodergenResult::Text {
                 text:              response_text,
-                usage:             Some(stage_usage),
+                usage:             Some(Box::new(stage_usage)),
                 files_touched:     Vec::new(),
                 last_file_touched: None,
+                timing:            active_stage_timing(inference_duration, Duration::ZERO),
             });
         }
     }
@@ -1191,6 +1203,8 @@ impl CodergenBackend for AgentApiBackend {
 
         // Record turn count before processing so we only aggregate new usage.
         let mut turns_before = session.history().turns().len();
+        let mut inference_duration = Duration::ZERO;
+        let mut tool_duration = Duration::ZERO;
 
         // Activate with the steering hub after initialization so HTTP
         // `POST /runs/{id}/steer` calls reach this session. The activation
@@ -1243,9 +1257,13 @@ impl CodergenBackend for AgentApiBackend {
                 if !is_reused {
                     emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
                 }
-                session
+                let process_result = session
                     .process_input_with_runtime(prompt, agent_tool_runtime.clone())
-                    .await
+                    .await;
+                let timing = session.last_input_timing();
+                inference_duration = inference_duration.saturating_add(timing.inference);
+                tool_duration = tool_duration.saturating_add(timing.tool);
+                process_result
             }
             Err(err) => Err(err),
         };
@@ -1371,10 +1389,13 @@ impl CodergenBackend for AgentApiBackend {
                             }
                         }
                         emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
-                        match session
+                        let process_result = session
                             .process_input_with_runtime(prompt, agent_tool_runtime.clone())
-                            .await
-                        {
+                            .await;
+                        let timing = session.last_input_timing();
+                        inference_duration = inference_duration.saturating_add(timing.inference);
+                        tool_duration = tool_duration.saturating_add(timing.tool);
+                        match process_result {
                             Ok(()) => {
                                 succeeded = true;
                                 break;
@@ -1435,7 +1456,11 @@ impl CodergenBackend for AgentApiBackend {
                             ));
                         }
                         let repair_message = error.repair_message(schema);
-                        match session.process_input(&repair_message).await {
+                        let repair_result = session.process_input(&repair_message).await;
+                        let timing = session.last_input_timing();
+                        inference_duration = inference_duration.saturating_add(timing.inference);
+                        tool_duration = tool_duration.saturating_add(timing.tool);
+                        match repair_result {
                             Ok(()) => {
                                 repair_attempts += 1;
                                 response = last_assistant_response(&session);
@@ -1507,9 +1532,10 @@ impl CodergenBackend for AgentApiBackend {
 
         Ok(CodergenResult::Text {
             text: response,
-            usage: Some(stage_usage),
+            usage: Some(Box::new(stage_usage)),
             files_touched,
             last_file_touched,
+            timing: active_stage_timing(inference_duration, tool_duration),
         })
     }
 }
