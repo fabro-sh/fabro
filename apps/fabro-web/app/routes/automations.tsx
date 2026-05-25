@@ -222,6 +222,7 @@ export default function Automations() {
           <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
           <input
             type="text"
+            aria-label="Search automations"
             placeholder="Search automations..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -230,6 +231,7 @@ export default function Automations() {
         </div>
         <div className="relative">
           <select
+            aria-label="Automation trigger filter"
             value={triggerFilter}
             onChange={(e) => setTriggerFilter(e.target.value as TriggerFilter)}
             className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"

@@ -139,6 +139,7 @@ export function FileTreeSidebar({
   const selection = useFileTreeSelection(model);
   useEffect(() => {
     const pendingSelectedPath = pendingSelectedPathRef.current;
+    // react-doctor-disable-next-line react-doctor/no-event-handler -- This keeps Pierre's imperative tree model aligned after the tree emits a selection change.
     if (pendingSelectedPath === selectedPath) {
       pendingSelectedPathRef.current = null;
     }

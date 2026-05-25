@@ -271,7 +271,6 @@ function ChecksStatus({ checks }: { checks: CheckRun[] }) {
   return (
     <div
       className="-mx-4 mt-3 overflow-hidden border-y border-line"
-      role="group"
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onKeyDown={(e) => { e.stopPropagation(); }}
     >
@@ -448,7 +447,7 @@ function ApproveBoardButton({ runId }: { runId: string }) {
   const { push } = useToast();
   const [pending, setPending] = useState(false);
 
-  async function handleClick(event: React.MouseEvent) {
+  async function approveBoardRun(event: React.MouseEvent) {
     event.stopPropagation();
     event.preventDefault();
     if (pending) return;
@@ -467,7 +466,7 @@ function ApproveBoardButton({ runId }: { runId: string }) {
   return (
     <button
       type="button"
-      onClick={handleClick}
+      onClick={approveBoardRun}
       onPointerDown={(event) => event.stopPropagation()}
       disabled={pending}
       className="inline-flex items-center gap-1.5 rounded-md bg-teal-500 px-2.5 py-1 text-[11px] font-medium text-on-primary transition-colors hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-teal-500"
@@ -838,16 +837,18 @@ export default function Runs() {
   );
   const hasGitHubAuth = authConfig.data?.methods.includes("github") === true;
   const serverUrl = systemInfo.data?.server_url;
-  const allRepos = [
-    ...new Set(
+  const allRepos = Array.from(
+    new Set(
       initialColumns.flatMap((col: Column) => col.items.map((item: RunItem) => String(item.repo))),
     ),
-  ].sort();
-  const allWorkflows = [
-    ...new Set(
+  );
+  allRepos.sort();
+  const allWorkflows = Array.from(
+    new Set(
       initialColumns.flatMap((col: Column) => col.items.map((item: RunItem) => String(item.workflow))),
     ),
-  ].sort();
+  );
+  allWorkflows.sort();
   const [columns, setColumns] = useState(initialColumns);
   const lowerQuery = query.toLowerCase();
   useBoardEvents();
@@ -961,7 +962,7 @@ export default function Runs() {
           {view === "list" && (
             <ColumnPickerButton hidden={hiddenColumns} onChange={setHiddenColumns} />
           )}
-          <div role="group" aria-label="Run list view" className="flex rounded-md border border-line bg-panel/80 p-0.5">
+          <div className="flex rounded-md border border-line bg-panel/80 p-0.5">
             <button
               type="button"
               onClick={() => setView("columns")}

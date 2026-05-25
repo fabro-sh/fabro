@@ -174,6 +174,7 @@ export default function AutomationDiagram() {
           <button
             type="button"
             title="Fit to window"
+            aria-label="Fit diagram to window"
             onClick={fitToWindow}
             className="flex size-7 items-center justify-center rounded text-fg-muted transition-colors hover:bg-overlay hover:text-fg-3"
           >
@@ -219,7 +220,7 @@ export default function AutomationDiagram() {
           className="flex items-center justify-center"
           style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`, transformOrigin: "center center" }}
         >
-          <p className="text-sm text-fg-muted">Loading diagram...</p>
+          <p className="text-sm text-fg-muted">Loading diagram&hellip;</p>
         </div>
       </div>
     </div>

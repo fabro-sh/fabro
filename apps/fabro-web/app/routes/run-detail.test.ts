@@ -584,10 +584,11 @@ describe("RunDetail full-height child routes", () => {
     );
     expect(spacers).toHaveLength(0);
 
-    const dock = renderer.root.findAllByProps({
-      role:       "region",
-      "aria-label": "Interview question",
-    });
+    const dock = renderer.root.findAll(
+      (node) =>
+        node.type === "section" &&
+        node.props["aria-label"] === "Interview question",
+    );
     expect(dock).toHaveLength(1);
 
     const clearanceOwners = renderer.root.findAll(

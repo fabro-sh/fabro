@@ -135,7 +135,7 @@ export default function VncPanel({ runId, provider, leading }: VncPanelProps) {
           </Tooltip>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-line bg-black">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-line bg-neutral-950">
         <VncBody
           provider={provider}
           loading={supported && vncQuery.isLoading}
@@ -248,6 +248,7 @@ function VncBody({
       // Daytona's signed preview already pins the iframe to the noVNC service;
       // clipboard + fullscreen let the embedded session feel native.
       allow="clipboard-read; clipboard-write; fullscreen"
+      sandbox="allow-forms allow-pointer-lock allow-scripts"
       className="size-full border-0"
     />
   );

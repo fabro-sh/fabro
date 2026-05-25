@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { Switch } from "@headlessui/react";
 import { ChevronRightIcon, ChevronDownIcon } from "@heroicons/react/20/solid";
@@ -35,7 +35,7 @@ export default function AutomationsNew() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
-  const [slugTouched, setSlugTouched] = useState(false);
+  const slugTouchedRef = useRef(false);
   const [description, setDescription] = useState("");
   const [repository, setRepository] = useState(SAMPLE_REPOSITORIES[0]);
   const [branch, setBranch] = useState("main");
@@ -47,12 +47,12 @@ export default function AutomationsNew() {
 
   function onNameChange(next: string) {
     setName(next);
-    if (!slugTouched) setSlug(kebabify(next));
+    if (!slugTouchedRef.current) setSlug(kebabify(next));
   }
 
   function onSlugChange(next: string) {
     setSlug(kebabify(next));
-    setSlugTouched(true);
+    slugTouchedRef.current = true;
   }
 
   const canSubmit =
@@ -77,10 +77,10 @@ export default function AutomationsNew() {
           <input
             type="text"
             name="name"
+            aria-label="Automation name"
             value={name}
             onChange={(e) => onNameChange(e.target.value)}
             placeholder="Fix Build"
-            autoFocus
             autoComplete="off"
             className={INPUT_CLASS}
           />
@@ -96,6 +96,7 @@ export default function AutomationsNew() {
           <input
             type="text"
             name="slug"
+            aria-label="Automation slug"
             value={slug}
             onChange={(e) => onSlugChange(e.target.value)}
             placeholder="fix-build"
@@ -107,6 +108,7 @@ export default function AutomationsNew() {
         <Row title={<Label optional>Description</Label>} help="A short summary teammates will see when browsing automations.">
           <textarea
             name="description"
+            aria-label="Automation description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
@@ -120,6 +122,7 @@ export default function AutomationsNew() {
         <Row title={<Label required>Repository</Label>} help="The repository this automation will check out and operate on.">
           <SelectInput
             name="repository"
+            label="Repository"
             value={repository}
             onChange={setRepository}
             options={SAMPLE_REPOSITORIES}
@@ -129,6 +132,7 @@ export default function AutomationsNew() {
           <input
             type="text"
             name="branch"
+            aria-label="Default branch"
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
             placeholder="main"
@@ -144,6 +148,7 @@ export default function AutomationsNew() {
           <input
             type="text"
             name="workflow_slug"
+            aria-label="Workflow slug"
             value={workflowSlug}
             onChange={(e) => setWorkflowSlug(snakeify(e.target.value))}
             placeholder="fix_build"
@@ -158,6 +163,7 @@ export default function AutomationsNew() {
         <Row title={<Label optional>Goal</Label>} help="Plain-English objective the agent uses to decide when the workflow has succeeded.">
           <textarea
             name="goal"
+            aria-label="Automation goal"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             rows={3}
@@ -195,6 +201,7 @@ export default function AutomationsNew() {
               <input
                 type="text"
                 name="cron"
+                aria-label="Cron expression"
                 value={cron}
                 onChange={(e) => setCron(e.target.value)}
                 placeholder="0 9 * * 1-5"
@@ -275,11 +282,13 @@ function Label({
 
 function SelectInput({
   name,
+  label,
   value,
   onChange,
   options,
 }: {
   name: string;
+  label: string;
   value: string;
   onChange: (next: string) => void;
   options: ReadonlyArray<string>;
@@ -288,6 +297,7 @@ function SelectInput({
     <div className="relative">
       <select
         name={name}
+        aria-label={label}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={`${INPUT_CLASS} appearance-none pr-9 font-mono`}

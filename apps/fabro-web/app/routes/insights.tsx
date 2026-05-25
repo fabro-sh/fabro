@@ -1,4 +1,4 @@
-import { Link, Outlet, useNavigate } from "react-router";
+import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import { useInsightsHistory, useInsightsQueries } from "../lib/queries";
 import { timeAgo } from "../lib/time";
@@ -52,6 +52,7 @@ export default function InsightsLayout() {
   const savedQueries = mapSavedQueries(savedQueriesQuery.data as PaginatedSavedQueryList | undefined);
   const historyEntries = mapHistoryEntries(historyQuery.data as PaginatedHistoryEntryList | undefined);
   const navigate = useNavigate();
+  const location = useLocation();
 
   return (
     <div className="flex gap-6">
@@ -120,7 +121,7 @@ export default function InsightsLayout() {
 
       {/* ── Main content ── */}
       <div className="min-w-0 flex-1">
-        <Outlet />
+        <Outlet key={location.key} />
       </div>
     </div>
   );

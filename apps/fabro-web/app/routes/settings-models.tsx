@@ -226,15 +226,15 @@ function ModelsSection({ providers }: { providers: Provider[] }) {
     return sortModels(all, sortKey, direction, providerNameById);
   }, [data, sortKey, direction, providerNameById]);
 
-  const providerOptions: FilterOption<string>[] = useMemo(
-    () => [
-      { value: "", label: "All providers" },
-      ...providers
-        .filter((p) => p.configured)
-        .map((p) => ({ value: p.id, label: p.display_name || p.id })),
-    ],
-    [providers],
-  );
+  const providerOptions: FilterOption<string>[] = useMemo(() => {
+    const options: FilterOption<string>[] = [{ value: "", label: "All providers" }];
+    for (const provider of providers) {
+      if (provider.configured) {
+        options.push({ value: provider.id, label: provider.display_name || provider.id });
+      }
+    }
+    return options;
+  }, [providers]);
 
   const onSort = useCallback(
     (key: ModelSortKey) => {
@@ -412,7 +412,8 @@ function sortModels(
   const sign = direction === "asc" ? 1 : -1;
   const providerLabel = (m: Model) =>
     providerNameById.get(m.provider) ?? m.provider;
-  return [...models].sort((a, b) => {
+  const sorted = Array.from(models);
+  sorted.sort((a, b) => {
     let cmp = 0;
     switch (key) {
       case "provider":
@@ -436,6 +437,7 @@ function sortModels(
     }
     return cmp * sign;
   });
+  return sorted;
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {

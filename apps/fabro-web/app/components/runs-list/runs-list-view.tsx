@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type {
   ListRunsDirectionEnum,
@@ -15,6 +15,8 @@ import { RunTableRow } from "./run-table-row";
 import { SelectionCheckbox } from "./selection-checkbox";
 import { SortHeader } from "./sort-header";
 import type { ToggleableColumn } from "./toggleable-column";
+
+const EMPTY_SELECTION = new Set<string>();
 
 export type RunsListViewProps = {
   data:             PaginatedRunList | undefined;
@@ -54,20 +56,24 @@ export function RunsListView({
   const show = (col: ToggleableColumn) => !hiddenColumns.has(col);
   const rows: RunWithStatus[] = useMemo(() => {
     const apiRuns = data?.data ?? [];
-    return apiRuns
-      .map(toRunWithStatus)
-      .filter(
-        (item) =>
-          (repoFilter === "all" || item.repo === repoFilter) &&
-          (workflowFilter === "all" || item.workflow === workflowFilter) &&
-          (createdCutoffMs == null ||
-            (item.createdAt != null && Date.parse(item.createdAt) >= createdCutoffMs)) &&
-          (!query ||
-            item.title.toLowerCase().includes(query) ||
-            item.repo.toLowerCase().includes(query) ||
-            item.lifecycleStatusLabel?.toLowerCase().includes(query) ||
-            (item.number != null && `#${item.number}`.includes(query))),
-      );
+    const next: RunWithStatus[] = [];
+    for (const run of apiRuns) {
+      const item = toRunWithStatus(run);
+      if (
+        (repoFilter === "all" || item.repo === repoFilter) &&
+        (workflowFilter === "all" || item.workflow === workflowFilter) &&
+        (createdCutoffMs == null ||
+          (item.createdAt != null && Date.parse(item.createdAt) >= createdCutoffMs)) &&
+        (!query ||
+          item.title.toLowerCase().includes(query) ||
+          item.repo.toLowerCase().includes(query) ||
+          item.lifecycleStatusLabel?.toLowerCase().includes(query) ||
+          (item.number != null && `#${item.number}`.includes(query)))
+      ) {
+        next.push(item);
+      }
+    }
+    return next;
   }, [data, repoFilter, workflowFilter, createdCutoffMs, query]);
 
   const hasMore = data?.meta.has_more ?? false;
@@ -77,10 +83,12 @@ export function RunsListView({
   const apiRunCount = data?.data.length ?? 0;
   const isEmptyServerSide = data !== undefined && apiRunCount === 0 && page === 1;
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    setSelectedIds(new Set());
-  }, [page, sort, direction, query, repoFilter, workflowFilter, createdCutoffMs]);
+  const selectionScopeKey = `${page}:${sort}:${direction}:${query}:${repoFilter}:${workflowFilter}:${createdCutoffMs ?? ""}`;
+  const [selection, setSelection] = useState<{
+    scopeKey: string;
+    ids: Set<string>;
+  }>(() => ({ scopeKey: selectionScopeKey, ids: new Set() }));
+  const selectedIds = selection.scopeKey === selectionScopeKey ? selection.ids : EMPTY_SELECTION;
   const visibleIds = useMemo(() => rows.map((r) => r.id), [rows]);
   const selectedVisibleCount = visibleIds.reduce(
     (n, id) => (selectedIds.has(id) ? n + 1 : n),
@@ -89,25 +97,28 @@ export function RunsListView({
   const allOnPageSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
   const someOnPageSelected = selectedVisibleCount > 0 && !allOnPageSelected;
   const toggleAllOnPage = useCallback(() => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
+    setSelection((prev) => {
+      const next = new Set(prev.scopeKey === selectionScopeKey ? prev.ids : []);
       if (allOnPageSelected) {
         for (const id of visibleIds) next.delete(id);
       } else {
         for (const id of visibleIds) next.add(id);
       }
-      return next;
+      return { scopeKey: selectionScopeKey, ids: next };
     });
-  }, [allOnPageSelected, visibleIds]);
+  }, [allOnPageSelected, selectionScopeKey, visibleIds]);
   const toggleOne = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
+    setSelection((prev) => {
+      const next = new Set(prev.scopeKey === selectionScopeKey ? prev.ids : []);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      return next;
+      return { scopeKey: selectionScopeKey, ids: next };
     });
-  }, []);
-  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+  }, [selectionScopeKey]);
+  const clearSelection = useCallback(
+    () => setSelection({ scopeKey: selectionScopeKey, ids: new Set() }),
+    [selectionScopeKey],
+  );
   const selectedRuns = useMemo(
     () => rows.filter((r) => selectedIds.has(r.id)),
     [rows, selectedIds],

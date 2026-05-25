@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router";
 import { ArrowTopRightOnSquareIcon } from "@heroicons/react/20/solid";
 
@@ -272,7 +272,7 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
   const mode: SandboxMode =
     requestedMode === "vnc" && !vncTabAvailable(provider) ? "terminal" : requestedMode;
 
-  const setMode = (next: SandboxMode) => {
+  const setMode = useCallback((next: SandboxMode) => {
     setSearchParams(
       (current) => {
         const params = new URLSearchParams(current);
@@ -285,7 +285,18 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
       },
       { replace: true },
     );
-  };
+  }, [setSearchParams]);
+
+  const modeToggle = useMemo(
+    () => (
+      <ModeToggle
+        mode={mode}
+        onChange={setMode}
+        vncAvailable={vncTabAvailable(provider)}
+      />
+    ),
+    [mode, provider, setMode],
+  );
 
   // The outer flex spans from the tab bar's bottom border down to the
   // steer bar — `-mt-3` cancels the outlet wrapper's top padding so the
@@ -314,13 +325,6 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
           className={`flex min-h-0 flex-1 flex-col pt-3 pl-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
         >
           {(() => {
-            const modeToggle = (
-              <ModeToggle
-                mode={mode}
-                onChange={setMode}
-                vncAvailable={vncTabAvailable(provider)}
-              />
-            );
             if (mode === "terminal") {
               return <TerminalView runId={params.id} leading={modeToggle} />;
             }
@@ -328,10 +332,12 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
               return <ServicesPanel runId={params.id} leading={modeToggle} />;
             }
             if (mode === "filesystem") {
+              const rootDirectory = sandboxQuery.data?.sandbox.runtime?.working_directory ?? null;
               return (
                 <FilesystemPanel
+                  key={rootDirectory ?? "default-root"}
                   runId={params.id}
-                  rootDirectory={sandboxQuery.data?.sandbox.runtime?.working_directory}
+                  rootDirectory={rootDirectory}
                   leading={modeToggle}
                 />
               );

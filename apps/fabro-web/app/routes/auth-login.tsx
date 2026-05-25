@@ -97,6 +97,7 @@ function DevTokenForm({
           id="dev-token"
           type="password"
           name="dev_token"
+          aria-label="Dev token"
           value={token}
           onChange={(event) => setToken(event.target.value)}
           placeholder="fabro_dev_…"

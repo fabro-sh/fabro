@@ -60,7 +60,7 @@ function makeRun(overrides: Record<string, any> = {}) {
   } as any;
 }
 
-const EM_DASH = "—";
+const EMPTY_VALUE = "Not available";
 
 describe("RunSummaryPanelView", () => {
   test("renders all five column labels", () => {
@@ -71,21 +71,21 @@ describe("RunSummaryPanelView", () => {
     }
   });
 
-  test("shows em dash for missing run fields after load", () => {
+  test("shows unavailable copy for missing run fields after load", () => {
     const tree = render({ run: makeRun() });
-    expect(instanceText(cellAfterLabel(tree, "Created by"))).toBe(EM_DASH);
-    expect(instanceText(cellAfterLabel(tree, "Changes"))).toBe(EM_DASH);
-    expect(instanceText(cellAfterLabel(tree, "Cost"))).toBe(EM_DASH);
+    expect(instanceText(cellAfterLabel(tree, "Created by"))).toBe(EMPTY_VALUE);
+    expect(instanceText(cellAfterLabel(tree, "Changes"))).toBe(EMPTY_VALUE);
+    expect(instanceText(cellAfterLabel(tree, "Cost"))).toBe(EMPTY_VALUE);
   });
 
-  test("shows em dash when sandbox is absent", () => {
+  test("shows unavailable copy when sandbox is absent", () => {
     const tree = render({ run: makeRun(), sandboxResources: null });
-    expect(instanceText(cellAfterLabel(tree, "Sandbox"))).toBe(EM_DASH);
+    expect(instanceText(cellAfterLabel(tree, "Sandbox"))).toBe(EMPTY_VALUE);
   });
 
-  test("shows em dash when artifacts count is zero", () => {
+  test("shows unavailable copy when artifacts count is zero", () => {
     const tree = render({ run: makeRun(), artifactsCount: 0 });
-    expect(instanceText(cellAfterLabel(tree, "Artifacts"))).toBe(EM_DASH);
+    expect(instanceText(cellAfterLabel(tree, "Artifacts"))).toBe(EMPTY_VALUE);
   });
 
   test("renders diff additions/deletions/files with correct formatting", () => {
@@ -130,7 +130,12 @@ describe("RunSummaryPanelView", () => {
     const tree = render({ run: makeRun(), sandboxState: "stopped" });
     const cell = cellAfterLabel(tree, "Sandbox");
     expect(instanceText(cell)).toBe("Stopped");
-    const dot = cell.find((node) => node.props["aria-label"] === "Sandbox Stopped");
+    const dot = cell.find(
+      (node) =>
+        typeof node.props.className === "string" &&
+        node.props.className.includes("bg-fg-muted"),
+    );
+    expect(dot.props["aria-hidden"]).toBe("true");
     expect(dot.props.className).toContain("bg-fg-muted");
   });
 
@@ -209,8 +214,8 @@ describe("RunSummaryPanelView", () => {
     });
     const rendered = JSON.stringify(tree.toJSON());
     expect(rendered).toContain("animate-pulse");
-    expect(instanceText(cellAfterLabel(tree, "Created by"))).not.toContain(EM_DASH);
-    expect(instanceText(cellAfterLabel(tree, "Sandbox"))).not.toContain(EM_DASH);
-    expect(instanceText(cellAfterLabel(tree, "Artifacts"))).not.toContain(EM_DASH);
+    expect(instanceText(cellAfterLabel(tree, "Created by"))).not.toContain(EMPTY_VALUE);
+    expect(instanceText(cellAfterLabel(tree, "Sandbox"))).not.toContain(EMPTY_VALUE);
+    expect(instanceText(cellAfterLabel(tree, "Artifacts"))).not.toContain(EMPTY_VALUE);
   });
 });

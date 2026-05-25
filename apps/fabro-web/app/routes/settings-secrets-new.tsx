@@ -118,6 +118,7 @@ function CreateSecretForm() {
           <input
             type="text"
             name="name"
+            aria-label={nameLabel}
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder={namePlaceholder}
@@ -132,6 +133,7 @@ function CreateSecretForm() {
         >
           <textarea
             name="value"
+            aria-label="Secret value"
             value={value}
             onChange={(event) => setValue(event.target.value)}
             rows={isFile ? 6 : 2}
@@ -144,6 +146,7 @@ function CreateSecretForm() {
           <input
             type="text"
             name="description"
+            aria-label="Secret description"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             className={INPUT_CLASS}

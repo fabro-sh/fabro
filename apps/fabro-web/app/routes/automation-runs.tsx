@@ -87,6 +87,7 @@ export default function AutomationRuns() {
           <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
           <input
             type="text"
+            aria-label="Search runs"
             placeholder="Search runs..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -95,6 +96,7 @@ export default function AutomationRuns() {
         </div>
         <div className="relative">
           <select
+            aria-label="Run status filter"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as BoardColumn | "all")}
             className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"

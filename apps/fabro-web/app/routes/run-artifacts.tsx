@@ -24,16 +24,22 @@ export default function RunArtifacts() {
   return (
     <div className="flex gap-6">
       <StageSidebar stages={stages} runId={id!} activeLink="artifacts" />
-      <div className="min-w-0 flex-1">{renderBody(id!, artifactsQuery, stages)}</div>
+      <div className="min-w-0 flex-1">
+        <RunArtifactsBody runId={id!} artifactsQuery={artifactsQuery} stages={stages} />
+      </div>
     </div>
   );
 }
 
-function renderBody(
-  runId: string,
-  artifactsQuery: ReturnType<typeof useRunArtifacts>,
-  stages: ReturnType<typeof mapRunStagesToSidebarStages>,
-) {
+function RunArtifactsBody({
+  runId,
+  artifactsQuery,
+  stages,
+}: {
+  runId: string;
+  artifactsQuery: ReturnType<typeof useRunArtifacts>;
+  stages: ReturnType<typeof mapRunStagesToSidebarStages>;
+}) {
   if (artifactsQuery.error) {
     return (
       <ErrorState
@@ -99,10 +105,12 @@ function groupArtifacts(
   for (const group of groups.values()) {
     group.entries.sort((a, b) => a.relative_path.localeCompare(b.relative_path));
   }
-  return [...groups.values()].sort((a, b) => {
+  const sortedGroups = Array.from(groups.values());
+  sortedGroups.sort((a, b) => {
     const labelCmp = a.label.localeCompare(b.label);
     return labelCmp !== 0 ? labelCmp : a.retry - b.retry;
   });
+  return sortedGroups;
 }
 
 function ArtifactList({

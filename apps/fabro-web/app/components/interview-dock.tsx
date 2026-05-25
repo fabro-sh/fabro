@@ -1,7 +1,5 @@
 import {
   useCallback,
-  useEffect,
-  useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
@@ -44,20 +42,44 @@ export interface InterviewDockProps {
 
 export function InterviewDock({ runId, questions }: InterviewDockProps) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const submitMutation = useSubmitInterviewAnswer(runId);
-  const [error, setError] = useState<string | null>(null);
 
   const safeIndex = activeIndex < questions.length ? activeIndex : 0;
   const question = questions[safeIndex];
 
-  useEffect(() => {
-    setError(null);
-    submitMutation.reset();
-  }, [question?.id, submitMutation.reset]);
+  if (!question) return null;
+
+  const moreCount = questions.length - 1;
+
+  return (
+    <InterviewQuestionDock
+      key={question.id}
+      runId={runId}
+      question={question}
+      moreCount={moreCount}
+      onCycle={() =>
+        setActiveIndex((index) => (index + 1) % questions.length)
+      }
+    />
+  );
+}
+
+function InterviewQuestionDock({
+  runId,
+  question,
+  moreCount,
+  onCycle,
+}: {
+  runId: string;
+  question: ApiQuestion;
+  moreCount: number;
+  onCycle: () => void;
+}) {
+  const submitMutation = useSubmitInterviewAnswer(runId);
+  const [error, setError] = useState<string | null>(null);
+  const submitting = submitMutation.isMutating;
 
   const submit = useCallback(
     async (answer: SubmitInterviewAnswer) => {
-      if (!question) return;
       setError(null);
       try {
         await submitMutation.trigger({ questionId: question.id, answer });
@@ -65,22 +87,15 @@ export function InterviewDock({ runId, questions }: InterviewDockProps) {
         setError(interviewSubmitErrorMessage(caught));
       }
     },
-    [question, submitMutation],
+    [question.id, submitMutation],
   );
 
-  if (!question) return null;
-
-  const moreCount = questions.length - 1;
-  const submitting = submitMutation.isMutating;
-
   return (
-    <section role="region" aria-label="Interview question">
+    <section aria-label="Interview question">
       <DockHeader
         stage={question.stage}
         moreCount={moreCount}
-        onCycle={() =>
-          setActiveIndex((index) => (index + 1) % questions.length)
-        }
+        onCycle={onCycle}
       />
       <div className="space-y-5 px-5 py-4 sm:px-6">
         <div>
@@ -203,7 +218,6 @@ function QuestionBody({
         <FreeformBody
           submitting={submitting}
           onSubmit={onSubmit}
-          autoFocus
           placeholder="Write your response…"
           submitLabel="Send"
         />
@@ -222,8 +236,10 @@ function YesNoBody({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {/* react-doctor-disable-next-line react-doctor/design-no-vague-button-label -- Yes/no interview answers conventionally use the literal answer as the visible button label. */}
       <button
         type="button"
+        aria-label="Answer no"
         disabled={submitting}
         onClick={() => void onSubmit({ kind: "no" })}
         className={CHOICE_BUTTON}
@@ -232,6 +248,7 @@ function YesNoBody({
       </button>
       <button
         type="button"
+        aria-label="Answer yes"
         disabled={submitting}
         onClick={() => void onSubmit({ kind: "yes" })}
         className={PRIMARY_BUTTON}
@@ -330,7 +347,10 @@ function MultiSelectBody({
     });
   }
 
-  const selectedKeys = options.map((o) => o.key).filter((key) => selected.has(key));
+  const selectedKeys: string[] = [];
+  for (const option of options) {
+    if (selected.has(option.key)) selectedKeys.push(option.key);
+  }
 
   return (
     <div className="space-y-3">
@@ -375,22 +395,15 @@ function FreeformBody({
   onSubmit,
   placeholder,
   submitLabel,
-  autoFocus = false,
   divider = false,
 }: {
   submitting: boolean;
   onSubmit: (answer: SubmitInterviewAnswer) => Promise<void>;
   placeholder: string;
   submitLabel: string;
-  autoFocus?: boolean;
   divider?: boolean;
 }) {
   const [value, setValue] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useEffect(() => {
-    if (autoFocus) textareaRef.current?.focus();
-  }, [autoFocus]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -424,9 +437,9 @@ function FreeformBody({
           Your response
         </label>
         <textarea
-          ref={textareaRef}
           id="interview-freeform-answer"
           name="answer"
+          aria-label="Interview answer"
           rows={1}
           value={value}
           onChange={(event) => setValue(event.target.value)}

@@ -76,9 +76,10 @@ export function formatStageLabel(stage: { name: string; visit: number }): string
 export function mapRunStagesToSidebarStages(
   stagesResult: PaginatedRunStageList | null | undefined,
 ): Stage[] {
-  return (stagesResult?.data ?? [])
-    .filter((stage) => isVisibleStage(stage.node_id))
-    .map((stage) => ({
+  const stages: Stage[] = [];
+  for (const stage of stagesResult?.data ?? []) {
+    if (!isVisibleStage(stage.node_id)) continue;
+    stages.push({
       id: stage.id,
       name: stage.name,
       handler: stage.handler,
@@ -90,7 +91,9 @@ export function mapRunStagesToSidebarStages(
         : "--",
       startedAt: stage.started_at ?? null,
       providerUsed: stage.provider_used ?? null,
-    }));
+    });
+  }
+  return stages;
 }
 
 /**

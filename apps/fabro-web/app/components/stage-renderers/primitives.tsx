@@ -87,6 +87,7 @@ export function Markdown({ content }: { content: string }) {
     [content],
   );
   return (
+    // react-doctor-disable-next-line react-doctor/no-danger -- markedSafe strips raw HTML and unsafe link/image URLs before rendering Markdown.
     <div
       className="prose prose-sm max-w-none text-fg-3 prose-headings:text-fg-2 prose-strong:text-fg-2 prose-code:rounded prose-code:bg-overlay-strong prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.8em] prose-code:font-mono prose-code:text-fg-3 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-overlay-strong prose-pre:text-fg-3 prose-a:text-teal-500"
       dangerouslySetInnerHTML={{ __html: html }}

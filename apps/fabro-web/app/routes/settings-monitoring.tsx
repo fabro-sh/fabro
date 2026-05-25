@@ -202,13 +202,16 @@ function UsageMeter({
           <span className="font-mono text-xs tabular-nums text-fg-muted">{value}</span>
         ) : null}
       </div>
-      <div
-        role="meter"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={safePercent ?? undefined}
-        className="h-2 overflow-hidden rounded-sm bg-overlay-strong"
+      <meter
+        min={0}
+        max={100}
+        value={safePercent ?? 0}
+        aria-label={label ?? "Usage"}
+        className="sr-only"
       >
+        {value}
+      </meter>
+      <div className="h-2 overflow-hidden rounded-sm bg-overlay-strong" aria-hidden="true">
         <div
           className="h-full rounded-sm bg-teal-500 transition-[width]"
           style={{ width: `${safePercent ?? 0}%` }}

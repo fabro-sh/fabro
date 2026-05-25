@@ -37,12 +37,18 @@ export default function RunLogs() {
   return (
     <div className="flex gap-6">
       <StageSidebar stages={stages} runId={id!} activeLink="logs" />
-      <div className="min-w-0 flex-1">{renderBody(logsQuery)}</div>
+      <div className="min-w-0 flex-1">
+        <RunLogsBody logsQuery={logsQuery} />
+      </div>
     </div>
   );
 }
 
-function renderBody(logsQuery: ReturnType<typeof useRunLogs>) {
+function RunLogsBody({
+  logsQuery,
+}: {
+  logsQuery: ReturnType<typeof useRunLogs>;
+}) {
   if (logsQuery.error) {
     return (
       <ErrorState
@@ -82,14 +88,28 @@ const LOG_LINE_RE =
 
 interface LogRecord {
   level: LogLevel | null;
-  lines: string[];
+  lines: LogLineEntry[];
 }
 
-function parseRecords(lines: string[]): LogRecord[] {
+interface LogLineEntry {
+  key: string;
+  text: string;
+}
+
+function splitLogLines(text: string): LogLineEntry[] {
+  let offset = 0;
+  return text.split("\n").map((line) => {
+    const key = `${offset}:${line.length}`;
+    offset += line.length + 1;
+    return { key, text: line };
+  });
+}
+
+function parseRecords(lines: LogLineEntry[]): LogRecord[] {
   const records: LogRecord[] = [];
   let current: LogRecord | null = null;
   for (const line of lines) {
-    const match = LOG_LINE_RE.exec(line);
+    const match = LOG_LINE_RE.exec(line.text);
     if (match) {
       if (current) records.push(current);
       current = { level: match[3] as LogLevel, lines: [line] };
@@ -105,7 +125,7 @@ function parseRecords(lines: string[]): LogRecord[] {
 
 function LogPanel({ text }: { text: string }) {
   const byteCount = new Blob([text]).size;
-  const lines = useMemo(() => text.split("\n"), [text]);
+  const lines = useMemo(() => splitLogLines(text), [text]);
   const records = useMemo(() => parseRecords(lines), [lines]);
 
   const [selectedLevels, setSelectedLevels] = useState<LogLevel[]>([
@@ -122,7 +142,7 @@ function LogPanel({ text }: { text: string }) {
     const needle = search.toLowerCase();
     const kept = records.filter((record) => {
       if (record.level !== null && !levelSet.has(record.level)) return false;
-      if (needle && !record.lines.some((l) => l.toLowerCase().includes(needle))) {
+      if (needle && !record.lines.some((l) => l.text.toLowerCase().includes(needle))) {
         return false;
       }
       return true;
@@ -166,8 +186,8 @@ function LogPanel({ text }: { text: string }) {
         ) : (
           filteredLines.map((line, i) => (
             <LogLine
-              key={i}
-              line={line}
+              key={line.key}
+              line={line.text}
               trailingNewline={i < filteredLines.length - 1}
             />
           ))

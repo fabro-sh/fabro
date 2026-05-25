@@ -84,7 +84,7 @@ export default function AppShell() {
                 </Link>
               </div>
               <div className="hidden md:block">
-                <div className="ml-10 flex items-baseline space-x-4">
+                <div className="ml-10 flex items-baseline gap-x-4">
                   {navigation.map((item) => {
                     const current = activeFor(item, pathname);
                     return (

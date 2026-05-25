@@ -123,6 +123,7 @@ function BarChart({ result }: { result: QueryResult }) {
         setContainerWidth(entry.contentRect.width);
       }
     });
+    // react-doctor-disable-next-line react-doctor/no-initialize-state -- ResizeObserver is the first reliable source for this rendered container's width.
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -342,7 +343,7 @@ function SqlEditor({
       {/* Line numbers */}
       <div
         ref={lineNumbersRef}
-        className="pointer-events-none flex shrink-0 flex-col overflow-hidden border-r border-line bg-page/60 px-3 py-3 text-right leading-[1.625rem] text-fg-muted select-none"
+        className="pointer-events-none flex shrink-0 flex-col overflow-hidden border-r border-line bg-page/60 p-3 text-right leading-[1.625rem] text-fg-muted select-none"
         aria-hidden="true"
       >
         {Array.from({ length: lineCount }, (_, i) => (
@@ -354,6 +355,7 @@ function SqlEditor({
       {/* Textarea */}
       <textarea
         ref={textareaRef}
+        aria-label="SQL query"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onScroll={syncScroll}
@@ -376,12 +378,16 @@ const DEFAULT_SQL =
 export default function InsightsEditor() {
   const location = useLocation();
   const navState = location.state as { sql?: string; name?: string } | null;
+  const initialSql = navState?.sql ?? DEFAULT_SQL;
+  const initialQueryName = navState?.name ?? "Run duration by workflow";
 
-  const [sql, setSql] = useState(navState?.sql ?? DEFAULT_SQL);
-  const [result, setResult] = useState<QueryResult | null>(null);
+  const [sql, setSql] = useState(() => initialSql);
+  const [result, setResult] = useState<QueryResult | null>(() =>
+    generateMockResult(initialSql),
+  );
   const [resultView, setResultView] = useState<ResultView>("chart");
   const [isRunning, setIsRunning] = useState(false);
-  const [queryName, setQueryName] = useState(navState?.name ?? "Run duration by workflow");
+  const [queryName, setQueryName] = useState(() => initialQueryName);
   const [isEditingName, setIsEditingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [showAiDialog, setShowAiDialog] = useState(false);
@@ -396,25 +402,6 @@ export default function InsightsEditor() {
     }, delay);
   }, [sql]);
 
-  // Load query from navigation state
-  useEffect(() => {
-    if (navState?.sql) {
-      setSql(navState.sql);
-      if (navState.name) {
-        setQueryName(navState.name);
-      }
-    }
-  }, [navState]);
-
-  // Run default query on mount
-  const hasRun = useRef(false);
-  useEffect(() => {
-    if (!hasRun.current) {
-      hasRun.current = true;
-      runQuery();
-    }
-  }, [runQuery]);
-
   return (
     <div className="space-y-4">
       {/* ── Toolbar + Editor ── */}
@@ -426,6 +413,7 @@ export default function InsightsEditor() {
             <input
               ref={nameInputRef}
               type="text"
+              aria-label="Query name"
               value={queryName}
               onChange={(e) => setQueryName(e.target.value)}
               onBlur={() => setIsEditingName(false)}
@@ -444,6 +432,7 @@ export default function InsightsEditor() {
               </span>
               <button
                 type="button"
+                aria-label="Edit query name"
                 onClick={() => {
                   setIsEditingName(true);
                   requestAnimationFrame(() => nameInputRef.current?.select());
@@ -596,6 +585,7 @@ export default function InsightsEditor() {
               </DialogTitle>
               <button
                 type="button"
+                aria-label="Close SQL AI"
                 onClick={() => setShowAiDialog(false)}
                 className="text-fg-muted transition-colors hover:text-fg-3"
               >
@@ -608,6 +598,7 @@ export default function InsightsEditor() {
               </label>
               <textarea
                 id="ai-query-prompt"
+                aria-label="SQL AI prompt"
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
                 placeholder="e.g. Show me the average build time per workflow over the last 30 days"

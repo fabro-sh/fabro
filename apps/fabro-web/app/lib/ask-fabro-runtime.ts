@@ -300,6 +300,7 @@ export function createAskFabroAdapter(
       while (true) {
         if (queue.length === 0) {
           if (streamDone) break;
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- This loop waits for the next streamed event; iterations are not independent work.
           await new Promise<void>((resolve) => {
             resolveWaiter = resolve;
           });

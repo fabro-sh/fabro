@@ -9,6 +9,8 @@ export const TOGGLEABLE_COLUMNS = [
   "pr",
 ] as const;
 
+const TOGGLEABLE_COLUMN_SET = new Set<string>(TOGGLEABLE_COLUMNS);
+
 export type ToggleableColumn = (typeof TOGGLEABLE_COLUMNS)[number];
 
 export const toggleableColumnLabels: Record<ToggleableColumn, string> = {
@@ -27,7 +29,7 @@ export function parseHiddenColumns(raw: string | null): Set<ToggleableColumn> {
   if (!raw) return hidden;
   for (const value of raw.split(",")) {
     const trimmed = value.trim();
-    if ((TOGGLEABLE_COLUMNS as readonly string[]).includes(trimmed)) {
+    if (TOGGLEABLE_COLUMN_SET.has(trimmed)) {
       hidden.add(trimmed as ToggleableColumn);
     }
   }

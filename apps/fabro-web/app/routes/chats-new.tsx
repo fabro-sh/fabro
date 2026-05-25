@@ -48,7 +48,6 @@ export default function ChatsNew() {
             }}
             placeholder="Ask anything…"
             rows={2}
-            autoFocus
             className="block max-h-72 w-full resize-none bg-transparent px-4 pt-4 pb-2 text-base text-fg placeholder:text-fg-muted focus:outline-none"
           />
           <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-3">

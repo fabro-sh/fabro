@@ -1,7 +1,7 @@
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -156,7 +156,7 @@ export function ToastProvider({
 }
 
 export function useToast(): ToastContextValue {
-  const value = useContext(ToastContext);
+  const value = use(ToastContext);
   if (!value) {
     throw new Error("useToast must be used within a ToastProvider");
   }

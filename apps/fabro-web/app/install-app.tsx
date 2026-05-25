@@ -146,6 +146,7 @@ export default function InstallApp() {
     if (!token) return;
 
     persistInstallToken(token);
+    // react-doctor-disable-next-line react-doctor/no-initialize-state -- The token is persisted and scrubbed from the URL after the client mounts.
     setInstallToken(token);
     window.history.replaceState(window.history.state, "", sanitizedUrl);
   }, []);
@@ -210,8 +211,10 @@ export default function InstallApp() {
     };
   }, [installToken]);
 
+  // react-doctor-disable-next-line react-doctor/no-effect-chain -- Navigation waits for the async install session before leaving the token/root entry route.
   useEffect(() => {
     if (!installToken || !session) return;
+    // react-doctor-disable-next-line react-doctor/no-event-handler -- This redirects from root/install exactly once after the async session becomes available.
     if ((pathname === "/" || pathname === "/install") && !finishState) {
       startTransition(() => {
         navigate("/install/welcome", { replace: true });
@@ -219,6 +222,7 @@ export default function InstallApp() {
     }
   }, [finishState, installToken, pathname, navigate, session]);
 
+  // react-doctor-disable-next-line react-doctor/no-fetch-in-effect -- This is install-mode restart polling, not cacheable app data.
   useEffect(() => {
     if (!finishState) return;
 
@@ -233,6 +237,7 @@ export default function InstallApp() {
       if (inFlight || controller.signal.aborted) return;
       inFlight = true;
       try {
+        // react-doctor-disable-next-line react-doctor/no-fetch-in-effect -- This health probe is tied to install restart polling, not cacheable app data.
         const response = await fetch("/health", { signal: controller.signal });
         const body = response.ok
           ? ((await response.json()) as { mode?: string })
@@ -357,6 +362,7 @@ export default function InstallApp() {
     return <Navigate to="/install/finishing" replace />;
   }
 
+  // react-doctor-disable-next-line react-doctor/no-prevent-default -- Install wizard forms are client-side API steps with no meaningful non-JS endpoint.
   return (
     <InstallLayout currentStep={currentStep} completedSteps={completedSteps}>
       {pathname === "/install/finishing" ? (
@@ -385,13 +391,15 @@ export default function InstallApp() {
             </button>
           }
           onSubmit={async () => {
-            const providers = INSTALL_PROVIDERS.map(({ id }) => {
+            const providers = [];
+            for (const { id } of INSTALL_PROVIDERS) {
               const current = llmSelection[id] ?? { apiKey: "" };
-              return {
+              const provider = {
                 provider: id,
                 api_key:  current.apiKey.trim(),
               };
-            }).filter((provider) => provider.api_key.length > 0);
+              if (provider.api_key.length > 0) providers.push(provider);
+            }
 
             if (providers.length === 0) {
               setSaveError("Add at least one provider API key before continuing.");
@@ -942,6 +950,7 @@ function TokenEntryScreen({
   sessionError: string | null;
   onSubmit: () => void;
 }) {
+  // react-doctor-disable-next-line react-doctor/no-prevent-default -- Install finalization writes server config through the install API, not a native form action.
   return (
     <main className="min-h-dvh bg-atmosphere px-4 py-16 text-fg-2 antialiased sm:py-20">
       <div className="relative mx-auto max-w-md">
@@ -958,6 +967,7 @@ function TokenEntryScreen({
             platform log viewer, then paste it here to continue.
           </p>
         </div>
+        {/* react-doctor-disable-next-line react-doctor/no-prevent-default -- Install token entry is a client-side API step with no meaningful non-JS endpoint. */}
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -981,7 +991,6 @@ function TokenEntryScreen({
               spellCheck={false}
               autoComplete="off"
               autoCapitalize="off"
-              autoFocus
             />
           </div>
           {sessionError ? <ErrorMessage message={sessionError} /> : null}
@@ -1209,6 +1218,7 @@ function StepPanel({
   onSubmit: () => Promise<void>;
 }) {
   return (
+    // react-doctor-disable-next-line react-doctor/no-prevent-default -- Install wizard forms are client-side API steps with no meaningful non-JS endpoint.
     <form
       onSubmit={(event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -1272,6 +1282,7 @@ function ReviewScreen({
   const serverUrl =
     session?.server?.canonical_url || session?.prefill.canonical_url || "Unknown";
   return (
+    // react-doctor-disable-next-line react-doctor/no-prevent-default -- Install finalization writes server config through the install API, not a native form action.
     <form
       onSubmit={(event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -1296,10 +1307,10 @@ function ReviewScreen({
           mono
           action={<CopyButton value={serverUrl} label="Copy server URL" />}
         />
-        {renderObjectStoreSummaryRows(session?.object_store)}
-        {renderSandboxSummaryRows(session?.sandbox)}
+        <ObjectStoreSummaryRows objectStore={session?.object_store} />
+        <SandboxSummaryRows sandbox={session?.sandbox} />
         <SummaryRow label="LLM providers" value={llmSummary} />
-        {renderGithubSummaryRows(session?.github, serverUrl)}
+        <GithubSummaryRows github={session?.github} serverUrl={serverUrl} />
       </dl>
       {error ? <ErrorMessage message={error} /> : null}
       <div className="flex items-center justify-between gap-3 pt-2">
@@ -1918,10 +1929,13 @@ function describeLlmSummary(llm: InstallSessionResponse["llm"]): string {
   return providers.length > 0 ? providers.join(", ") : "Skipped";
 }
 
-function renderGithubSummaryRows(
-  github: InstallSessionResponse["github"],
-  serverUrl: string,
-): ReactNode {
+function GithubSummaryRows({
+  github,
+  serverUrl,
+}: {
+  github: InstallSessionResponse["github"];
+  serverUrl: string;
+}) {
   if (!github) {
     return <SummaryRow label="GitHub" value="Not configured" />;
   }
@@ -1959,9 +1973,11 @@ function githubCallbackUrl(serverUrl: string): string {
   return `${serverUrl.replace(/\/+$/, "")}/auth/callback/github`;
 }
 
-function renderObjectStoreSummaryRows(
-  objectStore: InstallSessionResponse["object_store"],
-): ReactNode {
+function ObjectStoreSummaryRows({
+  objectStore,
+}: {
+  objectStore: InstallSessionResponse["object_store"];
+}) {
   if (!objectStore) {
     return <SummaryRow label="Object store" value="Not configured" />;
   }
@@ -1991,9 +2007,11 @@ function renderObjectStoreSummaryRows(
   );
 }
 
-function renderSandboxSummaryRows(
-  sandbox: InstallSessionResponse["sandbox"],
-): ReactNode {
+function SandboxSummaryRows({
+  sandbox,
+}: {
+  sandbox: InstallSessionResponse["sandbox"];
+}) {
   if (!sandbox) {
     return <SummaryRow label="Sandbox" value="Not configured" />;
   }

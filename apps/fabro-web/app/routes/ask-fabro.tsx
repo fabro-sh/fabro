@@ -66,7 +66,7 @@ function DemoWorkspace({
         </button>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+      <main className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-4xl">
           <div className="grid grid-cols-3 gap-4">
             <StatCard
@@ -135,7 +135,7 @@ function StatCard({
   accent: string;
 }) {
   return (
-    <div className="rounded-lg bg-panel/40 px-4 py-4 ring-1 ring-line">
+    <div className="rounded-lg bg-panel/40 p-4 ring-1 ring-line">
       <div
         className={`flex items-center gap-2 text-xs font-medium uppercase tracking-wider ${accent}`}
       >

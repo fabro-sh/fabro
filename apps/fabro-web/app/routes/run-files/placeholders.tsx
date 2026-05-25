@@ -12,7 +12,7 @@ export function SensitivePlaceholder({ name }: { name: string }) {
     <div className={PLACEHOLDER_CLASSES}>
       <span className="font-mono text-fg-2">{name}</span>
       <span className="rounded bg-rose-950/40 px-2 py-0.5 text-xs text-rose-200">
-        sensitive — contents omitted
+        sensitive: contents omitted
       </span>
     </div>
   );
@@ -23,7 +23,7 @@ export function BinaryPlaceholder({ name }: { name: string }) {
     <div className={PLACEHOLDER_CLASSES}>
       <span className="font-mono text-fg-2">{name}</span>
       <span className="rounded bg-panel-alt/80 px-2 py-0.5 text-xs text-fg-3">
-        binary — not shown inline
+        binary: not shown inline
       </span>
     </div>
   );

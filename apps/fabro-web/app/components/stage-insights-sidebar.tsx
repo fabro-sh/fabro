@@ -245,7 +245,8 @@ function countTodoStats(list: TodoListProjection | null): TodoStats {
 
 function TodoSection({ todos }: { todos: TodoListProjection | null }) {
   if (!todos || (todos.items?.length ?? 0) === 0) return <p className="text-xs text-fg-muted">No todos.</p>;
-  const items = [...(todos.items ?? [])].sort((a, b) => a.order - b.order);
+  const items = Array.from(todos.items ?? []);
+  items.sort((a, b) => a.order - b.order);
   return (
     <ul className="space-y-1">
       {items.map((item) => (
@@ -357,22 +358,29 @@ function ContextBar({ snapshot }: { snapshot: StageContextWindow | null }) {
   const total = breakdown.reduce((acc, item) => acc + item.usage_percent, 0);
   const scale = total > 0 ? snapshot.usage_percent / total : 1;
   return (
-    <div
-      role="img"
-      aria-label={`${Math.round(snapshot.usage_percent)}% of context window used`}
-      className="flex h-1.5 w-full overflow-hidden rounded-full bg-overlay-strong"
-    >
-      {breakdown.map((item) => (
-        <span
-          key={item.category}
-          className="block h-full"
-          style={{
-            width:           `${item.usage_percent * scale}%`,
-            backgroundColor: categoryColor(item.category),
-          }}
-        />
-      ))}
-    </div>
+    <>
+      <meter
+        min={0}
+        max={100}
+        value={Math.round(snapshot.usage_percent)}
+        aria-label="Context window usage"
+        className="sr-only"
+      >
+        {Math.round(snapshot.usage_percent)}%
+      </meter>
+      <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-overlay-strong" aria-hidden="true">
+        {breakdown.map((item) => (
+          <span
+            key={item.category}
+            className="block h-full"
+            style={{
+              width:           `${item.usage_percent * scale}%`,
+              backgroundColor: categoryColor(item.category),
+            }}
+          />
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -385,6 +393,10 @@ function ContextBreakdown({ snapshot }: { snapshot: StageContextWindow | null })
   }
   const totalTokens = snapshot.input_tokens ?? 0;
   const contextWindow = snapshot.context_window_tokens ?? null;
+  const breakdownRows = [];
+  for (const item of snapshot.breakdown) {
+    if (item.tokens > 0) breakdownRows.push(item);
+  }
   return (
     <div className="mt-3 space-y-2 px-2">
       <div className="flex items-baseline justify-between font-mono text-xs tabular-nums text-fg-3">
@@ -394,21 +406,19 @@ function ContextBreakdown({ snapshot }: { snapshot: StageContextWindow | null })
         )}
       </div>
       <ul className="space-y-1">
-        {snapshot.breakdown
-          .filter((item) => item.tokens > 0)
-          .map((item) => (
-            <li key={item.category} className="flex items-center gap-2">
-              <span
-                className="block size-2 shrink-0 rounded-sm"
-                style={{ backgroundColor: categoryColor(item.category) }}
-                aria-hidden="true"
-              />
-              <span className="flex-1 truncate text-xs text-fg-3">{categoryLabel(item.category)}</span>
-              <span className="font-mono text-xs tabular-nums text-fg-muted">
-                {formatTokenCount(item.tokens, { compactDecimal: true })}
-              </span>
-            </li>
-          ))}
+        {breakdownRows.map((item) => (
+          <li key={item.category} className="flex items-center gap-2">
+            <span
+              className="block size-2 shrink-0 rounded-sm"
+              style={{ backgroundColor: categoryColor(item.category) }}
+              aria-hidden="true"
+            />
+            <span className="flex-1 truncate text-xs text-fg-3">{categoryLabel(item.category)}</span>
+            <span className="font-mono text-xs tabular-nums text-fg-muted">
+              {formatTokenCount(item.tokens, { compactDecimal: true })}
+            </span>
+          </li>
+        ))}
       </ul>
       {snapshot.warnings.length > 0 && (
         <ul className="space-y-1">

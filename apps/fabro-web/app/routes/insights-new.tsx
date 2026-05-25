@@ -40,6 +40,7 @@ export default function InsightsNew() {
           <h2 className="text-lg font-semibold text-fg">New Query</h2>
         </div>
         <textarea
+          aria-label="Insight prompt"
           placeholder="Ask assistant to generate a report"
           className="w-full rounded-lg border border-line bg-page/80 px-4 py-3.5 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus"
           rows={4}

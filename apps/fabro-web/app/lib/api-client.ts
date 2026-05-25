@@ -305,11 +305,12 @@ export async function fetchAllPages<TItem, TExtra extends object = {}>(
     }
 
     pagesLoaded += 1;
+    const pageData = page.data;
     const remainingItemBudget = PAGINATED_API_MAX_ITEMS - data.length;
-    const pageItems = remainingItemBudget > 0 ? page.data.slice(0, remainingItemBudget) : [];
+    const pageItems = remainingItemBudget > 0 ? pageData.slice(0, remainingItemBudget) : [];
     data.push(...pageItems);
 
-    if (!page.meta.has_more || page.data.length === 0) {
+    if (!page.meta.has_more || pageData.length === 0) {
       return {
         ...(extras ?? ({} as TExtra)),
         data,
@@ -319,7 +320,7 @@ export async function fetchAllPages<TItem, TExtra extends object = {}>(
 
     if (
       pagesLoaded >= PAGINATED_API_MAX_PAGES
-      || pageItems.length < page.data.length
+      || pageItems.length < pageData.length
       || data.length >= PAGINATED_API_MAX_ITEMS
     ) {
       console.warn(

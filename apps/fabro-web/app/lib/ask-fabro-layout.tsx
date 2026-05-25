@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, use, useMemo, useState } from "react";
 
 /**
  * Layout coordination for the docked "Ask Fabro" sidebar. The run detail page
@@ -47,5 +47,5 @@ export function AskFabroLayoutProvider({
 }
 
 export function useAskFabroLayout(): AskFabroLayout {
-  return useContext(AskFabroLayoutContext);
+  return use(AskFabroLayoutContext);
 }

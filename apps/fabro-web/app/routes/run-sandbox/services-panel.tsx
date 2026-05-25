@@ -198,7 +198,9 @@ function ServicesTable({
             <th className="px-4 py-3 text-left text-xs font-medium text-fg-3">Port</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-fg-3">Bindings</th>
             <th className="px-4 py-3 text-left text-xs font-medium text-fg-3">Process</th>
-            <th className="px-4 py-3 text-right text-xs font-medium text-fg-3" />
+            <th className="px-4 py-3 text-right text-xs font-medium text-fg-3">
+              <span className="sr-only">Actions</span>
+            </th>
 
           </tr>
         </thead>

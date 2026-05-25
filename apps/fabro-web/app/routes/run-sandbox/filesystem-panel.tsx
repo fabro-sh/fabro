@@ -42,6 +42,7 @@ export const TEXT_PREVIEW_BYTE_LIMIT = 256 * 1024;
 const BINARY_SAMPLE_BYTES = 8 * 1024;
 const pierrePoolOptions = { workerFactory };
 const pierreHighlighterOptions = { theme: "pierre-dark" };
+const EMPTY_SANDBOX_FILE_ENTRIES: SandboxFileEntry[] = [];
 
 type TreeThemeStyle = CSSProperties & Record<`--${string}`, string | number>;
 
@@ -201,14 +202,8 @@ export default function FilesystemPanel({
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [selectedFileSize, setSelectedFileSize] = useState<number | undefined>(undefined);
 
-  useEffect(() => {
-    setCurrentDir(initialDirectory);
-    setSelectedFilePath(null);
-    setSelectedFileSize(undefined);
-  }, [initialDirectory]);
-
   const filesQuery = useSandboxFiles(runId, currentDir);
-  const entries = filesQuery.data?.data ?? [];
+  const entries = filesQuery.data?.data ?? EMPTY_SANDBOX_FILE_ENTRIES;
   const treeInputs = useMemo(() => buildTreeInputs(entries), [entries]);
 
   const navigate = useCallback((nextDir: string) => {

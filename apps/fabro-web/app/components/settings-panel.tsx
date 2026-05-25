@@ -85,11 +85,7 @@ export function ViewToggle({
 }) {
   const btn = "rounded px-3 py-1.5 text-xs font-medium transition-colors";
   return (
-    <div
-      role="group"
-      aria-label="Settings view"
-      className="inline-flex shrink-0 rounded-md border border-line bg-panel/80 p-0.5"
-    >
+    <div className="inline-flex shrink-0 rounded-md border border-line bg-panel/80 p-0.5">
       <button
         type="button"
         onClick={() => setView("settings")}
@@ -110,11 +106,17 @@ export function ViewToggle({
   );
 }
 
-export function Mono({ children }: { children: ReactNode }) {
+export function Mono({
+  children,
+  title,
+}: {
+  children: ReactNode;
+  title?: string;
+}) {
   return (
     <div
       className="truncate font-mono text-xs text-fg-2"
-      title={typeof children === "string" ? children : undefined}
+      title={title}
     >
       {children}
     </div>

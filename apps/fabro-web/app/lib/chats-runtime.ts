@@ -108,11 +108,15 @@ export function toThreadMessages(
 ): ThreadMessageLike[] {
   return messages.map((msg) => {
     if (msg.role === "user") {
+      const content = [];
+      for (const part of msg.content) {
+        if (part.kind === "text") {
+          content.push({ type: "text", text: part.data.text } as const);
+        }
+      }
       return {
         role: "user",
-        content: msg.content
-          .filter((p) => p.kind === "text")
-          .map((p) => ({ type: "text", text: p.data.text }) as const),
+        content,
       };
     }
     if (msg.role === "assistant") {

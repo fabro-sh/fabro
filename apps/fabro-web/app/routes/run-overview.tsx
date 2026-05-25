@@ -76,6 +76,7 @@ export default function RunOverview() {
   }, [stages]);
 
   // Render SVG with stage annotations
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- This effect mutates local Set/Map instances and the Graphviz SVG DOM; it does not call React state setters.
   useEffect(() => {
     const inner = innerRef.current;
     if (!inner || !graphSvg) return;

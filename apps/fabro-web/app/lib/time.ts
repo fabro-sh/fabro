@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer } from "react";
 
 /**
  * Re-renders the calling component every `intervalMs` milliseconds while
@@ -6,11 +6,10 @@ import { useEffect, useState } from "react";
  * Returns the captured value when paused, so renders are stable.
  */
 export function useTickingNow(active: boolean, intervalMs = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, tick] = useReducer(() => Date.now(), undefined, Date.now);
   useEffect(() => {
     if (!active) return;
-    setNow(Date.now());
-    const interval = setInterval(() => setNow(Date.now()), intervalMs);
+    const interval = setInterval(tick, intervalMs);
     return () => clearInterval(interval);
   }, [active, intervalMs]);
   return now;

@@ -77,6 +77,7 @@ export function DetailsPanel({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  // react-doctor-disable-next-line react-doctor/prefer-use-effect-event -- React's useEffectEvent is not in the installed React type surface yet.
   useEffect(() => {
     if (!isOpen) return;
     function handleKey(event: KeyboardEvent) {
@@ -84,6 +85,7 @@ export function DetailsPanel({
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
+    // react-doctor-disable-next-line react-doctor/prefer-use-effect-event -- React's useEffectEvent is not in the installed React type surface yet.
   }, [isOpen, onClose]);
 
   return (
@@ -164,10 +166,12 @@ export function MultiSelectFilter<T extends string>({
     if (allSelected || (emptyMeansAll && selected.length === 0)) return "All types";
     if (selected.length === 0) return "No types";
     if (selected.length <= 2) {
-      return options
-        .filter((o) => selected.includes(o))
-        .map(labelOf)
-        .join(", ");
+      const selectedSet = new Set(selected);
+      const labels: string[] = [];
+      for (const option of options) {
+        if (selectedSet.has(option)) labels.push(labelOf(option));
+      }
+      return labels.join(", ");
     }
     return `${selected.length} types`;
   }, [allSelected, emptyMeansAll, selected, options, labelOf]);
@@ -367,10 +371,9 @@ export function DebugDnaStrip({
           const top = (STRIP_HEIGHT - height) / 2;
 
           return (
-            <div
+            <button
               key={event.seq}
-              role="button"
-              tabIndex={-1}
+              type="button"
               aria-label={`${debugCategoryLabel(category)} · ${event.event}`}
               aria-pressed={isSelected}
               onMouseEnter={(e) =>
@@ -383,7 +386,7 @@ export function DebugDnaStrip({
                 setHover((cur) => (cur?.seq === event.seq ? null : cur))
               }
               onClick={() => onSelect(event.seq)}
-              className="absolute -translate-x-1/2 cursor-pointer rounded-[1.5px] transition-all duration-100 ease-out"
+              className="absolute -translate-x-1/2 cursor-pointer rounded-[1.5px] border-0 p-0 transition-all duration-100 ease-out"
               style={{
                 left: `${pct}%`,
                 width: BAR_WIDTH,
@@ -477,8 +480,10 @@ function selectionsEqual(
     return a.turnIndex === b.turnIndex;
   }
   if (a.kind === "group" && b.kind === "group") {
-    if (a.childTurnIndices.length !== b.childTurnIndices.length) return false;
-    return a.childTurnIndices.every((v, i) => v === b.childTurnIndices[i]);
+    return (
+      a.childTurnIndices.length === b.childTurnIndices.length &&
+      a.childTurnIndices.every((v, i) => v === b.childTurnIndices[i])
+    );
   }
   return false;
 }
@@ -588,10 +593,9 @@ export function ThreadDnaStrip({
               };
 
           return (
-            <div
+            <button
               key={key}
-              role="button"
-              tabIndex={-1}
+              type="button"
               aria-label={`${THREAD_CATEGORY_LABEL[item.category]} · ${item.label}`}
               aria-pressed={isSelected}
               onMouseEnter={(e) =>
@@ -604,7 +608,7 @@ export function ThreadDnaStrip({
                 setHover((cur) => (cur?.key === key ? null : cur))
               }
               onClick={() => onSelect(item.selection)}
-              className="absolute cursor-pointer rounded-[2px] transition-all duration-100 ease-out"
+              className="absolute cursor-pointer rounded-[2px] border-0 p-0 transition-all duration-100 ease-out"
               style={style}
             />
           );

@@ -108,6 +108,7 @@ export default function AskFabroSidebar({
         }`}
         style={{ width }}
       >
+        {/* react-doctor-disable-next-line react-doctor/prefer-tag-over-role -- This is an interactive, draggable splitter; <hr> would not convey the resize behavior. */}
         <div
           role="separator"
           aria-orientation="vertical"

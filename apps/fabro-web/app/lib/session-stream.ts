@@ -109,6 +109,7 @@ async function readEventStream(
   let buffer = "";
 
   while (true) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Streaming readers must consume chunks sequentially to preserve SSE order and decoder state.
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });

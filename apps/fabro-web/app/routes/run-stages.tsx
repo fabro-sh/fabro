@@ -761,7 +761,7 @@ function EventRow({
       {turn.kind === "assistant" && metric != null ? (
         <Tooltip
           label={
-            <div className="px-1 py-1">
+            <div className="p-1">
               <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
                 Tokens in / out
               </div>
@@ -1211,11 +1211,7 @@ function EventsTabToggle({
   onTabChange: (tab: EventsTab) => void;
 }) {
   return (
-    <div
-      role="group"
-      aria-label="View"
-      className="inline-flex rounded-md bg-panel p-0.5 outline-1 -outline-offset-1 outline-line-strong"
-    >
+    <div className="inline-flex rounded-md bg-panel p-0.5 outline-1 -outline-offset-1 outline-line-strong">
       {availableTabs.map((value) => {
         const active = tab === value;
         return (
@@ -1519,8 +1515,9 @@ export default function RunStages() {
     const wanted = panelSelection.childTurnIndices;
     for (const item of displayItems) {
       if (item.kind !== "group") continue;
-      if (item.children.length !== wanted.length) continue;
-      const matches = item.children.every((c, i) => c.turnIndex === wanted[i]);
+      const matches =
+        item.children.length === wanted.length &&
+        item.children.every((c, i) => c.turnIndex === wanted[i]);
       if (matches) return item;
     }
     return null;

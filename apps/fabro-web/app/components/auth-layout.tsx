@@ -22,7 +22,7 @@ export function AuthLayout({
     <div className="flex min-h-screen flex-col items-center justify-center bg-atmosphere px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex justify-center">
-          <FabroLogo className="h-12 w-12" />
+          <FabroLogo className="size-12" />
         </div>
         <div className="rounded-xl border border-line bg-panel/80 p-8 shadow-lg backdrop-blur-sm">
           {children}

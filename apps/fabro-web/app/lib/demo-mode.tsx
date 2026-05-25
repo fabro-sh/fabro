@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 
 const DemoModeContext = createContext(false);
 
@@ -17,5 +17,5 @@ export function DemoModeProvider({
 }
 
 export function useDemoMode(): boolean {
-  return useContext(DemoModeContext);
+  return use(DemoModeContext);
 }

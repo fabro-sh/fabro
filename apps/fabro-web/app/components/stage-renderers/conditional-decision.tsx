@@ -97,7 +97,7 @@ export function ConditionalDecision({
               <div className="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
                 To
               </div>
-              <div className="mt-0.5 text-sm text-fg-muted">—</div>
+              <div className="mt-0.5 text-sm text-fg-muted">No target</div>
             </div>
           )}
         </div>

@@ -223,20 +223,17 @@ export function HumanQA({
 
   return (
     <div className="space-y-6 pl-3 pr-4 sm:pr-6 lg:pr-8">
-      <StageMetaBar
-        stage={stage}
-        trailing={
-          <span className="inline-flex items-center gap-1 text-xs text-fg-muted">
-            <span className="font-mono tabular-nums">{pairs.length}</span>
-            {pairs.length === 1 ? "question" : "questions"}
-            {pendingCount > 0 && (
-              <span className="ml-2 inline-flex items-center rounded-full bg-amber/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber">
-                {pendingCount} pending
-              </span>
-            )}
-          </span>
-        }
-      />
+      <StageMetaBar stage={stage}>
+        <span className="inline-flex items-center gap-1 text-xs text-fg-muted">
+          <span className="font-mono tabular-nums">{pairs.length}</span>
+          {pairs.length === 1 ? "question" : "questions"}
+          {pendingCount > 0 && (
+            <span className="ml-2 inline-flex items-center rounded-full bg-amber/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber">
+              {pendingCount} pending
+            </span>
+          )}
+        </span>
+      </StageMetaBar>
 
       {pairs.length === 0 ? (
         <p className="text-sm text-fg-muted">

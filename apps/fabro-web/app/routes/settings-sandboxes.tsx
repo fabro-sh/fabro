@@ -43,27 +43,30 @@ export default function SettingsSandboxes() {
 }
 
 function ProvidersPanel({ settings }: { settings: ServerSandboxProvidersSettings }) {
-  const providers: SandboxProvider[] = [
-    {
-      id: "local",
-      name: "Local",
-      description: "Run stages directly on the Fabro host.",
-      enabled: settings.local.enabled,
-    },
-    {
-      id: "docker",
-      name: "Docker",
-      description: "Run stages in isolated Docker containers on the host daemon.",
-      enabled: settings.docker.enabled,
-    },
-    {
-      id: "daytona",
-      name: "Daytona",
-      description: "Run stages in cloud sandboxes managed by Daytona.",
-      enabled: settings.daytona.enabled,
-      secretName: "DAYTONA_API_KEY",
-    },
-  ];
+  const providers: SandboxProvider[] = useMemo(
+    () => [
+      {
+        id: "local",
+        name: "Local",
+        description: "Run stages directly on the Fabro host.",
+        enabled: settings.local.enabled,
+      },
+      {
+        id: "docker",
+        name: "Docker",
+        description: "Run stages in isolated Docker containers on the host daemon.",
+        enabled: settings.docker.enabled,
+      },
+      {
+        id: "daytona",
+        name: "Daytona",
+        description: "Run stages in cloud sandboxes managed by Daytona.",
+        enabled: settings.daytona.enabled,
+        secretName: "DAYTONA_API_KEY",
+      },
+    ],
+    [settings],
+  );
 
   const { enabled, disabled } = useMemo(() => {
     const enabled: SandboxProvider[] = [];

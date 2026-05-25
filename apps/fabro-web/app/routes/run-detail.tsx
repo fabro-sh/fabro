@@ -432,13 +432,17 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const filesCount = runQuery.data?.diff?.files_changed ?? null;
   const childrenCount = runQuery.data?.children_count ?? null;
   const hasSandbox = runHasSandbox(runStateQuery.data);
-  const tabs = allTabs
-    .map((tab) => {
-      if (tab.name === "Files Changed") return { ...tab, count: filesCount };
-      if (tab.name === "Children") return { ...tab, count: childrenCount };
-      return tab;
-    })
-    .filter((t) => (!t.demoOnly || demoMode) && (!t.requiresSandbox || hasSandbox));
+  const tabs = [];
+  for (const tab of allTabs) {
+    if ((tab.demoOnly && !demoMode) || (tab.requiresSandbox && !hasSandbox)) continue;
+    if (tab.name === "Files Changed") {
+      tabs.push({ ...tab, count: filesCount });
+    } else if (tab.name === "Children") {
+      tabs.push({ ...tab, count: childrenCount });
+    } else {
+      tabs.push(tab);
+    }
+  }
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
   const steerBarRef = useRef<SteerBarHandle | null>(null);
   const now = useTickingNow(30_000);
@@ -458,12 +462,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     setSidebarWidth(sidebarWidth);
     return () => setSidebarWidth(0);
   }, [sidebarWidth, setSidebarWidth]);
-
-  useEffect(() => {
-    if (previewMutation.data?.intent === "preview") {
-      window.open(previewMutation.data.url, "_blank");
-    }
-  }, [previewMutation.data]);
 
   useEffect(() => {
     lifecycleToastStateRef.current = handleLifecycleToastResult(
@@ -574,6 +572,27 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
   const retryPending = retryMutation.isMutating;
+  const handlePreview = async () => {
+    const previewWindow = window.open("about:blank", "_blank");
+    try {
+      const result = await previewMutation.trigger({
+        port:            3000,
+        expires_in_secs: 3600,
+      });
+      if (result?.intent === "preview") {
+        if (previewWindow) {
+          previewWindow.location.href = result.url;
+        } else {
+          window.open(result.url, "_blank");
+        }
+      } else {
+        previewWindow?.close();
+      }
+    } catch (error) {
+      previewWindow?.close();
+      throw error;
+    }
+  };
   const handleConfirmDelete = async () => {
     setDeletePending(true);
     try {
@@ -728,10 +747,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           }}
           canPreview={hasSandbox}
           previewPending={previewPending}
-          onPreview={() => void previewMutation.trigger({
-            port: 3000,
-            expires_in_secs: 3600,
-          })}
+          onPreview={() => void handlePreview()}
           canArchive={visibility.showArchive}
           archivePending={archivePending}
           onArchive={() => void archiveMutation.trigger()}

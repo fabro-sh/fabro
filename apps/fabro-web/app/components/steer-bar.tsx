@@ -1,10 +1,10 @@
 import {
-  forwardRef,
   useImperativeHandle,
   useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type Ref,
 } from "react";
 
 import { ApiError } from "../lib/api-client";
@@ -13,16 +13,14 @@ import { ErrorMessage } from "./ui";
 
 export interface SteerBarProps {
   runId: string;
+  ref?: Ref<SteerBarHandle>;
 }
 
 export interface SteerBarHandle {
   focus(): void;
 }
 
-export const SteerBar = forwardRef<SteerBarHandle, SteerBarProps>(function SteerBar(
-  { runId },
-  ref,
-) {
+export function SteerBar({ runId, ref }: SteerBarProps) {
   const [text, setText] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -113,7 +111,7 @@ export const SteerBar = forwardRef<SteerBarHandle, SteerBarProps>(function Steer
       )}
     </form>
   );
-});
+}
 
 function formatSteerError(err: unknown): string {
   if (err instanceof ApiError) {

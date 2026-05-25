@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useReducer, useRef } from "react";
 import { PencilIcon } from "@heroicons/react/16/solid";
 
 import { ApiError } from "../lib/api-client";
@@ -7,6 +7,38 @@ import { InlineMarkdown } from "./inline-markdown";
 import { useToast } from "./toast";
 
 const TITLE_MAX_LENGTH = 100;
+
+type EditState =
+  | { kind: "view" }
+  | { kind: "editing"; draft: string; submitted: boolean };
+
+type EditAction =
+  | { type: "start"; title: string }
+  | { type: "change"; draft: string }
+  | { type: "mark_submitted" }
+  | { type: "allow_retry" }
+  | { type: "cancel" };
+
+function editReducer(state: EditState, action: EditAction): EditState {
+  switch (action.type) {
+    case "start":
+      return { kind: "editing", draft: action.title, submitted: false };
+    case "change":
+      return state.kind === "editing"
+        ? { ...state, draft: action.draft }
+        : state;
+    case "mark_submitted":
+      return state.kind === "editing"
+        ? { ...state, submitted: true }
+        : state;
+    case "allow_retry":
+      return state.kind === "editing"
+        ? { ...state, submitted: false }
+        : state;
+    case "cancel":
+      return { kind: "view" };
+  }
+}
 
 function focusInputNextFrame(callback: () => void): void {
   if (typeof requestAnimationFrame === "function") {
@@ -17,22 +49,16 @@ function focusInputNextFrame(callback: () => void): void {
 }
 
 export function EditableRunTitle({ runId, title }: { runId: string; title: string }) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(title);
-  const submittedRef = useRef(false);
+  const [editState, dispatchEdit] = useReducer(editReducer, { kind: "view" });
   const inputRef = useRef<HTMLInputElement>(null);
   const updateMutation = useUpdateRunTitle(runId);
   const { push } = useToast();
   const isSaving = updateMutation.isMutating;
-
-  useEffect(() => {
-    if (!isEditing) setDraft(title);
-  }, [title, isEditing]);
+  const isEditing = editState.kind === "editing";
+  const draft = isEditing ? editState.draft : "";
 
   const enterEdit = () => {
-    setDraft(title);
-    submittedRef.current = false;
-    setIsEditing(true);
+    dispatchEdit({ type: "start", title });
     focusInputNextFrame(() => {
       inputRef.current?.focus();
       inputRef.current?.select();
@@ -40,12 +66,11 @@ export function EditableRunTitle({ runId, title }: { runId: string; title: strin
   };
 
   const exitEdit = () => {
-    setIsEditing(false);
-    setDraft(title);
+    dispatchEdit({ type: "cancel" });
   };
 
   const submit = async () => {
-    if (submittedRef.current) return;
+    if (editState.kind !== "editing" || editState.submitted) return;
     const trimmed = draft.trim();
     if (trimmed === title.trim()) {
       exitEdit();
@@ -56,13 +81,13 @@ export function EditableRunTitle({ runId, title }: { runId: string; title: strin
       inputRef.current?.focus();
       return;
     }
-    submittedRef.current = true;
+    dispatchEdit({ type: "mark_submitted" });
     try {
       await updateMutation.trigger({ title: trimmed });
-      setIsEditing(false);
+      exitEdit();
       push({ message: "Run title updated." });
     } catch (error) {
-      submittedRef.current = false;
+      dispatchEdit({ type: "allow_retry" });
       const message = error instanceof ApiError && error.message
         ? error.message
         : "Could not update run title.";
@@ -84,7 +109,7 @@ export function EditableRunTitle({ runId, title }: { runId: string; title: strin
           value={draft}
           maxLength={TITLE_MAX_LENGTH}
           disabled={isSaving}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => dispatchEdit({ type: "change", draft: e.target.value })}
           onBlur={() => void submit()}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -92,7 +117,6 @@ export function EditableRunTitle({ runId, title }: { runId: string; title: strin
               void submit();
             } else if (e.key === "Escape") {
               e.preventDefault();
-              submittedRef.current = true;
               exitEdit();
             }
           }}

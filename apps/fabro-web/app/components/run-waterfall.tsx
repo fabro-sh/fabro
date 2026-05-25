@@ -177,11 +177,13 @@ function buildRows({
   nowMs: number;
 }): Row[] {
   const phases = deriveRunPhases(events, createdAtIso).map((p) => phaseRow(p, nowMs));
-  const stageRows = stages
-    .filter((s) => isVisibleStage(s.node_id))
-    .map((s) => stageRow(runId, s, nowMs))
-    .filter((r): r is Row => r !== null)
-    .sort((a, b) => a.startMs - b.startMs);
+  const stageRows: Row[] = [];
+  for (const stage of stages) {
+    if (!isVisibleStage(stage.node_id)) continue;
+    const row = stageRow(runId, stage, nowMs);
+    if (row) stageRows.push(row);
+  }
+  stageRows.sort((a, b) => a.startMs - b.startMs);
   return [...phases, ...stageRows];
 }
 

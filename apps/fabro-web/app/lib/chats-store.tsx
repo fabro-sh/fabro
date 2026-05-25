@@ -1,7 +1,7 @@
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useMemo,
   useReducer,
   type ReactNode,
@@ -184,13 +184,13 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
 }
 
 export function useChatsState(): State {
-  const value = useContext(ChatsStateContext);
+  const value = use(ChatsStateContext);
   if (!value) throw new Error("useChatsState must be used inside <ChatsProvider>");
   return value;
 }
 
 export function useChatsActions(): ChatsActions {
-  const value = useContext(ChatsActionsContext);
+  const value = use(ChatsActionsContext);
   if (!value) throw new Error("useChatsActions must be used inside <ChatsProvider>");
   return value;
 }

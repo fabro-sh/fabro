@@ -100,28 +100,30 @@ export function FileTreeSidebarSkeleton() {
   );
 }
 
-export function LoadingSkeleton({
-  reserveSidebar = false,
-}: {
-  reserveSidebar?: boolean;
-} = {}) {
-  const diffSkeleton = (
+function DiffSkeleton() {
+  return (
     <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-3">
       <div className="h-32 rounded-md bg-panel/60 motion-safe:animate-pulse" />
       <div className="h-32 rounded-md bg-panel/60 motion-safe:animate-pulse" />
     </div>
   );
+}
 
+export function LoadingSkeleton({
+  reserveSidebar = false,
+}: {
+  reserveSidebar?: boolean;
+} = {}) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3" aria-label="Loading files">
       <div className="h-8 shrink-0 rounded-md bg-panel/60 motion-safe:animate-pulse" />
       {reserveSidebar ? (
         <div className="flex min-h-0 flex-1 gap-4">
           <FileTreeSidebarSkeleton />
-          {diffSkeleton}
+          <DiffSkeleton />
         </div>
       ) : (
-        diffSkeleton
+        <DiffSkeleton />
       )}
     </div>
   );

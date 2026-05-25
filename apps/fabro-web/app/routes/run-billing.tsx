@@ -287,7 +287,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
           <tfoot>
             <tr className="border-t border-line-strong bg-overlay">
               <td className="px-4 py-3 font-medium text-fg">Total</td>
-              <td />
+              <td className="px-4 py-3 text-xs text-fg-muted">All models</td>
               <td className="px-4 py-3 text-right font-mono text-xs tabular-nums font-medium text-fg">
                 <TokensCell
                   inputTokens={totalInput}

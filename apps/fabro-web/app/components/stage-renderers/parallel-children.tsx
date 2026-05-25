@@ -140,16 +140,13 @@ export function ParallelChildren({
 
   return (
     <div className="space-y-6 pl-3 pr-4 sm:pr-6 lg:pr-8">
-      <StageMetaBar
-        stage={stage}
-        trailing={
-          overview.joinPolicy ? (
-            <span className="inline-flex items-center rounded-full bg-overlay-strong px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-fg-2">
-              {overview.joinPolicy.replace(/_/g, " ")}
-            </span>
-          ) : null
-        }
-      />
+      <StageMetaBar stage={stage}>
+        {overview.joinPolicy ? (
+          <span className="inline-flex items-center rounded-full bg-overlay-strong px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-fg-2">
+            {overview.joinPolicy.replace(/_/g, " ")}
+          </span>
+        ) : null}
+      </StageMetaBar>
 
       <section className="grid grid-cols-2 gap-x-6 gap-y-4 rounded-lg bg-panel p-5 outline-1 -outline-offset-1 outline-line sm:grid-cols-4">
         <StatItem label="Branches" value={overview.branchCount ?? "—"} />

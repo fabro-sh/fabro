@@ -118,8 +118,7 @@ export function BulkActionToolbar({
 
   return (
     <>
-      <div
-        role="region"
+      <section
         aria-label="Bulk actions"
         className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
       >
@@ -188,7 +187,7 @@ export function BulkActionToolbar({
             <XMarkIcon className="size-4" aria-hidden="true" />
           </button>
         </div>
-      </div>
+      </section>
       <ConfirmDialog
         open={deleteDialogOpen}
         title={`Delete ${deletableCount} ${plural(deletableCount, "run", "runs")}?`}

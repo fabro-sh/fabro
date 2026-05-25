@@ -251,11 +251,7 @@ function DiffLayoutToggle({
   const active = "bg-overlay-strong text-fg";
   const inactive = "text-fg-3 hover:text-fg";
   return (
-    <div
-      className="inline-flex rounded-md bg-panel-alt p-0.5 ring-1 ring-line"
-      role="group"
-      aria-label="Diff layout"
-    >
+    <div className="inline-flex rounded-md bg-panel-alt p-0.5 ring-1 ring-line">
       <button
         type="button"
         onClick={() => onChange("split")}

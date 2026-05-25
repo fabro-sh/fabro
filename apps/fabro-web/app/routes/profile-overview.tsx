@@ -56,10 +56,10 @@ function IdentityPanel({ user }: { user: AuthSessionUser }) {
   return (
     <Panel title="Identity">
       <Row title="Issuer">
-        {user.idpIssuer ? <Mono>{user.idpIssuer}</Mono> : <Muted>—</Muted>}
+        {user.idpIssuer ? <Mono>{user.idpIssuer}</Mono> : <Muted>Not available</Muted>}
       </Row>
       <Row title="Subject">
-        {user.idpSubject ? <Mono>{user.idpSubject}</Mono> : <Muted>—</Muted>}
+        {user.idpSubject ? <Mono>{user.idpSubject}</Mono> : <Muted>Not available</Muted>}
       </Row>
       <Row title="Profile URL">
         <UrlValue url={user.userUrl} />

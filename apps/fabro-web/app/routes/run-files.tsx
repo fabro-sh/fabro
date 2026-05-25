@@ -85,7 +85,6 @@ function useNarrowViewport(): boolean {
     if (typeof window === "undefined") return;
     const mql = window.matchMedia(`(max-width: ${MD_BREAKPOINT_PX - 1}px)`);
     const apply = () => setNarrow(mql.matches);
-    apply();
     mql.addEventListener("change", apply);
     return () => mql.removeEventListener("change", apply);
   }, []);
@@ -326,16 +325,15 @@ const RunFileRow = memo(function RunFileRow({
   }
 
   return (
-    <div
+    <section
       id={fileRowId(display)}
       tabIndex={-1}
       data-run-file-row="true"
-      role="region"
       aria-label={`${file.change_kind ?? "modified"}: ${display}`}
       className="focus:outline-2 focus:outline-focus focus:outline-offset-2 rounded-md"
     >
       {body}
-    </div>
+    </section>
   );
 });
 
@@ -433,11 +431,23 @@ export default function RunFiles() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const lastDeepLinkToastRef = useRef<string | null>(null);
 
-  const [minSpinUntil, setMinSpinUntil] = useState(0);
+  const minRefreshTimerRef = useRef<number | null>(null);
+  const [minRefreshActive, setMinRefreshActive] = useState(false);
+  const clearMinRefreshTimer = useCallback(() => {
+    if (minRefreshTimerRef.current !== null) {
+      window.clearTimeout(minRefreshTimerRef.current);
+      minRefreshTimerRef.current = null;
+    }
+  }, []);
   const handleRefresh = useCallback(() => {
-    setMinSpinUntil(Date.now() + MIN_REFRESH_SPIN_MS);
+    clearMinRefreshTimer();
+    setMinRefreshActive(true);
+    minRefreshTimerRef.current = window.setTimeout(() => {
+      setMinRefreshActive(false);
+      minRefreshTimerRef.current = null;
+    }, MIN_REFRESH_SPIN_MS);
     void filesQuery.mutate();
-  }, [filesQuery]);
+  }, [clearMinRefreshTimer, filesQuery]);
   const handlePickerChange = useCallback(
     (selection: DiffPickerValue) => {
       const search = new URLSearchParams(routeLocation.search);
@@ -456,22 +466,15 @@ export default function RunFiles() {
     },
     [routeLocation.hash, routeLocation.pathname, routeLocation.search, navigate],
   );
-  useEffect(() => {
-    if (minSpinUntil === 0) return;
-    const remaining = minSpinUntil - Date.now();
-    if (remaining <= 0) {
-      setMinSpinUntil(0);
-      return;
-    }
-    const id = window.setTimeout(() => setMinSpinUntil(0), remaining);
-    return () => window.clearTimeout(id);
-  }, [minSpinUntil]);
-  const showRefreshing = isRevalidating || minSpinUntil > 0;
+  useEffect(() => clearMinRefreshTimer, [clearMinRefreshTimer]);
+  // react-doctor-disable-next-line react-doctor/no-event-handler -- The refresh spinner is driven by both SWR revalidation and the click-owned minimum timer.
+  const showRefreshing = isRevalidating || minRefreshActive;
 
   // Return focus to the Refresh button after a refresh visibly completes so
   // keyboard-first users stay oriented.
   const refreshingPrev = useRef(false);
   useEffect(() => {
+    // react-doctor-disable-next-line react-doctor/no-event-handler -- Returning focus after async refresh completion is an accessibility sync effect.
     if (refreshingPrev.current && !showRefreshing) {
       refreshButtonRef.current?.focus({ preventScroll: true });
     }
@@ -498,7 +501,9 @@ export default function RunFiles() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
+  // react-doctor-disable-next-line react-doctor/no-event-handler -- Deep-link focus has to run after URL hash and file data have both rendered matching DOM rows.
   useEffect(() => {
+    // react-doctor-disable-next-line react-doctor/no-event-handler -- Toasting missing deep links also depends on resolved file data.
     const toast = resolveDeepLinkToast(hashFile, data);
     if (toast) {
       if (lastDeepLinkToastRef.current !== toast.key) {
