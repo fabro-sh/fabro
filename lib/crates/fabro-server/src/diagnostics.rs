@@ -261,7 +261,8 @@ async fn check_github_app(state: &AppState) -> CheckResult {
                             summary:     "token expired".to_string(),
                             details:     vec![CheckDetail::new(err.to_string())],
                             remediation: Some(
-                                "Run fabro install or update GITHUB_TOKEN".to_string(),
+                                "Run fabro install or run `fabro secret set GITHUB_TOKEN`"
+                                    .to_string(),
                             ),
                         };
                     }
@@ -274,7 +275,9 @@ async fn check_github_app(state: &AppState) -> CheckResult {
                     status:      CheckStatus::Warning,
                     summary:     "not configured".to_string(),
                     details:     Vec::new(),
-                    remediation: Some("Run fabro install or set GITHUB_TOKEN".to_string()),
+                    remediation: Some(
+                        "Run fabro install or run `fabro secret set GITHUB_TOKEN`".to_string(),
+                    ),
                 };
             }
             Err(err) => {
@@ -319,7 +322,9 @@ async fn check_github_app(state: &AppState) -> CheckResult {
                         "GitHub returned {}",
                         response.status()
                     ))],
-                    remediation: Some("Run fabro install or update GITHUB_TOKEN".to_string()),
+                    remediation: Some(
+                        "Run fabro install or run `fabro secret set GITHUB_TOKEN`".to_string(),
+                    ),
                 }
             }
             Ok(Ok(response)) => CheckResult {
@@ -330,21 +335,27 @@ async fn check_github_app(state: &AppState) -> CheckResult {
                     "GitHub returned {}",
                     response.status()
                 ))],
-                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
+                remediation: Some(
+                    "Check GitHub connectivity and the vault GITHUB_TOKEN".to_string(),
+                ),
             },
             Ok(Err(err)) => CheckResult {
                 name:        "GitHub Token".to_string(),
                 status:      CheckStatus::Error,
                 summary:     "connectivity error".to_string(),
                 details:     vec![CheckDetail::new(err.to_string())],
-                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
+                remediation: Some(
+                    "Check GitHub connectivity and the vault GITHUB_TOKEN".to_string(),
+                ),
             },
             Err(_) => CheckResult {
                 name:        "GitHub Token".to_string(),
                 status:      CheckStatus::Error,
                 summary:     "timeout".to_string(),
                 details:     vec![CheckDetail::new("GitHub probe timed out".to_string())],
-                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
+                remediation: Some(
+                    "Check GitHub connectivity and the vault GITHUB_TOKEN".to_string(),
+                ),
             },
         };
     }
@@ -363,13 +374,13 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         .slug
         .as_ref()
         .map(InterpString::as_source);
-    let private_key_raw = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
+    let private_key_raw = state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
     let client_id = settings.server.integrations.github.client_id.is_some();
     let client_secret = state
-        .server_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
+        .vault_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
         .is_some();
     let webhook_secret = state
-        .server_secret(EnvVars::GITHUB_APP_WEBHOOK_SECRET)
+        .vault_secret(EnvVars::GITHUB_APP_WEBHOOK_SECRET)
         .is_some();
 
     if app_id.is_none()
@@ -404,7 +415,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
             status:      CheckStatus::Error,
             summary:     "missing private key".to_string(),
             details:     Vec::new(),
-            remediation: Some("Set GITHUB_APP_PRIVATE_KEY".to_string()),
+            remediation: Some("Run `fabro secret set GITHUB_APP_PRIVATE_KEY`".to_string()),
         };
     };
 
@@ -469,7 +480,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
 }
 
 async fn check_sandbox(state: &AppState) -> CheckResult {
-    let Some(api_key) = state.vault_or_env(EnvVars::DAYTONA_API_KEY) else {
+    let Some(api_key) = state.vault_secret(EnvVars::DAYTONA_API_KEY) else {
         return CheckResult {
             name:        "Sandbox".to_string(),
             status:      CheckStatus::Warning,
@@ -554,7 +565,7 @@ fn check_storage_dir_path(path: &std::path::Path) -> CheckResult {
 }
 
 async fn check_brave_search(state: &AppState) -> CheckResult {
-    let Some(api_key) = state.vault_or_env(EnvVars::BRAVE_SEARCH_API_KEY) else {
+    let Some(api_key) = state.vault_secret(EnvVars::BRAVE_SEARCH_API_KEY) else {
         return CheckResult {
             name:        "Web Search (Brave)".to_string(),
             status:      CheckStatus::Warning,
@@ -650,10 +661,10 @@ fn check_crypto(state: &AppState) -> CheckResult {
             errors.push("server.integrations.github.client_id is not configured".to_string());
         }
         if state
-            .server_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
+            .vault_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
             .is_none()
         {
-            errors.push("GITHUB_APP_CLIENT_SECRET not set".to_string());
+            errors.push("GITHUB_APP_CLIENT_SECRET not configured in vault".to_string());
         }
     }
 
@@ -681,6 +692,8 @@ fn check_crypto(state: &AppState) -> CheckResult {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use fabro_config::RunLayer;
     use fabro_vault::SecretType;
     use httpmock::Method::POST;
@@ -764,6 +777,77 @@ mod tests {
             "expected a detail line prefixed with 'openai: ', got: {:?}",
             result.details
         );
+    }
+
+    #[tokio::test]
+    async fn check_sandbox_ignores_env_backed_daytona_api_key() {
+        let state = TestAppStateBuilder::new()
+            .env_lookup(|name| {
+                (name == EnvVars::DAYTONA_API_KEY).then(|| "dtn_from_env".to_string())
+            })
+            .build();
+
+        let result = check_sandbox(&state).await;
+
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert_eq!(result.summary, "recommended, not configured");
+        assert_eq!(
+            result.remediation.as_deref(),
+            Some("Run `fabro secret set DAYTONA_API_KEY` to enable cloud sandbox execution")
+        );
+    }
+
+    #[tokio::test]
+    async fn check_brave_search_ignores_env_backed_api_key() {
+        let state = TestAppStateBuilder::new()
+            .env_lookup(|name| {
+                (name == EnvVars::BRAVE_SEARCH_API_KEY).then(|| "brave-from-env".to_string())
+            })
+            .build();
+
+        let result = check_brave_search(&state).await;
+
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert_eq!(result.summary, "optional, not configured");
+        assert_eq!(
+            result.remediation.as_deref(),
+            Some("Run `fabro secret set BRAVE_SEARCH_API_KEY` to enable web search")
+        );
+    }
+
+    #[test]
+    fn check_crypto_requires_github_client_secret_from_vault() {
+        let settings = fabro_config::ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["github"]
+
+[server.auth.github]
+allowed_usernames = ["octocat"]
+
+[server.integrations.github]
+client_id = "Iv1.test"
+"#,
+        )
+        .expect("github settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .server_secret_env(HashMap::from([(
+                EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
+                "server-env-client-secret".to_string(),
+            )]))
+            .build();
+
+        let result = check_crypto(&state);
+
+        assert_eq!(result.status, CheckStatus::Error);
+        assert!(result.details.iter().any(|detail| {
+            detail
+                .text
+                .contains("GITHUB_APP_CLIENT_SECRET not configured in vault")
+        }));
     }
 
     #[test]

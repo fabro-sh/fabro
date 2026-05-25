@@ -290,7 +290,7 @@ methods = []
             name:           "missing-github-client-secret",
             settings:       GITHUB_SETTINGS,
             server_env:     &[("SESSION_SECRET", TEST_SESSION_SECRET)],
-            expected_error: "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not set.",
+            expected_error: "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not configured in the vault.",
         },
         StartupFailureCase {
             name:           "empty-auth-methods",

@@ -7,7 +7,7 @@ use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, Tool
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
     Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionOptions, StaticEnvProvider,
-    ToolEnvProvider, register_question_tools,
+    ToolEnvProvider, ToolSecrets, register_question_tools,
 };
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::{AttrValue, Node};
@@ -574,6 +574,7 @@ pub struct AgentApiBackend {
     sessions:           Mutex<HashMap<String, Session>>,
     tool_env:           Option<Arc<dyn ToolEnvProvider>>,
     mcp_servers:        Vec<McpServerSettings>,
+    tool_secrets:       ToolSecrets,
     run_model_controls: RunModelControls,
     source:             Arc<dyn CredentialSource>,
     steering_hub:       Arc<SteeringHub>,
@@ -622,6 +623,7 @@ impl AgentApiBackend {
             sessions: Mutex::new(HashMap::new()),
             tool_env: None,
             mcp_servers: Vec::new(),
+            tool_secrets: ToolSecrets::default(),
             run_model_controls: RunModelControls::default(),
             source,
             steering_hub,
@@ -661,6 +663,12 @@ impl AgentApiBackend {
     #[must_use]
     pub fn with_mcp_servers(mut self, servers: Vec<McpServerSettings>) -> Self {
         self.mcp_servers = servers;
+        self
+    }
+
+    #[must_use]
+    pub fn with_tool_secrets(mut self, tool_secrets: ToolSecrets) -> Self {
+        self.tool_secrets = tool_secrets;
         self
     }
 
@@ -720,6 +728,7 @@ impl AgentApiBackend {
             self.tool_env.as_ref(),
             tool_hooks,
             self.mcp_servers.clone(),
+            self.tool_secrets.clone(),
             self.fabro_run_tools.clone(),
         )
         .await
@@ -736,6 +745,7 @@ impl AgentApiBackend {
         tool_env: Option<&Arc<dyn ToolEnvProvider>>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         mcp_servers: Vec<McpServerSettings>,
+        tool_secrets: ToolSecrets,
         fabro_run_tools: Option<FabroRunToolServices>,
     ) -> Result<Session, Error> {
         let controls = effective_request_controls(run_model_controls, node)?;
@@ -756,6 +766,7 @@ impl AgentApiBackend {
             speed: controls.speed,
             tool_hooks,
             mcp_servers,
+            tool_secrets,
             // Workflow agents run with no `tool_access_policy`, which exposes
             // the entire tool registry (read, write, shell, subagent, MCP) and
             // skips approval gating. Report that truthfully so the UI doesn't
@@ -779,6 +790,7 @@ impl AgentApiBackend {
         let factory_tool_env = tool_env.cloned();
         let factory_fabro_run_tools = fabro_run_tools.clone();
         let factory_permission_level = config.permission_level;
+        let factory_tool_secrets = config.tool_secrets.clone();
         let factory: SessionFactory = Arc::new(move || {
             let mut child_profile = build_profile(
                 &factory_model,
@@ -798,6 +810,7 @@ impl AgentApiBackend {
                     reasoning_effort: controls.reasoning_effort,
                     speed: controls.speed,
                     permission_level: factory_permission_level,
+                    tool_secrets: factory_tool_secrets.clone(),
                     ..SessionOptions::default()
                 },
                 None,
@@ -1293,6 +1306,7 @@ impl CodergenBackend for AgentApiBackend {
                             self.tool_env.as_ref(),
                             tool_hooks.clone(),
                             self.mcp_servers.clone(),
+                            self.tool_secrets.clone(),
                             self.fabro_run_tools.clone(),
                         )
                         .await;

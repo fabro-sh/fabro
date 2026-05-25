@@ -390,7 +390,7 @@ async fn get_github_repo(
                 Ok(None) => {
                     return ApiError::new(
                         StatusCode::SERVICE_UNAVAILABLE,
-                        "GITHUB_TOKEN is not configured",
+                        "GITHUB_TOKEN is not configured -- run fabro install or run fabro secret set GITHUB_TOKEN",
                     )
                     .into_response();
                 }
@@ -444,7 +444,7 @@ async fn get_github_repo(
         {
             return ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "Stored GitHub token is invalid — run fabro install or update GITHUB_TOKEN",
+                "Stored GitHub token is invalid -- run fabro install or run fabro secret set GITHUB_TOKEN",
             )
             .into_response();
         }

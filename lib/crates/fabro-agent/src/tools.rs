@@ -61,7 +61,9 @@ pub fn register_core_tools(
     registry.register(make_shell_tool_with_config(config));
     registry.register(make_grep_tool());
     registry.register(make_glob_tool());
-    registry.register(make_web_search_tool());
+    registry.register(make_web_search_tool_with_api_key(
+        config.tool_secrets.brave_search_api_key.clone(),
+    ));
     registry.register(make_web_fetch_tool(summarizer));
 }
 
@@ -514,15 +516,6 @@ fn format_brave_results(body: &serde_json::Value) -> String {
     output
 }
 
-#[must_use]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Web search tool setup reads the documented Brave API key override from process env."
-)]
-pub(crate) fn make_web_search_tool() -> RegisteredTool {
-    make_web_search_tool_with_api_key(std::env::var(EnvVars::BRAVE_SEARCH_API_KEY).ok())
-}
-
 fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool {
     use std::sync::OnceLock;
     static CLIENT: OnceLock<fabro_http::HttpClient> = OnceLock::new();
@@ -544,10 +537,7 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
             let api_key = api_key.clone();
             Box::pin(async move {
                 let api_key = api_key.ok_or_else(|| {
-                    format!(
-                        "{} environment variable is not set",
-                        EnvVars::BRAVE_SEARCH_API_KEY
-                    )
+                    format!("{} is not configured", EnvVars::BRAVE_SEARCH_API_KEY)
                 })?;
 
                 let query = required_str(&args, "query")?;
@@ -702,6 +692,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::config::ToolSecrets;
     use crate::sandbox::*;
     use crate::test_support::MockSandbox;
     use crate::tool_registry::ToolContext;
@@ -1355,10 +1346,7 @@ mod tests {
         })
         .await;
         let err = result.unwrap_err();
-        assert!(
-            err.contains("BRAVE_SEARCH_API_KEY"),
-            "error should mention BRAVE_SEARCH_API_KEY, got: {err}"
-        );
+        assert_eq!(err, "BRAVE_SEARCH_API_KEY is not configured");
     }
 
     #[tokio::test]
@@ -1379,6 +1367,40 @@ mod tests {
         assert!(
             err.contains("query"),
             "error should mention missing query, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn register_core_tools_passes_configured_brave_search_key() {
+        let mut registry = ToolRegistry::new();
+        let config = SessionOptions {
+            tool_secrets: ToolSecrets {
+                brave_search_api_key: Some("fake-key".to_string()),
+            },
+            ..SessionOptions::default()
+        };
+
+        register_core_tools(&mut registry, &config, None);
+
+        let tool = registry
+            .get("web_search")
+            .expect("web_search should be registered");
+        let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
+        let result = (tool.executor)(serde_json::json!({}), ToolContext {
+            env,
+            cancel: CancellationToken::new(),
+            tool_env_provider: None,
+            session_id: None,
+            root_session_id: None,
+            tool_call_id: None,
+            agent_event_emitter: None,
+        })
+        .await;
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("query"),
+            "configured key should allow validation to reach query parsing, got: {err}"
         );
     }
 

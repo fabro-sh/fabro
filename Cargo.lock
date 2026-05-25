@@ -2559,6 +2559,7 @@ name = "fabro-vault"
 version = "0.244.0-nightly.0"
 dependencies = [
  "chrono",
+ "fabro-static",
  "fabro-types",
  "serde",
  "serde_json",

@@ -81,17 +81,14 @@ mod tests {
     use super::ServerSecrets;
 
     #[test]
-    fn server_secrets_snapshot_prefers_env_over_file() {
+    fn bootstrap_server_secrets_snapshot_prefers_env_over_file() {
         let dir = tempfile::tempdir().unwrap();
         let env_path = dir.path().join("server.env");
         envfile::write_env_file(
             &env_path,
             &HashMap::from([
                 ("SESSION_SECRET".to_string(), "file-value".to_string()),
-                (
-                    "GITHUB_APP_CLIENT_SECRET".to_string(),
-                    "file-client".to_string(),
-                ),
+                ("FABRO_DEV_TOKEN".to_string(), "file-dev-token".to_string()),
             ]),
         )
         .unwrap();
@@ -104,8 +101,8 @@ mod tests {
 
         assert_eq!(secrets.get("SESSION_SECRET").as_deref(), Some("env-value"));
         assert_eq!(
-            secrets.get("GITHUB_APP_CLIENT_SECRET").as_deref(),
-            Some("file-client")
+            secrets.get("FABRO_DEV_TOKEN").as_deref(),
+            Some("file-dev-token")
         );
     }
 }

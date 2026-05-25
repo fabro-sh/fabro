@@ -21,13 +21,14 @@ use fabro_mcp::config::McpServerSettings;
 #[cfg(test)]
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
+use fabro_static::EnvVars;
 use fabro_util::terminal::Styles;
 use fabro_vault::Vault;
 use tokio::io::{AsyncWriteExt, stdout};
 use tokio::signal;
 use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 
-use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
+use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback, ToolSecrets};
 use crate::error::InterruptReason;
 use crate::subagent::{SessionFactory, SubAgentManager};
 use crate::tool_permissions::{is_auto_approved, tool_category};
@@ -36,6 +37,16 @@ use crate::{
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, Message,
     OpenAiProfile, Sandbox, Session, SessionOptions,
 };
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Standalone agent CLI explicitly passes the Brave Search process-env credential into tool configuration."
+)]
+fn cli_tool_secrets() -> ToolSecrets {
+    ToolSecrets {
+        brave_search_api_key: std::env::var(EnvVars::BRAVE_SEARCH_API_KEY).ok(),
+    }
+}
 
 /// Public arguments for the agent command, usable from an external CLI.
 #[derive(Args)]
@@ -579,6 +590,7 @@ pub async fn run_with_args_and_client_and_catalog(
         permission_level: Some(permissions),
         skill_dirs: args.skills_dir.map(|d| vec![d]),
         mcp_servers,
+        tool_secrets: cli_tool_secrets(),
         ..SessionOptions::default()
     };
 
@@ -595,6 +607,7 @@ pub async fn run_with_args_and_client_and_catalog(
     let factory_env = Arc::clone(&env);
     let factory_hooks = config.tool_hooks.clone();
     let factory_permission_level = config.permission_level;
+    let factory_tool_secrets = config.tool_secrets.clone();
     let factory: SessionFactory = Arc::new(move || {
         let child_summarizer = Some(build_summarizer(
             &factory_provider_id,
@@ -616,6 +629,7 @@ pub async fn run_with_args_and_client_and_catalog(
             SessionOptions {
                 tool_hooks: factory_hooks.clone(),
                 permission_level: factory_permission_level,
+                tool_secrets: factory_tool_secrets.clone(),
                 ..SessionOptions::default()
             },
             None,

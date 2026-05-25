@@ -88,7 +88,11 @@ mod tests {
             EnvVars::OPENAI_API_KEY,
             EnvVars::ZAI_API_KEY,
         ] {
-            assert_eq!(secret_scope(name), Some(SecretScope::OptionalVault), "{name}");
+            assert_eq!(
+                secret_scope(name),
+                Some(SecretScope::OptionalVault),
+                "{name}"
+            );
             assert!(is_optional_vault_secret(name), "{name}");
             assert!(!is_bootstrap_secret(name), "{name}");
         }

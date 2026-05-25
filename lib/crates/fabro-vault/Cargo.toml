@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 chrono.workspace = true
+fabro-static = { path = "../fabro-static" }
 fabro-types = { path = "../fabro-types" }
 serde.workspace = true
 serde_json.workspace = true

@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 use std::{fmt, io};
 
 use chrono::{DateTime, Utc};
+use fabro_static::EnvVars;
 use fabro_types::SecretMetadata;
 pub use fabro_types::SecretType;
 
@@ -177,6 +178,10 @@ impl Vault {
     }
 
     fn validate_file_name(name: &str) -> Result<(), Error> {
+        if name == EnvVars::GITHUB_APP_PRIVATE_KEY {
+            return Ok(());
+        }
+
         if !name.starts_with('/') || name.ends_with('/') || name.contains('\0') {
             return Err(Error::InvalidName(name.to_string()));
         }
@@ -335,6 +340,26 @@ mod tests {
         assert_eq!(reloaded.file_secrets(), vec![(
             "/tmp/key.pem".to_string(),
             "pem".to_string()
+        )]);
+    }
+
+    #[test]
+    fn github_app_private_key_may_be_stored_as_file_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Vault::load(dir.path().join("secrets.json")).unwrap();
+
+        store
+            .set(
+                EnvVars::GITHUB_APP_PRIVATE_KEY,
+                "base64-pem",
+                SecretType::File,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(store.file_secrets(), vec![(
+            EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
+            "base64-pem".to_string()
         )]);
     }
 

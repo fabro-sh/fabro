@@ -35,7 +35,7 @@ pub mod types;
 pub use agent_profile::AgentProfile;
 pub use config::{
     SessionOptions, ToolAccess, ToolAccessPolicy, ToolApprovalAdapter, ToolExposureMode,
-    ToolHookCallback, ToolHookDecision,
+    ToolHookCallback, ToolHookDecision, ToolSecrets,
 };
 #[cfg(feature = "docker")]
 pub use docker_sandbox::{DockerSandbox, DockerSandboxOptions};

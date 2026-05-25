@@ -479,13 +479,18 @@ async fn http_log_records_webhook_principal_fields() {
 )]
 fn webhook_test_app(auth_mode: AuthMode) -> Router {
     let secret = TEST_WEBHOOK_SECRET.to_string();
-    let state = test_app_state_with_env_lookup_and_server_secret_env(
+    let state = test_app_state_with_env_lookup(
         default_test_server_settings(),
         RunLayer::default(),
         5,
         |_| None,
-        &HashMap::from([(WEBHOOK_SECRET_ENV.to_string(), secret)]),
     );
+    state
+        .vault
+        .try_write()
+        .expect("test vault should not be locked")
+        .set(WEBHOOK_SECRET_ENV, &secret, SecretType::Token, None)
+        .unwrap();
     build_router_with_options(
         state,
         &auth_mode,
@@ -1080,7 +1085,7 @@ async fn create_secret_allows_optional_vault_and_custom_secret_names() {
             .unwrap();
 
         assert_status!(response, StatusCode::OK).await;
-        assert_eq!(state.vault.read().await.get(name).as_deref(), Some(value));
+        assert_eq!(state.vault.read().await.get(name), Some(value));
     }
 }
 
@@ -1331,6 +1336,24 @@ async fn resolve_llm_client_reads_openai_token_from_vault() {
     assert!(llm_result.auth_issues.is_empty());
 }
 
+#[tokio::test]
+async fn resolve_llm_client_ignores_env_lookup_provider_tokens() {
+    let state = test_app_state_with_env_lookup(
+        default_test_server_settings(),
+        RunLayer::default(),
+        5,
+        |name| (name == EnvVars::OPENAI_API_KEY).then(|| "env-openai-key".to_string()),
+    );
+
+    let llm_result = state.resolve_llm_client().await.unwrap();
+
+    assert!(
+        llm_result.client.provider_names().is_empty(),
+        "server LLM credentials should come from vault only"
+    );
+    assert!(llm_result.auth_issues.is_empty());
+}
+
 struct FailingCredentialSource;
 
 #[async_trait::async_trait]
@@ -1404,17 +1427,16 @@ async fn llm_source_configured_providers_reads_openai_token_from_vault() {
 }
 
 #[tokio::test]
-async fn resolve_llm_client_uses_env_lookup_for_openai_settings() {
+async fn resolve_llm_client_uses_vault_key_without_env_lookup_openai_settings() {
     let server = MockServer::start_async().await;
     let response_mock = server
         .mock_async(|when, then| {
             when.method(POST)
                 .path("/v1/responses")
-                .header("authorization", "Bearer vault-openai-key")
-                .header("OpenAI-Organization", "env-org");
+                .header("authorization", "Bearer vault-openai-key");
             then.status(200)
                 .header("content-type", "application/json")
-                .json_body(openai_responses_payload("hello from env lookup"));
+                .json_body(openai_responses_payload("hello from vault key"));
         })
         .await;
     let state = TestAppStateBuilder::new()
@@ -1460,7 +1482,7 @@ async fn resolve_llm_client_uses_env_lookup_for_openai_settings() {
         .await
         .unwrap();
 
-    assert_eq!(response.text(), "hello from env lookup");
+    assert_eq!(response.text(), "hello from vault key");
     response_mock.assert_async().await;
 }
 
@@ -1588,11 +1610,11 @@ async fn delete_secret_by_name_removes_file_secret() {
 }
 
 #[test]
-fn server_secrets_resolve_process_env_before_server_env() {
+fn server_secrets_resolve_bootstrap_process_env_before_server_env() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("server.env"),
-        "SESSION_SECRET=file-value\nGITHUB_APP_CLIENT_SECRET=file-client\n",
+        "SESSION_SECRET=file-value\nFABRO_DEV_TOKEN=file-dev-token\n",
     )
     .unwrap();
 
@@ -1604,9 +1626,82 @@ fn server_secrets_resolve_process_env_before_server_env() {
 
     assert_eq!(secrets.get("SESSION_SECRET").as_deref(), Some("env-value"));
     assert_eq!(
-        secrets.get("GITHUB_APP_CLIENT_SECRET").as_deref(),
-        Some("file-client")
+        secrets.get("FABRO_DEV_TOKEN").as_deref(),
+        Some("file-dev-token")
     );
+}
+
+fn slack_app_state_with_secret_sources(
+    vault_entries: &[(&str, &str, SecretType)],
+    server_secret_env: HashMap<String, String>,
+) -> Arc<AppState> {
+    let (store, artifact_store) = test_store_bundle();
+    let vault_path = test_secret_store_path();
+    let server_env_path = vault_path.with_file_name("server.env");
+    let mut vault = Vault::load(vault_path.clone()).unwrap();
+    for (name, value, secret_type) in vault_entries {
+        vault.set(name, value, *secret_type, None).unwrap();
+    }
+    build_app_state(AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            default_test_server_settings(),
+            RunLayer::default(),
+            LlmCatalogSettings::default(),
+        ),
+        registry_factory_override: None,
+        max_concurrent_runs: 5,
+        store,
+        artifact_store,
+        vault_path,
+        preloaded_vault: Some(vault),
+        server_secrets: load_test_server_secrets(server_env_path, server_secret_env),
+        env_lookup: default_env_lookup(),
+        github_api_base_url: None,
+        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        shutdown: tokio_util::sync::CancellationToken::new(),
+    })
+    .expect("slack test app state should build")
+}
+
+#[test]
+fn slack_service_is_enabled_by_vault_tokens() {
+    let state = slack_app_state_with_secret_sources(
+        &[
+            (
+                EnvVars::FABRO_SLACK_BOT_TOKEN,
+                "xoxb-test",
+                SecretType::Token,
+            ),
+            (
+                EnvVars::FABRO_SLACK_APP_TOKEN,
+                "xapp-test",
+                SecretType::Token,
+            ),
+        ],
+        HashMap::new(),
+    );
+
+    assert!(state.slack_service.is_some());
+}
+
+#[test]
+fn slack_service_ignores_server_env_tokens() {
+    let state = slack_app_state_with_secret_sources(
+        &[],
+        HashMap::from([
+            (
+                EnvVars::FABRO_SLACK_BOT_TOKEN.to_string(),
+                "xoxb-server-env".to_string(),
+            ),
+            (
+                EnvVars::FABRO_SLACK_APP_TOKEN.to_string(),
+                "xapp-server-env".to_string(),
+            ),
+        ]),
+    );
+
+    assert!(state.slack_service.is_none());
 }
 
 #[cfg(unix)]
@@ -1662,16 +1757,20 @@ fn worker_command_opt_in_token_includes_agent_run_tools_scope() {
 
 #[cfg(unix)]
 #[test]
-fn worker_command_forwards_github_app_private_key_from_server_secrets() {
+fn worker_command_forwards_github_app_private_key_from_vault() {
     let storage_dir = tempfile::tempdir().unwrap();
-    let state = worker_command_test_state_with_extra_config_and_env_lookup(
-        storage_dir.path(),
-        &["dev-token"],
-        Some(TEST_DEV_TOKEN),
-        "",
-        &[(EnvVars::GITHUB_APP_PRIVATE_KEY, "test-private-key")],
-        |_| None,
-    );
+    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+    state
+        .vault
+        .try_write()
+        .expect("test vault should not be locked")
+        .set(
+            EnvVars::GITHUB_APP_PRIVATE_KEY,
+            "test-private-key",
+            SecretType::File,
+            None,
+        )
+        .unwrap();
     let cmd = worker_command(
         state.as_ref(),
         RunId::new(),
@@ -1894,6 +1993,7 @@ methods = ["dev-token"]
         store,
         artifact_store,
         vault_path,
+        preloaded_vault: None,
         server_secrets: ServerSecrets::load(server_env_path, HashMap::new()).unwrap(),
         env_lookup: default_env_lookup(),
         github_api_base_url: None,
@@ -2015,6 +2115,7 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
         store,
         artifact_store,
         vault_path: vault_path.to_path_buf(),
+        preloaded_vault: None,
         server_secrets: load_test_server_secrets(
             vault_path.with_file_name("server.env"),
             HashMap::new(),
@@ -5108,6 +5209,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         store,
         artifact_store,
         vault_path,
+        preloaded_vault: None,
         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         env_lookup: Arc::new(env_lookup),
         github_api_base_url,
@@ -5125,6 +5227,68 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
             .expect("test github token should be writable");
     }
     state
+}
+
+#[test]
+fn github_token_strategy_ignores_process_env_token() {
+    let state = create_github_token_app_state_with_env_lookup(None, None, |name| match name {
+        EnvVars::GITHUB_TOKEN => Some("ghu_from_env".to_string()),
+        _ => None,
+    });
+    let settings = state.server_settings();
+
+    let err = state
+        .github_credentials(&settings.server.integrations.github)
+        .expect_err("server runtime should ignore env-backed GitHub tokens");
+
+    assert_eq!(
+        err,
+        "GITHUB_TOKEN not configured -- run fabro install or run fabro secret set GITHUB_TOKEN"
+    );
+}
+
+#[test]
+fn github_token_strategy_ignores_gh_token_alias() {
+    let state = create_github_token_app_state_with_env_lookup(None, None, |name| match name {
+        EnvVars::GH_TOKEN => Some("ghu_from_env_alias".to_string()),
+        _ => None,
+    });
+    state
+        .vault
+        .try_write()
+        .expect("test vault should not already be locked")
+        .set(
+            EnvVars::GH_TOKEN,
+            "ghu_from_vault_alias",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
+    let settings = state.server_settings();
+
+    let err = state
+        .github_credentials(&settings.server.integrations.github)
+        .expect_err("server runtime should ignore GH_TOKEN in env and vault");
+
+    assert_eq!(
+        err,
+        "GITHUB_TOKEN not configured -- run fabro install or run fabro secret set GITHUB_TOKEN"
+    );
+}
+
+#[test]
+fn github_token_strategy_reads_github_token_from_vault() {
+    let state = create_github_token_app_state(Some("ghu_test"), None);
+    let settings = state.server_settings();
+
+    let credentials = state
+        .github_credentials(&settings.server.integrations.github)
+        .expect("vault GitHub token should resolve")
+        .expect("vault GitHub token should produce credentials");
+
+    assert!(
+        matches!(credentials, fabro_github::GitHubCredentials::Pat(token) if token == "ghu_test")
+    );
 }
 
 /// Build the (state, router, run_id) triple every PR-endpoint test
@@ -5423,8 +5587,19 @@ async fn list_models_marks_configured_true_when_provider_has_credential_material
         default_test_server_settings(),
         RunLayer::default(),
         5,
-        |name| (name == EnvVars::ANTHROPIC_API_KEY).then(|| "test-key".to_string()),
+        |_| None,
     );
+    state
+        .vault
+        .write()
+        .await
+        .set(
+            EnvVars::ANTHROPIC_API_KEY,
+            "test-key",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
     let app = crate::test_support::build_test_router(state);
 
     let req = Request::builder()
@@ -5600,14 +5775,25 @@ reasoning = false
 
 #[tokio::test]
 async fn list_providers_marks_configured_per_provider_and_omits_secrets() {
-    // Only `ANTHROPIC_API_KEY` is supplied, so anthropic resolves as configured
-    // while every other catalog provider does not.
+    // Only `ANTHROPIC_API_KEY` is supplied in the vault, so anthropic resolves as
+    // configured while every other catalog provider does not.
     let state = test_app_state_with_env_lookup(
         default_test_server_settings(),
         RunLayer::default(),
         5,
-        |name| (name == EnvVars::ANTHROPIC_API_KEY).then(|| "test-key".to_string()),
+        |_| None,
     );
+    state
+        .vault
+        .write()
+        .await
+        .set(
+            EnvVars::ANTHROPIC_API_KEY,
+            "test-key",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
     let app = crate::test_support::build_test_router(state);
 
     let req = Request::builder()

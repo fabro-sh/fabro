@@ -91,7 +91,7 @@ where
     }
     if github_enabled && lookup(EnvVars::GITHUB_APP_CLIENT_SECRET).is_none() {
         return Err(anyhow!(
-            "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not set."
+            "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not configured in the vault."
         ));
     }
 

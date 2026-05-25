@@ -1203,7 +1203,7 @@ async fn reconnect_run_sandbox(
         .sandbox
         .clone()
         .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "Run has no active sandbox."))?;
-    let daytona_api_key = state.vault_or_env_pub(EnvVars::DAYTONA_API_KEY);
+    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
     let sandbox = reconnect_for_run(&record, daytona_api_key, Some(*run_id))
         .await
         .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.to_string()))?;

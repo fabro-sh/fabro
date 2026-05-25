@@ -190,6 +190,7 @@ impl TestAppStateBuilder {
             store,
             artifact_store,
             vault_path,
+            preloaded_vault: None,
             server_secrets: load_test_server_secrets(server_env_path, self.server_secret_env),
             env_lookup: self.env_lookup,
             github_api_base_url: None,

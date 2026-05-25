@@ -146,10 +146,10 @@ use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, new_files_in_flight};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
 use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
+use crate::startup::load_startup_vault;
 use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
 use crate::{
-    canonical_host, demo, diagnostics, run_manifest, security_headers, static_files,
-    vault_legacy_migration, web_auth,
+    canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
 };
 
 mod handler;
@@ -1054,6 +1054,7 @@ pub(crate) struct AppStateConfig {
     pub(crate) store:                     Arc<Database>,
     pub(crate) artifact_store:            ArtifactStore,
     pub(crate) vault_path:                PathBuf,
+    pub(crate) preloaded_vault:           Option<Vault>,
     pub(crate) server_secrets:            ServerSecrets,
     pub(crate) env_lookup:                EnvLookup,
     pub(crate) github_api_base_url:       Option<String>,
@@ -1223,17 +1224,15 @@ impl AppState {
         AskFabroReadiness { default_model }
     }
 
-    pub(crate) fn vault_or_env(&self, name: &str) -> Option<String> {
-        process_env_var(name).or_else(|| {
-            self.vault
-                .try_read()
-                .ok()
-                .and_then(|vault| vault.get(name).map(str::to_string))
-        })
+    pub(crate) fn vault_secret(&self, name: &str) -> Option<String> {
+        self.vault
+            .try_read()
+            .ok()
+            .and_then(|vault| vault.get(name).map(str::to_string))
     }
 
-    fn env_lookup_or_vault_or_env(&self, name: &str) -> Option<String> {
-        (self.env_lookup)(name).or_else(|| self.vault_or_env(name))
+    pub(crate) fn config_env_lookup(&self, name: &str) -> Option<String> {
+        (self.env_lookup)(name)
     }
 
     pub(crate) async fn check_daytona_api_key(
@@ -1241,20 +1240,14 @@ impl AppState {
         api_key: String,
     ) -> anyhow::Result<daytona::DaytonaKeyCheck> {
         let base_url = self
-            .env_lookup_or_vault_or_env(EnvVars::DAYTONA_API_URL)
-            .or_else(|| self.env_lookup_or_vault_or_env(EnvVars::DAYTONA_SERVER_URL))
+            .config_env_lookup(EnvVars::DAYTONA_API_URL)
+            .or_else(|| self.config_env_lookup(EnvVars::DAYTONA_SERVER_URL))
             .unwrap_or_else(|| daytona::DEFAULT_DAYTONA_API_URL.to_string());
-        let org_id = self.env_lookup_or_vault_or_env(EnvVars::DAYTONA_ORGANIZATION_ID);
+        let org_id = self.config_env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
 
         let http_client = fabro_http::http_client().context("failed to build HTTP client")?;
         daytona::check_daytona_api_key_with(&base_url, org_id.as_deref(), api_key, http_client)
             .await
-    }
-
-    /// Public accessor used by `run_files` — mirrors `vault_or_env` without
-    /// changing its visibility semantics.
-    pub(crate) fn vault_or_env_pub(&self, name: &str) -> Option<String> {
-        self.vault_or_env(name)
     }
 
     /// Borrow the persistent store so sibling modules can open run readers
@@ -1317,7 +1310,7 @@ impl AppState {
                 let Some(app_id) = settings.app_id.as_ref().map(InterpString::as_source) else {
                     return Ok(None);
                 };
-                let raw = self.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
+                let raw = self.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
                 let Some(raw) = raw else {
                     return Ok(None);
                 };
@@ -1332,8 +1325,7 @@ impl AppState {
             }
             GithubIntegrationStrategy::Token => {
                 let token = self
-                    .vault_or_env(EnvVars::GITHUB_TOKEN)
-                    .or_else(|| self.vault_or_env(EnvVars::GH_TOKEN))
+                    .vault_secret(EnvVars::GITHUB_TOKEN)
                     .as_deref()
                     .map(str::trim)
                     .filter(|token| !token.is_empty())
@@ -1345,7 +1337,7 @@ impl AppState {
                         Ok(Some(fabro_github::GitHubCredentials::Pat(token)))
                     }
                     None => Err(
-                        "GITHUB_TOKEN not configured — run fabro install or set GITHUB_TOKEN"
+                        "GITHUB_TOKEN not configured -- run fabro install or run fabro secret set GITHUB_TOKEN"
                             .to_string(),
                     ),
                 }
@@ -1445,7 +1437,7 @@ fn resolve_interp_string(value: &InterpString) -> anyhow::Result<String> {
 
 #[expect(
     clippy::disallowed_methods,
-    reason = "Server state owns process-env lookup facades for interpolation and vault fallbacks."
+    reason = "Server state owns process-env lookup facades for interpolation and non-secret configuration."
 )]
 pub(crate) fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
@@ -1563,7 +1555,7 @@ pub fn build_router_with_options(
         .github_endpoints
         .clone()
         .unwrap_or_else(|| Arc::new(GithubEndpoints::production_defaults()));
-    let webhook_secret = state.server_secret(WEBHOOK_SECRET_ENV);
+    let webhook_secret = state.vault_secret(WEBHOOK_SECRET_ENV);
     let principal_layer = middleware::from_fn_with_state(Arc::clone(&state), principal_middleware);
     let api_common = if web_enabled {
         Router::new()
@@ -2066,6 +2058,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         store,
         artifact_store,
         vault_path,
+        preloaded_vault,
         server_secrets,
         env_lookup,
         github_api_base_url,
@@ -2074,39 +2067,13 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         shutdown,
     } = config;
 
-    match vault_legacy_migration::migrate_legacy_vault_file(&vault_path) {
-        Ok(report) if report.changed() => {
-            let backup_path = report
-                .backup_path
-                .as_ref()
-                .map_or_else(|| "<none>".to_string(), |path| path.display().to_string());
-            warn!(
-                migrated_entries = report.migrated_entries,
-                skipped_entries = report.skipped_entries,
-                backup_path = %backup_path,
-                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
-                "Migrated legacy vault file"
-            );
-        }
-        Ok(_) => {}
-        Err(err) => {
-            warn!(
-                error = %err,
-                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
-                "Legacy vault migration failed; continuing with normal vault load"
-            );
-        }
-    }
-    let vault = Vault::load(vault_path.clone())
-        .with_context(|| format!("load vault {}", vault_path.display()))?;
+    let vault = match preloaded_vault {
+        Some(vault) => vault,
+        None => load_startup_vault(&vault_path)?,
+    };
     let vault = Arc::new(AsyncRwLock::new(vault));
-    let llm_source: Arc<dyn CredentialSource> = Arc::new(VaultCredentialSource::with_env_lookup(
-        Arc::clone(&vault),
-        {
-            let env_lookup = Arc::clone(&env_lookup);
-            move |name| env_lookup(name)
-        },
-    ));
+    let llm_source: Arc<dyn CredentialSource> =
+        Arc::new(VaultCredentialSource::vault_only(Arc::clone(&vault)));
     let (global_event_tx, _) = broadcast::channel(4096);
     let current_server_settings = Arc::new(resolved_settings.server_settings);
     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
@@ -2131,7 +2098,12 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
                     .map_err(anyhow::Error::from)
             })
             .transpose()?;
-        match resolve_slack_credentials_status_with_lookup(|name| server_secrets.get(name)) {
+        match resolve_slack_credentials_status_with_lookup(|name| {
+            vault
+                .try_read()
+                .ok()
+                .and_then(|vault| vault.get(name).map(str::to_string))
+        }) {
             SlackCredentialResolution::Configured(credentials) => {
                 info!(
                     default_channel_configured = default_channel.is_some(),
@@ -2351,7 +2323,7 @@ async fn delete_run_sandbox_resource(
         }));
     }
 
-    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
+    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
     let sandbox = match reconnect_for_run(&record, daytona_api_key, Some(id)).await {
         Ok(sandbox) => sandbox,
         Err(err) if force || delete_started => {
@@ -3260,7 +3232,7 @@ fn worker_command(
     cmd.env(EnvVars::FABRO_CONFIG, state.active_config_path());
     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
-    if let Some(pem) = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
+    if let Some(pem) = state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
         cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
     }
 

@@ -30,6 +30,11 @@ impl VaultCredentialSource {
         let resolver = CredentialResolver::with_env_lookup(Arc::clone(&vault), env_lookup);
         Self { vault, resolver }
     }
+
+    #[must_use]
+    pub fn vault_only(vault: Arc<AsyncRwLock<Vault>>) -> Self {
+        Self::with_env_lookup(vault, |_| None)
+    }
 }
 
 impl std::fmt::Debug for VaultCredentialSource {
@@ -150,5 +155,33 @@ mod tests {
             ProviderId::anthropic(),
             ProviderId::openai()
         ]);
+    }
+
+    #[tokio::test]
+    async fn vault_only_ignores_env_lookup_values() {
+        let env_dir = tempfile::tempdir().unwrap();
+        let vault_only_dir = tempfile::tempdir().unwrap();
+        let catalog = default_catalog();
+        let env_backed = VaultCredentialSource::with_env_lookup(
+            Arc::new(AsyncRwLock::new(
+                Vault::load(env_dir.path().join("secrets.json")).unwrap(),
+            )),
+            |name| (name == "OPENAI_API_KEY").then(|| "env-openai-key".to_string()),
+        );
+        assert_eq!(env_backed.configured_providers(&catalog).await, vec![
+            ProviderId::openai()
+        ]);
+
+        let vault_only = VaultCredentialSource::vault_only(Arc::new(AsyncRwLock::new(
+            Vault::load(vault_only_dir.path().join("secrets.json")).unwrap(),
+        )));
+
+        assert!(
+            vault_only.configured_providers(&catalog).await.is_empty(),
+            "vault_only must not resolve env-backed provider keys"
+        );
+        let resolved = vault_only.resolve(&catalog).await.unwrap();
+        assert!(resolved.credentials.is_empty());
+        assert!(resolved.auth_issues.is_empty());
     }
 }

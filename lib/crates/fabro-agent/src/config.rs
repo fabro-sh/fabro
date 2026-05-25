@@ -99,6 +99,11 @@ impl ToolHookCallback for ToolApprovalAdapter {
     async fn post_tool_use_failure(&self, _tool_name: &str, _tool_call_id: &str, _error: &str) {}
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ToolSecrets {
+    pub brave_search_api_key: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct SessionOptions {
     pub max_turns: usize,
@@ -134,6 +139,8 @@ pub struct SessionOptions {
     pub skill_dirs: Option<Vec<String>>,
     /// MCP server configurations to connect to on session startup.
     pub mcp_servers: Vec<McpServerSettings>,
+    /// Secret values supplied by the runtime boundary for native tools.
+    pub tool_secrets: ToolSecrets,
     /// Wall-clock timeout for the entire `process_input` call.
     /// When set, the session's cancel token is triggered after this duration.
     pub wall_clock_timeout: Option<Duration>,
@@ -177,6 +184,10 @@ impl std::fmt::Debug for SessionOptions {
             .field("compaction_preserve_turns", &self.compaction_preserve_turns)
             .field("skill_dirs", &self.skill_dirs)
             .field("mcp_servers", &self.mcp_servers.len())
+            .field(
+                "brave_search_configured",
+                &self.tool_secrets.brave_search_api_key.is_some(),
+            )
             .field("wall_clock_timeout", &self.wall_clock_timeout)
             .finish()
     }
@@ -208,6 +219,7 @@ impl Default for SessionOptions {
             compaction_preserve_turns: 6,
             skill_dirs: None,
             mcp_servers: Vec::new(),
+            tool_secrets: ToolSecrets::default(),
             wall_clock_timeout: None,
         }
     }
@@ -286,7 +298,23 @@ mod tests {
             ToolExposureMode::AutoApprovedOnly
         );
         assert!(config.mcp_servers.is_empty());
+        assert_eq!(config.tool_secrets, ToolSecrets::default());
         assert!(config.wall_clock_timeout.is_none());
+    }
+
+    #[test]
+    fn session_options_debug_redacts_tool_secret_values() {
+        let config = SessionOptions {
+            tool_secrets: ToolSecrets {
+                brave_search_api_key: Some("brave-secret-value".to_string()),
+            },
+            ..SessionOptions::default()
+        };
+
+        let debug = format!("{config:?}");
+
+        assert!(debug.contains("brave_search_configured: true"));
+        assert!(!debug.contains("brave-secret-value"));
     }
 
     #[test]

@@ -15,7 +15,7 @@ use fabro_agent::profiles::assemble_system_prompt;
 use fabro_agent::tool_registry::ToolRegistry;
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, OpenAiProfile,
-    Session, SessionEvent, SessionOptions, WebFetchSummarizer,
+    Session, SessionEvent, SessionOptions, ToolSecrets, WebFetchSummarizer,
 };
 use fabro_api::types::{
     CreateRunSessionRequest, PaginatedEventList, PaginationMeta, SubmitTurnRequest,
@@ -24,6 +24,7 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::ToolDefinition;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_sandbox::reconnect::reconnect_for_run;
+use fabro_static::EnvVars;
 use fabro_store::{
     EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_sessions,
 };
@@ -708,7 +709,7 @@ async fn build_agent_session(
     }
     let sandbox = reconnect_for_run(
         sandbox_record,
-        state.vault_or_env("DAYTONA_API_KEY"),
+        state.vault_secret(EnvVars::DAYTONA_API_KEY),
         Some(run_id),
     )
     .await
@@ -756,6 +757,9 @@ async fn build_agent_session(
     let config = SessionOptions {
         tool_access_policy: Some(ask_fabro_policy),
         tool_exposure_mode: ToolExposureMode::AutoApprovedOnly,
+        tool_secrets: ToolSecrets {
+            brave_search_api_key: state.vault_secret(EnvVars::BRAVE_SEARCH_API_KEY),
+        },
         ..SessionOptions::default()
     };
 
