@@ -139,7 +139,7 @@ _version = 1
     );
     let state = fabro_server::test_support::TestAppStateBuilder::new()
         .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
-        .env_lookup(|name| (name == "OPENAI_API_KEY").then(|| "test-key".to_string()))
+        .vault_entries([("OPENAI_API_KEY", "test-key")])
         .build();
     let app = fabro_server::test_support::build_test_router(state);
     let created = create_run(&app, minimal_manifest_json(MINIMAL_DOT)).await;
