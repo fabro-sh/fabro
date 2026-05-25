@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { ChevronDownIcon } from "@heroicons/react/16/solid";
 import type { Model, Provider } from "@qltysh/fabro-api-client";
@@ -44,7 +45,7 @@ export default function SettingsModels() {
 }
 
 function ProvidersPanel({ providers }: { providers: Provider[] }) {
-  const { configured, unconfigured } = useMemo(() => {
+  const { configured, unconfigured, priorityProviderId } = useMemo(() => {
     const configured: Provider[] = [];
     const unconfigured: Provider[] = [];
     for (const provider of providers) {
@@ -54,7 +55,11 @@ function ProvidersPanel({ providers }: { providers: Provider[] }) {
         unconfigured.push(provider);
       }
     }
-    return { configured, unconfigured };
+    const top = configured.reduce<Provider | null>(
+      (best, p) => (!best || p.priority > best.priority ? p : best),
+      null,
+    );
+    return { configured, unconfigured, priorityProviderId: top?.id ?? null };
   }, [providers]);
   const [showUnconfigured, setShowUnconfigured] = useState(false);
   const showUnconfiguredRows = configured.length === 0 || showUnconfigured;
@@ -72,7 +77,11 @@ function ProvidersPanel({ providers }: { providers: Provider[] }) {
   return (
     <Panel title="Providers">
       {configured.map((provider) => (
-        <ProviderRow key={provider.id} provider={provider} />
+        <ProviderRow
+          key={provider.id}
+          provider={provider}
+          isPriority={provider.id === priorityProviderId}
+        />
       ))}
       {showUnconfiguredRows
         ? unconfigured.map((provider) => (
@@ -99,7 +108,13 @@ function ProvidersPanel({ providers }: { providers: Provider[] }) {
   );
 }
 
-function ProviderRow({ provider }: { provider: Provider }) {
+function ProviderRow({
+  provider,
+  isPriority = false,
+}: {
+  provider:    Provider;
+  isPriority?: boolean;
+}) {
   const name = provider.display_name || provider.id;
   const modelCount = `${provider.model_count} ${plural(provider.model_count, "model", "models")}`;
   return (
@@ -108,7 +123,10 @@ function ProviderRow({ provider }: { provider: Provider }) {
         <span className="flex items-center gap-4">
           <ProviderLogo provider={provider} />
           <span className="flex min-w-0 flex-col">
-            <span className="text-sm text-fg-2">{name}</span>
+            <span className="flex items-center gap-2 text-sm text-fg-2">
+              {name}
+              {isPriority ? <Label>Priority</Label> : null}
+            </span>
             <span className="text-xs/5 text-fg-3">{modelCount}</span>
           </span>
         </span>
@@ -116,6 +134,14 @@ function ProviderRow({ provider }: { provider: Provider }) {
     >
       <ProviderStatus provider={provider} />
     </Row>
+  );
+}
+
+function Label({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-md bg-overlay-strong px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-3">
+      {children}
+    </span>
   );
 }
 
@@ -336,10 +362,7 @@ function ModelTableRow({
 
 function ModelNameCell({ model }: { model: Model }) {
   const hasAliases = model.aliases.length > 0;
-  if (!hasAliases) {
-    return <span className="font-mono text-xs text-fg-2">{model.id}</span>;
-  }
-  return (
+  const nameNode = hasAliases ? (
     <span className="group/aliases relative inline-flex">
       <button
         type="button"
@@ -362,6 +385,20 @@ function ModelNameCell({ model }: { model: Model }) {
           </span>
         ))}
       </span>
+    </span>
+  ) : (
+    <span className="font-mono text-xs text-fg-2">{model.id}</span>
+  );
+
+  if (!model.default && !model.small_default) {
+    return nameNode;
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      {nameNode}
+      {model.default ? <Label>Default</Label> : null}
+      {model.small_default ? <Label>Small</Label> : null}
     </span>
   );
 }
