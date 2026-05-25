@@ -17,11 +17,11 @@ use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::envfile::{EnvFileRemoval, EnvFileUpdate};
 use fabro_install::{
-    InstallListenConfig, InstallPersistencePlan, InstallSandboxSelection,
-    OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite,
-    VaultSecretWrite, merge_server_settings, prepare_dev_token_write_for_install,
-    write_github_app_settings, write_object_store_settings, write_sandbox_settings,
-    write_token_settings,
+    GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, InstallListenConfig, InstallPersistencePlan,
+    InstallSandboxSelection, OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV,
+    PendingSettingsWrite, VaultSecretWrite, merge_server_settings,
+    prepare_dev_token_write_for_install, write_github_app_settings, write_object_store_settings,
+    write_sandbox_settings, write_token_settings,
 };
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
@@ -1580,17 +1580,12 @@ async fn post_install_finish(
                 secret_type: VaultSecretType::Token,
                 description: None,
             });
-            vault_removals.extend([
-                EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
-                EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
-                EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string(),
-            ]);
-            server_env_removals.extend([
-                make_env_removal(EnvVars::GITHUB_TOKEN),
-                make_env_removal(EnvVars::GITHUB_APP_PRIVATE_KEY),
-                make_env_removal(EnvVars::GITHUB_APP_CLIENT_SECRET),
-                make_env_removal(EnvVars::GITHUB_APP_WEBHOOK_SECRET),
-            ]);
+            vault_removals.extend(GITHUB_APP_VAULT_KEYS.iter().map(|k| (*k).to_string()));
+            server_env_removals.extend(
+                GITHUB_INSTALL_SECRET_KEYS
+                    .iter()
+                    .map(|k| make_env_removal(k)),
+            );
             let dev_token_path = Storage::new(state.storage_dir.as_ref())
                 .runtime_directory()
                 .dev_token_path();
@@ -1639,12 +1634,11 @@ async fn post_install_finish(
                 vault_removals.push(EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string());
             }
             vault_removals.push(EnvVars::GITHUB_TOKEN.to_string());
-            server_env_removals.extend([
-                make_env_removal(EnvVars::GITHUB_TOKEN),
-                make_env_removal(EnvVars::GITHUB_APP_PRIVATE_KEY),
-                make_env_removal(EnvVars::GITHUB_APP_CLIENT_SECRET),
-                make_env_removal(EnvVars::GITHUB_APP_WEBHOOK_SECRET),
-            ]);
+            server_env_removals.extend(
+                GITHUB_INSTALL_SECRET_KEYS
+                    .iter()
+                    .map(|k| make_env_removal(k)),
+            );
         }
     }
 

@@ -34,6 +34,24 @@ pub const OBJECT_STORE_MANAGED_COMMENT: &str = "managed by fabro-install: object
 pub const OBJECT_STORE_ACCESS_KEY_ID_ENV: &str = EnvVars::AWS_ACCESS_KEY_ID;
 pub const OBJECT_STORE_SECRET_ACCESS_KEY_ENV: &str = EnvVars::AWS_SECRET_ACCESS_KEY;
 
+/// Every GitHub-install secret name. Used to drop stale entries from
+/// `server.env` whenever an install runs so a switch between Token and App
+/// strategies leaves no residue behind.
+pub const GITHUB_INSTALL_SECRET_KEYS: &[&str] = &[
+    EnvVars::GITHUB_TOKEN,
+    EnvVars::GITHUB_APP_PRIVATE_KEY,
+    EnvVars::GITHUB_APP_CLIENT_SECRET,
+    EnvVars::GITHUB_APP_WEBHOOK_SECRET,
+];
+
+/// GitHub App vault secret names cleared when switching back to the Token
+/// strategy.
+pub const GITHUB_APP_VAULT_KEYS: &[&str] = &[
+    EnvVars::GITHUB_APP_PRIVATE_KEY,
+    EnvVars::GITHUB_APP_CLIENT_SECRET,
+    EnvVars::GITHUB_APP_WEBHOOK_SECRET,
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultSecretWrite {
     pub name:        String,

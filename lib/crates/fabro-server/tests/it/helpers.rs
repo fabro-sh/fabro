@@ -129,10 +129,7 @@ pub(crate) fn test_app_with_mock_anthropic(mock_base_url: &str) -> axum::Router 
             "anthropic",
             mock_base_url,
         ))
-        .env_lookup(|name| match name {
-            "ANTHROPIC_API_KEY" => Some("test-key".to_string()),
-            _ => None,
-        })
+        .vault_entries([("ANTHROPIC_API_KEY", "test-key")])
         .build();
     build_test_router(state)
 }

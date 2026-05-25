@@ -28,10 +28,11 @@ use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
 use fabro_config::{Storage, UserSettingsBuilder, envfile};
 use fabro_install::{
-    InstallListenConfig, InstallPersistencePlan, PendingDevTokenWrite, PendingSettingsWrite,
-    VaultSecretWrite, merge_server_settings as merge_server_settings_impl,
-    prepare_dev_token_write_for_install, restore_optional_file, rollback_dev_token_write,
-    write_github_app_settings, write_token_settings,
+    GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, InstallListenConfig, InstallPersistencePlan,
+    PendingDevTokenWrite, PendingSettingsWrite, VaultSecretWrite,
+    merge_server_settings as merge_server_settings_impl, prepare_dev_token_write_for_install,
+    restore_optional_file, rollback_dev_token_write, write_github_app_settings,
+    write_token_settings,
 };
 use fabro_model::catalog::CatalogProvider;
 use fabro_model::{Catalog, CredentialRef, ProviderId};
@@ -71,6 +72,7 @@ use crate::{local_server, server_client, user_config};
 
 const GITHUB_TOKEN_SECRET_KEY: &str = fabro_static::EnvVars::GITHUB_TOKEN;
 const GITHUB_APP_PRIVATE_KEY_KEY: &str = fabro_static::EnvVars::GITHUB_APP_PRIVATE_KEY;
+#[cfg(test)]
 const GITHUB_APP_CLIENT_SECRET_KEY: &str = fabro_static::EnvVars::GITHUB_APP_CLIENT_SECRET;
 const GITHUB_APP_WEBHOOK_SECRET_KEY: &str = fabro_static::EnvVars::GITHUB_APP_WEBHOOK_SECRET;
 
@@ -1618,28 +1620,14 @@ async fn run_install_github_inner(
                 secret_type: VaultSecretType::Token,
                 description: None,
             });
-            server_env_remove.extend([
-                GITHUB_TOKEN_SECRET_KEY,
-                GITHUB_APP_PRIVATE_KEY_KEY,
-                GITHUB_APP_CLIENT_SECRET_KEY,
-                GITHUB_APP_WEBHOOK_SECRET_KEY,
-            ]);
-            vault_remove.extend([
-                GITHUB_APP_PRIVATE_KEY_KEY,
-                GITHUB_APP_CLIENT_SECRET_KEY,
-                GITHUB_APP_WEBHOOK_SECRET_KEY,
-            ]);
+            server_env_remove.extend(GITHUB_INSTALL_SECRET_KEYS.iter().copied());
+            vault_remove.extend(GITHUB_APP_VAULT_KEYS.iter().copied());
         }
         GitHubInstallSelection::App { owner, username } => {
             let allowed_username = username.clone().context(
                 "GitHub App install requires an authenticated GitHub username; run `gh auth login` and rerun `fabro install github`",
             )?;
-            server_env_remove.extend([
-                GITHUB_TOKEN_SECRET_KEY,
-                GITHUB_APP_PRIVATE_KEY_KEY,
-                GITHUB_APP_CLIENT_SECRET_KEY,
-                GITHUB_APP_WEBHOOK_SECRET_KEY,
-            ]);
+            server_env_remove.extend(GITHUB_INSTALL_SECRET_KEYS.iter().copied());
             let registration = setup_github_app(
                 &s,
                 &web_url,
@@ -1843,17 +1831,8 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
                 type_:       ApiSecretType::Token,
                 description: None,
             });
-            server_env_remove.extend([
-                GITHUB_TOKEN_SECRET_KEY,
-                GITHUB_APP_PRIVATE_KEY_KEY,
-                GITHUB_APP_CLIENT_SECRET_KEY,
-                GITHUB_APP_WEBHOOK_SECRET_KEY,
-            ]);
-            vault_remove.extend([
-                GITHUB_APP_PRIVATE_KEY_KEY,
-                GITHUB_APP_CLIENT_SECRET_KEY,
-                GITHUB_APP_WEBHOOK_SECRET_KEY,
-            ]);
+            server_env_remove.extend(GITHUB_INSTALL_SECRET_KEYS.iter().copied());
+            vault_remove.extend(GITHUB_APP_VAULT_KEYS.iter().copied());
             Some(PendingGitHubSettings::Token)
         }
         GitHubInstallSelection::App { owner, username } => {
@@ -1890,12 +1869,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
                     .into_iter()
                     .map(|(key, value)| github_app_secret_request(key, value)),
             );
-            server_env_remove.extend([
-                GITHUB_TOKEN_SECRET_KEY,
-                GITHUB_APP_PRIVATE_KEY_KEY,
-                GITHUB_APP_CLIENT_SECRET_KEY,
-                GITHUB_APP_WEBHOOK_SECRET_KEY,
-            ]);
+            server_env_remove.extend(GITHUB_INSTALL_SECRET_KEYS.iter().copied());
             vault_remove.push(GITHUB_TOKEN_SECRET_KEY);
             if !webhook_configured {
                 vault_remove.push(GITHUB_APP_WEBHOOK_SECRET_KEY);

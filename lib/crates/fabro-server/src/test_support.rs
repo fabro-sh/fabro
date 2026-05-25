@@ -21,6 +21,7 @@ use fabro_store::{ArtifactStore, Database};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{AuthMethod, IdpIdentity, ServerSettings};
 use fabro_util::error::SharedError;
+use fabro_vault::{SecretType, Vault};
 use fabro_workflow::handler::HandlerRegistry;
 use object_store::memory::InMemory as MemoryObjectStore;
 use tokio_util::sync::CancellationToken;
@@ -62,6 +63,7 @@ pub struct TestAppStateBuilder {
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     store_bundle:              Option<(Arc<Database>, ArtifactStore)>,
     vault_path:                Option<PathBuf>,
+    vault_entries:             Vec<(String, String)>,
     server_env_path:           Option<PathBuf>,
     active_config_path:        Option<PathBuf>,
     server_secret_env:         HashMap<String, String>,
@@ -78,6 +80,7 @@ impl Default for TestAppStateBuilder {
             registry_factory_override: None,
             store_bundle:              None,
             vault_path:                None,
+            vault_entries:             Vec::new(),
             server_env_path:           None,
             active_config_path:        None,
             server_secret_env:         HashMap::new(),
@@ -170,9 +173,30 @@ impl TestAppStateBuilder {
         self
     }
 
+    /// Pre-populate the vault file with optional integration secrets (token
+    /// type) before [`build_app_state`] opens it.
+    pub fn vault_entries<I, K, V>(mut self, entries: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.vault_entries
+            .extend(entries.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self
+    }
+
     pub fn build(self) -> Arc<AppState> {
         let (store, artifact_store) = self.store_bundle.unwrap_or_else(test_store_bundle);
         let vault_path = self.vault_path.unwrap_or_else(test_secret_store_path);
+        if !self.vault_entries.is_empty() {
+            let mut vault = Vault::load(vault_path.clone()).expect("test vault should load");
+            for (name, value) in &self.vault_entries {
+                vault
+                    .set(name, value, SecretType::Token, None)
+                    .expect("test vault entry should persist");
+            }
+        }
         let server_env_path = self
             .server_env_path
             .unwrap_or_else(|| vault_path.with_file_name("server.env"));
@@ -354,21 +378,6 @@ pub fn test_app_state_with_env_lookup(
         .runtime_settings(server_settings, manifest_run_defaults)
         .max_concurrent_runs(max_concurrent_runs)
         .env_lookup(env_lookup)
-        .build()
-}
-
-pub fn test_app_state_with_env_lookup_and_server_secret_env(
-    server_settings: ServerSettings,
-    manifest_run_defaults: RunLayer,
-    max_concurrent_runs: usize,
-    env_lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
-    server_secret_env: &HashMap<String, String>,
-) -> Arc<AppState> {
-    TestAppStateBuilder::new()
-        .runtime_settings(server_settings, manifest_run_defaults)
-        .max_concurrent_runs(max_concurrent_runs)
-        .env_lookup(env_lookup)
-        .server_secret_env(server_secret_env.clone())
         .build()
 }
 

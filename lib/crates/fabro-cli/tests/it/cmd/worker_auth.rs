@@ -21,6 +21,7 @@ use fabro_client::{AuthEntry, AuthStore, OAuthEntry, ServerTarget, StoredSubject
 use fabro_config::{Storage, envfile};
 use fabro_store::EventEnvelope;
 use fabro_test::{apply_test_isolation, expect_reqwest_json, isolated_storage_dir, test_context};
+use fabro_vault::{SecretType, Vault};
 
 use super::support::{find_run_dir, output_stderr, output_stdout};
 use crate::support::{
@@ -74,12 +75,19 @@ client_id = "github-client-id"
         .unwrap();
         envfile::merge_env_file(
             &Storage::new(&storage_dir).runtime_directory().env_path(),
-            [
-                ("SESSION_SECRET", TEST_SESSION_SECRET),
-                ("GITHUB_APP_CLIENT_SECRET", TEST_GITHUB_CLIENT_SECRET),
-            ],
+            [("SESSION_SECRET", TEST_SESSION_SECRET)],
         )
         .unwrap();
+        let mut vault =
+            Vault::load(Storage::new(&storage_dir).secrets_path()).expect("test vault should load");
+        vault
+            .set(
+                "GITHUB_APP_CLIENT_SECRET",
+                TEST_GITHUB_CLIENT_SECRET,
+                SecretType::Token,
+                None,
+            )
+            .expect("GitHub client secret should store in test vault");
 
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_fabro"));
         apply_test_isolation(&mut cmd, home_root.path());

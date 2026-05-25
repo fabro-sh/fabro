@@ -1,7 +1,7 @@
 use crate::EnvVars;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SecretScope {
+enum SecretScope {
     Bootstrap,
     OptionalVault,
 }
@@ -32,7 +32,7 @@ const OPTIONAL_VAULT_SECRETS: &[&str] = &[
     EnvVars::DAYTONA_API_KEY,
 ];
 
-pub fn secret_scope(name: &str) -> Option<SecretScope> {
+fn secret_scope(name: &str) -> Option<SecretScope> {
     if BOOTSTRAP_SECRETS.contains(&name) {
         Some(SecretScope::Bootstrap)
     } else if OPTIONAL_VAULT_SECRETS.contains(&name) {
@@ -46,7 +46,8 @@ pub fn is_bootstrap_secret(name: &str) -> bool {
     secret_scope(name) == Some(SecretScope::Bootstrap)
 }
 
-pub fn is_optional_vault_secret(name: &str) -> bool {
+#[cfg(test)]
+fn is_optional_vault_secret(name: &str) -> bool {
     secret_scope(name) == Some(SecretScope::OptionalVault)
 }
 
