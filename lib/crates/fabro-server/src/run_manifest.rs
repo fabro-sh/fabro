@@ -26,7 +26,7 @@ use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
-use fabro_types::{ManifestPath, RunId, SandboxProvider, ServerSettings, WorkflowSettings};
+use fabro_types::{ManifestPath, RunId, SandboxProviderKind, ServerSettings, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;
@@ -632,7 +632,7 @@ fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<Chec
 
 pub(crate) fn sandbox_provider_policy_error(
     server_settings: &ServerSettings,
-    provider: SandboxProvider,
+    provider: SandboxProviderKind,
 ) -> Option<String> {
     let enabled = server_settings
         .server
@@ -647,8 +647,8 @@ pub(crate) fn sandbox_provider_policy_error(
     })
 }
 
-pub(crate) fn effective_sandbox_provider(settings: &RunNamespace) -> SandboxProvider {
-    SandboxProvider::from(settings.environment.provider).effective_for(settings.execution.mode)
+pub(crate) fn effective_sandbox_provider(settings: &RunNamespace) -> SandboxProviderKind {
+    SandboxProviderKind::from(settings.environment.provider).effective_for(settings.execution.mode)
 }
 
 fn resolve_daytona_config(settings: &RunNamespace) -> DaytonaConfig {
@@ -665,10 +665,10 @@ struct GitRemoteRefCheck {
     branch:     Option<String>,
 }
 
-fn clone_disabled_for_provider(provider: SandboxProvider, resolved_run: &RunNamespace) -> bool {
+fn clone_disabled_for_provider(provider: SandboxProviderKind, resolved_run: &RunNamespace) -> bool {
     match provider {
-        SandboxProvider::Docker | SandboxProvider::Daytona => !resolved_run.clone.enabled,
-        SandboxProvider::Local => false,
+        SandboxProviderKind::Docker | SandboxProviderKind::Daytona => !resolved_run.clone.enabled,
+        SandboxProviderKind::Local => false,
     }
 }
 
@@ -742,7 +742,7 @@ fn repository_access_details(request: &GitRemoteRefCheck) -> Vec<CheckDetail> {
 
 async fn run_repository_access_check(
     checks: &mut Vec<CheckResult>,
-    sandbox_provider: SandboxProvider,
+    sandbox_provider: SandboxProviderKind,
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
@@ -760,7 +760,7 @@ async fn run_repository_access_check(
 
 async fn run_repository_access_check_with<F, Fut>(
     checks: &mut Vec<CheckResult>,
-    sandbox_provider: SandboxProvider,
+    sandbox_provider: SandboxProviderKind,
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
@@ -876,7 +876,7 @@ async fn check_git_remote_ref(
 }
 
 fn preflight_sandbox_spec(
-    sandbox_provider: SandboxProvider,
+    sandbox_provider: SandboxProviderKind,
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
@@ -889,10 +889,10 @@ fn preflight_sandbox_spec(
     let clone_branch = prepared.git.as_ref().map(|git| git.branch.clone());
 
     match sandbox_provider {
-        SandboxProvider::Local => SandboxSpec::Local {
+        SandboxProviderKind::Local => SandboxSpec::Local {
             working_directory: prepared.source_directory.clone(),
         },
-        SandboxProvider::Docker => {
+        SandboxProviderKind::Docker => {
             let mut config = resolve_docker_config(resolved_run);
             config.skip_clone = true;
             SandboxSpec::Docker {
@@ -903,7 +903,7 @@ fn preflight_sandbox_spec(
                 clone_branch,
             }
         }
-        SandboxProvider::Daytona => {
+        SandboxProviderKind::Daytona => {
             let mut config = resolve_daytona_config(resolved_run);
             config.skip_clone = true;
             SandboxSpec::Daytona {
@@ -920,7 +920,7 @@ fn preflight_sandbox_spec(
 
 async fn run_sandbox_check(
     checks: &mut Vec<CheckResult>,
-    sandbox_provider: SandboxProvider,
+    sandbox_provider: SandboxProviderKind,
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
@@ -934,7 +934,7 @@ async fn run_sandbox_check(
         daytona_api_key,
     );
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = spec.build(None).await.map_err(|err| {
-        if matches!(sandbox_provider, SandboxProvider::Daytona) {
+        if matches!(sandbox_provider, SandboxProviderKind::Daytona) {
             format!("Daytona sandbox creation failed: {err}")
         } else {
             err.to_string()
@@ -1468,7 +1468,7 @@ mod tests {
     }
 
     fn prepared_and_resolved_for_sandbox(
-        provider: SandboxProvider,
+        provider: SandboxProviderKind,
         clone_enabled: bool,
         git: Option<types::GitContext>,
     ) -> (PreparedManifest, RunNamespace) {
@@ -1630,7 +1630,7 @@ dockerfile = { path = "Dockerfile" }
     #[tokio::test]
     async fn repository_access_check_skips_when_clone_is_disabled() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             false,
             Some(git_context("https://github.com/acme/widgets", "main")),
         );
@@ -1640,7 +1640,7 @@ dockerfile = { path = "Dockerfile" }
 
         let ok = run_repository_access_check_with(
             &mut checks,
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             &prepared,
             &resolved,
             None,
@@ -1659,7 +1659,7 @@ dockerfile = { path = "Dockerfile" }
     #[tokio::test]
     async fn repository_access_check_rejects_non_github_origins_before_remote_probe() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             true,
             Some(git_context("https://gitlab.com/acme/widgets", "main")),
         );
@@ -1669,7 +1669,7 @@ dockerfile = { path = "Dockerfile" }
 
         let ok = run_repository_access_check_with(
             &mut checks,
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             &prepared,
             &resolved,
             None,
@@ -1697,7 +1697,7 @@ dockerfile = { path = "Dockerfile" }
     #[tokio::test]
     async fn repository_access_check_probes_normalized_github_branch() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             true,
             Some(git_context(
                 "git@github.com:acme/widgets.git",
@@ -1710,7 +1710,7 @@ dockerfile = { path = "Dockerfile" }
 
         let ok = run_repository_access_check_with(
             &mut checks,
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             &prepared,
             &resolved,
             None,
@@ -1734,7 +1734,7 @@ dockerfile = { path = "Dockerfile" }
     #[tokio::test]
     async fn repository_access_check_surfaces_remote_probe_failure() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             true,
             Some(git_context("https://github.com/acme/widgets", "missing")),
         );
@@ -1742,7 +1742,7 @@ dockerfile = { path = "Dockerfile" }
 
         let ok = run_repository_access_check_with(
             &mut checks,
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             &prepared,
             &resolved,
             None,
@@ -1766,13 +1766,18 @@ dockerfile = { path = "Dockerfile" }
     #[test]
     fn preflight_sandbox_spec_disables_docker_clone_but_preserves_clone_metadata() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
-            SandboxProvider::Docker,
+            SandboxProviderKind::Docker,
             true,
             Some(git_context("https://github.com/acme/widgets", "main")),
         );
 
-        let spec =
-            preflight_sandbox_spec(SandboxProvider::Docker, &prepared, &resolved, None, None);
+        let spec = preflight_sandbox_spec(
+            SandboxProviderKind::Docker,
+            &prepared,
+            &resolved,
+            None,
+            None,
+        );
 
         match spec {
             SandboxSpec::Docker {

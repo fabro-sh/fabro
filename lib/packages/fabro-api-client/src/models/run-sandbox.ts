@@ -18,13 +18,13 @@
 import type { RunSandboxRuntime } from './run-sandbox-runtime';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxProvider } from './sandbox-provider';
+import type { SandboxProviderKind } from './sandbox-provider-kind';
 
 /**
  * Canonical sandbox environment record for a run.
  */
 export interface RunSandbox {
-    'provider': SandboxProvider;
+    'provider': SandboxProviderKind;
     'image': string | null;
     'snapshot': string | null;
     'runtime': RunSandboxRuntime | null;

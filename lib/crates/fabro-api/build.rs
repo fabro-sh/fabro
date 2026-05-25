@@ -530,7 +530,6 @@ fn main() {
         ("PreRunPushOutcome", "fabro_types::PreRunPushOutcome", &[]),
         ("DirtyStatus", "fabro_types::DirtyStatus", &[]),
         ("GitContext", "fabro_types::GitContext", &[]),
-        ("SandboxProvider", "fabro_types::SandboxProvider", &[]),
         (
             "SandboxProviderKind",
             "fabro_types::SandboxProviderKind",

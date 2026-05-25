@@ -127,7 +127,7 @@ pub use sandbox_details::{
 pub use sandbox_inventory::{
     SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxProviderLookupError,
 };
-pub use sandbox_provider::{SandboxProvider, SandboxProvider as SandboxProviderKind};
+pub use sandbox_provider::SandboxProviderKind;
 pub use sandbox_services::{
     SandboxService, SandboxServiceDiscoverySource, SandboxServiceListMeta,
     SandboxServiceListResponse,

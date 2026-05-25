@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::{TimeZone, Utc};
 use fabro_types::{
-    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxProvider,
+    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxProviderKind,
     SandboxResources, SandboxState, SandboxTimestamps,
 };
 use serde_json::json;
@@ -10,7 +10,7 @@ use serde_json::json;
 #[test]
 fn run_sandbox_serializes_canonical_identity_without_identifier() {
     let sandbox = RunSandbox {
-        provider: SandboxProvider::Docker,
+        provider: SandboxProviderKind::Docker,
         image:    None,
         snapshot: None,
         runtime:  Some(RunSandboxRuntime {
@@ -52,7 +52,7 @@ fn run_sandbox_serializes_canonical_identity_without_identifier() {
 fn sandbox_details_requires_canonical_id_and_working_directory() {
     let details = SandboxDetails {
         sandbox:      RunSandbox {
-            provider: SandboxProvider::Daytona,
+            provider: SandboxProviderKind::Daytona,
             image:    Some("ubuntu:24.04".to_string()),
             snapshot: None,
             runtime:  Some(RunSandboxRuntime {
@@ -116,16 +116,16 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
 #[test]
 fn sandbox_provider_rejects_unknown_values() {
     assert_eq!(
-        serde_json::from_value::<SandboxProvider>(json!("local")).unwrap(),
-        SandboxProvider::Local
+        serde_json::from_value::<SandboxProviderKind>(json!("local")).unwrap(),
+        SandboxProviderKind::Local
     );
     assert_eq!(
-        serde_json::from_value::<SandboxProvider>(json!("docker")).unwrap(),
-        SandboxProvider::Docker
+        serde_json::from_value::<SandboxProviderKind>(json!("docker")).unwrap(),
+        SandboxProviderKind::Docker
     );
     assert_eq!(
-        serde_json::from_value::<SandboxProvider>(json!("daytona")).unwrap(),
-        SandboxProvider::Daytona
+        serde_json::from_value::<SandboxProviderKind>(json!("daytona")).unwrap(),
+        SandboxProviderKind::Daytona
     );
-    assert!(serde_json::from_value::<SandboxProvider>(json!("other")).is_err());
+    assert!(serde_json::from_value::<SandboxProviderKind>(json!("other")).is_err());
 }

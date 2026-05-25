@@ -375,7 +375,6 @@ models/sandbox-network-policy.ts
 models/sandbox-network.ts
 models/sandbox-provider-kind.ts
 models/sandbox-provider-lookup-error.ts
-models/sandbox-provider.ts
 models/sandbox-resources.ts
 models/sandbox-service-discovery-source.ts
 models/sandbox-service-list-meta.ts

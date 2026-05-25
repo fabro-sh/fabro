@@ -6,7 +6,7 @@ use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::{
     BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
-    QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProvider,
+    QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProviderKind,
     StageCompletion, StageModelUsage, StageOutcome, StartRecord, WorkflowSettings, first_event_seq,
     fixtures,
 };
@@ -99,7 +99,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         diff:       RunDiff::default(),
     });
     projection.sandbox = Some(RunSandbox {
-        provider: SandboxProvider::Local,
+        provider: SandboxProviderKind::Local,
         image:    None,
         snapshot: None,
         runtime:  Some(RunSandboxRuntime {

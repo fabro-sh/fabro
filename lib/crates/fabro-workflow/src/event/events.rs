@@ -5,7 +5,7 @@ use ::fabro_types::{
     ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind, PairTarget,
     ParallelBranchId, PendingReason, PermissionLevel, Principal, PullRequestLink, RunBlobId,
     RunFailure, RunId, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason, RunProvenance,
-    RunRunnableSource, RunTiming, SandboxProvider, StageId, StageTiming, SuccessReason,
+    RunRunnableSource, RunTiming, SandboxProviderKind, StageId, StageTiming, SuccessReason,
     run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
@@ -506,7 +506,7 @@ pub enum Event {
     /// Emitted after the sandbox has been initialized (by engine lifecycle).
     SandboxInitialized {
         working_directory: String,
-        provider:          SandboxProvider,
+        provider:          SandboxProviderKind,
         id:                String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         repo_cloned:       Option<bool>,

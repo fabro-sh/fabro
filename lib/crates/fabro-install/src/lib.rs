@@ -461,13 +461,13 @@ pub fn write_object_store_settings(
 }
 
 fn write_sandbox_provider_policy(server: &mut toml::Table) -> Result<()> {
-    use fabro_types::SandboxProvider;
+    use fabro_types::SandboxProviderKind;
     let sandbox = ensure_table(server, "sandbox")?;
     let providers = ensure_table(sandbox, "providers")?;
     for provider in [
-        SandboxProvider::Local,
-        SandboxProvider::Docker,
-        SandboxProvider::Daytona,
+        SandboxProviderKind::Local,
+        SandboxProviderKind::Docker,
+        SandboxProviderKind::Daytona,
     ] {
         let entry = ensure_table(providers, &provider.to_string())?;
         entry.insert("enabled".to_string(), toml::Value::Boolean(true));

@@ -64,11 +64,10 @@ use fabro_model::{BilledTokenCounts, Catalog, ModelRef, ModelTestMode, ProviderI
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
 use fabro_sandbox::details::sandbox_details;
-use fabro_sandbox::provider::SandboxProvider as RuntimeSandboxProvider;
 use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_sandbox::{
-    DaytonaSandboxProvider, DockerSandboxOptions, DockerSandboxProvider, LocalSandboxProvider,
-    Sandbox, SandboxProviderRegistry, from_environment,
+    DaytonaSandboxProvider, DockerSandboxProvider, LocalSandboxProvider, Sandbox, SandboxProvider,
+    SandboxProviderRegistry,
 };
 use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
 use fabro_slack::config::{
@@ -93,7 +92,7 @@ use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
     PairMessageId, PairTarget, PendingReason, Principal, PullRequestLink, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, RunRunnableSource, SandboxProvider, ServerSettings,
+    RunControlAction, RunEvent, RunId, RunRunnableSource, SandboxProviderKind, ServerSettings,
     SessionCapability, StageModelUsage,
 };
 use fabro_util::error::{
@@ -2012,7 +2011,7 @@ fn system_sandbox_provider(
     manifest_run_settings: &std::result::Result<RunNamespace, SharedError>,
 ) -> String {
     manifest_run_settings.as_ref().map_or_else(
-        |_| SandboxProvider::default().to_string(),
+        |_| SandboxProviderKind::default().to_string(),
         |settings| settings.environment.provider.to_string(),
     )
 }
@@ -2062,42 +2061,31 @@ fn worker_token_keys_from_server_secrets(
 
 fn build_sandbox_provider_registry(
     server_settings: &ServerSettings,
-    manifest_run_settings: Option<&RunNamespace>,
-    vault: &Vault,
+    daytona_api_key: Option<String>,
     env_lookup: &EnvLookup,
     http_client: Option<fabro_http::HttpClient>,
 ) -> SandboxProviderRegistry {
     let provider_settings = &server_settings.server.sandbox.providers;
-    let mut providers: Vec<Arc<dyn RuntimeSandboxProvider>> = Vec::new();
+    let mut providers: Vec<Arc<dyn SandboxProvider>> = Vec::new();
 
     if provider_settings.local.enabled {
         providers.push(Arc::new(LocalSandboxProvider));
     }
 
     if provider_settings.docker.enabled {
-        let default_config =
-            manifest_run_settings.map_or_else(DockerSandboxOptions::default, |settings| {
-                from_environment::docker_config_from_environment(
-                    &settings.environment,
-                    !settings.clone.enabled,
-                )
-            });
-        providers.push(Arc::new(DockerSandboxProvider::new(default_config)));
+        providers.push(Arc::new(DockerSandboxProvider::new()));
     }
 
-    if provider_settings.daytona.enabled {
-        let api_key = vault.get(EnvVars::DAYTONA_API_KEY).map(str::to_string);
-        if api_key.is_some() {
-            let api_url = env_lookup(EnvVars::DAYTONA_API_URL)
-                .or_else(|| env_lookup(EnvVars::DAYTONA_SERVER_URL));
-            let organization_id = env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
-            providers.push(Arc::new(DaytonaSandboxProvider::new(
-                api_key,
-                api_url,
-                organization_id,
-                http_client,
-            )));
-        }
+    if provider_settings.daytona.enabled && daytona_api_key.is_some() {
+        let api_url = env_lookup(EnvVars::DAYTONA_API_URL)
+            .or_else(|| env_lookup(EnvVars::DAYTONA_SERVER_URL));
+        let organization_id = env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
+        providers.push(Arc::new(DaytonaSandboxProvider::new(
+            daytona_api_key,
+            api_url,
+            organization_id,
+            http_client,
+        )));
     }
 
     SandboxProviderRegistry::new(providers)
@@ -2125,6 +2113,9 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         Some(vault) => vault,
         None => load_startup_vault(&vault_path)?,
     };
+    // Read vault secrets needed for synchronous setup before we wrap the vault in
+    // an async lock for the rest of AppState.
+    let daytona_api_key = vault.get(EnvVars::DAYTONA_API_KEY).map(str::to_string);
     let vault = Arc::new(AsyncRwLock::new(vault));
     let llm_source: Arc<dyn CredentialSource> =
         Arc::new(VaultCredentialSource::vault_only(Arc::clone(&vault)));
@@ -2141,11 +2132,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     let sandbox_provider_registry = sandbox_provider_registry.unwrap_or_else(|| {
         build_sandbox_provider_registry(
             current_server_settings.as_ref(),
-            current_manifest_run_settings.as_ref().ok(),
-            vault
-                .try_read()
-                .as_deref()
-                .expect("startup vault should not be locked while building app state"),
+            daytona_api_key,
             &env_lookup,
             http_client.clone(),
         )

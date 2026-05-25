@@ -22,7 +22,7 @@ use fabro_types::settings::run::{
     TlsMode as ResolvedTlsMode,
 };
 use fabro_types::settings::{InterpString, ModelRegistry, ResolvedModelRef};
-use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProvider};
+use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -350,17 +350,17 @@ impl RunSession {
             .collect();
 
         let sandbox = match sandbox_provider {
-            SandboxProvider::Local => SandboxSpec::Local {
+            SandboxProviderKind::Local => SandboxSpec::Local {
                 working_directory: working_directory.clone(),
             },
-            SandboxProvider::Docker => SandboxSpec::Docker {
+            SandboxProviderKind::Docker => SandboxSpec::Docker {
                 config:           resolve_docker_config(resolved),
                 github_app:       services.github_app.clone(),
                 run_id:           Some(record.run_id),
                 clone_origin_url: record.repo_origin_url().map(str::to_string),
                 clone_branch:     record.base_branch().map(str::to_string),
             },
-            SandboxProvider::Daytona => {
+            SandboxProviderKind::Daytona => {
                 let api_key = match &services.vault {
                     Some(v) => v
                         .read()
@@ -516,8 +516,8 @@ async fn load_accepted_run_definition(
     serde_json::from_slice(&bytes).map_err(|err| Error::Parse(err.to_string()))
 }
 
-fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> SandboxProvider {
-    SandboxProvider::from(settings.environment.provider)
+fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> SandboxProviderKind {
+    SandboxProviderKind::from(settings.environment.provider)
 }
 
 fn resolve_daytona_config(settings: &ResolvedRunSettings) -> DaytonaConfig {

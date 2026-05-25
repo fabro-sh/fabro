@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 #[cfg(feature = "daytona")]
 use fabro_static::EnvVars;
-use fabro_types::{RunId, SandboxProvider};
+use fabro_types::{RunId, SandboxProviderKind};
 
 use crate::RunSandbox;
 #[cfg(any(feature = "daytona", feature = "docker"))]
@@ -55,7 +55,7 @@ pub async fn open_terminal_for_run(
 
     match record.provider {
         #[cfg(feature = "daytona")]
-        SandboxProvider::Daytona => {
+        SandboxProviderKind::Daytona => {
             let repo_cloned = runtime.repo_cloned.ok_or_else(|| {
                 crate::Error::message("Daytona run sandbox is missing clone metadata")
             })?;
@@ -82,11 +82,11 @@ pub async fn open_terminal_for_run(
             Ok(Box::new(session))
         }
         #[cfg(not(feature = "daytona"))]
-        SandboxProvider::Daytona => Err(crate::Error::message(
+        SandboxProviderKind::Daytona => Err(crate::Error::message(
             "Daytona sandbox support is not enabled",
         )),
         #[cfg(feature = "docker")]
-        SandboxProvider::Docker => {
+        SandboxProviderKind::Docker => {
             let repo_cloned = runtime.repo_cloned.ok_or_else(|| {
                 crate::Error::message("Docker run sandbox is missing clone metadata")
             })?;
@@ -104,10 +104,10 @@ pub async fn open_terminal_for_run(
             Ok(Box::new(session))
         }
         #[cfg(not(feature = "docker"))]
-        SandboxProvider::Docker => Err(crate::Error::message(
+        SandboxProviderKind::Docker => Err(crate::Error::message(
             "Docker sandbox support is not enabled",
         )),
-        SandboxProvider::Local => Err(crate::Error::message(
+        SandboxProviderKind::Local => Err(crate::Error::message(
             "Local sandboxes do not support embedded terminals",
         )),
     }

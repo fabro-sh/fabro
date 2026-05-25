@@ -474,7 +474,7 @@ mod tests {
     use fabro_model::{Catalog, ModelRef, ProviderId};
     use fabro_types::run_event::CliEnsureCompletedProps;
     use fabro_types::{
-        MetadataSnapshotFailureKind, MetadataSnapshotPhase, ParallelBranchId, SandboxProvider,
+        MetadataSnapshotFailureKind, MetadataSnapshotPhase, ParallelBranchId, SandboxProviderKind,
         StageId, fixtures,
     };
     use fabro_workflow::event::{Event, RunNoticeLevel, to_run_event, to_run_event_at};
@@ -737,7 +737,7 @@ mod tests {
             stage_started("code", "Code"),
             Event::SandboxInitialized {
                 working_directory: "/home/daytona/workspace".into(),
-                provider:          SandboxProvider::Daytona,
+                provider:          SandboxProviderKind::Daytona,
                 id:                "daytona:sandbox-id".into(),
                 repo_cloned:       None,
                 clone_origin_url:  None,
@@ -1119,7 +1119,7 @@ mod tests {
         emit(&mut ui, stage_started("code", "Code"));
         emit(&mut ui, Event::SandboxInitialized {
             working_directory: "/home/daytona/workspace".into(),
-            provider:          SandboxProvider::Daytona,
+            provider:          SandboxProviderKind::Daytona,
             id:                "daytona:sandbox-id".into(),
             repo_cloned:       None,
             clone_origin_url:  None,

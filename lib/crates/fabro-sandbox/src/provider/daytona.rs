@@ -5,9 +5,9 @@ use daytona_sdk::DaytonaError;
 use fabro_static::EnvVars;
 use fabro_types::{SandboxInfo, SandboxProviderKind};
 
-use super::{SandboxCreateSpec, SandboxListFilter, SandboxProvider};
+use super::{SandboxCreateSpec, SandboxProvider};
 use crate::daytona::{self, DaytonaSandbox};
-use crate::managed_labels::MANAGED_LABEL;
+use crate::managed_labels::{self, MANAGED_LABEL, MANAGED_LABEL_VALUE};
 use crate::{Sandbox, details};
 
 const DAYTONA_LIST_PAGE_SIZE: i32 = 100;
@@ -56,9 +56,9 @@ impl SandboxProvider for DaytonaSandboxProvider {
         SandboxProviderKind::Daytona
     }
 
-    async fn list(&self, _filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>> {
+    async fn list(&self) -> crate::Result<Vec<SandboxInfo>> {
         let client = self.client().await?;
-        let labels = HashMap::from([(MANAGED_LABEL.to_string(), "true".to_string())]);
+        let labels = HashMap::from([(MANAGED_LABEL.to_string(), MANAGED_LABEL_VALUE.to_string())]);
         let mut page = 1;
         let mut sandboxes = Vec::new();
 
@@ -67,11 +67,12 @@ impl SandboxProvider for DaytonaSandboxProvider {
                 .list(Some(&labels), Some(page), Some(DAYTONA_LIST_PAGE_SIZE))
                 .await
                 .map_err(|err| crate::Error::context("Failed to list Daytona sandboxes", err))?;
+            // The Daytona API already filters by the managed label above; map every
+            // returned sandbox without re-checking the label client-side.
             sandboxes.extend(
                 result
                     .items
                     .iter()
-                    .filter(|sandbox| managed_from_sdk_sandbox(sandbox))
                     .map(details::daytona::daytona_info_from_sdk_sandbox),
             );
 
@@ -153,7 +154,7 @@ impl SandboxProvider for DaytonaSandboxProvider {
         };
         if !managed_from_sdk_sandbox(&sandbox) {
             return Err(crate::Error::message(format!(
-                "Refusing to delete Daytona sandbox '{id}' because it is missing label {MANAGED_LABEL}=true"
+                "Refusing to delete Daytona sandbox '{id}' because it is missing label {MANAGED_LABEL}={MANAGED_LABEL_VALUE}"
             )));
         }
         client.delete(&sandbox.id).await.map_err(|err| {
@@ -163,7 +164,7 @@ impl SandboxProvider for DaytonaSandboxProvider {
 }
 
 fn managed_from_sdk_sandbox(sandbox: &daytona_sdk::Sandbox) -> bool {
-    sandbox.labels.get(MANAGED_LABEL).map(String::as_str) == Some("true")
+    managed_labels::is_managed(&sandbox.labels)
 }
 
 fn daytona_not_found(err: &DaytonaError) -> bool {

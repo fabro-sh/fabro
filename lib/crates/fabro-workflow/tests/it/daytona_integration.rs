@@ -1704,7 +1704,7 @@ async fn daytona_toolbox_idle_diagnostic() {
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cp_upload_download_round_trip() {
     use fabro_sandbox::reconnect::reconnect;
-    use fabro_types::{RunSandbox, SandboxProvider};
+    use fabro_types::{RunSandbox, SandboxProviderKind};
 
     // 1. Create and initialize a real Daytona sandbox
     let env = create_env().await;
@@ -1718,7 +1718,7 @@ async fn daytona_cp_upload_download_round_trip() {
 
     // 2. Build a RunSandbox (same as `fabro run` would persist)
     let record = RunSandbox {
-        provider: SandboxProvider::Daytona,
+        provider: SandboxProviderKind::Daytona,
         image:    None,
         snapshot: None,
         runtime:  Some(fabro_types::RunSandboxRuntime {

@@ -21,7 +21,7 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
-    SandboxProvider, StageContextWindowBreakdownItem, StageContextWindowCategory,
+    SandboxProviderKind, StageContextWindowBreakdownItem, StageContextWindowCategory,
     StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
     StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
     WorkflowSettings, fixtures,
@@ -961,7 +961,7 @@ id = "missing"
 
     assert_eq!(
         system_sandbox_provider(&manifest_run_settings),
-        SandboxProvider::default().to_string()
+        SandboxProviderKind::default().to_string()
     );
 }
 
@@ -980,7 +980,7 @@ enabled = false
     );
 
     assert_eq!(
-        crate::run_manifest::sandbox_provider_policy_error(&settings, SandboxProvider::Daytona)
+        crate::run_manifest::sandbox_provider_policy_error(&settings, SandboxProviderKind::Daytona)
             .as_deref(),
         Some(
             "sandbox provider \"daytona\" is disabled by server.sandbox.providers.daytona.enabled"
@@ -11173,7 +11173,7 @@ async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId
             definition_blob: None,
         },
         workflow_event::Event::SandboxInitialized {
-            provider:          SandboxProvider::Local,
+            provider:          SandboxProviderKind::Local,
             id:                "sandbox-preserve-1".to_string(),
             working_directory: "/tmp/fabro-preserved-sandbox".to_string(),
             repo_cloned:       None,
@@ -11924,7 +11924,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::SandboxInitialized {
-            provider:          SandboxProvider::Docker,
+            provider:          SandboxProviderKind::Docker,
             id:                "missing-sandbox".to_string(),
             working_directory: "/tmp/fabro-missing-sandbox".to_string(),
             repo_cloned:       Some(false),
@@ -13793,7 +13793,7 @@ async fn list_runs_includes_live_metadata_from_run_state() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::SandboxInitialized {
-            provider:          SandboxProvider::Local,
+            provider:          SandboxProviderKind::Local,
             id:                "sb-test".to_string(),
             working_directory: "/sandbox/workdir".to_string(),
             repo_cloned:       None,
@@ -13872,7 +13872,7 @@ async fn list_runs_page_limit_preserves_metadata_for_paged_items() {
             workflow_event::Event::RunStarting,
             workflow_event::Event::RunRunning,
             workflow_event::Event::SandboxInitialized {
-                provider:          SandboxProvider::Local,
+                provider:          SandboxProviderKind::Local,
                 id:                sandbox_id.to_string(),
                 working_directory: "/sandbox/workdir".to_string(),
                 repo_cloned:       None,

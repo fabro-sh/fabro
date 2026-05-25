@@ -323,7 +323,7 @@ impl EnvironmentProvider {
     }
 }
 
-impl From<EnvironmentProvider> for crate::SandboxProvider {
+impl From<EnvironmentProvider> for crate::SandboxProviderKind {
     fn from(value: EnvironmentProvider) -> Self {
         match value {
             EnvironmentProvider::Local => Self::Local,

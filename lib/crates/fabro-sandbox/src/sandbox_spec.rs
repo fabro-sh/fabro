@@ -9,7 +9,7 @@ use fabro_github::GitHubCredentials;
     unused_imports,
     reason = "Daytona-enabled builds persist RunId in the sandbox spec."
 )]
-use fabro_types::{RunId, RunSandbox, RunSandboxRuntime, SandboxProvider};
+use fabro_types::{RunId, RunSandbox, RunSandboxRuntime, SandboxProviderKind};
 
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use crate::clone_source;
@@ -45,21 +45,21 @@ pub enum SandboxSpec {
 }
 
 impl SandboxSpec {
-    pub fn provider(&self) -> SandboxProvider {
+    pub fn provider(&self) -> SandboxProviderKind {
         match self {
-            Self::Local { .. } => SandboxProvider::Local,
+            Self::Local { .. } => SandboxProviderKind::Local,
             #[cfg(feature = "docker")]
-            Self::Docker { .. } => SandboxProvider::Docker,
+            Self::Docker { .. } => SandboxProviderKind::Docker,
             #[cfg(feature = "daytona")]
-            Self::Daytona { .. } => SandboxProvider::Daytona,
+            Self::Daytona { .. } => SandboxProviderKind::Daytona,
         }
     }
 
     pub fn provider_name(&self) -> &'static str {
         match self.provider() {
-            SandboxProvider::Local => "local",
-            SandboxProvider::Docker => "docker",
-            SandboxProvider::Daytona => "daytona",
+            SandboxProviderKind::Local => "local",
+            SandboxProviderKind::Docker => "docker",
+            SandboxProviderKind::Daytona => "daytona",
         }
     }
 

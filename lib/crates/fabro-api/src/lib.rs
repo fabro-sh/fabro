@@ -49,7 +49,7 @@ pub mod types {
         RunPairStatusResponse, RunProjection, RunProvenance, RunRunnableSource, RunSandbox,
         RunSandboxRuntime, RunServerProvenance, RunSize, SandboxDetails, SandboxInfo,
         SandboxListMeta, SandboxListResponse, SandboxNetwork, SandboxNetworkPolicy,
-        SandboxNetworkPolicyMode, SandboxProvider, SandboxProviderKind, SandboxProviderLookupError,
+        SandboxNetworkPolicyMode, SandboxProviderKind, SandboxProviderLookupError,
         SandboxResources, SandboxService, SandboxServiceListResponse, SandboxState,
         SandboxTimestamps, SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId,
         SessionMessage, SessionRecord, SessionStatus, SessionSummary, SessionTurn,

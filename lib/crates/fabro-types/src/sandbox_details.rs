@@ -188,7 +188,7 @@ mod tests {
     fn serializes_with_snake_case_state() {
         let details = SandboxDetails {
             sandbox:      RunSandbox {
-                provider: crate::SandboxProvider::Docker,
+                provider: crate::SandboxProviderKind::Docker,
                 image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
                 snapshot: None,
                 runtime:  Some(crate::RunSandboxRuntime {
@@ -282,7 +282,7 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(details.sandbox.provider, crate::SandboxProvider::Local);
+        assert_eq!(details.sandbox.provider, crate::SandboxProviderKind::Local);
         assert_eq!(
             details
                 .sandbox

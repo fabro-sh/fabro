@@ -9,7 +9,7 @@ description = "Sandbox trait and implementations for Fabro agent execution envir
 [features]
 default = ["local"]
 local = []
-docker = ["dep:bollard", "dep:tar", "dep:futures", "dep:fabro-github"]
+docker = ["dep:bollard", "dep:tar", "dep:fabro-github"]
 daytona = ["dep:daytona-sdk", "dep:daytona-api-client", "dep:git2", "dep:fabro-github", "dep:fabro-config", "dep:fabro-http", "dep:reqwest-middleware", "dep:rand", "dep:tokio-tungstenite", "dep:futures-util", "dep:rustls"]
 test-support = []
 
@@ -39,10 +39,11 @@ shlex = "1"
 # local
 glob = { version = "0.3" }
 
+futures = { workspace = true }
+
 # docker
 bollard = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
-futures = { workspace = true, optional = true }
 
 # daytona
 fabro-config = { path = "../fabro-config", optional = true }

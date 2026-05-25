@@ -3,13 +3,13 @@ use strum::{Display, EnumString};
 
 use crate::settings::run::RunMode;
 
-/// Sandbox provider for agent tool operations.
+/// Sandbox provider discriminator for agent tool operations.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Display, EnumString,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
-pub enum SandboxProvider {
+pub enum SandboxProviderKind {
     /// Run tools on the local host.
     #[default]
     Local,
@@ -19,7 +19,7 @@ pub enum SandboxProvider {
     Daytona,
 }
 
-impl SandboxProvider {
+impl SandboxProviderKind {
     /// True only for Local. Used by dry-run to force local execution.
     /// NOT the same as "runs on the host" (Docker is host-adjacent but not
     /// dry-run compatible).
@@ -48,38 +48,38 @@ impl SandboxProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::SandboxProvider;
+    use super::SandboxProviderKind;
 
     #[test]
     fn sandbox_provider_default_is_local() {
-        assert_eq!(SandboxProvider::default(), SandboxProvider::Local);
+        assert_eq!(SandboxProviderKind::default(), SandboxProviderKind::Local);
     }
 
     #[test]
     fn sandbox_provider_from_str() {
         assert_eq!(
-            "local".parse::<SandboxProvider>().unwrap(),
-            SandboxProvider::Local
+            "local".parse::<SandboxProviderKind>().unwrap(),
+            SandboxProviderKind::Local
         );
         assert_eq!(
-            "docker".parse::<SandboxProvider>().unwrap(),
-            SandboxProvider::Docker
+            "docker".parse::<SandboxProviderKind>().unwrap(),
+            SandboxProviderKind::Docker
         );
         assert_eq!(
-            "daytona".parse::<SandboxProvider>().unwrap(),
-            SandboxProvider::Daytona
+            "daytona".parse::<SandboxProviderKind>().unwrap(),
+            SandboxProviderKind::Daytona
         );
         assert_eq!(
-            "LOCAL".parse::<SandboxProvider>().unwrap(),
-            SandboxProvider::Local
+            "LOCAL".parse::<SandboxProviderKind>().unwrap(),
+            SandboxProviderKind::Local
         );
-        assert!("invalid".parse::<SandboxProvider>().is_err());
+        assert!("invalid".parse::<SandboxProviderKind>().is_err());
     }
 
     #[test]
     fn sandbox_provider_display() {
-        assert_eq!(SandboxProvider::Local.to_string(), "local");
-        assert_eq!(SandboxProvider::Docker.to_string(), "docker");
-        assert_eq!(SandboxProvider::Daytona.to_string(), "daytona");
+        assert_eq!(SandboxProviderKind::Local.to_string(), "local");
+        assert_eq!(SandboxProviderKind::Docker.to_string(), "docker");
+        assert_eq!(SandboxProviderKind::Daytona.to_string(), "daytona");
     }
 }

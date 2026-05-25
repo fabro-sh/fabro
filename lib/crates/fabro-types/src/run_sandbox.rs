@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::SandboxProvider;
+use crate::SandboxProviderKind;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSandbox {
-    pub provider: SandboxProvider,
+    pub provider: SandboxProviderKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

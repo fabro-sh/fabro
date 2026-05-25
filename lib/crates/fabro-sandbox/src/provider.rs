@@ -3,7 +3,6 @@ pub mod daytona;
 #[cfg(feature = "docker")]
 pub mod docker;
 
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -15,14 +14,13 @@ use fabro_types::{
     SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxProviderKind,
     SandboxProviderLookupError,
 };
+use fabro_util::error::collect_chain;
+use futures::future::join_all;
 
 #[cfg(feature = "daytona")]
 use crate::daytona::DaytonaConfig;
 #[cfg(feature = "docker")]
 use crate::docker::DockerSandboxOptions;
-
-#[derive(Debug, Clone, Default)]
-pub struct SandboxListFilter;
 
 pub enum SandboxCreateSpec {
     Local,
@@ -49,7 +47,7 @@ pub enum SandboxCreateSpec {
 pub trait SandboxProvider: Send + Sync {
     fn kind(&self) -> SandboxProviderKind;
 
-    async fn list(&self, filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>>;
+    async fn list(&self) -> crate::Result<Vec<SandboxInfo>>;
     async fn get(&self, id: &str) -> crate::Result<Option<SandboxInfo>>;
     async fn create(&self, spec: SandboxCreateSpec) -> crate::Result<SandboxInfo>;
     async fn delete(&self, id: &str) -> crate::Result<()>;
@@ -74,13 +72,19 @@ impl SandboxProviderRegistry {
     }
 
     pub async fn list_managed(&self) -> SandboxListResponse {
+        let results = join_all(
+            self.providers
+                .iter()
+                .map(|provider| async move { (provider.kind(), provider.list().await) }),
+        )
+        .await;
+
         let mut data = Vec::new();
         let mut provider_errors = Vec::new();
-
-        for provider in &self.providers {
-            match provider.list(SandboxListFilter).await {
+        for (kind, result) in results {
+            match result {
                 Ok(mut sandboxes) => data.append(&mut sandboxes),
-                Err(err) => provider_errors.push(provider_error(provider.kind(), &err)),
+                Err(err) => provider_errors.push(provider_error(kind, &err)),
             }
         }
 
@@ -94,14 +98,20 @@ impl SandboxProviderRegistry {
         &self,
         id: &str,
     ) -> Result<SandboxInfo, SandboxLookupError> {
+        let results = join_all(
+            self.providers
+                .iter()
+                .map(|provider| async move { (provider.kind(), provider.get(id).await) }),
+        )
+        .await;
+
         let mut matches = Vec::new();
         let mut provider_errors = Vec::new();
-
-        for provider in &self.providers {
-            match provider.get(id).await {
+        for (kind, result) in results {
+            match result {
                 Ok(Some(sandbox)) => matches.push(sandbox),
                 Ok(None) => {}
-                Err(err) => provider_errors.push(provider_error(provider.kind(), &err)),
+                Err(err) => provider_errors.push(provider_error(kind, &err)),
             }
         }
 
@@ -150,7 +160,7 @@ impl SandboxProvider for LocalSandboxProvider {
         SandboxProviderKind::Local
     }
 
-    async fn list(&self, _filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>> {
+    async fn list(&self) -> crate::Result<Vec<SandboxInfo>> {
         Ok(Vec::new())
     }
 
@@ -175,122 +185,28 @@ fn provider_error(
 ) -> SandboxProviderLookupError {
     SandboxProviderLookupError {
         provider,
-        message: render_error(err),
+        message: collect_chain(err).join(": "),
     }
-}
-
-fn render_error(err: &(dyn std::error::Error + 'static)) -> String {
-    let mut message = err.to_string();
-    let mut source = err.source();
-    while let Some(err) = source {
-        let _ = write!(message, ": {err}");
-        source = err.source();
-    }
-    message
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use fabro_types::{SandboxNetwork, SandboxResources, SandboxState, SandboxTimestamps};
-
     use super::*;
-
-    #[derive(Clone)]
-    enum FakeList {
-        Ok(Vec<SandboxInfo>),
-        Err(&'static str),
-    }
-
-    #[derive(Clone)]
-    enum FakeGet {
-        Found(Box<SandboxInfo>),
-        Missing,
-        Err(&'static str),
-    }
-
-    struct FakeProvider {
-        kind: SandboxProviderKind,
-        list: FakeList,
-        get:  FakeGet,
-    }
-
-    impl FakeProvider {
-        fn new(kind: SandboxProviderKind, list: FakeList, get: FakeGet) -> Self {
-            Self { kind, list, get }
-        }
-    }
-
-    #[async_trait]
-    impl SandboxProvider for FakeProvider {
-        fn kind(&self) -> SandboxProviderKind {
-            self.kind
-        }
-
-        async fn list(&self, _filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>> {
-            match &self.list {
-                FakeList::Ok(sandboxes) => Ok(sandboxes.clone()),
-                FakeList::Err(message) => Err(crate::Error::message(*message)),
-            }
-        }
-
-        async fn get(&self, _id: &str) -> crate::Result<Option<SandboxInfo>> {
-            match &self.get {
-                FakeGet::Found(sandbox) => Ok(Some((**sandbox).clone())),
-                FakeGet::Missing => Ok(None),
-                FakeGet::Err(message) => Err(crate::Error::message(*message)),
-            }
-        }
-
-        async fn create(&self, _spec: SandboxCreateSpec) -> crate::Result<SandboxInfo> {
-            Err(crate::Error::message("not implemented"))
-        }
-
-        async fn delete(&self, _id: &str) -> crate::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn registry(providers: Vec<FakeProvider>) -> SandboxProviderRegistry {
-        SandboxProviderRegistry::new(
-            providers
-                .into_iter()
-                .map(|provider| Arc::new(provider) as Arc<dyn SandboxProvider>)
-                .collect(),
-        )
-    }
-
-    fn info(provider: SandboxProviderKind, id: &str) -> SandboxInfo {
-        SandboxInfo {
-            provider,
-            id: id.to_string(),
-            display_name: None,
-            state: SandboxState::Running,
-            native_state: None,
-            image: None,
-            snapshot: None,
-            region: None,
-            web_url: None,
-            working_directory: None,
-            resources: SandboxResources::default(),
-            network: SandboxNetwork::unknown(),
-            labels: BTreeMap::new(),
-            timestamps: SandboxTimestamps::default(),
-        }
-    }
+    use crate::test_support::{
+        FakeGet, FakeList, FakeSandboxProvider, fake_registry, fake_sandbox_info,
+    };
 
     #[tokio::test]
     async fn list_returns_aggregate_data_from_successful_providers() {
-        let docker = info(SandboxProviderKind::Docker, "docker-1");
-        let daytona = info(SandboxProviderKind::Daytona, "daytona-1");
-        let registry = registry(vec![
-            FakeProvider::new(
+        let docker = fake_sandbox_info(SandboxProviderKind::Docker, "docker-1");
+        let daytona = fake_sandbox_info(SandboxProviderKind::Daytona, "daytona-1");
+        let registry = fake_registry(vec![
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Docker,
                 FakeList::Ok(vec![docker.clone()]),
                 FakeGet::Missing,
             ),
-            FakeProvider::new(
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Daytona,
                 FakeList::Ok(vec![daytona.clone()]),
                 FakeGet::Missing,
@@ -305,14 +221,14 @@ mod tests {
 
     #[tokio::test]
     async fn list_includes_provider_error_metadata_when_one_provider_fails() {
-        let docker = info(SandboxProviderKind::Docker, "docker-1");
-        let registry = registry(vec![
-            FakeProvider::new(
+        let docker = fake_sandbox_info(SandboxProviderKind::Docker, "docker-1");
+        let registry = fake_registry(vec![
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Docker,
                 FakeList::Ok(vec![docker.clone()]),
                 FakeGet::Missing,
             ),
-            FakeProvider::new(
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Daytona,
                 FakeList::Err("daytona unavailable"),
                 FakeGet::Missing,
@@ -332,14 +248,14 @@ mod tests {
 
     #[tokio::test]
     async fn get_returns_one_matching_sandbox() {
-        let docker = info(SandboxProviderKind::Docker, "same-id");
-        let registry = registry(vec![
-            FakeProvider::new(
+        let docker = fake_sandbox_info(SandboxProviderKind::Docker, "same-id");
+        let registry = fake_registry(vec![
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Docker,
                 FakeList::Ok(Vec::new()),
                 FakeGet::Found(Box::new(docker.clone())),
             ),
-            FakeProvider::new(
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Daytona,
                 FakeList::Ok(Vec::new()),
                 FakeGet::Missing,
@@ -354,13 +270,13 @@ mod tests {
 
     #[tokio::test]
     async fn get_returns_not_found_when_all_providers_miss() {
-        let registry = registry(vec![
-            FakeProvider::new(
+        let registry = fake_registry(vec![
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Docker,
                 FakeList::Ok(Vec::new()),
                 FakeGet::Missing,
             ),
-            FakeProvider::new(
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Daytona,
                 FakeList::Ok(Vec::new()),
                 FakeGet::Missing,
@@ -377,16 +293,22 @@ mod tests {
 
     #[tokio::test]
     async fn get_returns_conflict_when_two_providers_match() {
-        let registry = registry(vec![
-            FakeProvider::new(
+        let registry = fake_registry(vec![
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Docker,
                 FakeList::Ok(Vec::new()),
-                FakeGet::Found(Box::new(info(SandboxProviderKind::Docker, "same-id"))),
+                FakeGet::Found(Box::new(fake_sandbox_info(
+                    SandboxProviderKind::Docker,
+                    "same-id",
+                ))),
             ),
-            FakeProvider::new(
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Daytona,
                 FakeList::Ok(Vec::new()),
-                FakeGet::Found(Box::new(info(SandboxProviderKind::Daytona, "same-id"))),
+                FakeGet::Found(Box::new(fake_sandbox_info(
+                    SandboxProviderKind::Daytona,
+                    "same-id",
+                ))),
             ),
         ]);
 
@@ -405,13 +327,13 @@ mod tests {
 
     #[tokio::test]
     async fn get_returns_provider_unavailable_when_no_match_and_one_provider_fails() {
-        let registry = registry(vec![
-            FakeProvider::new(
+        let registry = fake_registry(vec![
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Docker,
                 FakeList::Ok(Vec::new()),
                 FakeGet::Missing,
             ),
-            FakeProvider::new(
+            FakeSandboxProvider::new(
                 SandboxProviderKind::Daytona,
                 FakeList::Ok(Vec::new()),
                 FakeGet::Err("daytona unavailable"),

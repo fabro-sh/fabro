@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use fabro_sandbox::{TerminalSize, open_terminal_for_run};
-use fabro_types::{SandboxProvider, SandboxServiceDiscoverySource, SandboxServiceListMeta};
+use fabro_types::{SandboxProviderKind, SandboxServiceDiscoverySource, SandboxServiceListMeta};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 
@@ -400,7 +400,7 @@ async fn create_ssh_access(
     };
 
     match record.provider {
-        SandboxProvider::Daytona => {
+        SandboxProviderKind::Daytona => {
             let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
                 Ok(sandbox) => sandbox,
                 Err(response) => return response,
@@ -414,7 +414,7 @@ async fn create_ssh_access(
                 }
             }
         }
-        SandboxProvider::Docker => {
+        SandboxProviderKind::Docker => {
             let sandbox = match reconnect_run_sandbox(&state, &id).await {
                 Ok(sandbox) => sandbox,
                 Err(response) => return response,
@@ -433,7 +433,7 @@ async fn create_ssh_access(
                 }
             }
         }
-        SandboxProvider::Local => ApiError::new(
+        SandboxProviderKind::Local => ApiError::new(
             StatusCode::CONFLICT,
             "Sandbox provider does not support access commands.",
         )
@@ -454,7 +454,7 @@ async fn create_sandbox_vnc_preview(
         Ok(record) => record,
         Err(response) => return response,
     };
-    if record.provider != SandboxProvider::Daytona {
+    if record.provider != SandboxProviderKind::Daytona {
         return ApiError::new(
             StatusCode::NOT_IMPLEMENTED,
             "Sandbox provider does not support VNC previews.",
@@ -613,7 +613,7 @@ struct SandboxServiceDiscovery {
     source:   SandboxServiceDiscoverySource,
 }
 
-fn parse_sandbox_services(output: &str, provider: SandboxProvider) -> SandboxServiceDiscovery {
+fn parse_sandbox_services(output: &str, provider: SandboxProviderKind) -> SandboxServiceDiscovery {
     if output
         .lines()
         .any(|line| line.trim_start().starts_with("FABRO_PROC_NET_TCP "))
@@ -630,7 +630,7 @@ fn parse_sandbox_services(output: &str, provider: SandboxProvider) -> SandboxSer
     }
 }
 
-fn parse_ss_listening_services(output: &str, provider: SandboxProvider) -> Vec<SandboxService> {
+fn parse_ss_listening_services(output: &str, provider: SandboxProviderKind) -> Vec<SandboxService> {
     let mut services = BTreeMap::<u16, SandboxService>::new();
     for line in output
         .lines()
@@ -663,7 +663,7 @@ enum ProcNetFamily {
 
 fn parse_proc_net_listening_services(
     output: &str,
-    provider: SandboxProvider,
+    provider: SandboxProviderKind,
 ) -> Vec<SandboxService> {
     let mut services = BTreeMap::<u16, SandboxService>::new();
     let mut family = None;
@@ -743,7 +743,7 @@ fn parse_proc_net_ipv6(value: &str) -> Option<Ipv6Addr> {
 
 fn push_service(
     services: &mut BTreeMap<u16, SandboxService>,
-    provider: SandboxProvider,
+    provider: SandboxProviderKind,
     port: u16,
     address: String,
     process: Option<String>,
@@ -760,8 +760,8 @@ fn push_service(
     }
 }
 
-fn preview_supported(provider: SandboxProvider, port: u16) -> bool {
-    provider == SandboxProvider::Daytona && (3000..=9999).contains(&port)
+fn preview_supported(provider: SandboxProviderKind, port: u16) -> bool {
+    provider == SandboxProviderKind::Daytona && (3000..=9999).contains(&port)
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {
@@ -866,7 +866,7 @@ async fn reconnect_daytona_sandbox(
     run_id: &RunId,
 ) -> Result<DaytonaSandbox, Response> {
     let record = load_run_sandbox(state, run_id).await?;
-    if record.provider != SandboxProvider::Daytona {
+    if record.provider != SandboxProviderKind::Daytona {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             "Sandbox provider does not support this capability.",
@@ -1001,7 +1001,7 @@ LISTEN 0 4096 0.0.0.0:5173 0.0.0.0:* users:(("vite",pid=84,fd=19))
 LISTEN 0 4096 [::]:8080 [::]:* users:(("server",pid=126,fd=9))
 LISTEN 0 4096 [::1]:2500 [::]:* users:(("debug",pid=168,fd=7))
 "#,
-            SandboxProvider::Daytona,
+            SandboxProviderKind::Daytona,
         );
 
         assert_eq!(services.len(), 4);
@@ -1035,7 +1035,7 @@ not enough fields
 LISTEN 0 4096 127.0.0.1:0 0.0.0.0:* users:(("zero",pid=1,fd=2))
 LISTEN 0 4096 127.0.0.1:65536 0.0.0.0:* users:(("large",pid=1,fd=2))
 "#,
-            SandboxProvider::Daytona,
+            SandboxProviderKind::Daytona,
         );
 
         assert!(services.is_empty());
@@ -1050,7 +1050,7 @@ LISTEN 0 4096 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=42,fd=23))
 LISTEN 0 4096 127.0.0.1:3000 0.0.0.0:* users:(("node",pid=42,fd=23))
 LISTEN 0 4096 [::]:3000 [::]:* users:(("vite",pid=84,fd=19))
 "#,
-            SandboxProvider::Daytona,
+            SandboxProviderKind::Daytona,
         );
 
         assert_eq!(services, vec![SandboxService {
@@ -1082,7 +1082,7 @@ FABRO_PROC_NET_TCP /proc/net/tcp6
    0: 00000000000000000000000000000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000   501        0 44444
    1: 00000000000000000000000001000000:09C4 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000   501        0 55555
 ",
-            SandboxProvider::Daytona,
+            SandboxProviderKind::Daytona,
         );
 
         assert_eq!(discovery.source, SandboxServiceDiscoverySource::Procfs);
@@ -1116,11 +1116,11 @@ FABRO_PROC_NET_TCP /proc/net/tcp6
 
     #[test]
     fn preview_support_is_daytona_only_for_documented_range() {
-        assert!(!preview_supported(SandboxProvider::Daytona, 2500));
-        assert!(preview_supported(SandboxProvider::Daytona, 3000));
-        assert!(preview_supported(SandboxProvider::Daytona, 9999));
-        assert!(!preview_supported(SandboxProvider::Daytona, 10000));
-        assert!(!preview_supported(SandboxProvider::Docker, 3000));
+        assert!(!preview_supported(SandboxProviderKind::Daytona, 2500));
+        assert!(preview_supported(SandboxProviderKind::Daytona, 3000));
+        assert!(preview_supported(SandboxProviderKind::Daytona, 9999));
+        assert!(!preview_supported(SandboxProviderKind::Daytona, 10000));
+        assert!(!preview_supported(SandboxProviderKind::Docker, 3000));
     }
 
     #[test]

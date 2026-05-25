@@ -6,47 +6,23 @@ use bollard::container::{InspectContainerOptions, ListContainersOptions, RemoveC
 use bollard::errors::Error as DockerError;
 use bollard::models::ContainerInspectResponse;
 use fabro_types::{SandboxInfo, SandboxProviderKind};
+use futures::future::try_join_all;
 
-use super::{SandboxCreateSpec, SandboxListFilter, SandboxProvider};
-use crate::docker::{DockerSandbox, DockerSandboxOptions};
-use crate::managed_labels::MANAGED_LABEL;
+use super::{SandboxCreateSpec, SandboxProvider};
+use crate::docker::DockerSandbox;
+use crate::managed_labels::{self, MANAGED_LABEL, MANAGED_LABEL_VALUE};
 use crate::{Sandbox, details};
 
-#[derive(Debug, Clone)]
-pub struct DockerSandboxProvider {
-    _default_config: DockerSandboxOptions,
-}
+#[derive(Debug, Clone, Default)]
+pub struct DockerSandboxProvider;
 
 impl DockerSandboxProvider {
-    pub fn new(default_config: DockerSandboxOptions) -> Self {
-        Self {
-            _default_config: default_config,
-        }
+    pub fn new() -> Self {
+        Self
     }
 
     fn docker_client() -> crate::Result<Docker> {
         Docker::connect_with_local_defaults().map_err(crate::Error::docker_connect)
-    }
-
-    async fn inspect(&self, id: &str) -> crate::Result<Option<ContainerInspectResponse>> {
-        let docker = Self::docker_client()?;
-        match docker
-            .inspect_container(id, None::<InspectContainerOptions>)
-            .await
-        {
-            Ok(inspect) => Ok(Some(inspect)),
-            Err(err) if docker_not_found(&err) => Ok(None),
-            Err(err) => Err(crate::Error::context(
-                format!("Failed to inspect Docker container '{id}'"),
-                err,
-            )),
-        }
-    }
-}
-
-impl Default for DockerSandboxProvider {
-    fn default() -> Self {
-        Self::new(DockerSandboxOptions::default())
     }
 }
 
@@ -56,10 +32,12 @@ impl SandboxProvider for DockerSandboxProvider {
         SandboxProviderKind::Docker
     }
 
-    async fn list(&self, _filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>> {
+    async fn list(&self) -> crate::Result<Vec<SandboxInfo>> {
         let docker = Self::docker_client()?;
         let mut filters = HashMap::new();
-        filters.insert("label".to_string(), vec![format!("{MANAGED_LABEL}=true")]);
+        filters.insert("label".to_string(), vec![format!(
+            "{MANAGED_LABEL}={MANAGED_LABEL_VALUE}"
+        )]);
         let options = ListContainersOptions::<String> {
             all: true,
             filters,
@@ -70,23 +48,25 @@ impl SandboxProvider for DockerSandboxProvider {
             .await
             .map_err(|err| crate::Error::context("Failed to list Docker containers", err))?;
 
-        let mut sandboxes = Vec::new();
-        for container in containers {
-            let Some(id) = container.id else {
-                continue;
-            };
-            let Some(inspect) = self.inspect(&id).await? else {
-                continue;
-            };
-            if managed_from_inspect(&inspect) {
-                sandboxes.push(details::docker::docker_info_from_inspect(&inspect));
-            }
-        }
-        Ok(sandboxes)
+        let ids: Vec<String> = containers.into_iter().filter_map(|c| c.id).collect();
+        // Daemon-side label filter already restricts to managed containers, so we
+        // can skip the per-inspect managed re-check. Run inspects concurrently on
+        // the shared Docker client to avoid a serial N+1 round-trip.
+        let inspects = try_join_all(
+            ids.iter()
+                .map(|id| docker.inspect_container(id, None::<InspectContainerOptions>)),
+        )
+        .await
+        .map_err(|err| crate::Error::context("Failed to inspect Docker container", err))?;
+        Ok(inspects
+            .iter()
+            .map(details::docker::docker_info_from_inspect)
+            .collect())
     }
 
     async fn get(&self, id: &str) -> crate::Result<Option<SandboxInfo>> {
-        let Some(inspect) = self.inspect(id).await? else {
+        let docker = Self::docker_client()?;
+        let Some(inspect) = inspect_container(&docker, id).await? else {
             return Ok(None);
         };
         if !managed_from_inspect(&inspect) {
@@ -121,16 +101,16 @@ impl SandboxProvider for DockerSandboxProvider {
     }
 
     async fn delete(&self, id: &str) -> crate::Result<()> {
-        let Some(inspect) = self.inspect(id).await? else {
+        let docker = Self::docker_client()?;
+        let Some(inspect) = inspect_container(&docker, id).await? else {
             return Ok(());
         };
         if !managed_from_inspect(&inspect) {
             return Err(crate::Error::message(format!(
-                "Refusing to delete Docker container '{id}' because it is missing label {MANAGED_LABEL}=true"
+                "Refusing to delete Docker container '{id}' because it is missing label {MANAGED_LABEL}={MANAGED_LABEL_VALUE}"
             )));
         }
 
-        let docker = Self::docker_client()?;
         let container_id = inspect.id.as_deref().unwrap_or(id);
         docker
             .remove_container(
@@ -150,14 +130,29 @@ impl SandboxProvider for DockerSandboxProvider {
     }
 }
 
+async fn inspect_container(
+    docker: &Docker,
+    id: &str,
+) -> crate::Result<Option<ContainerInspectResponse>> {
+    match docker
+        .inspect_container(id, None::<InspectContainerOptions>)
+        .await
+    {
+        Ok(inspect) => Ok(Some(inspect)),
+        Err(err) if docker_not_found(&err) => Ok(None),
+        Err(err) => Err(crate::Error::context(
+            format!("Failed to inspect Docker container '{id}'"),
+            err,
+        )),
+    }
+}
+
 fn managed_from_inspect(inspect: &ContainerInspectResponse) -> bool {
     inspect
         .config
         .as_ref()
         .and_then(|config| config.labels.as_ref())
-        .and_then(|labels| labels.get(MANAGED_LABEL))
-        .map(String::as_str)
-        == Some("true")
+        .is_some_and(managed_labels::is_managed)
 }
 
 fn docker_not_found(error: &DockerError) -> bool {

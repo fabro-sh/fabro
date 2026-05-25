@@ -14,7 +14,7 @@ use fabro_types::{
     PullRequestLink, RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary,
     RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
     RunProjection, RunSandbox, RunSandboxRuntime, RunSize, RunSpec, RunStatus, RunTimestamps,
-    SandboxProvider, StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome,
+    SandboxProviderKind, StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome,
     StageProjection, StageState, StartRecord, SubAgentProjection, SubAgentStatus, TodoListKind,
     TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
 };
@@ -796,7 +796,7 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
 }
 
 fn planned_sandbox(settings: &RunEnvironmentSettings) -> RunSandbox {
-    let provider = SandboxProvider::from(settings.provider);
+    let provider = SandboxProviderKind::from(settings.provider);
     RunSandbox {
         provider,
         image: (settings.provider == EnvironmentProvider::Docker)

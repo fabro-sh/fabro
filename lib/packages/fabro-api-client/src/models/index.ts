@@ -348,7 +348,6 @@ export * from './sandbox-list-response';
 export * from './sandbox-network';
 export * from './sandbox-network-policy';
 export * from './sandbox-network-policy-mode';
-export * from './sandbox-provider';
 export * from './sandbox-provider-kind';
 export * from './sandbox-provider-lookup-error';
 export * from './sandbox-resources';

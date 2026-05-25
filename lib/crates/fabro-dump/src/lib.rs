@@ -473,9 +473,9 @@ mod tests {
     use fabro_types::graph::Graph;
     use fabro_types::run::RunSpec;
     use fabro_types::{
-        Checkpoint, CheckpointRecord, Conclusion, RunDiff, RunSandbox, RunStatus, SandboxProvider,
-        StageCompletion, StageModelUsage, StageOutcome, StartRecord, SuccessReason,
-        WorkflowSettings, first_event_seq, fixtures,
+        Checkpoint, CheckpointRecord, Conclusion, RunDiff, RunSandbox, RunStatus,
+        SandboxProviderKind, StageCompletion, StageModelUsage, StageOutcome, StartRecord,
+        SuccessReason, WorkflowSettings, first_event_seq, fixtures,
     };
     use futures::executor;
 
@@ -558,7 +558,7 @@ mod tests {
             diff:                 RunDiff::default(),
         });
         projection.sandbox = Some(RunSandbox {
-            provider: SandboxProvider::Local,
+            provider: SandboxProviderKind::Local,
             image:    None,
             snapshot: None,
             runtime:  Some(fabro_types::RunSandboxRuntime {

@@ -7514,7 +7514,7 @@ components:
       required: [provider, id]
       properties:
         provider:
-          $ref: "#/components/schemas/SandboxProvider"
+          $ref: "#/components/schemas/SandboxProviderKind"
         id:
           type: string
 
@@ -10155,16 +10155,8 @@ components:
           description: Equals `inference_time_ms + tool_time_ms`.
           example: 180000
 
-    SandboxProvider:
-      description: Sandbox execution provider.
-      type: string
-      enum:
-        - local
-        - docker
-        - daytona
-
     SandboxProviderKind:
-      description: Sandbox provider inventory discriminator.
+      description: Sandbox provider discriminator.
       type: string
       enum:
         - local
@@ -10181,7 +10173,7 @@ components:
         - runtime
       properties:
         provider:
-          $ref: "#/components/schemas/SandboxProvider"
+          $ref: "#/components/schemas/SandboxProviderKind"
         image:
           type: ["string", "null"]
         snapshot:

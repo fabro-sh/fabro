@@ -560,3 +560,103 @@ impl Sandbox for MutableMockSandbox {
         "Linux 6.1.0".into()
     }
 }
+
+// --- FakeSandboxProvider ---
+
+pub use fake_provider::{FakeGet, FakeList, FakeSandboxProvider, fake_registry, fake_sandbox_info};
+
+mod fake_provider {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use fabro_types::{
+        SandboxInfo, SandboxNetwork, SandboxProviderKind, SandboxResources, SandboxState,
+        SandboxTimestamps,
+    };
+
+    use crate::provider::{SandboxCreateSpec, SandboxProvider, SandboxProviderRegistry};
+
+    #[derive(Clone)]
+    pub enum FakeList {
+        Ok(Vec<SandboxInfo>),
+        Err(&'static str),
+    }
+
+    #[derive(Clone)]
+    pub enum FakeGet {
+        Found(Box<SandboxInfo>),
+        Missing,
+        Err(&'static str),
+    }
+
+    pub struct FakeSandboxProvider {
+        kind: SandboxProviderKind,
+        list: FakeList,
+        get:  FakeGet,
+    }
+
+    impl FakeSandboxProvider {
+        pub fn new(kind: SandboxProviderKind, list: FakeList, get: FakeGet) -> Self {
+            Self { kind, list, get }
+        }
+    }
+
+    #[async_trait]
+    impl SandboxProvider for FakeSandboxProvider {
+        fn kind(&self) -> SandboxProviderKind {
+            self.kind
+        }
+
+        async fn list(&self) -> crate::Result<Vec<SandboxInfo>> {
+            match &self.list {
+                FakeList::Ok(sandboxes) => Ok(sandboxes.clone()),
+                FakeList::Err(message) => Err(crate::Error::message(*message)),
+            }
+        }
+
+        async fn get(&self, _id: &str) -> crate::Result<Option<SandboxInfo>> {
+            match &self.get {
+                FakeGet::Found(sandbox) => Ok(Some((**sandbox).clone())),
+                FakeGet::Missing => Ok(None),
+                FakeGet::Err(message) => Err(crate::Error::message(*message)),
+            }
+        }
+
+        async fn create(&self, _spec: SandboxCreateSpec) -> crate::Result<SandboxInfo> {
+            Err(crate::Error::message("not implemented"))
+        }
+
+        async fn delete(&self, _id: &str) -> crate::Result<()> {
+            Ok(())
+        }
+    }
+
+    pub fn fake_registry(providers: Vec<FakeSandboxProvider>) -> SandboxProviderRegistry {
+        SandboxProviderRegistry::new(
+            providers
+                .into_iter()
+                .map(|provider| Arc::new(provider) as Arc<dyn SandboxProvider>)
+                .collect(),
+        )
+    }
+
+    pub fn fake_sandbox_info(provider: SandboxProviderKind, id: &str) -> SandboxInfo {
+        SandboxInfo {
+            provider,
+            id: id.to_string(),
+            display_name: None,
+            state: SandboxState::Running,
+            native_state: None,
+            image: None,
+            snapshot: None,
+            region: None,
+            web_url: None,
+            working_directory: None,
+            resources: SandboxResources::default(),
+            network: SandboxNetwork::unknown(),
+            labels: BTreeMap::new(),
+            timestamps: SandboxTimestamps::default(),
+        }
+    }
+}

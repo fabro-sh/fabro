@@ -15,7 +15,7 @@
 )]
 
 use fabro_sandbox::reconnect::reconnect;
-use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProvider};
+use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProviderKind};
 
 const DOCKER_MANAGED_LABEL: &str = "sh.fabro.managed";
 const DOCKER_CP_IMAGE: &str = "buildpack-deps:noble";
@@ -26,7 +26,7 @@ const DOCKER_CP_IMAGE: &str = "buildpack-deps:noble";
 
 fn local_record(working_directory: &std::path::Path) -> RunSandbox {
     RunSandbox {
-        provider: SandboxProvider::Local,
+        provider: SandboxProviderKind::Local,
         image:    None,
         snapshot: None,
         runtime:  Some(RunSandboxRuntime {
@@ -137,7 +137,7 @@ async fn local_cp_creates_parent_dirs() {
 
 fn docker_record(container_id: &str) -> RunSandbox {
     RunSandbox {
-        provider: SandboxProvider::Docker,
+        provider: SandboxProviderKind::Docker,
         image:    None,
         snapshot: None,
         runtime:  Some(RunSandboxRuntime {

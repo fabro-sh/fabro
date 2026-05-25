@@ -1,19 +1,19 @@
 use std::any::{TypeId, type_name};
 
-use fabro_api::types::{RunSandbox as ApiRunSandbox, SandboxProvider as ApiSandboxProvider};
-use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProvider};
+use fabro_api::types::{RunSandbox as ApiRunSandbox, SandboxProviderKind as ApiSandboxProvider};
+use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProviderKind};
 use serde_json::json;
 
 #[test]
 fn run_sandbox_reuses_domain_types() {
     assert_same_type::<ApiRunSandbox, RunSandbox>();
-    assert_same_type::<ApiSandboxProvider, SandboxProvider>();
+    assert_same_type::<ApiSandboxProvider, SandboxProviderKind>();
 }
 
 #[test]
 fn run_sandbox_json_matches_openapi_shape() {
     let sandbox = RunSandbox {
-        provider: SandboxProvider::Docker,
+        provider: SandboxProviderKind::Docker,
         image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
         snapshot: None,
         runtime:  Some(RunSandboxRuntime {

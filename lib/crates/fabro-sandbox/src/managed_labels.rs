@@ -3,7 +3,14 @@ use std::collections::HashMap;
 use fabro_types::RunId;
 
 pub(crate) const MANAGED_LABEL: &str = "sh.fabro.managed";
+pub(crate) const MANAGED_LABEL_VALUE: &str = "true";
 pub(crate) const RUN_ID_LABEL: &str = "sh.fabro.run_id";
+
+/// True when the provided label map carries the Fabro managed sentinel.
+#[cfg(any(feature = "docker", feature = "daytona", test))]
+pub(crate) fn is_managed(labels: &HashMap<String, String>) -> bool {
+    labels.get(MANAGED_LABEL).map(String::as_str) == Some(MANAGED_LABEL_VALUE)
+}
 
 #[cfg(any(feature = "docker", test))]
 pub(crate) fn for_run(run_id: Option<&RunId>) -> HashMap<String, String> {

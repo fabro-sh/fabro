@@ -301,7 +301,7 @@ mod tests {
         .await
         .unwrap();
         event::append_event(&source_store, &source_run_id, &Event::SandboxInitialized {
-            provider:          fabro_types::SandboxProvider::Local,
+            provider:          fabro_types::SandboxProviderKind::Local,
             id:                "sandbox-source".to_string(),
             working_directory: "/tmp/source".to_string(),
             repo_cloned:       None,

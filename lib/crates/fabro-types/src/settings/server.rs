@@ -150,11 +150,14 @@ pub struct ServerSandboxProvidersSettings {
 impl ServerSandboxProvidersSettings {
     /// Per-provider policy entry.
     #[must_use]
-    pub fn for_provider(&self, provider: crate::SandboxProvider) -> &ServerSandboxProviderSettings {
+    pub fn for_provider(
+        &self,
+        provider: crate::SandboxProviderKind,
+    ) -> &ServerSandboxProviderSettings {
         match provider {
-            crate::SandboxProvider::Local => &self.local,
-            crate::SandboxProvider::Docker => &self.docker,
-            crate::SandboxProvider::Daytona => &self.daytona,
+            crate::SandboxProviderKind::Local => &self.local,
+            crate::SandboxProviderKind::Docker => &self.docker,
+            crate::SandboxProviderKind::Daytona => &self.daytona,
         }
     }
 }

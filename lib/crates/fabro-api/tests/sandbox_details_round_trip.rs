@@ -5,20 +5,21 @@ use chrono::{TimeZone, Utc};
 use fabro_api::types::{
     SandboxDetails as ApiSandboxDetails, SandboxNetwork as ApiSandboxNetwork,
     SandboxNetworkPolicy as ApiSandboxNetworkPolicy,
-    SandboxNetworkPolicyMode as ApiSandboxNetworkPolicyMode, SandboxProvider as ApiSandboxProvider,
-    SandboxResources as ApiSandboxResources, SandboxState as ApiSandboxState,
-    SandboxTimestamps as ApiSandboxTimestamps,
+    SandboxNetworkPolicyMode as ApiSandboxNetworkPolicyMode,
+    SandboxProviderKind as ApiSandboxProvider, SandboxResources as ApiSandboxResources,
+    SandboxState as ApiSandboxState, SandboxTimestamps as ApiSandboxTimestamps,
 };
 use fabro_types::{
     RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy,
-    SandboxNetworkPolicyMode, SandboxProvider, SandboxResources, SandboxState, SandboxTimestamps,
+    SandboxNetworkPolicyMode, SandboxProviderKind, SandboxResources, SandboxState,
+    SandboxTimestamps,
 };
 use serde_json::json;
 
 #[test]
 fn sandbox_details_reuses_domain_types() {
     assert_same_type::<ApiSandboxDetails, SandboxDetails>();
-    assert_same_type::<ApiSandboxProvider, SandboxProvider>();
+    assert_same_type::<ApiSandboxProvider, SandboxProviderKind>();
     assert_same_type::<ApiSandboxState, SandboxState>();
     assert_same_type::<ApiSandboxResources, SandboxResources>();
     assert_same_type::<ApiSandboxTimestamps, SandboxTimestamps>();
@@ -32,7 +33,7 @@ fn sandbox_details_json_matches_openapi_shape() {
     let created_at = Utc.with_ymd_and_hms(2026, 5, 9, 12, 0, 0).unwrap();
     let details = SandboxDetails {
         sandbox:      RunSandbox {
-            provider: SandboxProvider::Docker,
+            provider: SandboxProviderKind::Docker,
             image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
             snapshot: None,
             runtime:  Some(RunSandboxRuntime {
@@ -129,7 +130,7 @@ fn sandbox_details_deserializes_when_optional_fields_are_absent() {
     }))
     .unwrap();
 
-    assert_eq!(details.sandbox.provider, SandboxProvider::Local);
+    assert_eq!(details.sandbox.provider, SandboxProviderKind::Local);
     assert_eq!(
         details
             .sandbox

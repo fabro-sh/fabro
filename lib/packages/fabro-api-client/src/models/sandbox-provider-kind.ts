@@ -15,7 +15,7 @@
 
 
 /**
- * Sandbox provider inventory discriminator.
+ * Sandbox provider discriminator.
  */
 
 export const SandboxProviderKind = {

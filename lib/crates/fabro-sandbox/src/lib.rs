@@ -47,8 +47,8 @@ pub use provider::daytona::DaytonaSandboxProvider;
 #[cfg(feature = "docker")]
 pub use provider::docker::DockerSandboxProvider;
 pub use provider::{
-    LocalSandboxProvider, SandboxCreateSpec, SandboxListFilter, SandboxLookupError,
-    SandboxProvider, SandboxProviderRegistry,
+    LocalSandboxProvider, SandboxCreateSpec, SandboxLookupError, SandboxProvider,
+    SandboxProviderRegistry,
 };
 pub use read_guard::ReadBeforeWriteSandbox;
 pub use reconnect::{reconnect, reconnect_for_run, reconnect_for_run_with_callback};
