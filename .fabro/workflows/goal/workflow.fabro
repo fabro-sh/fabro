@@ -1,0 +1,36 @@
+digraph Goal {
+    graph [
+        goal="Complete the user-provided goal",
+        rankdir=LR,
+        max_node_visits=30
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    work [
+        label="Work",
+        thread_id="goal",
+        fidelity="full",
+        max_visits=12,
+        prompt="@prompts/continue.md"
+    ]
+
+    audit [
+        label="Completion Audit",
+        thread_id="goal",
+        fidelity="full",
+        goal_gate=true,
+        retry_target="work",
+        output_schema="routing",
+        output_retries=2,
+        max_visits=12,
+        prompt="@prompts/audit.md"
+    ]
+
+    start -> work -> audit
+
+    audit -> exit [label="Done", condition="outcome=succeeded"]
+    audit -> work [label="Continue", condition="outcome=failed || preferred_label=Continue"]
+    audit -> work [label="No clear verdict"]
+}
