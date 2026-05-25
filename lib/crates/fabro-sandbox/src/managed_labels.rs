@@ -30,7 +30,7 @@ pub(crate) fn merge_for_run(
 }
 
 fn insert_for_run(labels: &mut HashMap<String, String>, run_id: Option<&RunId>) {
-    labels.insert(MANAGED_LABEL.to_string(), "true".to_string());
+    labels.insert(MANAGED_LABEL.to_string(), MANAGED_LABEL_VALUE.to_string());
     if let Some(run_id) = run_id {
         labels.insert(RUN_ID_LABEL.to_string(), run_id.to_string());
     }
@@ -67,6 +67,7 @@ mod tests {
             labels.get(RUN_ID_LABEL).map(String::as_str),
             Some("01HY0000000000000000000000")
         );
+        assert!(is_managed(&labels));
     }
 
     #[test]
