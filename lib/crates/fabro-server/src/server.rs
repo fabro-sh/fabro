@@ -2098,10 +2098,10 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
                     .map_err(anyhow::Error::from)
             })
             .transpose()?;
+        let vault_guard = vault.try_read().ok();
         match resolve_slack_credentials_status_with_lookup(|name| {
-            vault
-                .try_read()
-                .ok()
+            vault_guard
+                .as_ref()
                 .and_then(|vault| vault.get(name).map(str::to_string))
         }) {
             SlackCredentialResolution::Configured(credentials) => {

@@ -72,7 +72,6 @@ use crate::{local_server, server_client, user_config};
 
 const GITHUB_TOKEN_SECRET_KEY: &str = fabro_static::EnvVars::GITHUB_TOKEN;
 const GITHUB_APP_PRIVATE_KEY_KEY: &str = fabro_static::EnvVars::GITHUB_APP_PRIVATE_KEY;
-#[cfg(test)]
 const GITHUB_APP_CLIENT_SECRET_KEY: &str = fabro_static::EnvVars::GITHUB_APP_CLIENT_SECRET;
 const GITHUB_APP_WEBHOOK_SECRET_KEY: &str = fabro_static::EnvVars::GITHUB_APP_WEBHOOK_SECRET;
 
@@ -1163,11 +1162,11 @@ async fn setup_github_app(
     let pem_b64 = BASE64_STANDARD.encode(pem.as_bytes());
 
     let mut env_pairs = vec![
-        ("GITHUB_APP_PRIVATE_KEY".to_string(), pem_b64),
-        ("GITHUB_APP_CLIENT_SECRET".to_string(), client_secret),
+        (GITHUB_APP_PRIVATE_KEY_KEY.to_string(), pem_b64),
+        (GITHUB_APP_CLIENT_SECRET_KEY.to_string(), client_secret),
     ];
     if let Some(secret) = webhook_secret {
-        env_pairs.push(("GITHUB_APP_WEBHOOK_SECRET".to_string(), secret));
+        env_pairs.push((GITHUB_APP_WEBHOOK_SECRET_KEY.to_string(), secret));
     }
 
     Ok(GitHubAppRegistration {
