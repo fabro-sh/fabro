@@ -352,6 +352,7 @@ pub struct Session {
     tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,
     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,
+    last_input_timing: SessionInputTiming,
 }
 
 impl Session {
@@ -389,6 +390,7 @@ impl Session {
             tool_env_provider: None,
             subagent_manager,
             completion_coordinator: None,
+            last_input_timing: SessionInputTiming::default(),
         }
     }
 
@@ -1206,19 +1208,25 @@ impl Session {
     pub async fn process_input(&mut self, input: &str) -> Result<(), Error> {
         self.process_input_with_runtime(input, AgentToolRuntime::default())
             .await
-            .1
     }
 
-    /// Process an input. Returns the inference/tool timing accumulated during
-    /// the call alongside the call result; timing is observed even on error.
+    #[must_use]
+    pub const fn last_input_timing(&self) -> SessionInputTiming {
+        self.last_input_timing
+    }
+
+    /// Process an input. The inference/tool timing accumulated during the call
+    /// is available via [`Self::last_input_timing`] after this returns, even on
+    /// error.
     pub async fn process_input_with_runtime(
         &mut self,
         input: &str,
         agent_tool_runtime: AgentToolRuntime,
-    ) -> (SessionInputTiming, Result<(), Error>) {
+    ) -> Result<(), Error> {
         let mut timing = SessionInputTiming::default();
+        self.last_input_timing = timing;
         if self.state == SessionState::Closed {
-            return (timing, Err(Error::SessionClosed));
+            return Err(Error::SessionClosed);
         }
 
         // Spawn wall-clock timeout task if configured
@@ -1271,7 +1279,8 @@ impl Session {
             self.transition(SessionState::Idle);
         }
 
-        (timing, result)
+        self.last_input_timing = timing;
+        result
     }
 
     async fn run_single_input(
@@ -2285,10 +2294,11 @@ mod tests {
         let env = Arc::new(MockSandbox::default());
         let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
-        let (first, result) = session
+        let result = session
             .process_input_with_runtime("use the slow tool", AgentToolRuntime::default())
             .await;
         result.unwrap();
+        let first = session.last_input_timing();
         assert!(
             first.inference >= Duration::from_millis(35),
             "expected non-zero inference timing for first input, got {first:?}"
@@ -2298,10 +2308,11 @@ mod tests {
             "expected non-zero tool timing for first input, got {first:?}"
         );
 
-        let (second, result) = session
+        let result = session
             .process_input_with_runtime("no tools this time", AgentToolRuntime::default())
             .await;
         result.unwrap();
+        let second = session.last_input_timing();
         assert!(
             second.inference >= Duration::from_millis(15),
             "expected per-input inference timing for second input, got {second:?}"

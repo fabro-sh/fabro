@@ -1254,9 +1254,10 @@ impl CodergenBackend for AgentApiBackend {
                 if !is_reused {
                     emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
                 }
-                let (timing, process_result) = session
+                let process_result = session
                     .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                     .await;
+                let timing = session.last_input_timing();
                 inference_duration = inference_duration.saturating_add(timing.inference);
                 tool_duration = tool_duration.saturating_add(timing.tool);
                 process_result
@@ -1385,9 +1386,10 @@ impl CodergenBackend for AgentApiBackend {
                             }
                         }
                         emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
-                        let (timing, process_result) = session
+                        let process_result = session
                             .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                             .await;
+                        let timing = session.last_input_timing();
                         inference_duration = inference_duration.saturating_add(timing.inference);
                         tool_duration = tool_duration.saturating_add(timing.tool);
                         match process_result {
@@ -1451,12 +1453,13 @@ impl CodergenBackend for AgentApiBackend {
                             ));
                         }
                         let repair_message = error.repair_message(schema);
-                        let (timing, repair_result) = session
+                        let repair_result = session
                             .process_input_with_runtime(
                                 &repair_message,
                                 fabro_agent::AgentToolRuntime::default(),
                             )
                             .await;
+                        let timing = session.last_input_timing();
                         inference_duration = inference_duration.saturating_add(timing.inference);
                         tool_duration = tool_duration.saturating_add(timing.tool);
                         match repair_result {
