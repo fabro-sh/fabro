@@ -1424,7 +1424,7 @@ mod tests {
     use crate::error::Error;
     use crate::event::test_support::user_principal;
     use crate::event::{Event, StageScope};
-    use crate::outcome::{BilledModelUsage, FailureDetail};
+    use crate::outcome::FailureDetail;
 
     #[derive(Debug)]
     struct EventTestCause;
@@ -1446,25 +1446,7 @@ mod tests {
         }
     }
 
-    fn test_usage(model_id: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
-        serde_json::from_value(serde_json::json!({
-            "input": {
-                "usage": {
-                    "model": {
-                        "provider": "openai",
-                        "model_id": model_id
-                    },
-                    "tokens": {
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens
-                    }
-                },
-                "facts": { "algorithm": "openai" }
-            },
-            "total_usd_micros": input_tokens + output_tokens
-        }))
-        .unwrap()
-    }
+    use crate::test_support::test_usage;
 
     #[test]
     fn run_event_stage_completed_places_node_fields_in_header() {

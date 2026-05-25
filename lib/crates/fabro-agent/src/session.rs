@@ -76,6 +76,15 @@ pub struct SessionInputTiming {
     pub tool:      Duration,
 }
 
+/// Take the value out of `start`, add its elapsed time to `total`. Used by
+/// `run_single_input` to accumulate inference and tool spans at well-defined
+/// boundaries (stream open, retry, error, cancel, end-of-loop).
+fn record_elapsed(start: &mut Option<Instant>, total: &mut Duration) {
+    if let Some(s) = start.take() {
+        *total = total.saturating_add(s.elapsed());
+    }
+}
+
 impl SteeringItem {
     #[must_use]
     pub fn actor(&self) -> Option<&Principal> {
@@ -343,8 +352,6 @@ pub struct Session {
     tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,
     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,
-    last_input_inference_duration: Duration,
-    last_input_tool_duration: Duration,
 }
 
 impl Session {
@@ -382,8 +389,6 @@ impl Session {
             tool_env_provider: None,
             subagent_manager,
             completion_coordinator: None,
-            last_input_inference_duration: Duration::ZERO,
-            last_input_tool_duration: Duration::ZERO,
         }
     }
 
@@ -1198,28 +1203,22 @@ impl Session {
         &self.file_tracker
     }
 
-    #[must_use]
-    pub const fn last_input_timing(&self) -> SessionInputTiming {
-        SessionInputTiming {
-            inference: self.last_input_inference_duration,
-            tool:      self.last_input_tool_duration,
-        }
-    }
-
     pub async fn process_input(&mut self, input: &str) -> Result<(), Error> {
         self.process_input_with_runtime(input, AgentToolRuntime::default())
             .await
+            .1
     }
 
+    /// Process an input. Returns the inference/tool timing accumulated during
+    /// the call alongside the call result; timing is observed even on error.
     pub async fn process_input_with_runtime(
         &mut self,
         input: &str,
         agent_tool_runtime: AgentToolRuntime,
-    ) -> Result<(), Error> {
-        self.last_input_inference_duration = Duration::ZERO;
-        self.last_input_tool_duration = Duration::ZERO;
+    ) -> (SessionInputTiming, Result<(), Error>) {
+        let mut timing = SessionInputTiming::default();
         if self.state == SessionState::Closed {
-            return Err(Error::SessionClosed);
+            return (timing, Err(Error::SessionClosed));
         }
 
         // Spawn wall-clock timeout task if configured
@@ -1241,7 +1240,9 @@ impl Session {
         });
 
         // Process the initial input, then drain any followups
-        let mut result = self.run_single_input(input, &agent_tool_runtime).await;
+        let mut result = self
+            .run_single_input(input, &agent_tool_runtime, &mut timing)
+            .await;
 
         if result.is_ok() {
             loop {
@@ -1251,7 +1252,9 @@ impl Session {
                     .expect("followup queue lock poisoned")
                     .pop_front();
                 let Some(followup) = followup else { break };
-                result = self.run_single_input(&followup, &agent_tool_runtime).await;
+                result = self
+                    .run_single_input(&followup, &agent_tool_runtime, &mut timing)
+                    .await;
                 if result.is_err() {
                     break;
                 }
@@ -1268,13 +1271,14 @@ impl Session {
             self.transition(SessionState::Idle);
         }
 
-        result
+        (timing, result)
     }
 
     async fn run_single_input(
         &mut self,
         input: &str,
         agent_tool_runtime: &AgentToolRuntime,
+        timing: &mut SessionInputTiming,
     ) -> Result<(), Error> {
         const STREAM_CONSUME_RETRIES: usize = 3;
 
@@ -1409,15 +1413,6 @@ impl Session {
             let client = self.llm_client.clone();
             let cancel_token_for_select = self.cancel_token.clone();
             let mut inference_start = Some(Instant::now());
-            macro_rules! record_inference_duration {
-                () => {
-                    if let Some(start) = inference_start.take() {
-                        self.last_input_inference_duration = self
-                            .last_input_inference_duration
-                            .saturating_add(start.elapsed());
-                    }
-                };
-            }
             let stream_outcome: Option<Result<StreamEventStream, Error>> = tokio::select! {
                 biased;
                 () = round_token.cancelled() => None,
@@ -1428,12 +1423,12 @@ impl Session {
                 match stream {
                     Ok(stream) => stream,
                     Err(err) => {
-                        record_inference_duration!();
+                        record_elapsed(&mut inference_start, &mut timing.inference);
                         return Err(err);
                     }
                 }
             } else {
-                record_inference_duration!();
+                record_elapsed(&mut inference_start, &mut timing.inference);
                 if self.cancel_token.is_cancelled() {
                     self.close();
                     return Err(self.interrupted_error());
@@ -1509,7 +1504,7 @@ impl Session {
                 // If terminal cancel fired, drop the stream and bail out.
                 if self.cancel_token.is_cancelled() {
                     drop(event_stream);
-                    record_inference_duration!();
+                    record_elapsed(&mut inference_start, &mut timing.inference);
                     self.close();
                     return Err(self.interrupted_error());
                 }
@@ -1579,7 +1574,7 @@ impl Session {
                             match stream {
                                 Ok(stream) => stream,
                                 Err(err) => {
-                                    record_inference_duration!();
+                                    record_elapsed(&mut inference_start, &mut timing.inference);
                                     return Err(err);
                                 }
                             }
@@ -1600,7 +1595,7 @@ impl Session {
                             },
                         );
                     }
-                    record_inference_duration!();
+                    record_elapsed(&mut inference_start, &mut timing.inference);
                     return Err(self.emit_llm_error(err));
                 }
 
@@ -1632,7 +1627,7 @@ impl Session {
                         match stream {
                             Ok(stream) => stream,
                             Err(err) => {
-                                record_inference_duration!();
+                                record_elapsed(&mut inference_start, &mut timing.inference);
                                 return Err(err);
                             }
                         }
@@ -1643,7 +1638,7 @@ impl Session {
                     };
                 }
             }
-            record_inference_duration!();
+            record_elapsed(&mut inference_start, &mut timing.inference);
 
             // Mid-LLM steer interrupt: drop the unrecorded turn, clear any
             // partial visible output, and re-iterate. The next turn's
@@ -1770,9 +1765,7 @@ impl Session {
                 agent_tool_runtime,
             )
             .await;
-            self.last_input_tool_duration = self
-                .last_input_tool_duration
-                .saturating_add(tool_start.elapsed());
+            timing.tool = timing.tool.saturating_add(tool_start.elapsed());
             composite_watcher.abort();
             if tool_calls
                 .iter()
@@ -2292,8 +2285,10 @@ mod tests {
         let env = Arc::new(MockSandbox::default());
         let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
-        session.process_input("use the slow tool").await.unwrap();
-        let first = session.last_input_timing();
+        let (first, result) = session
+            .process_input_with_runtime("use the slow tool", AgentToolRuntime::default())
+            .await;
+        result.unwrap();
         assert!(
             first.inference >= Duration::from_millis(35),
             "expected non-zero inference timing for first input, got {first:?}"
@@ -2303,8 +2298,10 @@ mod tests {
             "expected non-zero tool timing for first input, got {first:?}"
         );
 
-        session.process_input("no tools this time").await.unwrap();
-        let second = session.last_input_timing();
+        let (second, result) = session
+            .process_input_with_runtime("no tools this time", AgentToolRuntime::default())
+            .await;
+        result.unwrap();
         assert!(
             second.inference >= Duration::from_millis(15),
             "expected per-input inference timing for second input, got {second:?}"

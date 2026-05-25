@@ -53,6 +53,14 @@ impl StageTiming {
         Self::new(wall_time_ms, 0, 0)
     }
 
+    /// Active-only timing for stages whose wall time will be supplied
+    /// separately by the executor's own stopwatch (current shape of the
+    /// handler → executor hop).
+    #[must_use]
+    pub fn active_only(inference_time_ms: u64, tool_time_ms: u64) -> Self {
+        Self::new(0, inference_time_ms, tool_time_ms)
+    }
+
     /// Sum two timings field-by-field. Used to aggregate visits of one node
     /// and to accumulate run-level rollups.
     #[must_use]

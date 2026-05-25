@@ -138,7 +138,7 @@ impl Handler for PromptHandler {
                         files_touched,
                         timing,
                         ..
-                    }) => (text, usage.map(|usage| *usage), files_touched, timing),
+                    }) => (text, usage, files_touched, timing),
                     Err(Error::Cancelled) => return Err(Error::Cancelled),
                     Err(e) if e.is_retryable() => {
                         return Err(e);

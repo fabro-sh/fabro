@@ -20,10 +20,14 @@ use crate::interview_runtime::WorkflowAgentQuestionRuntime;
 use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt};
 
 /// Result from a `CodergenBackend` invocation.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Text payload is the common case; Full(Box<Outcome>) is the rare alternative."
+)]
 pub enum CodergenResult {
     Text {
         text:              String,
-        usage:             Option<Box<BilledModelUsage>>,
+        usage:             Option<BilledModelUsage>,
         files_touched:     Vec<String>,
         last_file_touched: Option<String>,
         /// Active timing observed by the backend. The wall field is ignored by
@@ -302,13 +306,7 @@ impl Handler for AgentHandler {
                         files_touched,
                         last_file_touched,
                         timing,
-                    }) => (
-                        text,
-                        usage.map(|usage| *usage),
-                        files_touched,
-                        last_file_touched,
-                        timing,
-                    ),
+                    }) => (text, usage, files_touched, last_file_touched, timing),
                     Err(Error::Cancelled) => return Err(Error::Cancelled),
                     Err(e) if e.is_retryable() => {
                         return Err(e);

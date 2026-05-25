@@ -53,6 +53,56 @@ async fn execute_and_emit_terminal(initialized: InitializedState) -> Executed {
     executed
 }
 
+/// Construct a fully-populated `BilledModelUsage` for tests. Centralised so
+/// callers don't keep rebuilding the same JSON skeleton.
+#[must_use]
+pub fn test_usage(
+    model_id: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+) -> fabro_types::BilledModelUsage {
+    serde_json::from_value(serde_json::json!({
+        "input": {
+            "usage": {
+                "model": {
+                    "provider": "openai",
+                    "model_id": model_id
+                },
+                "tokens": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens
+                }
+            },
+            "facts": { "algorithm": "openai" }
+        },
+        "total_usd_micros": input_tokens + output_tokens
+    }))
+    .expect("test_usage JSON must deserialise")
+}
+
+/// Append the `RunStartRequested → RunRunnable → RunStarting → RunRunning`
+/// sequence so subsequent calls observe the run as live.
+pub async fn mark_run_running(run_store: &fabro_store::RunDatabase, run_id: &fabro_types::RunId) {
+    append_event(run_store, run_id, &Event::RunStartRequested {
+        resume: false,
+        actor:  None,
+    })
+    .await
+    .expect("seed run.start_requested");
+    append_event(run_store, run_id, &Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .expect("seed run.runnable");
+    append_event(run_store, run_id, &Event::RunStarting)
+        .await
+        .expect("seed run.starting");
+    append_event(run_store, run_id, &Event::RunRunning)
+        .await
+        .expect("seed run.running");
+}
+
 pub fn test_store_dir(run_dir: &std::path::Path) -> PathBuf {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     std::process::id().hash(&mut hasher);

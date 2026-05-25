@@ -120,12 +120,6 @@ pub struct EffectiveRequestControls {
     pub(crate) speed:            Option<Speed>,
 }
 
-fn active_stage_timing(inference: Duration, tool: Duration) -> StageTiming {
-    // The executor ignores this wall field and supplies its own stopwatch-based
-    // value when converting Outcome.timing into the emitted stage timing.
-    StageTiming::new(0, crate::millis_u64(inference), crate::millis_u64(tool))
-}
-
 fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentApiErrorDisposition {
     match err {
         fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::Cancelled) => {
@@ -1119,10 +1113,13 @@ impl CodergenBackend for AgentApiBackend {
 
             return Ok(CodergenResult::Text {
                 text:              response_text,
-                usage:             Some(Box::new(stage_usage)),
+                usage:             Some(stage_usage),
                 files_touched:     Vec::new(),
                 last_file_touched: None,
-                timing:            active_stage_timing(inference_duration, Duration::ZERO),
+                timing:            StageTiming::active_only(
+                    crate::millis_u64(inference_duration),
+                    0,
+                ),
             });
         }
     }
@@ -1257,10 +1254,9 @@ impl CodergenBackend for AgentApiBackend {
                 if !is_reused {
                     emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
                 }
-                let process_result = session
+                let (timing, process_result) = session
                     .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                     .await;
-                let timing = session.last_input_timing();
                 inference_duration = inference_duration.saturating_add(timing.inference);
                 tool_duration = tool_duration.saturating_add(timing.tool);
                 process_result
@@ -1389,10 +1385,9 @@ impl CodergenBackend for AgentApiBackend {
                             }
                         }
                         emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
-                        let process_result = session
+                        let (timing, process_result) = session
                             .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                             .await;
-                        let timing = session.last_input_timing();
                         inference_duration = inference_duration.saturating_add(timing.inference);
                         tool_duration = tool_duration.saturating_add(timing.tool);
                         match process_result {
@@ -1456,8 +1451,12 @@ impl CodergenBackend for AgentApiBackend {
                             ));
                         }
                         let repair_message = error.repair_message(schema);
-                        let repair_result = session.process_input(&repair_message).await;
-                        let timing = session.last_input_timing();
+                        let (timing, repair_result) = session
+                            .process_input_with_runtime(
+                                &repair_message,
+                                fabro_agent::AgentToolRuntime::default(),
+                            )
+                            .await;
                         inference_duration = inference_duration.saturating_add(timing.inference);
                         tool_duration = tool_duration.saturating_add(timing.tool);
                         match repair_result {
@@ -1532,10 +1531,13 @@ impl CodergenBackend for AgentApiBackend {
 
         Ok(CodergenResult::Text {
             text: response,
-            usage: Some(Box::new(stage_usage)),
+            usage: Some(stage_usage),
             files_touched,
             last_file_touched,
-            timing: active_stage_timing(inference_duration, tool_duration),
+            timing: StageTiming::active_only(
+                crate::millis_u64(inference_duration),
+                crate::millis_u64(tool_duration),
+            ),
         })
     }
 }

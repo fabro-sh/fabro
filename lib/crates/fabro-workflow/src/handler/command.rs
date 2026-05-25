@@ -178,7 +178,7 @@ impl Handler for CommandHandler {
                 serde_json::json!(finalized.output_ref),
             );
             outcome.notes = Some(format!("Script completed: {script}"));
-            outcome.timing = Some(StageTiming::new(0, 0, result.duration_ms));
+            outcome.timing = Some(StageTiming::active_only(0, result.duration_ms));
             Ok(outcome)
         } else {
             let mut reason = format!(
@@ -191,7 +191,7 @@ impl Handler for CommandHandler {
                 keys::COMMAND_OUTPUT.to_string(),
                 serde_json::json!(finalized.output_ref),
             );
-            outcome.timing = Some(StageTiming::new(0, 0, result.duration_ms));
+            outcome.timing = Some(StageTiming::active_only(0, result.duration_ms));
             Ok(outcome)
         }
     }

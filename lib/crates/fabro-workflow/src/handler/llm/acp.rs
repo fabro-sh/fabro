@@ -233,7 +233,7 @@ impl AgentAcpBackend {
             usage: None,
             files_touched,
             last_file_touched,
-            timing: StageTiming::new(0, result.duration_ms, 0),
+            timing: StageTiming::active_only(result.duration_ms, 0),
         })
     }
 

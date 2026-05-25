@@ -164,32 +164,12 @@ mod tests {
 
     use fabro_model::{Catalog, ModelRef, ProviderId};
     use fabro_types::{
-        AttrValue, BilledModelUsage, BilledTokenCounts, Graph, Node, RunProjection, RunSpec,
-        StageCompletion, StageOutcome, WorkflowSettings, first_event_seq, fixtures,
+        AttrValue, BilledTokenCounts, Graph, Node, RunProjection, RunSpec, StageCompletion,
+        StageOutcome, WorkflowSettings, first_event_seq, fixtures,
     };
-    use serde_json::json;
 
     use super::billing_rollup_from_projection;
-
-    fn test_usage(model_id: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
-        serde_json::from_value(json!({
-            "input": {
-                "usage": {
-                    "model": {
-                        "provider": "openai",
-                        "model_id": model_id
-                    },
-                    "tokens": {
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens
-                    }
-                },
-                "facts": { "algorithm": "openai" }
-            },
-            "total_usd_micros": input_tokens + output_tokens
-        }))
-        .unwrap()
-    }
+    use crate::test_support::test_usage;
 
     fn test_projection() -> RunProjection {
         RunProjection::new(

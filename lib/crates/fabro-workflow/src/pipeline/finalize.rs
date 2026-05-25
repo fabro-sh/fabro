@@ -650,8 +650,8 @@ mod tests {
     use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
     use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
     use fabro_types::{
-        BilledModelUsage, BilledTokenCounts, EventBody, RunBlobId, RunEvent, RunId, RunSpec,
-        StageCompletion, WorkflowSettings, first_event_seq, fixtures,
+        BilledTokenCounts, EventBody, RunBlobId, RunEvent, RunId, RunSpec, StageCompletion,
+        WorkflowSettings, first_event_seq, fixtures,
     };
     use object_store::memory::InMemory;
 
@@ -864,25 +864,7 @@ mod tests {
         )
     }
 
-    fn test_usage(model_id: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
-        serde_json::from_value(serde_json::json!({
-            "input": {
-                "usage": {
-                    "model": {
-                        "provider": "openai",
-                        "model_id": model_id
-                    },
-                    "tokens": {
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens
-                    }
-                },
-                "facts": { "algorithm": "openai" }
-            },
-            "total_usd_micros": input_tokens + output_tokens
-        }))
-        .unwrap()
-    }
+    use crate::test_support::test_usage;
 
     #[test]
     fn conclusion_stage_order_follows_projection_first_event_order() {
