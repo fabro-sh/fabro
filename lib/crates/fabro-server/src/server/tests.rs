@@ -1027,6 +1027,63 @@ async fn create_secret_stores_file_secret_outside_token_lookups() {
     )]);
 }
 
+fn create_token_secret_request(name: &str, value: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(api("/secrets"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_string(&serde_json::json!({
+                "name": name,
+                "value": value,
+                "type": "token"
+            }))
+            .unwrap(),
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn create_secret_rejects_bootstrap_secret_names() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    for name in [EnvVars::SESSION_SECRET, EnvVars::FABRO_DEV_TOKEN] {
+        let response = app
+            .clone()
+            .oneshot(create_token_secret_request(name, "secret-value"))
+            .await
+            .unwrap();
+        let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+
+        assert_eq!(
+            body["errors"][0]["detail"],
+            format!("{name} is a bootstrap secret; configure it with process env or server.env")
+        );
+        assert!(state.vault.read().await.get(name).is_none());
+    }
+}
+
+#[tokio::test]
+async fn create_secret_allows_optional_vault_and_custom_secret_names() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+
+    for (name, value) in [
+        (EnvVars::GITHUB_APP_CLIENT_SECRET, "github-client-secret"),
+        ("CUSTOM_WORKFLOW_TOKEN", "custom-secret"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(create_token_secret_request(name, value))
+            .await
+            .unwrap();
+
+        assert_status!(response, StatusCode::OK).await;
+        assert_eq!(state.vault.read().await.get(name).as_deref(), Some(value));
+    }
+}
+
 #[tokio::test]
 async fn github_webhook_rejects_missing_signature() {
     let app = webhook_test_app(crate::test_support::test_auth_mode());

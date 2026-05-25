@@ -31,6 +31,12 @@ async fn create_secret(
     let name = body.name;
     let value = body.value;
     let description = body.description;
+    if fabro_static::is_bootstrap_secret(&name) {
+        return ApiError::bad_request(format!(
+            "{name} is a bootstrap secret; configure it with process env or server.env"
+        ))
+        .into_response();
+    }
     if secret_type == SecretType::Oauth {
         if let Err(err) = serde_json::from_str::<OAuthCredential>(&value) {
             return ApiError::bad_request(format!("invalid oauth credential JSON: {err}"))
