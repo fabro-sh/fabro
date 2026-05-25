@@ -15,7 +15,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
 use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
-use fabro_config::envfile::EnvFileUpdate;
+use fabro_config::envfile::{EnvFileRemoval, EnvFileUpdate};
 use fabro_install::{
     InstallListenConfig, InstallPersistencePlan, InstallSandboxSelection,
     OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite,
@@ -1560,8 +1560,13 @@ async fn post_install_finish(
         value,
         comment: None,
     };
+    let make_env_removal = |key: &str| EnvFileRemoval {
+        key:     key.to_string(),
+        comment: None,
+    };
     let mut server_env_writes = object_store_env_plan.writes;
-    let server_env_removals = object_store_env_plan.removals;
+    let mut server_env_removals = object_store_env_plan.removals;
+    let mut vault_removals = Vec::new();
     let mut dev_token: Option<String> = None;
     let mut dev_token_write = None;
     match github {
@@ -1575,6 +1580,17 @@ async fn post_install_finish(
                 secret_type: VaultSecretType::Token,
                 description: None,
             });
+            vault_removals.extend([
+                EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
+                EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
+                EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string(),
+            ]);
+            server_env_removals.extend([
+                make_env_removal(EnvVars::GITHUB_TOKEN),
+                make_env_removal(EnvVars::GITHUB_APP_PRIVATE_KEY),
+                make_env_removal(EnvVars::GITHUB_APP_CLIENT_SECRET),
+                make_env_removal(EnvVars::GITHUB_APP_WEBHOOK_SECRET),
+            ]);
             let dev_token_path = Storage::new(state.storage_dir.as_ref())
                 .runtime_directory()
                 .dev_token_path();
@@ -1600,17 +1616,35 @@ async fn post_install_finish(
             ) {
                 return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
             }
-            server_env_writes.push(make_env_write(
-                EnvVars::GITHUB_APP_PRIVATE_KEY,
-                BASE64_STANDARD.encode(github.pem.as_bytes()),
-            ));
-            server_env_writes.push(make_env_write(
-                EnvVars::GITHUB_APP_CLIENT_SECRET,
-                github.client_secret,
-            ));
+            vault_secrets.push(VaultSecretWrite {
+                name:        EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
+                value:       BASE64_STANDARD.encode(github.pem.as_bytes()),
+                secret_type: VaultSecretType::File,
+                description: None,
+            });
+            vault_secrets.push(VaultSecretWrite {
+                name:        EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
+                value:       github.client_secret,
+                secret_type: VaultSecretType::Token,
+                description: None,
+            });
             if let Some(secret) = github.webhook_secret {
-                server_env_writes.push(make_env_write(EnvVars::GITHUB_APP_WEBHOOK_SECRET, secret));
+                vault_secrets.push(VaultSecretWrite {
+                    name:        EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string(),
+                    value:       secret,
+                    secret_type: VaultSecretType::Token,
+                    description: None,
+                });
+            } else {
+                vault_removals.push(EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string());
             }
+            vault_removals.push(EnvVars::GITHUB_TOKEN.to_string());
+            server_env_removals.extend([
+                make_env_removal(EnvVars::GITHUB_TOKEN),
+                make_env_removal(EnvVars::GITHUB_APP_PRIVATE_KEY),
+                make_env_removal(EnvVars::GITHUB_APP_CLIENT_SECRET),
+                make_env_removal(EnvVars::GITHUB_APP_WEBHOOK_SECRET),
+            ]);
         }
     }
 
@@ -1645,7 +1679,7 @@ async fn post_install_finish(
         server_env_removals,
         dev_token_write,
         vault_writes: vault_secrets,
-        vault_removals: Vec::new(),
+        vault_removals,
     };
     if let Err(err) = persistence_plan.persist_direct() {
         error!(error = %err, "install persistence failed");
@@ -2256,20 +2290,27 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
 
-    use axum::http::HeaderMap;
+    use axum::extract::{Query, State};
+    use axum::http::{HeaderMap, StatusCode};
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use fabro_config::{Storage, envfile};
     use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
     use fabro_model::{Catalog, ProviderId};
     use fabro_static::EnvVars;
+    use fabro_vault::SecretType as VaultSecretType;
     use object_store::Error as ObjectStoreError;
     use serde_json::json;
 
     use super::{
-        DEFAULT_INSTALL_GITHUB_API_BASE_URL, InstallAppState, InstallAwsCredentialPair,
-        InstallFinishGuard, InstallObjectStoreCredentialMode, InstallObjectStoreInput,
-        InstallObjectStoreProvider, InstallObjectStoreState, PendingInstall, ServerSecrets,
-        classify_object_store_validation_error, detect_canonical_url, install_object_store_lookup,
-        lock_unpoisoned, provider_base_url_override, resolve_install_object_store_state,
-        token_is_valid, write_artifact_store_metadata,
+        DEFAULT_INSTALL_GITHUB_API_BASE_URL, GitHubAppOwner, GithubAppInstall, GithubInstallState,
+        InstallAppState, InstallAwsCredentialPair, InstallFinishGuard,
+        InstallObjectStoreCredentialMode, InstallObjectStoreInput, InstallObjectStoreProvider,
+        InstallObjectStoreState, InstallSandboxState, InstallTokenQuery, LlmProvidersInput,
+        PendingInstall, ServerConfigInput, ServerSecrets, classify_object_store_validation_error,
+        detect_canonical_url, install_object_store_lookup, lock_unpoisoned, post_install_finish,
+        provider_base_url_override, resolve_install_object_store_state, token_is_valid,
+        write_artifact_store_metadata,
     };
 
     #[test]
@@ -2332,6 +2373,106 @@ mod tests {
         assert!(InstallFinishGuard::try_acquire(Arc::clone(&flag)).is_none());
         drop(first);
         assert!(InstallFinishGuard::try_acquire(flag).is_some());
+    }
+
+    #[tokio::test]
+    async fn finish_with_github_app_writes_runtime_secrets_to_vault_not_server_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let config_path = dir.path().join("settings.toml");
+        let server_env_path = storage.runtime_directory().env_path();
+        envfile::write_env_file(
+            &server_env_path,
+            &HashMap::from([
+                (
+                    EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
+                    "stale-private".to_string(),
+                ),
+                (
+                    EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
+                    "stale-client".to_string(),
+                ),
+                (
+                    EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string(),
+                    "stale-webhook".to_string(),
+                ),
+            ]),
+        )
+        .unwrap();
+
+        let mut stale_vault = fabro_vault::Vault::load(storage.secrets_path()).unwrap();
+        stale_vault
+            .set(
+                EnvVars::GITHUB_TOKEN,
+                "stale-token",
+                VaultSecretType::Token,
+                None,
+            )
+            .unwrap();
+
+        let state = InstallAppState::for_test_with_paths("install-token", dir.path(), &config_path);
+        {
+            let mut pending = lock_unpoisoned(&state.pending_install, "install session");
+            pending.server = Some(ServerConfigInput {
+                canonical_url: "https://fabro.example".to_string(),
+            });
+            pending.object_store = Some(InstallObjectStoreState::Local {
+                root: dir.path().join("runs").display().to_string(),
+            });
+            pending.sandbox = Some(InstallSandboxState::Docker);
+            pending.llm = Some(LlmProvidersInput {
+                providers: Vec::new(),
+            });
+            pending.github = Some(GithubInstallState::App(GithubAppInstall {
+                owner:            GitHubAppOwner::Personal,
+                app_name:         "Fabro Test".to_string(),
+                allowed_username: "octocat".to_string(),
+                app_id:           "12345".to_string(),
+                slug:             "fabro-test".to_string(),
+                client_id:        "Iv1.test".to_string(),
+                client_secret:    "vault-client-secret".to_string(),
+                webhook_secret:   Some("vault-webhook-secret".to_string()),
+                pem:              "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n"
+                    .to_string(),
+            }));
+        }
+
+        let response = post_install_finish(
+            State(state),
+            HeaderMap::new(),
+            Query(InstallTokenQuery {
+                token: Some("install-token".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let server_env = envfile::read_env_file(&server_env_path).unwrap();
+        assert!(server_env.contains_key(EnvVars::SESSION_SECRET));
+        assert!(!server_env.contains_key(EnvVars::GITHUB_APP_PRIVATE_KEY));
+        assert!(!server_env.contains_key(EnvVars::GITHUB_APP_CLIENT_SECRET));
+        assert!(!server_env.contains_key(EnvVars::GITHUB_APP_WEBHOOK_SECRET));
+
+        let vault = fabro_vault::Vault::load(storage.secrets_path()).unwrap();
+        assert_eq!(vault.get(EnvVars::GITHUB_TOKEN), None);
+        assert_eq!(
+            vault.get(EnvVars::GITHUB_APP_CLIENT_SECRET),
+            Some("vault-client-secret")
+        );
+        assert_eq!(
+            vault.get(EnvVars::GITHUB_APP_WEBHOOK_SECRET),
+            Some("vault-webhook-secret")
+        );
+        let private_key_entry = vault
+            .get_entry(EnvVars::GITHUB_APP_PRIVATE_KEY)
+            .expect("private key should be stored in vault");
+        assert_eq!(private_key_entry.secret_type, VaultSecretType::File);
+        assert_eq!(
+            private_key_entry.value,
+            BASE64_STANDARD.encode(
+                "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n".as_bytes()
+            )
+        );
     }
 
     #[test]

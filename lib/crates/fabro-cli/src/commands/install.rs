@@ -1179,7 +1179,22 @@ async fn setup_github_app(
 async fn persist_vault_secrets_via_server(
     client: &server_client::Client,
     secrets: &[CreateSecretRequest],
+    removals: &[&'static str],
 ) -> Result<()> {
+    if !removals.is_empty() {
+        let existing = client
+            .list_secrets()
+            .await?
+            .into_iter()
+            .map(|secret| secret.name)
+            .collect::<Vec<_>>();
+        for name in removals {
+            if existing.iter().any(|existing_name| existing_name == name) {
+                client.delete_secret_by_name(name).await?;
+            }
+        }
+    }
+
     for secret in secrets {
         client
             .create_secret(CreateSecretRequest {
@@ -1197,11 +1212,12 @@ async fn persist_vault_secrets_via_server(
 async fn persist_vault_secrets_with(
     storage_dir: &Path,
     secrets: &[CreateSecretRequest],
+    removals: &[&'static str],
     server_was_running: bool,
     connect_server: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<server_client::Client>>,
     stop_server: impl for<'a> Fn(&'a Path, Duration) -> BoxFuture<'a, bool>,
 ) -> Result<()> {
-    if secrets.is_empty() {
+    if secrets.is_empty() && removals.is_empty() {
         return Ok(());
     }
 
@@ -1214,7 +1230,7 @@ async fn persist_vault_secrets_with(
             return Err(err);
         }
     };
-    let result = persist_vault_secrets_via_server(&client, secrets).await;
+    let result = persist_vault_secrets_via_server(&client, secrets, removals).await;
     if !server_was_running {
         stop_server(storage_dir, Duration::from_secs(5)).await;
     }
@@ -1235,6 +1251,20 @@ fn credential_secret_request(result: &LoginResult) -> Result<CreateSecretRequest
             type_:       ApiSecretType::Oauth,
             description: None,
         }),
+    }
+}
+
+fn github_app_secret_request(key: String, value: String) -> CreateSecretRequest {
+    let type_ = if key == GITHUB_APP_PRIVATE_KEY_KEY {
+        ApiSecretType::File
+    } else {
+        ApiSecretType::Token
+    };
+    CreateSecretRequest {
+        name: key,
+        value,
+        type_,
+        description: None,
     }
 }
 
@@ -1261,7 +1291,9 @@ fn server_env_removals(keys: &[&'static str]) -> Vec<envfile::EnvFileRemoval> {
 async fn persist_install_outputs(
     storage_dir: &Path,
     server_env_secrets: &[(String, String)],
+    server_env_remove: &[&'static str],
     vault_secrets: &[CreateSecretRequest],
+    vault_remove: &[&'static str],
     settings_write: Option<PendingSettingsWrite<'_>>,
     dev_token_write: Option<PendingDevTokenWrite>,
     server_was_running: bool,
@@ -1275,8 +1307,9 @@ async fn persist_install_outputs(
     persist_cli_install_outputs_with(
         storage_dir,
         server_env_updates(server_env_secrets),
-        Vec::new(),
+        server_env_removals(server_env_remove),
         vault_secrets,
+        vault_remove,
         settings_write,
         dev_token_write,
         server_was_running,
@@ -1300,7 +1333,7 @@ struct PendingGitHubInstallWrite<'a> {
     settings_write:    PendingSettingsWrite<'a>,
     server_env_set:    Vec<(String, String)>,
     server_env_remove: Vec<&'static str>,
-    vault_set:         Vec<(String, String)>,
+    vault_set:         Vec<VaultSecretWrite>,
     vault_remove:      Vec<&'static str>,
 }
 
@@ -1317,16 +1350,7 @@ fn persist_github_install_changes(
         server_env_writes: server_env_updates(&writes.server_env_set),
         server_env_removals: server_env_removals(&writes.server_env_remove),
         dev_token_write: None,
-        vault_writes: writes
-            .vault_set
-            .iter()
-            .map(|(key, value)| VaultSecretWrite {
-                name:        key.clone(),
-                value:       value.clone(),
-                secret_type: VaultSecretType::Token,
-                description: None,
-            })
-            .collect(),
+        vault_writes: writes.vault_set.clone(),
         vault_removals: writes
             .vault_remove
             .iter()
@@ -1363,6 +1387,7 @@ async fn persist_cli_install_outputs_with(
     server_env_writes: Vec<envfile::EnvFileUpdate>,
     server_env_removals: Vec<envfile::EnvFileRemoval>,
     vault_secrets: &[CreateSecretRequest],
+    vault_removals: &[&'static str],
     settings_write: Option<PendingSettingsWrite<'_>>,
     dev_token_write: Option<PendingDevTokenWrite>,
     server_was_running: bool,
@@ -1386,6 +1411,7 @@ async fn persist_cli_install_outputs_with(
     let persist_result = persist_vault_secrets_with(
         storage_dir,
         vault_secrets,
+        vault_removals,
         server_was_running,
         connect_server,
         stop_server,
@@ -1578,7 +1604,7 @@ async fn run_install_github_inner(
         .context("failed to parse existing settings.toml")?;
 
     let selection = choose_install_github_selection(args, github_args, &s, printer).await?;
-    let mut server_env_set = Vec::new();
+    let server_env_set = Vec::new();
     let mut server_env_remove = Vec::new();
     let mut vault_set = Vec::new();
     let mut vault_remove = Vec::new();
@@ -1586,8 +1612,19 @@ async fn run_install_github_inner(
     match selection {
         GitHubInstallSelection::Token { token } => {
             write_token_settings(&mut doc)?;
-            vault_set.push((GITHUB_TOKEN_SECRET_KEY.to_string(), token));
+            vault_set.push(VaultSecretWrite {
+                name:        GITHUB_TOKEN_SECRET_KEY.to_string(),
+                value:       token,
+                secret_type: VaultSecretType::Token,
+                description: None,
+            });
             server_env_remove.extend([
+                GITHUB_TOKEN_SECRET_KEY,
+                GITHUB_APP_PRIVATE_KEY_KEY,
+                GITHUB_APP_CLIENT_SECRET_KEY,
+                GITHUB_APP_WEBHOOK_SECRET_KEY,
+            ]);
+            vault_remove.extend([
                 GITHUB_APP_PRIVATE_KEY_KEY,
                 GITHUB_APP_CLIENT_SECRET_KEY,
                 GITHUB_APP_WEBHOOK_SECRET_KEY,
@@ -1598,6 +1635,7 @@ async fn run_install_github_inner(
                 "GitHub App install requires an authenticated GitHub username; run `gh auth login` and rerun `fabro install github`",
             )?;
             server_env_remove.extend([
+                GITHUB_TOKEN_SECRET_KEY,
                 GITHUB_APP_PRIVATE_KEY_KEY,
                 GITHUB_APP_CLIENT_SECRET_KEY,
                 GITHUB_APP_WEBHOOK_SECRET_KEY,
@@ -1616,8 +1654,27 @@ async fn run_install_github_inner(
                 printer,
             )
             .await?;
-            server_env_set.extend(registration.env_pairs);
+            let webhook_configured = registration
+                .env_pairs
+                .iter()
+                .any(|(key, _)| key == GITHUB_APP_WEBHOOK_SECRET_KEY);
+            for (key, value) in registration.env_pairs {
+                let secret_type = if key == GITHUB_APP_PRIVATE_KEY_KEY {
+                    VaultSecretType::File
+                } else {
+                    VaultSecretType::Token
+                };
+                vault_set.push(VaultSecretWrite {
+                    name: key,
+                    value,
+                    secret_type,
+                    description: None,
+                });
+            }
             vault_remove.push(GITHUB_TOKEN_SECRET_KEY);
+            if !webhook_configured {
+                vault_remove.push(GITHUB_APP_WEBHOOK_SECRET_KEY);
+            }
             write_github_app_settings(
                 &mut doc,
                 &registration.app_id,
@@ -1758,6 +1815,8 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
 
     let mut vault_secrets: Vec<CreateSecretRequest> = Vec::new();
     let mut server_env_pairs: Vec<(String, String)> = Vec::new();
+    let mut server_env_remove: Vec<&'static str> = Vec::new();
+    let mut vault_remove: Vec<&'static str> = Vec::new();
     let llm_selection = input_source
         .collect_llm_selection(&facts, &s, printer)
         .await?;
@@ -1779,11 +1838,22 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
                 s.green.apply_to("✔")
             );
             vault_secrets.push(CreateSecretRequest {
-                name:        "GITHUB_TOKEN".to_string(),
+                name:        GITHUB_TOKEN_SECRET_KEY.to_string(),
                 value:       token,
                 type_:       ApiSecretType::Token,
                 description: None,
             });
+            server_env_remove.extend([
+                GITHUB_TOKEN_SECRET_KEY,
+                GITHUB_APP_PRIVATE_KEY_KEY,
+                GITHUB_APP_CLIENT_SECRET_KEY,
+                GITHUB_APP_WEBHOOK_SECRET_KEY,
+            ]);
+            vault_remove.extend([
+                GITHUB_APP_PRIVATE_KEY_KEY,
+                GITHUB_APP_CLIENT_SECRET_KEY,
+                GITHUB_APP_WEBHOOK_SECRET_KEY,
+            ]);
             Some(PendingGitHubSettings::Token)
         }
         GitHubInstallSelection::App { owner, username } => {
@@ -1810,7 +1880,26 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
                 s.green.apply_to("✔"),
                 registration.slug
             );
-            server_env_pairs.extend(registration.env_pairs.iter().cloned());
+            let webhook_configured = registration
+                .env_pairs
+                .iter()
+                .any(|(key, _)| key == GITHUB_APP_WEBHOOK_SECRET_KEY);
+            vault_secrets.extend(
+                registration
+                    .env_pairs
+                    .into_iter()
+                    .map(|(key, value)| github_app_secret_request(key, value)),
+            );
+            server_env_remove.extend([
+                GITHUB_TOKEN_SECRET_KEY,
+                GITHUB_APP_PRIVATE_KEY_KEY,
+                GITHUB_APP_CLIENT_SECRET_KEY,
+                GITHUB_APP_WEBHOOK_SECRET_KEY,
+            ]);
+            vault_remove.push(GITHUB_TOKEN_SECRET_KEY);
+            if !webhook_configured {
+                vault_remove.push(GITHUB_APP_WEBHOOK_SECRET_KEY);
+            }
             Some(PendingGitHubSettings::App {
                 app_id:            registration.app_id,
                 slug:              registration.slug,
@@ -1924,7 +2013,9 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
     persist_install_outputs(
         &storage_dir,
         &server_env_pairs,
+        &server_env_remove,
         &vault_secrets,
+        &vault_remove,
         Some(PendingSettingsWrite {
             path:              &config_path,
             contents:          settings_toml.as_str(),
@@ -2073,7 +2164,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use fabro_vault::Vault;
-    use httpmock::Method::POST;
+    use httpmock::Method::{DELETE, GET, POST};
     use httpmock::MockServer;
 
     use super::*;
@@ -2615,6 +2706,7 @@ client_id = "client-id"
         persist_vault_secrets_with(
             dir.path(),
             &vault_secrets,
+            &[],
             false,
             |_| {
                 let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
@@ -2674,6 +2766,7 @@ client_id = "client-id"
         persist_vault_secrets_with(
             dir.path(),
             &vault_secrets,
+            &[],
             true,
             |_| {
                 let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
@@ -2695,6 +2788,95 @@ client_id = "client-id"
 
         assert_eq!(created.calls_async().await, 1);
         assert!(!stop_called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn persist_vault_secrets_with_removes_existing_stale_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault_secrets = [CreateSecretRequest {
+            name:        GITHUB_TOKEN_SECRET_KEY.to_string(),
+            value:       "gh-token".to_string(),
+            type_:       ApiSecretType::Token,
+            description: None,
+        }];
+        let server = MockServer::start_async().await;
+        let listed = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/api/v1/secrets");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [
+                                {
+                                    "name": GITHUB_APP_PRIVATE_KEY_KEY,
+                                    "type": "file",
+                                    "created_at": "2026-01-01T00:00:00Z",
+                                    "updated_at": "2026-01-01T00:00:00Z"
+                                }
+                            ]
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+        let deleted = server
+            .mock_async(|when, then| {
+                when.method(DELETE)
+                    .path("/api/v1/secrets")
+                    .body_includes(GITHUB_APP_PRIVATE_KEY_KEY);
+                then.status(204);
+            })
+            .await;
+        let created = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/api/v1/secrets")
+                    .body_includes(GITHUB_TOKEN_SECRET_KEY);
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "name": GITHUB_TOKEN_SECRET_KEY,
+                            "type": "token",
+                            "created_at": "2026-01-01T00:00:00Z",
+                            "updated_at": "2026-01-01T00:00:00Z"
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        persist_vault_secrets_with(
+            dir.path(),
+            &vault_secrets,
+            &[GITHUB_APP_PRIVATE_KEY_KEY, GITHUB_APP_CLIENT_SECRET_KEY],
+            true,
+            |_| {
+                let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
+                Box::pin(async move { Ok(client) })
+            },
+            |_, _| Box::pin(async move { true }),
+        )
+        .await
+        .unwrap();
+
+        listed.assert_async().await;
+        deleted.assert_async().await;
+        created.assert_async().await;
+    }
+
+    #[test]
+    fn github_app_secret_request_marks_private_key_as_file_secret() {
+        let private_key =
+            github_app_secret_request(GITHUB_APP_PRIVATE_KEY_KEY.to_string(), "pem".to_string());
+        let client_secret = github_app_secret_request(
+            GITHUB_APP_CLIENT_SECRET_KEY.to_string(),
+            "client".to_string(),
+        );
+
+        assert_eq!(private_key.type_, ApiSecretType::File);
+        assert_eq!(client_secret.type_, ApiSecretType::Token);
     }
 
     #[tokio::test]
@@ -2871,6 +3053,7 @@ client_id = "client-id"
             server_env_updates(&server_env_pairs),
             Vec::new(),
             &vault_secrets,
+            &[],
             Some(PendingSettingsWrite {
                 path:              &settings_path,
                 contents:          "_version = 1\n",
@@ -2926,6 +3109,7 @@ client_id = "client-id"
             server_env_updates(&server_env_pairs),
             Vec::new(),
             &vault_secrets,
+            &[],
             Some(PendingSettingsWrite {
                 path:              &settings_path,
                 contents:          "_version = 1\n",
@@ -2974,6 +3158,7 @@ client_id = "client-id"
             server_env_updates(&server_env_pairs),
             Vec::new(),
             &vault_secrets,
+            &[],
             Some(PendingSettingsWrite {
                 path:              &settings_path,
                 contents:          "_version = 1\n",
@@ -3013,6 +3198,7 @@ client_id = "client-id"
             server_env_updates(&server_env_pairs),
             Vec::new(),
             &vault_secrets,
+            &[],
             Some(PendingSettingsWrite {
                 path:              &settings_path,
                 contents:          "_version = 1\n[server]\nfoo = \"bar\"\n",
@@ -3072,7 +3258,12 @@ client_id = "client-id"
                 GITHUB_APP_CLIENT_SECRET_KEY,
                 GITHUB_APP_WEBHOOK_SECRET_KEY,
             ],
-            vault_set:         vec![(GITHUB_TOKEN_SECRET_KEY.to_string(), "token".to_string())],
+            vault_set:         vec![VaultSecretWrite {
+                name:        GITHUB_TOKEN_SECRET_KEY.to_string(),
+                value:       "token".to_string(),
+                secret_type: VaultSecretType::Token,
+                description: None,
+            }],
             vault_remove:      Vec::new(),
         })
         .unwrap();
@@ -3095,7 +3286,7 @@ client_id = "client-id"
     }
 
     #[test]
-    fn persist_github_install_changes_replaces_token_secret_with_app_env_keys() {
+    fn persist_github_install_changes_replaces_token_secret_with_app_vault_keys() {
         let dir = tempfile::tempdir().unwrap();
         let storage = Storage::new(dir.path());
         let server_env_path = storage.runtime_directory().env_path();
@@ -3124,44 +3315,66 @@ client_id = "client-id"
                 contents:          "after",
                 previous_contents: Some("before"),
             },
-            server_env_set:    vec![
-                (
-                    GITHUB_APP_PRIVATE_KEY_KEY.to_string(),
-                    "private".to_string(),
-                ),
-                (
-                    GITHUB_APP_CLIENT_SECRET_KEY.to_string(),
-                    "client".to_string(),
-                ),
-            ],
+            server_env_set:    Vec::new(),
             server_env_remove: vec![
+                GITHUB_TOKEN_SECRET_KEY,
                 GITHUB_APP_PRIVATE_KEY_KEY,
                 GITHUB_APP_CLIENT_SECRET_KEY,
                 GITHUB_APP_WEBHOOK_SECRET_KEY,
             ],
-            vault_set:         Vec::new(),
+            vault_set:         vec![
+                VaultSecretWrite {
+                    name:        GITHUB_APP_PRIVATE_KEY_KEY.to_string(),
+                    value:       "private".to_string(),
+                    secret_type: VaultSecretType::File,
+                    description: None,
+                },
+                VaultSecretWrite {
+                    name:        GITHUB_APP_CLIENT_SECRET_KEY.to_string(),
+                    value:       "client".to_string(),
+                    secret_type: VaultSecretType::Token,
+                    description: None,
+                },
+                VaultSecretWrite {
+                    name:        GITHUB_APP_WEBHOOK_SECRET_KEY.to_string(),
+                    value:       "webhook".to_string(),
+                    secret_type: VaultSecretType::Token,
+                    description: None,
+                },
+            ],
             vault_remove:      vec![GITHUB_TOKEN_SECRET_KEY],
         })
         .unwrap();
 
         let server_env = envfile::read_env_file(&server_env_path).unwrap();
         assert_eq!(server_env.get("KEEP_ME").map(String::as_str), Some("1"));
-        assert_eq!(
-            server_env
-                .get(GITHUB_APP_PRIVATE_KEY_KEY)
-                .map(String::as_str),
-            Some("private")
-        );
-        assert_eq!(
-            server_env
-                .get(GITHUB_APP_CLIENT_SECRET_KEY)
-                .map(String::as_str),
-            Some("client")
-        );
+        assert!(!server_env.contains_key(GITHUB_APP_PRIVATE_KEY_KEY));
+        assert!(!server_env.contains_key(GITHUB_APP_CLIENT_SECRET_KEY));
         assert!(!server_env.contains_key(GITHUB_APP_WEBHOOK_SECRET_KEY));
 
         let vault = Vault::load(storage.secrets_path()).unwrap();
         assert_eq!(vault.get(GITHUB_TOKEN_SECRET_KEY), None);
+        assert_eq!(vault.get(GITHUB_APP_PRIVATE_KEY_KEY), Some("private"));
+        assert_eq!(vault.get(GITHUB_APP_CLIENT_SECRET_KEY), Some("client"));
+        assert_eq!(vault.get(GITHUB_APP_WEBHOOK_SECRET_KEY), Some("webhook"));
+        assert_eq!(
+            vault
+                .get_entry(GITHUB_APP_PRIVATE_KEY_KEY)
+                .map(|entry| entry.secret_type),
+            Some(VaultSecretType::File)
+        );
+        assert_eq!(
+            vault
+                .get_entry(GITHUB_APP_CLIENT_SECRET_KEY)
+                .map(|entry| entry.secret_type),
+            Some(VaultSecretType::Token)
+        );
+        assert_eq!(
+            vault
+                .get_entry(GITHUB_APP_WEBHOOK_SECRET_KEY)
+                .map(|entry| entry.secret_type),
+            Some(VaultSecretType::Token)
+        );
         assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), "after");
     }
 
@@ -3197,7 +3410,12 @@ client_id = "client-id"
             },
             server_env_set:    Vec::new(),
             server_env_remove: vec![GITHUB_APP_PRIVATE_KEY_KEY, GITHUB_APP_CLIENT_SECRET_KEY],
-            vault_set:         vec![("bad-secret-name".to_string(), "token".to_string())],
+            vault_set:         vec![VaultSecretWrite {
+                name:        "bad-secret-name".to_string(),
+                value:       "token".to_string(),
+                secret_type: VaultSecretType::Token,
+                description: None,
+            }],
             vault_remove:      Vec::new(),
         });
 

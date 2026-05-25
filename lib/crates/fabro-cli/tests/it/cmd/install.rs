@@ -661,6 +661,26 @@ mode = "keep-me"
         ]),
     )
     .unwrap();
+    let mut stale_vault = Vault::load(Storage::new(&storage_dir).secrets_path()).unwrap();
+    stale_vault
+        .set("GITHUB_APP_PRIVATE_KEY", "private", SecretType::File, None)
+        .unwrap();
+    stale_vault
+        .set(
+            "GITHUB_APP_CLIENT_SECRET",
+            "client-secret",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
+    stale_vault
+        .set(
+            "GITHUB_APP_WEBHOOK_SECRET",
+            "webhook-secret",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
 
     let path = fake_gh_path(&context, "token-from-gh");
     let output = context
@@ -740,6 +760,9 @@ mode = "keep-me"
 
     let vault = Vault::load(Storage::new(&storage_dir).secrets_path()).unwrap();
     assert_eq!(vault.get("GITHUB_TOKEN"), Some("token-from-gh"));
+    assert_eq!(vault.get("GITHUB_APP_PRIVATE_KEY"), None);
+    assert_eq!(vault.get("GITHUB_APP_CLIENT_SECRET"), None);
+    assert_eq!(vault.get("GITHUB_APP_WEBHOOK_SECRET"), None);
     assert_eq!(
         vault
             .get_entry("GITHUB_TOKEN")
