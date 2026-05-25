@@ -8,7 +8,7 @@ use axum::http::{Method, Request, StatusCode};
 use fabro_config::ServerSettingsBuilder;
 use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
-use fabro_server::server::{RouterOptions, build_router};
+use fabro_server::server::RouterOptions;
 use fabro_server::test_support::{
     TEST_DEV_TOKEN, TEST_SESSION_SECRET, test_app_state,
     test_app_state_with_runtime_settings_and_options,
