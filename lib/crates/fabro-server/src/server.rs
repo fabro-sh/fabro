@@ -2467,6 +2467,16 @@ fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, 
         .collect()
 }
 
+pub(in crate::server) fn counts_toward_scheduler_capacity(status: RunStatus) -> bool {
+    matches!(
+        status,
+        RunStatus::Starting
+            | RunStatus::Running
+            | RunStatus::Blocked { .. }
+            | RunStatus::Paused { .. }
+    )
+}
+
 #[allow(
     clippy::result_large_err,
     reason = "Run ID parsing returns HTTP 400 responses directly."
@@ -4063,15 +4073,7 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
                 let runs = state.runs.lock().expect("runs lock poisoned");
                 let active = runs
                     .values()
-                    .filter(|r| {
-                        matches!(
-                            r.status,
-                            RunStatus::Starting
-                                | RunStatus::Running
-                                | RunStatus::Blocked { .. }
-                                | RunStatus::Paused { .. }
-                        )
-                    })
+                    .filter(|r| counts_toward_scheduler_capacity(r.status))
                     .count();
                 let available = state.max_concurrent_runs.saturating_sub(active);
                 if available == 0 {

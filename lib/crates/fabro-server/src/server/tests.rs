@@ -9513,6 +9513,20 @@ async fn worker_started_child_run_requires_approval_before_becoming_runnable() {
         Some("pending")
     );
 
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/system/info",
+            &user_jwt,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let info_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(info_body["runs"]["active"], 1);
+    assert_eq!(info_body["runs"]["scheduler_slots_used"], 0);
+
     {
         let runs = state.runs.lock().expect("runs lock poisoned");
         assert_eq!(
@@ -13050,6 +13064,31 @@ async fn queue_position_reported_for_runnable_runs() {
     let second_id = second_run_id.parse::<RunId>().unwrap();
     assert_eq!(positions.get(&first_id).copied(), Some(1));
     assert_eq!(positions.get(&second_id).copied(), Some(2));
+}
+
+#[test]
+fn scheduler_capacity_counts_only_runs_occupying_slots() {
+    assert!(!counts_toward_scheduler_capacity(RunStatus::Submitted));
+    assert!(!counts_toward_scheduler_capacity(RunStatus::Pending {
+        reason: PendingReason::ApprovalRequired,
+    }));
+    assert!(!counts_toward_scheduler_capacity(RunStatus::Runnable));
+    assert!(counts_toward_scheduler_capacity(RunStatus::Starting));
+    assert!(counts_toward_scheduler_capacity(RunStatus::Running));
+    assert!(counts_toward_scheduler_capacity(RunStatus::Blocked {
+        blocked_reason: BlockedReason::HumanInputRequired,
+    }));
+    assert!(counts_toward_scheduler_capacity(RunStatus::Paused {
+        prior_block: None,
+    }));
+    assert!(!counts_toward_scheduler_capacity(RunStatus::Removing));
+    assert!(!counts_toward_scheduler_capacity(RunStatus::Succeeded {
+        reason: SuccessReason::Completed,
+    }));
+    assert!(!counts_toward_scheduler_capacity(RunStatus::Failed {
+        reason: FailureReason::WorkflowError,
+    }));
+    assert!(!counts_toward_scheduler_capacity(RunStatus::Dead));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

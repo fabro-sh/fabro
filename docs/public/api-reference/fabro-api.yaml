@@ -12291,6 +12291,10 @@ components:
           type: integer
           format: int64
           description: Runs currently pending, runnable, or executing.
+        scheduler_slots_used:
+          type: integer
+          format: int64
+          description: Runs currently occupying scheduler concurrency slots.
 
     SystemResourcesResponse:
       description: Server-visible runtime resource usage for the active Fabro process environment.
