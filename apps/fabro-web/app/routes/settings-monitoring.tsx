@@ -59,17 +59,14 @@ function RunsPanel() {
     return <PanelSkeleton />;
   }
 
-  const active = info.runs?.active ?? 0;
+  const slotsUsed = info.runs?.scheduler_slots_used ?? 0;
   const max = settings.server.scheduler.max_concurrent_runs;
-  const percent = max > 0 ? (active / max) * 100 : null;
+  const percent = max > 0 ? (slotsUsed / max) * 100 : null;
 
   return (
     <Panel title="Runs">
-      <Row
-        title="Active"
-        help="Runs currently pending, runnable, or executing against the scheduler ceiling."
-      >
-        <UsageMeter percent={percent} label={`${active} / ${max} active`} />
+      <Row title="Concurrency used" help="Runs currently occupying scheduler slots.">
+        <UsageMeter percent={percent} label={`${slotsUsed} / ${max} slots used`} />
       </Row>
     </Panel>
   );
