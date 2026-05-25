@@ -985,6 +985,14 @@ mod tests {
             ))
         }
 
+        async fn approve_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn deny_run(&self, _run_id: &RunId, _reason: Option<String>) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
         async fn cancel_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
             unreachable!()
         }

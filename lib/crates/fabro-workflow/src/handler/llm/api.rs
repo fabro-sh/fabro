@@ -287,11 +287,17 @@ async fn execute_fabro_run_tool(
         }
         fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME => {
             let params = parse_fabro_tool_args::<fabro_tool::FabroRunInteractParams>(name, args)?;
-            let result = fabro_tool::interact_run(
-                Arc::clone(&services.backend),
-                fabro_tool::ValidatedInteractRun::try_from(params)?,
-            )
-            .await?;
+            let validated = fabro_tool::ValidatedInteractRun::try_from(params)?;
+            if matches!(
+                validated.action,
+                fabro_tool::ValidatedInteractAction::Approve
+                    | fabro_tool::ValidatedInteractAction::Deny { .. }
+            ) {
+                return Err(fabro_tool::ToolError::message(
+                    "Run approval must be performed by a user through the API, CLI, web UI, or human MCP server.",
+                ));
+            }
+            let result = fabro_tool::interact_run(Arc::clone(&services.backend), validated).await?;
             let summary = fabro_tool::interact_run_text(&result);
             render_fabro_tool_result(&summary, &result)
         }
@@ -1539,8 +1545,8 @@ mod tests {
     use fabro_llm::{Error as LlmError, ProviderErrorDetail, ProviderErrorKind};
     use fabro_tool::FabroToolBackend;
     use fabro_types::{
-        EventEnvelope, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunPairStatusResponse,
-        RunProjection, RunStatus, RunTimestamps, SuccessReason, WorkflowRef,
+        EventEnvelope, FailureReason, Run, RunId, RunLifecycle, RunLinks, RunOrigin,
+        RunPairStatusResponse, RunProjection, RunStatus, RunTimestamps, SuccessReason, WorkflowRef,
     };
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
@@ -1948,6 +1954,38 @@ reasoning = false
     }
 
     #[tokio::test]
+    async fn agent_run_interact_rejects_approval_actions_before_backend_dispatch() {
+        for action in ["approve", "deny"] {
+            let (services, backend) = fabro_run_tool_services();
+            let mut registry = ToolRegistry::new();
+            register_fabro_run_tools(&mut registry, &services);
+            let tool = registry
+                .get(fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME)
+                .expect("interact tool should be registered");
+
+            let err = (tool.executor)(
+                serde_json::json!({
+                    "run_id": child_run_id().to_string(),
+                    "action": action
+                }),
+                tool_context(),
+            )
+            .await
+            .expect_err("workflow agents must not approve or deny runs");
+
+            assert!(err.contains("must be performed by a user"), "{err}");
+            assert!(
+                backend.approved_run_ids.lock().unwrap().is_empty(),
+                "approve backend should not be called for {action}"
+            );
+            assert!(
+                backend.denied_run_ids.lock().unwrap().is_empty(),
+                "deny backend should not be called for {action}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn agent_run_pair_dispatches_to_shared_backend() {
         let (services, backend) = fabro_run_tool_services();
         let mut registry = ToolRegistry::new();
@@ -1978,6 +2016,8 @@ reasoning = false
             child_id:            child_run_id(),
             created_parent_ids:  Mutex::new(Vec::new()),
             started_run_ids:     Mutex::new(Vec::new()),
+            approved_run_ids:    Mutex::new(Vec::new()),
+            denied_run_ids:      Mutex::new(Vec::new()),
             pair_status_run_ids: Mutex::new(Vec::new()),
         });
         let services = FabroRunToolServices {
@@ -2078,6 +2118,8 @@ reasoning = false
         child_id:            RunId,
         created_parent_ids:  Mutex<Vec<Option<RunId>>>,
         started_run_ids:     Mutex<Vec<RunId>>,
+        approved_run_ids:    Mutex<Vec<RunId>>,
+        denied_run_ids:      Mutex<Vec<RunId>>,
         pair_status_run_ids: Mutex<Vec<RunId>>,
     }
 
@@ -2114,6 +2156,28 @@ reasoning = false
                 0,
                 RunStatus::Pending {
                     reason: fabro_types::PendingReason::ApprovalRequired,
+                },
+            ))
+        }
+
+        async fn approve_run(&self, run_id: &RunId) -> anyhow::Result<Run> {
+            self.approved_run_ids.lock().unwrap().push(*run_id);
+            Ok(run_with_status(
+                *run_id,
+                Some(current_run_id()),
+                0,
+                RunStatus::Runnable,
+            ))
+        }
+
+        async fn deny_run(&self, run_id: &RunId, _reason: Option<String>) -> anyhow::Result<Run> {
+            self.denied_run_ids.lock().unwrap().push(*run_id);
+            Ok(run_with_status(
+                *run_id,
+                Some(current_run_id()),
+                0,
+                RunStatus::Failed {
+                    reason: FailureReason::ApprovalDenied,
                 },
             ))
         }

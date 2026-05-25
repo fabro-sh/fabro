@@ -924,6 +924,35 @@ impl Client {
         convert_type(response.into_inner())
     }
 
+    pub async fn approve_run(&self, run_id: &RunId) -> Result<Run> {
+        let response = self
+            .send_api(
+                |client| async move { client.approve_run().id(run_id.to_string()).send().await },
+            )
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn deny_run(&self, run_id: &RunId, reason: Option<String>) -> Result<Run> {
+        let body = types::DenyRunRequest {
+            reason: normalize_optional_text(reason.as_deref()),
+        };
+        let response = self
+            .send_api(|client| {
+                let body = body.clone();
+                async move {
+                    client
+                        .deny_run()
+                        .id(run_id.to_string())
+                        .body(body)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
     pub async fn interrupt_run(&self, run_id: &RunId) -> Result<()> {
         self.send_api(|client| async move {
             client.interrupt_run().id(run_id.to_string()).send().await
@@ -1976,6 +2005,13 @@ pub fn apply_bearer_token_auth(
 
 fn non_zero_u64_from_u32(value: u32) -> Option<NonZeroU64> {
     NonZeroU64::new(u64::from(value))
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {

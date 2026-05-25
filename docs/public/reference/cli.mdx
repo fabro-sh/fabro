@@ -63,6 +63,7 @@ fabro [OPTIONS] [COMMAND]
 
 | Command | Description |
 | --- | --- |
+| `fabro approve` | Approve pending workflow runs |
 | `fabro archive` | Mark terminal runs as archived (reviewed, no further action needed). Archived runs are hidden from default listings |
 | `fabro artifact` | Inspect and copy run artifacts (screenshots, reports, traces) |
 | `fabro ask` | Ask Fabro a read-only question about a run |
@@ -70,6 +71,7 @@ fabro [OPTIONS] [COMMAND]
 | `fabro auth` | Manage CLI authentication state |
 | `fabro completion` | Generate shell completions |
 | `fabro create` | Create a workflow run (allocate run dir, persist spec) |
+| `fabro deny` | Deny pending workflow runs |
 | `fabro discord` | Open the Discord community in the browser |
 | `fabro docs` | Open the docs website in the browser |
 | `fabro doctor` | Check environment and integration health |
@@ -105,6 +107,26 @@ fabro [OPTIONS] [COMMAND]
 | `fabro version` | Show client and server version information |
 | `fabro wait` | Block until a workflow run completes |
 | `fabro workflow` | Workflow operations |
+
+### `fabro approve`
+
+Approve pending workflow runs
+
+```bash
+fabro approve [OPTIONS] <RUNS>...
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `RUNS` | Run IDs or workflow names to approve |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
 ### `fabro archive`
 
@@ -337,6 +359,27 @@ fabro create [OPTIONS] <WORKFLOW>
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 | `-I, --input <key=value>` | Override a workflow input value (repeatable, format: KEY=VALUE) |
 | `-v, --verbose` | Enable verbose output |
+
+### `fabro deny`
+
+Deny pending workflow runs
+
+```bash
+fabro deny [OPTIONS] <RUNS>...
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `RUNS` | Run IDs or workflow names to deny |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--reason <reason>` | Reason for denying execution |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
 ### `fabro discord`
 

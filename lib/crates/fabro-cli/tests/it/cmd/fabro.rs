@@ -31,6 +31,8 @@ fn help() {
       dump        Export a run's durable state to a directory
       rm          Remove one or more workflow runs
       inspect     Show detailed information about a workflow run
+      approve     Approve pending workflow runs
+      deny        Deny pending workflow runs
       archive     Mark terminal runs as archived (reviewed, no further action needed). Archived runs are hidden from default listings
       unarchive   Restore archived runs to their prior terminal status
       model       List and test LLM models

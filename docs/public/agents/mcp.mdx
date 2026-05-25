@@ -33,7 +33,7 @@ Pass `--server` when the MCP client should connect to a specific Fabro server, o
 | `fabro_run_create` | Create one or more workflow runs, optionally under a parent run, starting them by default. |
 | `fabro_run_search` | Search runs by ID, parent, workflow, labels, status, archive state, and creation time. |
 | `fabro_run_get` | Read-only inspection of a run: returns its summary, projection, and pending questions without mutating state. |
-| `fabro_run_interact` | Control a run: start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. |
+| `fabro_run_interact` | Control a run: start, approve, deny, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. |
 | `fabro_run_gather` | Wait for runs to reach terminal states, returning current state on timeout. |
 | `fabro_run_pair` | Inspect, start, message, end, or read transcript for a live run pairing session. |
 | `fabro_run_events` | List, inspect, or search stored events for a run. |
@@ -64,6 +64,20 @@ Use the object form when you need create options:
 Use `goal` for inline goal text or `goal_file` to read the run goal from a file. They are mutually exclusive. Relative `goal_file` paths resolve from the run's `cwd`, or from the MCP server working directory when `cwd` is omitted.
 
 Run summaries returned by the MCP server include parent metadata. Use `parent_id` on `fabro_run_create` to create a child run, `parent_id` on `fabro_run_search` to list direct children, and the `link_parent` or `unlink_parent` actions on `fabro_run_interact` to change an existing run's parent.
+
+Pending runs can be approved or denied through `fabro_run_interact`:
+
+```json
+{ "run_id": "nightly", "action": "approve" }
+```
+
+```json
+{
+  "run_id": "nightly",
+  "action": "deny",
+  "reason": "Not approved for execution"
+}
+```
 
 Use `fabro_run_pair` when an MCP client needs to pair with an active API-mode agent stage. The tool can inspect current pair status, start a pair session for a selected stage, send messages, end the session, and read transcript entries.
 

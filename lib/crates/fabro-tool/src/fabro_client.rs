@@ -102,6 +102,16 @@ impl FabroToolBackend for ClientBackend {
         self.client.start_run(run_id, resume).await
     }
 
+    async fn approve_run(&self, run_id: &RunId) -> anyhow::Result<Run> {
+        self.ensure_run_scope(run_id)?;
+        self.client.approve_run(run_id).await
+    }
+
+    async fn deny_run(&self, run_id: &RunId, reason: Option<String>) -> anyhow::Result<Run> {
+        self.ensure_run_scope(run_id)?;
+        self.client.deny_run(run_id, reason).await
+    }
+
     async fn cancel_run(&self, run_id: &RunId) -> anyhow::Result<Run> {
         self.ensure_run_scope(run_id)?;
         self.client.cancel_run(run_id).await

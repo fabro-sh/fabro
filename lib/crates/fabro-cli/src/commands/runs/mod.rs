@@ -4,6 +4,7 @@ use fabro_util::terminal::Styles;
 use crate::args::RunsCommands;
 use crate::command_context::CommandContext;
 
+pub(crate) mod approval;
 pub(crate) mod archive;
 pub(crate) mod inspect;
 pub(crate) mod list;
@@ -17,6 +18,8 @@ pub(crate) async fn dispatch(cmd: RunsCommands, base_ctx: &CommandContext) -> Re
         }
         RunsCommands::Rm(args) => rm::remove_command(&args, base_ctx).await,
         RunsCommands::Inspect(args) => inspect::run(&args, base_ctx).await,
+        RunsCommands::Approve(args) => approval::approve_command(&args, base_ctx).await,
+        RunsCommands::Deny(args) => approval::deny_command(&args, base_ctx).await,
         RunsCommands::Archive(args) => archive::archive_command(&args, base_ctx).await,
         RunsCommands::Unarchive(args) => archive::unarchive_command(&args, base_ctx).await,
     }

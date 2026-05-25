@@ -8730,6 +8730,7 @@ async fn run_tools_worker_cannot_call_user_only_non_mcp_routes() {
 
     for (method, path) in [
         (Method::POST, format!("/runs/{target_run_id}/approve")),
+        (Method::POST, format!("/runs/{target_run_id}/deny")),
         (Method::GET, format!("/runs/{target_run_id}/timeline")),
     ] {
         let response = app

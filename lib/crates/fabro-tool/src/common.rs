@@ -59,6 +59,8 @@ pub trait FabroToolBackend: Send + Sync {
     async fn resolve_run(&self, selector: &str) -> anyhow::Result<Run>;
     async fn retrieve_run(&self, run_id: &RunId) -> anyhow::Result<Run>;
     async fn start_run(&self, run_id: &RunId, resume: bool) -> anyhow::Result<Run>;
+    async fn approve_run(&self, run_id: &RunId) -> anyhow::Result<Run>;
+    async fn deny_run(&self, run_id: &RunId, reason: Option<String>) -> anyhow::Result<Run>;
     async fn cancel_run(&self, run_id: &RunId) -> anyhow::Result<Run>;
     async fn interrupt_run(&self, run_id: &RunId) -> anyhow::Result<()>;
     async fn steer_run(&self, run_id: &RunId, text: String, interrupt: bool) -> anyhow::Result<()>;
@@ -192,7 +194,7 @@ static TOOL_DEFINITIONS: LazyLock<Vec<ToolDefinition>> = LazyLock::new(|| {
         ),
         tool_definition::<crate::FabroRunInteractParams>(
             FABRO_RUN_INTERACT_TOOL_NAME,
-            "Control a Fabro run: start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. Use fabro_run_get for read-only inspection.",
+            "Control a Fabro run: start, approve, deny, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. Use fabro_run_get for read-only inspection.",
         ),
         tool_definition::<crate::FabroRunGatherParams>(
             FABRO_RUN_GATHER_TOOL_NAME,
@@ -361,6 +363,34 @@ mod tests {
             assert!(
                 schema_text.contains(&format!("\"{action}\"")),
                 "pair schema should expose action {action}: {schema}"
+            );
+        }
+    }
+
+    #[test]
+    fn interact_tool_definition_exposes_approval_schema() {
+        let definition = tool_definitions()
+            .iter()
+            .find(|definition| definition.name == FABRO_RUN_INTERACT_TOOL_NAME)
+            .expect("interact tool should be in the shared catalog");
+        let schema = &definition.parameters;
+        let schema_text = schema.to_string();
+
+        assert!(
+            definition.description.contains("approve") && definition.description.contains("deny"),
+            "interact description should include approval actions: {}",
+            definition.description
+        );
+        for field in ["action", "run_id", "reason"] {
+            assert!(
+                schema.pointer(&format!("/properties/{field}")).is_some(),
+                "interact schema should expose {field}: {schema}"
+            );
+        }
+        for action in ["approve", "deny"] {
+            assert!(
+                schema_text.contains(&format!("\"{action}\"")),
+                "interact schema should expose action {action}: {schema}"
             );
         }
     }
