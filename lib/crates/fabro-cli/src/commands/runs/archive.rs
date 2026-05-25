@@ -1,16 +1,25 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
+use futures::FutureExt as _;
 
-use super::short_run_id;
+use super::{RunBatchAction, run_resolved_run_batch};
 use crate::args::{RunsArchiveArgs, RunsUnarchiveArgs};
 use crate::command_context::CommandContext;
-use crate::shared::print_json_pretty;
 
 pub(crate) async fn archive_command(
     args: &RunsArchiveArgs,
     base_ctx: &CommandContext,
 ) -> Result<()> {
     let ctx = base_ctx.with_target(&args.server)?;
-    run_bulk(Action::Archive, &args.runs, &ctx).await
+    run_resolved_run_batch(
+        RunBatchAction {
+            past:     "archived",
+            json_key: "archived",
+        },
+        &args.runs,
+        &ctx,
+        |client, run_id| client.archive_run(run_id).boxed(),
+    )
+    .await
 }
 
 pub(crate) async fn unarchive_command(
@@ -18,88 +27,14 @@ pub(crate) async fn unarchive_command(
     base_ctx: &CommandContext,
 ) -> Result<()> {
     let ctx = base_ctx.with_target(&args.server)?;
-    run_bulk(Action::Unarchive, &args.runs, &ctx).await
-}
-
-#[derive(Clone, Copy)]
-enum Action {
-    Archive,
-    Unarchive,
-}
-
-impl Action {
-    fn past(self) -> &'static str {
-        match self {
-            Self::Archive => "archived",
-            Self::Unarchive => "unarchived",
-        }
-    }
-
-    fn json_key(self) -> &'static str {
-        self.past()
-    }
-}
-
-async fn run_bulk(action: Action, identifiers: &[String], ctx: &CommandContext) -> Result<()> {
-    let client = ctx.server().await?;
-    let client = client.as_ref();
-    let json = ctx.json_output();
-    let printer = ctx.printer();
-    let mut had_errors = false;
-    let mut changed = Vec::new();
-    let mut errors = Vec::new();
-
-    for identifier in identifiers {
-        let run = match client.resolve_run(identifier).await {
-            Ok(run) => run,
-            Err(err) => {
-                if !json {
-                    fabro_util::printerr!(printer, "error: {identifier}: {err}");
-                }
-                errors.push(serde_json::json!({
-                    "identifier": identifier,
-                    "error": err.to_string(),
-                }));
-                had_errors = true;
-                continue;
-            }
-        };
-
-        let run_id = run.id;
-        let result = match action {
-            Action::Archive => client.archive_run(&run_id).await,
-            Action::Unarchive => client.unarchive_run(&run_id).await,
-        };
-        match result {
-            Ok(_) => {
-                let run_id_string = run_id.to_string();
-                changed.push(run_id_string.clone());
-                if !json {
-                    fabro_util::printerr!(printer, "{}", short_run_id(&run_id_string));
-                }
-            }
-            Err(err) => {
-                if !json {
-                    fabro_util::printerr!(printer, "error: {identifier}: {err}");
-                }
-                errors.push(serde_json::json!({
-                    "identifier": identifier,
-                    "error": err.to_string(),
-                }));
-                had_errors = true;
-            }
-        }
-    }
-
-    if json {
-        let mut body = serde_json::Map::new();
-        body.insert(action.json_key().to_string(), serde_json::json!(changed));
-        body.insert("errors".to_string(), serde_json::json!(errors));
-        print_json_pretty(&serde_json::Value::Object(body))?;
-    }
-
-    if had_errors {
-        bail!("some runs could not be {}", action.past());
-    }
-    Ok(())
+    run_resolved_run_batch(
+        RunBatchAction {
+            past:     "unarchived",
+            json_key: "unarchived",
+        },
+        &args.runs,
+        &ctx,
+        |client, run_id| client.unarchive_run(run_id).boxed(),
+    )
+    .await
 }
