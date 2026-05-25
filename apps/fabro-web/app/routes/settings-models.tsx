@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { ChevronDownIcon } from "@heroicons/react/16/solid";
+import {
+  CheckCircleIcon,
+  ChevronDownIcon,
+  XCircleIcon,
+} from "@heroicons/react/16/solid";
 import type { Model, Provider } from "@qltysh/fabro-api-client";
+import { apiData, modelsApi } from "../lib/api-client";
 import { useModels, useProviders } from "../lib/queries";
+import { Spinner } from "../components/state";
 import {
   Dot,
   Panel,
@@ -206,12 +212,29 @@ function ProviderStatus({ provider }: { provider: Provider }) {
 
 type ModelSortKey = "provider" | "model" | "context" | "speed";
 
+type RowState =
+  | { phase: "queued" }
+  | { phase: "running" }
+  | { phase: "ok" }
+  | { phase: "error"; message: string };
+
+type Sweep = {
+  done:   number;
+  total:  number;
+  ok:     number;
+  failed: number;
+};
+
+const TEST_CONCURRENCY = 4;
+
 function ModelsSection({ providers }: { providers: Provider[] }) {
   const [providerFilter, setProviderFilter] = useState<string>("");
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebouncedValue(searchInput, 250);
   const [sortKey, setSortKey] = useState<ModelSortKey>("provider");
   const [direction, setDirection] = useState<SortDirection>("asc");
+  const [results, setResults] = useState<Map<string, RowState>>(new Map());
+  const [sweep, setSweep] = useState<Sweep | null>(null);
 
   const { data, isLoading } = useModels(providerFilter, debouncedSearch);
 
@@ -248,6 +271,75 @@ function ModelsSection({ providers }: { providers: Provider[] }) {
     [sortKey],
   );
 
+  const running = sweep !== null && sweep.done < sweep.total;
+
+  const runSweep = useCallback(async () => {
+    if (running) return;
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return;
+
+    const seed = new Map<string, RowState>();
+    for (const id of ids) seed.set(id, { phase: "queued" });
+    setResults(seed);
+    setSweep({ done: 0, total: ids.length, ok: 0, failed: 0 });
+
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < ids.length) {
+        const i = cursor;
+        cursor += 1;
+        const id = ids[i];
+        setResults((prev) => {
+          const next = new Map(prev);
+          next.set(id, { phase: "running" });
+          return next;
+        });
+
+        let outcome: RowState;
+        try {
+          const result = await apiData(() => modelsApi.testModel(id));
+          if (result.status === "ok") {
+            outcome = { phase: "ok" };
+          } else if (result.status === "error") {
+            outcome = {
+              phase:   "error",
+              message: result.error_message ?? "Failed",
+            };
+          } else {
+            outcome = { phase: "error", message: "provider not configured" };
+          }
+        } catch (err) {
+          outcome = {
+            phase:   "error",
+            message: err instanceof Error ? err.message : String(err),
+          };
+        }
+
+        setResults((prev) => {
+          const next = new Map(prev);
+          next.set(id, outcome);
+          return next;
+        });
+        setSweep((prev) =>
+          prev
+            ? {
+                done:   prev.done + 1,
+                total:  prev.total,
+                ok:     prev.ok + (outcome.phase === "ok" ? 1 : 0),
+                failed: prev.failed + (outcome.phase === "error" ? 1 : 0),
+              }
+            : prev,
+        );
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(TEST_CONCURRENCY, ids.length) }, () =>
+        worker(),
+      ),
+    );
+  }, [rows, running]);
+
   const showEmpty = !isLoading && rows.length === 0;
 
   return (
@@ -271,6 +363,28 @@ function ModelsSection({ providers }: { providers: Provider[] }) {
             onChange={(e) => setSearchInput(e.target.value)}
             className="w-44 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs text-fg-2 placeholder:text-fg-muted focus:border-line-strong focus:outline-none"
           />
+          {sweep && !running ? (
+            <span
+              className={`text-xs tabular-nums ${sweep.failed === 0 ? "text-mint" : "text-coral"}`}
+            >
+              {sweep.ok} ok · {sweep.failed} failed
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void runSweep()}
+            disabled={running || rows.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium text-fg-2 ring-1 ring-line hover:bg-overlay/40 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {running ? (
+              <>
+                <Spinner className="size-3.5 h-lh shrink-0 text-teal-500" />
+                Testing… {sweep!.done}/{sweep!.total}
+              </>
+            ) : (
+              "Test models"
+            )}
+          </button>
         </div>
       </header>
       <div className="-mx-4 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-6 lg:-mx-8">
@@ -308,6 +422,12 @@ function ModelsSection({ providers }: { providers: Provider[] }) {
                   align="right"
                   onClick={onSort}
                 />
+                <th
+                  scope="col"
+                  className="whitespace-nowrap px-3 py-2.5 text-right text-xs font-medium text-fg-3"
+                >
+                  Test
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -318,6 +438,7 @@ function ModelsSection({ providers }: { providers: Provider[] }) {
                   providerLabel={
                     providerNameById.get(model.provider) ?? model.provider
                   }
+                  state={results.get(model.id)}
                 />
               ))}
             </tbody>
@@ -338,9 +459,11 @@ function ModelsSection({ providers }: { providers: Provider[] }) {
 function ModelTableRow({
   model,
   providerLabel,
+  state,
 }: {
   model:         Model;
   providerLabel: string;
+  state:         RowState | undefined;
 }) {
   return (
     <tr className="border-b border-line transition-colors last:border-b-0 hover:bg-overlay/40">
@@ -356,7 +479,49 @@ function ModelTableRow({
       <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-fg-muted tabular-nums">
         {formatTokensPerSecond(model.estimated_output_tps)}
       </td>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right">
+        <TestStatusCell state={state} />
+      </td>
     </tr>
+  );
+}
+
+function TestStatusCell({ state }: { state: RowState | undefined }) {
+  if (!state) {
+    return <span className="text-xs text-fg-muted">—</span>;
+  }
+  if (state.phase === "queued") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-fg-muted">
+        <Spinner className="size-3.5 h-lh shrink-0 opacity-40" />
+        Queued
+      </span>
+    );
+  }
+  if (state.phase === "running") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-fg-2">
+        <Spinner className="size-3.5 h-lh shrink-0 text-teal-500" />
+        Testing…
+      </span>
+    );
+  }
+  if (state.phase === "ok") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-mint">
+        <CheckCircleIcon className="size-4 h-lh shrink-0" />
+        Ok
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex max-w-[14rem] items-center gap-1.5 text-xs text-coral"
+      title={state.message}
+    >
+      <XCircleIcon className="size-4 h-lh shrink-0" />
+      <span className="min-w-0 truncate">{state.message}</span>
+    </span>
   );
 }
 

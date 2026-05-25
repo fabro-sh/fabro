@@ -82,7 +82,7 @@ export function LoadingState({ label }: { label?: string }) {
   );
 }
 
-function Spinner({ className = "" }: { className?: string }) {
+export function Spinner({ className = "" }: { className?: string }) {
   return (
     <svg
       className={`shrink-0 animate-spin ${className}`}
