@@ -2,6 +2,7 @@ pub mod config;
 pub mod error;
 #[cfg(any(feature = "docker", feature = "daytona"))]
 pub mod from_environment;
+pub mod provider;
 pub mod sandbox;
 pub mod sandbox_spec;
 
@@ -39,8 +40,16 @@ pub use details::sandbox_details;
 #[cfg(feature = "docker")]
 pub use docker::{DockerSandbox, DockerSandboxOptions};
 pub use error::{Error, Result, default_redacted_output_tail, display_for_log};
-pub use fabro_types::{RunSandbox, SandboxProvider};
+pub use fabro_types::{RunSandbox, SandboxProviderKind};
 pub use local::LocalSandbox;
+#[cfg(feature = "daytona")]
+pub use provider::daytona::DaytonaSandboxProvider;
+#[cfg(feature = "docker")]
+pub use provider::docker::DockerSandboxProvider;
+pub use provider::{
+    LocalSandboxProvider, SandboxCreateSpec, SandboxListFilter, SandboxLookupError,
+    SandboxProvider, SandboxProviderRegistry,
+};
 pub use read_guard::ReadBeforeWriteSandbox;
 pub use reconnect::{reconnect, reconnect_for_run, reconnect_for_run_with_callback};
 pub use sandbox::{

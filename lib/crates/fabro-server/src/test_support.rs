@@ -16,6 +16,7 @@ use chrono::Duration as ChronoDuration;
 use fabro_config::{RunLayer, RunSettingsBuilder, ServerSettingsBuilder, envfile};
 use fabro_interview::Interviewer;
 use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
+use fabro_sandbox::SandboxProviderRegistry;
 use fabro_static::EnvVars;
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::settings::ServerAuthMethod;
@@ -61,6 +62,7 @@ pub struct TestAppStateBuilder {
     manifest_run_defaults:     RunLayer,
     max_concurrent_runs:       usize,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+    sandbox_provider_registry: Option<SandboxProviderRegistry>,
     store_bundle:              Option<(Arc<Database>, ArtifactStore)>,
     vault_path:                Option<PathBuf>,
     vault_entries:             Vec<(String, String)>,
@@ -78,6 +80,7 @@ impl Default for TestAppStateBuilder {
             manifest_run_defaults:     RunLayer::default(),
             max_concurrent_runs:       5,
             registry_factory_override: None,
+            sandbox_provider_registry: None,
             store_bundle:              None,
             vault_path:                None,
             vault_entries:             Vec::new(),
@@ -118,6 +121,14 @@ impl TestAppStateBuilder {
         + 'static,
     ) -> Self {
         self.registry_factory_override = Some(Box::new(registry_factory_override));
+        self
+    }
+
+    pub fn sandbox_provider_registry(
+        mut self,
+        sandbox_provider_registry: SandboxProviderRegistry,
+    ) -> Self {
+        self.sandbox_provider_registry = Some(sandbox_provider_registry);
         self
     }
 
@@ -222,6 +233,7 @@ impl TestAppStateBuilder {
             http_client: Some(
                 fabro_http::test_http_client().expect("test HTTP client should build"),
             ),
+            sandbox_provider_registry: self.sandbox_provider_registry,
             shutdown: CancellationToken::new(),
         })
         .expect("test app state should build")

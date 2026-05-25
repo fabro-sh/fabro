@@ -12,7 +12,7 @@ use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::from_environment::{
     daytona_config_from_environment, docker_config_from_environment,
 };
-use fabro_sandbox::{DockerSandboxOptions, SandboxProvider, SandboxSpec};
+use fabro_sandbox::{DockerSandboxOptions, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::settings::run::{
     ApprovalMode, HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
@@ -22,7 +22,7 @@ use fabro_types::settings::run::{
     TlsMode as ResolvedTlsMode,
 };
 use fabro_types::settings::{InterpString, ModelRegistry, ResolvedModelRef};
-use fabro_types::{ManifestPath, RunId, RunRunnableSource};
+use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProvider};
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;

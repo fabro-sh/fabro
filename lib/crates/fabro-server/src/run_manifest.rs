@@ -21,12 +21,12 @@ use fabro_sandbox::from_environment::{
     daytona_config_from_environment, docker_config_from_environment,
 };
 use fabro_sandbox::redact::redact_auth_url;
-use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
+use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
-use fabro_types::{ManifestPath, RunId, ServerSettings, WorkflowSettings};
+use fabro_types::{ManifestPath, RunId, SandboxProvider, ServerSettings, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;

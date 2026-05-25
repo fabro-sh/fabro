@@ -531,8 +531,25 @@ fn main() {
         ("DirtyStatus", "fabro_types::DirtyStatus", &[]),
         ("GitContext", "fabro_types::GitContext", &[]),
         ("SandboxProvider", "fabro_types::SandboxProvider", &[]),
+        (
+            "SandboxProviderKind",
+            "fabro_types::SandboxProviderKind",
+            &[],
+        ),
         ("RunSandbox", "fabro_types::RunSandbox", &[]),
         ("SandboxDetails", "fabro_types::SandboxDetails", &[]),
+        ("SandboxInfo", "fabro_types::SandboxInfo", &[]),
+        (
+            "SandboxProviderLookupError",
+            "fabro_types::SandboxProviderLookupError",
+            &[],
+        ),
+        ("SandboxListMeta", "fabro_types::SandboxListMeta", &[]),
+        (
+            "SandboxListResponse",
+            "fabro_types::SandboxListResponse",
+            &[],
+        ),
         ("SandboxNetwork", "fabro_types::SandboxNetwork", &[]),
         (
             "SandboxNetworkPolicy",

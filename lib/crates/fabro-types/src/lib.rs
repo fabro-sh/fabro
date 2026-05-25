@@ -31,6 +31,7 @@ pub mod run_sandbox;
 pub mod run_summary;
 pub mod run_title;
 pub mod sandbox_details;
+pub mod sandbox_inventory;
 pub mod sandbox_provider;
 pub mod sandbox_services;
 pub mod secret;
@@ -123,7 +124,10 @@ pub use sandbox_details::{
     SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode,
     SandboxResources, SandboxState, SandboxTimestamps,
 };
-pub use sandbox_provider::SandboxProvider;
+pub use sandbox_inventory::{
+    SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxProviderLookupError,
+};
+pub use sandbox_provider::{SandboxProvider, SandboxProvider as SandboxProviderKind};
 pub use sandbox_services::{
     SandboxService, SandboxServiceDiscoverySource, SandboxServiceListMeta,
     SandboxServiceListResponse,

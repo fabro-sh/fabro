@@ -64,8 +64,12 @@ use fabro_model::{BilledTokenCounts, Catalog, ModelRef, ModelTestMode, ProviderI
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
 use fabro_sandbox::details::sandbox_details;
+use fabro_sandbox::provider::SandboxProvider as RuntimeSandboxProvider;
 use fabro_sandbox::reconnect::reconnect_for_run;
-use fabro_sandbox::{Sandbox, SandboxProvider};
+use fabro_sandbox::{
+    DaytonaSandboxProvider, DockerSandboxOptions, DockerSandboxProvider, LocalSandboxProvider,
+    Sandbox, SandboxProviderRegistry, from_environment,
+};
 use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
 use fabro_slack::config::{
     SlackCredentialResolution,
@@ -89,8 +93,8 @@ use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
     AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
     PairMessageId, PairTarget, PendingReason, Principal, PullRequestLink, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, RunRunnableSource, ServerSettings, SessionCapability,
-    StageModelUsage,
+    RunControlAction, RunEvent, RunId, RunRunnableSource, SandboxProvider, ServerSettings,
+    SessionCapability, StageModelUsage,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -960,6 +964,7 @@ pub struct AppState {
     pub(crate) github_api_base_url: String,
     active_config_path: PathBuf,
     http_client: Option<fabro_http::HttpClient>,
+    sandbox_provider_registry: SandboxProviderRegistry,
     shutdown: CancellationToken,
     shutting_down: AtomicBool,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
@@ -1060,6 +1065,7 @@ pub(crate) struct AppStateConfig {
     pub(crate) github_api_base_url:       Option<String>,
     pub(crate) active_config_path:        PathBuf,
     pub(crate) http_client:               Option<fabro_http::HttpClient>,
+    pub(crate) sandbox_provider_registry: Option<SandboxProviderRegistry>,
     pub(crate) shutdown:                  CancellationToken,
 }
 
@@ -1258,6 +1264,10 @@ impl AppState {
 
     pub(crate) fn session_runtimes(&self) -> &SessionRuntimeManager {
         &self.session_runtimes
+    }
+
+    pub(crate) fn sandbox_provider_registry(&self) -> &SandboxProviderRegistry {
+        &self.sandbox_provider_registry
     }
 
     pub(crate) fn server_secret(&self, name: &str) -> Option<String> {
@@ -2050,6 +2060,49 @@ fn worker_token_keys_from_server_secrets(
         .map_err(|err| jwt_auth::session_secret_key_error(&err))
 }
 
+fn build_sandbox_provider_registry(
+    server_settings: &ServerSettings,
+    manifest_run_settings: Option<&RunNamespace>,
+    vault: &Vault,
+    env_lookup: &EnvLookup,
+    http_client: Option<fabro_http::HttpClient>,
+) -> SandboxProviderRegistry {
+    let provider_settings = &server_settings.server.sandbox.providers;
+    let mut providers: Vec<Arc<dyn RuntimeSandboxProvider>> = Vec::new();
+
+    if provider_settings.local.enabled {
+        providers.push(Arc::new(LocalSandboxProvider));
+    }
+
+    if provider_settings.docker.enabled {
+        let default_config =
+            manifest_run_settings.map_or_else(DockerSandboxOptions::default, |settings| {
+                from_environment::docker_config_from_environment(
+                    &settings.environment,
+                    !settings.clone.enabled,
+                )
+            });
+        providers.push(Arc::new(DockerSandboxProvider::new(default_config)));
+    }
+
+    if provider_settings.daytona.enabled {
+        let api_key = vault.get(EnvVars::DAYTONA_API_KEY).map(str::to_string);
+        if api_key.is_some() {
+            let api_url = env_lookup(EnvVars::DAYTONA_API_URL)
+                .or_else(|| env_lookup(EnvVars::DAYTONA_SERVER_URL));
+            let organization_id = env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
+            providers.push(Arc::new(DaytonaSandboxProvider::new(
+                api_key,
+                api_url,
+                organization_id,
+                http_client,
+            )));
+        }
+    }
+
+    SandboxProviderRegistry::new(providers)
+}
+
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
@@ -2064,6 +2117,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         github_api_base_url,
         active_config_path,
         http_client,
+        sandbox_provider_registry,
         shutdown,
     } = config;
 
@@ -2084,6 +2138,18 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         Catalog::from_builtin_with_overrides(&resolved_settings.llm_catalog_settings)
             .context("building LLM model catalog")?,
     );
+    let sandbox_provider_registry = sandbox_provider_registry.unwrap_or_else(|| {
+        build_sandbox_provider_registry(
+            current_server_settings.as_ref(),
+            current_manifest_run_settings.as_ref().ok(),
+            vault
+                .try_read()
+                .as_deref()
+                .expect("startup vault should not be locked while building app state"),
+            &env_lookup,
+            http_client.clone(),
+        )
+    });
     let slack_service = {
         let default_channel = current_server_settings
             .server
@@ -2153,6 +2219,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         github_api_base_url,
         active_config_path,
         http_client,
+        sandbox_provider_registry,
         shutdown,
         shutting_down: AtomicBool::new(false),
         registry_factory_override,

@@ -66,7 +66,7 @@ fn parse_rfc3339_utc(value: &str) -> Option<DateTime<Utc>> {
 }
 
 #[cfg(feature = "docker")]
-mod docker {
+pub(crate) mod docker {
     use std::collections::BTreeMap;
 
     use anyhow::{Context, Result, anyhow};
@@ -74,11 +74,12 @@ mod docker {
     use bollard::container::InspectContainerOptions;
     use bollard::models::{ContainerInspectResponse, ContainerStateStatusEnum, HostConfig};
     use fabro_types::{
-        RunId, RunSandbox, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxResources,
-        SandboxState, SandboxTimestamps,
+        RunId, RunSandbox, SandboxDetails, SandboxInfo, SandboxNetwork, SandboxNetworkPolicy,
+        SandboxProviderKind, SandboxResources, SandboxState, SandboxTimestamps,
     };
 
     use super::parse_rfc3339_utc;
+    use crate::docker::WORKING_DIRECTORY;
 
     pub(super) async fn docker_details(
         record: &RunSandbox,
@@ -94,13 +95,66 @@ mod docker {
             .inspect_container(&runtime.id, None::<InspectContainerOptions>)
             .await
             .map_err(|err| anyhow!("Failed to inspect Docker container '{}': {err}", runtime.id))?;
-        Ok(map_docker_inspect(inspect, record))
+        Ok(map_docker_inspect(&inspect, record))
     }
 
-    fn map_docker_inspect(
-        inspect: ContainerInspectResponse,
+    pub(crate) fn docker_info_from_inspect(inspect: &ContainerInspectResponse) -> SandboxInfo {
+        let fields = docker_fields_from_inspect(inspect);
+        SandboxInfo {
+            provider:          SandboxProviderKind::Docker,
+            id:                fields.id,
+            display_name:      fields.display_name,
+            state:             fields.state,
+            native_state:      fields.native_state,
+            image:             fields.image,
+            snapshot:          None,
+            region:            None,
+            web_url:           None,
+            working_directory: fields.working_directory,
+            resources:         fields.resources,
+            network:           fields.network,
+            labels:            fields.labels,
+            timestamps:        fields.timestamps,
+        }
+    }
+
+    pub(super) fn map_docker_inspect(
+        inspect: &ContainerInspectResponse,
         record: &RunSandbox,
     ) -> SandboxDetails {
+        let fields = docker_fields_from_inspect(inspect);
+        let image = fields.image.clone().or_else(|| record.image.clone());
+
+        SandboxDetails {
+            sandbox:      RunSandbox {
+                image,
+                ..record.clone()
+            },
+            state:        fields.state,
+            native_state: fields.native_state,
+            region:       None,
+            web_url:      None,
+            resources:    fields.resources,
+            network:      fields.network,
+            labels:       fields.labels,
+            timestamps:   fields.timestamps,
+        }
+    }
+
+    struct DockerFields {
+        id:                String,
+        display_name:      Option<String>,
+        state:             SandboxState,
+        native_state:      Option<String>,
+        image:             Option<String>,
+        working_directory: Option<String>,
+        resources:         SandboxResources,
+        network:           SandboxNetwork,
+        labels:            BTreeMap<String, String>,
+        timestamps:        SandboxTimestamps,
+    }
+
+    fn docker_fields_from_inspect(inspect: &ContainerInspectResponse) -> DockerFields {
         let status_enum = inspect
             .state
             .as_ref()
@@ -124,23 +178,44 @@ mod docker {
 
         let labels: BTreeMap<String, String> = inspect
             .config
-            .and_then(|config| config.labels)
+            .as_ref()
+            .and_then(|config| config.labels.clone())
             .map(|map| map.into_iter().collect())
             .unwrap_or_default();
 
-        let image = inspect.image;
+        let image = inspect
+            .config
+            .as_ref()
+            .and_then(|config| config.image.clone())
+            .or_else(|| inspect.image.clone())
+            .filter(|value| !value.is_empty());
+        let working_directory = inspect
+            .config
+            .as_ref()
+            .and_then(|config| config.working_dir.clone())
+            .filter(|value| !value.is_empty())
+            .or_else(|| Some(WORKING_DIRECTORY.to_string()));
+
+        let id = inspect
+            .id
+            .clone()
+            .or_else(|| inspect.name.as_ref().map(|name| trim_container_name(name)))
+            .unwrap_or_default();
+        let display_name = inspect
+            .name
+            .as_ref()
+            .map(|name| trim_container_name(name))
+            .filter(|name| !name.is_empty());
 
         let created_at = inspect.created.as_deref().and_then(parse_rfc3339_utc);
 
-        SandboxDetails {
-            sandbox: RunSandbox {
-                image: image.or_else(|| record.image.clone()),
-                ..record.clone()
-            },
+        DockerFields {
+            id,
+            display_name,
             state: normalized_state,
             native_state,
-            region: None,
-            web_url: None,
+            image,
+            working_directory,
             resources,
             network,
             labels,
@@ -149,6 +224,10 @@ mod docker {
                 last_activity_at: None,
             },
         }
+    }
+
+    fn trim_container_name(name: &str) -> String {
+        name.strip_prefix('/').unwrap_or(name).to_string()
     }
 
     fn docker_network(host_config: Option<&HostConfig>) -> SandboxNetwork {
@@ -258,7 +337,7 @@ mod docker {
                 }),
                 ..Default::default()
             };
-            let details = map_docker_inspect(inspect, &record());
+            let details = map_docker_inspect(&inspect, &record());
             assert_eq!(details.resources.memory_bytes, None);
         }
 
@@ -271,7 +350,7 @@ mod docker {
                 }),
                 ..Default::default()
             };
-            let details = map_docker_inspect(inspect, &record());
+            let details = map_docker_inspect(&inspect, &record());
             assert_eq!(details.resources.memory_bytes, Some(2_147_483_648));
         }
 
@@ -284,7 +363,7 @@ mod docker {
                 }),
                 ..Default::default()
             };
-            let details = map_docker_inspect(inspect, &record());
+            let details = map_docker_inspect(&inspect, &record());
             assert_eq!(details.network.egress, SandboxNetworkPolicy::blocked());
             assert_eq!(details.network.ingress, SandboxNetworkPolicy::blocked());
         }
@@ -298,7 +377,7 @@ mod docker {
                 }),
                 ..Default::default()
             };
-            let details = map_docker_inspect(inspect, &record());
+            let details = map_docker_inspect(&inspect, &record());
             assert_eq!(details.network, SandboxNetwork::unknown());
         }
 
@@ -308,10 +387,29 @@ mod docker {
                 name: Some("/fabro-run-abc".to_string()),
                 ..Default::default()
             };
-            let details = map_docker_inspect(inspect, &record());
+            let details = map_docker_inspect(&inspect, &record());
             let runtime = details.sandbox.runtime.expect("runtime");
             assert_eq!(runtime.id, "container-abc123");
             assert_eq!(runtime.working_directory, "/workspace");
+        }
+
+        #[test]
+        fn inventory_identity_uses_native_id_and_display_name() {
+            let inspect = ContainerInspectResponse {
+                id: Some("container-abc123".to_string()),
+                name: Some("/fabro-run-abc".to_string()),
+                ..Default::default()
+            };
+            let info = docker_info_from_inspect(&inspect);
+            assert_eq!(info.id, "container-abc123");
+            assert_eq!(info.display_name.as_deref(), Some("fabro-run-abc"));
+        }
+
+        #[test]
+        fn inventory_working_directory_defaults_to_fabro_workspace() {
+            let inspect = ContainerInspectResponse::default();
+            let info = docker_info_from_inspect(&inspect);
+            assert_eq!(info.working_directory.as_deref(), Some("/workspace"));
         }
 
         #[test]
@@ -392,18 +490,18 @@ mod docker {
 }
 
 #[cfg(feature = "daytona")]
-mod daytona {
+pub(crate) mod daytona {
     use std::collections::BTreeMap;
 
     use anyhow::{Context, Result, anyhow};
     use daytona_api_client::models::SandboxState as DaytonaState;
     use fabro_types::{
-        RunSandbox, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy, SandboxResources,
-        SandboxState, SandboxTimestamps,
+        RunSandbox, SandboxDetails, SandboxInfo, SandboxNetwork, SandboxNetworkPolicy,
+        SandboxProviderKind, SandboxResources, SandboxState, SandboxTimestamps,
     };
 
     use super::parse_rfc3339_utc;
-    use crate::daytona::{DAYTONA_DASHBOARD_SANDBOXES_URL, DaytonaSandbox};
+    use crate::daytona::{DAYTONA_DASHBOARD_SANDBOXES_URL, DaytonaSandbox, WORKING_DIRECTORY};
 
     pub(super) async fn daytona_details(
         record: &RunSandbox,
@@ -434,7 +532,58 @@ mod daytona {
         Ok(map_daytona_sandbox(sdk_sandbox, record))
     }
 
-    fn map_daytona_sandbox(sandbox: &daytona_sdk::Sandbox, record: &RunSandbox) -> SandboxDetails {
+    pub(crate) fn daytona_info_from_sdk_sandbox(sandbox: &daytona_sdk::Sandbox) -> SandboxInfo {
+        let fields = daytona_fields_from_sdk_sandbox(sandbox);
+        SandboxInfo {
+            provider:          SandboxProviderKind::Daytona,
+            id:                sandbox.id.clone(),
+            display_name:      Some(sandbox.name.clone()).filter(|name| !name.is_empty()),
+            state:             fields.state,
+            native_state:      fields.native_state,
+            image:             None,
+            snapshot:          sandbox.snapshot.clone(),
+            region:            fields.region,
+            web_url:           Some(daytona_dashboard_url(&sandbox.id)),
+            working_directory: Some(WORKING_DIRECTORY.to_string()),
+            resources:         fields.resources,
+            network:           fields.network,
+            labels:            fields.labels,
+            timestamps:        fields.timestamps,
+        }
+    }
+
+    pub(super) fn map_daytona_sandbox(
+        sandbox: &daytona_sdk::Sandbox,
+        record: &RunSandbox,
+    ) -> SandboxDetails {
+        let fields = daytona_fields_from_sdk_sandbox(sandbox);
+        SandboxDetails {
+            sandbox:      RunSandbox {
+                snapshot: sandbox.snapshot.clone().or_else(|| record.snapshot.clone()),
+                ..record.clone()
+            },
+            state:        fields.state,
+            native_state: fields.native_state,
+            region:       fields.region,
+            web_url:      Some(daytona_dashboard_url(&sandbox.id)),
+            resources:    fields.resources,
+            network:      fields.network,
+            labels:       fields.labels,
+            timestamps:   fields.timestamps,
+        }
+    }
+
+    struct DaytonaFields {
+        state:        SandboxState,
+        native_state: Option<String>,
+        region:       Option<String>,
+        resources:    SandboxResources,
+        network:      SandboxNetwork,
+        labels:       BTreeMap<String, String>,
+        timestamps:   SandboxTimestamps,
+    }
+
+    fn daytona_fields_from_sdk_sandbox(sandbox: &daytona_sdk::Sandbox) -> DaytonaFields {
         let normalized_state = sandbox
             .state
             .map_or(SandboxState::Unknown, normalize_daytona_state);
@@ -459,15 +608,10 @@ mod daytona {
             Some(target)
         };
 
-        SandboxDetails {
-            sandbox: RunSandbox {
-                snapshot: sandbox.snapshot.clone().or_else(|| record.snapshot.clone()),
-                ..record.clone()
-            },
+        DaytonaFields {
             state: normalized_state,
             native_state,
             region,
-            web_url: Some(daytona_dashboard_url(&sandbox.id)),
             resources,
             network: daytona_network(
                 sandbox.network_block_all,

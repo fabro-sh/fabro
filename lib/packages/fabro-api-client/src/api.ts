@@ -27,6 +27,7 @@ export * from './api/repos-api';
 export * from './api/run-internals-api';
 export * from './api/run-outputs-api';
 export * from './api/runs-api';
+export * from './api/sandboxes-api';
 export * from './api/secrets-api';
 export * from './api/sessions-api';
 export * from './api/settings-api';

@@ -1659,6 +1659,7 @@ fn slack_app_state_with_secret_sources(
         github_api_base_url: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
     })
     .expect("slack test app state should build")
@@ -1999,6 +2000,7 @@ methods = ["dev-token"]
         github_api_base_url: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
     }) else {
         panic!("build_app_state should require SESSION_SECRET")
@@ -2124,6 +2126,7 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
         github_api_base_url: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
     })
 }
@@ -5215,6 +5218,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         github_api_base_url,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
     };
     let state = build_app_state(config).expect("test app state should build");

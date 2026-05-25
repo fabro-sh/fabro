@@ -266,9 +266,12 @@ fn runtime_layout_metadata(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "docker")]
     use fabro_types::RunId;
 
+    #[cfg(feature = "docker")]
     use super::*;
+    #[cfg(feature = "docker")]
     use crate::test_support::MockSandbox;
 
     #[cfg(feature = "docker")]

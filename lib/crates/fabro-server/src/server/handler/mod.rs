@@ -16,6 +16,7 @@ mod pair;
 mod pull_requests;
 mod runs;
 mod sandbox;
+mod sandboxes;
 mod secrets;
 mod sessions;
 mod steer;
@@ -153,6 +154,7 @@ pub(super) fn real_routes() -> Router<Arc<AppState>> {
         .merge(pull_requests::routes())
         .merge(artifacts::routes())
         .merge(sandbox::routes())
+        .merge(sandboxes::routes())
         .merge(lifecycle::routes())
         .merge(steer::routes())
         .merge(pair::routes())

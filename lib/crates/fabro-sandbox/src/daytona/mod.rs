@@ -128,7 +128,7 @@ async fn build_daytona_client(
     build_daytona_client_with(api_key, None, None, None).await
 }
 
-async fn build_daytona_client_with(
+pub(crate) async fn build_daytona_client_with(
     api_key: Option<String>,
     api_url: Option<String>,
     organization_id: Option<String>,

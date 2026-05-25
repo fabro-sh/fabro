@@ -15,6 +15,8 @@ tags:
     description: Browser authentication
   - name: Runs
     description: Run management operations
+  - name: Sandboxes
+    description: Provider-backed sandbox inventory
   - name: Sessions
     description: Ask Fabro sessions bound to runs
   - name: Human-in-the-Loop
@@ -3624,6 +3626,67 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run has no active sandbox or provider does not support access commands
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/sandboxes:
+    get:
+      operationId: listSandboxes
+      tags: [Sandboxes]
+      summary: List Sandboxes
+      description: Lists Fabro-managed sandboxes directly from configured sandbox providers.
+      responses:
+        "200":
+          description: Provider-backed sandbox inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SandboxListResponse"
+
+  /api/v1/sandboxes/{id}:
+    get:
+      operationId: retrieveSandbox
+      tags: [Sandboxes]
+      summary: Retrieve Sandbox
+      description: Retrieves a Fabro-managed sandbox by provider-native id by searching all configured sandbox providers.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sandbox found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SandboxInfo"
+        "404":
+          description: No provider found a Fabro-managed sandbox with this id
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: More than one provider matched this sandbox id
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Provider lookup failed before a definitive result could be determined
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -10100,6 +10163,14 @@ components:
         - docker
         - daytona
 
+    SandboxProviderKind:
+      description: Sandbox provider inventory discriminator.
+      type: string
+      enum:
+        - local
+        - docker
+        - daytona
+
     RunSandbox:
       description: Canonical sandbox environment record for a run.
       type: object
@@ -11011,6 +11082,95 @@ components:
           description: Provider-reported labels.
         timestamps:
           $ref: "#/components/schemas/SandboxTimestamps"
+
+    SandboxInfo:
+      description: Provider-backed inventory record for a Fabro-managed sandbox.
+      type: object
+      required:
+        - provider
+        - id
+        - state
+        - resources
+        - network
+        - labels
+        - timestamps
+      properties:
+        provider:
+          $ref: "#/components/schemas/SandboxProviderKind"
+        id:
+          type: string
+          description: Provider-native sandbox id.
+        display_name:
+          type: ["string", "null"]
+          description: Provider display name when distinct from the native id.
+        state:
+          $ref: "#/components/schemas/SandboxState"
+        native_state:
+          type: ["string", "null"]
+          description: Original provider state string before normalization. Display/debugging only; UI behavior keys off `state`.
+        image:
+          type: ["string", "null"]
+          description: Provider image when surfaced by the sandbox provider.
+        snapshot:
+          type: ["string", "null"]
+          description: Provider snapshot when surfaced by the sandbox provider.
+        region:
+          type: ["string", "null"]
+          description: Provider region or target. Null for local-style providers.
+        web_url:
+          type: ["string", "null"]
+          description: Provider dashboard URL for this sandbox when available.
+        working_directory:
+          type: ["string", "null"]
+          description: Provider-reported or Fabro-default working directory when available.
+        resources:
+          $ref: "#/components/schemas/SandboxResources"
+        network:
+          $ref: "#/components/schemas/SandboxNetwork"
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: Provider-reported labels.
+        timestamps:
+          $ref: "#/components/schemas/SandboxTimestamps"
+
+    SandboxProviderLookupError:
+      description: Provider error captured during fail-soft sandbox inventory lookup.
+      type: object
+      required:
+        - provider
+        - message
+      properties:
+        provider:
+          $ref: "#/components/schemas/SandboxProviderKind"
+        message:
+          type: string
+
+    SandboxListMeta:
+      description: Metadata for provider-backed sandbox inventory.
+      type: object
+      required:
+        - provider_errors
+      properties:
+        provider_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SandboxProviderLookupError"
+
+    SandboxListResponse:
+      description: Non-paginated provider-backed sandbox inventory response.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SandboxInfo"
+        meta:
+          $ref: "#/components/schemas/SandboxListMeta"
 
     SandboxFileEntry:
       description: A directory entry in a run sandbox.
