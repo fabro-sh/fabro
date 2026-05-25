@@ -7,7 +7,7 @@ use fabro_types::settings::ServerNamespace;
 use fabro_vault::Vault;
 use tracing::warn;
 
-use crate::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
+use crate::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup, validate_auth_configuration};
 use crate::migrations;
 use crate::server_secrets::ServerSecrets;
 
@@ -101,6 +101,10 @@ pub fn validate_startup(
     vault: &Vault,
 ) -> anyhow::Result<()> {
     resolve_startup(env_path, env_entries, settings, vault).map(|_| ())
+}
+
+pub fn validate_startup_configuration(settings: &ServerNamespace) -> anyhow::Result<()> {
+    validate_auth_configuration(settings)
 }
 
 #[cfg(test)]

@@ -70,25 +70,11 @@ pub fn resolve_auth_mode_with_lookup<F>(settings: &ServerNamespace, lookup: F) -
 where
     F: Fn(&str) -> Option<String>,
 {
+    validate_auth_configuration(settings)?;
+
     let methods = settings.auth.methods.clone();
     let github_enabled = methods.contains(&ServerAuthMethod::Github);
-    if methods.is_empty() {
-        return Err(anyhow!(
-            "Fabro server refuses to start: server.auth.methods must not be empty."
-        ));
-    }
-
     let web_enabled = settings.web.enabled;
-    if github_enabled && !web_enabled {
-        return Err(anyhow!(
-            "Fabro server refuses to start: github auth is enabled but server.web.enabled is false."
-        ));
-    }
-    if github_enabled && settings.integrations.github.client_id.is_none() {
-        return Err(anyhow!(
-            "Fabro server refuses to start: github auth is enabled but server.integrations.github.client_id is not configured."
-        ));
-    }
     if github_enabled && lookup(EnvVars::GITHUB_APP_CLIENT_SECRET).is_none() {
         return Err(anyhow!(
             "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not configured in the vault."
@@ -130,6 +116,29 @@ where
         jwt_key,
         jwt_issuer,
     }))
+}
+
+pub fn validate_auth_configuration(settings: &ServerNamespace) -> Result<()> {
+    let methods = &settings.auth.methods;
+    let github_enabled = methods.contains(&ServerAuthMethod::Github);
+    if methods.is_empty() {
+        return Err(anyhow!(
+            "Fabro server refuses to start: server.auth.methods must not be empty."
+        ));
+    }
+
+    let web_enabled = settings.web.enabled;
+    if github_enabled && !web_enabled {
+        return Err(anyhow!(
+            "Fabro server refuses to start: github auth is enabled but server.web.enabled is false."
+        ));
+    }
+    if github_enabled && settings.integrations.github.client_id.is_none() {
+        return Err(anyhow!(
+            "Fabro server refuses to start: github auth is enabled but server.integrations.github.client_id is not configured."
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_jwt_issuer<F>(settings: &ServerNamespace, lookup: &F) -> String
