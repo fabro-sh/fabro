@@ -60,6 +60,31 @@ input_cost_per_mtok = 2.0
 output_cost_per_mtok = 12.0
 cache_input_cost_per_mtok = 0.5
 
+[models."gemini-3.5-flash"]
+provider = "gemini"
+api_id = "gemini-3.5-flash"
+display_name = "Gemini 3.5 Flash"
+family = "gemini-3"
+training = "2025-01-01"
+knowledge_cutoff = "January 2025"
+estimated_output_tps = 150
+aliases = ["gemini-35-flash"]
+
+[models."gemini-3.5-flash".limits]
+context_window = 1048576
+max_output = 65536
+
+[models."gemini-3.5-flash".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+
+[models."gemini-3.5-flash".costs]
+input_cost_per_mtok = 1.5
+output_cost_per_mtok = 9.0
+cache_input_cost_per_mtok = 0.15
+
 [models."gemini-3-flash-preview"]
 provider = "gemini"
 api_id = "gemini-3-flash-preview"
@@ -85,28 +110,28 @@ input_cost_per_mtok = 0.5
 output_cost_per_mtok = 3.0
 cache_input_cost_per_mtok = 0.125
 
-[models."gemini-3.1-flash-lite-preview"]
+[models."gemini-3.1-flash-lite"]
 provider = "gemini"
-api_id = "gemini-3.1-flash-lite-preview"
-display_name = "Gemini 3.1 Flash Lite (Preview)"
+api_id = "gemini-3.1-flash-lite"
+display_name = "Gemini 3.1 Flash Lite"
 family = "gemini-3"
 training = "2025-01-01"
 knowledge_cutoff = "January 2025"
 estimated_output_tps = 200
-aliases = ["gemini-flash-lite"]
+aliases = ["gemini-flash-lite", "gemini-3.1-flash-lite-preview"]
 small_default = true
 
-[models."gemini-3.1-flash-lite-preview".limits]
+[models."gemini-3.1-flash-lite".limits]
 context_window = 1048576
 max_output = 65536
 
-[models."gemini-3.1-flash-lite-preview".features]
+[models."gemini-3.1-flash-lite".features]
 tools = true
 vision = true
 reasoning = true
 reasoning_effort = "levels"
 
-[models."gemini-3.1-flash-lite-preview".costs]
+[models."gemini-3.1-flash-lite".costs]
 input_cost_per_mtok = 0.25
 output_cost_per_mtok = 1.5
-cache_input_cost_per_mtok = 0.0625
+cache_input_cost_per_mtok = 0.025

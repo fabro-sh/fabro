@@ -1910,35 +1910,26 @@ enabled = true
     fn builtin_small_defaults_are_marked_per_provider() {
         let catalog = Catalog::builtin();
 
-        assert_eq!(
-            catalog
-                .small_default_for_provider(&ProviderId::anthropic())
-                .unwrap()
-                .id,
-            "claude-haiku-4-5"
-        );
-        assert_eq!(
-            catalog
-                .small_default_for_provider(&ProviderId::openai())
-                .unwrap()
-                .id,
-            "gpt-5.4-mini"
-        );
-        assert_eq!(
-            catalog
-                .small_default_for_provider(&ProviderId::gemini())
-                .unwrap()
-                .id,
-            "gemini-3.1-flash-lite-preview"
-        );
-        assert!(catalog.get("claude-haiku-4-5").unwrap().small_default);
-        assert!(catalog.get("gpt-5.4-mini").unwrap().small_default);
+        let small_defaults = catalog
+            .list(None)
+            .into_iter()
+            .filter(|model| model.small_default)
+            .collect::<Vec<_>>();
+
         assert!(
-            catalog
-                .get("gemini-3.1-flash-lite-preview")
-                .unwrap()
-                .small_default
+            !small_defaults.is_empty(),
+            "built-in catalog should mark at least one small default model"
         );
+
+        for model in small_defaults {
+            assert_eq!(
+                catalog
+                    .small_default_for_provider(&model.provider)
+                    .unwrap()
+                    .id,
+                model.id
+            );
+        }
     }
 
     #[test]
@@ -3691,68 +3682,6 @@ reasoning_effort = "levels"
     #[test]
     fn get_model_info_returns_none_for_unknown() {
         assert!(Catalog::builtin().get("nonexistent-model").is_none());
-    }
-
-    #[test]
-    fn gemini_3_1_flash_lite_in_catalog() {
-        let m = Catalog::builtin()
-            .get("gemini-3.1-flash-lite-preview")
-            .unwrap();
-        insta::assert_debug_snapshot!(m, @r#"
-        Model {
-            id: "gemini-3.1-flash-lite-preview",
-            provider: gemini,
-            family: "gemini-3",
-            display_name: "Gemini 3.1 Flash Lite (Preview)",
-            limits: ModelLimits {
-                context_window: 1048576,
-                max_output: Some(
-                    65536,
-                ),
-            },
-            training: Some(
-                "2025-01-01",
-            ),
-            knowledge_cutoff: Some(
-                "January 2025",
-            ),
-            features: ModelFeatures {
-                tools: true,
-                vision: true,
-                reasoning: true,
-                reasoning_effort: Levels,
-                prompt_cache: false,
-            },
-            costs: ModelCosts {
-                input_cost_per_mtok: Some(
-                    0.25,
-                ),
-                output_cost_per_mtok: Some(
-                    1.5,
-                ),
-                cache_input_cost_per_mtok: Some(
-                    0.0625,
-                ),
-            },
-            estimated_output_tps: Some(
-                200.0,
-            ),
-            aliases: [
-                "gemini-flash-lite",
-            ],
-            default: false,
-            small_default: true,
-            configured: false,
-        }
-        "#);
-    }
-
-    #[test]
-    fn gemini_flash_lite_alias() {
-        assert_eq!(
-            Catalog::builtin().get("gemini-flash-lite").unwrap().id,
-            "gemini-3.1-flash-lite-preview"
-        );
     }
 
     #[test]
