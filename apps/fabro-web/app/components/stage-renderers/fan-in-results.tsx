@@ -9,7 +9,8 @@ import type { EventEnvelope } from "@qltysh/fabro-api-client";
 import type { Stage } from "../stage-sidebar";
 import { formatTokenCount } from "../../lib/format";
 import { getString } from "../../lib/unknown";
-import { Markdown, prettyJson } from "./primitives";
+import { Markdown } from "./primitives";
+import { prettyJson } from "./pretty-json";
 import { StageMetaBar } from "./meta-bar";
 import { parseFanInOutcome } from "./helpers";
 

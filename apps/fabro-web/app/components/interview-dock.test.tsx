@@ -6,7 +6,8 @@ import {
   QuestionType,
 } from "@qltysh/fabro-api-client";
 
-import { InterviewDock, displayLabel } from "./interview-dock";
+import { InterviewDock } from "./interview-dock";
+import { displayLabel } from "./interview-label";
 import { generatedAxios } from "../lib/api-client";
 
 function render(node: React.ReactNode): TestRenderer.ReactTestRenderer {

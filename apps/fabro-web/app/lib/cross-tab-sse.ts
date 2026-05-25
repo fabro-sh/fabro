@@ -11,9 +11,9 @@ import {
 import { getNumber, getString, isRecord, type UnknownRecord } from "./unknown";
 
 export const CROSS_TAB_SSE_CHANNEL = "fabro:sse:v1";
-export const HEARTBEAT_MS = 1000;
-export const LEADER_STALE_MS = 4000;
-export const ELECTION_JITTER_MS = 150;
+const HEARTBEAT_MS = 1000;
+const LEADER_STALE_MS = 4000;
+const ELECTION_JITTER_MS = 150;
 
 const MESSAGE_VERSION = 1 as const;
 const EVENT_DEDUPE_TTL_MS = 5 * 60 * 1000;

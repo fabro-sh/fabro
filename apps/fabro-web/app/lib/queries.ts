@@ -363,7 +363,7 @@ export function useRunEventsList(id: string | undefined) {
   );
 }
 
-export function fetchRunCommandLog(
+function fetchRunCommandLog(
   id: string,
   stageId: string,
   offset: number,

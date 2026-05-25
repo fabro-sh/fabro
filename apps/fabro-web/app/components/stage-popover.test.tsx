@@ -4,7 +4,8 @@ import TestRenderer, { act } from "react-test-renderer";
 import { SWRConfig } from "swr";
 import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
-import { deriveStageSummary, StagePopover } from "./stage-popover";
+import { StagePopover } from "./stage-popover";
+import { deriveStageSummary } from "./stage-popover-summary";
 import type { Stage } from "../lib/stage-sidebar";
 import { generatedAxios } from "../lib/api-client";
 

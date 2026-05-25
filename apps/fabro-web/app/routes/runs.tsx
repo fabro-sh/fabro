@@ -28,7 +28,7 @@ import { EmptyState } from "../components/state";
 import { PullRequestChip } from "../components/pull-request-chip";
 import {
   summarizeBatchLifecycleAction,
-} from "../components/runs-list/bulk-action-toolbar";
+} from "../components/runs-list/batch-lifecycle";
 import { ColumnPickerButton } from "../components/runs-list/column-picker-button";
 import { FilterButton } from "../components/runs-list/filter-button";
 import {
@@ -58,7 +58,7 @@ import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
 import { approveRun, archiveRuns, canArchive, mapError } from "../lib/run-actions";
-import { plural } from "../components/settings-panel";
+import { plural } from "../lib/plural";
 import { useToast } from "../components/toast";
 import type {
   BoardColumn,
@@ -72,8 +72,6 @@ export {
   persistRunsWorkspacePreferences,
   RUNS_PREFERENCES_STORAGE_KEY,
 } from "../components/runs-list/preferences";
-export { summarizeBatchLifecycleAction } from "../components/runs-list/bulk-action-toolbar";
-
 export function meta({}: any) {
   return [{ title: "Runs — Fabro" }];
 }

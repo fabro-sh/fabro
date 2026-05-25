@@ -7,9 +7,11 @@ import {
   DebugEventRow,
   EventSearchInput,
   MultiSelectFilter,
+} from "../components/event-debug";
+import {
   debugCategory,
   debugCategoryLabel,
-} from "../components/event-debug";
+} from "../components/event-debug-helpers";
 import { RunWaterfall } from "../components/run-waterfall";
 import { StageSidebar } from "../components/stage-sidebar";
 import { EmptyState, ErrorState, LoadingState } from "../components/state";

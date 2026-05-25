@@ -169,9 +169,9 @@ export function FileTreeSidebar({
       {paths.length > 0 ? (
         <FileTree model={model} className="min-h-0 flex-1 overflow-hidden" />
       ) : (
-        <div role="status" className="min-h-0 flex-1 px-3 py-2 text-sm text-fg-muted">
+        <output className="min-h-0 flex-1 px-3 py-2 text-sm text-fg-muted">
           No changed files
-        </div>
+        </output>
       )}
     </aside>
   );

@@ -139,7 +139,7 @@ export default function SettingsLayout() {
     >
       <aside className="lg:w-56 lg:shrink-0">
         <nav className="sticky top-6">
-          <ul role="list" className="flex gap-1 overflow-x-auto lg:flex-col lg:gap-0.5">
+          <ul className="flex gap-1 overflow-x-auto lg:flex-col lg:gap-0.5">
             {navSections.map((section, sectionIdx) => (
               <Fragment key={section.key}>
                 {section.label ? (
@@ -153,8 +153,7 @@ export default function SettingsLayout() {
                   </li>
                 ) : sectionIdx > 0 ? (
                   <li
-                    role="separator"
-                    aria-orientation="vertical"
+                    aria-hidden="true"
                     className="mx-1 self-stretch border-l border-line lg:mx-0 lg:my-2 lg:self-auto lg:border-l-0 lg:border-t"
                   />
                 ) : null}

@@ -341,11 +341,11 @@ const RunFileRow = memo(function RunFileRow({
 
 export default function RunFiles() {
   const params = useParams();
-  const location = useLocation();
+  const routeLocation = useLocation();
   const navigate = useNavigate();
   const searchParams = useMemo(
-    () => new URLSearchParams(location.search),
-    [location.search],
+    () => new URLSearchParams(routeLocation.search),
+    [routeLocation.search],
   );
   const selectedScope = normalizeRunFileScope(searchParams.get("scope"));
   const selectedCommitSha = searchParams.get("commit");
@@ -440,7 +440,7 @@ export default function RunFiles() {
   }, [filesQuery]);
   const handlePickerChange = useCallback(
     (selection: DiffPickerValue) => {
-      const search = new URLSearchParams(location.search);
+      const search = new URLSearchParams(routeLocation.search);
       if (selection.kind === "commit") {
         search.set("commit", selection.sha);
         search.delete("scope");
@@ -449,12 +449,12 @@ export default function RunFiles() {
         search.delete("commit");
       }
       navigate({
-        pathname: location.pathname,
+        pathname: routeLocation.pathname,
         search:   `?${search.toString()}`,
-        hash:     location.hash,
+        hash:     routeLocation.hash,
       });
     },
-    [location.hash, location.pathname, location.search, navigate],
+    [routeLocation.hash, routeLocation.pathname, routeLocation.search, navigate],
   );
   useEffect(() => {
     if (minSpinUntil === 0) return;

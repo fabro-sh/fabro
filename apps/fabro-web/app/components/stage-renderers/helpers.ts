@@ -241,7 +241,7 @@ export function parseFanInOutcome(events: EventEnvelope[], notes: string | null)
   };
 }
 
-export function asUnknownRecord(value: unknown): UnknownRecord | null {
+function asUnknownRecord(value: unknown): UnknownRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as UnknownRecord;
 }
@@ -355,4 +355,4 @@ export function findEdgeForNode(
 }
 
 // Re-export helper used by renderers that need to read nested properties.
-export { getObject, getString, getNumber, getArray };
+export { getString };

@@ -5,7 +5,7 @@ export type RunFileSelection =
   | { kind: "commit"; fromSha: string; toSha: string };
 export type QueryKey = readonly unknown[];
 
-export const RUN_FILE_SCOPES = ["committed", "uncommitted", "all"] as const;
+const RUN_FILE_SCOPES = ["committed", "uncommitted", "all"] as const;
 
 export function runFileScopeSelection(
   scope: RunFileScope = "committed",

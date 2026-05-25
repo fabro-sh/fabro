@@ -2,13 +2,15 @@
 // exposes the primary button, secondary button, input, error message, and
 // copy button so the auth and in-app surfaces can match.
 
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import {
   ClipboardDocumentCheckIcon,
   ClipboardIcon,
 } from "@heroicons/react/16/solid";
+
+import { hoverCardStyle } from "./hover-card-style";
 
 export const INPUT_CLASS =
   "block w-full rounded-lg bg-panel-alt px-3.5 py-2.5 text-base text-fg outline-1 -outline-offset-1 outline-white/10 placeholder:text-fg-muted focus:outline-2 focus:-outline-offset-1 focus:outline-teal-500 sm:text-sm";
@@ -19,7 +21,7 @@ export const PRIMARY_BUTTON_CLASS =
 export const SECONDARY_BUTTON_CLASS =
   "inline-flex items-center justify-center gap-2 rounded-lg bg-transparent px-3.5 py-2 text-sm font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10 hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60";
 
-export const DANGER_BUTTON_CLASS =
+const DANGER_BUTTON_CLASS =
   "inline-flex items-center justify-center gap-2 rounded-lg bg-coral px-4 py-2 text-sm font-medium text-on-primary transition-colors hover:bg-coral/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-coral";
 
 export const COMPACT_SECONDARY_BUTTON_CLASS =
@@ -33,28 +35,6 @@ export function ErrorMessage({ message }: { message: string }) {
     >
       {message}
     </p>
-  );
-}
-
-export function FormField({
-  label,
-  htmlFor,
-  help,
-  children,
-}: {
-  label: string;
-  htmlFor: string;
-  help?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-fg-2">
-        {label}
-      </label>
-      {children}
-      {help ? <p className="mt-1.5 text-xs/5 text-fg-3 text-pretty">{help}</p> : null}
-    </div>
   );
 }
 
@@ -232,19 +212,6 @@ export function Tooltip({
         : null}
     </>
   );
-}
-
-// Anchors the card just below the trigger. Triggers in the left half of the
-// viewport grow rightward from their left edge; triggers in the right half
-// grow leftward from their right edge — keeping the card on-screen without
-// measuring its width.
-export function hoverCardStyle(rect: DOMRect): CSSProperties {
-  const margin = 12;
-  const top = rect.bottom + 6;
-  if (rect.left > window.innerWidth / 2) {
-    return { top, right: Math.max(margin, window.innerWidth - rect.right) };
-  }
-  return { top, left: Math.max(margin, rect.left) };
 }
 
 /**

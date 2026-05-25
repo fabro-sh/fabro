@@ -192,10 +192,7 @@ function DiffSelectionPicker({
             </ListboxOption>
           ))}
           {commits.length > 0 ? (
-            <div
-              role="separator"
-              className="my-1 border-t border-line"
-            />
+            <hr className="my-1 border-t border-line" />
           ) : null}
           {commits.map((commit) => (
             <ListboxOption

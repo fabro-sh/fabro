@@ -402,9 +402,9 @@ function DirectoryPane({
           <LoadingState label={`Listing ${currentDir}…`} />
         </div>
       ) : treeInputs.paths.length === 0 ? (
-        <div role="status" className="px-3 py-4 text-sm text-fg-muted">
+        <output className="px-3 py-4 text-sm text-fg-muted">
           Empty directory
-        </div>
+        </output>
       ) : (
         <FileTree model={model} className="min-h-0 flex-1 overflow-auto" />
       )}

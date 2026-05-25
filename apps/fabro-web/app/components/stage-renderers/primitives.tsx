@@ -1,7 +1,8 @@
 import { useMemo, type ReactNode } from "react";
 import { Marked } from "marked";
 
-import { highlightJson } from "../event-debug";
+import { highlightJson } from "../event-debug-helpers";
+import { prettyJson } from "./pretty-json";
 
 export function DetailField({
   label,
@@ -30,15 +31,6 @@ export function CodeBlock({ children }: { children: string }) {
       {children || <span className="text-fg-muted">empty</span>}
     </pre>
   );
-}
-
-export function prettyJson(raw: string): { text: string; isJson: boolean } {
-  if (!raw || !raw.trim()) return { text: "", isJson: false };
-  try {
-    return { text: JSON.stringify(JSON.parse(raw), null, 2), isJson: true };
-  } catch {
-    return { text: raw, isJson: false };
-  }
 }
 
 export function JsonBlock({ value }: { value: string }) {

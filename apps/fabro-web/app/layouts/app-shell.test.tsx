@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getVisibleNavigation } from "./app-shell";
+import { getVisibleNavigation } from "./navigation";
 
 describe("getVisibleNavigation", () => {
   test("shows Automations first in demo mode followed by Runs and Settings", () => {

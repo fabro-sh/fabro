@@ -9,8 +9,8 @@ import {
   RUNS_PREFERENCES_STORAGE_KEY,
   runsQuickStartCommands,
   shouldRefreshBoardForEvent,
-  summarizeBatchLifecycleAction,
 } from "./runs";
+import { summarizeBatchLifecycleAction } from "../components/runs-list/batch-lifecycle";
 
 function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
   const status =

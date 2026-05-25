@@ -224,36 +224,6 @@ export function ObjectStoreRows({
   );
 }
 
-export function ObjectStoreValue({
-  store,
-  prefix,
-}: {
-  store: ObjectStoreSettings;
-  prefix: string;
-}) {
-  if (store.type === "s3") {
-    const target = `s3://${store.bucket}${prefix ? `/${prefix}` : ""}`;
-    return (
-      <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Badge>s3</Badge>
-        <span className="truncate font-mono text-xs text-fg-2" title={target}>
-          {target}
-        </span>
-        <span className="font-mono text-[11px] text-fg-muted">{store.region}</span>
-      </span>
-    );
-  }
-  const target = `${store.root}${prefix ? `/${prefix}` : ""}`;
-  return (
-    <span className="inline-flex items-center gap-2">
-      <Badge>local</Badge>
-      <span className="truncate font-mono text-xs text-fg-2" title={target}>
-        {target}
-      </span>
-    </span>
-  );
-}
-
 export function UsernameList({ names }: { names: string[] }) {
   const visible = names.slice(0, 3);
   const remaining = names.length - visible.length;
@@ -288,8 +258,4 @@ export function Count({
       {suffix ? <span className="ml-1 text-fg-muted">{suffix}</span> : null}
     </span>
   );
-}
-
-export function plural(n: number, singular: string, pluralForm: string) {
-  return n === 1 ? singular : pluralForm;
 }

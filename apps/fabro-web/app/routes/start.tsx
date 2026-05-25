@@ -94,6 +94,7 @@ export default function Start() {
                   autoResize();
                 }}
                 onKeyDown={handleKeyDown}
+                aria-label="Workflow prompt"
                 placeholder="Describe a workflow, pipeline, or automation..."
                 rows={3}
                 className="w-full resize-none bg-transparent px-5 pt-4 pb-14 text-[15px] leading-relaxed text-fg-2 placeholder:text-fg-muted focus:outline-none"
@@ -120,8 +121,10 @@ export default function Start() {
                     <kbd className="font-mono">Enter</kbd> to submit
                   </span>
                   <button
+                    type="button"
                     onClick={handleSubmit}
                     disabled={!prompt.trim()}
+                    aria-label="Submit prompt"
                     className="flex items-center justify-center size-8 rounded-lg bg-teal-500 text-on-primary transition-all duration-200 hover:bg-teal-300 disabled:opacity-30 disabled:hover:bg-teal-500 disabled:cursor-default"
                   >
                     <ArrowUpIcon className="size-4" />
@@ -135,6 +138,7 @@ export default function Start() {
             <div className="flex items-center justify-center gap-2">
               {categories.map((cat) => (
                 <button
+                  type="button"
                   key={cat.label}
                   onClick={() => setOpenCategory(openCategory === cat.label ? null : cat.label)}
                   className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors ${
@@ -229,7 +233,9 @@ function CategoryPanel({
         <category.icon className="size-4 text-teal-500" />
         <span className="text-sm font-medium text-fg-2">{category.label}</span>
         <button
+          type="button"
           onClick={onClose}
+          aria-label="Close category menu"
           className="ml-auto flex items-center justify-center size-6 rounded-md text-fg-muted hover:text-fg-3 hover:bg-overlay transition-colors"
         >
           <XMarkIcon className="size-4" />
@@ -239,6 +245,7 @@ function CategoryPanel({
         {category.items.map((item, i) => (
           <li key={item.title} className={i > 0 ? "border-t border-line" : ""}>
             <button
+              type="button"
               onClick={() => onSelect(item.prompt)}
               className="w-full px-4 py-3 text-left text-sm text-fg-3 transition-colors hover:bg-overlay hover:text-fg-2"
             >

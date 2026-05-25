@@ -1,7 +1,7 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -12,26 +12,24 @@ import {
   ArrowTopRightOnSquareIcon,
   ClipboardDocumentIcon,
 } from "@heroicons/react/20/solid";
-import type { RunSandbox } from "@qltysh/fabro-api-client";
 
 import { SECONDARY_BUTTON_CLASS, Tooltip } from "./ui";
 import { ErrorState } from "./state";
 import { useToast } from "./toast";
 import { apiData, humanInTheLoopApi } from "../lib/api-client";
 import { useRunState } from "../lib/queries";
+import {
+  buildFullScreenTerminalUrl,
+  buildTerminalWebSocketUrl,
+  parseTerminalServerMessage,
+  sandboxStatusDetail,
+  terminalAccessCommandLabel,
+} from "./terminal-view-helpers";
 
 const ICON_BUTTON_CLASS =
   "inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500";
 
-export const TERMINAL_DOCK_CLEARANCE_CLASS =
-  "pb-[calc(0.125rem+var(--fabro-interview-dock-clearance,0px))]";
-
 type ConnectionStatus = "connecting" | "ready" | "closed" | "error";
-
-interface TerminalServerMessage {
-  type: "ready" | "error" | "closed";
-  message?: string;
-}
 
 const TERMINAL_BACKGROUND = "#05080F";
 
@@ -68,37 +66,6 @@ const TERMINAL_THEME = {
   brightWhite:   "#FFFFFF",
 };
 
-export function buildTerminalWebSocketUrl(location: Location, runId: string): string {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.host}/api/v1/runs/${encodeURIComponent(runId)}/terminal`;
-}
-
-export function buildFullScreenTerminalUrl(runId: string): string {
-  return `/runs/${encodeURIComponent(runId)}/terminal`;
-}
-
-export function parseTerminalServerMessage(data: string): TerminalServerMessage | null {
-  try {
-    const parsed = JSON.parse(data);
-    if (!parsed || typeof parsed !== "object") return null;
-    const type = (parsed as { type?: unknown }).type;
-    if (type !== "ready" && type !== "error" && type !== "closed") return null;
-    const message = (parsed as { message?: unknown }).message;
-    return {
-      type,
-      message: typeof message === "string" ? message : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function terminalAccessCommandLabel(provider: string | null): string | null {
-  if (provider === "daytona") return "SSH";
-  if (provider === "docker") return "Exec";
-  return null;
-}
-
 function terminalAccessCommandCopiedMessage(provider: string | null): string {
   return provider === "docker" ? "Docker exec command copied." : "SSH command copied.";
 }
@@ -107,10 +74,6 @@ function terminalAccessCommandErrorMessage(provider: string | null): string {
   return provider === "docker"
     ? "Could not copy Docker exec command."
     : "Could not copy SSH command.";
-}
-
-export function sandboxStatusDetail(sandbox: RunSandbox | null | undefined): string | null {
-  return sandbox?.runtime?.id ?? sandbox?.provider ?? null;
 }
 
 function sendResize(socket: WebSocket | null, terminal: XtermTerminal | null) {
@@ -156,8 +119,7 @@ function StatusPill({
   detail: string | null;
 }) {
   return (
-    <span
-      role="status"
+    <output
       aria-live="polite"
       className="inline-flex items-center gap-2 rounded-full bg-overlay py-1 pr-3 pl-2 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10"
     >
@@ -174,7 +136,7 @@ function StatusPill({
           </span>
         </>
       ) : null}
-    </span>
+    </output>
   );
 }
 
@@ -193,19 +155,19 @@ export default function TerminalView({
   const provider = sandbox?.provider ?? null;
   const sandboxDetail = sandboxStatusDetail(sandbox);
   const accessCommandLabel = terminalAccessCommandLabel(provider);
-  const [connectionKey, setConnectionKey] = useState(0);
+  const [connectionKey, reconnectTerminal] = useReducer((key: number) => key + 1, 0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<{ message: string; recoverable: boolean } | null>(null);
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XtermTerminal | null>(null);
   const fitRef = useRef<XtermFitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const headingId = useMemo(() => `run-terminal-${runId}`, [runId]);
+  const headingId = `run-terminal-${runId}`;
 
   const reconnect = useCallback(() => {
     setError(null);
     setStatus("connecting");
-    setConnectionKey((key) => key + 1);
+    reconnectTerminal();
   }, []);
 
   const copyAccessCommand = useCallback(async () => {
@@ -226,6 +188,7 @@ export default function TerminalView({
     }
   }, [accessCommandLabel, runId, provider, push]);
 
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup -- listeners, socket, xterm, and ResizeObserver are disposed in the returned cleanup.
   useEffect(() => {
     if (!terminalEl.current) return undefined;
 
@@ -271,10 +234,10 @@ export default function TerminalView({
         }
       }));
 
-      socket.addEventListener("open", () => {
+      const handleOpen = () => {
         sendResize(socket, terminal);
-      });
-      socket.addEventListener("message", (event) => {
+      };
+      const handleMessage = (event: MessageEvent) => {
         if (typeof event.data === "string") {
           const message = parseTerminalServerMessage(event.data);
           if (!message) return;
@@ -297,16 +260,28 @@ export default function TerminalView({
           ? new Uint8Array(event.data)
           : event.data;
         terminal.write(bytes);
-      });
-      socket.addEventListener("close", () => {
+      };
+      const handleClose = () => {
         setStatus((current) => current === "error" ? current : "closed");
-      });
-      socket.addEventListener("error", () => {
+      };
+      const handleError = () => {
         setStatus("error");
         setError({
           message: "Terminal WebSocket connection failed.",
           recoverable: true,
         });
+      };
+      socket.addEventListener("open", handleOpen);
+      socket.addEventListener("message", handleMessage);
+      socket.addEventListener("close", handleClose);
+      socket.addEventListener("error", handleError);
+      disposables.push({
+        dispose: () => {
+          socket.removeEventListener("open", handleOpen);
+          socket.removeEventListener("message", handleMessage);
+          socket.removeEventListener("close", handleClose);
+          socket.removeEventListener("error", handleError);
+        },
       });
 
       resizeObserver = new ResizeObserver(() => {

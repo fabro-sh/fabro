@@ -10,8 +10,8 @@ import {
   PanelSkeleton,
   Row,
   SettingsPageIntro,
-  plural,
 } from "../components/settings-panel";
+import { plural } from "../lib/plural";
 import {
   FilterButton,
   type FilterOption,

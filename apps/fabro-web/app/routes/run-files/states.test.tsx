@@ -151,13 +151,13 @@ describe("emptyStateCopy", () => {
 });
 
 describe("component rendering", () => {
-  test("EmptyState wraps message in role=status", () => {
+  test("EmptyState wraps message in a live output", () => {
     let tree: TestRenderer.ReactTestRenderer | undefined;
     TestRenderer.act(() => {
       tree = TestRenderer.create(<EmptyState kind="starting" />);
     });
     const statusEl = tree!.root.findAll(
-      (node) => node.type === "div" && node.props?.role === "status",
+      (node) => node.type === "output",
     );
     expect(statusEl.length).toBeGreaterThan(0);
   });

@@ -17,12 +17,14 @@ import {
   EventSearchInput,
   MultiSelectFilter,
   ThreadDnaStrip,
+} from "../components/event-debug";
+import {
   debugCategory,
   debugCategoryLabel,
   formatElapsed,
-} from "../components/event-debug";
+  type DebugCategory,
+} from "../components/event-debug-helpers";
 import type {
-  DebugCategory,
   ThreadDnaItem,
   ThreadDnaSelection,
 } from "../components/event-debug";

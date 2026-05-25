@@ -53,7 +53,7 @@ describe("ToastProvider", () => {
 
     expect(textFromNode(renderer!.toJSON())).toContain("Run archived.");
     const liveRegions = renderer!.root.findAll(
-      (node) => node.props?.role === "status" && node.props?.["aria-live"] === "polite",
+      (node) => node.type === "output" && node.props?.["aria-live"] === "polite",
     );
     expect(liveRegions.length).toBeGreaterThan(0);
 

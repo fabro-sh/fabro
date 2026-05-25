@@ -7,12 +7,12 @@ import { useRun, useRunGraph, useRunStages } from "../lib/queries";
 import { RunSummaryPanel } from "../components/run-summary-panel";
 import { StagePopover } from "../components/stage-popover";
 import { StageSidebar } from "../components/stage-sidebar";
-import { hoverCardStyle } from "../components/ui";
+import { hoverCardStyle } from "../components/hover-card-style";
 import {
   GRAPH_DEFAULT_ZOOM_INDEX,
   GRAPH_ZOOM_STEPS,
-  GraphToolbar,
-} from "../components/graph-toolbar";
+} from "../components/graph-toolbar-constants";
+import { GraphToolbar } from "../components/graph-toolbar";
 import { EmptyState, ErrorState } from "../components/state";
 import {
   ACTIVE_STAGE_STATES,
@@ -110,6 +110,11 @@ export default function RunOverview() {
         openTimer = null;
       }
     };
+    const listeners: Array<{ target: Element; type: string; listener: EventListener }> = [];
+    const addListener = (target: Element, type: string, listener: EventListener) => {
+      target.addEventListener(type, listener);
+      listeners.push({ target, type, listener });
+    };
 
     for (const group of svg.querySelectorAll(".node")) {
       const nodeId = group.querySelector("title")?.textContent?.trim();
@@ -119,10 +124,10 @@ export default function RunOverview() {
       const stage = stageId ? stageById.get(stageId) : undefined;
       if (stageId) {
         (group as SVGElement).style.cursor = "pointer";
-        group.addEventListener("click", () => navigate(`/runs/${id}/stages/${stageId}`));
+        addListener(group, "click", () => navigate(`/runs/${id}/stages/${stageId}`));
       }
       if (stage) {
-        group.addEventListener("mouseenter", () => {
+        addListener(group, "mouseenter", () => {
           clearOpenTimer();
           const target = group as SVGGElement;
           openTimer = setTimeout(() => {
@@ -130,7 +135,7 @@ export default function RunOverview() {
             setHoveredNode({ stage, rect: target.getBoundingClientRect() });
           }, HOVER_OPEN_DELAY_MS);
         });
-        group.addEventListener("mouseleave", () => {
+        addListener(group, "mouseleave", () => {
           clearOpenTimer();
           setHoveredNode(null);
         });
@@ -200,6 +205,9 @@ export default function RunOverview() {
 
     return () => {
       clearOpenTimer();
+      for (const { target, type, listener } of listeners) {
+        target.removeEventListener(type, listener);
+      }
       setHoveredNode(null);
     };
   }, [stages, stageById, graphSvg, id, navigate, terminalOutcome]);

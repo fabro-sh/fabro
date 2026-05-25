@@ -9,9 +9,6 @@ import {
 } from "@headlessui/react";
 import {
   Bars3Icon,
-  ClockIcon,
-  Cog6ToothIcon,
-  PlayIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
@@ -20,19 +17,10 @@ import { ToastProvider } from "../components/toast";
 import { AskFabroLayoutProvider, useAskFabroLayout } from "../lib/ask-fabro-layout";
 import { DemoModeProvider } from "../lib/demo-mode";
 import { useAuthMe } from "../lib/queries";
-
-const allNavigation = [
-  { name: "Automations", href: "/automations", icon: ClockIcon, demoOnly: true },
-  { name: "Runs", href: "/runs", icon: PlayIcon, demoOnly: false },
-  { name: "Settings", href: "/settings", icon: Cog6ToothIcon, demoOnly: false },
-];
+import { allNavigation, getVisibleNavigation } from "./navigation";
 
 function activeFor(item: (typeof allNavigation)[number], pathname: string): boolean {
   return pathname.startsWith(item.href);
-}
-
-export function getVisibleNavigation(demoMode: boolean) {
-  return allNavigation.filter((item) => !item.demoOnly || demoMode);
 }
 
 function classNames(...classes: Array<string | false | null | undefined>) {

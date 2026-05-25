@@ -6,7 +6,7 @@ import {
   sandboxStatusDetail,
   TERMINAL_DOCK_CLEARANCE_CLASS,
   terminalAccessCommandLabel,
-} from "./terminal-view";
+} from "./terminal-view-helpers";
 
 function locationLike(url: string): Location {
   return new URL(url) as unknown as Location;

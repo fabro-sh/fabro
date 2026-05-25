@@ -9,8 +9,8 @@ import {
   Row,
   SettingsPageIntro,
   UsernameList,
-  plural,
 } from "../components/settings-panel";
+import { plural } from "../lib/plural";
 
 export function meta() {
   return [{ title: "Security — Fabro" }];

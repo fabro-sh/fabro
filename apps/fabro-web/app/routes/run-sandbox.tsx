@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import { useSearchParams } from "react-router";
 import { ArrowTopRightOnSquareIcon } from "@heroicons/react/20/solid";
 
-import TerminalView, { TERMINAL_DOCK_CLEARANCE_CLASS } from "../components/terminal-view";
+import TerminalView from "../components/terminal-view";
+import { TERMINAL_DOCK_CLEARANCE_CLASS } from "../components/terminal-view-helpers";
 import { EmptyState, ErrorState } from "../components/state";
 import {
   formatAbsoluteTs,

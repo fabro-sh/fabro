@@ -90,7 +90,7 @@ export function parsePage(raw: string | null): number {
 }
 
 export const LIST_PAGE_SIZES = [10, 25, 50, 100] as const;
-export const DEFAULT_LIST_PAGE_SIZE = 25;
+const DEFAULT_LIST_PAGE_SIZE = 25;
 
 export function parsePageSize(raw: string | null): number {
   const n = Number(raw);
@@ -287,7 +287,7 @@ export function persistRunsWorkspacePreferences(
 }
 
 const CHILD_RUNS_LIST_PREFERENCES_VERSION = 1;
-export const CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY = "fabro:run-children-preferences:v1";
+const CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY = "fabro:run-children-preferences:v1";
 const CHILD_RUNS_LIST_PARAM_KEYS = [
   "search",
   "created",
@@ -381,7 +381,7 @@ function hasChildRunsListParams(searchParams: URLSearchParams): boolean {
   return CHILD_RUNS_LIST_PARAM_KEYS.some((key) => searchParams.has(key));
 }
 
-export function loadStoredChildRunsListSearchParams(
+function loadStoredChildRunsListSearchParams(
   storage: Pick<Storage, "getItem"> | null = runsPreferencesStorage(),
 ): URLSearchParams {
   if (storage == null) return new URLSearchParams();

@@ -57,7 +57,7 @@ export function StageMetaBar({
  * Section heading used inside renderer bodies. Pairs an h3 title with optional
  * supporting text underneath.
  */
-export function SectionHeader({
+function SectionHeader({
   title,
   description,
   action,

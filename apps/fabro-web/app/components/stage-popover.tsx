@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { EventEnvelope, StageState } from "@qltysh/fabro-api-client";
+import type { StageState } from "@qltysh/fabro-api-client";
 
 import { formatTokenCount } from "../lib/format";
 import { useRunStageEvents } from "../lib/queries";
@@ -10,86 +10,13 @@ import {
   type Stage,
 } from "../lib/stage-sidebar";
 import { timeAgo } from "../lib/time";
-import {
-  getArray,
-  getNumber,
-  getObject,
-  getString,
-} from "../lib/unknown";
 import { PopoverHeader, PopoverRow, PopoverRows } from "./ui";
+import {
+  deriveStageSummary,
+  type StageSummary,
+} from "./stage-popover-summary";
 
 const REASON_MAX_CHARS = 240;
-
-export interface StageSummary {
-  attempt?: number;
-  maxAttempts?: number;
-  failureMessage?: string;
-  notes?: string;
-  inputTokens?: number;
-  outputTokens?: number;
-  filesTouchedCount?: number;
-  systemActor?: string;
-  exitCode?: number;
-}
-
-/**
- * Reduce a stage's event stream to the latest values relevant to the popover.
- * Events arrive in `seq` order, so later events overwrite earlier ones —
- * giving us the most recent attempt counts, failure message, and billing.
- */
-export function deriveStageSummary(events: EventEnvelope[]): StageSummary {
-  const summary: StageSummary = {};
-  for (const e of events) {
-    const props = e.properties ?? {};
-    switch (e.event) {
-      case "stage.started": {
-        const attempt = getNumber(props, "attempt");
-        const max = getNumber(props, "max_attempts");
-        if (attempt !== undefined) summary.attempt = attempt;
-        if (max !== undefined) summary.maxAttempts = max;
-        break;
-      }
-      case "stage.completed": {
-        readFailure(summary, getObject(props, "failure"));
-        readBilling(summary, getObject(props, "billing"));
-        readTermination(summary, getObject(props, "termination"));
-        const notes = getString(props, "notes");
-        if (notes !== undefined) summary.notes = notes;
-        const files = getArray(props, "files_touched");
-        if (files !== undefined) summary.filesTouchedCount = files.length;
-        break;
-      }
-      case "stage.failed": {
-        readFailure(summary, getObject(props, "failure"));
-        readBilling(summary, getObject(props, "billing"));
-        break;
-      }
-    }
-  }
-  return summary;
-}
-
-function readFailure(summary: StageSummary, failure: unknown) {
-  if (!failure) return;
-  const message = getString(failure, "message");
-  if (message !== undefined) summary.failureMessage = message;
-  const actor = getString(failure, "system_actor");
-  if (actor !== undefined) summary.systemActor = actor;
-}
-
-function readBilling(summary: StageSummary, billing: unknown) {
-  if (!billing) return;
-  const input = getNumber(billing, "input_tokens");
-  const output = getNumber(billing, "output_tokens");
-  if (input !== undefined) summary.inputTokens = input;
-  if (output !== undefined) summary.outputTokens = output;
-}
-
-function readTermination(summary: StageSummary, termination: unknown) {
-  if (!termination) return;
-  const exitCode = getNumber(termination, "exit_code");
-  if (exitCode !== undefined) summary.exitCode = exitCode;
-}
 
 /** Trim, collapse blank-line runs, and cap to ~240 chars with an ellipsis. */
 function truncateReason(text: string): { display: string; truncated: boolean } {

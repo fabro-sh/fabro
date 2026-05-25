@@ -128,7 +128,7 @@ export function RowActionsMenu({ run }: { run: RunWithStatus }) {
             )}
           </MenuItem>
           {(showApprove || hasLifecycle) && (
-            <div className="my-1 h-px bg-line" role="separator" />
+            <hr className="my-1 h-px border-0 bg-line" />
           )}
           {showApprove && (
             <MenuItem>
@@ -187,7 +187,7 @@ export function RowActionsMenu({ run }: { run: RunWithStatus }) {
             </MenuItem>
           )}
           {hasDestructive && (
-            <div className="my-1 h-px bg-line" role="separator" />
+            <hr className="my-1 h-px border-0 bg-line" />
           )}
           {showDeny && (
             <MenuItem>

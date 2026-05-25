@@ -105,7 +105,7 @@ type SandboxForm = {
 
 export default function InstallApp() {
   const navigate = useNavigate();
-  const location = useLocation();
+  const { pathname } = useLocation();
   const [installToken, setInstallToken] = useState<string | null>(() =>
     readStoredInstallToken(),
   );
@@ -151,7 +151,7 @@ export default function InstallApp() {
   }, []);
 
   useEffect(() => {
-    if (shouldConsumeInstallGithubErrorForPath(location.pathname)) {
+    if (shouldConsumeInstallGithubErrorForPath(pathname)) {
       const { error, sanitizedUrl } = consumeInstallGithubErrorFromUrl(window.location.href);
       if (error) {
         setSaveError(error);
@@ -160,7 +160,7 @@ export default function InstallApp() {
       }
     }
     setSaveError((current) => (current === null ? current : null));
-  }, [location.pathname]);
+  }, [pathname]);
 
   useEffect(() => {
     if (!installToken) {
@@ -212,12 +212,12 @@ export default function InstallApp() {
 
   useEffect(() => {
     if (!installToken || !session) return;
-    if ((location.pathname === "/" || location.pathname === "/install") && !finishState) {
+    if ((pathname === "/" || pathname === "/install") && !finishState) {
       startTransition(() => {
         navigate("/install/welcome", { replace: true });
       });
     }
-  }, [finishState, installToken, location.pathname, navigate, session]);
+  }, [finishState, installToken, pathname, navigate, session]);
 
   useEffect(() => {
     if (!finishState) return;
@@ -266,9 +266,9 @@ export default function InstallApp() {
 
   const currentStep = useMemo<StepId>(
     () =>
-      STEPPER_STEPS.find((step) => location.pathname.startsWith(step.href))?.id ??
+      STEPPER_STEPS.find((step) => pathname.startsWith(step.href))?.id ??
       "welcome",
-    [location.pathname],
+    [pathname],
   );
 
   const completedSteps = new Set(session?.completed_steps ?? []);
@@ -353,15 +353,15 @@ export default function InstallApp() {
     );
   }
 
-  if (finishState && location.pathname !== "/install/finishing") {
+  if (finishState && pathname !== "/install/finishing") {
     return <Navigate to="/install/finishing" replace />;
   }
 
   return (
     <InstallLayout currentStep={currentStep} completedSteps={completedSteps}>
-      {location.pathname === "/install/finishing" ? (
+      {pathname === "/install/finishing" ? (
         <FinishingScreen finishState={finishState} timedOut={timedOut} />
-      ) : location.pathname === "/install/llm" ? (
+      ) : pathname === "/install/llm" ? (
         <StepPanel
           title="Add your LLM credentials"
           description="Each key you enter is validated before it's saved. Skip a provider by leaving it blank, or skip LLM setup entirely and configure providers later."
@@ -412,7 +412,7 @@ export default function InstallApp() {
         >
           <ProviderFields value={llmSelection} onChange={setLlmSelection} />
         </StepPanel>
-      ) : location.pathname === "/install/server" ? (
+      ) : pathname === "/install/server" ? (
         <StepPanel
           title="Confirm the public URL"
           description="This is where operators will reach Fabro after setup. It's also the redirect target for the GitHub App callback."
@@ -439,6 +439,7 @@ export default function InstallApp() {
             <input
               type="url"
               name="canonical_url"
+              aria-label="Canonical URL"
               ref={canonicalUrlInputRef}
               value={canonicalUrl}
               onChange={(event) => setCanonicalUrl(event.target.value)}
@@ -449,7 +450,7 @@ export default function InstallApp() {
             />
           </Field>
         </StepPanel>
-      ) : location.pathname === "/install/object-store" ? (
+      ) : pathname === "/install/object-store" ? (
         <StepPanel
           title="Choose the shared object store"
           description="This configures the shared backend for both SlateDB and run artifacts. Fabro still keeps its local storage root on disk."
@@ -529,6 +530,7 @@ export default function InstallApp() {
                 <input
                   ref={bucketInputRef}
                   name="object_store_bucket"
+                  aria-label="Bucket"
                   value={objectStoreForm.bucket}
                   onChange={(event) =>
                     setObjectStoreForm((current) => ({
@@ -546,6 +548,7 @@ export default function InstallApp() {
                 <input
                   ref={regionInputRef}
                   name="object_store_region"
+                  aria-label="Region"
                   value={objectStoreForm.region}
                   onChange={(event) =>
                     setObjectStoreForm((current) => ({
@@ -577,6 +580,7 @@ export default function InstallApp() {
                       ref={accessKeyIdInputRef}
                       id="aws_access_key_id"
                       name="aws_access_key_id"
+                      aria-label="AWS access key ID"
                       value={objectStoreForm.accessKeyId}
                       onChange={(event) =>
                         setObjectStoreForm((current) => ({
@@ -629,6 +633,7 @@ export default function InstallApp() {
                 <input
                   ref={localRootInputRef}
                   name="object_store_local_root"
+                  aria-label="Local directory"
                   value={objectStoreForm.localRoot}
                   onChange={(event) =>
                     setObjectStoreForm((current) => ({
@@ -648,7 +653,7 @@ export default function InstallApp() {
             </div>
           )}
         </StepPanel>
-      ) : location.pathname === "/install/sandbox" ? (
+      ) : pathname === "/install/sandbox" ? (
         <StepPanel
           title="Choose the sandbox runtime"
           description="Workflows run inside this sandbox. Docker uses the host daemon; Daytona runs each sandbox in its cloud."
@@ -707,6 +712,7 @@ export default function InstallApp() {
                   ref={sandboxApiKeyInputRef}
                   type="password"
                   name="sandbox_api_key"
+                  aria-label="Daytona API key"
                   value={sandboxForm.apiKey}
                   onChange={(event) =>
                     setSandboxForm((current) => ({
@@ -730,9 +736,9 @@ export default function InstallApp() {
             </p>
           )}
         </StepPanel>
-      ) : location.pathname === "/install/github/done" ? (
+      ) : pathname === "/install/github/done" ? (
         <GithubAppDoneScreen github={session?.github} />
-      ) : location.pathname === "/install/github" ? (
+      ) : pathname === "/install/github" ? (
         <StepPanel
           title="Connect GitHub"
           description="Choose how Fabro should authenticate. Tokens are stored in the vault; apps hand off to GitHub and return here."
@@ -857,6 +863,7 @@ export default function InstallApp() {
                 <Field label="Organization slug">
                   <input
                     name="github_org_slug"
+                    aria-label="Organization slug"
                     value={appForm.owner.slug ?? ""}
                     onChange={(event) =>
                       setAppForm((current) => ({
@@ -876,6 +883,7 @@ export default function InstallApp() {
               >
                 <input
                   name="github_allowed_username"
+                  aria-label="Allowed GitHub username"
                   value={appForm.allowedUsername}
                   onChange={(event) =>
                     setAppForm((current) => ({
@@ -897,7 +905,7 @@ export default function InstallApp() {
             </div>
           )}
         </StepPanel>
-      ) : location.pathname === "/install/review" ? (
+      ) : pathname === "/install/review" ? (
         <ReviewScreen
           session={session}
           error={saveError}
@@ -965,6 +973,7 @@ function TokenEntryScreen({
               id="install-token"
               type="password"
               name="install_token"
+              aria-label="Install token"
               value={manualToken}
               onChange={(event) => setManualToken(event.target.value)}
               className={`${INPUT_CLASS} font-mono`}
@@ -1067,7 +1076,7 @@ function Stepper({
           />
         </div>
       </div>
-      <ol role="list" className="hidden items-center sm:flex">
+      <ol className="hidden items-center sm:flex">
         {STEPPER_STEPS.map((step, index) => {
           const isComplete = completedSteps.has(step.id);
           const isCurrent = step.id === currentStep;
@@ -1140,7 +1149,7 @@ function WelcomeScreen() {
         object store and sandbox runtime, validate your LLM credentials, and
         connect GitHub. When you finish, Fabro restarts into normal mode.
       </p>
-      <ol role="list" className="mt-10 divide-y divide-line border-y border-line">
+      <ol className="mt-10 divide-y divide-line border-y border-line">
         {[
           ["Server URL", "Confirm where operators will reach Fabro."],
           [
@@ -1664,6 +1673,7 @@ function PasswordInput({
         type={visible ? "text" : "password"}
         id={id}
         name={name}
+        aria-label={placeholder ?? name}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={`${INPUT_CLASS} pr-11 font-mono`}

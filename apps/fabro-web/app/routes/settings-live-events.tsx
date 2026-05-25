@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import {
-  DEBUG_CATEGORIES,
   DebugEventDetailsPanel,
   EventSearchInput,
   MultiSelectFilter,
+} from "../components/event-debug";
+import {
+  DEBUG_CATEGORIES,
   debugCategory,
   debugCategoryLabel,
   debugCategoryTone,
   type DebugCategory,
-} from "../components/event-debug";
+} from "../components/event-debug-helpers";
 import { EmptyState } from "../components/state";
 import { Tooltip } from "../components/ui";
 import { eventDedupeKey } from "../lib/cross-tab-sse";

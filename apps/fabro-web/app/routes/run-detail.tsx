@@ -1063,7 +1063,7 @@ function ActionsMenu(props: ActionsMenuProps) {
             </button>
           )}
         </MenuItem>
-        <div className="my-1 h-px bg-line" role="separator" />
+        <hr className="my-1 h-px border-0 bg-line" />
         {canPreview && (
           <MenuItem>
             <button
@@ -1097,7 +1097,7 @@ function ActionsMenu(props: ActionsMenuProps) {
           </button>
         </MenuItem>
         {separators.afterOperations && (
-          <div className="my-1 h-px bg-line" role="separator" />
+          <hr className="my-1 h-px border-0 bg-line" />
         )}
         {canRetry && (
           <MenuItem>
@@ -1136,7 +1136,7 @@ function ActionsMenu(props: ActionsMenuProps) {
           </MenuItem>
         )}
         {separators.beforeDestructive && (
-          <div className="my-1 h-px bg-line" role="separator" />
+          <hr className="my-1 h-px border-0 bg-line" />
         )}
         {canDeny && (
           <MenuItem>

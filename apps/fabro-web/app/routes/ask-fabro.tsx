@@ -93,7 +93,6 @@ function DemoWorkspace({
             Recent runs
           </h2>
           <ul
-            role="list"
             className="overflow-hidden rounded-lg bg-panel/40 ring-1 ring-line"
           >
             {RUN_ROWS.map((row, i) => (

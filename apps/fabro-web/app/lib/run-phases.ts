@@ -16,10 +16,6 @@ const PHASE_LABEL: Record<RunPhaseKind, string> = {
   initializing: "Initializing",
 };
 
-export function phaseLabel(kind: RunPhaseKind): string {
-  return PHASE_LABEL[kind];
-}
-
 // Stages own the timeline once `run.running` fires, so we stop slicing there.
 export function deriveRunPhases(
   events: ReadonlyArray<EventEnvelope> | undefined,

@@ -23,6 +23,7 @@ import {
   type SubmitInterviewAnswerArg,
 } from "../lib/mutations";
 import { ApiError } from "../lib/api-client";
+import { displayLabel } from "./interview-label";
 import { ErrorMessage } from "./ui";
 
 const PRIMARY_BUTTON =
@@ -487,16 +488,6 @@ function questionTypeLabel(type: QuestionType): string {
     default:
       return "";
   }
-}
-
-export function displayLabel(label: string): string {
-  const trimmed = label.trim();
-  const stripped = trimmed
-    .replace(/^\[[^\]]+\]\s*/, "")
-    .replace(/^[A-Za-z0-9]+\)\s*/, "")
-    .replace(/^[A-Za-z0-9]+\s*-\s+/, "")
-    .trim();
-  return stripped || trimmed;
 }
 
 function interviewSubmitErrorMessage(error: unknown): string {

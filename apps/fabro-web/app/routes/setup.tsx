@@ -90,10 +90,7 @@ export default function Setup() {
       <p className="mt-3 text-center text-sm/6 text-fg-3 text-pretty">
         {content.description}
       </p>
-      <ol
-        role="list"
-        className="mt-8 divide-y divide-line border-y border-line"
-      >
+      <ol className="mt-8 divide-y divide-line border-y border-line">
         {content.steps.map((step, index) => (
           <li key={step.title} className="flex items-start gap-4 py-4">
             <span

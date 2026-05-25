@@ -20,7 +20,7 @@ export default function SettingsIndex() {
                 {section.label}
               </h2>
             ) : null}
-            <ul role="list" className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {section.items.map((item) => (
                 <li key={item.href}>
                   <Link

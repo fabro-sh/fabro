@@ -247,7 +247,7 @@ function TodoSection({ todos }: { todos: TodoListProjection | null }) {
   if (!todos || (todos.items?.length ?? 0) === 0) return <p className="text-xs text-fg-muted">No todos.</p>;
   const items = [...(todos.items ?? [])].sort((a, b) => a.order - b.order);
   return (
-    <ul role="list" className="space-y-1">
+    <ul className="space-y-1">
       {items.map((item) => (
         <TodoRow key={item.id} todo={item} />
       ))}
@@ -393,7 +393,7 @@ function ContextBreakdown({ snapshot }: { snapshot: StageContextWindow | null })
           <span className="text-fg-muted">/ {formatTokenCount(contextWindow, { compactDecimal: true })}</span>
         )}
       </div>
-      <ul role="list" className="space-y-1">
+      <ul className="space-y-1">
         {snapshot.breakdown
           .filter((item) => item.tokens > 0)
           .map((item) => (
@@ -411,7 +411,7 @@ function ContextBreakdown({ snapshot }: { snapshot: StageContextWindow | null })
           ))}
       </ul>
       {snapshot.warnings.length > 0 && (
-        <ul role="list" className="space-y-1">
+        <ul className="space-y-1">
           {snapshot.warnings.map((w) => (
             <li key={w.code} className="text-[11px] text-amber">⚠ {w.message}</li>
           ))}
@@ -489,7 +489,7 @@ function SkillsSection({ activated, available, activatedNames }: SkillsSectionPr
   return (
     <div className="space-y-2">
       {activated.length > 0 && (
-        <ul role="list" className="space-y-1">
+        <ul className="space-y-1">
           {activated.map((skill) => (
             <li key={`${skill.name}:${skill.source}`} className="flex items-center gap-1.5">
               <SkillSourceIcon source={skill.source} />
@@ -516,7 +516,7 @@ function SkillSourceIcon({ source }: { source: ActivatedSkill["source"] }) {
 function AgentToolsSection({ tools }: { tools: AgentToolSummary[] }) {
   if (tools.length === 0) return <p className="text-xs text-fg-muted">No tools reported.</p>;
   return (
-    <ul role="list" className="space-y-1.5">
+    <ul className="space-y-1.5">
       {tools.map((tool) => {
         const nameClass = tool.invoked
           ? "min-w-0 flex-1 truncate text-xs text-fg-2"
@@ -541,7 +541,7 @@ function AgentToolsSection({ tools }: { tools: AgentToolSummary[] }) {
 function McpSection({ servers }: { servers: McpServerProjection[] }) {
   if (servers.length === 0) return <p className="text-xs text-fg-muted">No MCP servers.</p>;
   return (
-    <ul role="list" className="space-y-1">
+    <ul className="space-y-1">
       {servers.map((server) => {
         // Dim unused servers so the eye lands on the invoked ones first;
         // failed servers stay coral regardless.

@@ -159,8 +159,7 @@ function StatusPill({
 }) {
   const { dot, label } = pillState({ provider, loading, error });
   return (
-    <span
-      role="status"
+    <output
       aria-live="polite"
       className="inline-flex items-center gap-2 rounded-full bg-overlay py-1 pr-3 pl-2 text-xs font-medium text-fg-2 outline-1 -outline-offset-1 outline-white/10"
     >
@@ -172,7 +171,7 @@ function StatusPill({
           <span className="font-mono text-fg-3">{provider}</span>
         </>
       )}
-    </span>
+    </output>
   );
 }
 

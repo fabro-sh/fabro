@@ -5,8 +5,8 @@ import {
   debugCategory,
   debugCategoryLabel,
   debugCategoryTone,
-} from "../event-debug";
-import type { DebugCategory } from "../event-debug";
+  type DebugCategory,
+} from "../event-debug-helpers";
 import { StageMetaBar } from "./meta-bar";
 
 interface CategoryCount {
@@ -14,7 +14,7 @@ interface CategoryCount {
   count: number;
 }
 
-export function summarizeEventCategories(events: EventEnvelope[]): CategoryCount[] {
+function summarizeEventCategories(events: EventEnvelope[]): CategoryCount[] {
   const counts = new Map<DebugCategory, number>();
   for (const event of events) {
     if (!event.event) continue;

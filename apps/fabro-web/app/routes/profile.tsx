@@ -41,7 +41,7 @@ export default function ProfileLayout() {
     <div className="flex flex-col gap-6 lg:flex-row">
       <aside className="lg:w-56 lg:shrink-0">
         <nav className="sticky top-6">
-          <ul role="list" className="flex gap-1 overflow-x-auto lg:flex-col lg:gap-0.5">
+          <ul className="flex gap-1 overflow-x-auto lg:flex-col lg:gap-0.5">
             {navItems.map((item) => {
               const current = item.match(pathname);
               return (

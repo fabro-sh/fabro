@@ -26,7 +26,7 @@ import { StagePopover } from "./stage-popover";
 
 export type { Stage };
 
-export const statusConfig: Record<StageState, { icon: ComponentType<{ className?: string }>; color: string }> = {
+const statusConfig: Record<StageState, { icon: ComponentType<{ className?: string }>; color: string }> = {
   pending: { icon: PauseCircleIcon, color: "text-fg-muted" },
   running: { icon: ArrowPathIcon, color: "text-teal-500" },
   retrying: { icon: ArrowPathIcon, color: "text-amber" },

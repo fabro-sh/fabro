@@ -1,9 +1,8 @@
 import { ArrowDownIcon, ArrowRightIcon, MinusIcon, PlusIcon } from "@heroicons/react/20/solid";
 
-type Direction = "LR" | "TB";
+import { GRAPH_ZOOM_STEPS } from "./graph-toolbar-constants";
 
-export const GRAPH_ZOOM_STEPS = [25, 50, 75, 100, 150, 200];
-export const GRAPH_DEFAULT_ZOOM_INDEX = 2;
+type Direction = "LR" | "TB";
 
 export function GraphToolbar({
   direction,
@@ -53,7 +52,13 @@ export function GraphToolbar({
         </button>
       </div>
       <div className={group}>
-        <button type="button" title="Fit to window" onClick={fitToWindow} className={btn}>
+        <button
+          type="button"
+          title="Fit to window"
+          aria-label="Fit graph to window"
+          onClick={fitToWindow}
+          className={btn}
+        >
           <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" className="size-3.5" aria-hidden="true">
             <rect x="1" y="1" width="12" height="12" rx="1.5" strokeWidth="1.5" strokeDasharray="3 2" />
           </svg>

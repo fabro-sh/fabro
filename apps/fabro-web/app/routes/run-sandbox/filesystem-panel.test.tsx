@@ -337,7 +337,7 @@ describe("FilesystemPanel render", () => {
     const renderer = renderPanel();
     const empties = renderer.root.findAll(
       (node) =>
-        node.type === "div" &&
+        node.type === "output" &&
         Array.isArray(node.children) &&
         node.children.includes("Empty directory"),
     );
