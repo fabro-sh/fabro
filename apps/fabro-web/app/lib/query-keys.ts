@@ -30,9 +30,6 @@ export const queryKeys = {
     sessions: () => ["auth", "sessions"] as const,
     loginDevToken: () => ["auth", "login-dev-token"] as const,
   },
-  demo: {
-    toggle: () => ["demo", "toggle"] as const,
-  },
   system: {
     info: () => ["system", "info"] as const,
     resources: () => ["system", "resources"] as const,
@@ -52,7 +49,6 @@ export const queryKeys = {
         queryKeys.runs.files(id, runFileScopeSelection(scope)),
       ),
     commits: (id: string) => ["runs", "commits", id] as const,
-    children: (parentId: string) => ["runs", "children", parentId] as const,
     stages: (id: string) => ["runs", "stages", id] as const,
     graph: (id: string, direction?: RunGraphDirection) =>
       ["runs", "graph", id, direction ?? null] as const,
@@ -102,6 +98,10 @@ export const queryKeys = {
   },
   providers: {
     list: () => ["providers", "list"] as const,
+  },
+  models: {
+    list: (provider: string, query: string) =>
+      ["models", "list", provider, query] as const,
   },
   secrets: {
     list: () => ["secrets", "list"] as const,

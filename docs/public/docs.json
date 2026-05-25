@@ -51,6 +51,7 @@
             "icon": "play",
             "pages": [
               "execution/run-configuration",
+              "execution/child-runs",
               "execution/environments",
               "execution/context",
               "execution/checkpoints",
@@ -175,7 +176,6 @@
             "icon": "code",
             "pages": [
               "api-reference/overview",
-              "api-reference/demo-mode",
               "api-reference/client-sdks"
             ]
           },
@@ -186,7 +186,11 @@
               "GET /api/v1/runs",
               "POST /api/v1/runs",
               "GET /api/v1/runs/{id}",
+              "PUT /api/v1/runs/{id}/parent",
+              "DELETE /api/v1/runs/{id}/parent",
               "POST /api/v1/runs/{id}/start",
+              "POST /api/v1/runs/{id}/approve",
+              "POST /api/v1/runs/{id}/deny",
               "POST /api/v1/runs/{id}/cancel",
               "POST /api/v1/runs/{id}/pause",
               "POST /api/v1/runs/{id}/unpause",

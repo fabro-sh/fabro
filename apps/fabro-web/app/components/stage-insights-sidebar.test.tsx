@@ -3,8 +3,8 @@ import TestRenderer, { act } from "react-test-renderer";
 import { MemoryRouter } from "react-router";
 
 import {
-  AgentToolCategory,
   AgentSkillActivationSource,
+  AgentToolCategory,
   StageContextWindowCategory,
   StageContextWindowCountMethod,
   StageContextWindowStaleness,
@@ -172,11 +172,11 @@ describe("StageInsightsSidebar", () => {
 
     expect(dom).toContain("1/2");
     expect(dom).toContain("apply_patch");
-    // Description is exposed via the `title` attribute (tooltip) on each row.
-    expect(dom).toContain("Apply a unified diff patch");
-    expect(dom).toContain("Used");
     expect(dom).toContain("grep");
+    // Tool description still appears as the row `title` tooltip.
+    expect(dom).toContain("Apply a unified diff patch");
     expect(dom).toContain("Search file contents");
+    expect(dom).toContain("Used");
   });
 
   test("renders mcp server used/total count, marks invoked servers as 'used'", () => {

@@ -1,0 +1,226 @@
+---
+title: "Child Runs"
+description: "Spawn and supervise additional Fabro runs from a parent run"
+---
+
+A Fabro run can orchestrate other Fabro runs. An agent in the parent run can create child runs, inspect them, wait for them, and control them while the parent continues coordinating the larger job.
+
+Child runs are full workflow runs. Each child has its own run ID, workflow, lifecycle, sandbox, events, checkpoints, artifacts, and outputs. The parent-child relationship gives Fabro a durable way to show, query, and manage the orchestration tree.
+
+## When to use child runs
+
+Use child runs when the unit of work is large enough to deserve its own workflow run:
+
+- **Parallel workstreams** - launch implementation, review, migration, or validation runs at the same time.
+- **Specialized workflows** - delegate to purpose-built workflows for different repos, services, or review types.
+- **Long-running work** - let the parent keep coordinating while children run independently.
+- **Manager patterns** - build a parent workflow that creates workers, watches progress, gathers results, and decides what happens next.
+- **Variants and attempts** - run multiple approaches as separate durable runs with separate outputs.
+
+For small subtasks inside one agent stage, use [sub-agents](/agents/subagents). For reusable workflow structure inside one run, use [sub-workflows](/tutorials/sub-workflow) or [imports](/workflows/imports).
+
+## Enable run tools
+
+Workflow agents can create and manage runs when the parent run opts in to Fabro's run-management tool catalog:
+
+```toml title="run.toml"
+[run.agent]
+fabro_tools = true
+```
+
+This exposes the same Fabro run tools available through [MCP](/agents/mcp):
+
+| Tool | Purpose |
+|---|---|
+| `fabro_run_create` | Create one or more child runs, starting them by default |
+| `fabro_run_search` | Search runs, including direct children by `parent_id` |
+| `fabro_run_get` | Inspect a run without mutating it |
+| `fabro_run_interact` | Start, message, interrupt, cancel, archive, unarchive, link, unlink, inspect, or answer questions |
+| `fabro_run_gather` | Wait for runs to reach terminal states |
+| `fabro_run_events` | Read stored events for a run |
+| `fabro_run_pair` | Pair with an active API-mode agent stage |
+
+<Note>
+When a workflow agent calls `fabro_run_create`, Fabro always parents the created runs to the current run. If the agent supplies `parent_id`, it must match the current run ID.
+</Note>
+
+## Create child runs
+
+The simplest `fabro_run_create` call names a workflow:
+
+```json
+{
+  "runs": ["implement-and-test"]
+}
+```
+
+Use the object form to pass run options:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": "implement-and-test",
+      "goal": "Implement the checkout page refactor and run the test suite.",
+      "labels": {
+        "lane": "checkout",
+        "source": "parent-run"
+      },
+      "start": true
+    }
+  ]
+}
+```
+
+The parent can create several children in one call:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": "implementation",
+      "goal_file": "plans/api.md",
+      "labels": { "lane": "api" }
+    },
+    {
+      "workflow": "implementation",
+      "goal_file": "plans/web.md",
+      "labels": { "lane": "web" }
+    },
+    {
+      "workflow": "review",
+      "goal": "Review the current branch for security and data-integrity risks.",
+      "labels": { "lane": "review" }
+    }
+  ]
+}
+```
+
+By default, `fabro_run_create` requests start for each created run. Set `"start": false` when the parent should create the child now and start it later.
+
+## Start and approval
+
+Child run creation and child run execution are separate steps:
+
+1. **Create** - `fabro_run_create` creates a durable run record with the current run as parent.
+2. **Start request** - if `start` is true, Fabro requests execution for the child.
+3. **Approval if required** - parent-generated child runs may enter `pending` with `approval_required`.
+4. **Schedule** - after approval, the child becomes `runnable` and the scheduler starts it when capacity is available.
+5. **Execute** - the child runs its own workflow and writes its own events, checkpoints, artifacts, and outputs.
+
+The approval step prevents a workflow agent from recursively launching executing runs without an operator checkpoint. Approve or deny pending child runs from the web UI or through the run lifecycle API.
+
+## Supervise children
+
+A parent run can keep track of the children it creates.
+
+List direct children:
+
+```json
+{
+  "parent_id": "01KRTKP5DJJ4EV6T7QSB081Z1N"
+}
+```
+
+Wait for children to finish:
+
+```json
+{
+  "run_ids": [
+    "01KRTM8V3WQ6E9M2A2R6B3G8HK",
+    "01KRTM91N7W9S6BP2RZ6SXX4FR"
+  ],
+  "timeout_seconds": 1800
+}
+```
+
+Inspect a child:
+
+```json
+{
+  "run_id": "01KRTM8V3WQ6E9M2A2R6B3G8HK"
+}
+```
+
+Cancel a child that is no longer useful:
+
+```json
+{
+  "action": "cancel",
+  "run_id": "01KRTM8V3WQ6E9M2A2R6B3G8HK"
+}
+```
+
+Read a child's events:
+
+```json
+{
+  "run_id": "01KRTM8V3WQ6E9M2A2R6B3G8HK",
+  "limit": 100
+}
+```
+
+Child listings are direct. To walk a larger tree, list each child as a parent and repeat.
+
+## Web UI
+
+Run detail pages include a **Children** tab. It lists runs whose `parent_id` is the current run, shows a count badge on the tab, supports refresh, filtering, sorting, and archived-run visibility, and uses the same run list layout as the main runs page.
+
+Use this tab when you want to see the work a manager run delegated, jump into a child run, inspect child output, or verify that a child has finished.
+
+## CLI and API
+
+You can also create and organize child runs outside a workflow agent.
+
+Create a run under an existing parent:
+
+```bash
+fabro run child.fabro --parent parent-run
+fabro create child.fabro --parent parent-run
+```
+
+List direct children:
+
+```bash
+fabro ps --parent parent-run
+```
+
+Repair or reorganize relationships:
+
+```bash
+fabro parent link child-run parent-run
+fabro parent unlink child-run
+```
+
+The HTTP API exposes the same model:
+
+| Operation | Purpose |
+|---|---|
+| `POST /api/v1/runs` with `parent_id` | Create a run under a parent |
+| `GET /api/v1/runs?parent_id=...` | List direct children |
+| `PUT /api/v1/runs/{id}/parent` | Link or replace a run's parent |
+| `DELETE /api/v1/runs/{id}/parent` | Remove a run's parent link |
+| `POST /api/v1/runs/{id}/approve` | Approve a pending child run |
+| `POST /api/v1/runs/{id}/deny` | Deny a pending child run |
+
+## Relationship rules
+
+Parent-child links are orchestration metadata:
+
+- A run can have one parent and any number of direct children.
+- Creating or linking a child requires the parent run to exist.
+- Self-parenting and cycles are rejected.
+- Parent links can be changed for active, terminal, and archived runs.
+- A child can keep its historical parent reference even if the parent run is later removed.
+- Parent-child links are not fork or rewind lineage. Fork and rewind use separate source fields.
+
+## Related concepts
+
+| Concept | Runtime boundary | Use it for |
+|---|---|---|
+| Child runs | Separate durable runs connected by `parent_id` | Orchestrating independent workflows |
+| Sub-agents | Separate LLM sessions inside one agent stage | Delegating small agent subtasks without creating runs |
+| Sub-workflows | A child workflow engine inside the same run | Reusing a workflow with runtime isolation but one parent run |
+| Imports | Parse-time graph expansion | Reusing graph structure without a runtime boundary |
+| Forks and rewinds | New runs from an existing checkpoint | Exploring or replacing execution from prior run state |
+| Parallel branches | Concurrent branches inside one workflow run | Splitting work within a single graph |

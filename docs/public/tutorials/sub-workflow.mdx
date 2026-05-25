@@ -121,6 +121,8 @@ Sub-workflows are most valuable when:
 
 For simpler cases, just add more nodes to a single workflow. Sub-workflows add a layer of indirection — use them when the benefits of reuse or encapsulation justify it.
 
+Use [child runs](/execution/child-runs) instead when the delegated work should be a separate durable run that can be listed, approved, cancelled, retried, inspected, and supervised independently.
+
 ## What you've learned
 
 - **Sub-workflow nodes** (`shape=house`) run a child workflow inside a parent

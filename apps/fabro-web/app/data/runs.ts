@@ -2,6 +2,7 @@ import { formatDurationMs } from "../lib/format";
 import {
   BoardColumn,
   type Run,
+  type RunSize,
   type RunStatus as ApiRunStatus,
 } from "@qltysh/fabro-api-client";
 
@@ -33,11 +34,13 @@ export interface RunItem {
   actionDisabled?: boolean;
   comments?: number;
   question?: string;
+  pendingApproval?: boolean;
   sandboxId?: string;
   sandboxWorkingDirectory?: string;
   sourceDirectory?: string;
   createdAt?: string;
   lastEventAt?: string;
+  size?: RunSize;
 }
 
 export const columnStatuses = [
@@ -98,11 +101,17 @@ export function mapRunListItem(item: Run): RunItem {
     elapsed: item.timing != null ? formatDurationMs(item.timing.wall_time_ms) : undefined,
     resources: undefined,
     question: item.current_question?.text,
+    pendingApproval:
+      item.lifecycle.status.kind === "pending"
+      && item.lifecycle.approval?.state === "pending",
     sandboxId: runtime?.id ?? undefined,
     sandboxWorkingDirectory: runtime?.working_directory ?? undefined,
     sourceDirectory: item.source_directory ?? undefined,
     createdAt: item.timestamps.created_at,
     lastEventAt: item.timestamps.last_event_at ?? undefined,
+    additions: item.diff?.additions,
+    deletions: item.diff?.deletions,
+    size: item.size,
   };
 }
 

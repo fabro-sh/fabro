@@ -3,6 +3,7 @@ import type {
   BatchDeleteRunsResponse,
   BatchRunLifecycleRequest,
   BatchRunLifecycleResponse,
+  BatchRunLifecycleSummary,
   ErrorResponseEntry,
   Run,
 } from "@qltysh/fabro-api-client";
@@ -65,11 +66,35 @@ export async function unarchiveRun(id: string, request?: Request): Promise<Run> 
   return runLifecycleAction(id, "unarchive", request);
 }
 
+// Client-side batch summary for actions that don't have a server-side batch
+// endpoint yet (currently: approve). Shape matches the server's batch
+// responses so it slots into the same toolbar plumbing.
+export interface BatchActionSummary {
+  summary: BatchRunLifecycleSummary;
+}
+
 export async function archiveRuns(
   runIds: string[],
   request?: Request,
 ): Promise<BatchRunLifecycleResponse> {
   return batchRunLifecycleAction(runIds, "archive", request);
+}
+
+export async function approveRuns(
+  runIds: string[],
+  request?: Request,
+): Promise<BatchActionSummary> {
+  const settled = await Promise.allSettled(
+    runIds.map((id) => approveRun(id, request)),
+  );
+  const succeeded = settled.filter((r) => r.status === "fulfilled").length;
+  return {
+    summary: {
+      requested: settled.length,
+      succeeded,
+      failed:    settled.length - succeeded,
+    },
+  };
 }
 
 export async function unarchiveRuns(

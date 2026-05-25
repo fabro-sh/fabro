@@ -66,8 +66,6 @@ export * from './create-secret-request';
 export * from './delete-run-response';
 export * from './delete-run-sandbox';
 export * from './delete-secret-request';
-export * from './demo-toggle-request';
-export * from './demo-toggle-response';
 export * from './deny-run-request';
 export * from './dev-token-login-request';
 export * from './dev-token-login-response';

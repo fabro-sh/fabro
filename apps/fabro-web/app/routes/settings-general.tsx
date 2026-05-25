@@ -21,7 +21,7 @@ import {
 } from "../components/settings-panel";
 
 export function meta() {
-  return [{ title: "General settings — Fabro" }];
+  return [{ title: "Server settings — Fabro" }];
 }
 
 const DESCRIPTION = (

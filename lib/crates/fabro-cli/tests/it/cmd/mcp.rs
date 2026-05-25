@@ -468,6 +468,19 @@ async fn stdio_server_initializes_and_lists_run_tools() {
             .is_some_and(serde_json::Value::is_object),
         "fabro_run_interact.answer should have an object JSON Schema: {interact_schema}"
     );
+    assert!(
+        interact_schema
+            .pointer("/properties/reason")
+            .is_some_and(serde_json::Value::is_object),
+        "fabro_run_interact.reason should have an object JSON Schema: {interact_schema}"
+    );
+    let interact_schema_text = interact_schema.to_string();
+    for action in ["approve", "deny"] {
+        assert!(
+            interact_schema_text.contains(&format!("\"{action}\"")),
+            "fabro_run_interact schema should expose action {action}: {interact_schema}"
+        );
+    }
     let get_schema = tools
         .iter()
         .find(|(name, _, _)| name == "fabro_run_get")
@@ -1484,6 +1497,79 @@ async fn mcp_interact_actions_resolve_selector_and_call_expected_endpoints() {
     message.assert();
     interrupt.assert();
     cancel.assert();
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_interact_approval_actions_resolve_selector_and_call_expected_endpoints() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let target_url = format!("{}/api/v1", server.base_url());
+    let target: fabro_client::ServerTarget = target_url.parse().unwrap();
+    seed_dev_token_auth(&context.home_dir, &target, TEST_DEV_TOKEN);
+    let run_id = unique_run_id();
+    let selector = "nightly";
+    let resolve = mock_resolved_run(&server, selector, &run_id);
+    let approve = server.mock(|when, then| {
+        when.method(POST)
+            .path(format!("/api/v1/runs/{run_id}/approve"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(remote_run_summary_json(
+                &run_id,
+                "Simple",
+                "simple",
+                "Run tests",
+                &serde_json::json!({ "kind": "runnable" }),
+                "2026-04-05T12:00:00Z",
+            ));
+    });
+    let deny = server.mock(|when, then| {
+        when.method(POST)
+            .path(format!("/api/v1/runs/{run_id}/deny"))
+            .json_body(serde_json::json!({
+                "reason": "Not approved for execution"
+            }));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(remote_run_summary_json(
+                &run_id,
+                "Simple",
+                "simple",
+                "Run tests",
+                &serde_json::json!({ "kind": "failed", "reason": "approval_denied" }),
+                "2026-04-05T12:00:00Z",
+            ));
+    });
+
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+    let approved = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": selector, "action": "approve" }),
+    )
+    .await;
+    let denied = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({
+            "run_id": selector,
+            "action": "deny",
+            "reason": "Not approved for execution"
+        }),
+    )
+    .await;
+
+    assert_eq!(approved["result"]["summary"]["run_id"], run_id);
+    assert_eq!(approved["result"]["summary"]["status"], "runnable");
+    assert_eq!(denied["result"]["summary"]["run_id"], run_id);
+    assert_eq!(denied["result"]["summary"]["status"], "failed");
+    resolve.assert_calls(2);
+    approve.assert();
+    deny.assert();
     client
         .shutdown()
         .await

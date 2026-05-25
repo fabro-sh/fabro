@@ -17,13 +17,13 @@ import {
 } from "../components/settings-panel";
 
 export function meta() {
-  return [{ title: "Resources — Fabro" }];
+  return [{ title: "Monitoring — Fabro" }];
 }
 
 const DESCRIPTION =
   "Server-visible run concurrency, CPU, memory, and storage filesystem usage for this Fabro process.";
 
-export default function SettingsResources() {
+export default function SettingsMonitoring() {
   const resourcesQuery = useSystemResources();
   const resources = resourcesQuery.data;
 

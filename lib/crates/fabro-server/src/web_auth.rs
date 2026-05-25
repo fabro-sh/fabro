@@ -23,7 +23,7 @@ use crate::auth::{GithubEndpoints, browser_shell};
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, auth_method_name, dev_token_matches};
 use crate::principal_middleware::{
-    RequestAuth, RequestAuthContext, RequiredUser, UserProfile, require_authenticated_user,
+    RequestAuth, RequestAuthContext, UserProfile, require_authenticated_user,
 };
 use crate::server::AppState;
 
@@ -68,11 +68,6 @@ struct OAuthStateCookie {
 #[derive(Deserialize)]
 struct DevTokenLoginRequest {
     token: String,
-}
-
-#[derive(Deserialize)]
-struct DemoToggleRequest {
-    enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -158,7 +153,6 @@ pub fn api_routes() -> Router<Arc<AppState>> {
         .route("/auth/me", get(auth_me))
         .route("/auth/sessions", get(list_auth_sessions))
         .route("/auth/sessions/{id}", delete(delete_auth_session))
-        .route("/demo/toggle", post(toggle_demo))
 }
 
 pub fn parse_cookie_header(headers: &HeaderMap) -> CookieJar {
@@ -1024,26 +1018,6 @@ async fn delete_auth_session(
     }
 
     StatusCode::NO_CONTENT.into_response()
-}
-
-async fn toggle_demo(
-    _auth: RequiredUser,
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<DemoToggleRequest>,
-) -> Response {
-    let mut jar = CookieJar::new();
-    jar.add(
-        Cookie::build(("fabro-demo", if payload.enabled { "1" } else { "0" }))
-            .path("/")
-            .http_only(true)
-            .same_site(SameSite::Lax)
-            .secure(session_cookie_secure(state.as_ref()))
-            .max_age(Duration::days(365))
-            .build(),
-    );
-    let mut response = Json(json!({ "enabled": payload.enabled })).into_response();
-    append_jar_delta(response.headers_mut(), &jar);
-    response
 }
 
 #[cfg(test)]

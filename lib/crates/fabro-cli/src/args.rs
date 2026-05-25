@@ -394,6 +394,30 @@ pub(crate) struct RunsUnarchiveArgs {
 }
 
 #[derive(Args)]
+pub(crate) struct RunsApproveArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Run IDs or workflow names to approve
+    #[arg(required = true)]
+    pub(crate) runs: Vec<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct RunsDenyArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Reason for denying execution
+    #[arg(long)]
+    pub(crate) reason: Option<String>,
+
+    /// Run IDs or workflow names to deny
+    #[arg(required = true)]
+    pub(crate) runs: Vec<String>,
+}
+
+#[derive(Args)]
 pub(crate) struct EventsArgs {
     #[command(flatten)]
     pub(crate) server: ServerTargetArgs,
@@ -1151,6 +1175,10 @@ pub(crate) enum RunsCommands {
     Rm(RunsRemoveArgs),
     /// Show detailed information about a workflow run
     Inspect(InspectArgs),
+    /// Approve pending workflow runs.
+    Approve(RunsApproveArgs),
+    /// Deny pending workflow runs.
+    Deny(RunsDenyArgs),
     /// Mark terminal runs as archived (reviewed, no further action needed).
     /// Archived runs are hidden from default listings.
     Archive(RunsArchiveArgs),
@@ -1164,6 +1192,8 @@ impl RunsCommands {
             Self::Ps(_) => "ps",
             Self::Rm(_) => "rm",
             Self::Inspect(_) => "inspect",
+            Self::Approve(_) => "approve",
+            Self::Deny(_) => "deny",
             Self::Archive(_) => "archive",
             Self::Unarchive(_) => "unarchive",
         }

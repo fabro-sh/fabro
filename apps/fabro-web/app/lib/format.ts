@@ -20,6 +20,25 @@ export function formatElapsedSecs(secs: number): string {
 }
 
 /**
+ * Format a model context window size (e.g., "128k", "1m", "400").
+ * Rounds to the nearest thousand before bucketing into k / m.
+ */
+export function formatContextWindow(tokens: number): string {
+  const rounded = Math.round(tokens / 1000) * 1000;
+  if (rounded >= 1_000_000) return `${rounded / 1_000_000}m`;
+  if (rounded >= 1_000) return `${rounded / 1_000}k`;
+  return String(tokens);
+}
+
+/**
+ * Format an estimated output throughput in tokens per second (e.g., "85 tok/s").
+ */
+export function formatTokensPerSecond(tps: number | null | undefined): string {
+  if (tps == null) return "—";
+  return `${Math.trunc(tps)} tok/s`;
+}
+
+/**
  * Format a byte count for display (e.g., "1.23 MB", "247.32 KB", "742 B").
  */
 export function formatBytes(bytes: number): string {

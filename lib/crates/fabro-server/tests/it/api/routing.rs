@@ -234,24 +234,6 @@ async fn web_enabled_serves_web_only_routes() {
     )
     .await;
 
-    let demo_toggle_request = Request::builder()
-        .method("POST")
-        .uri("/api/v1/demo/toggle")
-        .header("authorization", format!("Bearer {TEST_DEV_TOKEN}"))
-        .header("content-type", "application/json")
-        .body(Body::from(r#"{"enabled":true}"#))
-        .unwrap();
-    let demo_toggle_response = checked_response(
-        app.clone().oneshot(demo_toggle_request).await.unwrap(),
-        StatusCode::OK,
-        "POST /api/v1/demo/toggle",
-    )
-    .await;
-    assert!(
-        demo_toggle_response.headers().contains_key("set-cookie"),
-        "demo toggle should set a cookie"
-    );
-
     // Unregistered /api/* paths must always 404, even for browser-style
     // `Accept: text/html` requests — the SPA fallback never applies to
     // /api/. Guards against API typos silently rendering the UI shell.
@@ -268,59 +250,6 @@ async fn web_enabled_serves_web_only_routes() {
         "GET /api/v2/nonexistent",
     )
     .await;
-}
-
-#[tokio::test]
-async fn toggle_demo_rejects_unauthenticated_requests() {
-    let app = build_router(test_app_state(), dev_token_enabled_auth_mode());
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/demo/toggle")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"enabled":true}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    response_status(
-        response,
-        StatusCode::UNAUTHORIZED,
-        "POST /api/v1/demo/toggle without auth",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn toggle_demo_allows_authenticated_requests() {
-    let app = build_router(test_app_state(), dev_token_enabled_auth_mode());
-
-    let response = checked_response(
-        app.oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/demo/toggle")
-                .header("authorization", format!("Bearer {TEST_DEV_TOKEN}"))
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"enabled":true}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap(),
-        StatusCode::OK,
-        "POST /api/v1/demo/toggle with dev token",
-    )
-    .await;
-    assert!(
-        response
-            .headers()
-            .get("set-cookie")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.contains("fabro-demo=1")),
-        "authenticated demo toggle should set the demo cookie"
-    );
 }
 
 #[tokio::test]
@@ -479,11 +408,6 @@ enabled = false
         ("GET", "/auth/login/github", Body::empty()),
         ("GET", "/api/v1/auth/me", Body::empty()),
         ("GET", "/api/v1/setup/status", Body::empty()),
-        (
-            "POST",
-            "/api/v1/demo/toggle",
-            Body::from(r#"{"enabled":true}"#),
-        ),
     ] {
         let request = Request::builder()
             .method(method)

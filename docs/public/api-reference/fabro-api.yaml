@@ -12,7 +12,7 @@ tags:
   - name: Integrations
     description: External provider callbacks and integration endpoints
   - name: Auth
-    description: Browser authentication and demo-mode controls
+    description: Browser authentication
   - name: Runs
     description: Run management operations
   - name: Sessions
@@ -743,35 +743,6 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Session not found
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/demo/toggle:
-    post:
-      operationId: toggleDemo
-      tags: [Auth]
-      summary: Toggle browser demo mode
-      description: Enables or disables demo-mode routing for the current browser session.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DemoToggleRequest"
-      responses:
-        "200":
-          description: Demo-mode state updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DemoToggleResponse"
-        "401":
-          description: Not authenticated
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -4763,7 +4734,7 @@ components:
       description: Field to sort by. Defaults to `created_at`.
       schema:
         type: string
-        enum: [created_at, updated_at, status, elapsed, repo, title, workflow, changes]
+        enum: [created_at, updated_at, status, elapsed, repo, title, workflow, changes, size]
         default: created_at
       example: created_at
 
@@ -4931,24 +4902,6 @@ components:
           type: string
         userUrl:
           type: string
-
-    DemoToggleRequest:
-      description: Desired browser demo-mode state.
-      type: object
-      required:
-        - enabled
-      properties:
-        enabled:
-          type: boolean
-
-    DemoToggleResponse:
-      description: Updated browser demo-mode state.
-      type: object
-      required:
-        - enabled
-      properties:
-        enabled:
-          type: boolean
 
     DevTokenLoginRequest:
       description: Browser login payload for development-token auth.

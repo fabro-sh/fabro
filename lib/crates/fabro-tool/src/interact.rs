@@ -15,6 +15,8 @@ use super::common::{FabroToolBackend, ToolError, ToolResult};
 pub enum RunInteractAction {
     Get,
     Start,
+    Approve,
+    Deny,
     Message,
     /// Cancel the active steerable agent's current round and park it
     /// waiting for a later `message`. The run sits idle until you follow up
@@ -35,6 +37,7 @@ pub struct FabroRunInteractParams {
     pub action:      RunInteractAction,
     pub run_id:      String,
     pub parent_id:   Option<String>,
+    pub reason:      Option<String>,
     pub message:     Option<String>,
     pub interrupt:   Option<bool>,
     pub question_id: Option<String>,
@@ -114,6 +117,10 @@ pub struct ValidatedInteractRun {
 pub enum ValidatedInteractAction {
     Get,
     Start,
+    Approve,
+    Deny {
+        reason: Option<String>,
+    },
     Message {
         message:   String,
         interrupt: bool,
@@ -134,10 +141,18 @@ pub enum ValidatedInteractAction {
 }
 
 impl ValidatedInteractAction {
+    /// Actions that may only be performed by a human user, never by a
+    /// workflow-agent through its own `fabro_tools` MCP surface.
+    pub fn requires_user(&self) -> bool {
+        matches!(self, Self::Approve | Self::Deny { .. })
+    }
+
     fn action(&self) -> RunInteractAction {
         match self {
             Self::Get => RunInteractAction::Get,
             Self::Start => RunInteractAction::Start,
+            Self::Approve => RunInteractAction::Approve,
+            Self::Deny { .. } => RunInteractAction::Deny,
             Self::Message { .. } => RunInteractAction::Message,
             Self::Interrupt => RunInteractAction::Interrupt,
             Self::Cancel => RunInteractAction::Cancel,
@@ -158,9 +173,15 @@ impl TryFrom<FabroRunInteractParams> for ValidatedInteractRun {
         if params.run_id.trim().is_empty() {
             return Err(ToolError::message("run_id is required"));
         }
+        let reason = normalize_optional_text(params.reason.as_deref());
+        if !matches!(params.action, RunInteractAction::Deny) && reason.is_some() {
+            return Err(ToolError::message("reason is only valid for action deny"));
+        }
         let action = match params.action {
             RunInteractAction::Get => ValidatedInteractAction::Get,
             RunInteractAction::Start => ValidatedInteractAction::Start,
+            RunInteractAction::Approve => ValidatedInteractAction::Approve,
+            RunInteractAction::Deny => ValidatedInteractAction::Deny { reason },
             RunInteractAction::Message => {
                 let Some(message) = params
                     .message
@@ -245,6 +266,20 @@ pub async fn interact_run(
         ValidatedInteractAction::Start => {
             let summary = backend
                 .start_run(&run_id, false)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "summary": common::run_summary_result(&summary) })
+        }
+        ValidatedInteractAction::Approve => {
+            let summary = backend
+                .approve_run(&run_id)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "summary": common::run_summary_result(&summary) })
+        }
+        ValidatedInteractAction::Deny { reason } => {
+            let summary = backend
+                .deny_run(&run_id, reason)
                 .await
                 .map_err(|err| ToolError::from_anyhow(&err))?;
             json!({ "summary": common::run_summary_result(&summary) })
@@ -401,11 +436,41 @@ fn text_answer_request(text: String) -> types::SubmitAnswerRequest {
     .into()
 }
 
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+    use chrono::{TimeZone, Utc};
+    use fabro_types::{
+        EventEnvelope, FailureReason, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunProjection,
+        RunStatus, RunTimestamps, WorkflowRef,
+    };
     use serde_json::json;
 
     use super::*;
+
+    fn interact_params(action: RunInteractAction) -> FabroRunInteractParams {
+        FabroRunInteractParams {
+            action,
+            run_id: "run_123".to_string(),
+            parent_id: None,
+            message: None,
+            interrupt: None,
+            question_id: None,
+            answer: None,
+            reason: None,
+        }
+    }
 
     #[test]
     fn answer_payloads_map_to_submit_answer_wire_json() {
@@ -450,6 +515,7 @@ mod tests {
             interrupt:   None,
             question_id: Some("question-1".to_string()),
             answer:      Some(json!({ "value": "yes" }).into()),
+            reason:      None,
         })
         .unwrap_err();
 
@@ -467,6 +533,7 @@ mod tests {
                 interrupt: None,
                 question_id: None,
                 answer: None,
+                reason: None,
             })
             .unwrap_err();
 
@@ -489,6 +556,7 @@ mod tests {
             interrupt:   None,
             question_id: None,
             answer:      None,
+            reason:      None,
         })
         .expect("unlink_parent should not require parent_id");
 
@@ -509,6 +577,7 @@ mod tests {
             interrupt:   None,
             question_id: None,
             answer:      None,
+            reason:      None,
         })
         .expect("interrupt should validate with only run_id");
 
@@ -517,5 +586,280 @@ mod tests {
             validated.action,
             ValidatedInteractAction::Interrupt
         ));
+    }
+
+    #[test]
+    fn approve_action_requires_only_run_id() {
+        let validated = ValidatedInteractRun::try_from(interact_params(RunInteractAction::Approve))
+            .expect("approve should validate with only run_id");
+
+        assert_eq!(validated.run_id, "run_123");
+        assert!(matches!(validated.action, ValidatedInteractAction::Approve));
+    }
+
+    #[test]
+    fn deny_action_normalizes_optional_reason() {
+        for (raw_reason, expected) in [
+            (None, None),
+            (
+                Some("  Needs review  ".to_string()),
+                Some("Needs review".to_string()),
+            ),
+            (Some("   ".to_string()), None),
+        ] {
+            let mut params = interact_params(RunInteractAction::Deny);
+            params.reason = raw_reason;
+
+            let validated =
+                ValidatedInteractRun::try_from(params).expect("deny should validate reason");
+
+            match validated.action {
+                ValidatedInteractAction::Deny { reason } => assert_eq!(reason, expected),
+                other => panic!("expected deny action, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn nonblank_reason_is_rejected_for_non_deny_actions() {
+        let mut params = interact_params(RunInteractAction::Approve);
+        params.reason = Some("because".to_string());
+
+        let err = ValidatedInteractRun::try_from(params).unwrap_err();
+
+        assert!(err.as_str().contains("reason"));
+        assert!(err.as_str().contains("deny"));
+    }
+
+    #[tokio::test]
+    async fn approve_dispatches_to_backend_and_returns_summary() {
+        let run_id = run_id("01KRBZW5C00000000000000001");
+        let backend = Arc::new(MockInteractBackend::new(run_id));
+
+        let result = interact_run(backend.clone(), ValidatedInteractRun {
+            run_id: "nightly".to_string(),
+            action: ValidatedInteractAction::Approve,
+        })
+        .await
+        .expect("approve should dispatch");
+
+        assert!(matches!(result.action, RunInteractAction::Approve));
+        assert_eq!(result.result["summary"]["run_id"], run_id.to_string());
+        assert_eq!(backend.approved.lock().unwrap().as_slice(), &[run_id]);
+    }
+
+    #[tokio::test]
+    async fn deny_dispatches_to_backend_with_reason_and_returns_summary() {
+        let run_id = run_id("01KRBZW5C00000000000000001");
+        let backend = Arc::new(MockInteractBackend::new(run_id));
+
+        let result = interact_run(backend.clone(), ValidatedInteractRun {
+            run_id: "nightly".to_string(),
+            action: ValidatedInteractAction::Deny {
+                reason: Some("Needs review".to_string()),
+            },
+        })
+        .await
+        .expect("deny should dispatch");
+
+        assert!(matches!(result.action, RunInteractAction::Deny));
+        assert_eq!(result.result["summary"]["run_id"], run_id.to_string());
+        assert_eq!(backend.denied.lock().unwrap().as_slice(), &[(
+            run_id,
+            Some("Needs review".to_string())
+        )]);
+    }
+
+    fn run_id(raw: &str) -> RunId {
+        raw.parse().expect("test run id should parse")
+    }
+
+    fn run_with_status(run_id: RunId, status: RunStatus) -> Run {
+        Run {
+            id:               run_id,
+            parent_id:        None,
+            children_count:   0,
+            title:            "Test run".to_string(),
+            goal:             "Test run".to_string(),
+            workflow:         WorkflowRef {
+                slug:       Some("simple".to_string()),
+                name:       Some("Simple".to_string()),
+                graph_name: None,
+                node_count: 0,
+                edge_count: 0,
+            },
+            automation:       None,
+            repository:       None,
+            created_by:       None,
+            origin:           RunOrigin::default(),
+            labels:           HashMap::new(),
+            lifecycle:        RunLifecycle {
+                status,
+                approval: None,
+                pending_control: None,
+                queue_position: None,
+                error: None,
+                archived: false,
+                archived_at: None,
+            },
+            sandbox:          None,
+            models:           Vec::new(),
+            source_directory: None,
+            timestamps:       RunTimestamps {
+                created_at:    Utc.with_ymd_and_hms(2026, 5, 25, 12, 0, 0).unwrap(),
+                started_at:    None,
+                last_event_at: None,
+                completed_at:  None,
+            },
+            timing:           None,
+            billing:          None,
+            size:             fabro_types::RunSize::default(),
+            ask_fabro:        fabro_types::AskFabro::default(),
+            diff:             None,
+            pull_request:     None,
+            current_question: None,
+            superseded_by:    None,
+            retried_from:     None,
+            links:            RunLinks { web: None },
+        }
+    }
+
+    struct MockInteractBackend {
+        run_id:   RunId,
+        approved: Mutex<Vec<RunId>>,
+        denied:   Mutex<Vec<(RunId, Option<String>)>>,
+    }
+
+    impl MockInteractBackend {
+        fn new(run_id: RunId) -> Self {
+            Self {
+                run_id,
+                approved: Mutex::new(Vec::new()),
+                denied: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl FabroToolBackend for MockInteractBackend {
+        async fn create_run_from_spec(
+            &self,
+            _spec: &crate::ValidatedCreateRunSpec,
+            _cwd: &Path,
+            _user_settings_path: &Path,
+            _parent_id: Option<RunId>,
+        ) -> anyhow::Result<RunId> {
+            unreachable!()
+        }
+
+        async fn resolve_run(&self, selector: &str) -> anyhow::Result<Run> {
+            assert_eq!(selector, "nightly");
+            Ok(run_with_status(self.run_id, RunStatus::Pending {
+                reason: fabro_types::PendingReason::ApprovalRequired,
+            }))
+        }
+
+        async fn retrieve_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn start_run(&self, _run_id: &RunId, _resume: bool) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn approve_run(&self, run_id: &RunId) -> anyhow::Result<Run> {
+            self.approved.lock().unwrap().push(*run_id);
+            Ok(run_with_status(*run_id, RunStatus::Runnable))
+        }
+
+        async fn deny_run(&self, run_id: &RunId, reason: Option<String>) -> anyhow::Result<Run> {
+            self.denied.lock().unwrap().push((*run_id, reason));
+            Ok(run_with_status(*run_id, RunStatus::Failed {
+                reason: FailureReason::ApprovalDenied,
+            }))
+        }
+
+        async fn cancel_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn interrupt_run(&self, _run_id: &RunId) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn steer_run(
+            &self,
+            _run_id: &RunId,
+            _text: String,
+            _interrupt: bool,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
+
+        async fn archive_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn unarchive_run(&self, _run_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn list_store_runs(&self) -> anyhow::Result<Vec<Run>> {
+            unreachable!()
+        }
+
+        async fn list_store_runs_by_parent(&self, _parent_id: RunId) -> anyhow::Result<Vec<Run>> {
+            unreachable!()
+        }
+
+        async fn link_run_parent(
+            &self,
+            _child_id: &RunId,
+            _parent_id: &RunId,
+        ) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn unlink_run_parent(&self, _child_id: &RunId) -> anyhow::Result<Run> {
+            unreachable!()
+        }
+
+        async fn get_run_state(&self, _run_id: &RunId) -> anyhow::Result<RunProjection> {
+            unreachable!()
+        }
+
+        async fn list_run_events(
+            &self,
+            _run_id: &RunId,
+            _after: Option<u32>,
+            _limit: Option<usize>,
+        ) -> anyhow::Result<Vec<EventEnvelope>> {
+            unreachable!()
+        }
+
+        async fn list_run_events_until(
+            &self,
+            _run_id: &RunId,
+            _after: Option<u32>,
+            _limit: usize,
+        ) -> anyhow::Result<Vec<EventEnvelope>> {
+            unreachable!()
+        }
+
+        async fn list_run_questions(
+            &self,
+            _run_id: &RunId,
+        ) -> anyhow::Result<Vec<types::ApiQuestion>> {
+            unreachable!()
+        }
+
+        async fn submit_run_answer(
+            &self,
+            _run_id: &RunId,
+            _question_id: &str,
+            _body: types::SubmitAnswerRequest,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
     }
 }

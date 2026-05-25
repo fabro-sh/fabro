@@ -7,6 +7,8 @@ A workflow can pull in another `.fabro` file as a reusable subgraph. Use imports
 
 Imports are resolved at parse time: the imported graph is merged into the parent's graph, with node IDs prefixed to avoid collisions. There is no runtime "sub-workflow" boundary; once merged, an imported node behaves like any other node in the run.
 
+If you need runtime delegation to separate durable runs, use [child runs](/execution/child-runs) instead.
+
 ## Basic example
 
 Place a node in the parent graph with an `import` attribute pointing at the file to splice in:

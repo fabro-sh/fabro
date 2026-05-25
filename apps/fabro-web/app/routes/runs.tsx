@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
-import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpDownIcon, ChevronUpIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArchiveBoxIcon, CheckIcon, ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
-import { Listbox, ListboxButton, ListboxOption, ListboxOptions, Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
+import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
 import {
   DndContext,
@@ -21,31 +21,58 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, columnForRun, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem, toRunWithStatus } from "../data/runs";
-import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus } from "../data/runs";
-import { formatRelativeTime } from "../lib/format";
+
+import { ciConfig, columnForRun, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
+import type { CiStatus, CheckRun, CheckStatus, RunItem } from "../data/runs";
 import { EmptyState } from "../components/state";
-import { InlineMarkdown } from "../components/inline-markdown";
 import { PullRequestChip } from "../components/pull-request-chip";
-import { plural } from "../components/settings-panel";
-import { useToast } from "../components/toast";
-import { ConfirmDialog } from "../components/ui";
+import {
+  summarizeBatchLifecycleAction,
+} from "../components/runs-list/bulk-action-toolbar";
+import { ColumnPickerButton } from "../components/runs-list/column-picker-button";
+import { FilterButton } from "../components/runs-list/filter-button";
+import {
+  createdCutoffMsFor,
+  createdFilterOptions,
+  hiddenColumnsFromSearchParams,
+  parseCreatedFilter,
+  parseDirection,
+  parsePage,
+  parsePageSize,
+  parseSort,
+  parseView,
+  persistRunsWorkspacePreferences,
+  resolveRunsWorkspaceSearchParams,
+  runsWorkspacePreferencesFromSearchParams,
+  runsWorkspacePreferencesToSearchParams,
+} from "../components/runs-list/preferences";
+import type {
+  CreatedFilter,
+  RunsWorkspacePreferences,
+  ViewMode,
+} from "../components/runs-list/preferences";
+import { RunsListView } from "../components/runs-list/runs-list-view";
+import { serializeHiddenColumns } from "../components/runs-list/toggleable-column";
+import type { ToggleableColumn } from "../components/runs-list/toggleable-column";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
-import { archiveRuns, canArchive, canDelete, canUnarchive, deleteRuns, unarchiveRuns } from "../lib/run-actions";
+import { approveRun, archiveRuns, canArchive, mapError } from "../lib/run-actions";
+import { plural } from "../components/settings-panel";
+import { useToast } from "../components/toast";
 import type {
-  BatchDeleteRunsResponse,
-  BatchRunLifecycleResponse,
-  BatchRunLifecycleSummary,
   BoardColumn,
-  ListRunsDirectionEnum,
   ListRunsSortEnum,
-  PaginatedRunList,
   Run,
 } from "@qltysh/fabro-api-client";
 
 export { shouldRefreshBoardForEvent };
+export {
+  loadStoredRunsWorkspaceSearchParams,
+  persistRunsWorkspacePreferences,
+  RUNS_PREFERENCES_STORAGE_KEY,
+} from "../components/runs-list/preferences";
+export { summarizeBatchLifecycleAction } from "../components/runs-list/bulk-action-toolbar";
 
 export function meta({}: any) {
   return [{ title: "Runs — Fabro" }];
@@ -69,33 +96,6 @@ const columnStyles: Record<BoardColumn, ColumnStyle> = {
 
 const defaultColumnStyle: ColumnStyle = { actions: [] };
 const defaultColumnColors = { label: "", dot: "bg-fg-muted", text: "text-fg-muted" };
-
-type BatchLifecycleLabel = "Archive" | "Unarchive" | "Delete";
-
-interface BatchLifecycleToast {
-  message: string;
-  tone?: "error";
-}
-
-export function summarizeBatchLifecycleAction(
-  label: BatchLifecycleLabel,
-  summary: BatchRunLifecycleSummary,
-): BatchLifecycleToast {
-  const { requested, succeeded, failed } = summary;
-  if (failed === 0) {
-    return { message: `${label}d ${succeeded} ${plural(succeeded, "run", "runs")}.` };
-  }
-  if (succeeded === 0) {
-    return {
-      message: `Couldn't ${label.toLowerCase()} ${requested} ${plural(requested, "run", "runs")}. Try again.`,
-      tone:    "error",
-    };
-  }
-  return {
-    message: `${label}d ${succeeded} of ${requested} ${plural(requested, "run", "runs")}. ${failed} failed.`,
-    tone:    "error",
-  };
-}
 
 interface BoardRunsResponse {
   data: Run[];
@@ -174,15 +174,6 @@ function boardLifecycleStatusLabel(run: Pick<RunItem, "column" | "lifecycleStatu
   }
   return run.lifecycleStatusLabel;
 }
-
-function listLifecycleStatusLabel(run: Pick<RunWithStatus, "status" | "statusLabel" | "lifecycleStatusLabel">): string | null {
-  if (run.lifecycleStatusLabel == null || run.lifecycleStatusLabel === run.statusLabel) {
-    return null;
-  }
-  if (run.status === "initializing") return null;
-  return run.lifecycleStatusLabel;
-}
-
 
 function CheckStatusIcon({ status }: { status: CheckStatus }) {
   switch (status) {
@@ -277,7 +268,7 @@ function ChecksStatus({ checks }: { checks: CheckRun[] }) {
   const [expanded, setExpanded] = useState(false);
   const overallStatus = deriveCiStatus(checks);
   const config = ciConfig[overallStatus];
-  const { summary, detail } = summarizeChecks(checks);
+  const { summary } = summarizeChecks(checks);
 
   return (
     <div
@@ -329,7 +320,6 @@ function PrCard({
   actions?: string[];
 }) {
   const lifecycleLabel = boardLifecycleStatusLabel(pr);
-  const hasActions = actions != null && actions.length > 0;
 
   return (
     <div className="group rounded-md border border-line bg-panel p-4 transition-all duration-200 hover:border-line-strong hover:shadow-lg hover:shadow-black/20">
@@ -356,34 +346,62 @@ function PrCard({
         <p className="text-sm leading-snug text-fg-2">{pr.title}</p>
       </Link>
 
-      {(pr.resources != null || pr.comments != null || (pr.elapsed != null && !hasActions)) && (
-        <div className="mt-3 flex items-center gap-3 font-mono text-xs">
-          {pr.resources != null && (
-            <span className="text-fg-3">{pr.resources}</span>
-          )}
-          {pr.comments != null && (
-            <span className="inline-flex items-center gap-1 text-fg-muted">
-              <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
-                <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
-              </svg>
-              {pr.comments}
-            </span>
-          )}
-          {pr.elapsed != null && !hasActions && (
-            <span className="ml-auto font-mono text-fg-muted">{pr.elapsed}</span>
-          )}
-        </div>
-      )}
-
       {pr.checks != null && <ChecksStatus checks={pr.checks} />}
 
       {pr.question != null && (
         <p className="mt-3 truncate text-xs italic text-amber/70">{pr.question}</p>
       )}
 
-      {hasActions && (
+      <PrCardFooter pr={pr} actions={actions} />
+
+      {pr.pendingApproval && (
         <div className="mt-3 flex items-center gap-1.5">
-          {actions?.map((label) => (
+          <ApproveBoardButton runId={pr.id} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// All inline footer metadata on PrCard belongs in this one row. Adding a new
+// piece as a sibling `<div>` below the card body recreates a recurring bug
+// where stats stack onto separate lines instead of sitting next to elapsed/actions.
+function PrCardFooter({ pr, actions }: { pr: RunItem; actions?: string[] }) {
+  const hasActions = actions != null && actions.length > 0;
+  const hasStats =
+    pr.resources != null ||
+    pr.comments != null ||
+    (pr.additions != null && pr.additions !== 0) ||
+    (pr.deletions != null && pr.deletions !== 0);
+
+  if (!hasStats && !hasActions && pr.elapsed == null) return null;
+
+  return (
+    <div className="mt-3 flex items-center gap-3 font-mono text-xs">
+      {pr.resources != null && (
+        <span className="text-fg-3">{pr.resources}</span>
+      )}
+      {pr.comments != null && (
+        <span className="inline-flex items-center gap-1 text-fg-muted">
+          <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
+            <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
+          </svg>
+          {pr.comments}
+        </span>
+      )}
+      {pr.additions != null && pr.additions !== 0 && (
+        <span className="tabular-nums text-mint">
+          +{pr.additions.toLocaleString()}
+        </span>
+      )}
+      {pr.deletions != null && pr.deletions !== 0 && (
+        <span className="tabular-nums text-coral">
+          -{pr.deletions.toLocaleString()}
+        </span>
+      )}
+      {hasActions && (
+        <div className="ml-auto flex items-center gap-1.5">
+          {actions.map((label) => (
             <button
               key={label}
               type="button"
@@ -416,28 +434,49 @@ function PrCard({
               {label}
             </button>
           ))}
-          {pr.elapsed != null && (
-            <span className="ml-auto font-mono text-xs text-fg-muted">{pr.elapsed}</span>
-          )}
         </div>
       )}
-
-      {((pr.additions != null && pr.additions !== 0) ||
-        (pr.deletions != null && pr.deletions !== 0)) && (
-        <div className="mt-3 flex items-center gap-3 font-mono text-xs">
-          {pr.additions != null && (
-            <span className="tabular-nums text-mint">
-              +{pr.additions.toLocaleString()}
-            </span>
-          )}
-          {pr.deletions != null && (
-            <span className="tabular-nums text-coral">
-              -{pr.deletions.toLocaleString()}
-            </span>
-          )}
-        </div>
+      {pr.elapsed != null && (
+        <span className={`text-fg-muted ${hasActions ? "" : "ml-auto"}`}>
+          {pr.elapsed}
+        </span>
       )}
     </div>
+  );
+}
+
+function ApproveBoardButton({ runId }: { runId: string }) {
+  const { mutate } = useSWRConfig();
+  const { push } = useToast();
+  const [pending, setPending] = useState(false);
+
+  async function handleClick(event: React.MouseEvent) {
+    event.stopPropagation();
+    event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    try {
+      await approveRun(runId);
+      mutateRunListCaches(mutate);
+      push({ message: "Run approved." });
+    } catch (error) {
+      push({ message: mapError(error, "approve"), tone: "error" });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      onPointerDown={(event) => event.stopPropagation()}
+      disabled={pending}
+      className="inline-flex items-center gap-1.5 rounded-md bg-teal-500 px-2.5 py-1 text-[11px] font-medium text-on-primary transition-colors hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-teal-500"
+    >
+      <CheckIcon className="size-3" aria-hidden="true" />
+      {pending ? "Approving…" : "Approve"}
+    </button>
   );
 }
 
@@ -579,1114 +618,6 @@ function BoardColumnView({ column }: { column: Column }) {
   );
 }
 
-type ViewMode = "columns" | "list";
-
-type CreatedFilter = "all" | "today" | "1h" | "1d" | "7d" | "30d";
-
-const createdFilterOptions: { value: CreatedFilter; label: string }[] = [
-  { value: "all", label: "All time" },
-  { value: "today", label: "Today" },
-  { value: "1h", label: "Last hour" },
-  { value: "1d", label: "Last day" },
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
-];
-
-function parseCreatedFilter(raw: string | null): CreatedFilter {
-  switch (raw) {
-    case "today":
-    case "1h":
-    case "1d":
-    case "7d":
-    case "30d":
-      return raw;
-    default:
-      return "all";
-  }
-}
-
-function parseView(raw: string | null): ViewMode {
-  return raw === "list" ? "list" : "columns";
-}
-
-const SORT_KEYS = ["created_at", "updated_at", "status", "elapsed", "repo", "title", "workflow", "changes"] as const satisfies readonly ListRunsSortEnum[];
-
-function parseSort(raw: string | null): ListRunsSortEnum {
-  return (SORT_KEYS as readonly string[]).includes(raw ?? "")
-    ? (raw as ListRunsSortEnum)
-    : "created_at";
-}
-
-function parseDirection(raw: string | null): ListRunsDirectionEnum {
-  return raw === "asc" ? "asc" : "desc";
-}
-
-function parsePage(raw: string | null): number {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
-}
-
-const TOGGLEABLE_COLUMNS = ["elapsed", "repo", "workflow", "created", "updated", "changes", "pr"] as const;
-type ToggleableColumn = typeof TOGGLEABLE_COLUMNS[number];
-
-const toggleableColumnLabels: Record<ToggleableColumn, string> = {
-  elapsed:  "Elapsed",
-  repo:     "Repo",
-  workflow: "Workflow",
-  created:  "Created",
-  updated:  "Updated",
-  changes:  "Changes",
-  pr:       "PR",
-};
-
-function parseHiddenColumns(raw: string | null): Set<ToggleableColumn> {
-  const hidden = new Set<ToggleableColumn>();
-  if (!raw) return hidden;
-  for (const value of raw.split(",")) {
-    const trimmed = value.trim();
-    if ((TOGGLEABLE_COLUMNS as readonly string[]).includes(trimmed)) {
-      hidden.add(trimmed as ToggleableColumn);
-    }
-  }
-  return hidden;
-}
-
-function serializeHiddenColumns(hidden: Set<ToggleableColumn>): string | null {
-  if (hidden.size === 0) return null;
-  return TOGGLEABLE_COLUMNS.filter((col) => hidden.has(col)).join(",");
-}
-
-const LIST_PAGE_SIZES = [10, 25, 50, 100] as const;
-const DEFAULT_LIST_PAGE_SIZE = 25;
-
-function parsePageSize(raw: string | null): number {
-  const n = Number(raw);
-  return (LIST_PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_LIST_PAGE_SIZE;
-}
-
-const RUNS_PREFERENCES_VERSION = 1;
-export const RUNS_PREFERENCES_STORAGE_KEY = "fabro:runs-preferences:v1";
-const RUNS_WORKSPACE_PARAM_KEYS = [
-  "view",
-  "search",
-  "repo",
-  "workflow",
-  "created",
-  "archived",
-  "sort",
-  "direction",
-  "size",
-  "hide",
-] as const;
-
-type RunsPreferencesStorage = Pick<Storage, "getItem" | "setItem">;
-
-interface RunsWorkspacePreferences {
-  version: typeof RUNS_PREFERENCES_VERSION;
-  view: ViewMode;
-  search: string;
-  repo: string;
-  workflow: string;
-  created: CreatedFilter;
-  archived: boolean;
-  sort: ListRunsSortEnum;
-  direction: ListRunsDirectionEnum;
-  size: number;
-  hide: string;
-  // URL-only: never persisted to localStorage.
-  page: number;
-}
-
-function defaultRunsWorkspacePreferences(): RunsWorkspacePreferences {
-  return {
-    version:   RUNS_PREFERENCES_VERSION,
-    view:      "columns",
-    search:    "",
-    repo:      "all",
-    workflow:  "all",
-    created:   "all",
-    archived:  false,
-    sort:      "created_at",
-    direction: "desc",
-    size:      DEFAULT_LIST_PAGE_SIZE,
-    hide:      "",
-    page:      1,
-  };
-}
-
-function runsPreferencesStorage(): RunsPreferencesStorage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function filterPreference(raw: string | null): string {
-  return raw == null || raw === "" ? "all" : raw;
-}
-
-function storageRecord(value: unknown): Record<string, unknown> | null {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function normalizeStoredRunsWorkspacePreferences(value: unknown): RunsWorkspacePreferences {
-  const record = storageRecord(value);
-  if (record == null || record.version !== RUNS_PREFERENCES_VERSION) {
-    return defaultRunsWorkspacePreferences();
-  }
-
-  const hiddenColumns = parseHiddenColumns(stringValue(record.hide));
-  const size = record.size;
-
-  return {
-    version:   RUNS_PREFERENCES_VERSION,
-    view:      parseView(stringValue(record.view)),
-    search:    stringValue(record.search) ?? "",
-    repo:      filterPreference(stringValue(record.repo)),
-    workflow:  filterPreference(stringValue(record.workflow)),
-    created:   parseCreatedFilter(stringValue(record.created)),
-    archived:  record.archived === true || record.archived === "1",
-    sort:      parseSort(stringValue(record.sort)),
-    direction: parseDirection(stringValue(record.direction)),
-    size:      parsePageSize(typeof size === "number" || typeof size === "string" ? String(size) : null),
-    hide:      serializeHiddenColumns(hiddenColumns) ?? "",
-    page:      1,
-  };
-}
-
-function runsWorkspacePreferencesFromSearchParams(searchParams: URLSearchParams): RunsWorkspacePreferences {
-  return {
-    version:   RUNS_PREFERENCES_VERSION,
-    view:      parseView(searchParams.get("view")),
-    search:    searchParams.get("search") ?? "",
-    repo:      filterPreference(searchParams.get("repo")),
-    workflow:  filterPreference(searchParams.get("workflow")),
-    created:   parseCreatedFilter(searchParams.get("created")),
-    archived:  searchParams.get("archived") === "1",
-    sort:      parseSort(searchParams.get("sort")),
-    direction: parseDirection(searchParams.get("direction")),
-    size:      parsePageSize(searchParams.get("size")),
-    hide:      serializeHiddenColumns(parseHiddenColumns(searchParams.get("hide"))) ?? "",
-    page:      parsePage(searchParams.get("page")),
-  };
-}
-
-function runsWorkspacePreferencesToSearchParams(preferences: RunsWorkspacePreferences): URLSearchParams {
-  const params = new URLSearchParams();
-  if (preferences.view === "list") params.set("view", "list");
-  if (preferences.search !== "") params.set("search", preferences.search);
-  if (preferences.repo !== "all") params.set("repo", preferences.repo);
-  if (preferences.workflow !== "all") params.set("workflow", preferences.workflow);
-  if (preferences.created !== "all") params.set("created", preferences.created);
-  if (preferences.archived) params.set("archived", "1");
-  if (preferences.sort !== "created_at") params.set("sort", preferences.sort);
-  if (preferences.direction === "asc") params.set("direction", "asc");
-  if (preferences.size !== DEFAULT_LIST_PAGE_SIZE) params.set("size", String(preferences.size));
-  if (preferences.hide !== "") params.set("hide", preferences.hide);
-  if (preferences.page > 1) params.set("page", String(preferences.page));
-  return params;
-}
-
-function hasRunsWorkspaceParams(searchParams: URLSearchParams): boolean {
-  return RUNS_WORKSPACE_PARAM_KEYS.some((key) => searchParams.has(key));
-}
-
-export function loadStoredRunsWorkspaceSearchParams(
-  storage: Pick<Storage, "getItem"> | null = runsPreferencesStorage(),
-): URLSearchParams {
-  if (storage == null) return new URLSearchParams();
-  try {
-    const raw = storage.getItem(RUNS_PREFERENCES_STORAGE_KEY);
-    if (raw == null) return new URLSearchParams();
-    return runsWorkspacePreferencesToSearchParams(
-      normalizeStoredRunsWorkspacePreferences(JSON.parse(raw)),
-    );
-  } catch {
-    return new URLSearchParams();
-  }
-}
-
-// Resolve which search params should drive rendering. If the URL has no
-// workspace params (e.g. the user clicked the Runs nav link, which goes to
-// `/runs`), fall back to stored preferences so the first render already
-// reflects the user's view/archived/etc. choice instead of route defaults.
-// Without this, users whose only runs are archived briefly see the empty
-// Quick Start landing before a post-commit effect restores `archived=1`.
-export function resolveRunsWorkspaceSearchParams(
-  urlSearchParams: URLSearchParams,
-): URLSearchParams {
-  if (hasRunsWorkspaceParams(urlSearchParams)) return urlSearchParams;
-  const stored = loadStoredRunsWorkspaceSearchParams();
-  return stored.toString() === "" ? urlSearchParams : stored;
-}
-
-export function persistRunsWorkspacePreferences(
-  preferences: RunsWorkspacePreferences,
-  storage: Pick<Storage, "setItem"> | null = runsPreferencesStorage(),
-) {
-  if (storage == null) return;
-  // `page` is URL-only ephemeral view state; strip it before persisting.
-  const { page: _page, ...storable } = preferences;
-  try {
-    storage.setItem(RUNS_PREFERENCES_STORAGE_KEY, JSON.stringify(storable));
-  } catch {
-    // localStorage persistence is best effort only.
-  }
-}
-
-const sortColumnLabels: Record<ListRunsSortEnum, string> = {
-  created_at: "Created",
-  updated_at: "Updated",
-  status:     "Status",
-  elapsed:    "Elapsed",
-  repo:       "Repo",
-  title:      "Title",
-  workflow:   "Workflow",
-  changes:    "Changes",
-};
-
-function createdCutoffMsFor(filter: CreatedFilter): number | null {
-  const now = Date.now();
-  switch (filter) {
-    case "all":
-      return null;
-    case "today": {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      return d.getTime();
-    }
-    case "1h":
-      return now - 60 * 60 * 1000;
-    case "1d":
-      return now - 24 * 60 * 60 * 1000;
-    case "7d":
-      return now - 7 * 24 * 60 * 60 * 1000;
-    case "30d":
-      return now - 30 * 24 * 60 * 60 * 1000;
-  }
-}
-
-export const RUNS_LIST_GRID_TEMPLATE = "auto 5rem auto 1fr auto auto 8rem auto";
-
-export function RunRow({ run }: { run: RunWithStatus }) {
-  const lifecycleLabel = listLifecycleStatusLabel(run);
-  const statusDisplay = columnStatusDisplay[run.status];
-
-  return (
-    <div className="grid items-center rounded-md border border-line bg-panel/80 px-4 py-3 transition-all duration-200 hover:border-line-strong hover:bg-panel" style={{ gridColumn: "1 / -1", gridTemplateColumns: "subgrid" }}>
-      <Link to={`/runs/${run.id}`} className="contents">
-      <span className="flex items-center gap-2 pr-2">
-        <span className={`size-1.5 shrink-0 rounded-full ${statusDisplay.dot}`} aria-hidden="true" />
-        <span className={`font-mono text-xs ${statusDisplay.text}`}>{run.statusLabel}</span>
-      </span>
-
-      <span className="font-mono text-xs pr-2 text-fg-muted">
-        {run.elapsed}
-      </span>
-
-      <span className="truncate font-mono text-xs font-medium text-teal-500 pr-2">{run.repo}</span>
-
-      <span className="flex items-center gap-2 min-w-0">
-        <InlineMarkdown content={run.title} className="truncate text-sm text-fg-2" />
-        {lifecycleLabel != null && (
-          <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
-            {lifecycleLabel}
-          </span>
-        )}
-        {run.comments != null && run.comments > 0 && (
-          <span className="inline-flex shrink-0 items-center gap-1 font-mono text-xs text-fg-muted">
-            <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
-              <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
-            </svg>
-            {run.comments}
-          </span>
-        )}
-      </span>
-
-      <span className="truncate font-mono text-xs text-fg-3 pr-2">{run.workflow}</span>
-
-      <span
-        className="font-mono text-xs text-fg-muted pr-2"
-        title={run.createdAt}
-      >
-        {run.createdAt != null ? formatRelativeTime(run.createdAt) : ""}
-      </span>
-
-      <span className="flex items-center justify-end gap-2 pr-4 font-mono text-xs tabular-nums">
-        {run.additions != null && <span className="text-mint">+{run.additions.toLocaleString()}</span>}
-        {run.deletions != null && <span className="text-coral">-{run.deletions.toLocaleString()}</span>}
-      </span>
-      </Link>
-
-      <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs text-fg-muted">
-        {run.pullRequestUrl && run.number != null && (
-          <PullRequestChip number={run.number} url={run.pullRequestUrl}>
-            {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
-          </PullRequestChip>
-        )}
-      </span>
-    </div>
-  );
-}
-
-function RunTableRow({
-  run,
-  hiddenColumns,
-  selected,
-  onToggleSelected,
-}: {
-  run:               RunWithStatus;
-  hiddenColumns:     Set<ToggleableColumn>;
-  selected:          boolean;
-  onToggleSelected:  (id: string) => void;
-}) {
-  const lifecycleLabel = listLifecycleStatusLabel(run);
-  const statusDisplay = columnStatusDisplay[run.status];
-  const show = (col: ToggleableColumn) => !hiddenColumns.has(col);
-
-  return (
-    <tr className={`group relative border-b border-line transition-colors last:border-b-0 ${selected ? "bg-overlay/30" : "hover:bg-overlay/40"}`}>
-      <td className="relative z-10 w-8 whitespace-nowrap px-3 py-2.5">
-        <SelectionCheckbox
-          checked={selected}
-          onChange={() => onToggleSelected(run.id)}
-          ariaLabel={selected ? `Deselect run ${run.title}` : `Select run ${run.title}`}
-        />
-      </td>
-      <td className="whitespace-nowrap px-3 py-2.5">
-        <span className="inline-flex items-center gap-2">
-          <span className={`size-1.5 shrink-0 rounded-full ${statusDisplay.dot}`} aria-hidden="true" />
-          <span className={`font-mono text-xs ${statusDisplay.text}`}>{run.statusLabel}</span>
-        </span>
-      </td>
-      {show("elapsed") && (
-        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted">
-          {run.elapsed}
-        </td>
-      )}
-      {show("repo") && (
-        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs font-medium text-teal-500">
-          {run.repo}
-        </td>
-      )}
-      <td className="w-full max-w-0 px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <Link
-            to={`/runs/${run.id}`}
-            className="min-w-0 truncate text-sm text-fg-2 before:absolute before:inset-0 hover:text-fg"
-          >
-            <InlineMarkdown content={run.title} className="truncate" />
-          </Link>
-          {lifecycleLabel != null && (
-            <span className="relative z-10 rounded-full border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
-              {lifecycleLabel}
-            </span>
-          )}
-          {run.comments != null && run.comments > 0 && (
-            <span className="relative z-10 inline-flex shrink-0 items-center gap-1 font-mono text-xs text-fg-muted">
-              <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
-                <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
-              </svg>
-              {run.comments}
-            </span>
-          )}
-        </div>
-      </td>
-      {show("workflow") && (
-        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-3">{run.workflow}</td>
-      )}
-      {show("created") && (
-        <td
-          className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted"
-          title={run.createdAt ?? undefined}
-        >
-          {run.createdAt != null ? formatRelativeTime(run.createdAt) : ""}
-        </td>
-      )}
-      {show("updated") && (
-        <td
-          className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-fg-muted"
-          title={run.lastEventAt ?? undefined}
-        >
-          {run.lastEventAt != null ? formatRelativeTime(run.lastEventAt) : ""}
-        </td>
-      )}
-      {show("changes") && (
-        <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs tabular-nums">
-          {run.additions != null && <span className="text-mint">+{run.additions.toLocaleString()}</span>}
-          {run.additions != null && run.deletions != null && " "}
-          {run.deletions != null && <span className="text-coral">-{run.deletions.toLocaleString()}</span>}
-        </td>
-      )}
-      {show("pr") && (
-        <td className="whitespace-nowrap px-3 py-2.5 text-right">
-          {run.pullRequestUrl && run.number != null && (
-            <span className="relative z-10 inline-flex items-center justify-end gap-1.5">
-              <PullRequestChip number={run.number} url={run.pullRequestUrl}>
-                {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
-              </PullRequestChip>
-            </span>
-          )}
-        </td>
-      )}
-    </tr>
-  );
-}
-
-type RunsListViewProps = {
-  data:             PaginatedRunList | undefined;
-  isLoading:        boolean;
-  hasGitHubAuth:    boolean;
-  serverUrl:        string | undefined;
-  sort:             ListRunsSortEnum;
-  direction:        ListRunsDirectionEnum;
-  page:             number;
-  pageSize:         number;
-  hiddenColumns:    Set<ToggleableColumn>;
-  onSortClick:      (key: ListRunsSortEnum) => void;
-  onPageChange:     (page: number) => void;
-  onPageSizeChange: (size: number) => void;
-  query:            string;
-  repoFilter:       string;
-  workflowFilter:   string;
-  createdCutoffMs:  number | null;
-};
-
-function SortHeader({
-  label,
-  sortKey,
-  activeSort,
-  direction,
-  align = "left",
-  onClick,
-}: {
-  label:      string;
-  sortKey:    ListRunsSortEnum;
-  activeSort: ListRunsSortEnum;
-  direction:  ListRunsDirectionEnum;
-  align?:     "left" | "right";
-  onClick:    (key: ListRunsSortEnum) => void;
-}) {
-  const isActive = activeSort === sortKey;
-  const ariaSort: "ascending" | "descending" | "none" = isActive
-    ? direction === "asc"
-      ? "ascending"
-      : "descending"
-    : "none";
-  return (
-    <th
-      scope="col"
-      aria-sort={ariaSort}
-      className={`whitespace-nowrap px-3 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"}`}
-    >
-      <button
-        type="button"
-        onClick={() => onClick(sortKey)}
-        className={`inline-flex items-center gap-1 transition-colors hover:text-fg-2 ${isActive ? "text-fg-2" : "text-fg-3"} ${align === "right" ? "ml-auto" : ""}`}
-      >
-        <span>{label}</span>
-        {isActive ? (
-          direction === "asc" ? (
-            <ChevronUpIcon className="size-3.5 text-fg-3" aria-hidden="true" />
-          ) : (
-            <ChevronDownIcon className="size-3.5 text-fg-3" aria-hidden="true" />
-          )
-        ) : (
-          <ChevronUpDownIcon className="size-3.5 text-fg-muted" aria-hidden="true" />
-        )}
-      </button>
-    </th>
-  );
-}
-
-function RunsListView({
-  data,
-  isLoading,
-  hasGitHubAuth,
-  serverUrl,
-  sort,
-  direction,
-  page,
-  pageSize,
-  hiddenColumns,
-  onSortClick,
-  onPageChange,
-  onPageSizeChange,
-  query,
-  repoFilter,
-  workflowFilter,
-  createdCutoffMs,
-}: RunsListViewProps) {
-  const show = (col: ToggleableColumn) => !hiddenColumns.has(col);
-  const rows: RunWithStatus[] = useMemo(() => {
-    const apiRuns = data?.data ?? [];
-    return apiRuns
-      .map(toRunWithStatus)
-      .filter(
-        (item) =>
-          (repoFilter === "all" || item.repo === repoFilter) &&
-          (workflowFilter === "all" || item.workflow === workflowFilter) &&
-          (createdCutoffMs == null ||
-            (item.createdAt != null && Date.parse(item.createdAt) >= createdCutoffMs)) &&
-          (!query ||
-            item.title.toLowerCase().includes(query) ||
-            item.repo.toLowerCase().includes(query) ||
-            item.lifecycleStatusLabel?.toLowerCase().includes(query) ||
-            (item.number != null && `#${item.number}`.includes(query))),
-      );
-  }, [data, repoFilter, workflowFilter, createdCutoffMs, query]);
-
-  const hasMore = data?.meta.has_more ?? false;
-  const total = data?.meta.total ?? null;
-  const pageCount = total != null ? Math.max(1, Math.ceil(total / pageSize)) : null;
-  const hasRows = rows.length > 0;
-  const apiRunCount = data?.data.length ?? 0;
-  const isEmptyServerSide = data !== undefined && apiRunCount === 0 && page === 1;
-
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    setSelectedIds(new Set());
-  }, [page, sort, direction, query, repoFilter, workflowFilter, createdCutoffMs]);
-  const visibleIds = useMemo(() => rows.map((r) => r.id), [rows]);
-  const selectedVisibleCount = visibleIds.reduce(
-    (n, id) => (selectedIds.has(id) ? n + 1 : n),
-    0,
-  );
-  const allOnPageSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
-  const someOnPageSelected = selectedVisibleCount > 0 && !allOnPageSelected;
-  const toggleAllOnPage = useCallback(() => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (allOnPageSelected) {
-        for (const id of visibleIds) next.delete(id);
-      } else {
-        for (const id of visibleIds) next.add(id);
-      }
-      return next;
-    });
-  }, [allOnPageSelected, visibleIds]);
-  const toggleOne = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
-  const selectedRuns = useMemo(
-    () => rows.filter((r) => selectedIds.has(r.id)),
-    [rows, selectedIds],
-  );
-
-  if (isEmptyServerSide && !isLoading) {
-    return (
-      <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="-mx-4 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-6 lg:-mx-8">
-        <div className="inline-block min-w-full px-4 py-2 align-middle sm:px-6 lg:px-8">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line text-xs font-medium text-fg-3">
-                <th scope="col" className="w-8 whitespace-nowrap px-3 py-2.5">
-                  <SelectionCheckbox
-                    checked={allOnPageSelected}
-                    indeterminate={someOnPageSelected}
-                    onChange={toggleAllOnPage}
-                    ariaLabel={allOnPageSelected ? "Deselect all runs on this page" : "Select all runs on this page"}
-                    disabled={visibleIds.length === 0}
-                  />
-                </th>
-                <SortHeader label="Status" sortKey="status" activeSort={sort} direction={direction} onClick={onSortClick} />
-                {show("elapsed") && (
-                  <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} onClick={onSortClick} />
-                )}
-                {show("repo") && (
-                  <SortHeader label="Repo" sortKey="repo" activeSort={sort} direction={direction} onClick={onSortClick} />
-                )}
-                <SortHeader label="Title" sortKey="title" activeSort={sort} direction={direction} onClick={onSortClick} />
-                {show("workflow") && (
-                  <SortHeader label="Workflow" sortKey="workflow" activeSort={sort} direction={direction} onClick={onSortClick} />
-                )}
-                {show("created") && (
-                  <SortHeader label="Created" sortKey="created_at" activeSort={sort} direction={direction} onClick={onSortClick} />
-                )}
-                {show("updated") && (
-                  <SortHeader label="Updated" sortKey="updated_at" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
-                )}
-                {show("changes") && (
-                  <SortHeader label="Changes" sortKey="changes" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
-                )}
-                {show("pr") && (
-                  <th scope="col" className="whitespace-nowrap px-3 py-2.5 text-right font-medium">PR</th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((run) => (
-                <RunTableRow
-                  key={run.id}
-                  run={run}
-                  hiddenColumns={hiddenColumns}
-                  selected={selectedIds.has(run.id)}
-                  onToggleSelected={toggleOne}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {!hasRows && !isLoading && (
-        <div className="py-8">
-          <EmptyState
-            title="No matching runs"
-            description={
-              apiRunCount === 0
-                ? "Try a different page, sort, or filter combination."
-                : "Try clearing the search, repo, or workflow filter."
-            }
-          />
-        </div>
-      )}
-      {(total == null || total >= 25) && (
-        <ListPager
-          page={page}
-          pageSize={pageSize}
-          pageCount={pageCount}
-          hasMore={hasMore}
-          disabled={isLoading}
-          onPageChange={onPageChange}
-          onPageSizeChange={onPageSizeChange}
-        />
-      )}
-      <BulkActionToolbar selectedRuns={selectedRuns} onClear={clearSelection} />
-    </div>
-  );
-}
-
-function ListPager({
-  page,
-  pageSize,
-  pageCount,
-  hasMore,
-  disabled,
-  onPageChange,
-  onPageSizeChange,
-}: {
-  page:             number;
-  pageSize:         number;
-  pageCount:        number | null;
-  hasMore:          boolean;
-  disabled:         boolean;
-  onPageChange:     (page: number) => void;
-  onPageSizeChange: (size: number) => void;
-}) {
-  const onFirstPage = page <= 1;
-  const onLastPage = pageCount != null ? page >= pageCount : !hasMore;
-  return (
-    <nav
-      aria-label="Pagination"
-      className="flex items-center justify-between gap-6 pt-2 text-sm text-fg-3"
-    >
-      <div className="flex items-center gap-3">
-        <label htmlFor="runs-page-size" className="text-fg-3">
-          Rows per page
-        </label>
-        <div className="relative">
-          <select
-            id="runs-page-size"
-            value={pageSize}
-            onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            disabled={disabled}
-            className="appearance-none rounded-md border border-line bg-panel/80 py-1.5 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0 disabled:opacity-60"
-          >
-            {LIST_PAGE_SIZES.map((size) => (
-              <option key={size} value={size}>{size}</option>
-            ))}
-          </select>
-          <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-        </div>
-      </div>
-
-      <span className="text-fg-3">
-        Page {page}
-        {pageCount != null ? <> of {pageCount}</> : null}
-      </span>
-
-      <div className="flex items-center gap-1.5">
-        <PagerButton
-          label="First page"
-          onClick={() => onPageChange(1)}
-          disabled={disabled || onFirstPage}
-        >
-          <ChevronDoubleLeftIcon className="size-4" aria-hidden="true" />
-        </PagerButton>
-        <PagerButton
-          label="Previous page"
-          onClick={() => onPageChange(Math.max(1, page - 1))}
-          disabled={disabled || onFirstPage}
-        >
-          <ChevronLeftIcon className="size-4" aria-hidden="true" />
-        </PagerButton>
-        <PagerButton
-          label="Next page"
-          onClick={() => onPageChange(page + 1)}
-          disabled={disabled || onLastPage}
-        >
-          <ChevronRightIcon className="size-4" aria-hidden="true" />
-        </PagerButton>
-        <PagerButton
-          label="Last page"
-          onClick={() => pageCount != null && onPageChange(pageCount)}
-          disabled={disabled || onLastPage || pageCount == null}
-        >
-          <ChevronDoubleRightIcon className="size-4" aria-hidden="true" />
-        </PagerButton>
-      </div>
-    </nav>
-  );
-}
-
-function PagerButton({
-  label,
-  onClick,
-  disabled,
-  children,
-}: {
-  label:    string;
-  onClick:  () => void;
-  disabled: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      disabled={disabled}
-      className="inline-flex size-8 items-center justify-center rounded-md border border-line bg-panel/80 text-fg-3 transition-colors enabled:hover:bg-panel enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
-    >
-      {children}
-    </button>
-  );
-}
-
-function SelectionCheckbox({
-  checked,
-  indeterminate = false,
-  disabled = false,
-  onChange,
-  ariaLabel,
-}: {
-  checked:        boolean;
-  indeterminate?: boolean;
-  disabled?:      boolean;
-  onChange:       () => void;
-  ariaLabel:      string;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = indeterminate;
-  }, [indeterminate]);
-  return (
-    <input
-      ref={ref}
-      type="checkbox"
-      aria-label={ariaLabel}
-      checked={checked}
-      disabled={disabled}
-      onChange={onChange}
-      onClick={(e) => e.stopPropagation()}
-      className="size-4 cursor-pointer rounded border border-line-strong bg-panel/80 text-focus outline-none focus:ring-1 focus:ring-focus disabled:cursor-default disabled:opacity-40"
-    />
-  );
-}
-
-function BulkActionToolbar({
-  selectedRuns,
-  onClear,
-}: {
-  selectedRuns: RunWithStatus[];
-  onClear:      () => void;
-}) {
-  const [pending, setPending] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const { mutate } = useSWRConfig();
-  const { push } = useToast();
-
-  const count = selectedRuns.length;
-  const archivable = useMemo(
-    () => selectedRuns.filter((r) => canArchive(r.lifecycleStatus)),
-    [selectedRuns],
-  );
-  const unarchivable = useMemo(
-    () => selectedRuns.filter((r) => canUnarchive(r.lifecycleStatus)),
-    [selectedRuns],
-  );
-  const deletable = useMemo(
-    () => selectedRuns.filter((r) => canDelete(r.lifecycleStatus)),
-    [selectedRuns],
-  );
-
-  if (count === 0) return null;
-
-  async function runBulk(
-    label: BatchLifecycleLabel,
-    eligible: RunWithStatus[],
-    action: (ids: string[]) => Promise<BatchRunLifecycleResponse | BatchDeleteRunsResponse>,
-  ) {
-    if (pending) return;
-    if (eligible.length === 0) {
-      push({
-        message: `No selected ${plural(count, "run", "runs")} can be ${label.toLowerCase()}d.`,
-        tone:    "error",
-      });
-      return;
-    }
-    setPending(true);
-    try {
-      const response = await action(eligible.map((r) => r.id));
-      push(summarizeBatchLifecycleAction(label, response.summary));
-      if (response.summary.failed === 0) {
-        onClear();
-      }
-    } catch {
-      push(
-        summarizeBatchLifecycleAction(label, {
-          requested: eligible.length,
-          succeeded: 0,
-          failed:    eligible.length,
-        }),
-      );
-    } finally {
-      setPending(false);
-      mutateRunListCaches(mutate);
-    }
-  }
-
-  function onClickDelete() {
-    if (pending) return;
-    if (deletable.length === 0) {
-      push({
-        message: `No selected ${plural(count, "run", "runs")} can be deleted.`,
-        tone:    "error",
-      });
-      return;
-    }
-    setDeleteDialogOpen(true);
-  }
-
-  async function onConfirmDelete() {
-    await runBulk("Delete", deletable, (ids) => deleteRuns(ids));
-    setDeleteDialogOpen(false);
-  }
-
-  const deletableCount = deletable.length;
-
-  return (
-    <>
-      <div
-        role="region"
-        aria-label="Bulk actions"
-        className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
-      >
-        <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-panel py-2 pl-4 pr-2 text-sm text-fg-2 shadow-lg shadow-black/40">
-          <span className="font-medium">
-            {count} {plural(count, "run", "runs")} selected
-          </span>
-          <span className="h-5 w-px bg-line" aria-hidden="true" />
-          <BulkActionButton
-            label="Archive"
-            icon={<ArchiveBoxIcon className="size-4" aria-hidden="true" />}
-            disabled={pending}
-            onClick={() => runBulk("Archive", archivable, archiveRuns)}
-          />
-          <BulkActionButton
-            label="Unarchive"
-            icon={<ArrowUturnLeftIcon className="size-4" aria-hidden="true" />}
-            disabled={pending}
-            onClick={() => runBulk("Unarchive", unarchivable, unarchiveRuns)}
-          />
-          <BulkActionButton
-            label="Delete"
-            icon={<TrashIcon className="size-4" aria-hidden="true" />}
-            disabled={pending}
-            onClick={onClickDelete}
-          />
-          <button
-            type="button"
-            onClick={onClear}
-            disabled={pending}
-            aria-label="Clear selection"
-            title="Clear selection"
-            className="inline-flex size-8 items-center justify-center rounded-full text-fg-3 transition-colors enabled:hover:bg-overlay enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
-          >
-            <XMarkIcon className="size-4" aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-      <ConfirmDialog
-        open={deleteDialogOpen}
-        title={`Delete ${deletableCount} ${plural(deletableCount, "run", "runs")}?`}
-        description={
-          <>
-            This permanently removes {deletableCount} archived {plural(deletableCount, "run", "runs")}{" "}
-            and their durable state. This action cannot be undone.
-          </>
-        }
-        confirmLabel={`Delete ${plural(deletableCount, "run", "runs")}`}
-        pendingLabel="Deleting…"
-        pending={pending}
-        onConfirm={() => void onConfirmDelete()}
-        onCancel={() => setDeleteDialogOpen(false)}
-      />
-    </>
-  );
-}
-
-function BulkActionButton({
-  label,
-  icon,
-  disabled,
-  onClick,
-}: {
-  label:    string;
-  icon:     React.ReactNode;
-  disabled: boolean;
-  onClick:  () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-fg-2 transition-colors enabled:hover:bg-overlay disabled:cursor-default disabled:opacity-40"
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
-  );
-}
-
-type FilterOption<T extends string> = { value: T; label: string };
-
-function FilterButton<T extends string>({
-  label,
-  value,
-  allValue,
-  options,
-  onChange,
-}: {
-  label:    string;
-  value:    T;
-  allValue: T;
-  options:  FilterOption<T>[];
-  onChange: (next: T) => void;
-}) {
-  const active = value !== allValue;
-  const activeLabel = options.find((opt) => opt.value === value)?.label;
-  return (
-    <Menu as="div" className="relative">
-      <MenuButton
-        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
-          active
-            ? "border-line-strong bg-panel text-fg-2"
-            : "border-line bg-panel/80 text-fg-muted hover:text-fg-3"
-        }`}
-      >
-        <PlusCircleIcon className="size-4" aria-hidden="true" />
-        <span>{active ? `${label}: ${activeLabel}` : label}</span>
-      </MenuButton>
-      <MenuItems
-        anchor="bottom start"
-        className="z-20 mt-1 max-h-72 min-w-[12rem] overflow-y-auto rounded-md border border-line bg-panel py-1 text-xs shadow-lg focus:outline-none"
-      >
-        {options.map((option) => (
-          <MenuItem key={option.value}>
-            {({ focus }) => (
-              <button
-                type="button"
-                onClick={() => onChange(option.value)}
-                className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left ${
-                  focus ? "bg-overlay" : ""
-                } ${option.value === value ? "text-teal-500" : "text-fg-2"}`}
-              >
-                <span className="truncate">{option.label}</span>
-                {option.value === value && (
-                  <CheckIcon className="size-4 shrink-0" aria-hidden="true" />
-                )}
-              </button>
-            )}
-          </MenuItem>
-        ))}
-      </MenuItems>
-    </Menu>
-  );
-}
-
-function ColumnPickerButton({
-  hidden,
-  onChange,
-}: {
-  hidden:   Set<ToggleableColumn>;
-  onChange: (next: Set<ToggleableColumn>) => void;
-}) {
-  const visible = TOGGLEABLE_COLUMNS.filter((col) => !hidden.has(col));
-  return (
-    <Listbox
-      value={visible}
-      onChange={(next: ToggleableColumn[]) => {
-        const nextHidden = new Set<ToggleableColumn>(TOGGLEABLE_COLUMNS);
-        for (const col of next) nextHidden.delete(col);
-        onChange(nextHidden);
-      }}
-      multiple
-    >
-      <ListboxButton className="inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium text-fg-muted transition-colors hover:text-fg-3">
-        <AdjustmentsHorizontalIcon className="size-4" aria-hidden="true" />
-        <span>View</span>
-      </ListboxButton>
-      <ListboxOptions
-        anchor="bottom end"
-        className="z-20 mt-1 min-w-[10rem] rounded-md border border-line bg-panel py-1 text-xs shadow-lg focus:outline-none"
-      >
-        {TOGGLEABLE_COLUMNS.map((col) => (
-          <ListboxOption
-            key={col}
-            value={col}
-            className={({ focus }) =>
-              `flex cursor-pointer items-center justify-between gap-3 px-3 py-1.5 text-fg-2 ${focus ? "bg-overlay" : ""}`
-            }
-          >
-            {({ selected }) => (
-              <>
-                <span>{toggleableColumnLabels[col]}</span>
-                {selected ? (
-                  <CheckIcon className="size-4 shrink-0 text-teal-500" aria-hidden="true" />
-                ) : (
-                  <span className="size-4 shrink-0" aria-hidden="true" />
-                )}
-              </>
-            )}
-          </ListboxOption>
-        ))}
-      </ListboxOptions>
-    </Listbox>
-  );
-}
-
 function TerminalLine({ prompt, command }: { prompt: string; command: string }) {
   return (
     <div className="flex items-center gap-2 font-mono text-sm">
@@ -1822,7 +753,7 @@ export default function Runs() {
   const page = parsePage(searchParams.get("page"));
   const pageSize = parsePageSize(searchParams.get("size"));
   const hiddenColumns = useMemo(
-    () => parseHiddenColumns(searchParams.get("hide")),
+    () => hiddenColumnsFromSearchParams(searchParams),
     [searchParams],
   );
 
@@ -2086,8 +1017,9 @@ export default function Runs() {
           <RunsListView
             data={listRunsPage.data}
             isLoading={listRunsPage.data === undefined && listRunsPage.isLoading}
-            hasGitHubAuth={hasGitHubAuth}
-            serverUrl={serverUrl}
+            emptyState={
+              <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
+            }
             sort={sort}
             direction={direction}
             page={page}

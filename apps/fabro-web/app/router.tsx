@@ -34,13 +34,14 @@ import * as Insights from "./routes/insights";
 import * as InsightsEditor from "./routes/insights-editor";
 import * as InsightsNew from "./routes/insights-new";
 import * as Settings from "./routes/settings";
+import * as SettingsIndex from "./routes/settings-index";
 import * as SettingsGeneral from "./routes/settings-general";
 import * as SettingsIntegrations from "./routes/settings-integrations";
 import * as SettingsModels from "./routes/settings-models";
 import * as SettingsSandboxes from "./routes/settings-sandboxes";
 import * as SettingsSecrets from "./routes/settings-secrets";
 import * as SettingsSecretsNew from "./routes/settings-secrets-new";
-import * as SettingsResources from "./routes/settings-resources";
+import * as SettingsMonitoring from "./routes/settings-monitoring";
 import * as SettingsSecurity from "./routes/settings-security";
 import * as SettingsStorage from "./routes/settings-storage";
 import * as SettingsLiveEvents from "./routes/settings-live-events";
@@ -142,15 +143,16 @@ export const routes: RouteObject[] = [
           }),
           route("settings", Settings, {
             children: [
-              indexRoute(SettingsGeneral),
-              route("integrations", SettingsIntegrations),
+              indexRoute(SettingsIndex),
               route("models", SettingsModels),
+              route("integrations", SettingsIntegrations),
               route("sandboxes", SettingsSandboxes),
+              route("security", SettingsSecurity),
               route("secrets", SettingsSecrets),
               route("secrets/new", SettingsSecretsNew),
-              route("security", SettingsSecurity),
+              route("server", SettingsGeneral),
               route("storage", SettingsStorage),
-              route("resources", SettingsResources),
+              route("monitoring", SettingsMonitoring),
               route("live-events", SettingsLiveEvents),
             ],
           }),

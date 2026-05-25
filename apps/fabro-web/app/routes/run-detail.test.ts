@@ -219,7 +219,9 @@ function hasClasses(value: unknown, classes: string[]) {
 
 function tabCountBadges(renderer: TestRenderer.ReactTestRenderer) {
   return renderer.root.findAll(
-    (node) => node.type === "span" && hasClasses(node.props.className, ["tabular-nums"]),
+    (node) =>
+      node.type === "span" &&
+      hasClasses(node.props.className, ["rounded-full", "tabular-nums"]),
   );
 }
 

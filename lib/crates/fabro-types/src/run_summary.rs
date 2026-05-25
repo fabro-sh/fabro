@@ -211,6 +211,8 @@ pub struct RunBillingSummary {
     Default,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Hash,
     Serialize,
     Deserialize,

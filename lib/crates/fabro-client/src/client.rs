@@ -924,6 +924,33 @@ impl Client {
         convert_type(response.into_inner())
     }
 
+    pub async fn approve_run(&self, run_id: &RunId) -> Result<Run> {
+        let response = self
+            .send_api(
+                |client| async move { client.approve_run().id(run_id.to_string()).send().await },
+            )
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    pub async fn deny_run(&self, run_id: &RunId, reason: Option<String>) -> Result<Run> {
+        let body = types::DenyRunRequest { reason };
+        let response = self
+            .send_api(|client| {
+                let body = body.clone();
+                async move {
+                    client
+                        .deny_run()
+                        .id(run_id.to_string())
+                        .body(body)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
+        convert_type(response.into_inner())
+    }
+
     pub async fn interrupt_run(&self, run_id: &RunId) -> Result<()> {
         self.send_api(|client| async move {
             client.interrupt_run().id(run_id.to_string()).send().await

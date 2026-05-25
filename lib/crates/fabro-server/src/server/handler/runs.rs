@@ -97,6 +97,7 @@ enum RunsSortKey {
     Title,
     Workflow,
     Changes,
+    Size,
 }
 
 #[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
@@ -194,6 +195,7 @@ fn sort_runs(runs: &mut [fabro_types::Run], key: RunsSortKey, direction: RunsSor
             RunsSortKey::Title => run_title_key(a).cmp(&run_title_key(b)),
             RunsSortKey::Workflow => run_workflow_key(a).cmp(&run_workflow_key(b)),
             RunsSortKey::Changes => run_changes_total(a).cmp(&run_changes_total(b)),
+            RunsSortKey::Size => a.size.cmp(&b.size),
         };
         let primary = if asc { primary } else { primary.reverse() };
         // Stable tiebreak: newer ULIDs (and thus newer runs) first.

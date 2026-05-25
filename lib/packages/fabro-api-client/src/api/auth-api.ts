@@ -28,10 +28,6 @@ import type { AuthMeResponse } from '../models';
 // @ts-ignore
 import type { AuthSessionsResponse } from '../models';
 // @ts-ignore
-import type { DemoToggleRequest } from '../models';
-// @ts-ignore
-import type { DemoToggleResponse } from '../models';
-// @ts-ignore
 import type { DevTokenLoginRequest } from '../models';
 // @ts-ignore
 import type { DevTokenLoginResponse } from '../models';
@@ -219,47 +215,6 @@ export const AuthApiAxiosParamCreator = function (configuration?: Configuration)
                 options: localVarRequestOptions,
             };
         },
-        /**
-         * Enables or disables demo-mode routing for the current browser session.
-         * @summary Toggle browser demo mode
-         * @param {DemoToggleRequest} demoToggleRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        toggleDemo: async (demoToggleRequest: DemoToggleRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'demoToggleRequest' is not null or undefined
-            assertParamExists('toggleDemo', 'demoToggleRequest', demoToggleRequest)
-            const localVarPath = `/api/v1/demo/toggle`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication SessionCookie required
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(demoToggleRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
     }
 };
 
@@ -331,19 +286,6 @@ export const AuthApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['AuthApi.loginDevToken']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
-        /**
-         * Enables or disables demo-mode routing for the current browser session.
-         * @summary Toggle browser demo mode
-         * @param {DemoToggleRequest} demoToggleRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async toggleDemo(demoToggleRequest: DemoToggleRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DemoToggleResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.toggleDemo(demoToggleRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AuthApi.toggleDemo']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
     }
 };
 
@@ -399,16 +341,6 @@ export const AuthApiFactory = function (configuration?: Configuration, basePath?
          */
         loginDevToken(devTokenLoginRequest: DevTokenLoginRequest, options?: RawAxiosRequestConfig): AxiosPromise<DevTokenLoginResponse> {
             return localVarFp.loginDevToken(devTokenLoginRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Enables or disables demo-mode routing for the current browser session.
-         * @summary Toggle browser demo mode
-         * @param {DemoToggleRequest} demoToggleRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        toggleDemo(demoToggleRequest: DemoToggleRequest, options?: RawAxiosRequestConfig): AxiosPromise<DemoToggleResponse> {
-            return localVarFp.toggleDemo(demoToggleRequest, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -467,16 +399,5 @@ export class AuthApi extends BaseAPI {
      */
     public loginDevToken(devTokenLoginRequest: DevTokenLoginRequest, options?: RawAxiosRequestConfig) {
         return AuthApiFp(this.configuration).loginDevToken(devTokenLoginRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Enables or disables demo-mode routing for the current browser session.
-     * @summary Toggle browser demo mode
-     * @param {DemoToggleRequest} demoToggleRequest
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public toggleDemo(demoToggleRequest: DemoToggleRequest, options?: RawAxiosRequestConfig) {
-        return AuthApiFp(this.configuration).toggleDemo(demoToggleRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }

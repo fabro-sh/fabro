@@ -86,7 +86,7 @@ export function useRetryRun(id: string | undefined) {
   return useLifecycleMutation(id, "retry", retryRun, (run, mutate) => {
     void mutate(queryKeys.runs.detail(run.id), run, { revalidate: false });
     if (run.parent_id) {
-      void mutate(queryKeys.runs.children(run.parent_id));
+      mutateRunListCaches(mutate);
     }
   });
 }
@@ -202,21 +202,6 @@ export function useSteerRun(runId: string | undefined) {
       onSuccess: () => {
         if (!runId) return;
         void mutate(queryKeys.runs.detail(runId));
-      },
-    },
-  );
-}
-
-export function useToggleDemoMode() {
-  const { mutate } = useSWRConfig();
-  return useSWRMutation(
-    queryKeys.demo.toggle(),
-    async (_key, { arg }: { arg: { enabled: boolean } }) => {
-      await apiData(() => authApi.toggleDemo(arg));
-    },
-    {
-      onSuccess: () => {
-        void mutate(queryKeys.auth.me());
       },
     },
   );

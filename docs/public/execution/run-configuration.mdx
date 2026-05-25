@@ -428,7 +428,7 @@ fabro_tools = true
 
 `fabro_tools` defaults to `false`. Set it to `true` only for runs whose agents should be able to use the same Fabro run-management MCP tool catalog exposed to human MCP clients: create, search, get, interact, gather, events, and pair.
 
-One workflow-agent exception is intentional: `fabro_run_create` always creates child runs parented to the current run. If an agent supplies `parent_id`, it must match the current run ID.
+One workflow-agent exception is intentional: `fabro_run_create` always creates [child runs](/execution/child-runs) parented to the current run. If an agent supplies `parent_id`, it must match the current run ID.
 
 This setting is separate from normal agent `permissions` and from MCP server configuration. `permissions` controls workspace tool access, while `[run.agent.mcps]` configures external MCP servers available to the agent.
 

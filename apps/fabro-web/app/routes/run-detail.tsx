@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   ArrowPathIcon,
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -35,6 +36,7 @@ import {
 import { EditableRunTitle } from "../components/editable-run-title";
 import { GitPullRequestIcon } from "../components/icons";
 import { InterviewDock } from "../components/interview-dock";
+import { SizeChip } from "../components/size-chip";
 import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
@@ -44,6 +46,7 @@ import {
   PopoverHeader,
   PopoverRow,
   PopoverRows,
+  PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
   Tooltip,
 } from "../components/ui";
@@ -80,7 +83,6 @@ import {
   formatAbsoluteTs,
   formatDurationMs,
   formatRelativeTime,
-  formatUsdMicros,
 } from "../lib/format";
 import { queryKeys } from "../lib/query-keys";
 import { useRunEvents } from "../lib/run-events";
@@ -443,6 +445,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const fullHeight = matches.some(
     (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
   );
+  const hideSteerBar = matches.some(
+    (m) => (m.handle as { hideSteerBar?: boolean } | undefined)?.hideSteerBar,
+  );
 
   useRunEvents(params.id);
   useRunToasts(params.id);
@@ -556,13 +561,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       {run.workflow}
     </span>
   );
-  const totalUsdMicros = summary.billing?.total_usd_micros;
-  const sizeChip = totalUsdMicros != null && (
-    <Tooltip label={`Size ${summary.size} · ${formatUsdMicros(totalUsdMicros)} billed`}>
-      <span className="rounded bg-overlay px-1.5 py-0.5 font-mono text-xs font-bold text-fg-muted tabular-nums">
-        {summary.size}
-      </span>
-    </Tooltip>
+  const sizeChip = (
+    <SizeChip size={summary.size} totalUsdMicros={summary.billing?.total_usd_micros} />
   );
 
   const visibility = lifecycleActionVisibility(run.lifecycleStatus);
@@ -701,6 +701,22 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           </HoverCard>
         )}
 
+        {approvalActionVisible && (
+          <button
+            type="button"
+            onClick={() => void approveMutation.trigger()}
+            disabled={approvePending}
+            className={PRIMARY_BUTTON_CLASS}
+          >
+            {approvePending ? (
+              <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <CheckIcon className="size-4" aria-hidden="true" />
+            )}
+            {approvePending ? "Approving…" : "Approve"}
+          </button>
+        )}
+
         <ActionsMenu
           runId={params.id}
           canSendInterrupt={statusKind === "running"}
@@ -719,9 +735,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           canArchive={visibility.showArchive}
           archivePending={archivePending}
           onArchive={() => void archiveMutation.trigger()}
-          canApprove={approvalActionVisible}
           approvePending={approvePending}
-          onApprove={() => void approveMutation.trigger()}
           canDeny={approvalActionVisible}
           denyPending={denyPending}
           onDeny={() => void denyMutation.trigger()}
@@ -802,26 +816,30 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         className={
           fullHeight
             ? "pt-3 flex min-h-0 flex-1 flex-col"
-            : "pt-3 pb-[var(--fabro-interview-dock-clearance)]"
+            : hideSteerBar && !hasPendingQuestions
+              ? "pt-3"
+              : "pt-3 pb-[var(--fabro-interview-dock-clearance)]"
         }
       >
         <Outlet />
       </div>
 
-      <div
-        className={`fixed bottom-0 left-0 z-30 border-t border-line bg-page ${
-          isResizing
-            ? ""
-            : "transition-[right] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-        }`}
-        style={{ right: sidebarWidth }}
-      >
-        {hasPendingQuestions ? (
-          <InterviewDock runId={params.id} questions={pendingQuestions} />
-        ) : (
-          <SteerBar ref={steerBarRef} runId={params.id} />
-        )}
-      </div>
+      {(!hideSteerBar || hasPendingQuestions) && (
+        <div
+          className={`fixed bottom-0 left-0 z-30 border-t border-line bg-page ${
+            isResizing
+              ? ""
+              : "transition-[right] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          }`}
+          style={{ right: sidebarWidth }}
+        >
+          {hasPendingQuestions ? (
+            <InterviewDock runId={params.id} questions={pendingQuestions} />
+          ) : (
+            <SteerBar ref={steerBarRef} runId={params.id} />
+          )}
+        </div>
+      )}
 
       {askAvailable && (
         // Docked below the top nav (h-16) and above the steer bar (z-30); the
@@ -961,9 +979,7 @@ interface ActionsMenuProps {
   canArchive: boolean;
   archivePending: boolean;
   onArchive: () => void;
-  canApprove: boolean;
   approvePending: boolean;
-  onApprove: () => void;
   canDeny: boolean;
   denyPending: boolean;
   onDeny: () => void;
@@ -988,7 +1004,7 @@ function ActionsMenu(props: ActionsMenuProps) {
     canFocusSteer, onFocusSteer,
     canPreview, previewPending, onPreview,
     canArchive, archivePending, onArchive,
-    canApprove, approvePending, onApprove,
+    approvePending,
     canDeny, denyPending, onDeny,
     canRetry, retryPending, onRetry,
     canUnarchive, unarchivePending, onUnarchive,
@@ -998,7 +1014,7 @@ function ActionsMenu(props: ActionsMenuProps) {
 
   const [runIdCopied, setRunIdCopied] = useState(false);
 
-  const hasLifecycle = canApprove || canRetry || canArchive || canUnarchive;
+  const hasLifecycle = canRetry || canArchive || canUnarchive;
   const hasDestructive = canDeny || canCancel || canDelete;
   const anyPending =
     previewPending ||
@@ -1082,18 +1098,6 @@ function ActionsMenu(props: ActionsMenuProps) {
         </MenuItem>
         {separators.afterOperations && (
           <div className="my-1 h-px bg-line" role="separator" />
-        )}
-        {canApprove && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onApprove}
-              disabled={approvePending}
-              className={MENU_ITEM_CLASS}
-            >
-              {approvePending ? "Approving…" : "Approve"}
-            </button>
-          </MenuItem>
         )}
         {canRetry && (
           <MenuItem>

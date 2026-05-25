@@ -9,6 +9,7 @@ import type {
   EventEnvelope,
   ListRunsDirectionEnum,
   ListRunsSortEnum,
+  Model,
   PaginatedRunCommitList,
   PaginatedRunFileList,
   PaginatedRunList,
@@ -76,6 +77,7 @@ export interface RunsListFilters {
 export interface RunsPageOptions extends RunsListFilters {
   limit?: number;
   offset?: number;
+  parentId?: string;
 }
 
 export function useAuthConfig() {
@@ -146,7 +148,7 @@ export function useRunsPage(opts: RunsPageOptions = {}, enabled = true) {
           opts.limit,
           opts.offset,
           opts.includeArchived ?? false,
-          undefined,
+          opts.parentId,
           opts.status,
           opts.sort,
           opts.direction,
@@ -195,16 +197,6 @@ export function useRunFiles(
             ),
       ),
     { keepPreviousData: true },
-  );
-}
-
-export function useChildRuns(parentId: string | undefined) {
-  return useSWR<PaginatedRunList | null>(
-    parentId ? queryKeys.runs.children(parentId) : null,
-    () =>
-      apiNullableData(() =>
-        runsApi.listRuns(undefined, undefined, false, parentId!),
-      ),
   );
 }
 
@@ -444,6 +436,24 @@ export function useProviders() {
   return useSWR<ProviderList>(
     queryKeys.providers.list(),
     () => apiData(() => modelsApi.listProviders()),
+    immutableOptions,
+  );
+}
+
+export function useModels(provider: string, query: string) {
+  return useSWR<PaginatedEnvelope<Model>>(
+    queryKeys.models.list(provider, query),
+    () =>
+      fetchAllPages("models", (limit, offset) =>
+        apiData(() =>
+          modelsApi.listModels(
+            provider || undefined,
+            query || undefined,
+            limit,
+            offset,
+          ),
+        ),
+      ),
     immutableOptions,
   );
 }

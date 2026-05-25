@@ -134,6 +134,27 @@ pub(crate) fn mock_resolved_run<'a>(
     })
 }
 
+/// Snapshot filter that scrubs short (12-char) ULID suffixes from output, used
+/// when the CLI prints abbreviated run IDs.
+pub(crate) fn ulid_filter() -> (String, String) {
+    (
+        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        "[ULID]".to_string(),
+    )
+}
+
+/// JSON 409 error body mirroring the server's batch-error shape, used by mock
+/// HTTP servers in CLI tests that exercise partial-failure code paths.
+pub(crate) fn conflict_error_body(detail: &str) -> Value {
+    serde_json::json!({
+        "errors": [{
+            "status": "409",
+            "title": "Conflict",
+            "detail": detail,
+        }]
+    })
+}
+
 pub(crate) fn remote_run_summary_json(
     run_id: &str,
     workflow_name: &str,

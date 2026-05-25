@@ -33,9 +33,9 @@ describe("browser router", () => {
     expect(paths).not.toContain("/setup/complete");
   });
 
-  test("exposes the resources settings page", () => {
+  test("exposes the monitoring settings page", () => {
     const paths = collectPaths(routes);
 
-    expect(paths).toContain("/settings/resources");
+    expect(paths).toContain("/settings/monitoring");
   });
 });

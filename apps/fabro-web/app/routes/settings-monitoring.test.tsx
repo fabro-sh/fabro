@@ -21,14 +21,14 @@ mock.module("../lib/queries", () => ({
   useSystemResources: () => ({ data: systemResources }),
 }));
 
-const { default: SettingsResources } = await import("./settings-resources");
+const { default: SettingsMonitoring } = await import("./settings-monitoring");
 
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
-function renderSettingsResources() {
+function renderSettingsMonitoring() {
   let renderer: TestRenderer.ReactTestRenderer | undefined;
   act(() => {
-    renderer = TestRenderer.create(<SettingsResources />);
+    renderer = TestRenderer.create(<SettingsMonitoring />);
   });
   mountedRenderers.push(renderer!);
   return renderer!;
@@ -103,7 +103,7 @@ function sampleServerSettings(maxConcurrentRuns = 8): ServerSettings {
   } as unknown as ServerSettings;
 }
 
-describe("SettingsResources route", () => {
+describe("SettingsMonitoring route", () => {
   beforeEach(() => {
     teardownReactTestEnv = setupReactTestEnv();
     systemInfo = { runs: { active: 3, total: 12 } };
@@ -126,7 +126,7 @@ describe("SettingsResources route", () => {
   test("renders loaded resource data", () => {
     systemResources = sampleResources();
 
-    const renderer = renderSettingsResources();
+    const renderer = renderSettingsMonitoring();
     const text = textContent(renderer.toJSON());
 
     expect(text).toContain("18%");
@@ -148,7 +148,7 @@ describe("SettingsResources route", () => {
       },
     });
 
-    const renderer = renderSettingsResources();
+    const renderer = renderSettingsMonitoring();
 
     expect(textContent(renderer.toJSON())).toContain("Collecting sample");
   });
@@ -179,7 +179,7 @@ describe("SettingsResources route", () => {
       },
     });
 
-    const renderer = renderSettingsResources();
+    const renderer = renderSettingsMonitoring();
     const text = textContent(renderer.toJSON());
 
     expect(text).toContain("Unsupported");
@@ -192,7 +192,7 @@ describe("SettingsResources route", () => {
       notes: ["Memory is scoped to the current container."],
     });
 
-    const renderer = renderSettingsResources();
+    const renderer = renderSettingsMonitoring();
 
     expect(textContent(renderer.toJSON())).toContain(
       "Memory is scoped to the current container.",

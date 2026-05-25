@@ -249,7 +249,7 @@ describe("runs route workspace preferences", () => {
       }),
     );
 
-    expect(loadStoredRunsWorkspaceSearchParams(storage).toString()).toBe("hide=elapsed%2Crepo");
+    expect(loadStoredRunsWorkspaceSearchParams(storage).toString()).toBe("hide=repo%2Celapsed");
   });
 
   test("valid stored preferences produce canonical URL params", () => {

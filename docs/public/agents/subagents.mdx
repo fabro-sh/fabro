@@ -94,6 +94,8 @@ Sub-agents are most useful for:
 - **Divide and conquer** -- split an independent task into smaller pieces
 - **Context management** -- offload work when the parent session is getting crowded
 
+Use [child runs](/execution/child-runs) instead when the delegated work should be a separate Fabro run with its own workflow, lifecycle, sandbox, checkpoints, and outputs.
+
 <Note>
 Sub-agents run with no turn limit by default. Pass `max_turns` when you want predictable cost or time bounds. All active sub-agents are cleaned up automatically when the parent session closes.
 </Note>

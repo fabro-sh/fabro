@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { ChevronDownIcon } from "@heroicons/react/16/solid";
-import type { Provider } from "@qltysh/fabro-api-client";
-import { useProviders } from "../lib/queries";
+import type { Model, Provider } from "@qltysh/fabro-api-client";
+import { useModels, useProviders } from "../lib/queries";
 import {
   Dot,
   Panel,
@@ -11,6 +11,15 @@ import {
   SettingsPageIntro,
   plural,
 } from "../components/settings-panel";
+import {
+  FilterButton,
+  type FilterOption,
+} from "../components/runs-list/filter-button";
+import {
+  SortHeader,
+  type SortDirection,
+} from "../components/runs-list/sort-header";
+import { formatContextWindow, formatTokensPerSecond } from "../lib/format";
 
 export function meta() {
   return [{ title: "Models — Fabro" }];
@@ -20,10 +29,13 @@ export default function SettingsModels() {
   const query = useProviders();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <SettingsPageIntro description="LLM providers configured on this Fabro server." />
       {query.data ? (
-        <ProvidersPanel providers={query.data.data} />
+        <>
+          <ProvidersPanel providers={query.data.data} />
+          <ModelsSection providers={query.data.data} />
+        </>
       ) : (
         <PanelSkeleton />
       )}
@@ -164,4 +176,236 @@ function ProviderStatus({ provider }: { provider: Provider }) {
       ) : null}
     </span>
   );
+}
+
+type ModelSortKey = "provider" | "model" | "context" | "speed";
+
+function ModelsSection({ providers }: { providers: Provider[] }) {
+  const [providerFilter, setProviderFilter] = useState<string>("");
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebouncedValue(searchInput, 250);
+  const [sortKey, setSortKey] = useState<ModelSortKey>("provider");
+  const [direction, setDirection] = useState<SortDirection>("asc");
+
+  const { data, isLoading } = useModels(providerFilter, debouncedSearch);
+
+  const providerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of providers) map.set(p.id, p.display_name || p.id);
+    return map;
+  }, [providers]);
+
+  const rows = useMemo(() => {
+    const all = (data?.data ?? []).filter((m) => m.configured);
+    return sortModels(all, sortKey, direction, providerNameById);
+  }, [data, sortKey, direction, providerNameById]);
+
+  const providerOptions: FilterOption<string>[] = useMemo(
+    () => [
+      { value: "", label: "All providers" },
+      ...providers
+        .filter((p) => p.configured)
+        .map((p) => ({ value: p.id, label: p.display_name || p.id })),
+    ],
+    [providers],
+  );
+
+  const onSort = useCallback(
+    (key: ModelSortKey) => {
+      if (sortKey === key) {
+        setDirection((dir) => (dir === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(key);
+        setDirection("asc");
+      }
+    },
+    [sortKey],
+  );
+
+  const showEmpty = !isLoading && rows.length === 0;
+
+  return (
+    <section className="space-y-3">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-medium text-fg-2">Models</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterButton
+            label="Provider"
+            value={providerFilter}
+            allValue=""
+            options={providerOptions}
+            onChange={setProviderFilter}
+          />
+          <input
+            type="search"
+            name="model-search"
+            aria-label="Search models"
+            placeholder="Search models…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="w-44 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs text-fg-2 placeholder:text-fg-muted focus:border-line-strong focus:outline-none"
+          />
+        </div>
+      </header>
+      <div className="-mx-4 -my-2 overflow-x-auto whitespace-nowrap sm:-mx-6 lg:-mx-8">
+        <div className="inline-block min-w-full px-4 py-2 align-middle sm:px-6 lg:px-8">
+          <table className="w-full text-sm [&_td:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:first-child]:pl-0 [&_th:last-child]:pr-0">
+            <thead>
+              <tr className="border-b border-line text-xs font-medium text-fg-3">
+                <SortHeader<ModelSortKey>
+                  label="Provider"
+                  sortKey="provider"
+                  activeSort={sortKey}
+                  direction={direction}
+                  onClick={onSort}
+                />
+                <SortHeader<ModelSortKey>
+                  label="Model"
+                  sortKey="model"
+                  activeSort={sortKey}
+                  direction={direction}
+                  onClick={onSort}
+                />
+                <SortHeader<ModelSortKey>
+                  label="Context"
+                  sortKey="context"
+                  activeSort={sortKey}
+                  direction={direction}
+                  align="right"
+                  onClick={onSort}
+                />
+                <SortHeader<ModelSortKey>
+                  label="Speed"
+                  sortKey="speed"
+                  activeSort={sortKey}
+                  direction={direction}
+                  align="right"
+                  onClick={onSort}
+                />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((model) => (
+                <ModelTableRow
+                  key={model.id}
+                  model={model}
+                  providerLabel={
+                    providerNameById.get(model.provider) ?? model.provider
+                  }
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {showEmpty && (
+        <div className="py-6 text-sm text-fg-muted">
+          {debouncedSearch || providerFilter
+            ? "No matching models from configured providers."
+            : "No configured providers yet — add a provider above to enable models."}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ModelTableRow({
+  model,
+  providerLabel,
+}: {
+  model:         Model;
+  providerLabel: string;
+}) {
+  return (
+    <tr className="border-b border-line transition-colors last:border-b-0 hover:bg-overlay/40">
+      <td className="whitespace-nowrap px-3 py-2.5 text-fg-3">
+        {providerLabel}
+      </td>
+      <td className="whitespace-nowrap px-3 py-2.5">
+        <ModelNameCell model={model} />
+      </td>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-fg-muted tabular-nums">
+        {formatContextWindow(model.limits.context_window)}
+      </td>
+      <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-fg-muted tabular-nums">
+        {formatTokensPerSecond(model.estimated_output_tps)}
+      </td>
+    </tr>
+  );
+}
+
+function ModelNameCell({ model }: { model: Model }) {
+  const hasAliases = model.aliases.length > 0;
+  if (!hasAliases) {
+    return <span className="font-mono text-xs text-fg-2">{model.id}</span>;
+  }
+  return (
+    <span className="group/aliases relative inline-flex">
+      <button
+        type="button"
+        aria-describedby={`aliases-${model.id}`}
+        className="cursor-default font-mono text-xs text-fg-2 underline decoration-dotted decoration-fg-muted underline-offset-4 hover:decoration-fg-3 focus:outline-none focus-visible:text-fg"
+      >
+        {model.id}
+      </button>
+      <span
+        role="tooltip"
+        id={`aliases-${model.id}`}
+        className="pointer-events-none invisible absolute left-0 top-full z-30 mt-1.5 min-w-[10rem] rounded-md bg-panel p-2 text-xs opacity-0 shadow-2xl shadow-black/40 ring-1 ring-line-strong transition-opacity duration-100 group-hover/aliases:visible group-hover/aliases:opacity-100 group-focus-within/aliases:visible group-focus-within/aliases:opacity-100"
+      >
+        <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+          Aliases
+        </span>
+        {model.aliases.map((alias) => (
+          <span key={alias} className="block font-mono text-fg-2">
+            {alias}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
+function sortModels(
+  models:           Model[],
+  key:              ModelSortKey,
+  direction:        SortDirection,
+  providerNameById: Map<string, string>,
+): Model[] {
+  const sign = direction === "asc" ? 1 : -1;
+  const providerLabel = (m: Model) =>
+    providerNameById.get(m.provider) ?? m.provider;
+  return [...models].sort((a, b) => {
+    let cmp = 0;
+    switch (key) {
+      case "provider":
+        cmp = providerLabel(a).localeCompare(providerLabel(b));
+        if (cmp === 0) cmp = a.id.localeCompare(b.id);
+        break;
+      case "model":
+        cmp = a.id.localeCompare(b.id);
+        break;
+      case "context":
+        cmp = a.limits.context_window - b.limits.context_window;
+        if (cmp === 0) cmp = a.id.localeCompare(b.id);
+        break;
+      case "speed": {
+        const ta = a.estimated_output_tps ?? -Infinity;
+        const tb = b.estimated_output_tps ?? -Infinity;
+        cmp = ta - tb;
+        if (cmp === 0) cmp = a.id.localeCompare(b.id);
+        break;
+      }
+    }
+    return cmp * sign;
+  });
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
 }

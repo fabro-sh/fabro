@@ -118,7 +118,7 @@ impl FabroMcpServer {
 
     #[tool(
         name = "fabro_run_interact",
-        description = "Control a Fabro run: start, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. Use fabro_run_get for read-only inspection."
+        description = "Control a Fabro run: start, approve, deny, message, interrupt, cancel, archive, unarchive, link or unlink a parent, inspect or answer questions. Use fabro_run_get for read-only inspection."
     )]
     async fn fabro_run_interact(
         &self,

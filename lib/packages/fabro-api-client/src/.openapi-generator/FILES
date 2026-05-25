@@ -89,8 +89,6 @@ models/create-secret-request.ts
 models/delete-run-response.ts
 models/delete-run-sandbox.ts
 models/delete-secret-request.ts
-models/demo-toggle-request.ts
-models/demo-toggle-response.ts
 models/deny-run-request.ts
 models/dev-token-login-request.ts
 models/dev-token-login-response.ts

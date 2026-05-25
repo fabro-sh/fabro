@@ -279,7 +279,6 @@ url = "{web_url}"
             .route("/auth/cli/refresh", post(|| async { StatusCode::OK }))
             .route("/auth/cli/logout", post(|| async { StatusCode::OK }))
             .route("/api/v1/runs", get(|| async { StatusCode::OK }))
-            .route("/api/v1/demo/toggle", post(|| async { StatusCode::OK }))
             .route(WEBHOOK_ROUTE, post(|| async { StatusCode::OK }))
             .route("/health", get(|| async { StatusCode::OK }))
             .fallback(|| async { StatusCode::OK.into_response() })
@@ -386,23 +385,9 @@ url = "{web_url}"
         .await;
         assert_status!(webhook_response, StatusCode::OK).await;
 
-        let runs_response = request(
-            app.clone(),
-            Method::GET,
-            "/api/v1/runs",
-            Some("localhost:32276"),
-        )
-        .await;
+        let runs_response =
+            request(app, Method::GET, "/api/v1/runs", Some("localhost:32276")).await;
         assert_status!(runs_response, StatusCode::OK).await;
-
-        let demo_response = request(
-            app,
-            Method::POST,
-            "/api/v1/demo/toggle",
-            Some("localhost:32276"),
-        )
-        .await;
-        assert_status!(demo_response, StatusCode::OK).await;
     }
 
     #[tokio::test]

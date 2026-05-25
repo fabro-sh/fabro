@@ -1,3 +1,4 @@
+mod approve;
 mod archive;
 mod artifact_cp;
 mod artifact_list;
@@ -6,6 +7,7 @@ mod auth;
 mod cli_reference;
 mod config;
 mod create;
+mod deny;
 mod diff;
 mod discord;
 mod docs;

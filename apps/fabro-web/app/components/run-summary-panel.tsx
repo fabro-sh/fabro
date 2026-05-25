@@ -183,11 +183,11 @@ export function RunSummaryPanelView({
           ) : diff ? (
             <div className="flex items-baseline gap-2 text-sm">
               <span className="font-mono tabular-nums">
-                <span className="text-mint">+{diff.additions}</span>{" "}
-                <span className="text-coral">−{diff.deletions}</span>
+                <span className="text-mint">+{diff.additions.toLocaleString()}</span>{" "}
+                <span className="text-coral">−{diff.deletions.toLocaleString()}</span>
               </span>
               <span className="text-fg-3">
-                in {diff.files_changed} {diff.files_changed === 1 ? "file" : "files"}
+                in {diff.files_changed.toLocaleString()} {diff.files_changed === 1 ? "file" : "files"}
               </span>
             </div>
           ) : (
