@@ -3,9 +3,8 @@ import TestRenderer, { act } from "react-test-renderer";
 import { MemoryRouter } from "react-router";
 
 import {
-  AgentToolCategory,
   AgentSkillActivationSource,
-  PermissionLevel,
+  AgentToolCategory,
   StageContextWindowCategory,
   StageContextWindowCountMethod,
   StageContextWindowStaleness,
@@ -148,17 +147,7 @@ describe("StageInsightsSidebar", () => {
     expect(dom).not.toContain("31%");
   });
 
-  test("renders permission badge for read-only", () => {
-    const dom = render(makeStage({ permission_level: PermissionLevel.READ_ONLY }), null);
-    expect(dom).toContain("Read-only");
-  });
-
-  test("renders permission badge for full access", () => {
-    const dom = render(makeStage({ permission_level: PermissionLevel.FULL }), null);
-    expect(dom).toContain("Full access");
-  });
-
-  test("renders projected agent tool names, descriptions, categories, and invoked state", () => {
+  test("renders projected agent tool names and invoked state", () => {
     const dom = render(
       makeStage({
         agent_tools: [
@@ -177,29 +166,16 @@ describe("StageInsightsSidebar", () => {
             invoked:     false,
           },
         ],
-        permission_level: PermissionLevel.FULL,
       }),
       null,
     );
 
     expect(dom).toContain("1/2");
     expect(dom).toContain("apply_patch");
-    expect(dom).toContain("Apply a unified diff patch");
-    expect(dom).toContain("write");
-    expect(dom).toContain("used");
     expect(dom).toContain("grep");
+    // Tool description still appears as the row `title` tooltip.
+    expect(dom).toContain("Apply a unified diff patch");
     expect(dom).toContain("Search file contents");
-    expect(dom).toContain("read");
-    expect(dom).toContain("available");
-    // Permission remains secondary compatibility metadata, not the source of
-    // the tool list.
-    expect(dom).toContain("Full access");
-  });
-
-  test("legacy stages without agent tools keep permission fallback only", () => {
-    const dom = render(makeStage({ permission_level: PermissionLevel.READ_WRITE }), null);
-    expect(dom).toContain("Read/write");
-    expect(dom).not.toContain("apply_patch");
   });
 
   test("renders mcp server used/total count, marks invoked servers as 'used'", () => {
@@ -266,6 +242,5 @@ describe("StageInsightsSidebar", () => {
     const dom = render(undefined, null);
     // sidebar still renders even with no data
     expect(dom).toContain("Agent");
-    expect(dom).toContain("Unknown");
   });
 });
