@@ -5,12 +5,14 @@ use super::super::{
     ProviderId, ProviderList, Query, RequiredUser, Response, Router, State, StatusCode,
     auth_issue_message, default_page_limit, error, get, post, run_model_test,
 };
+use crate::diagnostics;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
         .route("/providers", get(list_providers))
+        .route("/providers/test", post(test_providers))
 }
 
 #[derive(serde::Deserialize)]
@@ -91,6 +93,20 @@ async fn list_providers(_auth: RequiredUser, State(state): State<Arc<AppState>>)
     let data = catalog.provider_summaries(&configured);
 
     (StatusCode::OK, Json(ProviderList { data })).into_response()
+}
+
+async fn test_providers(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
+    match diagnostics::test_llm_providers(&state).await {
+        Ok(report) => (StatusCode::OK, Json(report)).into_response(),
+        Err(err) => {
+            error!(error = ?err, "Failed to resolve LLM providers for provider test");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve LLM providers",
+            )
+            .into_response()
+        }
+    }
 }
 
 async fn test_model(

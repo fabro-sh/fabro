@@ -31,6 +31,8 @@ import type { ModelTestResult } from '../models';
 import type { PaginatedModelList } from '../models';
 // @ts-ignore
 import type { ProviderList } from '../models';
+// @ts-ignore
+import type { ProviderTestList } from '../models';
 /**
  * ModelsApi - axios parameter creator
  */
@@ -173,6 +175,42 @@ export const ModelsApiAxiosParamCreator = function (configuration?: Configuratio
                 options: localVarRequestOptions,
             };
         },
+        /**
+         * Tests every configured LLM provider once using the catalog probe model. Provider-level failures are returned in the response body with HTTP 200.
+         * @summary Test Providers
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        testProviders: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/providers/test`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -224,6 +262,18 @@ export const ModelsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['ModelsApi.testModel']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         * Tests every configured LLM provider once using the catalog probe model. Provider-level failures are returned in the response body with HTTP 200.
+         * @summary Test Providers
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async testProviders(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProviderTestList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.testProviders(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelsApi.testProviders']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -266,6 +316,15 @@ export const ModelsApiFactory = function (configuration?: Configuration, basePat
         testModel(id: string, mode?: ModelTestMode, options?: RawAxiosRequestConfig): AxiosPromise<ModelTestResult> {
             return localVarFp.testModel(id, mode, options).then((request) => request(axios, basePath));
         },
+        /**
+         * Tests every configured LLM provider once using the catalog probe model. Provider-level failures are returned in the response body with HTTP 200.
+         * @summary Test Providers
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        testProviders(options?: RawAxiosRequestConfig): AxiosPromise<ProviderTestList> {
+            return localVarFp.testProviders(options).then((request) => request(axios, basePath));
+        },
     };
 };
 
@@ -307,5 +366,15 @@ export class ModelsApi extends BaseAPI {
      */
     public testModel(id: string, mode?: ModelTestMode, options?: RawAxiosRequestConfig) {
         return ModelsApiFp(this.configuration).testModel(id, mode, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Tests every configured LLM provider once using the catalog probe model. Provider-level failures are returned in the response body with HTTP 200.
+     * @summary Test Providers
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public testProviders(options?: RawAxiosRequestConfig) {
+        return ModelsApiFp(this.configuration).testProviders(options).then((request) => request(this.axios, this.basePath));
     }
 }

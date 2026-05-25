@@ -4466,6 +4466,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProviderList"
 
+  /api/v1/providers/test:
+    post:
+      operationId: testProviders
+      tags: [Models]
+      summary: Test Providers
+      description: >
+        Tests every configured LLM provider once using the catalog probe model.
+        Provider-level failures are returned in the response body with HTTP 200.
+      responses:
+        "200":
+          description: Provider test results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderTestList"
+
   # ── Completions ───────────────────────────────────────────────────────
 
   /api/v1/completions:
@@ -6176,6 +6192,75 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Provider"
+
+    ProviderTestList:
+      description: Results from testing all configured LLM providers.
+      type: object
+      required:
+        - data
+        - summary
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderTestResult"
+        summary:
+          $ref: "#/components/schemas/ProviderTestSummary"
+
+    ProviderTestResult:
+      description: Result of testing one configured LLM provider.
+      type: object
+      required:
+        - provider
+        - model_id
+        - status
+        - error_message
+      properties:
+        provider:
+          $ref: "#/components/schemas/ProviderId"
+        model_id:
+          type: ["string", "null"]
+          description: Catalog probe model ID used for the provider, or null when no probe was sent.
+          example: "gpt-5.4-mini"
+        status:
+          $ref: "#/components/schemas/ProviderTestStatus"
+        error_message:
+          type: ["string", "null"]
+          description: Error details when status is "error".
+
+    ProviderTestSummary:
+      description: Aggregate provider test status and counts.
+      type: object
+      required:
+        - status
+        - total
+        - passed
+        - failed
+      properties:
+        status:
+          $ref: "#/components/schemas/ProviderTestStatus"
+        total:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of configured providers tested or evaluated.
+        passed:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of providers whose probe succeeded.
+        failed:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of providers with configuration, auth, registration, or probe errors.
+
+    ProviderTestStatus:
+      description: Provider test status.
+      type: string
+      enum:
+        - ok
+        - error
 
     Provider:
       description: An LLM provider from the catalog with effective config and configured status.

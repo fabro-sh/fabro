@@ -5895,6 +5895,398 @@ async fn list_providers_marks_all_unconfigured_without_credentials() {
 }
 
 #[tokio::test]
+async fn test_providers_no_configured_providers_returns_error_summary() {
+    let state = test_app_state_with_env_lookup(
+        default_test_server_settings(),
+        RunLayer::default(),
+        5,
+        |_| None,
+    );
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/providers/test"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    assert_eq!(body["data"].as_array().unwrap().len(), 0);
+    assert_eq!(body["summary"]["status"], "error");
+    assert_eq!(body["summary"]["total"], 0);
+    assert_eq!(body["summary"]["passed"], 0);
+    assert_eq!(body["summary"]["failed"], 0);
+}
+
+#[tokio::test]
+async fn test_providers_successful_probe_returns_probe_model() {
+    let server = MockServer::start_async().await;
+    let response_mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/responses")
+                .header("authorization", "Bearer vault-openai-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(openai_responses_payload("OK"));
+        })
+        .await;
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(default_test_server_settings(), RunLayer::default())
+        .max_concurrent_runs(5)
+        .provider_base_url("openai", server.url("/v1"))
+        .build();
+    state
+        .vault
+        .write()
+        .await
+        .set(
+            EnvVars::OPENAI_API_KEY,
+            "vault-openai-key",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/providers/test"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let results = body["data"].as_array().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["provider"], "openai");
+    assert_eq!(results[0]["model_id"], "gpt-5.4-mini");
+    assert_eq!(results[0]["status"], "ok");
+    assert!(results[0]["error_message"].is_null());
+    assert_eq!(body["summary"]["status"], "ok");
+    assert_eq!(body["summary"]["total"], 1);
+    assert_eq!(body["summary"]["passed"], 1);
+    assert_eq!(body["summary"]["failed"], 0);
+    response_mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_providers_auth_issue_returns_error_without_upstream_call() {
+    let server = MockServer::start_async().await;
+    let upstream = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/responses");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(openai_responses_payload("unexpected"));
+        })
+        .await;
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(default_test_server_settings(), RunLayer::default())
+        .max_concurrent_runs(5)
+        .provider_base_url("openai", server.url("/v1"))
+        .build();
+    let mut credential = openai_oauth_credential();
+    credential.tokens.expires_at = Utc::now() - ChronoDuration::hours(1);
+    credential.tokens.refresh_token = None;
+    state
+        .vault
+        .write()
+        .await
+        .set(
+            "OPENAI_CODEX",
+            &serde_json::to_string(&credential).unwrap(),
+            SecretType::Oauth,
+            None,
+        )
+        .unwrap();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/providers/test"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let results = body["data"].as_array().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["provider"], "openai");
+    assert!(results[0]["model_id"].is_null());
+    assert_eq!(results[0]["status"], "error");
+    assert!(
+        results[0]["error_message"]
+            .as_str()
+            .unwrap()
+            .contains("requires re-authentication")
+    );
+    assert_eq!(body["summary"]["status"], "error");
+    assert_eq!(body["summary"]["total"], 1);
+    assert_eq!(body["summary"]["passed"], 0);
+    assert_eq!(body["summary"]["failed"], 1);
+    upstream.assert_calls_async(0).await;
+}
+
+#[tokio::test]
+async fn test_providers_registration_issue_returns_error_without_probe() {
+    let llm_catalog_settings: LlmCatalogSettings = toml::from_str(
+        r#"
+[providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+
+[providers.acme.auth]
+credentials = ["vault:ACME_API_KEY"]
+
+[models."acme-probe"]
+provider = "acme"
+display_name = "Acme Probe"
+family = "acme"
+default = true
+probe = true
+
+[models."acme-probe".limits]
+context_window = 128000
+
+[models."acme-probe".features]
+tools = true
+vision = false
+reasoning = false
+"#,
+    )
+    .expect("catalog fixture should parse");
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(default_test_server_settings(), RunLayer::default())
+        .max_concurrent_runs(5)
+        .llm_catalog_settings(llm_catalog_settings)
+        .build();
+    state
+        .vault
+        .write()
+        .await
+        .set("ACME_API_KEY", "acme-key", SecretType::Token, None)
+        .unwrap();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/providers/test"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let results = body["data"].as_array().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["provider"], "acme");
+    assert!(results[0]["model_id"].is_null());
+    assert_eq!(results[0]["status"], "error");
+    assert!(
+        results[0]["error_message"]
+            .as_str()
+            .unwrap()
+            .contains("does not configure base_url")
+    );
+    assert_eq!(body["summary"]["status"], "error");
+    assert_eq!(body["summary"]["total"], 1);
+    assert_eq!(body["summary"]["passed"], 0);
+    assert_eq!(body["summary"]["failed"], 1);
+}
+
+#[tokio::test]
+async fn test_providers_mixed_results_preserve_catalog_order_and_counts() {
+    let server = MockServer::start_async().await;
+    let alpha_mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/responses")
+                .header("authorization", "Bearer alpha-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(openai_responses_payload("OK"));
+        })
+        .await;
+    let zeta_mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/responses")
+                .header("authorization", "Bearer zeta-key");
+            then.status(401)
+                .header("content-type", "application/json")
+                .json_body(json!({
+                    "error": {
+                        "message": "invalid api key",
+                        "type": "invalid_request_error"
+                    }
+                }));
+        })
+        .await;
+    let llm_catalog_settings: LlmCatalogSettings = toml::from_str(&format!(
+        r#"
+[providers.zeta]
+display_name = "Zeta"
+adapter = "openai"
+base_url = "{base_url}"
+
+[providers.zeta.auth]
+credentials = ["vault:ZETA_API_KEY"]
+
+[providers.alpha]
+display_name = "Alpha"
+adapter = "openai"
+base_url = "{base_url}"
+
+[providers.alpha.auth]
+credentials = ["vault:ALPHA_API_KEY"]
+
+[models."zeta-probe"]
+provider = "zeta"
+display_name = "Zeta Probe"
+family = "zeta"
+default = true
+probe = true
+
+[models."zeta-probe".limits]
+context_window = 128000
+
+[models."zeta-probe".features]
+tools = true
+vision = false
+reasoning = false
+
+[models."alpha-probe"]
+provider = "alpha"
+display_name = "Alpha Probe"
+family = "alpha"
+default = true
+probe = true
+
+[models."alpha-probe".limits]
+context_window = 128000
+
+[models."alpha-probe".features]
+tools = true
+vision = false
+reasoning = false
+"#,
+        base_url = server.url("/v1")
+    ))
+    .expect("catalog fixture should parse");
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(default_test_server_settings(), RunLayer::default())
+        .max_concurrent_runs(5)
+        .llm_catalog_settings(llm_catalog_settings)
+        .build();
+    {
+        let mut vault = state.vault.write().await;
+        vault
+            .set("ALPHA_API_KEY", "alpha-key", SecretType::Token, None)
+            .unwrap();
+        vault
+            .set("ZETA_API_KEY", "zeta-key", SecretType::Token, None)
+            .unwrap();
+    }
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/providers/test"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let results = body["data"].as_array().unwrap();
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0]["provider"], "alpha");
+    assert_eq!(results[0]["model_id"], "alpha-probe");
+    assert_eq!(results[0]["status"], "ok");
+    assert_eq!(results[1]["provider"], "zeta");
+    assert_eq!(results[1]["model_id"], "zeta-probe");
+    assert_eq!(results[1]["status"], "error");
+    assert_eq!(body["summary"]["status"], "error");
+    assert_eq!(body["summary"]["total"], 2);
+    assert_eq!(body["summary"]["passed"], 1);
+    assert_eq!(body["summary"]["failed"], 1);
+    alpha_mock.assert_async().await;
+    zeta_mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_providers_response_does_not_leak_api_keys() {
+    let leaked_key = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
+    let server = MockServer::start_async().await;
+    let response_mock = server
+        .mock_async(move |when, then| {
+            when.method(POST)
+                .path("/v1/responses")
+                .header("authorization", format!("Bearer {leaked_key}"));
+            then.status(401)
+                .header("content-type", "application/json")
+                .json_body(json!({
+                    "error": {
+                        "message": format!("invalid api key {leaked_key}"),
+                        "type": "invalid_request_error"
+                    }
+                }));
+        })
+        .await;
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(default_test_server_settings(), RunLayer::default())
+        .max_concurrent_runs(5)
+        .provider_base_url("openai", server.url("/v1"))
+        .build();
+    state
+        .vault
+        .write()
+        .await
+        .set(EnvVars::OPENAI_API_KEY, leaked_key, SecretType::Token, None)
+        .unwrap();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/providers/test"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    let serialized = body.to_string();
+
+    assert!(
+        !serialized.contains(leaked_key),
+        "provider test response leaked API key: {serialized}"
+    );
+    assert!(
+        serialized.contains("REDACTED"),
+        "provider test response should include a redacted error: {serialized}"
+    );
+    response_mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_providers_requires_user_auth() {
+    let app = build_router(test_app_state(), test_auth_mode());
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/providers/test"))
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::UNAUTHORIZED).await;
+}
+
+#[tokio::test]
 async fn auth_login_github_redirects_to_github() {
     let source = r#"
 _version = 1

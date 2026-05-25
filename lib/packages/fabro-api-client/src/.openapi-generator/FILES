@@ -259,6 +259,10 @@ models/principal-worker.ts
 models/principal.ts
 models/project-namespace.ts
 models/provider-list.ts
+models/provider-test-list.ts
+models/provider-test-result.ts
+models/provider-test-status.ts
+models/provider-test-summary.ts
 models/provider.ts
 models/prune-run-entry.ts
 models/prune-runs-request.ts
