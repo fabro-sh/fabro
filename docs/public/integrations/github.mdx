@@ -67,7 +67,7 @@ The installer:
 2. Opens GitHub in your browser so you can review the manifest and click **Create GitHub App**.
 3. Receives GitHub's temporary callback on localhost, exchanges it for permanent app credentials, and writes:
    - `app_id`, `client_id`, and `slug` to `~/.fabro/settings.toml`
-   - `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` to `<data_dir>/server.env`
+   - `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` to the server vault
 4. Prints the resulting app slug so you can install the app on the repositories Fabro should access.
 
 After setup completes, restart the Fabro server before attempting browser login.
@@ -90,9 +90,9 @@ The GitHub App check verifies five fields:
 |---|---|
 | `server.integrations.github.app_id` | `~/.fabro/settings.toml` |
 | `server.integrations.github.client_id` | `~/.fabro/settings.toml` |
-| `GITHUB_APP_CLIENT_SECRET` | `<data_dir>/server.env` |
-| `GITHUB_APP_WEBHOOK_SECRET` | `<data_dir>/server.env` |
-| `GITHUB_APP_PRIVATE_KEY` | `<data_dir>/server.env` |
+| `GITHUB_APP_CLIENT_SECRET` | server vault |
+| `GITHUB_APP_WEBHOOK_SECRET` | server vault |
+| `GITHUB_APP_PRIVATE_KEY` | server vault |
 
 If all five are set, the check passes. If none are set, it warns (GitHub integration is optional). If some are set but others are missing, it errors with the specific missing fields.
 
@@ -115,15 +115,23 @@ slug = "fabro-a3f2"
 | `client_id` | OAuth Client ID for the app |
 | `slug` | App slug, used for linking to the GitHub App settings page |
 
-### `server.env`
+### Server vault
 
-Fabro stores the GitHub App secrets in `<data_dir>/server.env` under these keys:
+Fabro stores the GitHub App secrets in the server vault under these keys:
 
 - `GITHUB_APP_CLIENT_SECRET`
 - `GITHUB_APP_WEBHOOK_SECRET`
 - `GITHUB_APP_PRIVATE_KEY`
 
 The private key is stored as base64-encoded PEM. Fabro also accepts raw PEM format (starting with `-----BEGIN`).
+
+Install mode writes these automatically. If you rotate them manually, use `fabro secret set` on the server:
+
+```bash
+fabro secret set GITHUB_APP_CLIENT_SECRET <client-secret>
+fabro secret set GITHUB_APP_WEBHOOK_SECRET <webhook-secret>
+fabro secret set --type file GITHUB_APP_PRIVATE_KEY <private-key-pem-or-base64>
+```
 
 ### Webhook delivery strategies
 
@@ -164,10 +172,16 @@ This walks through just the GitHub setup steps — choosing a strategy, register
 Choose **GitHub CLI** in `fabro install` to use the default local-user flow. The installer:
 
 1. Runs `gh auth token`
-2. Stores the token as `GITHUB_TOKEN`
+2. Stores the token as vault secret `GITHUB_TOKEN`
 3. Writes `strategy = "token"` under `[server.integrations.github]`
 
-After install, Fabro reads `GITHUB_TOKEN` from the vault or environment (with `GH_TOKEN` as a fallback). Token updates after install are the user's responsibility. Short-lived GitHub installation tokens (`ghs_*`) are rejected as static tokens; use a PAT for `token` mode, or use GitHub App mode so Fabro can refresh installation tokens for you.
+After install, Fabro reads `GITHUB_TOKEN` from the server vault only. To update it after install, run:
+
+```bash
+fabro secret set GITHUB_TOKEN <token>
+```
+
+Short-lived GitHub installation tokens (`ghs_*`) are rejected as static tokens; use a PAT for `token` mode, or use GitHub App mode so Fabro can refresh installation tokens for you.
 
 In this mode, Fabro disables the embedded web UI and browser auth routes. Machine API routes and `/health` continue to work.
 
@@ -268,7 +282,7 @@ The app is installed but doesn't have access to this specific repository. Update
 
 ### "GitHub App authentication failed"
 
-The `app_id` in `settings.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run `fabro install` on the server host or verify the values match your GitHub App.
+The `app_id` in `settings.toml` or the `GITHUB_APP_PRIVATE_KEY` vault secret is incorrect. Re-run `fabro install` on the server host or verify the values match your GitHub App.
 
 ### Clone fails for private repositories
 

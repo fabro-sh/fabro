@@ -18,7 +18,7 @@ Local CLI-managed servers previously started with no authentication. Now, `fabro
 <Warning>
 **`GITHUB_CLI_TOKEN` renamed to `GITHUB_TOKEN`.** The environment variable and vault secret for GitHub token auth have been renamed. The `gh_cli` strategy is now called `token`, reflecting that at runtime it's just a stored token — not tied to the `gh` CLI.
 
-To migrate: replace `GITHUB_CLI_TOKEN` with `GITHUB_TOKEN` in your environment or vault configuration. `GH_TOKEN` is also accepted as a fallback.
+To migrate: replace `GITHUB_CLI_TOKEN` with `GITHUB_TOKEN` in your environment or vault configuration. Current server runtimes read `GITHUB_TOKEN` from the vault.
 </Warning>
 
 ## More

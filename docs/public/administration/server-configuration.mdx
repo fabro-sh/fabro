@@ -286,7 +286,7 @@ Customize the git author identity used for checkpoint commits. When not set, def
 
 ### `[server.integrations.github]` section
 
-Configure GitHub integration auth. `strategy = "token"` is the default and uses a stored `GITHUB_TOKEN` from the vault (with `GH_TOKEN` as a fallback). `strategy = "app"` enables the GitHub App flow and browser OAuth; webhook delivery is configured separately under `[server.integrations.github.webhooks]`.
+Configure GitHub integration auth. `strategy = "token"` is the default and uses a stored `GITHUB_TOKEN` from the vault. `strategy = "app"` enables the GitHub App flow and browser OAuth; webhook delivery is configured separately under `[server.integrations.github.webhooks]`.
 
 ```toml title="settings.toml"
 [server.integrations.github]
@@ -330,36 +330,52 @@ Configure checkpoint behavior for all runs.
 
 ## Secrets and environment variables
 
-Fabro splits secrets into two scopes:
+Fabro splits server-runtime secrets into two scopes:
 
-- Server runtime secrets live in `<data_dir>/server.env` and resolve with precedence `process env -> server.env`.
-- Workflow-visible secrets live in `<data_dir>/vaults/default/secrets.json` (the vault). Anything stored in the vault may be used by workflows.
+- Bootstrap secrets live in process env or `<data_dir>/server.env` and resolve with precedence `process env -> server.env`.
+- Optional integration secrets live in `<data_dir>/vaults/default/secrets.json` (the vault). Anything stored in the vault may be used by workflows.
 
-For the auth model above, the main server runtime secrets are:
+`server.env` is only for bootstrap/runtime values the server may need before optional integrations are loaded:
 
 - `SESSION_SECRET` when the web UI is enabled
 - `FABRO_DEV_TOKEN` when `"dev-token"` auth is enabled
-- `GITHUB_APP_CLIENT_SECRET` when `"github"` auth is enabled
-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` when the install wizard or a manual config uses
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` when a manual config uses
   static S3 object-store credentials
+
+`server.env` is not used for Slack, Daytona, Brave Search, LLM provider keys, `GITHUB_TOKEN`, or GitHub App private key/client secret/webhook secret. Configure those optional integrations with `fabro secret set`, `fabro provider login`, or `fabro install`.
 
 Fabro no longer auto-loads `.env` files. Provider API keys are required for the models you want to use; everything else is optional.
 
 ### LLM provider keys
 
-Fabro's built-in provider access resolves these from the process environment first, then an exact-name vault token or OAuth entry.
+Server-backed workflows resolve built-in provider credentials from exact-name vault tokens or OAuth entries. Add them with `fabro provider login` or `fabro secret set`:
+
+```bash
+fabro secret set ANTHROPIC_API_KEY sk-ant-...
+fabro secret set OPENAI_API_KEY sk-...
+fabro secret set GEMINI_API_KEY AI...
+```
+
+Standalone CLI/library usage can still opt into env-backed credential sources explicitly, but the Fabro server runtime does not read provider keys from process env or `server.env`.
 
 | Variable | Provider |
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic (Claude) |
 | `OPENAI_API_KEY` | OpenAI (GPT) |
-| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Google (Gemini) |
+| `GEMINI_API_KEY` | Google (Gemini) |
 | `KIMI_API_KEY` | Kimi |
 | `ZAI_API_KEY` | Zai (GLM) |
 | `MINIMAX_API_KEY` | Minimax |
 | `INCEPTION_API_KEY` | Inception (Mercury) |
 
 ### Sandbox and tools
+
+These optional server integrations are vault-only:
+
+```bash
+fabro secret set DAYTONA_API_KEY dtn_...
+fabro secret set BRAVE_SEARCH_API_KEY BSA...
+```
 
 | Variable | Description |
 |---|---|
@@ -373,6 +389,7 @@ Fabro resolves these from `process env -> server.env`.
 | Variable | Description |
 |---|---|
 | `SESSION_SECRET` | Session encryption secret (64-character hex string) |
+| `FABRO_DEV_TOKEN` | Optional fixed development auth token |
 
 ### Object store runtime secrets (optional)
 
@@ -382,6 +399,7 @@ Fabro resolves these from `process env -> server.env`.
 |---|---|
 | `AWS_ACCESS_KEY_ID` | Static AWS access key ID for S3-backed `[server.slatedb]` / `[server.artifacts]` |
 | `AWS_SECRET_ACCESS_KEY` | Matching static AWS secret access key |
+| `AWS_SESSION_TOKEN` | Optional matching AWS session token for temporary static credentials |
 
 The browser install wizard can write these into `server.env` for the AWS S3 manual-credential
 path. It does not support manual STS/session-token input; use runtime credentials instead for ECS,
@@ -402,13 +420,19 @@ remains the fallback if you no longer trust the host boundary.
 
 ### GitHub integration (optional)
 
+GitHub token mode is vault-only:
+
+```bash
+fabro secret set GITHUB_TOKEN ghp_...
+```
+
 | Variable | Description |
 |---|---|
-| `GITHUB_TOKEN` | GitHub personal access token, stored by `fabro install` when `strategy = "token"`. Also accepts `GH_TOKEN` as a fallback. |
+| `GITHUB_TOKEN` | GitHub personal access token, stored by `fabro install` when `strategy = "token"` |
 
 ### GitHub App extras (optional)
 
-Fabro resolves these from `process env -> server.env`.
+GitHub App mode stores these secrets in the vault. `fabro install` writes them automatically when it registers an app; do not put them in `server.env`.
 
 | Variable | Description |
 |---|---|
@@ -420,7 +444,12 @@ Fabro resolves these from `process env -> server.env`.
 
 Slack credentials are server-level secrets. They enable one Slack connection that is shared by human interview prompts and run lifecycle notifications. `server.integrations.slack.default_channel` is optional and is used only as the default destination for interview prompts; lifecycle notifications use `[run.notifications.<name>.slack].channel` in run or workflow configuration.
 
-Fabro resolves these from `process env -> server.env`. If both are present, startup logs `Slack integration enabled` and then the Slack Socket Mode connection status. If either is missing or empty, startup logs `Slack integration disabled; missing credentials` with the missing variable names.
+Fabro resolves these from the vault only. If both are present, startup logs `Slack integration enabled` and then the Slack Socket Mode connection status. If either is missing or empty, startup logs `Slack integration disabled; missing credentials` with the missing variable names.
+
+```bash
+fabro secret set FABRO_SLACK_BOT_TOKEN xoxb-...
+fabro secret set FABRO_SLACK_APP_TOKEN xapp-...
+```
 
 | Variable | Description |
 |---|---|

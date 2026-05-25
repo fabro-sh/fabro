@@ -34,7 +34,7 @@ This removes the old CLI runtime path and prevents ACP execution from accidental
 
 ## Explicit vault-backed provider credentials
 
-Fabro now separates process environment credentials from server-owned vault credentials. Provider auth configuration can try process env first, vault entries second, or any explicit order you choose.
+Fabro now separates process environment credentials from server-owned vault credentials. Provider auth configuration can declare env and vault refs explicitly; current server runtimes use vault-backed provider credentials, while standalone library/CLI flows can opt into env-backed sources.
 
 ```toml
 [llm.providers.proxy.auth]
@@ -63,7 +63,7 @@ OpenAI Codex OAuth credentials now live under `vault:OPENAI_CODEX`, and provider
 </Accordion>
 
 <Accordion title="Improvements">
-- Provider catalogs now check process environment credentials first, then same-name vault entries where configured
+- Provider catalogs now declare process-env and vault credential refs explicitly
 - Web stage model extraction now follows the new API/ACP event contract
 - Settings are now split into General, Integrations, Security, and Storage pages instead of one oversized overview
 </Accordion>

@@ -130,7 +130,7 @@ Searches the web using the Brave Search API.
 | `query` | string | yes | Search query |
 | `max_results` | integer | no | Maximum results (default: 5, max: 20) |
 
-Requires the `BRAVE_SEARCH_API_KEY` environment variable. Returns numbered results with title, URL, and description.
+Requires `BRAVE_SEARCH_API_KEY` to be configured for the current runtime. Server-backed sessions read it from the server vault (`fabro secret set BRAVE_SEARCH_API_KEY <key>`); standalone local agent runs can pass it from the invoking shell. Returns numbered results with title, URL, and description.
 
 ### web_fetch
 

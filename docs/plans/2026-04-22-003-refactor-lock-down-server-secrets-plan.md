@@ -72,7 +72,7 @@ Both install flows (CLI `fabro install` and web install via `/install/finish`) w
 **Out of scope:**
 
 - **Vault + `ProviderCredentials`** (`secrets.json`, REST-managed, runtime-mutable). Different lifecycle.
-- **`vault_or_env` for run-level credentials** (`GITHUB_TOKEN`, `DAYTONA_API_KEY`). Same env-as-source pattern, different track.
+- **Legacy vault-or-process-env helper for run-level credentials** (`GITHUB_TOKEN`, `DAYTONA_API_KEY`). Same env-as-source pattern, different track at the time of this plan.
 - **`{{ env.FOO }}` config interpolation.** Operator-supplied templating, different feature.
 - **Workflow-stage env (Sandbox).** Stages run inside `Sandbox` (local/Docker/Daytona); their env is configured by the workflow definition + Sandbox config. Anything a workflow stage needs to execute (e.g. `git push` requiring `GITHUB_TOKEN`) routes via Vault → Sandbox, not subprocess inheritance.
 - **`validate_api_key` `set_var` in `provider_auth.rs`.** Vault-side smell, deferred.
@@ -431,7 +431,7 @@ Strategy doc covers:
 - **Worker and render-graph env:** `env_clear` + strict fail-closed allowlist. Daemon child inherits parent env (12-factor pattern). New worker env entries require demonstrated need + intentional addition.
 - **Install while running:** allowed only through the shared install orchestration which owns restart/handoff. Manual `server.env` edits still require restart discipline.
 - **Rotation:** restart required. Live rotation intentionally not supported. Compliance-driven N+1 rotation (overlap windows) is a known limitation tracked as follow-up.
-- **Out of scope (with reasons):** Vault + `ProviderCredentials`, `vault_or_env` for run-level credentials (different track), `{{ env.FOO }}` config interpolation, workflow-stage env (Sandbox's job), `validate_api_key` `set_var` smell, Tailscale spawns, `bun --watch-web`.
+- **Out of scope (with reasons):** Vault + `ProviderCredentials`, the legacy vault-or-process-env helper for run-level credentials (different track at the time), `{{ env.FOO }}` config interpolation, workflow-stage env (Sandbox's job), `validate_api_key` `set_var` smell, Tailscale spawns, `bun --watch-web`.
 - **Adding a new server-level secret:** (1) provision via the install orchestration or platform env; (2) consume via `state.server_secret(...)`; (3) do not touch env in any other layer; (4) decide if it joins the startup-critical set (most don't).
 - **Adding a new worker env var:** add to the worker list in `spawn_env.rs` with a one-line reason and a failing-without test that proves need.
 
@@ -446,7 +446,7 @@ Strategy doc covers:
 - **State lifecycle:** `ServerSecrets` snapshot built once at boot from env+file; both immutable for process lifetime. Rotating any in-scope secret requires restart. Install flows MAY update `server.env` while a server is running when they own restart/handoff via the shared install orchestration (Unit 5).
 - **Subprocess env:** workers and render-graph processes inherit only an explicit fail-closed allowlist. Daemon child inherits parent env — that's how 12-factor SESSION_SECRET reaches the daemon.
 - **API surface:** no public API change. `state.server_secret(...)` signature unchanged. `ServerSecrets::with_env_lookup` removed; replaced by `load(path, &dyn EnvSource)`. `/install/finish` API contract unchanged (no `restart_required` flag, no new fields).
-- **Unchanged invariants:** `ProviderCredentials`, Vault REST API, `vault_or_env` for run-level credentials, `{{ env.FOO }}` interpolation, workflow stages (configured by `Sandbox`) all behave exactly as before.
+- **Unchanged invariants at the time:** `ProviderCredentials`, Vault REST API, the legacy vault-or-process-env helper for run-level credentials, `{{ env.FOO }}` interpolation, workflow stages (configured by `Sandbox`) all behaved exactly as before. Later secrets-rationalization work moved optional server integration secrets to vault-only lookup.
 
 ## Risks & Dependencies
 

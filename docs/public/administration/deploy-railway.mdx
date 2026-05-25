@@ -31,18 +31,19 @@ Railway sets `$PORT` automatically and expects the container to bind to it. The 
 
 If you override the port in **Service → Settings → Networking → Target Port**, match the value to `$PORT`.
 
-### 3. Set required environment variables
+### 3. Set bootstrap environment variables
 
-Add variables in **Service → Variables** as needed. The [Server Configuration](/administration/server-configuration) reference has the full list; the minimum useful set:
+Add variables in **Service → Variables** as needed. The [Server Configuration](/administration/server-configuration) reference has the full list. Railway process env is for bootstrap values only:
 
 | Variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / ... | At least one LLM provider key for the models you'll run |
 | `FABRO_DEV_TOKEN` | Optional — pre-set the dev token instead of reading the one written to `/storage` on first boot |
 | `SESSION_SECRET` | 64-character hex string; required when the web UI is enabled |
-| `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Only if you enable GitHub OAuth or the GitHub App integration |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Optional static S3 object-store credentials |
 
-No `.env` file is auto-loaded inside the container; everything comes from Railway's environment.
+Do not put optional integration secrets in Railway variables for server runtime. After the server is running, add LLM provider keys, Slack, Daytona, Brave Search, `GITHUB_TOKEN`, and GitHub App secrets to the server vault with `fabro secret set`, `fabro provider login`, or `fabro install`.
+
+No `.env` file is auto-loaded inside the container; bootstrap variables come from Railway's environment.
 
 ## Accessing your Fabro server
 

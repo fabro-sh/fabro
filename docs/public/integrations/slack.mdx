@@ -98,24 +98,16 @@ If you add scopes or event subscriptions after installing the app, reinstall it 
 
 ### 7. Configure Fabro
 
-Add both tokens where the Fabro server process can read server runtime secrets. Fabro resolves Slack credentials in this order:
-
-1. Process environment
-2. `<data_dir>/server.env`
-
-Fabro does not auto-load `.env` files for local server processes. For a default local server, put the tokens in `~/.fabro/storage/server.env`:
+Add both tokens to the Fabro server vault:
 
 ```bash
-mkdir -p ~/.fabro/storage
-cat >> ~/.fabro/storage/server.env <<'EOF'
-FABRO_SLACK_BOT_TOKEN=xoxb-your-bot-token
-FABRO_SLACK_APP_TOKEN=xapp-your-app-token
-EOF
+fabro secret set FABRO_SLACK_BOT_TOKEN xoxb-your-bot-token
+fabro secret set FABRO_SLACK_APP_TOKEN xapp-your-app-token
 ```
 
-For Docker Compose, `.env` works because Compose loads it into the container process environment. For systemd, Railway, ECS, Kubernetes, or another process manager, configure the same variables as process environment variables.
+The server runtime does not read Slack tokens from process env or `server.env`. `server.env` is reserved for bootstrap secrets such as `SESSION_SECRET`, `FABRO_DEV_TOKEN`, and object-store credentials.
 
-Restart the server after changing either `server.env` or the process environment.
+Restart the server after changing Slack credentials so the Socket Mode connection is recreated with the new tokens.
 
 Optionally, set a default interview channel in your [server configuration](/administration/server-configuration):
 

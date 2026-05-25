@@ -16,18 +16,18 @@ The supported deployment artifact is the official Fabro image at `ghcr.io/fabro-
 | **Image** | `ghcr.io/fabro-sh/fabro:nightly` (multi-arch; pin a version for production) |
 | **Persistent volume** | Mount at `/storage`. Stores run history, checkpoints, sessions, the dev token, and JWT keys. |
 | **Port** | The container binds to `$PORT` (default `32276`). Expose it. |
-| **LLM provider key** | At least one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, ... |
+| **LLM provider key** | Add at least one provider key during the install wizard or later with `fabro secret set` / `fabro provider login`. |
 | **Replicas** | One. The server expects exclusive ownership of `/storage`. |
 
 ## Quickstart with docker compose
 
-The repo ships a `docker-compose.yaml` at the root. Clone the repo (or copy the file), create a `.env` with at least one provider key, and start it:
+The repo ships a `docker-compose.yaml` at the root. Clone the repo (or copy the file), create a `.env` for bootstrap settings if needed, and start it:
 
 ```bash
 git clone https://github.com/fabro-sh/fabro.git
 cd fabro
 cp .env.example .env
-# edit .env and set at least ANTHROPIC_API_KEY (or another provider key)
+# edit .env for bootstrap values such as SESSION_SECRET or FABRO_DEV_TOKEN if needed
 docker compose up -d
 ```
 
@@ -59,15 +59,9 @@ docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d
 
 Leave `FABRO_DOMAIN` unset to serve plain HTTP on `localhost`.
 
-## Required environment variables
+## Bootstrap environment variables
 
-At minimum, set one LLM provider key in `.env`:
-
-```bash title=".env"
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-For the web UI you also need a session secret:
+For the web UI you need a session secret unless install mode is generating the initial local configuration:
 
 ```bash
 SESSION_SECRET=<64-character hex string>
@@ -75,13 +69,20 @@ SESSION_SECRET=<64-character hex string>
 
 Generate one with `openssl rand -hex 32`.
 
+`server.env` and container process env are for bootstrap values only:
+
+| Variable | Purpose |
+|---|---|
+| `SESSION_SECRET` | Session encryption secret |
+| `FABRO_DEV_TOKEN` | Optional — pre-set the dev token instead of reading the one written to `/storage` on first boot |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Optional static S3 object-store credentials |
+
+Do not put optional integration secrets in `.env` for server runtime. Configure LLM provider keys, Slack, Daytona, Brave Search, `GITHUB_TOKEN`, and GitHub App secrets in the vault with `fabro secret set`, `fabro provider login`, or `fabro install`.
+
 Optional:
 
 | Variable | Purpose |
 |---|---|
-| `FABRO_DEV_TOKEN` | Pre-set the dev token instead of reading the one written to `/storage` on first boot |
-| `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Only if you enable GitHub OAuth or the GitHub App integration |
-| `FABRO_SLACK_APP_TOKEN`, `FABRO_SLACK_BOT_TOKEN` | Only if you enable the Slack integration for human interviews or run lifecycle notifications |
 | `FABRO_DOMAIN` | Public hostname when using the Caddy reverse-proxy overlay |
 
 See [Server Configuration](/administration/server-configuration) for the full settings reference, and [`.env.example`](https://github.com/fabro-sh/fabro/blob/main/.env.example) for the complete list.
@@ -90,11 +91,11 @@ See [Server Configuration](/administration/server-configuration) for the full se
 
 The same image works on any container orchestrator that supports the requirements above. Common patterns:
 
-- **AWS ECS / Fargate** — Task definition referencing `ghcr.io/fabro-sh/fabro:nightly`, EFS volume mounted at `/storage`, port `32276` published, environment variables for keys.
+- **AWS ECS / Fargate** — Task definition referencing `ghcr.io/fabro-sh/fabro:nightly`, EFS volume mounted at `/storage`, port `32276` published, environment variables for bootstrap values, and vault-backed optional integration secrets.
 - **Google Cloud Run** — Cloud Run with a backed volume mount at `/storage`. Pin minimum instances to 1; scale-to-zero interrupts running workflows.
 - **Kubernetes** — One-replica `StatefulSet` (not Deployment) with a `PersistentVolumeClaim` mounted at `/storage`. Expose via Service + Ingress.
 
-In all cases: single replica, persistent `/storage`, expose `$PORT`, set provider keys.
+In all cases: single replica, persistent `/storage`, expose `$PORT`, and configure optional integration secrets in the vault.
 
 ## Pinning a version
 

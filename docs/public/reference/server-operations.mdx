@@ -21,7 +21,7 @@ This starts the server on a Unix socket at `~/.fabro/fabro.sock` by default. Use
 
 If `~/.fabro/settings.toml` does not yet exist, `fabro server start` enters **install mode**: it prints an install URL and a one-time install token, attempts to open the URL in your default browser, and serves a web wizard that walks you through configuring your server URL, shared object store, LLM provider, and GitHub integration.
 
-The LLM step can be completed with one or more provider keys, or explicitly skipped so you can finish server setup first and add model credentials later. A skipped LLM step writes no LLM vault credentials; LLM-dependent workflows keep failing with provider-not-configured errors until credentials are added.
+The LLM step can be completed with one or more provider keys, or explicitly skipped so you can finish server setup first and add model credentials later. A skipped LLM step writes no LLM vault credentials; LLM-dependent workflows keep failing with provider-not-configured errors until credentials are added. Optional integration secrets collected by install mode, including LLM keys and GitHub App secrets, are written to the server vault rather than `server.env`.
 
 When Fabro can construct a direct install URL, the token is embedded in the URL and also printed on its own line for copying. If you open the server root through a reverse proxy or another machine, paste the printed install token when prompted.
 
