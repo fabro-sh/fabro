@@ -288,11 +288,7 @@ async fn execute_fabro_run_tool(
         fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME => {
             let params = parse_fabro_tool_args::<fabro_tool::FabroRunInteractParams>(name, args)?;
             let validated = fabro_tool::ValidatedInteractRun::try_from(params)?;
-            if matches!(
-                validated.action,
-                fabro_tool::ValidatedInteractAction::Approve
-                    | fabro_tool::ValidatedInteractAction::Deny { .. }
-            ) {
+            if validated.action.requires_user() {
                 return Err(fabro_tool::ToolError::message(
                     "Run approval must be performed by a user through the API, CLI, web UI, or human MCP server.",
                 ));

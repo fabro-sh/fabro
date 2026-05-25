@@ -4,15 +4,9 @@ use serde_json::Value;
 
 use super::support::{
     remote_run_summary_json, setup_seeded_completed_dry_run, setup_seeded_created_dry_run,
+    ulid_filter,
 };
 use crate::support::unique_run_id;
-
-fn ulid_filter() -> (String, String) {
-    (
-        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
-        "[ULID]".to_string(),
-    )
-}
 
 #[test]
 fn help() {

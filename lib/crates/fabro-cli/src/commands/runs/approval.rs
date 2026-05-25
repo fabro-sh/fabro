@@ -25,22 +25,11 @@ enum Action {
 }
 
 impl Action {
-    fn verb(self) -> &'static str {
+    fn past(self) -> &'static str {
         match self {
             Self::Approve => "approved",
             Self::Deny => "denied",
         }
-    }
-
-    fn failure_message(self) -> &'static str {
-        match self {
-            Self::Approve => "some runs could not be approved",
-            Self::Deny => "some runs could not be denied",
-        }
-    }
-
-    fn json_key(self) -> &'static str {
-        self.verb()
     }
 }
 
@@ -102,13 +91,13 @@ async fn run_bulk(
 
     if json {
         let mut body = serde_json::Map::new();
-        body.insert(action.json_key().to_string(), serde_json::json!(changed));
+        body.insert(action.past().to_string(), serde_json::json!(changed));
         body.insert("errors".to_string(), serde_json::json!(errors));
         print_json_pretty(&serde_json::Value::Object(body))?;
     }
 
     if had_errors {
-        bail!(action.failure_message());
+        bail!("some runs could not be {}", action.past());
     }
     Ok(())
 }

@@ -2,25 +2,8 @@ use fabro_test::{fabro_snapshot, test_context};
 use httpmock::MockServer;
 use serde_json::Value;
 
-use super::support::remote_run_summary_json;
+use super::support::{conflict_error_body, remote_run_summary_json, ulid_filter};
 use crate::support::unique_run_id;
-
-fn ulid_filter() -> (String, String) {
-    (
-        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
-        "[ULID]".to_string(),
-    )
-}
-
-fn error_body(detail: &str) -> serde_json::Value {
-    serde_json::json!({
-        "errors": [{
-            "status": "409",
-            "title": "Conflict",
-            "detail": detail,
-        }]
-    })
-}
 
 #[test]
 fn help() {
@@ -272,7 +255,7 @@ fn deny_partial_error_attempts_remaining_runs_and_reports_json() {
             .json_body(serde_json::json!({ "reason": "Needs review" }));
         then.status(409)
             .header("Content-Type", "application/json")
-            .json_body(error_body("Run is not pending approval."));
+            .json_body(conflict_error_body("Run is not pending approval."));
     });
     let good_deny = server.mock(|when, then| {
         when.method("POST")

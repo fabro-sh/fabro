@@ -141,6 +141,12 @@ pub enum ValidatedInteractAction {
 }
 
 impl ValidatedInteractAction {
+    /// Actions that may only be performed by a human user, never by a
+    /// workflow-agent through its own `fabro_tools` MCP surface.
+    pub fn requires_user(&self) -> bool {
+        matches!(self, Self::Approve | Self::Deny { .. })
+    }
+
     fn action(&self) -> RunInteractAction {
         match self {
             Self::Get => RunInteractAction::Get,

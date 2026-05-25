@@ -934,9 +934,7 @@ impl Client {
     }
 
     pub async fn deny_run(&self, run_id: &RunId, reason: Option<String>) -> Result<Run> {
-        let body = types::DenyRunRequest {
-            reason: normalize_optional_text(reason.as_deref()),
-        };
+        let body = types::DenyRunRequest { reason };
         let response = self
             .send_api(|client| {
                 let body = body.clone();
@@ -2005,13 +2003,6 @@ pub fn apply_bearer_token_auth(
 
 fn non_zero_u64_from_u32(value: u32) -> Option<NonZeroU64> {
     NonZeroU64::new(u64::from(value))
-}
-
-fn normalize_optional_text(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
 }
 
 fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {
