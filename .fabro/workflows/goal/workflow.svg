@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="480" viewBox="0 0 1120 480" role="img" aria-labelledby="title desc">
+  <title id="title">Goal workflow diagram</title>
+  <desc id="desc">The goal workflow starts, performs work, audits completion, exits when done, or loops back to work when more progress is needed.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="1120" height="480" fill="#f8fafc"/>
+
+  <text x="560" y="48" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="700" fill="#0f172a">
+    Goal Workflow
+  </text>
+  <text x="560" y="78" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15" fill="#475569">
+    Work toward an immutable goal, audit evidence, then exit or continue.
+  </text>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif" filter="url(#shadow)">
+    <path d="M 112 200 L 160 240 L 112 280 L 64 240 Z" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+    <text x="112" y="246" text-anchor="middle" font-size="18" font-weight="700" fill="#1e3a8a">Start</text>
+
+    <rect x="246" y="168" width="170" height="144" rx="14" fill="#ecfeff" stroke="#0891b2" stroke-width="2"/>
+    <text x="331" y="225" text-anchor="middle" font-size="22" font-weight="700" fill="#164e63">Work</text>
+    <text x="331" y="252" text-anchor="middle" font-size="14" fill="#155e75">continue.md</text>
+    <text x="331" y="276" text-anchor="middle" font-size="13" fill="#155e75">full thread context</text>
+
+    <rect x="528" y="150" width="210" height="180" rx="14" fill="#fefce8" stroke="#ca8a04" stroke-width="2"/>
+    <text x="633" y="218" text-anchor="middle" font-size="22" font-weight="700" fill="#713f12">Completion Audit</text>
+    <text x="633" y="246" text-anchor="middle" font-size="14" fill="#854d0e">audit.md</text>
+    <text x="633" y="270" text-anchor="middle" font-size="13" fill="#854d0e">validated routing JSON</text>
+
+    <path d="M 914 200 L 962 240 L 914 280 L 866 240 Z" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+    <text x="914" y="246" text-anchor="middle" font-size="18" font-weight="700" fill="#14532d">Exit</text>
+  </g>
+
+  <g fill="none" stroke="#334155" stroke-width="2.5" marker-end="url(#arrow)" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <path d="M 161 240 L 236 240"/>
+    <path d="M 416 240 L 518 240"/>
+    <path d="M 738 240 L 856 240"/>
+    <path d="M 633 330 C 633 400 331 400 331 323"/>
+  </g>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#334155">
+    <text x="797" y="224" text-anchor="middle" font-weight="700">Done</text>
+    <text x="482" y="392" text-anchor="middle" font-weight="700">Continue</text>
+    <text x="482" y="414" text-anchor="middle">missing or weak evidence</text>
+  </g>
+</svg>
