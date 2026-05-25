@@ -106,7 +106,7 @@ function sampleServerSettings(maxConcurrentRuns = 8): ServerSettings {
 describe("SettingsMonitoring route", () => {
   beforeEach(() => {
     teardownReactTestEnv = setupReactTestEnv();
-    systemInfo = { runs: { active: 3, total: 12 } };
+    systemInfo = { runs: { active: 3, scheduler_slots_used: 1, total: 12 } };
     serverSettings = sampleServerSettings();
   });
 
@@ -133,7 +133,8 @@ describe("SettingsMonitoring route", () => {
     expect(text).toContain("5s");
     expect(text).toContain("3 GiB");
     expect(text).toContain("8 GiB");
-    expect(text).toContain("3 / 8 active");
+    expect(text).toContain("1 / 8 slots used");
+    expect(text).not.toContain("3 / 8 active");
   });
 
   test("shows CPU warmup state while usage is null", () => {

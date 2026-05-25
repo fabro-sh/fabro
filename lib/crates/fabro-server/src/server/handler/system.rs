@@ -7,9 +7,9 @@ use super::super::{
     BillingByModel, DfParams, FABRO_VERSION, GithubIntegrationStrategy, IntoResponse, Json, Path,
     PruneRunsRequest, PruneRunsResponse, Query, RequiredUser, Response, Router, RunStatus, State,
     StatusCode, SystemInfoResponse, SystemRepairRunIssue, SystemRepairRunsResponse,
-    SystemRunCounts, build_disk_usage_response, build_prune_plan, delete_run_internal, diagnostics,
-    get, post, resolve_interp_string, resource_sampler, spawn_blocking, system_sandbox_provider,
-    to_i64,
+    SystemRunCounts, build_disk_usage_response, build_prune_plan, counts_toward_scheduler_capacity,
+    delete_run_internal, diagnostics, get, post, resolve_interp_string, resource_sampler,
+    spawn_blocking, system_sandbox_provider, to_i64,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -44,7 +44,7 @@ async fn get_server_settings(_auth: RequiredUser, State(state): State<Arc<AppSta
 async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     let manifest_run_settings = state.manifest_run_settings();
     let server_settings = state.server_settings();
-    let (total_runs, active_runs) = {
+    let (total_runs, active_runs, scheduler_slots_used) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         let active = runs
             .values()
@@ -60,7 +60,11 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
                 )
             })
             .count();
-        (runs.len(), active)
+        let scheduler_slots_used = runs
+            .values()
+            .filter(|run| counts_toward_scheduler_capacity(run.status))
+            .count();
+        (runs.len(), active, scheduler_slots_used)
     };
 
     let response = SystemInfoResponse {
@@ -75,8 +79,9 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
         storage_dir:      Some(state.server_storage_dir().display().to_string()),
         uptime_secs:      Some(to_i64(state.started_at.elapsed().as_secs())),
         runs:             Some(SystemRunCounts {
-            total:  Some(to_i64(total_runs)),
-            active: Some(to_i64(active_runs)),
+            total:                Some(to_i64(total_runs)),
+            active:               Some(to_i64(active_runs)),
+            scheduler_slots_used: Some(to_i64(scheduler_slots_used)),
         }),
         sandbox_provider: Some(system_sandbox_provider(&manifest_run_settings)),
     };
