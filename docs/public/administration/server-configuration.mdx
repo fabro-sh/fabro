@@ -344,6 +344,8 @@ Fabro splits server-runtime secrets into two scopes:
 
 `server.env` is not used for Slack, Daytona, Brave Search, LLM provider keys, `GITHUB_TOKEN`, or GitHub App private key/client secret/webhook secret. Configure those optional integrations with `fabro secret set`, `fabro provider login`, or `fabro install`.
 
+During startup, Fabro temporarily migrates recognized legacy optional integration secrets from process env or `server.env` into the vault. When a matching `server.env` entry can be safely removed, Fabro writes a hidden backup beside `server.env` first. Process env values cannot be cleaned up automatically, so remove those from your deployment environment after the vault contains the secret.
+
 Fabro no longer auto-loads `.env` files. Provider API keys are required for the models you want to use; everything else is optional.
 
 ### LLM provider keys
@@ -356,7 +358,7 @@ fabro secret set OPENAI_API_KEY sk-...
 fabro secret set GEMINI_API_KEY AI...
 ```
 
-Standalone CLI/library usage can still opt into env-backed credential sources explicitly, but the Fabro server runtime does not read provider keys from process env or `server.env`.
+Standalone CLI/library usage can still opt into env-backed credential sources explicitly, but the Fabro server runtime reads provider keys from the vault after the temporary startup migration.
 
 | Variable | Provider |
 |---|---|

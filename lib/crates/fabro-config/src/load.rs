@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use fabro_types::settings::InterpString;
 
-use crate::{Error, Result, RunGoalLayer, SettingsLayer, legacy_sandbox_migration};
+use crate::{Error, Result, RunGoalLayer, SettingsLayer, migrations};
 
 #[expect(
     clippy::print_stderr,
@@ -17,7 +17,7 @@ pub(crate) fn load_settings_path(path: &Path) -> Result<SettingsLayer> {
     let content = std::fs::read_to_string(path).map_err(|source| Error::read_file(path, source))?;
     let mut layer = match content.parse::<SettingsLayer>() {
         Ok(layer) => layer,
-        Err(err) => match legacy_sandbox_migration::migrate_settings_path(path, &content)? {
+        Err(err) => match migrations::run_migrations(path, &content)? {
             Some(report) => {
                 tracing::warn!("{}", report.warning);
                 eprintln!("{}", report.warning);

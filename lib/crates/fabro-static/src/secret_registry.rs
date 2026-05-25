@@ -46,9 +46,12 @@ pub fn is_bootstrap_secret(name: &str) -> bool {
     secret_scope(name) == Some(SecretScope::Bootstrap)
 }
 
-#[cfg(test)]
-fn is_optional_vault_secret(name: &str) -> bool {
+pub fn is_optional_vault_secret(name: &str) -> bool {
     secret_scope(name) == Some(SecretScope::OptionalVault)
+}
+
+pub fn optional_vault_secrets() -> &'static [&'static str] {
+    OPTIONAL_VAULT_SECRETS
 }
 
 #[cfg(test)]

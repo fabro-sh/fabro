@@ -25,6 +25,7 @@ pub mod install;
 pub mod ip_allowlist;
 pub mod jwt_auth;
 pub mod manifest_validation;
+mod migrations;
 mod principal_middleware;
 mod request_id;
 mod run_files;
@@ -42,7 +43,6 @@ mod startup;
 pub mod static_files;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
-mod vault_legacy_migration;
 pub mod web_auth;
 mod worker_token;
 

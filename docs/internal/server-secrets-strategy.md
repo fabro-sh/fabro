@@ -8,7 +8,7 @@ This document defines how Fabro handles server-level secrets.
 - It reads bootstrap secrets from `process env` and `<storage>/server.env`.
 - Resolution is snapshot-based: env and file are read once at construction, then treated as immutable for the life of the process.
 - `process env` wins over `server.env` on conflicts.
-- Optional integration secrets are vault-only in server runtime. Do not add optional server integrations to `ServerSecrets` or read them from process env.
+- Optional integration secrets are vault-only in server runtime. Do not add optional server integrations to `ServerSecrets` or add new runtime env fallback paths.
 - `fabro server start` never generates secrets. Missing required secrets are a startup error.
 - `std::env::set_var` and `std::env::remove_var` are banned workspace-wide. Tests are not exempt. Enforced by clippy via `disallowed_methods` in `clippy.toml`; intentional exceptions must be annotated with a scoped `#[expect(clippy::disallowed_methods, reason = "...")]` at the call site.
 
@@ -55,7 +55,7 @@ Bootstrap secrets come from one of two sources:
 
 Optional integration secrets are provisioned into the vault, usually with `fabro secret set` or `fabro install`.
 
-There is no compatibility layer for removed secrets and no startup-time secret generation.
+There is no startup-time secret generation. A temporary startup migration moves recognized legacy optional secrets from process env or `server.env` into the vault, removes matching `server.env` entries after writing a backup, and logs conflicts by key name only. Runtime lookup remains vault-only after that migration step.
 
 ## Subprocess Boundaries
 
