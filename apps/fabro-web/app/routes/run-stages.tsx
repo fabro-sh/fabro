@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useReducer, useState } from "react";
 import { useParams } from "react-router";
 import {
   ArrowDownTrayIcon,
@@ -137,6 +137,42 @@ const EVENT_KIND_LABEL: Record<EventKind, string> = {
 
 const EVENTS_TABS = ["primary", "context", "debug"] as const;
 type EventsTab = (typeof EVENTS_TABS)[number];
+
+interface StageActivityState {
+  tab: EventsTab;
+  selectedKinds: EventKind[];
+  selectedDebugCategories: DebugCategory[];
+  search: string;
+}
+
+type StageActivityAction =
+  | { type: "tabChanged"; tab: EventsTab }
+  | { type: "kindsChanged"; kinds: EventKind[] }
+  | { type: "debugCategoriesChanged"; categories: DebugCategory[] }
+  | { type: "searchChanged"; search: string };
+
+const initialStageActivityState = (): StageActivityState => ({
+  tab: "primary",
+  selectedKinds: [...EVENT_KINDS],
+  selectedDebugCategories: [],
+  search: "",
+});
+
+function stageActivityReducer(
+  state: StageActivityState,
+  action: StageActivityAction,
+): StageActivityState {
+  switch (action.type) {
+    case "tabChanged":
+      return { ...state, tab: action.tab };
+    case "kindsChanged":
+      return { ...state, selectedKinds: action.kinds };
+    case "debugCategoriesChanged":
+      return { ...state, selectedDebugCategories: action.categories };
+    case "searchChanged":
+      return { ...state, search: action.search };
+  }
+}
 
 const PRIMARY_TAB_LABEL: Record<StageRenderer, string> = {
   agent: "Thread",
@@ -1131,9 +1167,6 @@ function ToolGroupDetails({
   runStart: string | undefined;
 }) {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
-  useEffect(() => {
-    setExpandedIndex(null);
-  }, [group]);
 
   const elapsed = formatElapsed(group.ts, runStart);
   const totalDuration = group.durationMs > 0 ? formatDurationMs(group.durationMs) : null;
@@ -1188,13 +1221,19 @@ function ToolGroupDetailsPanel({
   runStart: string | undefined;
   onClose: () => void;
 }) {
+  const detailsKey = group
+    ? `tool-group-details-${group.children.map((child) => child.turnIndex).join("-")}`
+    : "empty";
+
   return (
     <DetailsPanel
       title={group ? "Tool group" : ""}
       isOpen={group != null}
       onClose={onClose}
     >
-      {group ? <ToolGroupDetails group={group} runStart={runStart} /> : null}
+      {group ? (
+        <ToolGroupDetails key={detailsKey} group={group} runStart={runStart} />
+      ) : null}
     </DetailsPanel>
   );
 }
@@ -1424,49 +1463,185 @@ function EventsToolbar({
   );
 }
 
-export default function RunStages() {
-  const { id, stageId } = useParams();
-  const runQuery = useRun(id);
-  const stagesQuery = useRunStages(id);
-  const stages = useMemo(
-    () => mapRunStagesToSidebarStages(stagesQuery.data),
-    [stagesQuery.data],
+function StageActivityBody({
+  effectiveTab,
+  renderer,
+  turns,
+  filteredTurns,
+  displayItems,
+  panelSelection,
+  onPanelSelectionChange,
+  runStart,
+  runId,
+  selectedStage,
+  commandTurn,
+  debugEvents,
+  filteredDebugEvents,
+  openDebugSeq,
+  onDebugSeqChange,
+  contextData,
+  runEvents,
+  stages,
+}: {
+  effectiveTab: EventsTab;
+  renderer: StageRenderer;
+  turns: TurnType[];
+  filteredTurns: { turn: TurnType; index: number }[];
+  displayItems: DisplayItem[];
+  panelSelection: PanelSelection | null;
+  onPanelSelectionChange: (selection: PanelSelection | null) => void;
+  runStart: string | undefined;
+  runId: string;
+  selectedStage: Stage;
+  commandTurn: CommandTurn | null;
+  debugEvents: EventEnvelope[];
+  filteredDebugEvents: EventEnvelope[];
+  openDebugSeq: number | null;
+  onDebugSeqChange: (seq: number | null) => void;
+  contextData: ReturnType<typeof extractStageContext>;
+  runEvents: EventEnvelope[];
+  stages: Stage[];
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto pt-6 pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]">
+      {effectiveTab === "primary" ? (
+        renderer === "agent" ? (
+          turns.length > 0 && filteredTurns.length === 0 ? (
+            <div className="px-2 py-6 text-sm text-fg-muted">
+              No events match these filters.
+            </div>
+          ) : (
+            displayItems.map((item) => {
+              if (item.kind === "single") {
+                return (
+                  <EventRow
+                    key={`turn-${item.turnIndex}`}
+                    turn={item.turn}
+                    runStart={runStart}
+                    selected={
+                      panelSelection?.kind === "single" &&
+                      panelSelection.turnIndex === item.turnIndex
+                    }
+                    onSelect={() =>
+                      onPanelSelectionChange({
+                        kind: "single",
+                        turnIndex: item.turnIndex,
+                      })
+                    }
+                  />
+                );
+              }
+              const childIndices = item.children.map((c) => c.turnIndex);
+              const groupKey = `group-${childIndices.join("-")}`;
+              const isSelected =
+                panelSelection?.kind === "group" &&
+                panelSelection.childTurnIndices.length === childIndices.length &&
+                panelSelection.childTurnIndices.every((v, i) => v === childIndices[i]);
+              return (
+                <ToolGroupRow
+                  key={groupKey}
+                  group={item}
+                  runStart={runStart}
+                  selected={isSelected}
+                  onSelect={() =>
+                    onPanelSelectionChange({
+                      kind: "group",
+                      childTurnIndices: childIndices,
+                    })
+                  }
+                />
+              );
+            })
+          )
+        ) : renderer === "command" ? (
+          <CommandLogs runId={runId} stageId={selectedStage.id} turn={commandTurn} />
+        ) : renderer === "human" ? (
+          <HumanQA stage={selectedStage} events={debugEvents} />
+        ) : renderer === "conditional" ? (
+          <ConditionalDecision
+            stage={selectedStage}
+            runEvents={runEvents}
+            allStages={stages}
+            runId={runId}
+          />
+        ) : renderer === "parallel" ? (
+          <ParallelChildren
+            stage={selectedStage}
+            events={debugEvents}
+            runId={runId}
+            allStages={stages}
+          />
+        ) : renderer === "fan_in" ? (
+          <FanInResults
+            stage={selectedStage}
+            events={debugEvents}
+            notes={extractStageNotes(debugEvents)}
+          />
+        ) : renderer === "wait" ? (
+          <WaitStatus stage={selectedStage} />
+        ) : (
+          <StageSummary stage={selectedStage} events={debugEvents} />
+        )
+      ) : effectiveTab === "context" ? (
+        contextData ? <StageContext data={contextData} /> : null
+      ) : debugEvents.length > 0 && filteredDebugEvents.length === 0 ? (
+        <div className="px-2 py-6 text-sm text-fg-muted">
+          No events match these filters.
+        </div>
+      ) : (
+        filteredDebugEvents.map((event) => (
+          <DebugEventRow
+            key={`debug-${event.seq}`}
+            event={event}
+            runStart={runStart}
+            selected={openDebugSeq === event.seq}
+            onSelect={() => onDebugSeqChange(event.seq)}
+          />
+        ))
+      )}
+    </div>
   );
+}
 
-  const selectedStage = stages.find((s: Stage) => s.id === stageId) ?? stages[0];
-  const selectedStageId = selectedStage?.id;
-  const runStart =
-    selectedStage?.startedAt ??
-    runQuery.data?.timestamps.started_at ??
-    runQuery.data?.timestamps.created_at;
-  const stageEventsQuery = useRunStageEvents(id, selectedStageId);
-  // Insights sidebar only renders for agent stages; fetch projection + context
-  // window only when the user is on one to keep the hot path lean.
-  const isAgentStage = selectedStage?.handler === "agent";
-  const runStateQuery = useRunState(isAgentStage ? id : undefined);
-  const contextWindowQuery = useRunStageContextWindow(
-    isAgentStage ? id : undefined,
-    isAgentStage ? selectedStageId : undefined,
-  );
-  const stageProjection =
-    isAgentStage && selectedStageId
-      ? runStateQuery.data?.stages[selectedStageId]
-      : undefined;
+function RunStageActivityStage({
+  runId,
+  selectedStage,
+  stages,
+  runStart,
+  tab,
+  selectedKinds,
+  selectedDebugCategories,
+  search,
+  onTabChange,
+  onKindsChange,
+  onDebugCategoriesChange,
+  onSearchChange,
+}: {
+  runId: string;
+  selectedStage: Stage;
+  stages: Stage[];
+  runStart: string | undefined;
+  tab: EventsTab;
+  selectedKinds: EventKind[];
+  selectedDebugCategories: DebugCategory[];
+  search: string;
+  onTabChange: (tab: EventsTab) => void;
+  onKindsChange: (kinds: EventKind[]) => void;
+  onDebugCategoriesChange: (categories: DebugCategory[]) => void;
+  onSearchChange: (search: string) => void;
+}) {
+  const selectedStageId = selectedStage.id;
+  const stageEventsQuery = useRunStageEvents(runId, selectedStageId);
   const turns = useMemo(
-    () =>
-      selectedStageId
-        ? eventsToActivity(stageEventsQuery.data ?? [], selectedStageId)
-        : [],
+    () => eventsToActivity(stageEventsQuery.data ?? [], selectedStageId),
     [stageEventsQuery.data, selectedStageId],
   );
-  const renderer: StageRenderer = selectedStage
-    ? selectStageRenderer(selectedStage.handler)
-    : "summary";
+  const renderer: StageRenderer = selectStageRenderer(selectedStage.handler);
   // Some renderers need run-scoped events (e.g. conditional renders the
   // engine-level edge.selected event, which has no stage_id). Only fetch when
   // the active renderer actually needs it to keep this off the hot path.
   const needsRunEvents = renderer === "conditional";
-  const runEventsQuery = useRunEventsList(needsRunEvents ? id : undefined);
+  const runEventsQuery = useRunEventsList(needsRunEvents ? runId : undefined);
   const commandTurn = useMemo<CommandTurn | null>(() => {
     for (let i = turns.length - 1; i >= 0; i -= 1) {
       const t = turns[i];
@@ -1477,17 +1652,6 @@ export default function RunStages() {
 
   const [panelSelection, setPanelSelection] = useState<PanelSelection | null>(null);
   const [openDebugSeq, setOpenDebugSeq] = useState<number | null>(null);
-  useEffect(() => {
-    setPanelSelection(null);
-    setOpenDebugSeq(null);
-  }, [selectedStageId]);
-
-  const [tab, setTab] = useState<EventsTab>("primary");
-  const [selectedKinds, setSelectedKinds] = useState<EventKind[]>([
-    ...EVENT_KINDS,
-  ]);
-  const [selectedDebugCategories, setSelectedDebugCategories] = useState<DebugCategory[]>([]);
-  const [search, setSearch] = useState("");
   const filteredTurns = useMemo<{ turn: TurnType; index: number }[]>(() => {
     const kindSet = new Set(selectedKinds);
     const needle = search.toLowerCase();
@@ -1524,7 +1688,6 @@ export default function RunStages() {
   }, [displayItems, panelSelection]);
 
   const debugEvents = useMemo<EventEnvelope[]>(() => {
-    if (!selectedStageId) return [];
     return (stageEventsQuery.data ?? []).filter(
       (e) => activityEventStageId(e) === selectedStageId,
     );
@@ -1570,7 +1733,181 @@ export default function RunStages() {
   );
   const effectiveTab: EventsTab = availableTabs.includes(tab) ? tab : "primary";
 
-  if (!id || !stages.length) {
+  return (
+    <>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-3">
+        <div className="shrink-0 border-b border-line">
+          <div className="pl-3 pr-3">
+            <EventsToolbar
+              tab={effectiveTab}
+              renderer={renderer}
+              availableTabs={availableTabs}
+              commandTurn={commandTurn}
+              onTabChange={onTabChange}
+              selectedKinds={selectedKinds}
+              onKindsChange={onKindsChange}
+              selectedDebugCategories={selectedDebugCategories}
+              onDebugCategoriesChange={onDebugCategoriesChange}
+              availableDebugCategories={availableDebugCategories}
+              search={search}
+              onSearchChange={onSearchChange}
+              filteredCount={
+                effectiveTab === "primary"
+                  ? filteredTurns.length
+                  : filteredDebugEvents.length
+              }
+              totalCount={
+                effectiveTab === "primary" ? turns.length : debugEvents.length
+              }
+              providerUsed={selectedStage.providerUsed}
+              events={stageEventsQuery.data ?? []}
+              runId={runId}
+              stageId={selectedStageId}
+            />
+            {effectiveTab === "debug" && (
+              <div className="pb-3">
+                <DebugDnaStrip
+                  events={debugEvents}
+                  selectedSeq={openDebugSeq}
+                  onSelect={setOpenDebugSeq}
+                  runStart={runStart}
+                />
+              </div>
+            )}
+            {effectiveTab === "primary" && renderer === "agent" && (
+              <div className="pb-3">
+                <ThreadDnaStrip
+                  items={threadDnaItems}
+                  selection={panelSelection}
+                  onSelect={setPanelSelection}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+        <StageActivityBody
+          effectiveTab={effectiveTab}
+          renderer={renderer}
+          turns={turns}
+          filteredTurns={filteredTurns}
+          displayItems={displayItems}
+          panelSelection={panelSelection}
+          onPanelSelectionChange={setPanelSelection}
+          runStart={runStart}
+          runId={runId}
+          selectedStage={selectedStage}
+          commandTurn={commandTurn}
+          debugEvents={debugEvents}
+          filteredDebugEvents={filteredDebugEvents}
+          openDebugSeq={openDebugSeq}
+          onDebugSeqChange={setOpenDebugSeq}
+          contextData={contextData}
+          runEvents={runEventsQuery.data ?? []}
+          stages={stages}
+        />
+      </div>
+
+      {effectiveTab === "primary" && renderer === "agent" ? (
+        panelSelection?.kind === "group" ? (
+          <ToolGroupDetailsPanel
+            group={openGroup}
+            runStart={runStart}
+            onClose={() => setPanelSelection(null)}
+          />
+        ) : (
+          <EventDetailsPanel
+            turn={openTurn}
+            runStart={runStart}
+            onClose={() => setPanelSelection(null)}
+          />
+        )
+      ) : effectiveTab === "debug" ? (
+        <DebugEventDetailsPanel
+          event={openDebugEvent}
+          onClose={() => setOpenDebugSeq(null)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function RunStageActivity({
+  runId,
+  selectedStage,
+  stages,
+  runStart,
+}: {
+  runId: string;
+  selectedStage: Stage;
+  stages: Stage[];
+  runStart: string | undefined;
+}) {
+  const [activityState, dispatchActivity] = useReducer(
+    stageActivityReducer,
+    undefined,
+    initialStageActivityState,
+  );
+  const { tab, selectedKinds, selectedDebugCategories, search } = activityState;
+
+  return (
+    <RunStageActivityStage
+      key={selectedStage.id}
+      runId={runId}
+      selectedStage={selectedStage}
+      stages={stages}
+      runStart={runStart}
+      tab={tab}
+      selectedKinds={selectedKinds}
+      selectedDebugCategories={selectedDebugCategories}
+      search={search}
+      onTabChange={(nextTab) =>
+        dispatchActivity({ type: "tabChanged", tab: nextTab })
+      }
+      onKindsChange={(kinds) =>
+        dispatchActivity({ type: "kindsChanged", kinds })
+      }
+      onDebugCategoriesChange={(categories) =>
+        dispatchActivity({
+          type: "debugCategoriesChanged",
+          categories,
+        })
+      }
+      onSearchChange={(nextSearch) =>
+        dispatchActivity({ type: "searchChanged", search: nextSearch })
+      }
+    />
+  );
+}
+
+export default function RunStages() {
+  const { id, stageId } = useParams();
+  const runQuery = useRun(id);
+  const stagesQuery = useRunStages(id);
+  const stages = useMemo(
+    () => mapRunStagesToSidebarStages(stagesQuery.data),
+    [stagesQuery.data],
+  );
+
+  const selectedStage = stages.find((s: Stage) => s.id === stageId) ?? stages[0];
+  const selectedStageId = selectedStage?.id;
+  const runStart =
+    selectedStage?.startedAt ??
+    runQuery.data?.timestamps.started_at ??
+    runQuery.data?.timestamps.created_at;
+  // Insights sidebar only renders for agent stages; fetch projection + context
+  // window only when the user is on one to keep the hot path lean.
+  const isAgentStage = selectedStage?.handler === "agent";
+  const runStateQuery = useRunState(isAgentStage ? id : undefined);
+  const contextWindowQuery = useRunStageContextWindow(
+    isAgentStage ? id : undefined,
+    isAgentStage ? selectedStageId : undefined,
+  );
+  const stageProjection =
+    isAgentStage && selectedStageId
+      ? runStateQuery.data?.stages[selectedStageId]
+      : undefined;
+
+  if (!id || !selectedStage) {
     return (
       <div className="py-12">
         <EmptyState
@@ -1611,166 +1948,12 @@ export default function RunStages() {
         </>
       )}
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-3">
-        <div className="shrink-0 border-b border-line">
-          <div className="pl-3 pr-3">
-            <EventsToolbar
-              tab={effectiveTab}
-              renderer={renderer}
-              availableTabs={availableTabs}
-              commandTurn={commandTurn}
-              onTabChange={setTab}
-              selectedKinds={selectedKinds}
-              onKindsChange={setSelectedKinds}
-              selectedDebugCategories={selectedDebugCategories}
-              onDebugCategoriesChange={setSelectedDebugCategories}
-              availableDebugCategories={availableDebugCategories}
-              search={search}
-              onSearchChange={setSearch}
-              filteredCount={effectiveTab === "primary" ? filteredTurns.length : filteredDebugEvents.length}
-              totalCount={effectiveTab === "primary" ? turns.length : debugEvents.length}
-              providerUsed={selectedStage.providerUsed}
-              events={stageEventsQuery.data ?? []}
-              runId={id ?? ""}
-              stageId={selectedStageId ?? ""}
-            />
-            {effectiveTab === "debug" && (
-              <div className="pb-3">
-                <DebugDnaStrip
-                  events={debugEvents}
-                  selectedSeq={openDebugSeq}
-                  onSelect={setOpenDebugSeq}
-                  runStart={runStart}
-                />
-              </div>
-            )}
-            {effectiveTab === "primary" && renderer === "agent" && (
-              <div className="pb-3">
-                <ThreadDnaStrip
-                  items={threadDnaItems}
-                  selection={panelSelection}
-                  onSelect={setPanelSelection}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pt-6 pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]">
-          {effectiveTab === "primary" ? (
-            renderer === "agent" ? (
-              turns.length > 0 && filteredTurns.length === 0 ? (
-                <div className="px-2 py-6 text-sm text-fg-muted">
-                  No events match these filters.
-                </div>
-              ) : (
-                displayItems.map((item) => {
-                  if (item.kind === "single") {
-                    return (
-                      <EventRow
-                        key={`turn-${item.turnIndex}`}
-                        turn={item.turn}
-                        runStart={runStart}
-                        selected={
-                          panelSelection?.kind === "single" &&
-                          panelSelection.turnIndex === item.turnIndex
-                        }
-                        onSelect={() =>
-                          setPanelSelection({ kind: "single", turnIndex: item.turnIndex })
-                        }
-                      />
-                    );
-                  }
-                  const childIndices = item.children.map((c) => c.turnIndex);
-                  const groupKey = `group-${childIndices.join("-")}`;
-                  const isSelected =
-                    panelSelection?.kind === "group" &&
-                    panelSelection.childTurnIndices.length === childIndices.length &&
-                    panelSelection.childTurnIndices.every((v, i) => v === childIndices[i]);
-                  return (
-                    <ToolGroupRow
-                      key={groupKey}
-                      group={item}
-                      runStart={runStart}
-                      selected={isSelected}
-                      onSelect={() =>
-                        setPanelSelection({
-                          kind: "group",
-                          childTurnIndices: childIndices,
-                        })
-                      }
-                    />
-                  );
-                })
-              )
-            ) : renderer === "command" ? (
-              <CommandLogs runId={id} stageId={selectedStage.id} turn={commandTurn} />
-            ) : renderer === "human" ? (
-              <HumanQA stage={selectedStage} events={debugEvents} />
-            ) : renderer === "conditional" ? (
-              <ConditionalDecision
-                stage={selectedStage}
-                runEvents={runEventsQuery.data ?? []}
-                allStages={stages}
-                runId={id}
-              />
-            ) : renderer === "parallel" ? (
-              <ParallelChildren
-                stage={selectedStage}
-                events={debugEvents}
-                runId={id}
-                allStages={stages}
-              />
-            ) : renderer === "fan_in" ? (
-              <FanInResults
-                stage={selectedStage}
-                events={debugEvents}
-                notes={extractStageNotes(debugEvents)}
-              />
-            ) : renderer === "wait" ? (
-              <WaitStatus stage={selectedStage} />
-            ) : (
-              <StageSummary stage={selectedStage} events={debugEvents} />
-            )
-          ) : effectiveTab === "context" ? (
-            contextData ? <StageContext data={contextData} /> : null
-          ) : debugEvents.length > 0 && filteredDebugEvents.length === 0 ? (
-            <div className="px-2 py-6 text-sm text-fg-muted">
-              No events match these filters.
-            </div>
-          ) : (
-            filteredDebugEvents.map((event) => (
-              <DebugEventRow
-                key={`debug-${event.seq}`}
-                event={event}
-                runStart={runStart}
-                selected={openDebugSeq === event.seq}
-                onSelect={() => setOpenDebugSeq(event.seq)}
-              />
-            ))
-          )}
-        </div>
-      </div>
-
-      {effectiveTab === "primary" && renderer === "agent" ? (
-        panelSelection?.kind === "group" ? (
-          <ToolGroupDetailsPanel
-            group={openGroup}
-            runStart={runStart}
-            onClose={() => setPanelSelection(null)}
-          />
-        ) : (
-          <EventDetailsPanel
-            turn={openTurn}
-            runStart={runStart}
-            onClose={() => setPanelSelection(null)}
-          />
-        )
-      ) : effectiveTab === "debug" ? (
-        <DebugEventDetailsPanel
-          event={openDebugEvent}
-          onClose={() => setOpenDebugSeq(null)}
-        />
-      ) : null}
+      <RunStageActivity
+        runId={id}
+        selectedStage={selectedStage}
+        stages={stages}
+        runStart={runStart}
+      />
     </div>
   );
 }

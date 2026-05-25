@@ -1,6 +1,12 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { FormEvent, ReactNode, Ref } from "react";
-import { Link, Navigate, useLocation, useNavigate } from "react-router";
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+  type NavigateFunction,
+} from "react-router";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -102,44 +108,195 @@ type SandboxForm = {
   apiKey:   string;
   apiKeySaved: boolean;
 };
+type RunStepSubmit = (args: {
+  action:   () => Promise<void>;
+  fallback: string;
+  next?:    string;
+}) => Promise<void>;
+type InstallDispatch = (action: InstallAction) => void;
 
-export default function InstallApp() {
-  const navigate = useNavigate();
+type InstallState = {
+  sessionState: SessionState;
+  manualToken: string;
+  llmSelection: ProviderSelection;
+  objectStoreForm: ObjectStoreForm;
+  sandboxForm: SandboxForm;
+  canonicalUrl: string;
+  githubStrategy: GithubStrategy;
+  tokenForm: TokenForm;
+  appForm: AppForm;
+  saveError: string | null;
+  submitting: boolean;
+  finishState: FinishState;
+  timedOut: boolean;
+};
+
+type InstallAction =
+  | { type: "manualTokenChanged"; value: string }
+  | { type: "sessionCleared" }
+  | { type: "sessionRequested" }
+  | { type: "sessionReady"; session: InstallSessionResponse }
+  | { type: "sessionFailed"; message: string }
+  | { type: "saveErrorChanged"; message: string | null }
+  | { type: "submittingChanged"; submitting: boolean }
+  | { type: "timedOutChanged"; timedOut: boolean }
+  | { type: "finishStarted"; result: FinishState }
+  | { type: "canonicalUrlChanged"; value: string }
+  | { type: "llmProviderApiKeyChanged"; provider: string; apiKey: string }
+  | { type: "llmSelectionChanged"; value: ProviderSelection }
+  | { type: "objectStorePatched"; patch: Partial<ObjectStoreForm> }
+  | { type: "sandboxPatched"; patch: Partial<SandboxForm> }
+  | { type: "githubStrategyChanged"; strategy: GithubStrategy }
+  | { type: "tokenFormPatched"; patch: Partial<TokenForm> }
+  | { type: "tokenFormReplaced"; value: TokenForm }
+  | { type: "appFormPatched"; patch: Partial<AppForm> }
+  | { type: "githubOwnerChanged"; kind: GithubOwnerKind }
+  | { type: "githubOrgSlugChanged"; slug: string };
+
+function initialInstallState(): InstallState {
+  return {
+    sessionState:     { status: "idle" },
+    manualToken:      "",
+    llmSelection:     defaultProviderSelection(),
+    objectStoreForm:  defaultObjectStoreForm(),
+    sandboxForm:      defaultSandboxForm(),
+    canonicalUrl:     "",
+    githubStrategy:   "token",
+    tokenForm:        { token: "", username: "" },
+    appForm:          {
+      owner:           { kind: "personal" },
+      appName:         "Fabro",
+      allowedUsername: "",
+    },
+    saveError:        null,
+    submitting:       false,
+    finishState:      null,
+    timedOut:         false,
+  };
+}
+
+function hydrateInstallState(
+  state: InstallState,
+  session: InstallSessionResponse,
+): InstallState {
+  let githubStrategy = state.githubStrategy;
+  let tokenForm = state.tokenForm;
+  let appForm = state.appForm;
+
+  if (session.github?.strategy === "app") {
+    githubStrategy = "app";
+    appForm = {
+      owner:           session.github.owner ?? { kind: "personal" },
+      appName:         session.github.app_name || "Fabro",
+      allowedUsername: session.github.allowed_username || "",
+    };
+  } else if (session.github?.strategy === "token") {
+    githubStrategy = "token";
+    tokenForm = {
+      ...state.tokenForm,
+      username: session.github.username || state.tokenForm.username,
+    };
+  }
+
+  return {
+    ...state,
+    sessionState:    { status: "ready", data: session },
+    canonicalUrl:
+      state.canonicalUrl ||
+      session.server?.canonical_url ||
+      session.prefill.canonical_url,
+    objectStoreForm: hydrateObjectStoreForm(session),
+    sandboxForm:     hydrateSandboxForm(state.sandboxForm, session),
+    llmSelection:    hydrateProviderSelection(state.llmSelection, session),
+    githubStrategy,
+    tokenForm,
+    appForm,
+  };
+}
+
+function installReducer(state: InstallState, action: InstallAction): InstallState {
+  switch (action.type) {
+    case "manualTokenChanged":
+      return { ...state, manualToken: action.value };
+    case "sessionCleared":
+      return { ...state, sessionState: { status: "idle" } };
+    case "sessionRequested":
+      return { ...state, sessionState: { status: "loading" } };
+    case "sessionReady":
+      return hydrateInstallState(state, action.session);
+    case "sessionFailed":
+      return { ...state, sessionState: { status: "error", message: action.message } };
+    case "saveErrorChanged":
+      return { ...state, saveError: action.message };
+    case "submittingChanged":
+      return { ...state, submitting: action.submitting };
+    case "timedOutChanged":
+      return { ...state, timedOut: action.timedOut };
+    case "finishStarted":
+      return { ...state, finishState: action.result };
+    case "canonicalUrlChanged":
+      return { ...state, canonicalUrl: action.value };
+    case "llmProviderApiKeyChanged":
+      return {
+        ...state,
+        llmSelection: {
+          ...state.llmSelection,
+          [action.provider]: { apiKey: action.apiKey },
+        },
+      };
+    case "llmSelectionChanged":
+      return { ...state, llmSelection: action.value };
+    case "objectStorePatched":
+      return {
+        ...state,
+        objectStoreForm: { ...state.objectStoreForm, ...action.patch },
+      };
+    case "sandboxPatched":
+      return { ...state, sandboxForm: { ...state.sandboxForm, ...action.patch } };
+    case "githubStrategyChanged":
+      return { ...state, githubStrategy: action.strategy };
+    case "tokenFormPatched":
+      return { ...state, tokenForm: { ...state.tokenForm, ...action.patch } };
+    case "tokenFormReplaced":
+      return { ...state, tokenForm: action.value };
+    case "appFormPatched":
+      return { ...state, appForm: { ...state.appForm, ...action.patch } };
+    case "githubOwnerChanged":
+      return {
+        ...state,
+        appForm: {
+          ...state.appForm,
+          owner:
+            action.kind === "org"
+              ? {
+                  kind: "org",
+                  slug: state.appForm.owner.kind === "org" ? state.appForm.owner.slug ?? "" : "",
+                }
+              : { kind: "personal" },
+        },
+      };
+    case "githubOrgSlugChanged":
+      return {
+        ...state,
+        appForm: {
+          ...state.appForm,
+          owner: { kind: "org", slug: action.slug },
+        },
+      };
+  }
+}
+
+function useInstallController() {
   const { pathname } = useLocation();
   const [installToken, setInstallToken] = useState<string | null>(() =>
     readStoredInstallToken(),
   );
-  const [sessionState, setSessionState] = useState<SessionState>({ status: "idle" });
-  const session = sessionState.status === "ready" ? sessionState.data : null;
-  const [manualToken, setManualToken] = useState("");
-  const [llmSelection, setLlmSelection] = useState<ProviderSelection>(() =>
-    defaultProviderSelection(),
+  const [installState, dispatchInstall] = useReducer(
+    installReducer,
+    undefined,
+    initialInstallState,
   );
-  const [objectStoreForm, setObjectStoreForm] = useState<ObjectStoreForm>(() =>
-    defaultObjectStoreForm(),
-  );
-  const [sandboxForm, setSandboxForm] = useState<SandboxForm>(() =>
-    defaultSandboxForm(),
-  );
-  const [canonicalUrl, setCanonicalUrl] = useState("");
-  const [githubStrategy, setGithubStrategy] = useState<GithubStrategy>("token");
-  const [tokenForm, setTokenForm] = useState<TokenForm>({ token: "", username: "" });
-  const [appForm, setAppForm] = useState<AppForm>({
-    owner:           { kind: "personal" },
-    appName:         "Fabro",
-    allowedUsername: "",
-  });
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [finishState, setFinishState] = useState<FinishState>(null);
-  const [timedOut, setTimedOut] = useState(false);
-  const canonicalUrlInputRef = useRef<HTMLInputElement>(null);
-  const localRootInputRef = useRef<HTMLInputElement>(null);
-  const bucketInputRef = useRef<HTMLInputElement>(null);
-  const regionInputRef = useRef<HTMLInputElement>(null);
-  const accessKeyIdInputRef = useRef<HTMLInputElement>(null);
-  const secretAccessKeyInputRef = useRef<HTMLInputElement>(null);
-  const sandboxApiKeyInputRef = useRef<HTMLInputElement>(null);
+  const { finishState } = installState;
 
   useEffect(() => {
     const { token, sanitizedUrl } = consumeInstallTokenFromUrl(window.location.href);
@@ -155,53 +312,31 @@ export default function InstallApp() {
     if (shouldConsumeInstallGithubErrorForPath(pathname)) {
       const { error, sanitizedUrl } = consumeInstallGithubErrorFromUrl(window.location.href);
       if (error) {
-        setSaveError(error);
+        dispatchInstall({ type: "saveErrorChanged", message: error });
         window.history.replaceState(window.history.state, "", sanitizedUrl);
         return;
       }
     }
-    setSaveError((current) => (current === null ? current : null));
+    dispatchInstall({ type: "saveErrorChanged", message: null });
   }, [pathname]);
 
   useEffect(() => {
     if (!installToken) {
-      setSessionState({ status: "idle" });
+      dispatchInstall({ type: "sessionCleared" });
       return;
     }
 
     let cancelled = false;
-    setSessionState({ status: "loading" });
+    dispatchInstall({ type: "sessionRequested" });
     getInstallSession(installToken)
       .then((nextSession) => {
         if (cancelled) return;
-        setSessionState({ status: "ready", data: nextSession });
-        setCanonicalUrl((current) =>
-          current || nextSession.server?.canonical_url || nextSession.prefill.canonical_url,
-        );
-        setObjectStoreForm(hydrateObjectStoreForm(nextSession));
-        setSandboxForm((current) => hydrateSandboxForm(current, nextSession));
-        setLlmSelection((current) =>
-          hydrateProviderSelection(current, nextSession),
-        );
-        if (nextSession.github?.strategy === "app") {
-          setGithubStrategy("app");
-          setAppForm({
-            owner:           nextSession.github.owner ?? { kind: "personal" },
-            appName:         nextSession.github.app_name || "Fabro",
-            allowedUsername: nextSession.github.allowed_username || "",
-          });
-        } else if (nextSession.github?.strategy === "token") {
-          setGithubStrategy("token");
-          setTokenForm((current) => ({
-            ...current,
-            username: nextSession.github?.username || current.username,
-          }));
-        }
+        dispatchInstall({ type: "sessionReady", session: nextSession });
       })
       .catch((error) => {
         if (cancelled) return;
-        setSessionState({
-          status:  "error",
+        dispatchInstall({
+          type:    "sessionFailed",
           message: error instanceof Error ? error.message : "Install session failed",
         });
       });
@@ -211,24 +346,13 @@ export default function InstallApp() {
     };
   }, [installToken]);
 
-  // react-doctor-disable-next-line react-doctor/no-effect-chain -- Navigation waits for the async install session before leaving the token/root entry route.
-  useEffect(() => {
-    if (!installToken || !session) return;
-    // react-doctor-disable-next-line react-doctor/no-event-handler -- This redirects from root/install exactly once after the async session becomes available.
-    if ((pathname === "/" || pathname === "/install") && !finishState) {
-      startTransition(() => {
-        navigate("/install/welcome", { replace: true });
-      });
-    }
-  }, [finishState, installToken, pathname, navigate, session]);
-
   // react-doctor-disable-next-line react-doctor/no-fetch-in-effect -- This is install-mode restart polling, not cacheable app data.
   useEffect(() => {
     if (!finishState) return;
 
-    setTimedOut(false);
+    dispatchInstall({ type: "timedOutChanged", timedOut: false });
     const deadline = window.setTimeout(() => {
-      setTimedOut(true);
+      dispatchInstall({ type: "timedOutChanged", timedOut: true });
     }, 30_000);
 
     const controller = new AbortController();
@@ -269,6 +393,62 @@ export default function InstallApp() {
     };
   }, [finishState]);
 
+  return { pathname, installToken, setInstallToken, installState, dispatchInstall };
+}
+
+function useInstallRootRedirect({
+  installToken,
+  session,
+  finishState,
+  pathname,
+  navigate,
+}: {
+  installToken: string | null;
+  session: InstallSessionResponse | null;
+  finishState: FinishState;
+  pathname: string;
+  navigate: NavigateFunction;
+}) {
+  // react-doctor-disable-next-line react-doctor/no-effect-chain -- Navigation waits for the async install session before leaving the token/root entry route.
+  useEffect(() => {
+    if (!installToken || !session) return;
+    // react-doctor-disable-next-line react-doctor/no-event-handler -- This redirects from root/install exactly once after the async session becomes available.
+    if ((pathname === "/" || pathname === "/install") && !finishState) {
+      startTransition(() => {
+        navigate("/install/welcome", { replace: true });
+      });
+    }
+  }, [finishState, installToken, pathname, navigate, session]);
+}
+
+export default function InstallApp() {
+  const navigate = useNavigate();
+  const {
+    pathname,
+    installToken,
+    setInstallToken,
+    installState,
+    dispatchInstall,
+  } = useInstallController();
+  const {
+    sessionState,
+    manualToken,
+    llmSelection,
+    objectStoreForm,
+    sandboxForm,
+    canonicalUrl,
+    githubStrategy,
+    tokenForm,
+    appForm,
+    saveError,
+    submitting,
+    finishState,
+    timedOut,
+  } = installState;
+  const session = sessionState.status === "ready" ? sessionState.data : null;
+
+  useInstallRootRedirect({ installToken, session, finishState, pathname, navigate });
+
   const currentStep = useMemo<StepId>(
     () =>
       STEPPER_STEPS.find((step) => pathname.startsWith(step.href))?.id ??
@@ -285,49 +465,49 @@ export default function InstallApp() {
     return (
       <TokenEntryScreen
         manualToken={manualToken}
-        setManualToken={setManualToken}
+        onManualTokenChange={(value) =>
+          dispatchInstall({ type: "manualTokenChanged", value })
+        }
         sessionError={sessionError}
         onSubmit={() => {
           const nextToken = manualToken.trim();
           if (!nextToken) {
-            setSessionState({
-              status:  "error",
+            dispatchInstall({
+              type:    "sessionFailed",
               message: "Paste the install token from the server logs.",
             });
             return;
           }
           persistInstallToken(nextToken);
           setInstallToken(nextToken);
-          setSessionState({ status: "idle" });
+          dispatchInstall({ type: "sessionCleared" });
         }}
       />
     );
   }
 
-  const runStepSubmit = async (args: {
-    action:   () => Promise<void>;
-    fallback: string;
-    next?:    string;
-  }) => {
+  const runStepSubmit: RunStepSubmit = async (args) => {
     // Re-entrancy guard: the StepPanel form guards its own onSubmit, but the
     // LLM step's "Skip LLM setup" button calls this directly, so a fast
     // double-click could otherwise fire two requests before `submitting`
     // re-renders the disabled state.
     if (submitting) return;
-    setSubmitting(true);
-    setSaveError(null);
+    dispatchInstall({ type: "submittingChanged", submitting: true });
+    dispatchInstall({ type: "saveErrorChanged", message: null });
     try {
       await args.action();
       if (args.next) {
         const nextSession = await getInstallSession(installToken);
-        setSessionState({ status: "ready", data: nextSession });
-        setSandboxForm((current) => hydrateSandboxForm(current, nextSession));
+        dispatchInstall({ type: "sessionReady", session: nextSession });
         navigate(args.next);
       }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : args.fallback);
+      dispatchInstall({
+        type:    "saveErrorChanged",
+        message: error instanceof Error ? error.message : args.fallback,
+      });
     } finally {
-      setSubmitting(false);
+      dispatchInstall({ type: "submittingChanged", submitting: false });
     }
   };
 
@@ -335,7 +515,9 @@ export default function InstallApp() {
     return (
       <TokenEntryScreen
         manualToken={manualToken}
-        setManualToken={setManualToken}
+        onManualTokenChange={(value) =>
+          dispatchInstall({ type: "manualTokenChanged", value })
+        }
         sessionError={sessionError}
         onSubmit={() => {
           const nextToken = manualToken.trim();
@@ -362,573 +544,79 @@ export default function InstallApp() {
     return <Navigate to="/install/finishing" replace />;
   }
 
-  // react-doctor-disable-next-line react-doctor/no-prevent-default -- Install wizard forms are client-side API steps with no meaningful non-JS endpoint.
   return (
     <InstallLayout currentStep={currentStep} completedSteps={completedSteps}>
       {pathname === "/install/finishing" ? (
         <FinishingScreen finishState={finishState} timedOut={timedOut} />
       ) : pathname === "/install/llm" ? (
-        <StepPanel
-          title="Add your LLM credentials"
-          description="Each key you enter is validated before it's saved. Skip a provider by leaving it blank, or skip LLM setup entirely and configure providers later."
-          error={saveError}
+        <LlmStep
+          installToken={installToken}
+          llmSelection={llmSelection}
+          saveError={saveError}
           submitting={submitting}
-          backHref="/install/sandbox"
-          secondaryAction={
-            <button
-              type="button"
-              disabled={submitting}
-              className={SECONDARY_BUTTON_CLASS}
-              onClick={() => {
-                void runStepSubmit({
-                  action:   () => putInstallLlm(installToken, []),
-                  fallback: "Failed to skip LLM setup.",
-                  next:     "/install/github",
-                });
-              }}
-            >
-              Skip LLM setup
-            </button>
-          }
-          onSubmit={async () => {
-            const providers = [];
-            for (const { id } of INSTALL_PROVIDERS) {
-              const current = llmSelection[id] ?? { apiKey: "" };
-              const provider = {
-                provider: id,
-                api_key:  current.apiKey.trim(),
-              };
-              if (provider.api_key.length > 0) providers.push(provider);
-            }
-
-            if (providers.length === 0) {
-              setSaveError("Add at least one provider API key before continuing.");
-              return;
-            }
-
-            await runStepSubmit({
-              action: async () => {
-                await Promise.all(
-                  providers.map((provider) => testInstallLlm(installToken, provider)),
-                );
-                await putInstallLlm(installToken, providers);
-              },
-              fallback: "Failed to save LLM settings.",
-              next:     "/install/github",
-            });
-          }}
-        >
-          <ProviderFields value={llmSelection} onChange={setLlmSelection} />
-        </StepPanel>
+          runStepSubmit={runStepSubmit}
+          dispatchInstall={dispatchInstall}
+        />
       ) : pathname === "/install/server" ? (
-        <StepPanel
-          title="Confirm the public URL"
-          description="This is where operators will reach Fabro after setup. It's also the redirect target for the GitHub App callback."
-          error={saveError}
+        <ServerStep
+          installToken={installToken}
+          canonicalUrl={canonicalUrl}
+          saveError={saveError}
           submitting={submitting}
-          backHref="/install/welcome"
-          onSubmit={async () => {
-            if (!canonicalUrl.trim()) {
-              setSaveError("Enter the canonical server URL before continuing.");
-              focusInput(canonicalUrlInputRef);
-              return;
-            }
-            await runStepSubmit({
-              action:   () => putInstallServer(installToken, canonicalUrl.trim()),
-              fallback: "Failed to save server settings.",
-              next:     "/install/object-store",
-            });
-          }}
-        >
-          <Field
-            label="Canonical URL"
-            hint="Auto-detected from forwarded headers when available."
-          >
-            <input
-              type="url"
-              name="canonical_url"
-              aria-label="Canonical URL"
-              ref={canonicalUrlInputRef}
-              value={canonicalUrl}
-              onChange={(event) => setCanonicalUrl(event.target.value)}
-              className={INPUT_CLASS}
-              placeholder="https://fabro.example.com"
-              autoComplete="url"
-              spellCheck={false}
-            />
-          </Field>
-        </StepPanel>
+          runStepSubmit={runStepSubmit}
+          dispatchInstall={dispatchInstall}
+        />
       ) : pathname === "/install/object-store" ? (
-        <StepPanel
-          title="Choose the shared object store"
-          description="This configures the shared backend for both SlateDB and run artifacts. Fabro still keeps its local storage root on disk."
-          error={saveError}
+        <ObjectStoreStep
+          installToken={installToken}
+          objectStoreForm={objectStoreForm}
+          saveError={saveError}
           submitting={submitting}
-          submittingLabel={
-            objectStoreForm.provider === "s3" ? "Checking access..." : "Saving..."
-          }
-          backHref="/install/server"
-          onSubmit={async () => {
-            if (objectStoreForm.provider === "local") {
-              if (!objectStoreForm.localRoot.trim()) {
-                setSaveError("Enter the local object-store directory before continuing.");
-                focusInput(localRootInputRef);
-                return;
-              }
-            } else {
-              if (!objectStoreForm.bucket.trim()) {
-                setSaveError("Enter the S3 bucket before continuing.");
-                focusInput(bucketInputRef);
-                return;
-              }
-              if (!objectStoreForm.region.trim()) {
-                setSaveError("Enter the AWS region before continuing.");
-                focusInput(regionInputRef);
-                return;
-              }
-              if (objectStoreForm.credentialMode === "access_key") {
-                const accessKeyId = objectStoreForm.accessKeyId.trim();
-                const secretAccessKey = objectStoreForm.secretAccessKey.trim();
-                const keepStoredCredentials =
-                  objectStoreForm.manualCredentialsSaved &&
-                  !accessKeyId &&
-                  !secretAccessKey;
-                if (!keepStoredCredentials && !accessKeyId) {
-                  setSaveError("Enter the AWS access key ID before continuing.");
-                  focusInput(accessKeyIdInputRef);
-                  return;
-                }
-                if (!keepStoredCredentials && !secretAccessKey) {
-                  setSaveError("Enter the AWS secret access key before continuing.");
-                  focusInput(secretAccessKeyInputRef);
-                  return;
-                }
-              }
-            }
-
-            const payload = buildObjectStorePayload(objectStoreForm);
-            await runStepSubmit({
-              action: async () => {
-                if (objectStoreForm.provider === "s3") {
-                  await testInstallObjectStore(installToken, payload);
-                }
-                await putInstallObjectStore(installToken, payload);
-              },
-              fallback: "Failed to save object-store settings.",
-              next:     "/install/sandbox",
-            });
-          }}
-        >
-          <CardPicker
-            legend="Object store"
-            options={OBJECT_STORE_PROVIDER_OPTIONS}
-            value={objectStoreForm.provider}
-            onChange={(provider) => {
-              setObjectStoreForm((current) => ({ ...current, provider }));
-              if (provider === "s3") {
-                focusInput(bucketInputRef);
-              } else {
-                focusInput(localRootInputRef);
-              }
-            }}
-          />
-          {objectStoreForm.provider === "s3" ? (
-            <div className="space-y-5">
-              <Field label="Bucket">
-                <input
-                  ref={bucketInputRef}
-                  name="object_store_bucket"
-                  aria-label="Bucket"
-                  value={objectStoreForm.bucket}
-                  onChange={(event) =>
-                    setObjectStoreForm((current) => ({
-                      ...current,
-                      bucket: event.target.value,
-                    }))
-                  }
-                  className={`${INPUT_CLASS} font-mono`}
-                  placeholder="my-fabro-data"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                />
-              </Field>
-              <Field label="Region">
-                <input
-                  ref={regionInputRef}
-                  name="object_store_region"
-                  aria-label="Region"
-                  value={objectStoreForm.region}
-                  onChange={(event) =>
-                    setObjectStoreForm((current) => ({
-                      ...current,
-                      region: event.target.value,
-                    }))
-                  }
-                  className={`${INPUT_CLASS} font-mono`}
-                  placeholder="us-east-1"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                />
-              </Field>
-              <CardPicker
-                legend="Credentials"
-                options={OBJECT_STORE_CREDENTIAL_MODE_OPTIONS}
-                value={objectStoreForm.credentialMode}
-                onChange={(credentialMode) => {
-                  setObjectStoreForm((current) => ({ ...current, credentialMode }));
-                  if (credentialMode === "access_key") {
-                    focusInput(accessKeyIdInputRef);
-                  }
-                }}
-              />
-              {objectStoreForm.credentialMode === "access_key" ? (
-                <div className="space-y-5">
-                  <Field label="AWS access key ID">
-                    <input
-                      ref={accessKeyIdInputRef}
-                      id="aws_access_key_id"
-                      name="aws_access_key_id"
-                      aria-label="AWS access key ID"
-                      value={objectStoreForm.accessKeyId}
-                      onChange={(event) =>
-                        setObjectStoreForm((current) => ({
-                          ...current,
-                          accessKeyId: event.target.value,
-                        }))
-                      }
-                      className={`${INPUT_CLASS} font-mono`}
-                      placeholder="AKIA..."
-                      spellCheck={false}
-                      autoComplete="off"
-                      autoCapitalize="off"
-                    />
-                  </Field>
-                  <Field label="AWS secret access key">
-                    <PasswordInput
-                      inputRef={secretAccessKeyInputRef}
-                      id="aws_secret_access_key"
-                      name="aws_secret_access_key"
-                      value={objectStoreForm.secretAccessKey}
-                      onChange={(value) =>
-                        setObjectStoreForm((current) => ({
-                          ...current,
-                          secretAccessKey: value,
-                        }))
-                      }
-                      placeholder="Secret access key"
-                    />
-                  </Field>
-                  {objectStoreForm.manualCredentialsSaved ? (
-                    <p className="text-xs text-fg-muted">
-                      Credentials saved. Leave both fields blank to keep them, or
-                      enter both fields to replace them.
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="text-xs/5 text-fg-muted">
-                  Fabro will use AWS credentials already provided by the runtime,
-                  such as EC2, ECS, or IRSA-based auth.
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <Field
-                label="Local directory"
-                hint="Shared root for SlateDB and run artifacts."
-              >
-                <input
-                  ref={localRootInputRef}
-                  name="object_store_local_root"
-                  aria-label="Local directory"
-                  value={objectStoreForm.localRoot}
-                  onChange={(event) =>
-                    setObjectStoreForm((current) => ({
-                      ...current,
-                      localRoot: event.target.value,
-                    }))
-                  }
-                  className={`${INPUT_CLASS} font-mono`}
-                  placeholder="Local object-store directory"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                />
-              </Field>
-              <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
-                Fabro will store SlateDB and run artifacts under this directory.
-              </p>
-            </div>
-          )}
-        </StepPanel>
+          runStepSubmit={runStepSubmit}
+          dispatchInstall={dispatchInstall}
+        />
       ) : pathname === "/install/sandbox" ? (
-        <StepPanel
-          title="Choose the sandbox runtime"
-          description="Workflows run inside this sandbox. Docker uses the host daemon; Daytona runs each sandbox in its cloud."
-          error={saveError}
+        <SandboxStep
+          installToken={installToken}
+          sandboxForm={sandboxForm}
+          saveError={saveError}
           submitting={submitting}
-          submittingLabel={
-            sandboxForm.provider === "daytona" ? "Checking access..." : "Saving..."
-          }
-          backHref="/install/object-store"
-          onSubmit={async () => {
-            if (sandboxForm.provider === "daytona") {
-              const apiKey = sandboxForm.apiKey.trim();
-              const keepStoredKey = sandboxForm.apiKeySaved && !apiKey;
-              if (!keepStoredKey && !apiKey) {
-                setSaveError("Enter the Daytona API key before continuing.");
-                focusInput(sandboxApiKeyInputRef);
-                return;
-              }
-            }
-
-            const payload = buildSandboxPayload(sandboxForm);
-            await runStepSubmit({
-              action: async () => {
-                if (sandboxForm.provider === "daytona") {
-                  await testInstallSandbox(installToken, payload);
-                }
-                await putInstallSandbox(installToken, payload);
-              },
-              fallback: "Failed to save sandbox settings.",
-              next:     "/install/llm",
-            });
-          }}
-        >
-          <CardPicker
-            legend="Sandbox runtime"
-            options={SANDBOX_PROVIDER_OPTIONS}
-            value={sandboxForm.provider}
-            onChange={(provider) => {
-              setSandboxForm((current) => ({ ...current, provider }));
-              if (provider === "daytona") {
-                focusInput(sandboxApiKeyInputRef);
-              }
-            }}
-          />
-          {sandboxForm.provider === "daytona" ? (
-            <div className="space-y-5">
-              <Field
-                label="Daytona API key"
-                hint={
-                  sandboxForm.apiKeySaved
-                    ? "A key is already saved. Leave blank to keep using it."
-                    : "Stored in the vault and exported to workflows as DAYTONA_API_KEY."
-                }
-              >
-                <input
-                  ref={sandboxApiKeyInputRef}
-                  type="password"
-                  name="sandbox_api_key"
-                  aria-label="Daytona API key"
-                  value={sandboxForm.apiKey}
-                  onChange={(event) =>
-                    setSandboxForm((current) => ({
-                      ...current,
-                      apiKey: event.target.value,
-                    }))
-                  }
-                  className={`${INPUT_CLASS} font-mono`}
-                  placeholder={
-                    sandboxForm.apiKeySaved ? "•••• (saved)" : "dtn_..."
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </Field>
-            </div>
-          ) : (
-            <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
-              Fabro will use the host Docker daemon. Make sure the server has
-              access to <code className="font-mono text-fg-2">/var/run/docker.sock</code>.
-            </p>
-          )}
-        </StepPanel>
+          runStepSubmit={runStepSubmit}
+          dispatchInstall={dispatchInstall}
+        />
       ) : pathname === "/install/github/done" ? (
         <GithubAppDoneScreen github={session?.github} />
       ) : pathname === "/install/github" ? (
-        <StepPanel
-          title="Connect GitHub"
-          description="Choose how Fabro should authenticate. Tokens are stored in the vault; apps hand off to GitHub and return here."
-          error={saveError}
+        <GithubStep
+          installToken={installToken}
+          session={session}
+          githubStrategy={githubStrategy}
+          tokenForm={tokenForm}
+          appForm={appForm}
+          saveError={saveError}
           submitting={submitting}
-          submitLabel={githubStrategy === "app" ? "Continue on GitHub" : "Continue"}
-          backHref="/install/llm"
-          onSubmit={async () => {
-            if (githubStrategy === "token") {
-              const trimmedToken = tokenForm.token.trim();
-              if (!trimmedToken) {
-                setSaveError("Provide the GitHub token before continuing.");
-                return;
-              }
-              await runStepSubmit({
-                action: async () => {
-                  const username = await testInstallGithubToken(installToken, trimmedToken);
-                  setTokenForm({ token: trimmedToken, username });
-                  await putInstallGithubToken(installToken, trimmedToken, username);
-                },
-                fallback: "Failed to start GitHub setup.",
-                next:     "/install/review",
-              });
-              return;
-            }
-
-            const { owner, appName, allowedUsername } = appForm;
-            if (owner.kind === "org" && !(owner.slug ?? "").trim()) {
-              setSaveError("Enter the organization slug for the GitHub App.");
-              return;
-            }
-            if (!appName.trim()) {
-              setSaveError("Enter the GitHub App name before continuing.");
-              return;
-            }
-            if (!allowedUsername.trim()) {
-              setSaveError("Enter the GitHub username that should be allowed to log in.");
-              return;
-            }
-
-            await runStepSubmit({
-              action: async () => {
-                const manifest = await createInstallGithubAppManifest(installToken, {
-                  owner:
-                    owner.kind === "org"
-                      ? { kind: "org", slug: (owner.slug ?? "").trim() }
-                      : { kind: "personal" },
-                  app_name:         appName.trim(),
-                  allowed_username: allowedUsername.trim(),
-                });
-                submitGithubManifest(
-                  manifest.github_form_action,
-                  manifest.manifest,
-                  manifest.state,
-                );
-              },
-              fallback: "Failed to start GitHub setup.",
-            });
-          }}
-        >
-          <CardPicker
-            legend="Authentication"
-            options={GITHUB_STRATEGY_OPTIONS}
-            value={githubStrategy}
-            onChange={(strategy) => setGithubStrategy(strategy)}
-          />
-          {githubStrategy === "token" ? (
-            <div className="space-y-5">
-              <div>
-                <label
-                  htmlFor="github_token"
-                  className="text-sm font-medium text-fg"
-                >
-                  Personal access token
-                </label>
-                <div className="mt-2">
-                  <PasswordInput
-                    id="github_token"
-                    name="github_token"
-                    value={tokenForm.token}
-                    onChange={(value) =>
-                      setTokenForm((current) => ({ ...current, token: value }))
-                    }
-                    placeholder="ghp_..."
-                  />
-                </div>
-                {tokenForm.username ? (
-                  <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-mint">
-                    <CheckCircleIcon className="size-4 shrink-0" />
-                    Previously validated as{" "}
-                    <span className="font-medium">@{tokenForm.username}</span>
-                  </p>
-                ) : null}
-                <HelpDisclosure summary="Where do I get this?">
-                  <p>
-                    Create a fine-grained or classic token with{" "}
-                    <code className="font-mono text-fg-2">repo</code> scope.
-                  </p>
-                  <ExternalLink href="https://github.com/settings/tokens">
-                    github.com/settings/tokens
-                  </ExternalLink>
-                </HelpDisclosure>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              <CardPicker
-                legend="Owner"
-                options={GITHUB_OWNER_OPTIONS}
-                value={appForm.owner.kind}
-                onChange={(kind) =>
-                  setAppForm((current) => ({
-                    ...current,
-                    owner:
-                      kind === "org"
-                        ? { kind: "org", slug: current.owner.kind === "org" ? current.owner.slug ?? "" : "" }
-                        : { kind: "personal" },
-                  }))
-                }
-              />
-              {appForm.owner.kind === "org" ? (
-                <Field label="Organization slug">
-                  <input
-                    name="github_org_slug"
-                    aria-label="Organization slug"
-                    value={appForm.owner.slug ?? ""}
-                    onChange={(event) =>
-                      setAppForm((current) => ({
-                        ...current,
-                        owner: { kind: "org", slug: event.target.value },
-                      }))
-                    }
-                    className={INPUT_CLASS}
-                    placeholder="acme"
-                    spellCheck={false}
-                  />
-                </Field>
-              ) : null}
-              <Field
-                label="Allowed GitHub username"
-                hint="Only this username can log in through GitHub after setup."
-              >
-                <input
-                  name="github_allowed_username"
-                  aria-label="Allowed GitHub username"
-                  value={appForm.allowedUsername}
-                  onChange={(event) =>
-                    setAppForm((current) => ({
-                      ...current,
-                      allowedUsername: event.target.value,
-                    }))
-                  }
-                  className={INPUT_CLASS}
-                  placeholder="octocat"
-                  spellCheck={false}
-                />
-              </Field>
-              {session?.server?.canonical_url ? (
-                <p className="text-xs text-fg-muted">
-                  After creating the app, GitHub will redirect back to{" "}
-                  <code className="font-mono text-fg-3">{session.server.canonical_url}</code>.
-                </p>
-              ) : null}
-            </div>
-          )}
-        </StepPanel>
+          runStepSubmit={runStepSubmit}
+          dispatchInstall={dispatchInstall}
+        />
       ) : pathname === "/install/review" ? (
         <ReviewScreen
           session={session}
           error={saveError}
           submitting={submitting}
           onInstall={async () => {
-            setSubmitting(true);
-            setSaveError(null);
+            dispatchInstall({ type: "submittingChanged", submitting: true });
+            dispatchInstall({ type: "saveErrorChanged", message: null });
             try {
               const result = await finishInstall(installToken);
-              setFinishState(result);
+              dispatchInstall({ type: "finishStarted", result });
               navigate("/install/finishing");
             } catch (error) {
-              setSaveError(error instanceof Error ? error.message : "Install failed.");
+              dispatchInstall({
+                type:    "saveErrorChanged",
+                message: error instanceof Error ? error.message : "Install failed.",
+              });
             } finally {
-              setSubmitting(false);
+              dispatchInstall({ type: "submittingChanged", submitting: false });
             }
           }}
         />
@@ -939,14 +627,723 @@ export default function InstallApp() {
   );
 }
 
+function LlmStep({
+  installToken,
+  llmSelection,
+  saveError,
+  submitting,
+  runStepSubmit,
+  dispatchInstall,
+}: {
+  installToken: string;
+  llmSelection: ProviderSelection;
+  saveError: string | null;
+  submitting: boolean;
+  runStepSubmit: RunStepSubmit;
+  dispatchInstall: (action: InstallAction) => void;
+}) {
+  return (
+    <StepPanel
+      title="Add your LLM credentials"
+      description="Each key you enter is validated before it's saved. Skip a provider by leaving it blank, or skip LLM setup entirely and configure providers later."
+      error={saveError}
+      submitting={submitting}
+      backHref="/install/sandbox"
+      secondaryAction={
+        <button
+          type="button"
+          disabled={submitting}
+          className={SECONDARY_BUTTON_CLASS}
+          onClick={() => {
+            void runStepSubmit({
+              action:   () => putInstallLlm(installToken, []),
+              fallback: "Failed to skip LLM setup.",
+              next:     "/install/github",
+            });
+          }}
+        >
+          Skip LLM setup
+        </button>
+      }
+      onSubmit={async () => {
+        const providers: InstallLlmProviderInput[] = [];
+        for (const { id } of INSTALL_PROVIDERS) {
+          const current = llmSelection[id] ?? { apiKey: "" };
+          const provider = {
+            provider: id,
+            api_key:  current.apiKey.trim(),
+          };
+          if (provider.api_key.length > 0) providers.push(provider);
+        }
+
+        if (providers.length === 0) {
+          dispatchInstall({
+            type:    "saveErrorChanged",
+            message: "Add at least one provider API key before continuing.",
+          });
+          return;
+        }
+
+        await runStepSubmit({
+          action: async () => {
+            await Promise.all(
+              providers.map((provider) => testInstallLlm(installToken, provider)),
+            );
+            await putInstallLlm(installToken, providers);
+          },
+          fallback: "Failed to save LLM settings.",
+          next:     "/install/github",
+        });
+      }}
+    >
+      <ProviderFields
+        value={llmSelection}
+        onProviderApiKeyChange={(provider, apiKey) =>
+          dispatchInstall({
+            type: "llmProviderApiKeyChanged",
+            provider,
+            apiKey,
+          })
+        }
+      />
+    </StepPanel>
+  );
+}
+
+function ServerStep({
+  installToken,
+  canonicalUrl,
+  saveError,
+  submitting,
+  runStepSubmit,
+  dispatchInstall,
+}: {
+  installToken: string;
+  canonicalUrl: string;
+  saveError: string | null;
+  submitting: boolean;
+  runStepSubmit: RunStepSubmit;
+  dispatchInstall: (action: InstallAction) => void;
+}) {
+  const canonicalUrlInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <StepPanel
+      title="Confirm the public URL"
+      description="This is where operators will reach Fabro after setup. It's also the redirect target for the GitHub App callback."
+      error={saveError}
+      submitting={submitting}
+      backHref="/install/welcome"
+      onSubmit={async () => {
+        if (!canonicalUrl.trim()) {
+          dispatchInstall({
+            type:    "saveErrorChanged",
+            message: "Enter the canonical server URL before continuing.",
+          });
+          focusInput(canonicalUrlInputRef);
+          return;
+        }
+        await runStepSubmit({
+          action:   () => putInstallServer(installToken, canonicalUrl.trim()),
+          fallback: "Failed to save server settings.",
+          next:     "/install/object-store",
+        });
+      }}
+    >
+      <Field
+        label="Canonical URL"
+        hint="Auto-detected from forwarded headers when available."
+      >
+        <input
+          type="url"
+          name="canonical_url"
+          aria-label="Canonical URL"
+          ref={canonicalUrlInputRef}
+          value={canonicalUrl}
+          onChange={(event) =>
+            dispatchInstall({
+              type:  "canonicalUrlChanged",
+              value: event.target.value,
+            })
+          }
+          className={INPUT_CLASS}
+          placeholder="https://fabro.example.com"
+          autoComplete="url"
+          spellCheck={false}
+        />
+      </Field>
+    </StepPanel>
+  );
+}
+
+function ObjectStoreStep({
+  installToken,
+  objectStoreForm,
+  saveError,
+  submitting,
+  runStepSubmit,
+  dispatchInstall,
+}: {
+  installToken: string;
+  objectStoreForm: ObjectStoreForm;
+  saveError: string | null;
+  submitting: boolean;
+  runStepSubmit: RunStepSubmit;
+  dispatchInstall: (action: InstallAction) => void;
+}) {
+  const localRootInputRef = useRef<HTMLInputElement>(null);
+  const bucketInputRef = useRef<HTMLInputElement>(null);
+  const regionInputRef = useRef<HTMLInputElement>(null);
+  const accessKeyIdInputRef = useRef<HTMLInputElement>(null);
+  const secretAccessKeyInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <StepPanel
+      title="Choose the shared object store"
+      description="This configures the shared backend for both SlateDB and run artifacts. Fabro still keeps its local storage root on disk."
+      error={saveError}
+      submitting={submitting}
+      submittingLabel={
+        objectStoreForm.provider === "s3" ? "Checking access..." : "Saving..."
+      }
+      backHref="/install/server"
+      onSubmit={async () => {
+        if (objectStoreForm.provider === "local") {
+          if (!objectStoreForm.localRoot.trim()) {
+            dispatchInstall({
+              type:    "saveErrorChanged",
+              message: "Enter the local object-store directory before continuing.",
+            });
+            focusInput(localRootInputRef);
+            return;
+          }
+        } else {
+          if (!objectStoreForm.bucket.trim()) {
+            dispatchInstall({
+              type:    "saveErrorChanged",
+              message: "Enter the S3 bucket before continuing.",
+            });
+            focusInput(bucketInputRef);
+            return;
+          }
+          if (!objectStoreForm.region.trim()) {
+            dispatchInstall({
+              type:    "saveErrorChanged",
+              message: "Enter the AWS region before continuing.",
+            });
+            focusInput(regionInputRef);
+            return;
+          }
+          if (objectStoreForm.credentialMode === "access_key") {
+            const accessKeyId = objectStoreForm.accessKeyId.trim();
+            const secretAccessKey = objectStoreForm.secretAccessKey.trim();
+            const keepStoredCredentials =
+              objectStoreForm.manualCredentialsSaved &&
+              !accessKeyId &&
+              !secretAccessKey;
+            if (!keepStoredCredentials && !accessKeyId) {
+              dispatchInstall({
+                type:    "saveErrorChanged",
+                message: "Enter the AWS access key ID before continuing.",
+              });
+              focusInput(accessKeyIdInputRef);
+              return;
+            }
+            if (!keepStoredCredentials && !secretAccessKey) {
+              dispatchInstall({
+                type:    "saveErrorChanged",
+                message: "Enter the AWS secret access key before continuing.",
+              });
+              focusInput(secretAccessKeyInputRef);
+              return;
+            }
+          }
+        }
+
+        const payload = buildObjectStorePayload(objectStoreForm);
+        await runStepSubmit({
+          action: async () => {
+            if (objectStoreForm.provider === "s3") {
+              await testInstallObjectStore(installToken, payload);
+            }
+            await putInstallObjectStore(installToken, payload);
+          },
+          fallback: "Failed to save object-store settings.",
+          next:     "/install/sandbox",
+        });
+      }}
+    >
+      <CardPicker
+        legend="Object store"
+        options={OBJECT_STORE_PROVIDER_OPTIONS}
+        value={objectStoreForm.provider}
+        onChange={(provider) => {
+          dispatchInstall({
+            type:  "objectStorePatched",
+            patch: { provider },
+          });
+          if (provider === "s3") {
+            focusInput(bucketInputRef);
+          } else {
+            focusInput(localRootInputRef);
+          }
+        }}
+      />
+      {objectStoreForm.provider === "s3" ? (
+        <div className="space-y-5">
+          <Field label="Bucket">
+            <input
+              ref={bucketInputRef}
+              name="object_store_bucket"
+              aria-label="Bucket"
+              value={objectStoreForm.bucket}
+              onChange={(event) =>
+                dispatchInstall({
+                  type:  "objectStorePatched",
+                  patch: { bucket: event.target.value },
+                })
+              }
+              className={`${INPUT_CLASS} font-mono`}
+              placeholder="my-fabro-data"
+              spellCheck={false}
+              autoCapitalize="off"
+            />
+          </Field>
+          <Field label="Region">
+            <input
+              ref={regionInputRef}
+              name="object_store_region"
+              aria-label="Region"
+              value={objectStoreForm.region}
+              onChange={(event) =>
+                dispatchInstall({
+                  type:  "objectStorePatched",
+                  patch: { region: event.target.value },
+                })
+              }
+              className={`${INPUT_CLASS} font-mono`}
+              placeholder="us-east-1"
+              spellCheck={false}
+              autoCapitalize="off"
+            />
+          </Field>
+          <CardPicker
+            legend="Credentials"
+            options={OBJECT_STORE_CREDENTIAL_MODE_OPTIONS}
+            value={objectStoreForm.credentialMode}
+            onChange={(credentialMode) => {
+              dispatchInstall({
+                type:  "objectStorePatched",
+                patch: { credentialMode },
+              });
+              if (credentialMode === "access_key") {
+                focusInput(accessKeyIdInputRef);
+              }
+            }}
+          />
+          {objectStoreForm.credentialMode === "access_key" ? (
+            <div className="space-y-5">
+              <Field label="AWS access key ID">
+                <input
+                  ref={accessKeyIdInputRef}
+                  id="aws_access_key_id"
+                  name="aws_access_key_id"
+                  aria-label="AWS access key ID"
+                  value={objectStoreForm.accessKeyId}
+                  onChange={(event) =>
+                    dispatchInstall({
+                      type:  "objectStorePatched",
+                      patch: { accessKeyId: event.target.value },
+                    })
+                  }
+                  className={`${INPUT_CLASS} font-mono`}
+                  placeholder="AKIA..."
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                />
+              </Field>
+              <Field label="AWS secret access key">
+                <PasswordInput
+                  inputRef={secretAccessKeyInputRef}
+                  id="aws_secret_access_key"
+                  name="aws_secret_access_key"
+                  value={objectStoreForm.secretAccessKey}
+                  onChange={(value) =>
+                    dispatchInstall({
+                      type:  "objectStorePatched",
+                      patch: { secretAccessKey: value },
+                    })
+                  }
+                  placeholder="Secret access key"
+                />
+              </Field>
+              {objectStoreForm.manualCredentialsSaved ? (
+                <p className="text-xs text-fg-muted">
+                  Credentials saved. Leave both fields blank to keep them, or
+                  enter both fields to replace them.
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-xs/5 text-fg-muted">
+              Fabro will use AWS credentials already provided by the runtime,
+              such as EC2, ECS, or IRSA-based auth.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Field
+            label="Local directory"
+            hint="Shared root for SlateDB and run artifacts."
+          >
+            <input
+              ref={localRootInputRef}
+              name="object_store_local_root"
+              aria-label="Local directory"
+              value={objectStoreForm.localRoot}
+              onChange={(event) =>
+                dispatchInstall({
+                  type:  "objectStorePatched",
+                  patch: { localRoot: event.target.value },
+                })
+              }
+              className={`${INPUT_CLASS} font-mono`}
+              placeholder="Local object-store directory"
+              spellCheck={false}
+              autoCapitalize="off"
+            />
+          </Field>
+          <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
+            Fabro will store SlateDB and run artifacts under this directory.
+          </p>
+        </div>
+      )}
+    </StepPanel>
+  );
+}
+
+function SandboxStep({
+  installToken,
+  sandboxForm,
+  saveError,
+  submitting,
+  runStepSubmit,
+  dispatchInstall,
+}: {
+  installToken: string;
+  sandboxForm: SandboxForm;
+  saveError: string | null;
+  submitting: boolean;
+  runStepSubmit: RunStepSubmit;
+  dispatchInstall: (action: InstallAction) => void;
+}) {
+  const sandboxApiKeyInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <StepPanel
+      title="Choose the sandbox runtime"
+      description="Workflows run inside this sandbox. Docker uses the host daemon; Daytona runs each sandbox in its cloud."
+      error={saveError}
+      submitting={submitting}
+      submittingLabel={
+        sandboxForm.provider === "daytona" ? "Checking access..." : "Saving..."
+      }
+      backHref="/install/object-store"
+      onSubmit={async () => {
+        if (sandboxForm.provider === "daytona") {
+          const apiKey = sandboxForm.apiKey.trim();
+          const keepStoredKey = sandboxForm.apiKeySaved && !apiKey;
+          if (!keepStoredKey && !apiKey) {
+            dispatchInstall({
+              type:    "saveErrorChanged",
+              message: "Enter the Daytona API key before continuing.",
+            });
+            focusInput(sandboxApiKeyInputRef);
+            return;
+          }
+        }
+
+        const payload = buildSandboxPayload(sandboxForm);
+        await runStepSubmit({
+          action: async () => {
+            if (sandboxForm.provider === "daytona") {
+              await testInstallSandbox(installToken, payload);
+            }
+            await putInstallSandbox(installToken, payload);
+          },
+          fallback: "Failed to save sandbox settings.",
+          next:     "/install/llm",
+        });
+      }}
+    >
+      <CardPicker
+        legend="Sandbox runtime"
+        options={SANDBOX_PROVIDER_OPTIONS}
+        value={sandboxForm.provider}
+        onChange={(provider) => {
+          dispatchInstall({
+            type:  "sandboxPatched",
+            patch: { provider },
+          });
+          if (provider === "daytona") {
+            focusInput(sandboxApiKeyInputRef);
+          }
+        }}
+      />
+      {sandboxForm.provider === "daytona" ? (
+        <div className="space-y-5">
+          <Field
+            label="Daytona API key"
+            hint={
+              sandboxForm.apiKeySaved
+                ? "A key is already saved. Leave blank to keep using it."
+                : "Stored in the vault and exported to workflows as DAYTONA_API_KEY."
+            }
+          >
+            <input
+              ref={sandboxApiKeyInputRef}
+              type="password"
+              name="sandbox_api_key"
+              aria-label="Daytona API key"
+              value={sandboxForm.apiKey}
+              onChange={(event) =>
+                dispatchInstall({
+                  type:  "sandboxPatched",
+                  patch: { apiKey: event.target.value },
+                })
+              }
+              className={`${INPUT_CLASS} font-mono`}
+              placeholder={sandboxForm.apiKeySaved ? "•••• (saved)" : "dtn_..."}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </Field>
+        </div>
+      ) : (
+        <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
+          Fabro will use the host Docker daemon. Make sure the server has
+          access to <code className="font-mono text-fg-2">/var/run/docker.sock</code>.
+        </p>
+      )}
+    </StepPanel>
+  );
+}
+
+function GithubStep({
+  installToken,
+  session,
+  githubStrategy,
+  tokenForm,
+  appForm,
+  saveError,
+  submitting,
+  runStepSubmit,
+  dispatchInstall,
+}: {
+  installToken: string;
+  session: InstallSessionResponse;
+  githubStrategy: GithubStrategy;
+  tokenForm: TokenForm;
+  appForm: AppForm;
+  saveError: string | null;
+  submitting: boolean;
+  runStepSubmit: RunStepSubmit;
+  dispatchInstall: (action: InstallAction) => void;
+}) {
+  return (
+    <StepPanel
+      title="Connect GitHub"
+      description="Choose how Fabro should authenticate. Tokens are stored in the vault; apps hand off to GitHub and return here."
+      error={saveError}
+      submitting={submitting}
+      submitLabel={githubStrategy === "app" ? "Continue on GitHub" : "Continue"}
+      backHref="/install/llm"
+      onSubmit={async () => {
+        if (githubStrategy === "token") {
+          const trimmedToken = tokenForm.token.trim();
+          if (!trimmedToken) {
+            dispatchInstall({
+              type:    "saveErrorChanged",
+              message: "Provide the GitHub token before continuing.",
+            });
+            return;
+          }
+          await runStepSubmit({
+            action: async () => {
+              const username = await testInstallGithubToken(installToken, trimmedToken);
+              dispatchInstall({
+                type:  "tokenFormReplaced",
+                value: { token: trimmedToken, username },
+              });
+              await putInstallGithubToken(installToken, trimmedToken, username);
+            },
+            fallback: "Failed to start GitHub setup.",
+            next:     "/install/review",
+          });
+          return;
+        }
+
+        const { owner, appName, allowedUsername } = appForm;
+        if (owner.kind === "org" && !(owner.slug ?? "").trim()) {
+          dispatchInstall({
+            type:    "saveErrorChanged",
+            message: "Enter the organization slug for the GitHub App.",
+          });
+          return;
+        }
+        if (!appName.trim()) {
+          dispatchInstall({
+            type:    "saveErrorChanged",
+            message: "Enter the GitHub App name before continuing.",
+          });
+          return;
+        }
+        if (!allowedUsername.trim()) {
+          dispatchInstall({
+            type:    "saveErrorChanged",
+            message: "Enter the GitHub username that should be allowed to log in.",
+          });
+          return;
+        }
+
+        await runStepSubmit({
+          action: async () => {
+            const manifest = await createInstallGithubAppManifest(installToken, {
+              owner:
+                owner.kind === "org"
+                  ? { kind: "org", slug: (owner.slug ?? "").trim() }
+                  : { kind: "personal" },
+              app_name:         appName.trim(),
+              allowed_username: allowedUsername.trim(),
+            });
+            submitGithubManifest(
+              manifest.github_form_action,
+              manifest.manifest,
+              manifest.state,
+            );
+          },
+          fallback: "Failed to start GitHub setup.",
+        });
+      }}
+    >
+      <CardPicker
+        legend="Authentication"
+        options={GITHUB_STRATEGY_OPTIONS}
+        value={githubStrategy}
+        onChange={(strategy) =>
+          dispatchInstall({ type: "githubStrategyChanged", strategy })
+        }
+      />
+      {githubStrategy === "token" ? (
+        <div className="space-y-5">
+          <div>
+            <label
+              htmlFor="github_token"
+              className="text-sm font-medium text-fg"
+            >
+              Personal access token
+            </label>
+            <div className="mt-2">
+              <PasswordInput
+                id="github_token"
+                name="github_token"
+                value={tokenForm.token}
+                onChange={(value) =>
+                  dispatchInstall({
+                    type:  "tokenFormPatched",
+                    patch: { token: value },
+                  })
+                }
+                placeholder="ghp_..."
+              />
+            </div>
+            {tokenForm.username ? (
+              <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-mint">
+                <CheckCircleIcon className="size-4 shrink-0" />
+                Previously validated as{" "}
+                <span className="font-medium">@{tokenForm.username}</span>
+              </p>
+            ) : null}
+            <HelpDisclosure summary="Where do I get this?">
+              <p>
+                Create a fine-grained or classic token with{" "}
+                <code className="font-mono text-fg-2">repo</code> scope.
+              </p>
+              <ExternalLink href="https://github.com/settings/tokens">
+                github.com/settings/tokens
+              </ExternalLink>
+            </HelpDisclosure>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <CardPicker
+            legend="Owner"
+            options={GITHUB_OWNER_OPTIONS}
+            value={appForm.owner.kind}
+            onChange={(kind) =>
+              dispatchInstall({ type: "githubOwnerChanged", kind })
+            }
+          />
+          {appForm.owner.kind === "org" ? (
+            <Field label="Organization slug">
+              <input
+                name="github_org_slug"
+                aria-label="Organization slug"
+                value={appForm.owner.slug ?? ""}
+                onChange={(event) =>
+                  dispatchInstall({
+                    type: "githubOrgSlugChanged",
+                    slug: event.target.value,
+                  })
+                }
+                className={INPUT_CLASS}
+                placeholder="acme"
+                spellCheck={false}
+              />
+            </Field>
+          ) : null}
+          <Field
+            label="Allowed GitHub username"
+            hint="Only this username can log in through GitHub after setup."
+          >
+            <input
+              name="github_allowed_username"
+              aria-label="Allowed GitHub username"
+              value={appForm.allowedUsername}
+              onChange={(event) =>
+                dispatchInstall({
+                  type:  "appFormPatched",
+                  patch: { allowedUsername: event.target.value },
+                })
+              }
+              className={INPUT_CLASS}
+              placeholder="octocat"
+              spellCheck={false}
+            />
+          </Field>
+          {session.server?.canonical_url ? (
+            <p className="text-xs text-fg-muted">
+              After creating the app, GitHub will redirect back to{" "}
+              <code className="font-mono text-fg-3">{session.server.canonical_url}</code>.
+            </p>
+          ) : null}
+        </div>
+      )}
+    </StepPanel>
+  );
+}
+
 function TokenEntryScreen({
   manualToken,
-  setManualToken,
+  onManualTokenChange,
   sessionError,
   onSubmit,
 }: {
   manualToken: string;
-  setManualToken: (value: string) => void;
+  onManualTokenChange: (value: string) => void;
   sessionError: string | null;
   onSubmit: () => void;
 }) {
@@ -985,7 +1382,7 @@ function TokenEntryScreen({
               name="install_token"
               aria-label="Install token"
               value={manualToken}
-              onChange={(event) => setManualToken(event.target.value)}
+              onChange={(event) => onManualTokenChange(event.target.value)}
               className={`${INPUT_CLASS} font-mono`}
               placeholder="Paste install token"
               spellCheck={false}
@@ -1389,10 +1786,10 @@ function FinishingScreen({
 
 function ProviderFields({
   value,
-  onChange,
+  onProviderApiKeyChange,
 }: {
   value: ProviderSelection;
-  onChange: (nextValue: ProviderSelection) => void;
+  onProviderApiKeyChange: (provider: string, apiKey: string) => void;
 }) {
   return (
     <div className="space-y-6">
@@ -1411,12 +1808,7 @@ function ProviderFields({
                 id={`${provider.id}_api_key`}
                 name={`${provider.id}_api_key`}
                 value={current.apiKey}
-                onChange={(next) =>
-                  onChange({
-                    ...value,
-                    [provider.id]: { ...current, apiKey: next },
-                  })
-                }
+                onChange={(next) => onProviderApiKeyChange(provider.id, next)}
                 placeholder={provider.envVar}
               />
             </div>
