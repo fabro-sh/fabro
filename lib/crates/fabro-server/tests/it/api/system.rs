@@ -266,6 +266,16 @@ async fn test_app_state_with_options_respects_max_concurrent_runs() {
             .is_some_and(std::vec::Vec::is_empty),
         "second run should still be waiting for scheduler capacity while the first waits at the human gate: {second_questions}"
     );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api("/system/info"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/info").await;
+    assert_eq!(body["runs"]["active"], 2);
+    assert_eq!(body["runs"]["scheduler_slots_used"], 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

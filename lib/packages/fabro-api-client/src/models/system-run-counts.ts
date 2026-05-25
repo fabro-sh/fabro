@@ -26,4 +26,8 @@ export interface SystemRunCounts {
      * Runs currently pending, runnable, or executing.
      */
     'active'?: number;
+    /**
+     * Runs currently occupying scheduler concurrency slots.
+     */
+    'scheduler_slots_used'?: number;
 }
