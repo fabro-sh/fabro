@@ -55,7 +55,7 @@ Bootstrap secrets come from one of two sources:
 
 Optional integration secrets are provisioned into the vault, usually with `fabro secret set` or `fabro install`.
 
-There is no startup-time secret generation. A temporary startup migration moves recognized legacy optional secrets from process env or `server.env` into the vault, removes matching `server.env` entries after writing a backup, and logs conflicts by key name only. Runtime lookup remains vault-only after that migration step.
+There is no startup-time secret generation. A temporary startup migration moves recognized legacy optional secrets from process env or `server.env` into the vault, removes matching `server.env` entries after writing a backup, and logs conflicts by key name only. Runtime lookup remains vault-only after that migration step. See [migrations-strategy.md](migrations-strategy.md) for the migration pattern.
 
 ## Subprocess Boundaries
 
