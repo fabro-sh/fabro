@@ -28,6 +28,7 @@ import type {
   ServerSettings,
   StageContextWindow,
   SystemInfoResponse,
+  SystemIntegrationsResponse,
   SystemResourcesResponse,
   VncPreviewResponse,
   WorkflowDetailResponse,
@@ -108,6 +109,14 @@ export function useSystemInfo(refreshInterval?: number) {
     queryKeys.system.info(),
     () => apiData(() => systemApi.getSystemInfo()),
     refreshInterval ? { ...immutableOptions, refreshInterval } : immutableOptions,
+  );
+}
+
+export function useSystemIntegrations() {
+  return useSWR<SystemIntegrationsResponse>(
+    queryKeys.system.integrations(),
+    () => apiData(() => systemApi.getSystemIntegrations()),
+    { refreshInterval: 5_000 },
   );
 }
 

@@ -43,6 +43,7 @@ pub mod stage_id;
 pub mod start;
 pub mod status;
 pub mod steering;
+pub mod system_integrations;
 pub mod timing;
 pub mod todo;
 pub mod transcript;
@@ -146,6 +147,10 @@ pub use status::{
     RunStatusKind, SuccessReason, TerminalStatus,
 };
 pub use steering::SteeringMessage;
+pub use system_integrations::{
+    IntegrationConnectionKind, IntegrationConnectionState, IntegrationConnectionStatus,
+    IntegrationProvider, IntegrationStatus, SystemIntegrationStatus, SystemIntegrationsResponse,
+};
 pub use timing::{RunTiming, StageTiming};
 pub use todo::{TodoListKind, TodoListProjection, TodoPatch, TodoProjection, TodoStatus};
 pub use transcript::{

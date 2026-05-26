@@ -29,6 +29,21 @@ pub enum ProcessOutcome {
     Closed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectionStatusUpdate {
+    Connecting,
+    Connected,
+    Error(String),
+}
+
+pub type ConnectionStatusSink = Arc<dyn Fn(ConnectionStatusUpdate) + Send + Sync>;
+
+fn notify_status(sink: Option<&ConnectionStatusSink>, update: ConnectionStatusUpdate) {
+    if let Some(sink) = sink {
+        sink(update);
+    }
+}
+
 /// Process a single raw WebSocket text message: parse, ack, dispatch.
 pub fn process_message(
     text: &str,
@@ -87,10 +102,11 @@ pub async fn open_socket_url(
 
 /// Run the Socket Mode event loop. Connects, reads messages, acks, dispatches.
 /// On disconnect, returns so the caller can reconnect.
-pub async fn run_event_loop(
+async fn run_event_loop_inner(
     wss_url: &str,
     thread_registry: &ThreadRegistry,
     on_submit: &Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync>,
+    status_sink: Option<&ConnectionStatusSink>,
 ) -> Result<(), ConnectionError> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(wss_url)
         .await
@@ -141,6 +157,7 @@ pub async fn run_event_loop(
             }
             DispatchAction::Connected => {
                 info!("Slack Socket Mode handshake complete");
+                notify_status(status_sink, ConnectionStatusUpdate::Connected);
             }
             DispatchAction::Reconnect | DispatchAction::Ignored => {}
         }
@@ -155,18 +172,28 @@ pub async fn run_event_loop(
     Ok(())
 }
 
+pub async fn run_event_loop(
+    wss_url: &str,
+    thread_registry: &ThreadRegistry,
+    on_submit: &Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync>,
+) -> Result<(), ConnectionError> {
+    run_event_loop_inner(wss_url, thread_registry, on_submit, None).await
+}
+
 /// Top-level runner: connects, runs the event loop, and reconnects on
 /// disconnect.
-pub async fn run(
+async fn run_inner(
     slack_client: &SlackClient,
     app_token: &str,
     thread_registry: &ThreadRegistry,
     on_submit: Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync>,
+    status_sink: Option<ConnectionStatusSink>,
 ) {
     let mut backoff = std::time::Duration::from_secs(1);
     let max_backoff = std::time::Duration::from_secs(30);
 
     loop {
+        notify_status(status_sink.as_ref(), ConnectionStatusUpdate::Connecting);
         let wss_url = match open_socket_url(slack_client.http(), app_token).await {
             Ok(url) => {
                 backoff = std::time::Duration::from_secs(1);
@@ -174,24 +201,60 @@ pub async fn run(
             }
             Err(e) => {
                 error!("Failed to open Slack Socket Mode connection: {e}");
+                notify_status(
+                    status_sink.as_ref(),
+                    ConnectionStatusUpdate::Error(e.to_string()),
+                );
                 sleep(backoff).await;
                 backoff = (backoff * 2).min(max_backoff);
                 continue;
             }
         };
 
-        match run_event_loop(&wss_url, thread_registry, &on_submit).await {
+        match run_event_loop_inner(&wss_url, thread_registry, &on_submit, status_sink.as_ref())
+            .await
+        {
             Ok(()) => {
                 info!("Slack Socket Mode event loop ended; reconnecting");
                 backoff = std::time::Duration::from_secs(1);
             }
             Err(e) => {
                 error!("Slack Socket Mode event loop error: {e}; reconnecting");
+                notify_status(
+                    status_sink.as_ref(),
+                    ConnectionStatusUpdate::Error(e.to_string()),
+                );
                 sleep(backoff).await;
                 backoff = (backoff * 2).min(max_backoff);
             }
         }
     }
+}
+
+pub async fn run(
+    slack_client: &SlackClient,
+    app_token: &str,
+    thread_registry: &ThreadRegistry,
+    on_submit: Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync>,
+) {
+    run_inner(slack_client, app_token, thread_registry, on_submit, None).await;
+}
+
+pub async fn run_with_status(
+    slack_client: &SlackClient,
+    app_token: &str,
+    thread_registry: &ThreadRegistry,
+    on_submit: Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync>,
+    status_sink: ConnectionStatusSink,
+) {
+    run_inner(
+        slack_client,
+        app_token,
+        thread_registry,
+        on_submit,
+        Some(status_sink),
+    )
+    .await;
 }
 
 #[cfg(test)]
@@ -379,5 +442,40 @@ mod tests {
         assert_eq!(submissions[0].run_id, "run-1");
         assert_eq!(submissions[0].qid, "q-1");
         assert_eq!(submissions[0].answer.value, AnswerValue::Yes);
+    }
+
+    #[tokio::test]
+    async fn run_event_loop_notifies_connected_status() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let url = format!("ws://{addr}");
+
+        let registry = registry();
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let callback_updates = Arc::clone(&updates);
+        let status_sink: ConnectionStatusSink = Arc::new(move |update| {
+            callback_updates.lock().unwrap().push(update);
+        });
+        let on_submit: Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync> =
+            Arc::new(|_submission| {});
+
+        let server = async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            ws.send(Message::Text(r#"{"type":"hello"}"#.into()))
+                .await
+                .unwrap();
+            ws.send(Message::Close(None)).await.unwrap();
+        };
+
+        let _server_task = tokio::spawn(server);
+        let loop_result =
+            run_event_loop_inner(&url, &registry, &on_submit, Some(&status_sink)).await;
+        assert!(loop_result.is_ok());
+
+        let updates = updates.lock().unwrap();
+        assert_eq!(updates.as_slice(), &[ConnectionStatusUpdate::Connected]);
     }
 }

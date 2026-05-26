@@ -1,15 +1,24 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use chrono::Utc;
+use fabro_slack::config::{
+    SlackCredentialResolution,
+    resolve_credentials_status_with_lookup as resolve_slack_credentials_status_with_lookup,
+};
+use fabro_static::EnvVars;
+use fabro_types::settings::InterpString;
+use fabro_types::settings::server::GithubIntegrationSettings;
 
 use super::super::{
     AggregateBilling, AggregateBillingTotals, ApiError, AppState, BilledTokenCounts,
-    BillingByModel, DfParams, FABRO_VERSION, GithubIntegrationStrategy, IntoResponse, Json, Path,
-    PruneRunsRequest, PruneRunsResponse, Query, RequiredUser, Response, Router, RunStatus, State,
-    StatusCode, SystemInfoResponse, SystemRepairRunIssue, SystemRepairRunsResponse,
-    SystemRunCounts, build_disk_usage_response, build_prune_plan, counts_toward_scheduler_capacity,
-    delete_run_internal, diagnostics, get, post, resolve_interp_string, resource_sampler,
-    spawn_blocking, system_sandbox_provider, to_i64,
+    BillingByModel, DfParams, FABRO_VERSION, GithubIntegrationStrategy, IntegrationConnectionState,
+    IntegrationProvider, IntegrationStatus, IntoResponse, Json, Path, PruneRunsRequest,
+    PruneRunsResponse, Query, RequiredUser, Response, Router, RunStatus, State, StatusCode,
+    SystemInfoResponse, SystemIntegrationStatus, SystemIntegrationsResponse, SystemRepairRunIssue,
+    SystemRepairRunsResponse, SystemRunCounts, build_disk_usage_response, build_prune_plan,
+    counts_toward_scheduler_capacity, delete_run_internal, diagnostics, get, post,
+    resolve_interp_string, resource_sampler, spawn_blocking, system_sandbox_provider, to_i64,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -19,6 +28,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/health/diagnostics", post(run_diagnostics))
         .route("/settings", get(get_server_settings))
         .route("/system/info", get(get_system_info))
+        .route("/system/integrations", get(get_system_integrations))
         .route("/system/resources", get(get_system_resources))
         .route("/system/df", get(get_system_df))
         .route("/system/repair/runs", get(get_system_repair_runs))
@@ -86,6 +96,187 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
         sandbox_provider: Some(system_sandbox_provider(&manifest_run_settings)),
     };
     (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn get_system_integrations(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let settings = state.server_settings();
+    let response = SystemIntegrationsResponse {
+        data: vec![
+            github_integration_status(state.as_ref(), &settings.server.integrations.github),
+            slack_integration_status(state.as_ref()),
+        ],
+    };
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+fn github_integration_status(
+    state: &AppState,
+    settings: &GithubIntegrationSettings,
+) -> SystemIntegrationStatus {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "strategy".to_string(),
+        match settings.strategy {
+            GithubIntegrationStrategy::Token => "token",
+            GithubIntegrationStrategy::App => "app",
+        }
+        .to_string(),
+    );
+    if let Some(slug) = settings.slug.as_ref() {
+        metadata.insert("slug".to_string(), display_interp(state, slug));
+    }
+    if let Some(app_id) = settings.app_id.as_ref() {
+        metadata.insert("app_id".to_string(), display_interp(state, app_id));
+    }
+
+    if !settings.enabled {
+        return integration_status(
+            IntegrationProvider::Github,
+            false,
+            false,
+            IntegrationStatus::Disabled,
+            Vec::new(),
+            metadata,
+        );
+    }
+
+    let mut missing = Vec::new();
+    match settings.strategy {
+        GithubIntegrationStrategy::Token => {
+            if missing_vault_secret(state, EnvVars::GITHUB_TOKEN) {
+                missing.push(EnvVars::GITHUB_TOKEN.to_string());
+            }
+        }
+        GithubIntegrationStrategy::App => {
+            if settings.app_id.is_none() {
+                missing.push("server.integrations.github.app_id".to_string());
+            }
+            if settings.client_id.is_none() {
+                missing.push("server.integrations.github.client_id".to_string());
+            }
+            if missing_vault_secret(state, EnvVars::GITHUB_APP_CLIENT_SECRET) {
+                missing.push(EnvVars::GITHUB_APP_CLIENT_SECRET.to_string());
+            }
+            if missing_vault_secret(state, EnvVars::GITHUB_APP_PRIVATE_KEY) {
+                missing.push(EnvVars::GITHUB_APP_PRIVATE_KEY.to_string());
+            }
+        }
+    }
+    missing.sort();
+
+    let configured = missing.is_empty();
+    integration_status(
+        IntegrationProvider::Github,
+        true,
+        configured,
+        if configured {
+            IntegrationStatus::Configured
+        } else {
+            IntegrationStatus::MissingCredentials
+        },
+        missing,
+        metadata,
+    )
+}
+
+fn slack_integration_status(state: &AppState) -> SystemIntegrationStatus {
+    let settings = &state.server_settings().server.integrations.slack;
+    let mut metadata = BTreeMap::new();
+    if let Some(default_channel) = settings.default_channel.as_ref() {
+        metadata.insert(
+            "default_channel".to_string(),
+            display_interp(state, default_channel),
+        );
+    }
+
+    if !settings.enabled {
+        return integration_status(
+            IntegrationProvider::Slack,
+            false,
+            false,
+            IntegrationStatus::Disabled,
+            Vec::new(),
+            metadata,
+        );
+    }
+
+    let mut missing =
+        match resolve_slack_credentials_status_with_lookup(|name| state.vault_secret(name)) {
+            SlackCredentialResolution::Configured(_) => Vec::new(),
+            SlackCredentialResolution::Missing { env_vars } => {
+                env_vars.into_iter().map(str::to_string).collect()
+            }
+        };
+    missing.sort();
+    if !missing.is_empty() {
+        return integration_status(
+            IntegrationProvider::Slack,
+            true,
+            false,
+            IntegrationStatus::MissingCredentials,
+            missing,
+            metadata,
+        );
+    }
+
+    let connection = state
+        .slack_service
+        .as_ref()
+        .map(|service| service.connection_status());
+    let status = connection
+        .as_ref()
+        .map(|connection| match connection.status {
+            IntegrationConnectionState::Connecting => IntegrationStatus::Connecting,
+            IntegrationConnectionState::Connected => IntegrationStatus::Connected,
+            IntegrationConnectionState::Error => IntegrationStatus::Error,
+        })
+        .unwrap_or(IntegrationStatus::Configured);
+
+    SystemIntegrationStatus {
+        provider: IntegrationProvider::Slack,
+        enabled: true,
+        configured: true,
+        status,
+        missing_credentials: Vec::new(),
+        connection,
+        metadata,
+    }
+}
+
+fn integration_status(
+    provider: IntegrationProvider,
+    enabled: bool,
+    configured: bool,
+    status: IntegrationStatus,
+    missing_credentials: Vec<String>,
+    metadata: BTreeMap<String, String>,
+) -> SystemIntegrationStatus {
+    SystemIntegrationStatus {
+        provider,
+        enabled,
+        configured,
+        status,
+        missing_credentials,
+        connection: None,
+        metadata,
+    }
+}
+
+fn missing_vault_secret(state: &AppState, name: &str) -> bool {
+    state
+        .vault_secret(name)
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(str::is_empty)
+}
+
+fn display_interp(state: &AppState, value: &InterpString) -> String {
+    state
+        .resolve_interp(value)
+        .unwrap_or_else(|_| value.as_source())
 }
 
 async fn get_system_resources(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {

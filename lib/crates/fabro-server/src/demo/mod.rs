@@ -878,6 +878,48 @@ pub(crate) async fn get_system_info(
         .into_response()
 }
 
+pub(crate) async fn get_system_integrations(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "data": [
+                {
+                    "provider": "github",
+                    "enabled": true,
+                    "configured": true,
+                    "status": "configured",
+                    "missing_credentials": [],
+                    "connection": null,
+                    "metadata": {
+                        "strategy": "app",
+                        "slug": "fabro-demo"
+                    }
+                },
+                {
+                    "provider": "slack",
+                    "enabled": true,
+                    "configured": true,
+                    "status": "connected",
+                    "missing_credentials": [],
+                    "connection": {
+                        "kind": "socket_mode",
+                        "status": "connected",
+                        "last_connected_at": "2026-05-20T15:42:10Z",
+                        "last_error": null
+                    },
+                    "metadata": {
+                        "default_channel": "#fabro-demo"
+                    }
+                }
+            ]
+        })),
+    )
+        .into_response()
+}
+
 pub(crate) async fn get_system_resources(
     _auth: RequiredUser,
     State(_state): State<Arc<AppState>>,

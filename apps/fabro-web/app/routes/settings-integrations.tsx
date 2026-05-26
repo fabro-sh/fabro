@@ -1,7 +1,10 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import type { ServerSettings } from "@qltysh/fabro-api-client";
-import { useServerSettings } from "../lib/queries";
+import type {
+  IntegrationStatus,
+  SystemIntegrationStatus,
+} from "@qltysh/fabro-api-client";
+import { useSystemIntegrations } from "../lib/queries";
 import {
   Panel,
   PanelSkeleton,
@@ -16,23 +19,24 @@ export function meta() {
 
 const DESCRIPTION = (
   <>
-    External services connected to this server. Edit via{" "}
-    <code className="font-mono text-fg-2">settings.toml</code>; changes take
-    effect on the next server restart.
+    External services connected to this server, computed from runtime
+    configuration, vault credentials, and live connection state.
   </>
 );
 
 export default function SettingsIntegrations() {
-  const settingsQuery = useServerSettings();
-  const settings = settingsQuery.data;
+  const integrationsQuery = useSystemIntegrations();
+  const integrations = integrationsQuery.data?.data;
+  const github = integrations?.find((status) => status.provider === "github");
+  const slack = integrations?.find((status) => status.provider === "slack");
 
   return (
     <div className="space-y-6">
       <SettingsPageIntro description={DESCRIPTION} />
-      {settings ? (
+      {github && slack ? (
         <>
-          <GithubPanel settings={settings} />
-          <SlackPanel settings={settings} />
+          <GithubPanel status={github} />
+          <SlackPanel status={slack} />
         </>
       ) : (
         <>
@@ -66,8 +70,7 @@ function ProjectManagementPanel() {
   );
 }
 
-function GithubPanel({ settings }: { settings: ServerSettings }) {
-  const { github } = settings.server.integrations;
+function GithubPanel({ status }: { status: SystemIntegrationStatus }) {
   return (
     <Panel title="Version Control">
       <IntegrationRow
@@ -75,23 +78,13 @@ function GithubPanel({ settings }: { settings: ServerSettings }) {
         name="GitHub"
         help="App for repo access, checks, and PR automation."
       >
-        <IntegrationValue
-          enabled={github.enabled}
-          detail={
-            github.slug
-              ? `app: ${github.slug}`
-              : github.app_id
-                ? `app id: ${github.app_id}`
-                : undefined
-          }
-        />
+        <IntegrationValue status={status} detail={githubDetail(status)} />
       </IntegrationRow>
     </Panel>
   );
 }
 
-function SlackPanel({ settings }: { settings: ServerSettings }) {
-  const { slack } = settings.server.integrations;
+function SlackPanel({ status }: { status: SystemIntegrationStatus }) {
   return (
     <Panel title="Communication">
       <IntegrationRow
@@ -99,14 +92,7 @@ function SlackPanel({ settings }: { settings: ServerSettings }) {
         name="Slack"
         help="Workspace app for run notifications and approvals."
       >
-        <IntegrationValue
-          enabled={slack.enabled}
-          detail={
-            slack.default_channel
-              ? `channel: ${slack.default_channel}`
-              : undefined
-          }
-        />
+        <IntegrationValue status={status} detail={slackDetail(status)} />
       </IntegrationRow>
       <IntegrationRow
         slug="microsoft-teams"
@@ -181,19 +167,86 @@ function IntegrationLogo({ slug, name }: { slug: string; name: string }) {
 }
 
 function IntegrationValue({
-  enabled,
+  status,
   detail,
 }: {
-  enabled: boolean;
+  status: SystemIntegrationStatus;
   detail?: string;
 }) {
-  if (!enabled) return <Toggle on={false} />;
+  const label = status.status === "disabled" ? null : statusLabel(status.status);
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-      <Toggle on={true} />
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <Toggle on={status.enabled} />
+      {label ? (
+        <RuntimeStatusLabel status={status.status}>{label}</RuntimeStatusLabel>
+      ) : null}
       {detail ? (
-        <span className="font-mono text-xs text-fg-3">{detail}</span>
+        <span
+          className="min-w-0 max-w-full truncate font-mono text-xs text-fg-3"
+          title={detail}
+        >
+          {detail}
+        </span>
       ) : null}
     </span>
   );
+}
+
+function RuntimeStatusLabel({
+  status,
+  children,
+}: {
+  status: IntegrationStatus;
+  children: ReactNode;
+}) {
+  const tone =
+    status === "error" || status === "missing_credentials"
+      ? "text-amber-500"
+      : status === "connected"
+        ? "text-emerald-500"
+        : "text-fg-2";
+
+  return <span className={tone}>{children}</span>;
+}
+
+function statusLabel(status: IntegrationStatus): string {
+  switch (status) {
+    case "connected":
+      return "Connected";
+    case "connecting":
+      return "Connecting";
+    case "configured":
+      return "Configured";
+    case "error":
+      return "Error";
+    case "missing_credentials":
+      return "Missing credentials";
+    case "disabled":
+      return "Disabled";
+  }
+}
+
+function githubDetail(status: SystemIntegrationStatus): string | undefined {
+  const metadata = status.metadata ?? {};
+  if (metadata.slug) return `app: ${metadata.slug}`;
+  if (metadata.app_id) return `app id: ${metadata.app_id}`;
+  if (metadata.strategy) return `strategy: ${metadata.strategy}`;
+  return missingCredentialsDetail(status);
+}
+
+function slackDetail(status: SystemIntegrationStatus): string | undefined {
+  if (status.connection?.last_error) return status.connection.last_error;
+  const missing = missingCredentialsDetail(status);
+  if (missing) return missing;
+  const defaultChannel = status.metadata?.default_channel;
+  if (defaultChannel) return `channel: ${defaultChannel}`;
+  if (status.connection?.kind === "socket_mode") return "socket mode";
+  return undefined;
+}
+
+function missingCredentialsDetail(
+  status: SystemIntegrationStatus,
+): string | undefined {
+  if (status.missing_credentials.length === 0) return undefined;
+  return `missing: ${status.missing_credentials.join(", ")}`;
 }

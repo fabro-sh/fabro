@@ -21,6 +21,7 @@ use axum_extra::extract::cookie::Key;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 pub use fabro_api::types::{
     AggregateBilling, AggregateBillingTotals, ApiQuestion, AppendEventResponse, ArtifactEntry,
     ArtifactListResponse, BatchDeleteRunsRequest, BatchDeleteRunsResponse, BatchDeleteRunsResult,
@@ -31,18 +32,21 @@ pub use fabro_api::types::{
     CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     CreateRunPullRequestRequest, CreateSecretRequest, DeleteRunResponse, DeleteRunSandbox,
     DeleteSecretRequest, DenyRunRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow,
-    ErrorResponseEntry, ForkRequest, ForkResponse, LinkRunPullRequestRequest,
-    MergeRunPullRequestRequest, MergeRunPullRequestResponse, ModelReference, PaginatedEventList,
-    PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
-    Provider, ProviderList, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
-    RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest, RewindResponse, Run,
-    RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
-    RunError, RunManifest, RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse,
-    SandboxService, SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler,
-    StageState, StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
-    SystemDiskResourceScope, SystemDiskResources, SystemInfoResponse, SystemMemoryResourceScope,
-    SystemMemoryResources, SystemRepairRunIssue, SystemRepairRunsResponse, SystemResourcesResponse,
-    SystemRunCounts, TimelineEntryResponse, VncPreviewResponse, WriteBlobResponse,
+    ErrorResponseEntry, ForkRequest, ForkResponse, IntegrationConnectionKind,
+    IntegrationConnectionState, IntegrationConnectionStatus, IntegrationProvider,
+    IntegrationStatus, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
+    MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
+    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, Provider,
+    ProviderList, PruneRunEntry, PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection,
+    RenderWorkflowGraphRequest, RewindRequest, RewindResponse, Run, RunArtifactEntry,
+    RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals, RunError, RunManifest,
+    RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse, SandboxService,
+    SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
+    StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
+    SystemDiskResourceScope, SystemDiskResources, SystemInfoResponse, SystemIntegrationStatus,
+    SystemIntegrationsResponse, SystemMemoryResourceScope, SystemMemoryResources,
+    SystemRepairRunIssue, SystemRepairRunsResponse, SystemResourcesResponse, SystemRunCounts,
+    TimelineEntryResponse, VncPreviewResponse, WriteBlobResponse,
 };
 use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 #[cfg(test)]
@@ -492,6 +496,29 @@ struct SlackLifecyclePullRequest {
     url:    Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct SlackConnectionRuntimeState {
+    status:            IntegrationConnectionState,
+    last_connected_at: Option<DateTime<Utc>>,
+    last_error:        Option<String>,
+}
+
+impl Default for SlackConnectionRuntimeState {
+    fn default() -> Self {
+        Self {
+            status:            IntegrationConnectionState::Connecting,
+            last_connected_at: None,
+            last_error:        None,
+        }
+    }
+}
+
+fn sanitize_integration_error(error: &str) -> String {
+    const MAX_ERROR_CHARS: usize = 240;
+    let sanitized = error.replace(['\r', '\n'], " ");
+    sanitized.chars().take(MAX_ERROR_CHARS).collect()
+}
+
 #[derive(Clone)]
 struct SlackService {
     client:          SlackClient,
@@ -499,6 +526,7 @@ struct SlackService {
     default_channel: Option<String>,
     posted_messages: Arc<Mutex<HashMap<(RunId, String), SlackPostedMessage>>>,
     thread_registry: Arc<ThreadRegistry>,
+    connection:      Arc<Mutex<SlackConnectionRuntimeState>>,
 }
 
 impl SlackService {
@@ -509,7 +537,46 @@ impl SlackService {
             default_channel,
             posted_messages: Arc::new(Mutex::new(HashMap::new())),
             thread_registry: Arc::new(ThreadRegistry::new()),
+            connection: Arc::new(Mutex::new(SlackConnectionRuntimeState::default())),
         }
+    }
+
+    fn connection_status(&self) -> IntegrationConnectionStatus {
+        let state = self
+            .connection
+            .lock()
+            .expect("slack connection state lock poisoned")
+            .clone();
+        IntegrationConnectionStatus {
+            kind:              IntegrationConnectionKind::SocketMode,
+            status:            state.status,
+            last_connected_at: state.last_connected_at,
+            last_error:        state.last_error,
+        }
+    }
+
+    fn status_sink(&self) -> slack_connection::ConnectionStatusSink {
+        let connection = Arc::clone(&self.connection);
+        Arc::new(move |update| {
+            let mut state = connection
+                .lock()
+                .expect("slack connection state lock poisoned");
+            match update {
+                slack_connection::ConnectionStatusUpdate::Connecting => {
+                    state.status = IntegrationConnectionState::Connecting;
+                    state.last_error = None;
+                }
+                slack_connection::ConnectionStatusUpdate::Connected => {
+                    state.status = IntegrationConnectionState::Connected;
+                    state.last_connected_at = Some(Utc::now());
+                    state.last_error = None;
+                }
+                slack_connection::ConnectionStatusUpdate::Error(error) => {
+                    state.status = IntegrationConnectionState::Error;
+                    state.last_error = Some(sanitize_integration_error(&error));
+                }
+            }
+        })
     }
 
     async fn handle_event(
@@ -1493,11 +1560,12 @@ fn start_optional_slack_service(state: &Arc<AppState>) {
                     service.submit_answer(state, submission).await;
                 });
             });
-        slack_connection::run(
+        slack_connection::run_with_status(
             &service.client,
             &service.app_token,
             &service.thread_registry,
             on_submit,
+            service.status_sink(),
         )
         .await;
     });
@@ -2138,42 +2206,45 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         )
     });
     let slack_service = {
-        let default_channel = current_server_settings
-            .server
-            .integrations
-            .slack
-            .default_channel
-            .as_ref()
-            .map(|value| {
-                value
-                    .resolve(process_env_var)
-                    .map(|resolved| resolved.value)
-                    .map_err(anyhow::Error::from)
-            })
-            .transpose()?;
-        let vault_guard = vault.try_read().ok();
-        match resolve_slack_credentials_status_with_lookup(|name| {
-            vault_guard
+        let slack_settings = &current_server_settings.server.integrations.slack;
+        if !slack_settings.enabled {
+            info!("Slack integration disabled by server configuration");
+            None
+        } else {
+            let default_channel = slack_settings
+                .default_channel
                 .as_ref()
-                .and_then(|vault| vault.get(name).map(str::to_string))
-        }) {
-            SlackCredentialResolution::Configured(credentials) => {
-                info!(
-                    default_channel_configured = default_channel.is_some(),
-                    "Slack integration enabled"
-                );
-                Some(Arc::new(SlackService::new(
-                    credentials.bot_token,
-                    credentials.app_token,
-                    default_channel,
-                )))
-            }
-            SlackCredentialResolution::Missing { env_vars } => {
-                info!(
-                    missing_env_vars = %env_vars.join(","),
-                    "Slack integration disabled; missing credentials"
-                );
-                None
+                .map(|value| {
+                    value
+                        .resolve(process_env_var)
+                        .map(|resolved| resolved.value)
+                        .map_err(anyhow::Error::from)
+                })
+                .transpose()?;
+            let vault_guard = vault.try_read().ok();
+            match resolve_slack_credentials_status_with_lookup(|name| {
+                vault_guard
+                    .as_ref()
+                    .and_then(|vault| vault.get(name).map(str::to_string))
+            }) {
+                SlackCredentialResolution::Configured(credentials) => {
+                    info!(
+                        default_channel_configured = default_channel.is_some(),
+                        "Slack integration enabled"
+                    );
+                    Some(Arc::new(SlackService::new(
+                        credentials.bot_token,
+                        credentials.app_token,
+                        default_channel,
+                    )))
+                }
+                SlackCredentialResolution::Missing { env_vars } => {
+                    info!(
+                        missing_env_vars = %env_vars.join(","),
+                        "Slack integration disabled; missing credentials"
+                    );
+                    None
+                }
             }
         }
     };

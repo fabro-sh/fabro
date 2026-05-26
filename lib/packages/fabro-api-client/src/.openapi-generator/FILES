@@ -165,6 +165,11 @@ models/install-sandbox-summary.ts
 models/install-sandbox-validation-response.ts
 models/install-server-config-input.ts
 models/install-session-response.ts
+models/integration-connection-kind.ts
+models/integration-connection-state.ts
+models/integration-connection-status.ts
+models/integration-provider.ts
+models/integration-status.ts
 models/integration-webhooks-settings.ts
 models/interview-option.ts
 models/interview-provider-settings.ts
@@ -461,6 +466,8 @@ models/system-cpu-resources.ts
 models/system-disk-resource-scope.ts
 models/system-disk-resources.ts
 models/system-info-response.ts
+models/system-integration-status.ts
+models/system-integrations-response.ts
 models/system-memory-resource-scope.ts
 models/system-memory-resources.ts
 models/system-repair-run-issue.ts

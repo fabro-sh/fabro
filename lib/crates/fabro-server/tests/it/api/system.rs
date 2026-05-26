@@ -16,7 +16,8 @@ use tower::ServiceExt;
 use crate::helpers::{
     MINIMAL_DOT, POLL_ATTEMPTS, POLL_INTERVAL, TestAppSettings, api, checked_response,
     minimal_manifest_json, minimal_manifest_json_with_dry_run, response_json, response_status,
-    test_app_state_with_options, test_app_with_scheduler, test_settings, wait_for_run_status,
+    settings_from_toml, test_app_state_with_options, test_app_with_scheduler, test_settings,
+    wait_for_run_status,
 };
 
 const HUMAN_GATE_DOT: &str = r#"digraph GateTest {
@@ -142,6 +143,130 @@ async fn get_system_info_returns_runtime_fields() {
         body.get("features").is_none(),
         "system info should not include a features field"
     );
+}
+
+#[tokio::test]
+async fn get_system_integrations_reports_slack_missing_credentials_when_allowed() {
+    let settings = settings_from_toml(
+        r#"
+_version = 1
+
+[server.integrations.slack]
+enabled = true
+"#,
+    );
+    let app = fabro_server::test_support::build_test_router(
+        fabro_server::test_support::TestAppStateBuilder::new()
+            .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+            .build(),
+    );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/integrations").await;
+    let slack = body["data"]
+        .as_array()
+        .expect("integration response should include data")
+        .iter()
+        .find(|integration| integration["provider"] == "slack")
+        .expect("slack integration should be present");
+
+    assert_eq!(slack["enabled"], true);
+    assert_eq!(slack["configured"], false);
+    assert_eq!(slack["status"], "missing_credentials");
+    assert_eq!(
+        slack["missing_credentials"],
+        serde_json::json!(["FABRO_SLACK_APP_TOKEN", "FABRO_SLACK_BOT_TOKEN"])
+    );
+}
+
+#[tokio::test]
+async fn get_system_integrations_reports_slack_disabled_even_when_tokens_exist() {
+    let settings = settings_from_toml(
+        r#"
+_version = 1
+
+[server.integrations.slack]
+enabled = false
+"#,
+    );
+    let app = fabro_server::test_support::build_test_router(
+        fabro_server::test_support::TestAppStateBuilder::new()
+            .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+            .vault_entries([
+                ("FABRO_SLACK_APP_TOKEN", "xapp-test"),
+                ("FABRO_SLACK_BOT_TOKEN", "xoxb-test"),
+            ])
+            .build(),
+    );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/integrations").await;
+    let slack = body["data"]
+        .as_array()
+        .expect("integration response should include data")
+        .iter()
+        .find(|integration| integration["provider"] == "slack")
+        .expect("slack integration should be present");
+
+    assert_eq!(slack["enabled"], false);
+    assert_eq!(slack["configured"], false);
+    assert_eq!(slack["status"], "disabled");
+    assert_eq!(slack["missing_credentials"], serde_json::json!([]));
+    assert!(slack["connection"].is_null());
+}
+
+#[tokio::test]
+async fn get_system_integrations_reports_github_token_missing_credentials() {
+    let settings = settings_from_toml(
+        r#"
+_version = 1
+
+[server.integrations.github]
+enabled = true
+strategy = "token"
+"#,
+    );
+    let app = fabro_server::test_support::build_test_router(
+        fabro_server::test_support::TestAppStateBuilder::new()
+            .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+            .build(),
+    );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(api("/system/integrations"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+
+    let body = response_json(response, StatusCode::OK, "GET /api/v1/system/integrations").await;
+    let github = body["data"]
+        .as_array()
+        .expect("integration response should include data")
+        .iter()
+        .find(|integration| integration["provider"] == "github")
+        .expect("github integration should be present");
+
+    assert_eq!(github["enabled"], true);
+    assert_eq!(github["configured"], false);
+    assert_eq!(github["status"], "missing_credentials");
+    assert_eq!(
+        github["missing_credentials"],
+        serde_json::json!(["GITHUB_TOKEN"])
+    );
+    assert_eq!(github["metadata"]["strategy"], "token");
 }
 
 #[tokio::test]

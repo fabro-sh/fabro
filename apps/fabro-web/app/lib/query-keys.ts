@@ -32,6 +32,7 @@ export const queryKeys = {
   },
   system: {
     info: () => ["system", "info"] as const,
+    integrations: () => ["system", "integrations"] as const,
     resources: () => ["system", "resources"] as const,
     attachUrl: () => "/api/v1/attach",
   },

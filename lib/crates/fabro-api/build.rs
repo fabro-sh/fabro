@@ -535,6 +535,37 @@ fn main() {
             "fabro_types::SandboxProviderKind",
             &[],
         ),
+        (
+            "SystemIntegrationsResponse",
+            "fabro_types::SystemIntegrationsResponse",
+            &[],
+        ),
+        (
+            "SystemIntegrationStatus",
+            "fabro_types::SystemIntegrationStatus",
+            &[],
+        ),
+        (
+            "IntegrationProvider",
+            "fabro_types::IntegrationProvider",
+            &[],
+        ),
+        ("IntegrationStatus", "fabro_types::IntegrationStatus", &[]),
+        (
+            "IntegrationConnectionStatus",
+            "fabro_types::IntegrationConnectionStatus",
+            &[],
+        ),
+        (
+            "IntegrationConnectionKind",
+            "fabro_types::IntegrationConnectionKind",
+            &[],
+        ),
+        (
+            "IntegrationConnectionState",
+            "fabro_types::IntegrationConnectionState",
+            &[],
+        ),
         ("RunSandbox", "fabro_types::RunSandbox", &[]),
         ("SandboxDetails", "fabro_types::SandboxDetails", &[]),
         ("SandboxInfo", "fabro_types::SandboxInfo", &[]),

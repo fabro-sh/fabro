@@ -4271,6 +4271,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/SystemResourcesResponse"
 
+  /api/v1/system/integrations:
+    get:
+      operationId: getSystemIntegrations
+      tags: [System]
+      summary: Retrieve System Integrations
+      description: Returns runtime integration status computed from server configuration, vault credentials, and live connection state.
+      responses:
+        "200":
+          description: Runtime integration status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemIntegrationsResponse"
+
   /api/v1/system/df:
     get:
       operationId: getSystemDiskUsage
@@ -12532,6 +12546,96 @@ components:
           type: integer
           format: int64
           description: Runs currently occupying scheduler concurrency slots.
+
+    SystemIntegrationsResponse:
+      description: Runtime status for server integrations.
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SystemIntegrationStatus"
+
+    SystemIntegrationStatus:
+      description: Runtime status for one server integration.
+      type: object
+      required:
+        - provider
+        - enabled
+        - configured
+        - status
+        - missing_credentials
+        - connection
+        - metadata
+      properties:
+        provider:
+          $ref: "#/components/schemas/IntegrationProvider"
+        enabled:
+          type: boolean
+          description: Whether configuration allows this integration to run.
+        configured:
+          type: boolean
+          description: Whether the integration has required non-secret settings and vault credentials.
+        status:
+          $ref: "#/components/schemas/IntegrationStatus"
+        missing_credentials:
+          type: array
+          description: Missing setting or vault key names required before the integration can run.
+          items:
+            type: string
+        connection:
+          oneOf:
+            - $ref: "#/components/schemas/IntegrationConnectionStatus"
+            - type: "null"
+        metadata:
+          type: object
+          description: Non-secret display hints for the integration.
+          additionalProperties:
+            type: string
+
+    IntegrationProvider:
+      description: Server integration provider.
+      type: string
+      enum: [github, slack]
+
+    IntegrationStatus:
+      description: Computed runtime integration status.
+      type: string
+      enum:
+        - disabled
+        - missing_credentials
+        - configured
+        - connecting
+        - connected
+        - error
+
+    IntegrationConnectionStatus:
+      description: Live connection status for integrations with persistent connections.
+      type: object
+      required: [kind, status, last_connected_at, last_error]
+      properties:
+        kind:
+          $ref: "#/components/schemas/IntegrationConnectionKind"
+        status:
+          $ref: "#/components/schemas/IntegrationConnectionState"
+        last_connected_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Last time this integration established its live connection.
+        last_error:
+          type: ["string", "null"]
+          description: Sanitized last connection error, if any.
+
+    IntegrationConnectionKind:
+      description: Live connection mechanism.
+      type: string
+      enum: [socket_mode]
+
+    IntegrationConnectionState:
+      description: Live connection state.
+      type: string
+      enum: [connecting, connected, error]
 
     SystemResourcesResponse:
       description: Server-visible runtime resource usage for the active Fabro process environment.

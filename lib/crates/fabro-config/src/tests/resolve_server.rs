@@ -128,7 +128,7 @@ fn resolved_server_integrations_are_slack_only_for_chat() {
                 "webhooks": null,
             },
             "slack": {
-                "enabled": false,
+                "enabled": true,
                 "default_channel": null,
             },
         })

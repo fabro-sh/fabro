@@ -32,6 +32,8 @@ import type { PruneRunsResponse } from '../models';
 // @ts-ignore
 import type { SystemInfoResponse } from '../models';
 // @ts-ignore
+import type { SystemIntegrationsResponse } from '../models';
+// @ts-ignore
 import type { SystemRepairRunsResponse } from '../models';
 // @ts-ignore
 import type { SystemResourcesResponse } from '../models';
@@ -130,6 +132,42 @@ export const SystemApiAxiosParamCreator = function (configuration?: Configuratio
          */
         getSystemInfo: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/v1/system/info`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns runtime integration status computed from server configuration, vault credentials, and live connection state.
+         * @summary Retrieve System Integrations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getSystemIntegrations: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/system/integrations`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -319,6 +357,18 @@ export const SystemApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Returns runtime integration status computed from server configuration, vault credentials, and live connection state.
+         * @summary Retrieve System Integrations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getSystemIntegrations(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SystemIntegrationsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getSystemIntegrations(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SystemApi.getSystemIntegrations']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Lists cataloged runs that cannot be loaded from durable storage.
          * @summary List Run Repair Issues
          * @param {*} [options] Override http request option.
@@ -394,6 +444,15 @@ export const SystemApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.getSystemInfo(options).then((request) => request(axios, basePath));
         },
         /**
+         * Returns runtime integration status computed from server configuration, vault credentials, and live connection state.
+         * @summary Retrieve System Integrations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getSystemIntegrations(options?: RawAxiosRequestConfig): AxiosPromise<SystemIntegrationsResponse> {
+            return localVarFp.getSystemIntegrations(options).then((request) => request(axios, basePath));
+        },
+        /**
          * Lists cataloged runs that cannot be loaded from durable storage.
          * @summary List Run Repair Issues
          * @param {*} [options] Override http request option.
@@ -458,6 +517,16 @@ export class SystemApi extends BaseAPI {
      */
     public getSystemInfo(options?: RawAxiosRequestConfig) {
         return SystemApiFp(this.configuration).getSystemInfo(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns runtime integration status computed from server configuration, vault credentials, and live connection state.
+     * @summary Retrieve System Integrations
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getSystemIntegrations(options?: RawAxiosRequestConfig) {
+        return SystemApiFp(this.configuration).getSystemIntegrations(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

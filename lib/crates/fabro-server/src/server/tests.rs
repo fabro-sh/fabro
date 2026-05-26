@@ -1683,7 +1683,15 @@ fn slack_service_is_enabled_by_vault_tokens() {
         HashMap::new(),
     );
 
-    assert!(state.slack_service.is_some());
+    let service = state
+        .slack_service
+        .as_ref()
+        .expect("slack service should be enabled by vault tokens");
+    let connection = service.connection_status();
+    assert_eq!(connection.kind, IntegrationConnectionKind::SocketMode);
+    assert_eq!(connection.status, IntegrationConnectionState::Connecting);
+    assert!(connection.last_connected_at.is_none());
+    assert!(connection.last_error.is_none());
 }
 
 #[test]
@@ -1701,6 +1709,58 @@ fn slack_service_ignores_server_env_tokens() {
             ),
         ]),
     );
+
+    assert!(state.slack_service.is_none());
+}
+
+#[test]
+fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
+    let mut settings = default_test_server_settings();
+    settings.server.integrations.slack.enabled = false;
+    let (store, artifact_store) = test_store_bundle();
+    let vault_path = test_secret_store_path();
+    let mut vault = Vault::load(vault_path.clone()).unwrap();
+    vault
+        .set(
+            EnvVars::FABRO_SLACK_BOT_TOKEN,
+            "xoxb-test",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
+    vault
+        .set(
+            EnvVars::FABRO_SLACK_APP_TOKEN,
+            "xapp-test",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
+
+    let state = build_app_state(AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            settings,
+            RunLayer::default(),
+            LlmCatalogSettings::default(),
+        ),
+        registry_factory_override: None,
+        max_concurrent_runs: 5,
+        store,
+        artifact_store,
+        vault_path,
+        preloaded_vault: Some(vault),
+        server_secrets: load_test_server_secrets(
+            tempfile::tempdir().unwrap().path().join("server.env"),
+            HashMap::new(),
+        ),
+        env_lookup: default_env_lookup(),
+        github_api_base_url: None,
+        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
+        shutdown: tokio_util::sync::CancellationToken::new(),
+    })
+    .expect("slack disabled test app state should build");
 
     assert!(state.slack_service.is_none());
 }
@@ -3418,6 +3478,7 @@ fn slack_lifecycle_service(base_url: String, default_channel: Option<&str>) -> S
         default_channel: default_channel.map(str::to_string),
         posted_messages: StdArc::new(StdMutex::new(HashMap::new())),
         thread_registry: StdArc::new(ThreadRegistry::new()),
+        connection:      StdArc::new(StdMutex::new(SlackConnectionRuntimeState::default())),
     }
 }
 

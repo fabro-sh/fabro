@@ -314,10 +314,19 @@ pub struct GithubIntegrationSettings {
     pub webhooks:  Option<IntegrationWebhooksSettings>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackIntegrationSettings {
     pub enabled:         bool,
     pub default_channel: Option<InterpString>,
+}
+
+impl Default for SlackIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            enabled:         true,
+            default_channel: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
