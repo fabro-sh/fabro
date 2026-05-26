@@ -37,10 +37,12 @@ impl CircuitBreakerLifecycle {
         loop_sigs: HashMap<FailureSignature, usize>,
         restart_sigs: HashMap<FailureSignature, usize>,
     ) {
-        *self.loop_failure_signatures.lock()
-            .expect("circuit breaker mutex should not be poisoned: no code panics while holding this lock") = loop_sigs;
-        *self.restart_failure_signatures.lock()
-            .expect("circuit breaker mutex should not be poisoned: no code panics while holding this lock") = restart_sigs;
+        *self.loop_failure_signatures.lock().expect(
+            "circuit breaker mutex should not be poisoned: no code panics while holding this lock",
+        ) = loop_sigs;
+        *self.restart_failure_signatures.lock().expect(
+            "circuit breaker mutex should not be poisoned: no code panics while holding this lock",
+        ) = restart_sigs;
     }
 
     /// Snapshot current state for checkpoint building.

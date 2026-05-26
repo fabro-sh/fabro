@@ -301,7 +301,9 @@ fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
                 Role::System | Role::Developer => "system",
                 Role::User => "user",
                 Role::Assistant => "assistant",
-                Role::Tool => unreachable!("Role::Tool is handled in the early-return branch above this match"),
+                Role::Tool => unreachable!(
+                    "Role::Tool is handled in the early-return branch above this match"
+                ),
             };
 
             let mut tool_calls: Vec<ChatToolCall> = Vec::new();

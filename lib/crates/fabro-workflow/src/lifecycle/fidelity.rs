@@ -57,8 +57,9 @@ impl FidelityLifecycle {
     }
 
     pub(crate) fn set_degrade_fidelity_on_resume(&self, flag: bool) {
-        *self.degrade_fidelity_on_resume.lock()
-            .expect("fidelity mutex should not be poisoned: no code panics while holding this lock") = flag;
+        *self.degrade_fidelity_on_resume.lock().expect(
+            "fidelity mutex should not be poisoned: no code panics while holding this lock",
+        ) = flag;
     }
 }
 
@@ -66,8 +67,9 @@ impl FidelityLifecycle {
 impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // Clear incoming edge data (restart target must not inherit pre-restart edge)
-        *self.incoming_edge_data.lock()
-            .expect("fidelity mutex should not be poisoned: no code panics while holding this lock") = None;
+        *self.incoming_edge_data.lock().expect(
+            "fidelity mutex should not be poisoned: no code panics while holding this lock",
+        ) = None;
         Ok(())
     }
 
@@ -76,7 +78,9 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         node: &WorkflowNode,
         state: &WfRunState,
     ) -> CoreResult<WfNodeDecision> {
-        let incoming = self.incoming_edge_data.lock()
+        let incoming = self
+            .incoming_edge_data
+            .lock()
             .expect("fidelity mutex should not be poisoned: no code panics while holding this lock")
             .take();
         let gv_node = node.inner();
@@ -88,8 +92,9 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
 
         // 2. Fidelity degradation on resume (full → summary:high)
         let fidelity = {
-            let mut degrade = self.degrade_fidelity_on_resume.lock()
-                .expect("fidelity mutex should not be poisoned: no code panics while holding this lock");
+            let mut degrade = self.degrade_fidelity_on_resume.lock().expect(
+                "fidelity mutex should not be poisoned: no code panics while holding this lock",
+            );
             if *degrade {
                 *degrade = false;
                 fidelity.degraded()
@@ -185,8 +190,9 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
             let edge_data = IncomingEdgeData {
                 edge: Arc::new(gv_edge.clone()),
             };
-            *self.incoming_edge_data.lock()
-                .expect("fidelity mutex should not be poisoned: no code panics while holding this lock") = Some(edge_data);
+            *self.incoming_edge_data.lock().expect(
+                "fidelity mutex should not be poisoned: no code panics while holding this lock",
+            ) = Some(edge_data);
         }
         Ok(EdgeDecision::Continue)
     }

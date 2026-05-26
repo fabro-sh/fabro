@@ -120,8 +120,9 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
 
         // Reset run_start for duration measurement
-        *self.run_start.lock()
-            .expect("event lifecycle mutex should not be poisoned: no code panics while holding this lock") = Instant::now();
+        *self.run_start.lock().expect(
+            "event lifecycle mutex should not be poisoned: no code panics while holding this lock",
+        ) = Instant::now();
 
         // Emit RunStarted
         self.emitter.emit(&Event::WorkflowRunStarted {

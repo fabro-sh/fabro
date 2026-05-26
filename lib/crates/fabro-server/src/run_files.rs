@@ -344,10 +344,10 @@ async fn materialize_run_commits(
     Ok(PaginatedRunCommitList {
         data: commits,
         meta: RunCommitsMeta {
-            source:          RunCommitsMetaSource::Sandbox,
-            base_sha:        sha_newtype::<RunCommitsMetaBaseSha>(&base_sha)?,
-            head_sha:        sha_newtype::<RunCommitsMetaHeadSha>(&head_sha)?,
-            limit:           NonZeroU64::new(limit).expect("commit limit is non-zero"),
+            source: RunCommitsMetaSource::Sandbox,
+            base_sha: sha_newtype::<RunCommitsMetaBaseSha>(&base_sha)?,
+            head_sha: sha_newtype::<RunCommitsMetaHeadSha>(&head_sha)?,
+            limit: NonZeroU64::new(limit).expect("commit limit is non-zero"),
             total_returned,
             truncated,
         },
@@ -419,7 +419,7 @@ fn parse_git_log_commit(record: &str) -> std::result::Result<RunCommit, ApiError
         .collect::<std::result::Result<Vec<_>, ApiError>>()?;
 
     Ok(RunCommit {
-        sha:       sha_newtype::<RunCommitSha>(sha)?,
+        sha: sha_newtype::<RunCommitSha>(sha)?,
         short_sha: short_sha_newtype::<RunCommitShortSha>(sha)?,
         parents,
         author: RunCommitPerson {
@@ -484,7 +484,9 @@ where
     <T as TryFrom<String>>::Error: std::fmt::Display,
 {
     T::try_from(sha.to_string()).map_err(|err| {
-        ApiError::bad_request(format!("git returned a SHA that did not match expected hex pattern: `{sha}`: {err}"))
+        ApiError::bad_request(format!(
+            "git returned a SHA that did not match expected hex pattern: `{sha}`: {err}"
+        ))
     })
 }
 
@@ -495,7 +497,9 @@ where
 {
     let short = sha.chars().take(7).collect::<String>();
     T::try_from(short.clone()).map_err(|err| {
-        ApiError::bad_request(format!("git returned a short SHA that did not match expected hex pattern: `{short}`: {err}"))
+        ApiError::bad_request(format!(
+            "git returned a short SHA that did not match expected hex pattern: `{short}`: {err}"
+        ))
     })
 }
 

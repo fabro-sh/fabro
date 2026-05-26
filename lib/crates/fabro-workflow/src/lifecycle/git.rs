@@ -94,10 +94,12 @@ pub(crate) struct GitLifecycle {
 impl RunLifecycle<WorkflowGraph> for GitLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // Reset last_git_sha (diff base parity)
-        *self.last_git_sha.lock()
-            .expect("git lifecycle mutex should not be poisoned: no code panics while holding this lock") = None;
-        *self.checkpoint_git_result.lock()
-            .expect("git lifecycle mutex should not be poisoned: no code panics while holding this lock") = None;
+        *self.last_git_sha.lock().expect(
+            "git lifecycle mutex should not be poisoned: no code panics while holding this lock",
+        ) = None;
+        *self.checkpoint_git_result.lock().expect(
+            "git lifecycle mutex should not be poisoned: no code panics while holding this lock",
+        ) = None;
         if let Some(meta_branch) = self.metadata_branch().map(str::to_string) {
             if self.metadata_writer.is_none() || self.metadata_runtime.metadata_degraded() {
                 return Ok(());

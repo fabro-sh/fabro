@@ -420,8 +420,9 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             .on_checkpoint(node, result, next_node_id, state)
             .await?;
         // Clear checkpoint result for next checkpoint
-        *self.checkpoint_git_result.lock()
-            .expect("lifecycle mutex should not be poisoned: no code panics while holding this lock") = None;
+        *self.checkpoint_git_result.lock().expect(
+            "lifecycle mutex should not be poisoned: no code panics while holding this lock",
+        ) = None;
         Ok(())
     }
 

@@ -41,10 +41,9 @@ impl Context {
     }
 
     pub fn apply_updates(&self, updates: &HashMap<String, Value>) {
-        let mut values = self
-            .values
-            .write()
-            .expect("context RwLock should not be poisoned: no code panics while holding this lock");
+        let mut values = self.values.write().expect(
+            "context RwLock should not be poisoned: no code panics while holding this lock",
+        );
         for (k, v) in updates {
             values.insert(k.clone(), v.clone());
         }
