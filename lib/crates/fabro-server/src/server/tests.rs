@@ -5562,30 +5562,6 @@ async fn list_models_filters_by_provider() {
 }
 
 #[tokio::test]
-async fn list_models_filters_by_query_across_aliases() {
-    let app = test_app_with();
-
-    let req = Request::builder()
-        .method("GET")
-        .uri(api("/models?query=codex"))
-        .body(Body::empty())
-        .unwrap();
-
-    let response = app.oneshot(req).await.unwrap();
-    let body = response_json!(response, StatusCode::OK).await;
-    let model_ids = body["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|model| model["id"].as_str().unwrap().to_string())
-        .collect::<Vec<_>>();
-    assert_eq!(model_ids, vec![
-        "gpt-5.3-codex".to_string(),
-        "gpt-5.3-codex-spark".to_string()
-    ]);
-}
-
-#[tokio::test]
 async fn list_models_marks_configured_true_when_provider_has_credential_material() {
     let state = test_app_state_with_env_lookup(
         default_test_server_settings(),

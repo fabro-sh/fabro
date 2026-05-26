@@ -8,76 +8,6 @@ priority = 90
 [providers.openai.auth]
 credentials = ["env:OPENAI_API_KEY", "vault:OPENAI_API_KEY", "vault:OPENAI_CODEX"]
 
-[models."gpt-5.2"]
-provider = "openai"
-api_id = "gpt-5.2"
-display_name = "GPT-5.2"
-family = "gpt-5"
-training = "2025-08-31"
-knowledge_cutoff = "April 2025"
-estimated_output_tps = 65
-aliases = ["gpt5"]
-
-[models."gpt-5.2".limits]
-context_window = 272000
-max_output = 128000
-
-[models."gpt-5.2".features]
-tools = true
-vision = true
-reasoning = true
-reasoning_effort = "levels"
-
-[models."gpt-5.2".costs]
-input_cost_per_mtok = 1.75
-output_cost_per_mtok = 14.0
-cache_input_cost_per_mtok = 0.175
-
-[models."gpt-5.3-codex"]
-provider = "openai"
-api_id = "gpt-5.3-codex"
-display_name = "GPT-5.3 Codex"
-family = "gpt-5"
-training = "2025-08-31"
-knowledge_cutoff = "April 2025"
-estimated_output_tps = 100
-aliases = ["codex"]
-
-[models."gpt-5.3-codex".limits]
-context_window = 272000
-max_output = 128000
-
-[models."gpt-5.3-codex".features]
-tools = true
-vision = true
-reasoning = true
-reasoning_effort = "levels"
-
-[models."gpt-5.3-codex".costs]
-input_cost_per_mtok = 1.75
-output_cost_per_mtok = 14.0
-cache_input_cost_per_mtok = 0.175
-
-[models."gpt-5.3-codex-spark"]
-provider = "openai"
-api_id = "gpt-5.3-codex-spark"
-display_name = "GPT-5.3 Codex Spark"
-family = "gpt-5"
-training = "2025-08-31"
-knowledge_cutoff = "April 2025"
-estimated_output_tps = 1000
-aliases = ["codex-spark"]
-
-[models."gpt-5.3-codex-spark".limits]
-context_window = 131072
-max_output = 128000
-
-[models."gpt-5.3-codex-spark".features]
-tools = true
-vision = false
-reasoning = true
-reasoning_effort = "levels"
-
 [models."gpt-5.4"]
 provider = "openai"
 api_id = "gpt-5.4"
@@ -87,7 +17,7 @@ training = "2025-08-31"
 knowledge_cutoff = "April 2025"
 default = true
 estimated_output_tps = 70
-aliases = ["gpt54", "gpt-54"]
+aliases = ["gpt54", "gpt-54", "gpt-5.2", "gpt5", "gpt-5.3-codex", "codex"]
 
 [models."gpt-5.4".limits]
 context_window = 272000
@@ -187,7 +117,7 @@ family = "gpt-5"
 training = "2025-08-31"
 knowledge_cutoff = "April 2025"
 estimated_output_tps = 140
-aliases = ["gpt54-mini", "gpt-54-mini"]
+aliases = ["gpt54-mini", "gpt-54-mini", "gpt-5.3-codex-spark", "codex-spark"]
 probe = true
 small_default = true
 
