@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Link, useSearchParams } from "react-router";
-import { ArchiveBoxIcon, CheckIcon, ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { Link } from "react-router";
+import { CheckIcon, ChevronDownIcon, CommandLineIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
@@ -29,31 +29,11 @@ import { PullRequestChip } from "../components/pull-request-chip";
 import {
   summarizeBatchLifecycleAction,
 } from "../components/runs-list/batch-lifecycle";
-import { ColumnPickerButton } from "../components/runs-list/column-picker-button";
-import { FilterButton } from "../components/runs-list/filter-button";
 import {
   createdCutoffMsFor,
-  createdFilterOptions,
-  hiddenColumnsFromSearchParams,
-  parseCreatedFilter,
-  parseDirection,
-  parsePage,
-  parsePageSize,
-  parseSort,
-  parseView,
   persistRunsWorkspacePreferences,
-  resolveRunsWorkspaceSearchParams,
-  runsWorkspacePreferencesFromSearchParams,
-  runsWorkspacePreferencesToSearchParams,
-} from "../components/runs-list/preferences";
-import type {
-  CreatedFilter,
-  RunsWorkspacePreferences,
-  ViewMode,
 } from "../components/runs-list/preferences";
 import { RunsListView } from "../components/runs-list/runs-list-view";
-import { serializeHiddenColumns } from "../components/runs-list/toggleable-column";
-import type { ToggleableColumn } from "../components/runs-list/toggleable-column";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
@@ -65,6 +45,8 @@ import type {
   ListRunsSortEnum,
   Run,
 } from "@qltysh/fabro-api-client";
+import { RunsToolbar } from "./runs/toolbar";
+import { useRunsWorkspacePreferences } from "./runs/workspace-preferences";
 
 export { shouldRefreshBoardForEvent };
 export {
@@ -734,82 +716,29 @@ function RunsLandingEmpty({
 }
 
 export default function Runs() {
-  const [urlSearchParams, setSearchParams] = useSearchParams();
-  const searchParams = useMemo(
-    () => resolveRunsWorkspaceSearchParams(urlSearchParams),
-    [urlSearchParams],
-  );
-  const query = searchParams.get("search") ?? "";
-  const repoFilter = searchParams.get("repo") ?? "all";
-  const workflowFilter = searchParams.get("workflow") ?? "all";
-  const createdFilter = parseCreatedFilter(searchParams.get("created"));
-  const includeArchived = searchParams.get("archived") === "1";
-  const view = parseView(searchParams.get("view"));
-  const sort = parseSort(searchParams.get("sort"));
-  const direction = parseDirection(searchParams.get("direction"));
-  const page = parsePage(searchParams.get("page"));
-  const pageSize = parsePageSize(searchParams.get("size"));
-  const hiddenColumns = useMemo(
-    () => hiddenColumnsFromSearchParams(searchParams),
-    [searchParams],
-  );
-
-  const updatePreferences = useCallback(
-    (updater: (prev: RunsWorkspacePreferences) => RunsWorkspacePreferences) => {
-      setSearchParams(
-        (prevParams) => {
-          const next = updater(runsWorkspacePreferencesFromSearchParams(prevParams));
-          persistRunsWorkspacePreferences(next);
-          return runsWorkspacePreferencesToSearchParams(next);
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
-
-  const setQuery = (value: string) =>
-    updatePreferences((prev) => ({ ...prev, search: value }));
-  const setRepoFilter = (value: string) =>
-    updatePreferences((prev) => ({ ...prev, repo: value }));
-  const setWorkflowFilter = (value: string) =>
-    updatePreferences((prev) => ({ ...prev, workflow: value }));
-  const setCreatedFilter = (value: CreatedFilter) =>
-    updatePreferences((prev) => ({ ...prev, created: value }));
-  const setIncludeArchived = (value: boolean) =>
-    updatePreferences((prev) => ({ ...prev, archived: value }));
-  const setView = (value: ViewMode) =>
-    updatePreferences((prev) => ({ ...prev, view: value }));
-  const setPage = useCallback(
-    (next: number) => updatePreferences((prev) => ({ ...prev, page: next })),
-    [updatePreferences],
-  );
-  const setPageSize = useCallback(
-    (next: number) => updatePreferences((prev) => ({ ...prev, size: next, page: 1 })),
-    [updatePreferences],
-  );
-  const setHiddenColumns = useCallback(
-    (next: Set<ToggleableColumn>) =>
-      updatePreferences((prev) => ({ ...prev, hide: serializeHiddenColumns(next) ?? "" })),
-    [updatePreferences],
-  );
-  const handleSortClick = useCallback(
-    (key: ListRunsSortEnum) =>
-      updatePreferences((prev) =>
-        prev.sort === key
-          ? { ...prev, direction: prev.direction === "asc" ? "desc" : "asc", page: 1 }
-          : { ...prev, sort: key, direction: "desc", page: 1 },
-      ),
-    [updatePreferences],
-  );
-
-  const hydratedFromStorage = useRef(false);
-  useEffect(() => {
-    if (hydratedFromStorage.current) return;
-    hydratedFromStorage.current = true;
-    if (searchParams === urlSearchParams) return;
-    setSearchParams(searchParams, { replace: true });
-  }, [searchParams, urlSearchParams, setSearchParams]);
+  const {
+    query,
+    repoFilter,
+    workflowFilter,
+    createdFilter,
+    includeArchived,
+    view,
+    sort,
+    direction,
+    page,
+    pageSize,
+    hiddenColumns,
+    setQuery,
+    setRepoFilter,
+    setWorkflowFilter,
+    setCreatedFilter,
+    setIncludeArchived,
+    setView,
+    setPage,
+    setPageSize,
+    setHiddenColumns,
+    handleSortClick,
+  } = useRunsWorkspacePreferences();
 
   const boardRuns = useAllRuns({ includeArchived }, view === "columns");
   const listRunsPage = useRunsPage(
@@ -905,89 +834,24 @@ export default function Runs() {
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-64">
-            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-            <input
-              type="text"
-              name="search"
-              aria-label="Search runs"
-              placeholder="Search runs…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
-            />
-          </div>
-
-          <FilterButton
-            label="Time"
-            value={createdFilter}
-            allValue="all"
-            options={createdFilterOptions}
-            onChange={setCreatedFilter}
-          />
-          <FilterButton
-            label="Repo"
-            value={repoFilter}
-            allValue="all"
-            options={[
-              { value: "all", label: "All repos" },
-              ...allRepos.map((repo) => ({ value: repo, label: repo })),
-            ]}
-            onChange={setRepoFilter}
-          />
-          <FilterButton
-            label="Workflow"
-            value={workflowFilter}
-            allValue="all"
-            options={[
-              { value: "all", label: "All workflows" },
-              ...allWorkflows.map((workflow) => ({ value: workflow, label: workflow })),
-            ]}
-            onChange={setWorkflowFilter}
-          />
-
-          <button
-            type="button"
-            onClick={() => setIncludeArchived(!includeArchived)}
-            aria-pressed={includeArchived}
-            title={includeArchived ? "Hide archived runs" : "Show archived runs"}
-            className={`inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium transition-colors ${includeArchived ? "text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
-          >
-            <ArchiveBoxIcon className="size-4" aria-hidden="true" />
-            <span>Show archived</span>
-          </button>
-
-          <div className="ml-auto flex items-center gap-2">
-          {view === "list" && (
-            <ColumnPickerButton hidden={hiddenColumns} onChange={setHiddenColumns} />
-          )}
-          <div className="flex rounded-md border border-line bg-panel/80 p-0.5">
-            <button
-              type="button"
-              onClick={() => setView("columns")}
-              aria-pressed={view === "columns"}
-              className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${view === "columns" ? "bg-overlay text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
-              aria-label="Columns view"
-            >
-              <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
-                <path d="M2 4.75A.75.75 0 0 1 2.75 4h2.5a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1-.75-.75V4.75ZM8.25 4a.75.75 0 0 0-.75.75v10.5c0 .414.336.75.75.75h2.5a.75.75 0 0 0 .75-.75V4.75a.75.75 0 0 0-.75-.75h-2.5ZM14 4.75a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1-.75-.75V4.75Z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => setView("list")}
-              aria-pressed={view === "list"}
-              className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${view === "list" ? "bg-overlay text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
-              aria-label="List view"
-            >
-              <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
-                <path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75Zm0 5a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
-              </svg>
-            </button>
-          </div>
-          </div>
-        </div>
+        <RunsToolbar
+          query={query}
+          repoFilter={repoFilter}
+          workflowFilter={workflowFilter}
+          createdFilter={createdFilter}
+          includeArchived={includeArchived}
+          view={view}
+          hiddenColumns={hiddenColumns}
+          allRepos={allRepos}
+          allWorkflows={allWorkflows}
+          onQueryChange={setQuery}
+          onRepoFilterChange={setRepoFilter}
+          onWorkflowFilterChange={setWorkflowFilter}
+          onCreatedFilterChange={setCreatedFilter}
+          onIncludeArchivedChange={setIncludeArchived}
+          onViewChange={setView}
+          onHiddenColumnsChange={setHiddenColumns}
+        />
 
         {view === "columns" ? (
           <>

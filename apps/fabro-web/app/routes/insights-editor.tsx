@@ -392,15 +392,36 @@ export default function InsightsEditor() {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [showAiDialog, setShowAiDialog] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
+  const runRequestIdRef = useRef(0);
+  const runTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runQuery = useCallback(() => {
+    const requestId = runRequestIdRef.current + 1;
+    runRequestIdRef.current = requestId;
+    if (runTimeoutRef.current !== null) {
+      clearTimeout(runTimeoutRef.current);
+    }
     setIsRunning(true);
     const delay = 200 + Math.random() * 400;
-    setTimeout(() => {
+    runTimeoutRef.current = setTimeout(() => {
+      if (runRequestIdRef.current !== requestId) return;
+      runTimeoutRef.current = null;
       setResult(generateMockResult(sql));
       setIsRunning(false);
     }, delay);
   }, [sql]);
+
+  useEffect(() => {
+    const runRequestIds = runRequestIdRef;
+    const runTimeouts = runTimeoutRef;
+    return () => {
+      runRequestIds.current += 1;
+      if (runTimeouts.current !== null) {
+        clearTimeout(runTimeouts.current);
+        runTimeouts.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className="space-y-4">
