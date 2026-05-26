@@ -2207,10 +2207,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     });
     let slack_service = {
         let slack_settings = &current_server_settings.server.integrations.slack;
-        if !slack_settings.enabled {
-            info!("Slack integration disabled by server configuration");
-            None
-        } else {
+        if slack_settings.enabled {
             let default_channel = slack_settings
                 .default_channel
                 .as_ref()
@@ -2246,6 +2243,9 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
                     None
                 }
             }
+        } else {
+            info!("Slack integration disabled by server configuration");
+            None
         }
     };
     let worker_tokens = worker_token_keys_from_server_secrets(&server_secrets)?;

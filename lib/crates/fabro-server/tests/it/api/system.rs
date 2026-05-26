@@ -148,12 +148,12 @@ async fn get_system_info_returns_runtime_fields() {
 #[tokio::test]
 async fn get_system_integrations_reports_slack_missing_credentials_when_allowed() {
     let settings = settings_from_toml(
-        r#"
+        r"
 _version = 1
 
 [server.integrations.slack]
 enabled = true
-"#,
+",
     );
     let app = fabro_server::test_support::build_test_router(
         fabro_server::test_support::TestAppStateBuilder::new()
@@ -188,12 +188,12 @@ enabled = true
 #[tokio::test]
 async fn get_system_integrations_reports_slack_disabled_even_when_tokens_exist() {
     let settings = settings_from_toml(
-        r#"
+        r"
 _version = 1
 
 [server.integrations.slack]
 enabled = false
-"#,
+",
     );
     let app = fabro_server::test_support::build_test_router(
         fabro_server::test_support::TestAppStateBuilder::new()

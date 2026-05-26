@@ -228,12 +228,14 @@ fn slack_integration_status(state: &AppState) -> SystemIntegrationStatus {
         .map(|service| service.connection_status());
     let status = connection
         .as_ref()
-        .map(|connection| match connection.status {
-            IntegrationConnectionState::Connecting => IntegrationStatus::Connecting,
-            IntegrationConnectionState::Connected => IntegrationStatus::Connected,
-            IntegrationConnectionState::Error => IntegrationStatus::Error,
-        })
-        .unwrap_or(IntegrationStatus::Configured);
+        .map_or(
+            IntegrationStatus::Configured,
+            |connection| match connection.status {
+                IntegrationConnectionState::Connecting => IntegrationStatus::Connecting,
+                IntegrationConnectionState::Connected => IntegrationStatus::Connected,
+                IntegrationConnectionState::Error => IntegrationStatus::Error,
+            },
+        );
 
     SystemIntegrationStatus {
         provider: IntegrationProvider::Slack,
