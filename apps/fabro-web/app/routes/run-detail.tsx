@@ -1,69 +1,20 @@
 import {
-  Fragment,
-  useEffect,
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
 } from "react";
 import {
-  ArrowPathIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  ClockIcon,
-  FolderIcon,
-  RectangleStackIcon,
-  SignalIcon,
-  SparklesIcon,
-} from "@heroicons/react/20/solid";
-import {
-  Link,
-  Outlet,
   useLocation,
   useMatches,
   useNavigate,
 } from "react-router";
-import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 
-import AskFabroSidebar, {
-  SIDEBAR_WIDTH,
-} from "../components/chats/ask-fabro-sidebar";
-import {
-  AskFabroUnavailableReasonEnum,
-  type AskFabro,
-} from "@qltysh/fabro-api-client";
-import { EditableRunTitle } from "../components/editable-run-title";
-import { GitPullRequestIcon } from "../components/icons";
-import { InterviewDock } from "../components/interview-dock";
-import { SizeChip } from "../components/size-chip";
-import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
+import { type SteerBarHandle } from "../components/steer-bar";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
 import {
   ConfirmDialog,
-  HoverCard,
-  PopoverHeader,
-  PopoverRow,
-  PopoverRows,
-  PRIMARY_BUTTON_CLASS,
-  SECONDARY_BUTTON_CLASS,
-  Tooltip,
 } from "../components/ui";
-import {
-  isRunStatus,
-  mapRunToRunItem,
-  runStatusDisplay,
-  type Run,
-} from "../data/runs";
-import type {
-  PullRequestDetails,
-  RepositoryRef,
-  RunLifecycle,
-  RunTiming,
-  WorkflowRef,
-} from "@qltysh/fabro-api-client";
-import { useAskFabroLayout } from "../lib/ask-fabro-layout";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { useDemoMode } from "../lib/demo-mode";
 import { useSWRConfig } from "swr";
@@ -76,318 +27,45 @@ import {
   usePreviewRun,
   useRetryRun,
   useUnarchiveRun,
-  type LifecycleMutationResult,
-  type PreviewMutationResult,
 } from "../lib/mutations";
-import {
-  formatAbsoluteTs,
-  formatDurationMs,
-  formatRelativeTime,
-} from "../lib/format";
-import { queryKeys } from "../lib/query-keys";
 import { useRunEvents } from "../lib/run-events";
 import { useRunToasts } from "../hooks/use-run-toasts";
-import { useRun, useRunPullRequest, useRunQuestions, useRunState } from "../lib/queries";
+import { useRun, useRunQuestions, useRunState } from "../lib/queries";
 import {
-  canArchive,
   canApprove,
-  canCancel,
-  canDelete,
   canRetry,
-  canUnarchive,
   deleteErrorMessage,
   deleteRun,
-  isTerminalCancelledRun,
-  mapError,
-  type LifecycleAction,
-  type LifecycleActionError,
 } from "../lib/run-actions";
-
-const allTabs = [
-  { name: "Overview", path: "", count: null, demoOnly: false },
-  { name: "Stages", path: "/stages", count: null, demoOnly: false },
-  { name: "Files Changed", path: "/files", count: null, demoOnly: false },
-  { name: "Children", path: "/children", count: null, demoOnly: false },
-  { name: "Sandbox", path: "/sandbox", count: null, demoOnly: false, requiresSandbox: true },
-  { name: "Billing", path: "/billing", count: null, demoOnly: false },
-];
+import {
+  type ActionGroups,
+  focusSteerAfterMenuClose,
+} from "./run-detail/actions";
+import {
+  RunDetailAskFabroShell,
+  RunDetailDockedControls,
+} from "./run-detail/docked-controls";
+import { RunDetailHeader } from "./run-detail/header";
+import {
+  lifecycleActionVisibility,
+  useLifecycleToastResults,
+} from "./run-detail/lifecycle-toasts";
+import {
+  buildRunDetailRun,
+  useTickingNow,
+} from "./run-detail/model";
+import {
+  buildRunDetailTabs,
+  childRouteLayoutFlags,
+  RunDetailTabsAndOutlet,
+  runHasSandbox,
+} from "./run-detail/tabs-shell";
 
 export const handle = { hideHeader: true };
-
-export function focusSteerAfterMenuClose(focus: () => void) {
-  globalThis.setTimeout(focus, 0);
-}
-
-export function actionMenuSeparatorVisibility({
-  hasLifecycle,
-  hasDestructive,
-}: {
-  hasLifecycle: boolean;
-  hasDestructive: boolean;
-}) {
-  return {
-    afterOperations:   hasLifecycle || hasDestructive,
-    beforeDestructive: hasLifecycle && hasDestructive,
-  };
-}
-
-const ACTIONS_TRIGGER_CLASS =
-  `${SECONDARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-60`;
-
-const MENU_ITEM_CLASS =
-  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-fg-3 transition-colors data-focus:bg-overlay data-focus:text-fg data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
-
-const MENU_ITEM_DANGER_CLASS =
-  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-coral transition-colors data-focus:bg-coral/10 data-focus:text-coral data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
-
-function classNames(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(" ");
-}
-
-function useTickingNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
-
-type RunDetailRun = ReturnType<typeof mapRunToRunItem> & {
-  statusLabel: string;
-  statusDot: string;
-  statusText: string;
-};
-
-export type RunDetailActionResult = PreviewMutationResult | LifecycleMutationResult;
-
-export interface LifecycleToastState {
-  activeArchiveToastId: string | null;
-  lastProcessed: Record<LifecycleAction, RunDetailActionResult | null>;
-}
-
-type ToastApi = Pick<ReturnType<typeof useToast>, "push" | "dismiss">;
-
-const INITIAL_LIFECYCLE_TOAST_STATE: LifecycleToastState = {
-  activeArchiveToastId: null,
-  lastProcessed: {
-    cancel:    null,
-    approve:   null,
-    deny:      null,
-    archive:   null,
-    unarchive: null,
-    retry:     null,
-  },
-};
-
-export function lifecycleActionVisibility(status: string | null | undefined) {
-  return {
-    showPrimaryCancel: canCancel(status),
-    showArchive: canArchive(status),
-    showUnarchive: canUnarchive(status),
-    showDelete: canDelete(status),
-  };
-}
-
-function runHasSandbox(runState: unknown): boolean {
-  return !!(
-    runState &&
-    typeof runState === "object" &&
-    "sandbox" in runState &&
-    (runState as { sandbox?: unknown }).sandbox
-  );
-}
-
-function buildRunDetailRun(summary: Run): RunDetailRun {
-  const item = mapRunToRunItem(summary);
-  const rawStatus = summary.lifecycle.status;
-  const statusKind = rawStatus.kind;
-  const display = isRunStatus(statusKind)
-    ? runStatusDisplay[statusKind]
-    : { label: statusKind, dot: "bg-fg-muted", text: "text-fg-muted" };
-
-  return {
-    ...item,
-    statusLabel: display.label,
-    statusDot: display.dot,
-    statusText: display.text,
-  };
-}
 
 export function meta({ data }: any) {
   const run = data?.run;
   return [{ title: run ? `${run.title} — Fabro` : "Run — Fabro" }];
-}
-
-// ---- Header hover-card popovers ----
-
-function humanizeFailureReason(reason: string): string {
-  const spaced = reason.replace(/_/g, " ");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
-
-/** Shown only when the run failed or is archived — see `showStatusPopover`. */
-function StatusPopover({ lifecycle }: { lifecycle: RunLifecycle }) {
-  const status = lifecycle.status;
-  return (
-    <>
-      <PopoverHeader>Run status</PopoverHeader>
-      <PopoverRows>
-        {status.kind === "failed" && (
-          <PopoverRow label="Reason">{humanizeFailureReason(status.reason)}</PopoverRow>
-        )}
-        {lifecycle.error && (
-          <PopoverRow label="Error">
-            <span className="break-words">{lifecycle.error.message}</span>
-          </PopoverRow>
-        )}
-        {lifecycle.archived && (
-          <PopoverRow label="Archived">
-            {lifecycle.archived_at ? formatAbsoluteTs(lifecycle.archived_at) : "Yes"}
-          </PopoverRow>
-        )}
-      </PopoverRows>
-    </>
-  );
-}
-
-function RepositoryPopover({
-  repository,
-  cloneBranch,
-}: {
-  repository: RepositoryRef;
-  cloneBranch: string | null | undefined;
-}) {
-  return (
-    <>
-      <PopoverHeader>Repository</PopoverHeader>
-      <PopoverRows>
-        <PopoverRow label="Name">
-          <span className="font-mono break-all">{repository.name}</span>
-        </PopoverRow>
-        {cloneBranch && (
-          <PopoverRow label="Branch">
-            <span className="font-mono break-all">{cloneBranch}</span>
-          </PopoverRow>
-        )}
-      </PopoverRows>
-    </>
-  );
-}
-
-function WorkflowPopover({
-  workflow,
-  labels,
-}: {
-  workflow: WorkflowRef;
-  labels: Record<string, string>;
-}) {
-  const labelEntries = Object.entries(labels);
-  const hasCounts = workflow.node_count > 0 || workflow.edge_count > 0;
-  return (
-    <>
-      <PopoverHeader>Workflow</PopoverHeader>
-      {hasCounts && (
-        <div className="text-fg">
-          {workflow.node_count} {workflow.node_count === 1 ? "node" : "nodes"}
-          <span className="text-fg-muted"> · </span>
-          {workflow.edge_count} {workflow.edge_count === 1 ? "edge" : "edges"}
-        </div>
-      )}
-      {labelEntries.length > 0 && (
-        <div className={hasCounts ? "mt-2" : undefined}>
-          <div className="mb-1 text-fg-3">Labels</div>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-            {labelEntries.map(([key, value]) => (
-              <Fragment key={key}>
-                <dt className="font-mono text-fg-3">{key}</dt>
-                <dd className="min-w-0 font-mono break-all text-fg">{value}</dd>
-              </Fragment>
-            ))}
-          </dl>
-        </div>
-      )}
-    </>
-  );
-}
-
-function DurationPopover({
-  timing,
-  createdAt,
-  completedAt,
-  now,
-}: {
-  timing: RunTiming;
-  createdAt: string;
-  completedAt: string | null;
-  now: number;
-}) {
-  const endMs = completedAt != null ? Date.parse(completedAt) : now;
-  const sinceCreatedMs = Math.max(0, endMs - Date.parse(createdAt));
-  return (
-    <>
-      <PopoverHeader>Duration</PopoverHeader>
-      <dl className="space-y-2">
-        <div>
-          <dt className="text-fg-3">Wall-clock since created</dt>
-          <dd className="mt-0.5 font-mono text-fg">{formatDurationMs(sinceCreatedMs)}</dd>
-        </div>
-        <div>
-          <dt className="text-fg-3">Active (inference + tools)</dt>
-          <dd className="mt-0.5 font-mono text-fg">{formatDurationMs(timing.active_time_ms)}</dd>
-        </div>
-      </dl>
-    </>
-  );
-}
-
-function prStateBadge(details: PullRequestDetails): { label: string; className: string } {
-  if (details.merged) return { label: "Merged", className: "bg-mint/15 text-mint" };
-  if (details.draft) return { label: "Draft", className: "bg-overlay-strong text-fg-3" };
-  if (details.state === "closed") {
-    return { label: "Closed", className: "bg-coral/15 text-coral" };
-  }
-  return { label: "Open", className: "bg-teal-500/15 text-teal-300" };
-}
-
-/** Fetches live PR details on hover — mounted only while the card is open. */
-function PullRequestPopover({ runId }: { runId: string }) {
-  const prQuery = useRunPullRequest(runId);
-  const response = prQuery.data;
-  const details =
-    response?.meta.details_status === "available" ? response.data.details : null;
-
-  let body: ReactNode;
-  if (prQuery.isLoading) {
-    body = <div className="text-fg-3">Loading…</div>;
-  } else if (!details) {
-    body = <div className="text-fg-3">Live details unavailable.</div>;
-  } else {
-    const badge = prStateBadge(details);
-    body = (
-      <div className="space-y-2">
-        <div className="break-words text-fg">{details.title}</div>
-        <div className="flex items-center gap-2">
-          <span
-            className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${badge.className}`}
-          >
-            {badge.label}
-          </span>
-          <span className="flex min-w-0 items-center gap-1 font-mono text-fg-3">
-            <span className="truncate">{details.head_branch}</span>
-            <span className="shrink-0 text-fg-muted">→</span>
-            <span className="truncate">{details.base_branch}</span>
-          </span>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <>
-      <PopoverHeader>Pull request</PopoverHeader>
-      {body}
-    </>
-  );
 }
 
 export default function RunDetail({ params }: { params: { id: string } }) {
@@ -401,19 +79,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const questionsQuery = useRunQuestions(params.id, isBlocked);
   const pendingQuestions = questionsQuery.data ?? [];
   const { pathname } = useLocation();
-  // Ask Fabro readiness is computed server-side per run: feature flag, the
-  // run's sandbox state, and whether any LLM provider is configured. The
-  // trigger button is always rendered for visibility; it disables when the
-  // server reports `available: false`, with a tooltip explaining why.
   const askFabro = summary?.ask_fabro ?? null;
-  const askAvailable = askFabro?.available ?? false;
-  const askDefaultModel = askFabro?.default_model ?? null;
-  const [askOpen, setAskOpen] = useState(false);
-  // User-chosen sidebar width; persists across open/close. Draggable between
-  // SIDEBAR_WIDTH and SIDEBAR_MAX_WIDTH via the sidebar's left-edge handle.
-  const [askWidth, setAskWidth] = useState(SIDEBAR_WIDTH);
-  const sidebarWidth = askAvailable && askOpen ? askWidth : 0;
-  const { setSidebarWidth, isResizing } = useAskFabroLayout();
   const matches = useMatches();
   const basePath = `/runs/${params.id}`;
   const previewMutation = usePreviewRun(params.id);
@@ -432,91 +98,30 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const filesCount = runQuery.data?.diff?.files_changed ?? null;
   const childrenCount = runQuery.data?.children_count ?? null;
   const hasSandbox = runHasSandbox(runStateQuery.data);
-  const tabs = [];
-  for (const tab of allTabs) {
-    if ((tab.demoOnly && !demoMode) || (tab.requiresSandbox && !hasSandbox)) continue;
-    if (tab.name === "Files Changed") {
-      tabs.push({ ...tab, count: filesCount });
-    } else if (tab.name === "Children") {
-      tabs.push({ ...tab, count: childrenCount });
-    } else {
-      tabs.push(tab);
-    }
-  }
-  const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
+  const tabs = buildRunDetailTabs({
+    hasSandbox,
+    filesCount,
+    childrenCount,
+  });
   const steerBarRef = useRef<SteerBarHandle | null>(null);
   const now = useTickingNow(30_000);
-  const fullHeight = matches.some(
-    (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
-  );
-  const hideSteerBar = matches.some(
-    (m) => (m.handle as { hideSteerBar?: boolean } | undefined)?.hideSteerBar,
-  );
+  const { fullHeight, hideSteerBar } = childRouteLayoutFlags(matches);
 
   useRunEvents(params.id);
   useRunToasts(params.id);
 
-  // Publish the docked sidebar's width so the app shell insets `<main>` and
-  // the page content shifts left while the sidebar is open.
-  useEffect(() => {
-    setSidebarWidth(sidebarWidth);
-    return () => setSidebarWidth(0);
-  }, [sidebarWidth, setSidebarWidth]);
-
-  useEffect(() => {
-    lifecycleToastStateRef.current = handleLifecycleToastResult(
-      "cancel",
-      cancelMutation.data,
-      lifecycleToastStateRef.current,
-      { push, dismiss },
-    );
-  }, [cancelMutation.data, dismiss, push]);
-
-  useEffect(() => {
-    lifecycleToastStateRef.current = handleLifecycleToastResult(
-      "archive",
-      archiveMutation.data,
-      lifecycleToastStateRef.current,
-      { push, dismiss },
-    );
-  }, [archiveMutation.data, dismiss, push]);
-
-  useEffect(() => {
-    lifecycleToastStateRef.current = handleLifecycleToastResult(
-      "approve",
-      approveMutation.data,
-      lifecycleToastStateRef.current,
-      { push, dismiss },
-    );
-  }, [approveMutation.data, dismiss, push]);
-
-  useEffect(() => {
-    lifecycleToastStateRef.current = handleLifecycleToastResult(
-      "deny",
-      denyMutation.data,
-      lifecycleToastStateRef.current,
-      { push, dismiss },
-    );
-  }, [denyMutation.data, dismiss, push]);
-
-  useEffect(() => {
-    lifecycleToastStateRef.current = handleLifecycleToastResult(
-      "unarchive",
-      unarchiveMutation.data,
-      lifecycleToastStateRef.current,
-      { push, dismiss },
-    );
-  }, [dismiss, push, unarchiveMutation.data]);
-
-  useEffect(() => {
-    lifecycleToastStateRef.current = handleLifecycleToastResult(
-      "retry",
-      retryMutation.data,
-      lifecycleToastStateRef.current,
-      { push, dismiss },
-      navigate,
-    );
-  }, [dismiss, navigate, push, retryMutation.data]);
+  useLifecycleToastResults(
+    {
+      cancel:    cancelMutation.data,
+      approve:   approveMutation.data,
+      deny:      denyMutation.data,
+      archive:   archiveMutation.data,
+      unarchive: unarchiveMutation.data,
+      retry:     retryMutation.data,
+    },
+    { push, dismiss },
+    navigate,
+  );
 
   if (runQuery.isLoading && !run) {
     return <div className="py-12" />;
@@ -532,36 +137,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       </div>
     );
   }
-
-  const showStatusPopover =
-    summary.lifecycle.status.kind === "failed" ||
-    summary.lifecycle.archived ||
-    summary.lifecycle.error != null;
-  const showWorkflowPopover =
-    summary.workflow.node_count > 0 ||
-    summary.workflow.edge_count > 0 ||
-    Object.keys(summary.labels).length > 0;
-  const statusBadge = (
-    <span className="flex items-center gap-1.5">
-      <span className={`size-2 rounded-full ${run.statusDot}`} />
-      <span className={`font-medium ${run.statusText}`}>{run.statusLabel}</span>
-    </span>
-  );
-  const repoChip = (
-    <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
-      <FolderIcon className="size-3.5" aria-hidden="true" />
-      {run.repo}
-    </span>
-  );
-  const workflowChip = (
-    <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
-      <RectangleStackIcon className="size-3.5" aria-hidden="true" />
-      {run.workflow}
-    </span>
-  );
-  const sizeChip = (
-    <SizeChip size={summary.size} totalUsdMicros={summary.billing?.total_usd_micros} />
-  );
 
   const visibility = lifecycleActionVisibility(run.lifecycleStatus);
   const previewPending = previewMutation.isMutating;
@@ -608,589 +183,162 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     }
   };
   const hasPendingQuestions = isBlocked && pendingQuestions.length > 0;
+  const actionGroups: ActionGroups = {
+    operations: [
+      ...(hasSandbox
+        ? [{
+          key:          "preview",
+          label:        "Preview",
+          pendingLabel: "Opening…",
+          pending:      previewPending,
+          onSelect:     () => void handlePreview(),
+        }]
+        : []),
+      {
+        key:          "interrupt",
+        label:        "Send interrupt",
+        pendingLabel: "Interrupting…",
+        pending:      interruptMutation.isMutating,
+        disabled:     statusKind !== "running",
+        onSelect:     () => void interruptMutation.trigger(),
+      },
+      {
+        key:      "steer",
+        label:    "Send steering…",
+        disabled: statusKind !== "running" || hasPendingQuestions,
+        onSelect: () => {
+          focusSteerAfterMenuClose(() => steerBarRef.current?.focus());
+        },
+      },
+    ],
+    lifecycle: [
+      ...(!demoMode && canRetry(summary)
+        ? [{
+          key:          "retry",
+          label:        "Retry",
+          pendingLabel: "Retrying…",
+          pending:      retryPending,
+          onSelect:     () => void retryMutation.trigger(),
+        }]
+        : []),
+      ...(visibility.showArchive
+        ? [{
+          key:          "archive",
+          label:        "Archive",
+          pendingLabel: "Archiving…",
+          pending:      archivePending,
+          onSelect:     () => void archiveMutation.trigger(),
+        }]
+        : []),
+      ...(visibility.showUnarchive
+        ? [{
+          key:          "unarchive",
+          label:        "Unarchive",
+          pendingLabel: "Restoring…",
+          pending:      unarchivePending,
+          onSelect:     () => void unarchiveMutation.trigger(),
+        }]
+        : []),
+    ],
+    destructive: [
+      ...(approvalActionVisible
+        ? [{
+          key:          "deny",
+          label:        "Deny",
+          pendingLabel: "Denying…",
+          pending:      denyPending,
+          onSelect:     () => void denyMutation.trigger(),
+        }]
+        : []),
+      ...(visibility.showPrimaryCancel
+        ? [{
+          key:          "cancel",
+          label:        "Cancel",
+          pendingLabel: "Cancelling…",
+          pending:      cancelPending,
+          onSelect:     () => void cancelMutation.trigger(),
+        }]
+        : []),
+      ...(visibility.showDelete
+        ? [{
+          key:          "delete",
+          label:        "Delete",
+          pendingLabel: "Deleting…",
+          pending:      deletePending,
+          onSelect:     () => setDeleteDialogOpen(true),
+        }]
+        : []),
+    ],
+  };
   const dockClearance = hasPendingQuestions ? "18rem" : "5rem";
   const rootStyle = {
     "--fabro-interview-dock-clearance": dockClearance,
   } as CSSProperties;
 
   return (
-    <div
-      className={fullHeight ? "flex h-full min-h-0 flex-col" : undefined}
-      style={rootStyle}
-    >
-      <nav
-        className={classNames(
-          "mb-4 flex items-center gap-1 text-sm text-fg-muted",
-          fullHeight && "shrink-0",
-        )}
-      >
-        <Link to="/runs" className="text-fg-3 hover:text-fg">Runs</Link>
-        <ChevronRightIcon className="size-3" />
-        <Link
-          to={`/runs?workflow=${encodeURIComponent(run.workflow)}`}
-          className="text-fg-3 hover:text-fg"
-        >
-          {run.workflow}
-        </Link>
-        <ChevronRightIcon className="size-3" />
-        <span>{run.title}</span>
-      </nav>
-
-      <div
-        className={classNames(
-          "mb-6 flex flex-wrap items-start gap-4",
-          fullHeight && "shrink-0",
-        )}
-      >
-        <div className="min-w-0 flex-1">
-          <EditableRunTitle runId={params.id} title={run.title} />
-          <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-            {showStatusPopover ? (
-              <HoverCard content={<StatusPopover lifecycle={summary.lifecycle} />}>
-                {statusBadge}
-              </HoverCard>
-            ) : (
-              statusBadge
-            )}
-            {summary.repository ? (
-              <HoverCard
-                content={
-                  <RepositoryPopover
-                    repository={summary.repository}
-                    cloneBranch={summary.sandbox?.runtime?.clone_branch}
-                  />
-                }
-              >
-                {repoChip}
-              </HoverCard>
-            ) : (
-              repoChip
-            )}
-            {showWorkflowPopover ? (
-              <HoverCard
-                content={
-                  <WorkflowPopover workflow={summary.workflow} labels={summary.labels} />
-                }
-              >
-                {workflowChip}
-              </HoverCard>
-            ) : (
-              workflowChip
-            )}
-            {run.elapsed && summary.timing && (
-              <HoverCard
-                content={
-                  <DurationPopover
-                    timing={summary.timing}
-                    createdAt={summary.timestamps.created_at}
-                    completedAt={summary.timestamps.completed_at}
-                    now={now}
-                  />
-                }
-              >
-                <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
-                  <ClockIcon className="size-3.5" aria-hidden="true" />
-                  {run.elapsed}
-                </span>
-              </HoverCard>
-            )}
-            {run.lastEventAt && (
-              <Tooltip label={`Last event ${formatAbsoluteTs(run.lastEventAt)}`}>
-                <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
-                  <SignalIcon className="size-3.5" aria-hidden="true" />
-                  {formatRelativeTime(run.lastEventAt, now)}
-                </span>
-              </Tooltip>
-            )}
-            {sizeChip}
-          </div>
-        </div>
-
-        {run.pullRequestUrl && run.number != null && (
-          <HoverCard content={<PullRequestPopover runId={params.id} />}>
-            <a
-              href={run.pullRequestUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={SECONDARY_BUTTON_CLASS}
-            >
-              <GitPullRequestIcon className="size-4 text-mint" />
-              <span className="font-mono">#{run.number}</span>
-            </a>
-          </HoverCard>
-        )}
-
-        {approvalActionVisible && (
-          <button
-            type="button"
-            onClick={() => void approveMutation.trigger()}
-            disabled={approvePending}
-            className={PRIMARY_BUTTON_CLASS}
-          >
-            {approvePending ? (
-              <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <CheckIcon className="size-4" aria-hidden="true" />
-            )}
-            {approvePending ? "Approving…" : "Approve"}
-          </button>
-        )}
-
-        <ActionsMenu
-          runId={params.id}
-          canSendInterrupt={statusKind === "running"}
-          interruptPending={interruptMutation.isMutating}
-          onSendInterrupt={() => void interruptMutation.trigger()}
-          canFocusSteer={statusKind === "running" && !hasPendingQuestions}
-          onFocusSteer={() => {
-            focusSteerAfterMenuClose(() => steerBarRef.current?.focus());
-          }}
-          canPreview={hasSandbox}
-          previewPending={previewPending}
-          onPreview={() => void handlePreview()}
-          canArchive={visibility.showArchive}
-          archivePending={archivePending}
-          onArchive={() => void archiveMutation.trigger()}
-          approvePending={approvePending}
-          canDeny={approvalActionVisible}
-          denyPending={denyPending}
-          onDeny={() => void denyMutation.trigger()}
-          canRetry={!demoMode && canRetry(summary)}
-          retryPending={retryPending}
-          onRetry={() => void retryMutation.trigger()}
-          canUnarchive={visibility.showUnarchive}
-          unarchivePending={unarchivePending}
-          onUnarchive={() => void unarchiveMutation.trigger()}
-          canDelete={visibility.showDelete}
-          deletePending={deletePending}
-          onDelete={() => setDeleteDialogOpen(true)}
-          canCancel={visibility.showPrimaryCancel}
-          cancelPending={cancelPending}
-          onCancel={() => void cancelMutation.trigger()}
-        />
-
-        <AskFabroTriggerButton
-          askFabro={askFabro}
-          askOpen={askOpen}
-          onToggle={() => setAskOpen((open) => !open)}
-        />
-      </div>
-
-      <ConfirmDialog
-        open={deleteDialogOpen}
-        title="Delete this run?"
-        description={
-          <>
-            This permanently removes <span className="font-mono text-fg-2">{run.title}</span> and its
-            durable state. This action cannot be undone.
-          </>
-        }
-        confirmLabel="Delete run"
-        pendingLabel="Deleting…"
-        pending={deletePending}
-        onConfirm={() => void handleConfirmDelete()}
-        onCancel={() => setDeleteDialogOpen(false)}
-      />
-
-      <div
-        className={classNames(
-          "relative before:pointer-events-none before:absolute before:bottom-0 before:left-1/2 before:h-px before:w-screen before:-translate-x-1/2 before:bg-line",
-          fullHeight && "shrink-0",
-        )}
-      >
-        <nav className="-mb-px flex gap-6">
-          {tabs.map((tab) => {
-            const tabPath = `${basePath}${tab.path}`;
-            const isActive = tab.name === "Stages"
-              ? pathname.startsWith(`${basePath}/stages`)
-              : pathname === tabPath;
-            return (
-              <Link
-                key={tab.name}
-                to={tabPath}
-                className={`border-b-2 pb-3.5 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "border-teal-500 text-fg"
-                    : "border-transparent text-fg-muted hover:border-line-strong hover:text-fg-3"
-                }`}
-              >
-                {tab.name}
-                {tab.count != null && tab.count > 0 && (
-                  <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs font-normal tabular-nums ${
-                    isActive ? "bg-overlay-strong text-fg-3" : "bg-overlay text-fg-muted"
-                  }`}>
-                    {tab.count}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
-
-      <div
-        className={
-          fullHeight
-            ? "pt-3 flex min-h-0 flex-1 flex-col"
-            : hideSteerBar && !hasPendingQuestions
-              ? "pt-3"
-              : "pt-3 pb-[var(--fabro-interview-dock-clearance)]"
-        }
-      >
-        <Outlet />
-      </div>
-
-      {(!hideSteerBar || hasPendingQuestions) && (
+    <RunDetailAskFabroShell runId={params.id} askFabro={askFabro}>
+      {({ askTrigger, sidebarWidth, isResizing }) => (
         <div
-          className={`fixed bottom-0 left-0 z-30 border-t border-line bg-page ${
-            isResizing
-              ? ""
-              : "transition-[right] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-          }`}
-          style={{ right: sidebarWidth }}
+          className={fullHeight ? "flex h-full min-h-0 flex-col" : undefined}
+          style={rootStyle}
         >
-          {hasPendingQuestions ? (
-            <InterviewDock runId={params.id} questions={pendingQuestions} />
-          ) : (
-            <SteerBar ref={steerBarRef} runId={params.id} />
-          )}
-        </div>
-      )}
-
-      {askAvailable && (
-        // Docked below the top nav (h-16) and above the steer bar (z-30); the
-        // sidebar animates its own width, so the wrapper collapses when closed.
-        <div className="fixed top-16 right-0 bottom-0 z-40">
-          <AskFabroSidebar
-            isOpen={askOpen}
-            onClose={() => setAskOpen(false)}
+          <RunDetailHeader
             runId={params.id}
-            defaultModel={askDefaultModel}
-            width={askWidth}
-            onWidthChange={setAskWidth}
+            run={run}
+            summary={summary}
+            fullHeight={fullHeight}
+            now={now}
+            actions={{
+              approval: {
+                visible: approvalActionVisible,
+                pending: approvePending,
+                onApprove: () => void approveMutation.trigger(),
+              },
+              menu: {
+                runId: params.id,
+                groups: actionGroups,
+                pending: approvePending,
+              },
+              askTrigger,
+            }}
+          />
+
+          <ConfirmDialog
+            open={deleteDialogOpen}
+            title="Delete this run?"
+            description={
+              <>
+                This permanently removes <span className="font-mono text-fg-2">{run.title}</span> and its
+                durable state. This action cannot be undone.
+              </>
+            }
+            confirmLabel="Delete run"
+            pendingLabel="Deleting…"
+            pending={deletePending}
+            onConfirm={() => void handleConfirmDelete()}
+            onCancel={() => setDeleteDialogOpen(false)}
+          />
+
+          <RunDetailTabsAndOutlet
+            tabs={tabs}
+            basePath={basePath}
+            pathname={pathname}
+            fullHeight={fullHeight}
+            hideSteerBar={hideSteerBar}
+            hasPendingQuestions={hasPendingQuestions}
+          />
+
+          <RunDetailDockedControls
+            runId={params.id}
+            hideSteerBar={hideSteerBar}
+            hasPendingQuestions={hasPendingQuestions}
+            pendingQuestions={pendingQuestions}
+            sidebarWidth={sidebarWidth}
+            isResizing={isResizing}
+            steerBarRef={steerBarRef}
           />
         </div>
       )}
-    </div>
-  );
-}
-
-function isLifecycleActionFailure(
-  value: RunDetailActionResult,
-): value is Extract<LifecycleMutationResult, { ok: false }> {
-  return "ok" in value && value.ok === false;
-}
-
-const ASK_FABRO_UNAVAILABLE_TOOLTIPS: Record<
-  AskFabroUnavailableReasonEnum,
-  string
-> = {
-  [AskFabroUnavailableReasonEnum.NO_SANDBOX]:        "Run sandbox isn't ready",
-  [AskFabroUnavailableReasonEnum.SANDBOX_NOT_READY]: "Run sandbox isn't ready",
-  [AskFabroUnavailableReasonEnum.LLM_UNCONFIGURED]:  "No LLM configured",
-};
-
-function AskFabroTriggerButton({
-  askFabro,
-  askOpen,
-  onToggle,
-}: {
-  askFabro: AskFabro | null;
-  askOpen: boolean;
-  onToggle: () => void;
-}) {
-  const available = askFabro?.available ?? false;
-  const disabled = !available;
-  const unavailableReason = askFabro?.unavailable_reason ?? null;
-  const button = (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={disabled}
-      aria-expanded={askOpen}
-      className={classNames(
-        SECONDARY_BUTTON_CLASS,
-        "disabled:cursor-not-allowed disabled:opacity-60",
-      )}
-    >
-      <SparklesIcon className="size-4 text-teal-300" aria-hidden="true" />
-      Ask Fabro
-    </button>
-  );
-  if (!available && unavailableReason) {
-    const tooltip = ASK_FABRO_UNAVAILABLE_TOOLTIPS[unavailableReason] ?? "Ask Fabro is unavailable";
-    return <Tooltip label={tooltip}>{button}</Tooltip>;
-  }
-  return button;
-}
-
-export function handleLifecycleToastResult(
-  intent: LifecycleAction,
-  result: RunDetailActionResult | undefined,
-  state: LifecycleToastState,
-  toastApi: ToastApi,
-  navigate?: (path: string) => void,
-): LifecycleToastState {
-  if (!result || result.intent !== intent) return state;
-  if (state.lastProcessed[intent] === result) return state;
-
-  const nextState: LifecycleToastState = {
-    ...state,
-    lastProcessed: { ...state.lastProcessed, [intent]: result },
-  };
-
-  if (isLifecycleActionFailure(result)) {
-    toastApi.push({ message: mapError(result.error, intent), tone: "error" });
-    return nextState;
-  }
-
-  if (intent === "cancel") {
-    toastApi.push({
-      message: isTerminalCancelledRun(result.run) ? "Run cancelled." : "Cancellation requested.",
-    });
-    return nextState;
-  }
-
-  if (intent === "approve") {
-    toastApi.push({ message: "Run approved." });
-    return nextState;
-  }
-
-  if (intent === "deny") {
-    toastApi.push({ message: "Run denied." });
-    return nextState;
-  }
-
-  if (intent === "retry") {
-    toastApi.push({ message: "Retry started." });
-    navigate?.(`/runs/${result.run.id}`);
-    return nextState;
-  }
-
-  if (state.activeArchiveToastId) {
-    toastApi.dismiss(state.activeArchiveToastId);
-  }
-
-  if (intent === "archive") {
-    return {
-      ...nextState,
-      activeArchiveToastId: toastApi.push({ message: "Run archived." }),
-    };
-  }
-
-  toastApi.push({ message: "Run restored." });
-  return { ...nextState, activeArchiveToastId: null };
-}
-
-interface ActionsMenuProps {
-  runId: string;
-  canSendInterrupt: boolean;
-  interruptPending: boolean;
-  onSendInterrupt: () => void;
-  canFocusSteer: boolean;
-  onFocusSteer: () => void;
-  canPreview: boolean;
-  previewPending: boolean;
-  onPreview: () => void;
-  canArchive: boolean;
-  archivePending: boolean;
-  onArchive: () => void;
-  approvePending: boolean;
-  canDeny: boolean;
-  denyPending: boolean;
-  onDeny: () => void;
-  canRetry: boolean;
-  retryPending: boolean;
-  onRetry: () => void;
-  canUnarchive: boolean;
-  unarchivePending: boolean;
-  onUnarchive: () => void;
-  canDelete: boolean;
-  deletePending: boolean;
-  onDelete: () => void;
-  canCancel: boolean;
-  cancelPending: boolean;
-  onCancel: () => void;
-}
-
-function ActionsMenu(props: ActionsMenuProps) {
-  const {
-    runId,
-    canSendInterrupt, interruptPending, onSendInterrupt,
-    canFocusSteer, onFocusSteer,
-    canPreview, previewPending, onPreview,
-    canArchive, archivePending, onArchive,
-    approvePending,
-    canDeny, denyPending, onDeny,
-    canRetry, retryPending, onRetry,
-    canUnarchive, unarchivePending, onUnarchive,
-    canDelete, deletePending, onDelete,
-    canCancel, cancelPending, onCancel,
-  } = props;
-
-  const [runIdCopied, setRunIdCopied] = useState(false);
-
-  const hasLifecycle = canRetry || canArchive || canUnarchive;
-  const hasDestructive = canDeny || canCancel || canDelete;
-  const anyPending =
-    previewPending ||
-    approvePending ||
-    retryPending ||
-    archivePending ||
-    unarchivePending ||
-    denyPending ||
-    deletePending ||
-    cancelPending ||
-    interruptPending;
-  const separators = actionMenuSeparatorVisibility({ hasLifecycle, hasDestructive });
-
-  return (
-    <Menu as="div" className="shrink-0">
-      <MenuButton className={ACTIONS_TRIGGER_CLASS} disabled={anyPending}>
-        {anyPending && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
-        Actions
-        <ChevronDownIcon className="-mr-1 size-4 text-fg-muted" aria-hidden="true" />
-      </MenuButton>
-      <MenuItems
-        transition
-        anchor={{ to: "bottom end", gap: 4 }}
-        className="z-20 w-44 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
-      >
-        <MenuItem>
-          {({ close }) => (
-            <button
-              type="button"
-              onClick={async (event) => {
-                event.preventDefault();
-                try {
-                  await navigator.clipboard.writeText(runId);
-                  setRunIdCopied(true);
-                  window.setTimeout(() => {
-                    setRunIdCopied(false);
-                    close();
-                  }, 800);
-                } catch {
-                  close();
-                }
-              }}
-              className={MENU_ITEM_CLASS}
-            >
-              {runIdCopied ? "Copied!" : "Copy run ID"}
-            </button>
-          )}
-        </MenuItem>
-        <hr className="my-1 h-px border-0 bg-line" />
-        {canPreview && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onPreview}
-              disabled={previewPending}
-              className={MENU_ITEM_CLASS}
-            >
-              {previewPending ? "Opening…" : "Preview"}
-            </button>
-          </MenuItem>
-        )}
-        <MenuItem>
-          <button
-            type="button"
-            onClick={onSendInterrupt}
-            disabled={!canSendInterrupt || interruptPending}
-            className={MENU_ITEM_CLASS}
-          >
-            {interruptPending ? "Interrupting…" : "Send interrupt"}
-          </button>
-        </MenuItem>
-        <MenuItem>
-          <button
-            type="button"
-            onClick={onFocusSteer}
-            disabled={!canFocusSteer}
-            className={MENU_ITEM_CLASS}
-          >
-            Send steering…
-          </button>
-        </MenuItem>
-        {separators.afterOperations && (
-          <hr className="my-1 h-px border-0 bg-line" />
-        )}
-        {canRetry && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onRetry}
-              disabled={retryPending}
-              className={MENU_ITEM_CLASS}
-            >
-              {retryPending ? "Retrying…" : "Retry"}
-            </button>
-          </MenuItem>
-        )}
-        {canArchive && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onArchive}
-              disabled={archivePending}
-              className={MENU_ITEM_CLASS}
-            >
-              {archivePending ? "Archiving…" : "Archive"}
-            </button>
-          </MenuItem>
-        )}
-        {canUnarchive && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onUnarchive}
-              disabled={unarchivePending}
-              className={MENU_ITEM_CLASS}
-            >
-              {unarchivePending ? "Restoring…" : "Unarchive"}
-            </button>
-          </MenuItem>
-        )}
-        {separators.beforeDestructive && (
-          <hr className="my-1 h-px border-0 bg-line" />
-        )}
-        {canDeny && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onDeny}
-              disabled={denyPending}
-              className={MENU_ITEM_DANGER_CLASS}
-            >
-              {denyPending ? "Denying…" : "Deny"}
-            </button>
-          </MenuItem>
-        )}
-        {canCancel && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={cancelPending}
-              className={MENU_ITEM_DANGER_CLASS}
-            >
-              {cancelPending ? "Cancelling…" : "Cancel"}
-            </button>
-          </MenuItem>
-        )}
-        {canDelete && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={deletePending}
-              className={MENU_ITEM_DANGER_CLASS}
-            >
-              {deletePending ? "Deleting…" : "Delete"}
-            </button>
-          </MenuItem>
-        )}
-      </MenuItems>
-    </Menu>
+    </RunDetailAskFabroShell>
   );
 }

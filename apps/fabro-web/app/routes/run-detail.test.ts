@@ -6,7 +6,10 @@ import {
   RouterProvider,
   useParams,
 } from "react-router";
-import { QuestionType } from "@qltysh/fabro-api-client";
+import {
+  AskFabroUnavailableReasonEnum,
+  QuestionType,
+} from "@qltysh/fabro-api-client";
 
 import { ToastProvider } from "../components/toast";
 import { DemoModeProvider } from "../lib/demo-mode";
@@ -14,7 +17,33 @@ import { DemoModeProvider } from "../lib/demo-mode";
 let currentRunSummary: any = null;
 let currentRunState: any = null;
 let currentQuestions: any[] = [];
+let deleteRunApiResult: Promise<unknown> | null = null;
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
+
+const deleteRunApiMock = mock((_id: string) =>
+  deleteRunApiResult ?? Promise.resolve({}),
+);
+const mutateRunListCachesMock = mock((_mutate: unknown) => undefined);
+const swrMutateMock = mock((_key: unknown) => Promise.resolve(undefined));
+
+mock.module("@headlessui/react", () => ({
+  Dialog: ({ open, children }: any) =>
+    open ? createElement("div", { role: "dialog" }, children) : null,
+  DialogPanel: ({ children, ...props }: any) =>
+    createElement("div", props, children),
+  DialogTitle: ({ children, ...props }: any) =>
+    createElement("h2", props, children),
+  Menu: ({ as: Component = "div", children, ...props }: any) =>
+    createElement(Component, props, children),
+  MenuButton: ({ children, onClick, ...props }: any) =>
+    createElement("button", { ...props, onClick: onClick ?? (() => undefined) }, children),
+  MenuItem: ({ children }: any) =>
+    typeof children === "function"
+      ? children({ close: () => undefined })
+      : children,
+  MenuItems: ({ children, anchor: _anchor, transition: _transition, ...props }: any) =>
+    createElement("div", props, children),
+}));
 
 mock.module("../lib/queries", () => ({
   useRun: () => ({
@@ -48,6 +77,75 @@ mock.module("../hooks/use-run-toasts", () => ({
   useRunToasts: () => undefined,
 }));
 
+mock.module("../lib/api-client", () => ({
+  apiData: async function apiData<T>(
+    call: () => Promise<{ data: T }>,
+  ): Promise<T> {
+    const response = await call();
+    return response.data;
+  },
+  apiResponse: async function apiResponse<T>(call: () => Promise<T>): Promise<T> {
+    return await call();
+  },
+  requestSignalOptions: () => undefined,
+  runsApi: {
+    deleteRun: deleteRunApiMock,
+  },
+  ApiError: class ApiError extends Error {
+    readonly status: number;
+    readonly requestId: string | null;
+    readonly body: unknown;
+
+    constructor({
+      status,
+      message,
+      requestId,
+      body,
+    }: {
+      status: number;
+      message: string;
+      requestId: string | null;
+      body: unknown;
+    }) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+      this.requestId = requestId;
+      this.body = body;
+    }
+  },
+}));
+
+mock.module("../lib/board-cache", () => ({
+  mutateRunListCaches: mutateRunListCachesMock,
+}));
+
+mock.module("swr", () => ({
+  useSWRConfig: () => ({ mutate: swrMutateMock }),
+}));
+
+mock.module("../components/chats/ask-fabro-sidebar", () => ({
+  SIDEBAR_WIDTH: 420,
+  default: ({
+    isOpen,
+    runId,
+    defaultModel,
+    width,
+  }: {
+    isOpen: boolean;
+    runId: string;
+    defaultModel: string | null;
+    width: number;
+  }) =>
+    createElement("aside", {
+      "aria-label":         "Ask Fabro",
+      "aria-hidden":        !isOpen,
+      "data-run-id":        runId,
+      "data-default-model": defaultModel,
+      "data-width":         width,
+    }),
+}));
+
 const mutationState = () => ({
   data:       null,
   error:      null,
@@ -70,16 +168,19 @@ mock.module("../lib/mutations", () => ({
   useUnarchiveRun:         mutationState,
 }));
 
-const {
+import {
   actionMenuSeparatorVisibility,
-  default: RunDetail,
   focusSteerAfterMenuClose,
+} from "./run-detail/actions";
+import {
   handleLifecycleToastResult,
   lifecycleActionVisibility,
-} = await import("./run-detail");
+} from "./run-detail/lifecycle-toasts";
+
+const { default: RunDetail } = await import("./run-detail");
 mock.restore();
-type LifecycleToastState = import("./run-detail").LifecycleToastState;
-type RunDetailActionResult = import("./run-detail").RunDetailActionResult;
+type LifecycleToastState = import("./run-detail/lifecycle-toasts").LifecycleToastState;
+type RunDetailActionResult = import("./run-detail/lifecycle-toasts").RunDetailActionResult;
 
 const h = createElement;
 
@@ -88,6 +189,7 @@ function makeRunSummary(
   diffSummary: any = null,
   pullRequest: any = null,
   title = "Run 1",
+  askFabro: any = null,
 ) {
   const apiStatus =
     status === "succeeded"
@@ -136,6 +238,7 @@ function makeRunSummary(
     current_question: null,
     superseded_by:    null,
     retried_from:     null,
+    ask_fabro:        askFabro,
     links:            { web: null },
   };
 }
@@ -158,13 +261,14 @@ function RunDetailWithParams() {
   return h(RunDetail, { params: params as { id: string } });
 }
 
-async function renderRunDetail({
+async function renderRunDetailHarness({
   initialEntry,
   status = "succeeded",
   questions = [],
   diffSummary = null,
   pullRequest = null,
   title,
+  askFabro = null,
 }: {
   initialEntry: string;
   status?: string;
@@ -172,13 +276,18 @@ async function renderRunDetail({
   diffSummary?: any;
   pullRequest?: any;
   title?: string;
+  askFabro?: any;
 }) {
-  currentRunSummary = makeRunSummary(status, diffSummary, pullRequest, title);
+  currentRunSummary = makeRunSummary(status, diffSummary, pullRequest, title, askFabro);
   currentQuestions = questions;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
   const router = createMemoryRouter(
     [
+      {
+        path:    "/runs",
+        element: h("div", { "data-route": "runs-index" }, "Runs"),
+      },
       {
         path:    "/runs/:id",
         element: h(RunDetailWithParams),
@@ -209,7 +318,14 @@ async function renderRunDetail({
     );
   });
   mountedRenderers.push(renderer!);
-  return renderer!;
+  return { renderer: renderer!, router };
+}
+
+async function renderRunDetail(
+  options: Parameters<typeof renderRunDetailHarness>[0],
+) {
+  const { renderer } = await renderRunDetailHarness(options);
+  return renderer;
 }
 
 function hasClasses(value: unknown, classes: string[]) {
@@ -223,6 +339,48 @@ function tabCountBadges(renderer: TestRenderer.ReactTestRenderer) {
       node.type === "span" &&
       hasClasses(node.props.className, ["rounded-full", "tabular-nums"]),
   );
+}
+
+function askFabroButtons(renderer: TestRenderer.ReactTestRenderer) {
+  return renderer.root.findAll(
+    (node) => node.type === "button" && node.children.includes("Ask Fabro"),
+  );
+}
+
+function textFromNode(
+  node: ReturnType<TestRenderer.ReactTestRenderer["toJSON"]>,
+): string {
+  if (!node) return "";
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(textFromNode).join(" ");
+  return (node.children ?? []).map(textFromNode).join(" ");
+}
+
+function textFromTestNode(node: TestRenderer.ReactTestInstance): string {
+  return node.children.map((child) => {
+    if (typeof child === "string") return child;
+    if (typeof child === "number") return String(child);
+    return textFromTestNode(child);
+  }).join("");
+}
+
+function findButtonByText(
+  renderer: TestRenderer.ReactTestRenderer,
+  text: string,
+) {
+  return renderer.root.findAll(
+    (node) => node.type === "button" && textFromTestNode(node).includes(text),
+  )[0];
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("lifecycleActionVisibility", () => {
@@ -254,8 +412,9 @@ describe("actionMenuSeparatorVisibility", () => {
   test("does not render adjacent dividers when destructive actions follow ops directly", () => {
     expect(
       actionMenuSeparatorVisibility({
-        hasLifecycle:  false,
-        hasDestructive: true,
+        operations:   3,
+        lifecycle:    0,
+        destructive:  1,
       }),
     ).toEqual({
       afterOperations:   true,
@@ -266,8 +425,9 @@ describe("actionMenuSeparatorVisibility", () => {
   test("renders both dividers when lifecycle actions sit between ops and destructive actions", () => {
     expect(
       actionMenuSeparatorVisibility({
-        hasLifecycle:  true,
-        hasDestructive: true,
+        operations:   3,
+        lifecycle:    1,
+        destructive:  1,
       }),
     ).toEqual({
       afterOperations:   true,
@@ -406,6 +566,10 @@ describe("RunDetail full-height child routes", () => {
     currentRunSummary = null;
     currentRunState = null;
     currentQuestions = [];
+    deleteRunApiResult = null;
+    deleteRunApiMock.mockClear();
+    mutateRunListCachesMock.mockClear();
+    swrMutateMock.mockClear();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
@@ -545,6 +709,110 @@ describe("RunDetail full-height child routes", () => {
     });
 
     expect(tabCountBadges(renderer)).toHaveLength(0);
+  });
+
+  test("confirms deleting an archived run and navigates back to runs", async () => {
+    const deletion = deferred<unknown>();
+    deleteRunApiResult = deletion.promise;
+    const { renderer, router } = await renderRunDetailHarness({
+      initialEntry: "/runs/run_1",
+      status:       "archived",
+    });
+
+    const actionsButton = findButtonByText(renderer, "Actions");
+    expect(actionsButton).toBeDefined();
+
+    await act(async () => {
+      actionsButton!.props.onClick({
+        currentTarget:    { parentElement: null },
+        defaultPrevented: false,
+        preventDefault:  () => undefined,
+      });
+    });
+
+    const deleteButton = findButtonByText(renderer, "Delete");
+    expect(deleteButton).toBeDefined();
+
+    await act(async () => {
+      deleteButton!.props.onClick();
+    });
+
+    const confirmButton = findButtonByText(renderer, "Delete run");
+    expect(confirmButton).toBeDefined();
+
+    await act(async () => {
+      confirmButton!.props.onClick();
+      await Promise.resolve();
+    });
+
+    const pendingButton = findButtonByText(renderer, "Deleting…");
+    expect(pendingButton).toBeDefined();
+    expect(pendingButton!.props.disabled).toBe(true);
+
+    await act(async () => {
+      deletion.resolve({});
+      await deletion.promise;
+      await Promise.resolve();
+    });
+
+    expect(deleteRunApiMock).toHaveBeenCalledTimes(1);
+    expect(deleteRunApiMock.mock.calls[0]?.[0]).toBe("run_1");
+    expect(mutateRunListCachesMock).toHaveBeenCalledTimes(1);
+    expect(mutateRunListCachesMock.mock.calls[0]?.[0]).toBe(swrMutateMock);
+    expect(textFromNode(renderer.toJSON())).toContain("Run deleted.");
+    expect(router.state.location.pathname).toBe("/runs");
+  });
+
+  test("disables Ask Fabro trigger when the run reports an unavailable reason", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+      askFabro: {
+        available:          false,
+        unavailable_reason: AskFabroUnavailableReasonEnum.NO_SANDBOX,
+        default_model:      null,
+      },
+    });
+
+    const buttons = askFabroButtons(renderer);
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].props.disabled).toBe(true);
+    expect(
+      renderer.root.findAll(
+        (node) => node.type === "aside" && node.props["aria-label"] === "Ask Fabro",
+      ),
+    ).toHaveLength(0);
+  });
+
+  test("mounts the Ask Fabro sidebar and opens it from the trigger when available", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+      askFabro: {
+        available:          true,
+        unavailable_reason: null,
+        default_model:      "gpt-5",
+      },
+    });
+
+    const buttons = askFabroButtons(renderer);
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].props.disabled).toBe(false);
+
+    let sidebars = renderer.root.findAll(
+      (node) => node.type === "aside" && node.props["aria-label"] === "Ask Fabro",
+    );
+    expect(sidebars).toHaveLength(1);
+    expect(sidebars[0].props["aria-hidden"]).toBe(true);
+    expect(sidebars[0].props["data-run-id"]).toBe("run_1");
+    expect(sidebars[0].props["data-default-model"]).toBe("gpt-5");
+
+    await act(async () => {
+      buttons[0].props.onClick();
+    });
+
+    sidebars = renderer.root.findAll(
+      (node) => node.type === "aside" && node.props["aria-label"] === "Ask Fabro",
+    );
+    expect(sidebars[0].props["aria-hidden"]).toBe(false);
   });
 
   test("shows a linked pull request pill in the run header", async () => {
