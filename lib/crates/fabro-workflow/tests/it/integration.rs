@@ -30,8 +30,8 @@ use fabro_interview::{
     Answer, AnswerValue, AutoApproveInterviewer, CallbackInterviewer, Interviewer,
     QueueInterviewer, RecordingInterviewer,
 };
-use fabro_model::Catalog;
 use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
+use fabro_model::{Catalog, ProviderId};
 use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{RunEvent, RunId, StageId, WorkflowSettings, parse_blob_ref};
 use fabro_validate::{Severity, validate, validate_or_raise};
@@ -45,6 +45,7 @@ use fabro_workflow::handler::command::CommandHandler;
 use fabro_workflow::handler::conditional::ConditionalHandler;
 use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::human::HumanHandler;
+use fabro_workflow::handler::llm::AgentApiBackend;
 use fabro_workflow::handler::manager_loop::SubWorkflowHandler;
 use fabro_workflow::handler::start::StartHandler;
 use fabro_workflow::handler::wait::WaitHandler;
@@ -2083,6 +2084,238 @@ async fn smoke_test_with_mock_codergen_backend() {
     assert!(
         plan_prompt.ends_with("Plan to achieve: Build and validate"),
         "prompt should end with original prompt, got: {plan_prompt}"
+    );
+}
+
+#[tokio::test]
+async fn shared_thread_compaction_before_routing_audit_succeeds() {
+    use fabro_auth::EnvCredentialSource;
+    use fabro_workflow::steering_hub::SteeringHub;
+    use httpmock::Method::POST;
+    use httpmock::MockServer;
+
+    fn chat_completion_stream(text: &str, input_tokens: i64, output_tokens: i64) -> String {
+        let text_chunk = serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "model": "compact-model",
+            "choices": [{
+                "delta": {"content": text},
+                "finish_reason": null
+            }]
+        });
+        let usage_chunk = serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "model": "compact-model",
+            "choices": [],
+            "usage": {
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens
+            }
+        });
+        format!("data: {text_chunk}\n\ndata: {usage_chunk}\n\ndata: [DONE]\n\n")
+    }
+
+    fn chat_completion_response(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "model": "compact-model",
+            "choices": [{
+                "message": {"content": text},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 1,
+                "total_tokens": 11
+            }
+        })
+    }
+
+    let server = MockServer::start_async().await;
+    let warmup_count = 10;
+
+    for index in 1..=warmup_count {
+        let prompt = format!("Warmup {index}");
+        let next_prompt = if index == warmup_count {
+            "Audit shared-thread work".to_string()
+        } else {
+            format!("Warmup {}", index + 1)
+        };
+        let response = chat_completion_stream(r#"{"outcome":"succeeded"}"#, 1, 1);
+        server
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .path("/chat/completions")
+                    .body_includes(r#""stream":true"#)
+                    .body_includes(prompt)
+                    .body_excludes(next_prompt);
+                then.status(200)
+                    .header("content-type", "text/event-stream")
+                    .body(response);
+            })
+            .await;
+    }
+
+    let audit_stream = chat_completion_stream(
+        r#"{"outcome":"succeeded","preferred_next_label":"Done"}"#,
+        1_000_000,
+        1,
+    );
+    let audit_mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/chat/completions")
+                .body_includes(r#""stream":true"#)
+                .body_includes("Audit shared-thread work");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(audit_stream);
+        })
+        .await;
+
+    let compaction_mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/chat/completions")
+                .body_excludes(r#""stream":true"#);
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(chat_completion_response(
+                    "Previous work completed and the audit can finish.",
+                ));
+        })
+        .await;
+
+    let settings: LlmCatalogSettings = toml::from_str(&format!(
+        r#"
+[providers.compact]
+adapter = "openai_compatible"
+agent_profile = "openai"
+base_url = "{}"
+
+[providers.compact.auth]
+credentials = ["env:COMPACT_API_KEY"]
+
+[models.compact-model]
+provider = "compact"
+display_name = "Compact Model"
+family = "mock"
+default = true
+
+[models.compact-model.limits]
+context_window = 100000
+max_output = 1024
+
+[models.compact-model.features]
+tools = true
+vision = false
+reasoning = false
+"#,
+        server.base_url()
+    ))
+    .expect("test catalog should parse");
+    let catalog = Arc::new(Catalog::from_builtin_with_overrides(&settings).unwrap());
+    let source = Arc::new(EnvCredentialSource::with_env_lookup(Arc::new(|name| {
+        (name == "COMPACT_API_KEY").then(|| "sk-test".to_string())
+    })));
+    let backend = AgentApiBackend::new_with_catalog(
+        "compact-model".to_string(),
+        ProviderId::from("compact"),
+        Vec::new(),
+        source,
+        Arc::new(SteeringHub::new(Arc::new(Emitter::default()))),
+        catalog,
+    );
+
+    let mut graph = make_graph_with_start_exit("SharedThreadCompactionAudit");
+    graph.attrs.insert(
+        "default_fidelity".to_string(),
+        AttrValue::String("full".to_string()),
+    );
+    let mut previous = "start".to_string();
+    for index in 1..=warmup_count {
+        let node_id = format!("warmup_{index}");
+        let mut node = Node::new(&node_id);
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String(format!("Warmup {index}")),
+        );
+        node.attrs.insert(
+            "thread_id".to_string(),
+            AttrValue::String("shared-audit-thread".to_string()),
+        );
+        graph.nodes.insert(node_id.clone(), node);
+        graph.edges.push(Edge::new(&previous, &node_id));
+        previous = node_id;
+    }
+
+    let mut audit = Node::new("audit");
+    audit.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Audit shared-thread work".to_string()),
+    );
+    audit.attrs.insert(
+        "thread_id".to_string(),
+        AttrValue::String("shared-audit-thread".to_string()),
+    );
+    audit.attrs.insert(
+        "output_schema".to_string(),
+        AttrValue::String("routing".to_string()),
+    );
+    graph.nodes.insert("audit".to_string(), audit);
+    graph.edges.push(Edge::new(&previous, "audit"));
+    graph.edges.push(Edge::new("audit", "exit"));
+
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(Box::new(backend)))));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+
+    let dir = tempfile::tempdir().unwrap();
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
+    let run_options = RunOptions {
+        settings:         WorkflowSettings::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     CancellationToken::new(),
+        run_id:           test_run_id("shared-thread-compaction-audit"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
+        display_base_sha: None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
+        git:              None,
+    };
+
+    let (_outcome, state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("workflow execution should complete");
+
+    assert_eq!(
+        audit_mock.calls_async().await,
+        1,
+        "audit should use the high-usage response that triggers compaction"
+    );
+    assert_eq!(
+        compaction_mock.calls_async().await,
+        1,
+        "audit response should trigger context compaction before routing finishes"
+    );
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
+    let audit_outcome = checkpoint
+        .node_outcomes
+        .get("audit")
+        .expect("audit outcome should be captured");
+    assert_eq!(
+        audit_outcome.status,
+        StageOutcome::Succeeded,
+        "audit should succeed after compaction, got failure: {:?}",
+        audit_outcome.failure
     );
 }
 
