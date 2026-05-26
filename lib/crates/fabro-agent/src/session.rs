@@ -9,7 +9,7 @@ use fabro_llm::generate::StreamAccumulator;
 use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{
     ContentPart, Message as LlmMessage, ReasoningEffort, Request, RetryPolicy, StreamEvent,
-    ToolChoice,
+    TokenCounts, ToolChoice,
 };
 use fabro_llm::{Error as LlmError, retry};
 use fabro_mcp::config::{McpServerSettings, McpTransport};
@@ -353,6 +353,7 @@ pub struct Session {
     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,
     last_input_timing: SessionInputTiming,
+    last_input_usage: TokenCounts,
 }
 
 impl Session {
@@ -391,6 +392,7 @@ impl Session {
             subagent_manager,
             completion_coordinator: None,
             last_input_timing: SessionInputTiming::default(),
+            last_input_usage: TokenCounts::default(),
         }
     }
 
@@ -1215,6 +1217,11 @@ impl Session {
         self.last_input_timing
     }
 
+    #[must_use]
+    pub fn last_input_usage(&self) -> TokenCounts {
+        self.last_input_usage.clone()
+    }
+
     /// Process an input. The inference/tool timing accumulated during the call
     /// is available via [`Self::last_input_timing`] after this returns, even on
     /// error.
@@ -1224,7 +1231,9 @@ impl Session {
         agent_tool_runtime: AgentToolRuntime,
     ) -> Result<(), Error> {
         let mut timing = SessionInputTiming::default();
+        let mut usage = TokenCounts::default();
         self.last_input_timing = timing;
+        self.last_input_usage = TokenCounts::default();
         if self.state == SessionState::Closed {
             return Err(Error::SessionClosed);
         }
@@ -1249,7 +1258,7 @@ impl Session {
 
         // Process the initial input, then drain any followups
         let mut result = self
-            .run_single_input(input, &agent_tool_runtime, &mut timing)
+            .run_single_input(input, &agent_tool_runtime, &mut timing, &mut usage)
             .await;
 
         if result.is_ok() {
@@ -1261,7 +1270,7 @@ impl Session {
                     .pop_front();
                 let Some(followup) = followup else { break };
                 result = self
-                    .run_single_input(&followup, &agent_tool_runtime, &mut timing)
+                    .run_single_input(&followup, &agent_tool_runtime, &mut timing, &mut usage)
                     .await;
                 if result.is_err() {
                     break;
@@ -1280,6 +1289,7 @@ impl Session {
         }
 
         self.last_input_timing = timing;
+        self.last_input_usage = usage;
         result
     }
 
@@ -1288,6 +1298,7 @@ impl Session {
         input: &str,
         agent_tool_runtime: &AgentToolRuntime,
         timing: &mut SessionInputTiming,
+        usage_accumulator: &mut TokenCounts,
     ) -> Result<(), Error> {
         const STREAM_CONSUME_RETRIES: usize = 3;
 
@@ -1692,6 +1703,7 @@ impl Session {
                 &local_context_window,
                 &usage,
             ));
+            *usage_accumulator += usage.clone();
 
             self.history.push(Message::Assistant {
                 content: text.clone(),
