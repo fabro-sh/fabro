@@ -14,7 +14,7 @@ describe("setupContentForSearch", () => {
     );
     expect(content.steps.map((step) => step.title)).toEqual([
       "Return to Fabro",
-      "Retry the run",
+      "Use the new installation",
     ]);
   });
 });

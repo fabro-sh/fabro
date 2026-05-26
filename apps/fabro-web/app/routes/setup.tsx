@@ -44,11 +44,11 @@ const githubInstallReturnSteps = [
     ),
   },
   {
-    title: "Retry the run",
+    title: "Use the new installation",
     body: (
       <p className="text-sm/6 text-fg-3">
-        Start the run or preflight again so Fabro can clone the repository and
-        push checkpoint branches with the new installation.
+        Sign in and start a run or preflight. Fabro can now clone repositories
+        and push checkpoint branches using the new installation.
       </p>
     ),
   },
