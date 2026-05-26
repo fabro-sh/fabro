@@ -186,14 +186,15 @@ fn origin_allowed(headers: &HeaderMap) -> bool {
     let Ok(origin_url) = url::Url::parse(origin) else {
         return false;
     };
-    let Some(origin_host) = origin_url.host_str() else {
+    // Parse the Host header through the origin's scheme so default-port
+    // normalization is symmetric: browsers omit the port from Host for default
+    // scheme ports (e.g. `Host: example.com` on HTTPS) but always include
+    // scheme+host in Origin.
+    let Ok(host_url) = url::Url::parse(&format!("{}://{host}", origin_url.scheme())) else {
         return false;
     };
-    let origin_authority = match origin_url.port_or_known_default() {
-        Some(port) => format!("{origin_host}:{port}"),
-        None => origin_host.to_string(),
-    };
-    origin_authority.eq_ignore_ascii_case(host)
+    origin_url.host_str() == host_url.host_str()
+        && origin_url.port_or_known_default() == host_url.port_or_known_default()
 }
 
 async fn run_terminal(
@@ -985,10 +986,51 @@ mod tests {
     }
 
     #[test]
+    fn origin_validation_allows_default_https_port_omitted_from_host() {
+        // Browsers omit the port from Host when connecting on default scheme ports.
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("example.com"));
+        headers.insert("origin", HeaderValue::from_static("https://example.com"));
+        assert!(origin_allowed(&headers));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("100.53.109.177"));
+        headers.insert("origin", HeaderValue::from_static("https://100.53.109.177"));
+        assert!(origin_allowed(&headers));
+    }
+
+    #[test]
+    fn origin_validation_allows_default_http_port_omitted_from_host() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("example.com"));
+        headers.insert("origin", HeaderValue::from_static("http://example.com"));
+        assert!(origin_allowed(&headers));
+    }
+
+    #[test]
+    fn origin_validation_allows_explicit_default_port_in_host() {
+        // RFC-legal but uncommon: client includes the default port explicitly.
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("example.com:443"));
+        headers.insert("origin", HeaderValue::from_static("https://example.com"));
+        assert!(origin_allowed(&headers));
+    }
+
+    #[test]
     fn origin_validation_rejects_cross_origin_browser_origin() {
         let mut headers = HeaderMap::new();
         headers.insert("host", HeaderValue::from_static("127.0.0.1:4187"));
         headers.insert("origin", HeaderValue::from_static("https://evil.example"));
+        assert!(!origin_allowed(&headers));
+    }
+
+    #[test]
+    fn origin_validation_rejects_scheme_mismatch_on_default_port() {
+        // Same hostname but Origin uses http (default port 80) while Host carries the
+        // HTTPS default port 443 — different effective ports must not match.
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("example.com:443"));
+        headers.insert("origin", HeaderValue::from_static("http://example.com"));
         assert!(!origin_allowed(&headers));
     }
 
