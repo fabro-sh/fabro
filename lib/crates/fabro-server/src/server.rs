@@ -3079,7 +3079,9 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         EventBody::RunRemoving(_) => managed_run.status = RunStatus::Removing,
         EventBody::RunCompleted(_) => {
             let EventBody::RunCompleted(props) = &event.body else {
-                unreachable!();
+                unreachable!(
+                    "outer match arm already verified event.body is EventBody::RunCompleted"
+                )
             };
             managed_run.status = RunStatus::Succeeded {
                 reason: props.reason,

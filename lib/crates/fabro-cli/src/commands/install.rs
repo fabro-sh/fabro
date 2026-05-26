@@ -1030,10 +1030,23 @@ async fn setup_github_app(
         .route(
             "/callback",
             get(move |Query(params): Query<CallbackParams>| async move {
-                if let Some(tx) = code_tx.lock().unwrap().take() {
+                if let Some(tx) = code_tx
+                    .lock()
+                    .expect(
+                        "code_tx mutex is never poisoned: no code panics while holding this lock",
+                    )
+                    .take()
+                {
                     let _ = tx.send(params.code);
                 }
-                if let Some(tx) = shutdown_tx.lock().unwrap().take() {
+                if let Some(tx) = shutdown_tx
+                    .lock()
+                    .expect(
+                        "shutdown_tx mutex is never poisoned: no code panics while holding this \
+                         lock",
+                    )
+                    .take()
+                {
                     let _ = tx.send(());
                 }
                 Html(r#"<!DOCTYPE html>

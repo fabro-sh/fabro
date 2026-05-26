@@ -254,12 +254,19 @@ impl EngineServices {
 
     /// Read the current git state (if any).
     pub fn git_state(&self) -> Option<Arc<GitState>> {
-        self.git_state.read().unwrap().clone()
+        self.git_state
+            .read()
+            .expect("git_state lock is never poisoned: no code panics while holding this lock")
+            .clone()
     }
 
     /// Set the git state for the current run.
     pub fn set_git_state(&self, state: Option<Arc<GitState>>) {
-        *self.git_state.write().unwrap() = state;
+        *self
+            .git_state
+            .write()
+            .expect("git_state lock is never poisoned: no code panics while holding this lock") =
+            state;
     }
 
     /// Test-only default: empty registry and cross-phase services.
