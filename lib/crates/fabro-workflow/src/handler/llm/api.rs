@@ -1508,7 +1508,11 @@ impl CodergenBackend for AgentApiBackend {
         // Aggregate token usage only from new turns (prevents double-counting on
         // reuse), including any output-schema repair turns.
         let mut total_usage = TokenCounts::default();
-        for turn in &session.history().turns()[turns_before..] {
+        let turns = session.history().turns();
+        for turn in turns.get(turns_before..).expect(
+            "agent session history should not shrink below turns_before between usage baseline \
+             capture and aggregation",
+        ) {
             if let AgentMessage::Assistant { usage, .. } = turn {
                 total_usage += *usage.clone();
             }
