@@ -492,35 +492,40 @@ function TestStatusCell({ state }: { state: RowState | undefined }) {
   }
   if (state.phase === "queued") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-fg-muted">
+      <span className="inline-flex items-center" aria-label="Queued">
         <Spinner className="size-3.5 h-lh shrink-0 opacity-40" />
-        Queued
       </span>
     );
   }
   if (state.phase === "running") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-fg-2">
+      <span className="inline-flex items-center text-fg-2" aria-label="Testing">
         <Spinner className="size-3.5 h-lh shrink-0 text-teal-500" />
-        Testing…
       </span>
     );
   }
   if (state.phase === "ok") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-mint">
+      <span className="inline-flex items-center text-mint" aria-label="Ok">
         <CheckCircleIcon className="size-4 h-lh shrink-0" />
-        Ok
       </span>
     );
   }
   return (
-    <span
-      className="inline-flex max-w-[14rem] items-center gap-1.5 text-xs text-coral"
-      title={state.message}
-    >
-      <XCircleIcon className="size-4 h-lh shrink-0" />
-      <span className="min-w-0 truncate">{state.message}</span>
+    <span className="group/test-error relative inline-flex">
+      <span
+        aria-label={`Failed: ${state.message}`}
+        className="inline-flex cursor-default items-center text-coral focus:outline-none"
+        tabIndex={0}
+      >
+        <XCircleIcon className="size-4 h-lh shrink-0" />
+      </span>
+      <span
+        role="tooltip"
+        className="pointer-events-none invisible absolute right-0 top-full z-30 mt-1.5 w-[32rem] max-w-[80vw] whitespace-pre-line break-words rounded-md bg-panel p-3 text-left font-mono text-xs leading-relaxed text-fg-2 opacity-0 shadow-2xl shadow-black/40 ring-1 ring-line-strong transition-opacity duration-100 group-hover/test-error:visible group-hover/test-error:opacity-100 group-focus-within/test-error:visible group-focus-within/test-error:opacity-100"
+      >
+        {state.message}
+      </span>
     </span>
   );
 }
