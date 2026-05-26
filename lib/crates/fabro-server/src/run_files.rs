@@ -344,10 +344,10 @@ async fn materialize_run_commits(
     Ok(PaginatedRunCommitList {
         data: commits,
         meta: RunCommitsMeta {
-            source: RunCommitsMetaSource::Sandbox,
-            base_sha: sha_newtype::<RunCommitsMetaBaseSha>(&base_sha),
-            head_sha: sha_newtype::<RunCommitsMetaHeadSha>(&head_sha),
-            limit: NonZeroU64::new(limit).expect("commit limit is non-zero"),
+            source:          RunCommitsMetaSource::Sandbox,
+            base_sha:        sha_newtype::<RunCommitsMetaBaseSha>(&base_sha)?,
+            head_sha:        sha_newtype::<RunCommitsMetaHeadSha>(&head_sha)?,
+            limit:           NonZeroU64::new(limit).expect("commit limit is non-zero"),
             total_returned,
             truncated,
         },
@@ -410,15 +410,17 @@ fn parse_git_log_commit(record: &str) -> std::result::Result<RunCommit, ApiError
     let (subject, body) = split_commit_message(&message);
     let parents = parents
         .split_whitespace()
-        .map(|parent| RunCommitParent {
-            sha:       sha_newtype::<RunCommitParentSha>(parent),
-            short_sha: short_sha_newtype::<RunCommitParentShortSha>(parent),
+        .map(|parent| {
+            Ok(RunCommitParent {
+                sha:       sha_newtype::<RunCommitParentSha>(parent)?,
+                short_sha: short_sha_newtype::<RunCommitParentShortSha>(parent)?,
+            })
         })
-        .collect();
+        .collect::<std::result::Result<Vec<_>, ApiError>>()?;
 
     Ok(RunCommit {
-        sha: sha_newtype::<RunCommitSha>(sha),
-        short_sha: short_sha_newtype::<RunCommitShortSha>(sha),
+        sha:       sha_newtype::<RunCommitSha>(sha)?,
+        short_sha: short_sha_newtype::<RunCommitShortSha>(sha)?,
         parents,
         author: RunCommitPerson {
             name:  author_name.to_string(),
@@ -434,7 +436,11 @@ fn parse_git_log_commit(record: &str) -> std::result::Result<RunCommit, ApiError
         body,
         message: message.clone(),
         trailers: parse_commit_trailers(&message),
-        tree_sha: (!tree_sha.is_empty()).then(|| sha_newtype::<RunCommitTreeSha>(tree_sha)),
+        tree_sha: if tree_sha.is_empty() {
+            None
+        } else {
+            Some(sha_newtype::<RunCommitTreeSha>(tree_sha)?)
+        },
     })
 }
 
@@ -472,23 +478,25 @@ fn parse_git_date(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         .map(|d| d.with_timezone(&chrono::Utc))
 }
 
-fn sha_newtype<T>(sha: &str) -> T
+fn sha_newtype<T>(sha: &str) -> std::result::Result<T, ApiError>
 where
     T: TryFrom<String>,
     <T as TryFrom<String>>::Error: std::fmt::Display,
 {
-    T::try_from(sha.to_string())
-        .unwrap_or_else(|err| panic!("invalid generated SHA `{sha}`: {err}"))
+    T::try_from(sha.to_string()).map_err(|err| {
+        ApiError::bad_request(format!("git returned a SHA that did not match expected hex pattern: `{sha}`: {err}"))
+    })
 }
 
-fn short_sha_newtype<T>(sha: &str) -> T
+fn short_sha_newtype<T>(sha: &str) -> std::result::Result<T, ApiError>
 where
     T: TryFrom<String>,
     <T as TryFrom<String>>::Error: std::fmt::Display,
 {
     let short = sha.chars().take(7).collect::<String>();
-    T::try_from(short.clone())
-        .unwrap_or_else(|err| panic!("invalid generated short SHA `{short}`: {err}"))
+    T::try_from(short.clone()).map_err(|err| {
+        ApiError::bad_request(format!("git returned a short SHA that did not match expected hex pattern: `{short}`: {err}"))
+    })
 }
 
 /// Materialize the response for `GET /runs/{id}/files`. Prefers the live

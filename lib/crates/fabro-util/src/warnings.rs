@@ -20,7 +20,8 @@ macro_rules! warn_user {
 macro_rules! warn_user_once {
     ($($arg:tt)*) => {{
         let message = format!($($arg)*);
-        let mut set = $crate::WARNINGS.lock().unwrap();
+        let mut set = $crate::WARNINGS.lock()
+            .expect("WARNINGS mutex should not be poisoned: no code panics while holding this lock");
         if set.insert(message.clone()) {
             drop(set);
             $crate::warn_user!("{message}");

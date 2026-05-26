@@ -73,7 +73,8 @@ impl ArtifactLifecycle {
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
-        *self.attempt_start_epoch.lock().unwrap() = None;
+        *self.attempt_start_epoch.lock()
+            .expect("artifact mutex should not be poisoned: no code panics while holding this lock") = None;
         let ledger = self
             .rebuild_captured_artifact_ledger()
             .await
@@ -83,7 +84,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                     "failed to rebuild captured artifact ledger: {rendered}"
                 ))
             })?;
-        *self.captured_artifacts.lock().unwrap() = ledger;
+        *self.captured_artifacts.lock()
+            .expect("artifact mutex should not be poisoned: no code panics while holding this lock") = ledger;
         Ok(())
     }
 
@@ -96,7 +98,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         let epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0.0, |d| d.as_secs() as f64);
-        *self.attempt_start_epoch.lock().unwrap() = Some(epoch);
+        *self.attempt_start_epoch.lock()
+            .expect("artifact mutex should not be poisoned: no code panics while holding this lock") = Some(epoch);
         Ok(NodeDecision::Continue)
     }
 
@@ -108,7 +111,9 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         if self.artifact_globs.is_empty() {
             return Ok(());
         }
-        let epoch = self.attempt_start_epoch.lock().unwrap().unwrap_or(0.0);
+        let epoch = self.attempt_start_epoch.lock()
+            .expect("artifact mutex should not be poisoned: no code panics while holding this lock")
+            .unwrap_or(0.0);
         let node_id = ctx.node.id();
         let visit = stage_visit(state, node_id);
         let node_slug = if visit <= 1 {
@@ -256,7 +261,8 @@ impl ArtifactLifecycle {
     }
 
     fn new_captured_assets(&self, artifacts: &[ArtifactUpload]) -> Vec<ArtifactUpload> {
-        let ledger = self.captured_artifacts.lock().unwrap();
+        let ledger = self.captured_artifacts.lock()
+            .expect("artifact mutex should not be poisoned: no code panics while holding this lock");
         artifacts
             .iter()
             .filter(|artifact| !ledger.contains(&artifact_identity(artifact)))
@@ -265,7 +271,8 @@ impl ArtifactLifecycle {
     }
 
     fn record_captured_assets(&self, artifacts: &[ArtifactUpload]) {
-        let mut ledger = self.captured_artifacts.lock().unwrap();
+        let mut ledger = self.captured_artifacts.lock()
+            .expect("artifact mutex should not be poisoned: no code panics while holding this lock");
         for artifact in artifacts {
             ledger.insert(artifact_identity(artifact));
         }

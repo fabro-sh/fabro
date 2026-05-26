@@ -94,8 +94,10 @@ pub(crate) struct GitLifecycle {
 impl RunLifecycle<WorkflowGraph> for GitLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // Reset last_git_sha (diff base parity)
-        *self.last_git_sha.lock().unwrap() = None;
-        *self.checkpoint_git_result.lock().unwrap() = None;
+        *self.last_git_sha.lock()
+            .expect("git lifecycle mutex should not be poisoned: no code panics while holding this lock") = None;
+        *self.checkpoint_git_result.lock()
+            .expect("git lifecycle mutex should not be poisoned: no code panics while holding this lock") = None;
         if let Some(meta_branch) = self.metadata_branch().map(str::to_string) {
             if self.metadata_writer.is_none() || self.metadata_runtime.metadata_degraded() {
                 return Ok(());
@@ -173,7 +175,8 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
         // Skip git checkpoint for the start node (always empty) or if git disabled
         if self.start_node_id.as_deref() == Some(node_id) || self.run_options.git.is_none() {
-            *self.checkpoint_git_result.lock().unwrap() = None;
+            *self.checkpoint_git_result.lock()
+                .expect("git lifecycle mutex should not be poisoned: no code panics while holding this lock") = None;
             return Ok(());
         }
 
@@ -330,7 +333,9 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 }
 
                 // Save diff.patch
-                let prev = self.last_git_sha.lock().unwrap().clone().or_else(|| {
+                let prev = self.last_git_sha.lock()
+                    .expect("git lifecycle mutex should not be poisoned: no code panics while holding this lock")
+                    .clone().or_else(|| {
                     self.run_options
                         .git
                         .as_ref()
@@ -386,8 +391,10 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 }
 
                 // Update shared state
-                *self.last_git_sha.lock().unwrap() = Some(sha);
-                *self.checkpoint_git_result.lock().unwrap() = Some(git_result);
+                *self.last_git_sha.lock()
+                    .expect("git lifecycle mutex should not be poisoned: no code panics while holding this lock") = Some(sha);
+                *self.checkpoint_git_result.lock()
+                    .expect("git lifecycle mutex should not be poisoned: no code panics while holding this lock") = Some(git_result);
             }
             Err(e) => {
                 let exec_output_tail = fabro_sandbox::default_redacted_output_tail(&e);

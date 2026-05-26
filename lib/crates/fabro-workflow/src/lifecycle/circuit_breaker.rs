@@ -37,8 +37,10 @@ impl CircuitBreakerLifecycle {
         loop_sigs: HashMap<FailureSignature, usize>,
         restart_sigs: HashMap<FailureSignature, usize>,
     ) {
-        *self.loop_failure_signatures.lock().unwrap() = loop_sigs;
-        *self.restart_failure_signatures.lock().unwrap() = restart_sigs;
+        *self.loop_failure_signatures.lock()
+            .expect("circuit breaker mutex should not be poisoned: no code panics while holding this lock") = loop_sigs;
+        *self.restart_failure_signatures.lock()
+            .expect("circuit breaker mutex should not be poisoned: no code panics while holding this lock") = restart_sigs;
     }
 
     /// Snapshot current state for checkpoint building.
@@ -48,8 +50,12 @@ impl CircuitBreakerLifecycle {
         HashMap<FailureSignature, usize>,
         HashMap<FailureSignature, usize>,
     ) {
-        let loop_sigs = self.loop_failure_signatures.lock().unwrap().clone();
-        let restart_sigs = self.restart_failure_signatures.lock().unwrap().clone();
+        let loop_sigs = self.loop_failure_signatures.lock()
+            .expect("circuit breaker mutex should not be poisoned: no code panics while holding this lock")
+            .clone();
+        let restart_sigs = self.restart_failure_signatures.lock()
+            .expect("circuit breaker mutex should not be poisoned: no code panics while holding this lock")
+            .clone();
         (loop_sigs, restart_sigs)
     }
 }
@@ -83,7 +89,8 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
                 outcome.failure.as_ref().map(|f| f.message.as_str()),
             );
             if fc.is_signature_tracked() {
-                let mut sigs = self.loop_failure_signatures.lock().unwrap();
+                let mut sigs = self.loop_failure_signatures.lock()
+                    .expect("circuit breaker mutex should not be poisoned: no code panics while holding this lock");
                 let count = sigs.entry(sig.clone()).or_insert(0);
                 *count += 1;
                 let limit = self.loop_restart_signature_limit;
@@ -133,7 +140,8 @@ impl RunLifecycle<WorkflowGraph> for CircuitBreakerLifecycle {
                 Some(failure.message.as_str()),
             );
             if failure.category.is_signature_tracked() {
-                let mut sigs = self.restart_failure_signatures.lock().unwrap();
+                let mut sigs = self.restart_failure_signatures.lock()
+                    .expect("circuit breaker mutex should not be poisoned: no code panics while holding this lock");
                 let count = sigs.entry(sig.clone()).or_insert(0);
                 *count += 1;
                 let limit = self.loop_restart_signature_limit;

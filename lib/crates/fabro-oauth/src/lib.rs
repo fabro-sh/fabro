@@ -293,7 +293,10 @@ impl CallbackHandle {
     }
 
     pub fn shutdown(&self) {
-        if let Some(tx) = self.shutdown_tx.lock().unwrap().take() {
+        if let Some(tx) = self.shutdown_tx.lock()
+            .expect("oauth shutdown_tx mutex should not be poisoned: no code panics while holding this lock")
+            .take()
+        {
             let _ = tx.send(());
         }
     }
@@ -486,10 +489,16 @@ pub async fn start_callback_server(
                     let desc = params
                         .error_description
                         .unwrap_or_else(|| error.clone());
-                    if let Some(tx) = code_tx.lock().unwrap().take() {
+                    if let Some(tx) = code_tx.lock()
+                        .expect("oauth code_tx mutex should not be poisoned: no code panics while holding this lock")
+                        .take()
+                    {
                         let _ = tx.send(Err(desc.clone()));
                     }
-                    if let Some(tx) = shutdown_tx.lock().unwrap().take() {
+                    if let Some(tx) = shutdown_tx.lock()
+                        .expect("oauth shutdown_tx mutex should not be poisoned: no code panics while holding this lock")
+                        .take()
+                    {
                         let _ = tx.send(());
                     }
                     return (
@@ -499,10 +508,16 @@ pub async fn start_callback_server(
                 }
 
                 let Some(code) = params.code else {
-                    if let Some(tx) = code_tx.lock().unwrap().take() {
+                    if let Some(tx) = code_tx.lock()
+                        .expect("oauth code_tx mutex should not be poisoned: no code panics while holding this lock")
+                        .take()
+                    {
                         let _ = tx.send(Err("No authorization code received".to_string()));
                     }
-                    if let Some(tx) = shutdown_tx.lock().unwrap().take() {
+                    if let Some(tx) = shutdown_tx.lock()
+                        .expect("oauth shutdown_tx mutex should not be poisoned: no code panics while holding this lock")
+                        .take()
+                    {
                         let _ = tx.send(());
                     }
                     return (
@@ -513,10 +528,16 @@ pub async fn start_callback_server(
                     );
                 };
 
-                if let Some(tx) = code_tx.lock().unwrap().take() {
+                if let Some(tx) = code_tx.lock()
+                    .expect("oauth code_tx mutex should not be poisoned: no code panics while holding this lock")
+                    .take()
+                {
                     let _ = tx.send(Ok(code));
                 }
-                if let Some(tx) = shutdown_tx.lock().unwrap().take() {
+                if let Some(tx) = shutdown_tx.lock()
+                    .expect("oauth shutdown_tx mutex should not be poisoned: no code panics while holding this lock")
+                    .take()
+                {
                     let _ = tx.send(());
                 }
                 (StatusCode::OK, Html(callback_success_page()))
@@ -576,13 +597,19 @@ pub async fn start_callback_server_with_errors(
                 let error_description = params
                     .error_description
                     .unwrap_or_else(|| error_code.clone());
-                if let Some(tx) = callback_tx.lock().unwrap().take() {
+                if let Some(tx) = callback_tx.lock()
+                    .expect("oauth callback_tx mutex should not be poisoned: no code panics while holding this lock")
+                    .take()
+                {
                     let _ = tx.send(Err(CallbackFailure {
                         error_code:        error_code.clone(),
                         error_description: error_description.clone(),
                     }));
                 }
-                if let Some(tx) = route_shutdown_tx.lock().unwrap().take() {
+                if let Some(tx) = route_shutdown_tx.lock()
+                    .expect("oauth route_shutdown_tx mutex should not be poisoned: no code panics while holding this lock")
+                    .take()
+                {
                     let _ = tx.send(());
                 }
                 return (
@@ -592,13 +619,19 @@ pub async fn start_callback_server_with_errors(
             }
 
             let Some(code) = params.code else {
-                if let Some(tx) = callback_tx.lock().unwrap().take() {
+                if let Some(tx) = callback_tx.lock()
+                    .expect("oauth callback_tx mutex should not be poisoned: no code panics while holding this lock")
+                    .take()
+                {
                     let _ = tx.send(Err(CallbackFailure {
                         error_code:        "invalid_request".to_string(),
                         error_description: "No authorization code received".to_string(),
                     }));
                 }
-                if let Some(tx) = route_shutdown_tx.lock().unwrap().take() {
+                if let Some(tx) = route_shutdown_tx.lock()
+                    .expect("oauth route_shutdown_tx mutex should not be poisoned: no code panics while holding this lock")
+                    .take()
+                {
                     let _ = tx.send(());
                 }
                 return (
@@ -609,10 +642,16 @@ pub async fn start_callback_server_with_errors(
                 );
             };
 
-            if let Some(tx) = callback_tx.lock().unwrap().take() {
+            if let Some(tx) = callback_tx.lock()
+                .expect("oauth callback_tx mutex should not be poisoned: no code panics while holding this lock")
+                .take()
+            {
                 let _ = tx.send(Ok(CallbackSuccess { code }));
             }
-            if let Some(tx) = route_shutdown_tx.lock().unwrap().take() {
+            if let Some(tx) = route_shutdown_tx.lock()
+                .expect("oauth route_shutdown_tx mutex should not be poisoned: no code panics while holding this lock")
+                .take()
+            {
                 let _ = tx.send(());
             }
             (StatusCode::OK, Html(callback_success_page()))

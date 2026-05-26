@@ -20,11 +20,18 @@ impl Context {
     }
 
     pub fn set(&self, key: impl Into<String>, value: Value) {
-        self.values.write().unwrap().insert(key.into(), value);
+        self.values
+            .write()
+            .expect("context RwLock should not be poisoned: no code panics while holding this lock")
+            .insert(key.into(), value);
     }
 
     pub fn get(&self, key: &str) -> Option<Value> {
-        self.values.read().unwrap().get(key).cloned()
+        self.values
+            .read()
+            .expect("context RwLock should not be poisoned: no code panics while holding this lock")
+            .get(key)
+            .cloned()
     }
 
     pub fn get_string(&self, key: &str, default: &str) -> String {
@@ -34,14 +41,20 @@ impl Context {
     }
 
     pub fn apply_updates(&self, updates: &HashMap<String, Value>) {
-        let mut values = self.values.write().unwrap();
+        let mut values = self
+            .values
+            .write()
+            .expect("context RwLock should not be poisoned: no code panics while holding this lock");
         for (k, v) in updates {
             values.insert(k.clone(), v.clone());
         }
     }
 
     pub fn snapshot(&self) -> HashMap<String, Value> {
-        self.values.read().unwrap().clone()
+        self.values
+            .read()
+            .expect("context RwLock should not be poisoned: no code panics while holding this lock")
+            .clone()
     }
 
     /// Deep copy for parallel branch isolation.

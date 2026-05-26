@@ -243,7 +243,8 @@ where
     T: TryFrom<String>,
     <T as TryFrom<String>>::Error: std::fmt::Display,
 {
-    T::try_from(sha.to_string()).unwrap_or_else(|err| panic!("invalid demo SHA `{sha}`: {err}"))
+    T::try_from(sha.to_string())
+        .unwrap_or_else(|err| panic!("demo SHA `{sha}` is a hardcoded constant and must match the hex pattern: {err}"))
 }
 
 fn short_sha_newtype<T>(sha: &str) -> T
@@ -253,7 +254,7 @@ where
 {
     let short = sha.chars().take(7).collect::<String>();
     T::try_from(short.clone())
-        .unwrap_or_else(|err| panic!("invalid demo short SHA `{short}`: {err}"))
+        .unwrap_or_else(|err| panic!("demo short SHA `{short}` is a hardcoded constant and must match the hex pattern: {err}"))
 }
 
 fn demo_run_files() -> PaginatedRunFileList {
@@ -1128,7 +1129,7 @@ mod runs {
             labels: labels(entries),
             lifecycle: RunLifecycle {
                 status: parse_run_status(status, status_reason)
-                    .unwrap_or_else(|| panic!("invalid demo run status: {status}")),
+                    .unwrap_or_else(|| panic!("demo run status `{status}` is a hardcoded constant and must be a valid RunStatus variant")),
                 approval: None,
                 pending_control,
                 queue_position: None,

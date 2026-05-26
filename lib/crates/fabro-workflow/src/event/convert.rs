@@ -834,8 +834,9 @@ fn event_body_from_event(event: &Event) -> EventBody {
             | AgentEvent::ReasoningDelta { .. }
             | AgentEvent::ToolCallOutputDelta { .. }
             | AgentEvent::SessionStarted { .. }
-            | AgentEvent::SessionEnded => panic!(
-                "agent event should not be converted through the stage-scoped Event::Agent wrapper"
+            | AgentEvent::SessionEnded => unreachable!(
+                "streaming noise and session lifecycle events are filtered out before wrapping in \
+                 Event::Agent; if this is reached, the emitter has a routing bug"
             ),
         },
         Event::SubgraphStarted { start_node, .. } => {

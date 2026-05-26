@@ -107,7 +107,7 @@ fn print_human_output(
         RunStatus::Failed { .. } => (&styles.bold_red, "Failed"),
         RunStatus::Dead => (&styles.bold_red, "Dead"),
         // Poll loop only breaks on is_terminal() which is the three arms above.
-        _ => unreachable!(),
+        _ => unreachable!("print_human_output is only called after is_terminal(), which returns true only for Succeeded, Failed, and Dead"),
     };
     let status_display = style.apply_to(label);
 

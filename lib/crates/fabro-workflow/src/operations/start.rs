@@ -804,27 +804,31 @@ impl RunSession {
                 event if matches!(&event.body, EventBody::CheckpointCompleted(_)) => {
                     if let EventBody::CheckpointCompleted(props) = &event.body {
                         if let Some(sha) = props.git_commit_sha.as_ref() {
-                            *sha_clone.lock().unwrap() = Some(sha.clone());
+                            *sha_clone.lock()
+                                .expect("sha_clone mutex should not be poisoned: no code panics while holding this lock") = Some(sha.clone());
                         }
                     }
                 }
                 event if matches!(&event.body, EventBody::RunCompleted(_)) => {
                     if let EventBody::RunCompleted(props) = &event.body {
                         if let Some(sha) = props.final_git_commit_sha.as_ref() {
-                            *sha_clone.lock().unwrap() = Some(sha.clone());
+                            *sha_clone.lock()
+                                .expect("sha_clone mutex should not be poisoned: no code panics while holding this lock") = Some(sha.clone());
                         }
                     }
                 }
                 event if matches!(&event.body, EventBody::RunFailed(_)) => {
                     if let EventBody::RunFailed(props) = &event.body {
                         if let Some(sha) = props.final_git_commit_sha.as_ref() {
-                            *sha_clone.lock().unwrap() = Some(sha.clone());
+                            *sha_clone.lock()
+                                .expect("sha_clone mutex should not be poisoned: no code panics while holding this lock") = Some(sha.clone());
                         }
                     }
                 }
                 event if matches!(&event.body, EventBody::GitCommit(_)) => {
                     if let EventBody::GitCommit(props) = &event.body {
-                        *sha_clone.lock().unwrap() = Some(props.sha.clone());
+                        *sha_clone.lock()
+                            .expect("sha_clone mutex should not be poisoned: no code panics while holding this lock") = Some(props.sha.clone());
                     }
                 }
                 _ => {}
@@ -894,7 +898,9 @@ impl RunSession {
             workflow_name:    executed.graph.name.clone(),
             preserve_sandbox: self.preserve_sandbox,
             stop_on_terminal: self.stop_on_terminal,
-            last_git_sha:     last_git_sha.lock().unwrap().clone(),
+            last_git_sha:     last_git_sha.lock()
+                .expect("last_git_sha mutex should not be poisoned: no code panics while holding this lock")
+                .clone(),
         };
         let pr_opts = PullRequestOptions {
             pr_config:  self.pr_config,

@@ -114,7 +114,7 @@ fn eval_clause(clause: &Clause, outcome: &Outcome, context: &Context) -> bool {
                 Op::Lt => lhs < rhs,
                 Op::Gte => lhs >= rhs,
                 Op::Lte => lhs <= rhs,
-                _ => unreachable!(),
+                _ => unreachable!("outer match arm already restricts to Gt, Lt, Gte, and Lte"),
             }
         }
         Op::Contains => {

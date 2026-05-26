@@ -111,7 +111,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         // If restarted_from is Some, emit LoopRestart and clear it
         {
-            let mut restarted = self.restarted_from.lock().unwrap();
+            let mut restarted = self.restarted_from.lock()
+                .expect("event lifecycle mutex should not be poisoned: no code panics while holding this lock");
             if let Some((from_node, to_node)) = restarted.take() {
                 self.emitter
                     .emit(&Event::LoopRestart { from_node, to_node });
@@ -119,7 +120,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
 
         // Reset run_start for duration measurement
-        *self.run_start.lock().unwrap() = Instant::now();
+        *self.run_start.lock()
+            .expect("event lifecycle mutex should not be poisoned: no code panics while holding this lock") = Instant::now();
 
         // Emit RunStarted
         self.emitter.emit(&Event::WorkflowRunStarted {
@@ -377,7 +379,9 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let status = result.outcome.status.to_string();
 
         // Read git checkpoint result (set by GitLifecycle)
-        let git_result = self.checkpoint_git_result.lock().unwrap().clone();
+        let git_result = self.checkpoint_git_result.lock()
+            .expect("event lifecycle mutex should not be poisoned: no code panics while holding this lock")
+            .clone();
 
         let git_sha = git_result.as_ref().and_then(|r| r.commit_sha.clone());
         let diff = git_result.as_ref().and_then(|r| r.diff.clone());

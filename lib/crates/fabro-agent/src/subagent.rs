@@ -234,7 +234,7 @@ impl SubAgentManager {
 
         match &agent.status {
             SubAgentStatus::Finished(result) => result.clone(),
-            _ => unreachable!(),
+            _ => unreachable!("agent status was just assigned to Finished on the line above"),
         }
     }
 
