@@ -2299,6 +2299,7 @@ dependencies = [
  "fabro-types",
  "fabro-util",
  "fabro-validate",
+ "fabro-variable",
  "fabro-vault",
  "fabro-workflow",
  "futures-util",
@@ -2552,6 +2553,18 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "fabro-variable"
+version = "0.245.0-nightly.1"
+dependencies = [
+ "chrono",
+ "fabro-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ulid",
 ]
 
 [[package]]

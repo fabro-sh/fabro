@@ -17,6 +17,7 @@ api/secrets-api.ts
 api/sessions-api.ts
 api/settings-api.ts
 api/system-api.ts
+api/variables-api.ts
 api/workflows-api.ts
 base.ts
 common.ts
@@ -87,6 +88,7 @@ models/create-completion-request.ts
 models/create-run-pull-request-request.ts
 models/create-run-session-request.ts
 models/create-secret-request.ts
+models/create-variable-request.ts
 models/delete-run-response.ts
 models/delete-run-sandbox.ts
 models/delete-secret-request.ts
@@ -482,8 +484,11 @@ models/todo-projection.ts
 models/todo-status.ts
 models/update-run-parent-request.ts
 models/update-run-request.ts
+models/update-variable-request.ts
 models/user-response.ts
 models/validate-response.ts
+models/variable-list-response.ts
+models/variable.ts
 models/vnc-preview-response.ts
 models/webhook-strategy.ts
 models/workflow-detail-response.ts

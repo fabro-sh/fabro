@@ -224,6 +224,7 @@ impl TestAppStateBuilder {
             max_concurrent_runs: self.max_concurrent_runs,
             store,
             artifact_store,
+            variables_path: vault_path.with_file_name("variables.json"),
             vault_path,
             preloaded_vault: None,
             server_secrets: load_test_server_secrets(server_env_path, self.server_secret_env),

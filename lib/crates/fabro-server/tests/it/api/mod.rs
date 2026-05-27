@@ -12,3 +12,4 @@ mod sessions;
 mod settings;
 mod system;
 mod tcp;
+mod variables;

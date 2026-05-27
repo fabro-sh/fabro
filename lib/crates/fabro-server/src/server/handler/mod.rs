@@ -21,6 +21,7 @@ mod secrets;
 mod sessions;
 mod steer;
 pub(in crate::server) mod system;
+mod variables;
 
 pub(super) use system::{health, openapi_spec};
 
@@ -163,6 +164,7 @@ pub(super) fn real_routes() -> Router<Arc<AppState>> {
         .merge(graph::run_routes())
         .merge(models::routes())
         .merge(secrets::routes())
+        .merge(variables::routes())
         .merge(sessions::routes())
         .merge(system::routes())
         .merge(completions::routes())

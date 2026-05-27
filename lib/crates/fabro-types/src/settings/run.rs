@@ -14,7 +14,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
 use super::duration::Duration;
-use super::interp::InterpString;
+use super::interp::{InterpString, ResolveEnvError};
 use super::model_ref::ModelRef;
 use super::size::Size;
 
@@ -72,6 +72,280 @@ impl Default for RunNamespace {
             pull_request:  None,
             artifacts:     ArtifactsSettings::default(),
             integrations:  RunIntegrationsSettings::default(),
+        }
+    }
+}
+
+impl RunNamespace {
+    pub fn substitute_variables<F>(&mut self, mut lookup: F) -> Result<(), ResolveEnvError>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        substitute_goal(&mut self.goal, &mut lookup)?;
+        substitute_option(&mut self.working_dir, &mut lookup)?;
+        substitute_option(&mut self.model.provider, &mut lookup)?;
+        substitute_option(&mut self.model.name, &mut lookup)?;
+        if let Some(author) = &mut self.git.author {
+            substitute_option(&mut author.name, &mut lookup)?;
+            substitute_option(&mut author.email, &mut lookup)?;
+        }
+        substitute_map(&mut self.environment.env, &mut lookup)?;
+        for route in self.notifications.values_mut() {
+            if let Some(slack) = &mut route.slack {
+                substitute_option(&mut slack.channel, &mut lookup)?;
+            }
+        }
+        if let Some(slack) = &mut self.interviews.slack {
+            substitute_option(&mut slack.channel, &mut lookup)?;
+        }
+        substitute_map(&mut self.integrations.github.permissions, &mut lookup)?;
+        substitute_option(&mut self.scm.owner, &mut lookup)?;
+        substitute_option(&mut self.scm.repository, &mut lookup)?;
+        substitute_string_vec(&mut self.prepare.commands, &mut lookup)?;
+        for mcp in self.agent.mcps.values_mut() {
+            substitute_mcp_transport(&mut mcp.transport, &mut lookup)?;
+        }
+        for hook in &mut self.hooks {
+            substitute_option_string(&mut hook.command, &mut lookup)?;
+            if let Some(hook_type) = &mut hook.hook_type {
+                substitute_hook_type(hook_type, &mut lookup)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn substitute_goal<F>(goal: &mut Option<RunGoal>, lookup: &mut F) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    match goal {
+        Some(RunGoal::Inline(value) | RunGoal::File(value)) => substitute(value, lookup),
+        None => Ok(()),
+    }
+}
+
+fn substitute_option<F>(
+    value: &mut Option<InterpString>,
+    lookup: &mut F,
+) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    match value {
+        Some(value) => substitute(value, lookup),
+        None => Ok(()),
+    }
+}
+
+fn substitute_map<F>(
+    values: &mut HashMap<String, InterpString>,
+    lookup: &mut F,
+) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    for value in values.values_mut() {
+        substitute(value, lookup)?;
+    }
+    Ok(())
+}
+
+fn substitute<F>(value: &mut InterpString, lookup: &mut F) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    *value = value.substitute_variables(lookup)?;
+    Ok(())
+}
+
+fn substitute_string<F>(value: &mut String, lookup: &mut F) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let parsed = InterpString::parse(value);
+    if parsed.references_vars() {
+        *value = parsed.substitute_variables(lookup)?.as_source();
+    }
+    Ok(())
+}
+
+fn substitute_option_string<F>(
+    value: &mut Option<String>,
+    lookup: &mut F,
+) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    match value {
+        Some(value) => substitute_string(value, lookup),
+        None => Ok(()),
+    }
+}
+
+fn substitute_string_vec<F>(values: &mut [String], lookup: &mut F) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    for value in values {
+        substitute_string(value, lookup)?;
+    }
+    Ok(())
+}
+
+fn substitute_string_map<F>(
+    values: &mut HashMap<String, String>,
+    lookup: &mut F,
+) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    for value in values.values_mut() {
+        substitute_string(value, lookup)?;
+    }
+    Ok(())
+}
+
+fn substitute_mcp_transport<F>(
+    transport: &mut McpTransport,
+    lookup: &mut F,
+) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    match transport {
+        McpTransport::Stdio { command, env } | McpTransport::Sandbox { command, env, .. } => {
+            substitute_string_vec(command, lookup)?;
+            substitute_string_map(env, lookup)
+        }
+        McpTransport::Http { url, headers, .. } => {
+            substitute_string(url, lookup)?;
+            substitute_string_map(headers, lookup)
+        }
+    }
+}
+
+fn substitute_hook_type<F>(hook_type: &mut HookType, lookup: &mut F) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    match hook_type {
+        HookType::Command { command } => substitute_string(command, lookup),
+        HookType::Http { url, headers, .. } => {
+            substitute_string(url, lookup)?;
+            if let Some(headers) = headers {
+                substitute_string_map(headers, lookup)?;
+            }
+            Ok(())
+        }
+        HookType::Prompt { prompt, model } | HookType::Agent { prompt, model, .. } => {
+            substitute_string(prompt, lookup)?;
+            substitute_option_string(model, lookup)
+        }
+    }
+}
+
+#[cfg(test)]
+mod run_namespace_variable_substitution_tests {
+    use std::collections::HashMap;
+
+    use super::{
+        HookDefinition, HookEvent, HookType, InterpString, McpHttpProtocol, McpServerSettings,
+        McpTransport, RunGoal, RunNamespace, RunPrepareSettings,
+    };
+
+    #[test]
+    fn substitutes_variables_in_interp_and_late_bound_run_strings() {
+        let mut run = RunNamespace {
+            goal: Some(RunGoal::Inline(InterpString::parse(
+                "deploy {{ vars.ENV }} in {{ env.REGION }}",
+            ))),
+            working_dir: Some(InterpString::parse("/workspace/{{ vars.ENV }}")),
+            prepare: RunPrepareSettings {
+                commands:   vec!["echo {{ vars.ENV }} {{ env.REGION }}".to_string()],
+                timeout_ms: 1_000,
+            },
+            agent: super::RunAgentSettings {
+                mcps: HashMap::from([("http".to_string(), McpServerSettings {
+                    name:                 "http".to_string(),
+                    transport:            McpTransport::Http {
+                        protocol: McpHttpProtocol::default(),
+                        url:      "https://{{ vars.HOST }}/mcp".to_string(),
+                        headers:  HashMap::from([(
+                            "X-Env".to_string(),
+                            "{{ vars.ENV }}".to_string(),
+                        )]),
+                    },
+                    current_dir:          None,
+                    clear_env:            false,
+                    startup_timeout_secs: 10,
+                    tool_timeout_secs:    60,
+                })]),
+                ..super::RunAgentSettings::default()
+            },
+            hooks: vec![HookDefinition {
+                name:       Some("notify".to_string()),
+                event:      HookEvent::RunComplete,
+                command:    None,
+                hook_type:  Some(HookType::Http {
+                    url:              "https://hooks.example/{{ vars.ENV }}".to_string(),
+                    headers:          Some(HashMap::from([(
+                        "X-Env".to_string(),
+                        "{{ vars.ENV }}".to_string(),
+                    )])),
+                    allowed_env_vars: Vec::new(),
+                    tls:              super::TlsMode::Verify,
+                }),
+                matcher:    None,
+                blocking:   None,
+                timeout_ms: None,
+                sandbox:    None,
+            }],
+            ..RunNamespace::default()
+        };
+
+        run.substitute_variables(|name| match name {
+            "ENV" => Some("prod".to_string()),
+            "HOST" => Some("mcp.example".to_string()),
+            _ => None,
+        })
+        .unwrap();
+
+        let goal_source = match run.goal.as_ref() {
+            Some(RunGoal::Inline(value) | RunGoal::File(value)) => Some(value.as_source()),
+            None => None,
+        };
+        assert_eq!(
+            goal_source,
+            Some("deploy prod in {{ env.REGION }}".to_string())
+        );
+        assert_eq!(
+            run.working_dir.as_ref().map(InterpString::as_source),
+            Some("/workspace/prod".to_string())
+        );
+        assert_eq!(run.prepare.commands, vec![
+            "echo prod {{ env.REGION }}".to_string()
+        ]);
+        let mcp = &run.agent.mcps["http"];
+        match &mcp.transport {
+            McpTransport::Http { url, headers, .. } => {
+                assert_eq!(url, "https://mcp.example/mcp");
+                assert_eq!(headers.get("X-Env").map(String::as_str), Some("prod"));
+            }
+            other => panic!("expected http mcp transport, got {other:?}"),
+        }
+        match run.hooks[0].hook_type.as_ref().unwrap() {
+            HookType::Http { url, headers, .. } => {
+                assert_eq!(url, "https://hooks.example/prod");
+                assert_eq!(
+                    headers
+                        .as_ref()
+                        .and_then(|headers| headers.get("X-Env"))
+                        .map(String::as_str),
+                    Some("prod")
+                );
+            }
+            other => panic!("expected http hook type, got {other:?}"),
         }
     }
 }

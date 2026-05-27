@@ -48,6 +48,11 @@ impl Storage {
     }
 
     #[must_use]
+    pub fn variables_path(&self) -> PathBuf {
+        self.root.join("variables.json")
+    }
+
+    #[must_use]
     pub fn runtime_directory(&self) -> RuntimeDirectory {
         RuntimeDirectory::new(self.root.clone())
     }
@@ -182,6 +187,10 @@ mod tests {
         assert_eq!(
             storage.secrets_path(),
             std::path::Path::new("/tmp/fabro-data/vaults/default/secrets.json")
+        );
+        assert_eq!(
+            storage.variables_path(),
+            std::path::Path::new("/tmp/fabro-data/variables.json")
         );
         assert_eq!(
             storage.objects_dir(),

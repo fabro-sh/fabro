@@ -36,9 +36,9 @@ pub mod types {
     pub use fabro_types::{
         ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
         AgentToolCategory, AgentToolSource, AgentToolSummary, AgentToolsAvailableProps, AskFabro,
-        AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, DiffStats, DiffSummary,
-        DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
-        FailureSignature, GitContext, IdpIdentity, IntegrationConnectionKind,
+        AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, CreateVariableRequest,
+        DiffStats, DiffSummary, DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory,
+        FailureDetail, FailureSignature, GitContext, IdpIdentity, IntegrationConnectionKind,
         IntegrationConnectionState, IntegrationConnectionStatus, IntegrationProvider,
         IntegrationStatus, InterviewOption, InterviewQuestionRecord, McpServerProjection,
         McpServerStatus, PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord,
@@ -59,7 +59,8 @@ pub mod types {
         StageContextWindowStaleness, StageContextWindowUnavailableReason,
         StageContextWindowWarning, StageHandler, StageModelUsage, StageOutcome, StageProjection,
         StageState, SubAgentProjection, SubAgentStatus, SystemActorKind, SystemIntegrationStatus,
-        SystemIntegrationsResponse, TodoListProjection, TurnId, UserPrincipal, WorkflowSettings,
+        SystemIntegrationsResponse, TodoListProjection, TurnId, UpdateVariableRequest,
+        UserPrincipal, Variable, VariableListResponse, WorkflowSettings,
     };
 
     pub use crate::generated::types::*;
