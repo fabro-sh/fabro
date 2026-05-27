@@ -40,6 +40,11 @@ approval = "auto"
     assert_eq!(json["run"]["goal"]["type"], "inline");
     assert_eq!(json["run"]["goal"]["value"], "Ship it");
     assert_eq!(json["run"]["execution"]["approval"], "auto");
+    assert_eq!(
+        json["run"]["environment"]["image"]["docker"],
+        "buildpack-deps:noble"
+    );
+    assert!(json["run"]["environment"]["image"].get("ref").is_none());
 
     let round_trip: ApiWorkflowSettings =
         serde_json::from_value(json).expect("workflow settings should deserialize");

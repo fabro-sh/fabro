@@ -332,6 +332,10 @@ pub struct SandboxInitializedProps {
     pub provider:          SandboxProviderKind,
     pub id:                String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image:             Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot:          Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_cloned:       Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clone_origin_url:  Option<String>,

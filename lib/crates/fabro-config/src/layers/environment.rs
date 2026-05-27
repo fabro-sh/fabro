@@ -67,8 +67,8 @@ impl RunEnvironmentLayer {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentImageLayer {
-    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
-    pub reference:  Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dockerfile: Option<EnvironmentDockerfileLayer>,
 }

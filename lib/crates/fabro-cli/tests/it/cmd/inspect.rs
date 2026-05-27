@@ -165,7 +165,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
                 "id": "default",
                 "provider": "local",
                 "image": {
-                  "ref": null,
+                  "docker": null,
                   "dockerfile": null
                 },
                 "resources": {

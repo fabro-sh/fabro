@@ -1546,7 +1546,6 @@ id = "cloud"
 provider = "daytona"
 
 [environments.cloud.image]
-ref = "fabro-test"
 dockerfile = { path = "Dockerfile" }
 "#
                 .to_string(),
@@ -1606,7 +1605,6 @@ id = "cloud"
 provider = "daytona"
 
 [environments.cloud.image]
-ref = "fabro-test"
 dockerfile = { path = "Dockerfile" }
 "#
                 .to_string(),

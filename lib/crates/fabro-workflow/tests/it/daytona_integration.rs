@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
-use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
+use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox};
 use fabro_static::EnvVars;
 use fabro_store::{ArtifactKey, ArtifactStore, Database};
 use fabro_types::{RunId, StageId, WorkflowSettings};
@@ -368,7 +368,6 @@ async fn daytona_snapshot_sandbox() {
     let config = DaytonaConfig {
         auto_stop_interval: Some(60),
         snapshot: Some(DaytonaSnapshotConfig {
-            name:       "fabro-test-snapshot".to_string(),
             cpu:        Some(2),
             memory:     Some(4),
             disk:       Some(10),
@@ -1804,13 +1803,7 @@ async fn daytona_cp_upload_download_round_trip() {
 async fn daytona_computer_use_browser_screenshot() {
     use base64::Engine;
     let config = DaytonaConfig {
-        snapshot: Some(DaytonaSnapshotConfig {
-            name:       "daytona-medium".into(),
-            cpu:        None,
-            memory:     None,
-            disk:       None,
-            dockerfile: None,
-        }),
+        snapshot: None,
         skip_clone: true,
         ..DaytonaConfig::default()
     };
@@ -1958,13 +1951,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
 
     // Create sandbox from daytona-medium (has Node.js + Chromium)
     let config = DaytonaConfig {
-        snapshot: Some(DaytonaSnapshotConfig {
-            name:       "daytona-medium".into(),
-            cpu:        None,
-            memory:     None,
-            disk:       None,
-            dockerfile: None,
-        }),
+        snapshot: None,
         skip_clone: true,
         ..DaytonaConfig::default()
     };

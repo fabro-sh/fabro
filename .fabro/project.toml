@@ -17,7 +17,6 @@ auto_stop = "30m"
 repo = "fabro-sh/fabro"
 
 [environments.fabro-dev.image]
-ref = "fabro-v12"
 dockerfile = { path = "Dockerfile" }
 
 [environments.fabro-dev.resources]

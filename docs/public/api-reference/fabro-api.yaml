@@ -12177,9 +12177,9 @@ components:
 
     EnvironmentImageSettings:
       type: object
-      required: [ref, dockerfile]
+      required: [docker, dockerfile]
       properties:
-        ref:
+        docker:
           type: ["string", "null"]
         dockerfile:
           oneOf:

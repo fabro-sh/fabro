@@ -509,6 +509,10 @@ pub enum Event {
         provider:          SandboxProviderKind,
         id:                String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        image:             Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot:          Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         repo_cloned:       Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clone_origin_url:  Option<String>,

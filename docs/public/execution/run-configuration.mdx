@@ -71,7 +71,6 @@ project = "fabro"
 env = "ci"
 
 [environments.cloud.image]
-ref = "node-20"
 dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 
 [environments.cloud.resources]
@@ -248,7 +247,7 @@ id = "ci"
 provider = "docker" # local | docker | daytona
 
 [environments.ci.image]
-ref = "buildpack-deps:noble"
+docker = "buildpack-deps:noble"
 
 [environments.ci.resources]
 cpu = 2
@@ -274,8 +273,8 @@ memory = "8GB"
 |---|---|
 | `run.environment.id` | Environment slug to select. Defaults to `default`. |
 | `environments.<slug>.provider` | Required provider: `local`, `docker`, or `daytona`. |
-| `image.ref` | Docker image or Daytona snapshot name. |
-| `image.dockerfile` | Inline Dockerfile or `{ path = "Dockerfile" }`; for Daytona, requires `image.ref`. |
+| `image.docker` | Docker image. Daytona rejects this field. |
+| `image.dockerfile` | Inline Dockerfile or `{ path = "Dockerfile" }`; Daytona uses it to create or reuse an internally named snapshot. |
 | `resources.cpu` / `memory` / `disk` | Best-effort resource hints. Unsupported provider fields warn and continue. |
 | `network.mode` | `allow_all`, `block`, or `cidr_allow_list`. Local cannot enforce blocked/CIDR networking; Docker cannot enforce CIDR allow-lists. |
 | `network.allow` | CIDRs for `cidr_allow_list`; entries are validated as CIDRs. |
@@ -558,7 +557,7 @@ id = "cloud"
 provider = "daytona"
 
 [environments.cloud.image]
-ref = "my-project-snapshot"
+dockerfile = { path = "Dockerfile" }
 ```
 
 Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), TOML `run.inputs` tables replace wholesale, CLI input flags merge per key at highest precedence, environment `env` and `labels` merge by key, environment `volumes` replace as a whole list, and `run.prepare.steps` replaces whole-list.

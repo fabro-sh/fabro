@@ -192,6 +192,10 @@ macro_rules! delegate_sandbox {
                 self.$field.sandbox_info()
             }
 
+            fn snapshot_info(&self) -> Option<String> {
+                self.$field.snapshot_info()
+            }
+
             async fn refresh_push_credentials(&self) -> $crate::Result<()> {
                 self.$field.refresh_push_credentials().await
             }
@@ -946,6 +950,12 @@ pub trait Sandbox: Send + Sync {
     /// user how to reconnect.
     fn sandbox_info(&self) -> String {
         String::new()
+    }
+
+    /// Return the provider snapshot used by an initialized sandbox, when the
+    /// provider has a snapshot concept.
+    fn snapshot_info(&self) -> Option<String> {
+        None
     }
 
     /// Refresh git push credentials (e.g. rotate an expiring GitHub App token).

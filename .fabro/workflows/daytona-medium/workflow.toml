@@ -8,6 +8,3 @@ id = "daytona-medium"
 
 [environments.daytona-medium]
 provider = "daytona"
-
-[environments.daytona-medium.image]
-ref = "daytona-medium"

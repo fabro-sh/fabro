@@ -4,23 +4,14 @@ use fabro_agent::sandbox::Sandbox;
 use fabro_devcontainer::DevcontainerSpec;
 use fabro_sandbox::daytona::{DaytonaSnapshotConfig, DockerfileSource};
 use futures::future::try_join_all;
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
 use crate::event::{Emitter, Event};
 
-/// Compute a deterministic snapshot name from Dockerfile content.
-pub fn snapshot_name_for_dockerfile(dockerfile: &str) -> String {
-    let hash = Sha256::digest(dockerfile.as_bytes());
-    let hex = hex::encode(hash);
-    format!("devcontainer-{}", &hex[..12])
-}
-
 /// Map a `DevcontainerSpec` to a `DaytonaSnapshotConfig`.
 pub fn devcontainer_to_snapshot_config(dc: &DevcontainerSpec) -> DaytonaSnapshotConfig {
     DaytonaSnapshotConfig {
-        name:       snapshot_name_for_dockerfile(&dc.dockerfile),
         dockerfile: Some(DockerfileSource::Inline(dc.dockerfile.clone())),
         cpu:        None,
         memory:     None,
@@ -380,29 +371,6 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_name_is_deterministic() {
-        let dockerfile = "FROM ubuntu:22.04\nRUN apt-get update";
-        let name1 = snapshot_name_for_dockerfile(dockerfile);
-        let name2 = snapshot_name_for_dockerfile(dockerfile);
-        assert_eq!(name1, name2);
-    }
-
-    #[test]
-    fn snapshot_name_differs_for_different_dockerfiles() {
-        let name1 = snapshot_name_for_dockerfile("FROM ubuntu:22.04");
-        let name2 = snapshot_name_for_dockerfile("FROM rust:1.85");
-        assert_ne!(name1, name2);
-    }
-
-    #[test]
-    fn snapshot_name_has_prefix() {
-        let name = snapshot_name_for_dockerfile("FROM ubuntu:22.04");
-        assert!(name.starts_with("devcontainer-"), "name: {name}");
-        // prefix + 12 hex chars
-        assert_eq!(name.len(), "devcontainer-".len() + 12);
-    }
-
-    #[test]
     fn maps_dockerfile_to_inline() {
         let dc = test_devcontainer_config("FROM rust:1.85\nRUN cargo install sccache");
         let snapshot = devcontainer_to_snapshot_config(&dc);
@@ -413,11 +381,12 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_name_from_dockerfile_hash() {
+    fn devcontainer_snapshot_uses_runtime_daytona_identity_path() {
         let dc = test_devcontainer_config("FROM ubuntu:22.04");
         let snapshot = devcontainer_to_snapshot_config(&dc);
-        let expected = snapshot_name_for_dockerfile(&dc.dockerfile);
-        assert_eq!(snapshot.name, expected);
+        assert_eq!(snapshot.cpu, None);
+        assert_eq!(snapshot.memory, None);
+        assert_eq!(snapshot.disk, None);
     }
 
     #[tokio::test]

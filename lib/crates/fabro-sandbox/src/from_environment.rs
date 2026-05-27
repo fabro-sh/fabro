@@ -40,10 +40,9 @@ pub fn daytona_config_from_environment(
             .collect(),
         snapshot: settings
             .image
-            .reference
+            .dockerfile
             .as_ref()
-            .map(|name| DaytonaSnapshotSettings {
-                name:       name.clone(),
+            .map(|dockerfile| DaytonaSnapshotSettings {
                 cpu:        settings.resources.cpu,
                 memory:     settings
                     .resources
@@ -53,18 +52,14 @@ pub fn daytona_config_from_environment(
                     .resources
                     .disk
                     .map(|size| size_to_gb_i32(size.as_bytes())),
-                dockerfile: settings
-                    .image
-                    .dockerfile
-                    .as_ref()
-                    .map(|dockerfile| match dockerfile {
-                        ResolvedDockerfileSource::Inline(text) => {
-                            SandboxDockerfileSource::Inline(text.clone())
-                        }
-                        ResolvedDockerfileSource::Path { path } => {
-                            SandboxDockerfileSource::Path { path: path.clone() }
-                        }
-                    }),
+                dockerfile: Some(match dockerfile {
+                    ResolvedDockerfileSource::Inline(text) => {
+                        SandboxDockerfileSource::Inline(text.clone())
+                    }
+                    ResolvedDockerfileSource::Path { path } => {
+                        SandboxDockerfileSource::Path { path: path.clone() }
+                    }
+                }),
             }),
         network: Some(match settings.network.mode {
             EnvironmentNetworkMode::Block => DaytonaNetwork::Block,
@@ -94,7 +89,7 @@ pub fn docker_config_from_environment(
     DockerSandboxOptions {
         image: settings
             .image
-            .reference
+            .docker
             .clone()
             .unwrap_or(default_options.image),
         network_mode: match settings.network.mode {

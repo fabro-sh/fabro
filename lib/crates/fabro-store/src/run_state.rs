@@ -267,6 +267,8 @@ impl RunProjectionReducer for RunProjection {
                     runtime:  None,
                 });
                 sandbox.provider = props.provider;
+                sandbox.image.clone_from(&props.image);
+                sandbox.snapshot.clone_from(&props.snapshot);
                 sandbox.runtime = Some(RunSandboxRuntime {
                     id:                props.id.clone(),
                     working_directory: props.working_directory.clone(),
@@ -800,12 +802,10 @@ fn planned_sandbox(settings: &RunEnvironmentSettings) -> RunSandbox {
     RunSandbox {
         provider,
         image: (settings.provider == EnvironmentProvider::Docker)
-            .then(|| settings.image.reference.clone())
+            .then(|| settings.image.docker.clone())
             .flatten()
             .filter(|image| !image.is_empty()),
-        snapshot: (settings.provider == EnvironmentProvider::Daytona)
-            .then(|| settings.image.reference.clone())
-            .flatten(),
+        snapshot: None,
         runtime: None,
     }
 }
@@ -1246,6 +1246,7 @@ mod tests {
         RunCompletedProps, RunControlEffectProps, StageCompletedProps, StageFailedProps,
         StagePromptProps, StageRetryingProps, StageStartedProps,
     };
+    use fabro_types::settings::run::{DockerfileSource, EnvironmentProvider};
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
@@ -1369,6 +1370,50 @@ mod tests {
             .apply_event(&test_raw_event(3, "run.running", &json!({}), None))
             .unwrap();
         state
+    }
+
+    #[test]
+    fn planned_sandbox_uses_docker_image_and_hides_daytona_snapshot_until_init() {
+        let mut docker = WorkflowSettings::default().run.environment;
+        docker.provider = EnvironmentProvider::Docker;
+        docker.image.docker = Some("ubuntu:24.04".to_string());
+
+        let planned_docker = super::planned_sandbox(&docker);
+        assert_eq!(planned_docker.image.as_deref(), Some("ubuntu:24.04"));
+        assert_eq!(planned_docker.snapshot, None);
+
+        let mut daytona = WorkflowSettings::default().run.environment;
+        daytona.provider = EnvironmentProvider::Daytona;
+        daytona.image.dockerfile = Some(DockerfileSource::Inline("FROM ubuntu:24.04".to_string()));
+
+        let planned_daytona = super::planned_sandbox(&daytona);
+        assert_eq!(planned_daytona.image, None);
+        assert_eq!(planned_daytona.snapshot, None);
+    }
+
+    #[test]
+    fn sandbox_initialized_updates_image_and_snapshot_projection_fields() {
+        let mut state = initialized_projection();
+        state
+            .apply_event(&test_raw_event(
+                1,
+                "sandbox.initialized",
+                &json!({
+                    "provider": "daytona",
+                    "id": "fabro-run-sandbox",
+                    "working_directory": "/home/daytona/workspace",
+                    "snapshot": "fabro-11111111-2222-8333-8444-555555555555"
+                }),
+                None,
+            ))
+            .unwrap();
+
+        let sandbox = state.sandbox.expect("sandbox should be projected");
+        assert_eq!(sandbox.image, None);
+        assert_eq!(
+            sandbox.snapshot.as_deref(),
+            Some("fabro-11111111-2222-8333-8444-555555555555")
+        );
     }
 
     #[test]

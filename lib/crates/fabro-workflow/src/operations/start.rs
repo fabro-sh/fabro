@@ -1302,7 +1302,7 @@ reasoning = false
         let settings = settings_from_run_layer(RunLayer {
             environment: Some(RunEnvironmentLayer {
                 image: Some(EnvironmentImageLayer {
-                    reference: Some("ubuntu:24.04".to_string()),
+                    docker: Some("ubuntu:24.04".to_string()),
                     ..EnvironmentImageLayer::default()
                 }),
                 resources: Some(EnvironmentResourcesLayer {

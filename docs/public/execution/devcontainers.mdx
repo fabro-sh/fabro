@@ -15,7 +15,7 @@ id = "dev"
 provider = "docker"
 
 [environments.dev.image]
-ref = "ghcr.io/acme/project-devcontainer:latest"
+docker = "ghcr.io/acme/project-devcontainer:latest"
 ```
 
 For Daytona snapshot creation, provide a Dockerfile path on the selected environment:
@@ -28,6 +28,5 @@ id = "cloud-dev"
 provider = "daytona"
 
 [environments.cloud-dev.image]
-ref = "project-dev"
 dockerfile = { path = ".devcontainer/Dockerfile" }
 ```

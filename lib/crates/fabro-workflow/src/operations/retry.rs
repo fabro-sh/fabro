@@ -304,6 +304,8 @@ mod tests {
             provider:          fabro_types::SandboxProviderKind::Local,
             id:                "sandbox-source".to_string(),
             working_directory: "/tmp/source".to_string(),
+            image:             None,
+            snapshot:          None,
             repo_cloned:       None,
             clone_origin_url:  None,
             clone_branch:      None,
