@@ -59,6 +59,27 @@ fn upsert_preserves_description_when_omitted_and_updates_when_present() {
 }
 
 #[test]
+fn update_existing_preserves_description_and_reports_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = VariableStore::load(dir.path().join("variables.json")).unwrap();
+
+    let created = store
+        .set("DEPLOY_ENV", "staging", Some("Deployment target"))
+        .unwrap();
+    let updated = store
+        .update_existing("DEPLOY_ENV", "production", None)
+        .unwrap();
+
+    assert_eq!(updated.created_at, created.created_at);
+    assert_eq!(updated.value, "production");
+    assert_eq!(updated.description.as_deref(), Some("Deployment target"));
+    assert!(matches!(
+        store.update_existing("MISSING", "value", None),
+        Err(Error::NotFound(name)) if name == "MISSING"
+    ));
+}
+
+#[test]
 fn remove_deletes_variable_and_reports_missing() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = VariableStore::load(dir.path().join("variables.json")).unwrap();

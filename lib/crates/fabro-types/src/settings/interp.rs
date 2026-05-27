@@ -11,6 +11,8 @@ use std::fmt;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::variable::is_env_style_name;
+
 /// A config string that may contain `{{ env.NAME }}` or `{{ vars.NAME }}`
 /// tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -370,16 +372,6 @@ impl fmt::Display for ResolveEnvError {
 }
 
 impl std::error::Error for ResolveEnvError {}
-
-fn is_env_style_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
-        _ => return false,
-    }
-
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-}
 
 impl Serialize for InterpString {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

@@ -158,4 +158,6 @@ pub use transcript::{
     AudioData, ContentPart, DocumentData, ImageData, MessageId, MessageKind, MessageSource,
     PairMessageRef, ThinkingData, ToolCall, ToolResult, TranscriptMessage,
 };
-pub use variable::{CreateVariableRequest, UpdateVariableRequest, Variable, VariableListResponse};
+pub use variable::{
+    CreateVariableRequest, UpdateVariableRequest, Variable, VariableListResponse, is_env_style_name,
+};

@@ -4492,6 +4492,7 @@ paths:
         required: true
         schema:
           type: string
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
         description: Variable name.
     get:
       operationId: getVariable
@@ -13279,6 +13280,7 @@ components:
       properties:
         name:
           type: string
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
           description: Env-style variable name.
           example: DEPLOY_ENV
         value:
@@ -13317,6 +13319,7 @@ components:
       properties:
         name:
           type: string
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
           description: Env-style variable name.
         value:
           type: string

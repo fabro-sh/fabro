@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::{fmt, io};
 
 use chrono::{DateTime, Utc};
-use fabro_types::Variable;
+use fabro_types::{Variable, is_env_style_name};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct VariableEntry {
@@ -83,10 +83,33 @@ impl VariableStore {
         value: &str,
         description: Option<&str>,
     ) -> Result<Variable, Error> {
+        self.set_with_policy(name, value, description, false)
+    }
+
+    pub fn update_existing(
+        &mut self,
+        name: &str,
+        value: &str,
+        description: Option<&str>,
+    ) -> Result<Variable, Error> {
+        self.set_with_policy(name, value, description, true)
+    }
+
+    fn set_with_policy(
+        &mut self,
+        name: &str,
+        value: &str,
+        description: Option<&str>,
+        require_existing: bool,
+    ) -> Result<Variable, Error> {
         Self::validate_name(name)?;
 
         let now = Utc::now();
-        let (created_at, description) = self.entries.get(name).map_or_else(
+        let existing = self.entries.get(name);
+        if require_existing && existing.is_none() {
+            return Err(Error::NotFound(name.to_string()));
+        }
+        let (created_at, description) = existing.map_or_else(
             || (now, description.map(str::to_string)),
             |entry| {
                 (
@@ -188,16 +211,6 @@ fn variable_from_entry(name: &str, entry: &VariableEntry) -> Variable {
         created_at:  entry.created_at,
         updated_at:  entry.updated_at,
     }
-}
-
-fn is_env_style_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
-        _ => return false,
-    }
-
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn io_context(op: &str, path: &Path, source: &io::Error) -> io::Error {

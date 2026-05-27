@@ -83,18 +83,26 @@ impl RunNamespace {
     {
         substitute_goal(&mut self.goal, &mut lookup)?;
         substitute_option(&mut self.working_dir, &mut lookup)?;
+        substitute_string_map(&mut self.metadata, &mut lookup)?;
         substitute_option(&mut self.model.provider, &mut lookup)?;
         substitute_option(&mut self.model.name, &mut lookup)?;
+        substitute_option_string(&mut self.model.controls.reasoning_effort, &mut lookup)?;
+        substitute_option_string(&mut self.model.controls.speed, &mut lookup)?;
         if let Some(author) = &mut self.git.author {
             substitute_option(&mut author.name, &mut lookup)?;
             substitute_option(&mut author.email, &mut lookup)?;
         }
+        substitute_string_vec(&mut self.checkpoint.exclude_globs, &mut lookup)?;
+        substitute_environment(&mut self.environment, &mut lookup)?;
         substitute_map(&mut self.environment.env, &mut lookup)?;
         for route in self.notifications.values_mut() {
+            substitute_option_string(&mut route.provider, &mut lookup)?;
+            substitute_string_vec(&mut route.events, &mut lookup)?;
             if let Some(slack) = &mut route.slack {
                 substitute_option(&mut slack.channel, &mut lookup)?;
             }
         }
+        substitute_option_string(&mut self.interviews.provider, &mut lookup)?;
         if let Some(slack) = &mut self.interviews.slack {
             substitute_option(&mut slack.channel, &mut lookup)?;
         }
@@ -103,14 +111,19 @@ impl RunNamespace {
         substitute_option(&mut self.scm.repository, &mut lookup)?;
         substitute_string_vec(&mut self.prepare.commands, &mut lookup)?;
         for mcp in self.agent.mcps.values_mut() {
+            substitute_string(&mut mcp.name, &mut lookup)?;
             substitute_mcp_transport(&mut mcp.transport, &mut lookup)?;
         }
         for hook in &mut self.hooks {
+            substitute_option_string(&mut hook.name, &mut lookup)?;
             substitute_option_string(&mut hook.command, &mut lookup)?;
+            substitute_option_string(&mut hook.matcher, &mut lookup)?;
             if let Some(hook_type) = &mut hook.hook_type {
                 substitute_hook_type(hook_type, &mut lookup)?;
             }
         }
+        substitute_option_string(&mut self.scm.provider, &mut lookup)?;
+        substitute_string_vec(&mut self.artifacts.include, &mut lookup)?;
         Ok(())
     }
 }
@@ -155,6 +168,9 @@ fn substitute<F>(value: &mut InterpString, lookup: &mut F) -> Result<(), Resolve
 where
     F: FnMut(&str) -> Option<String>,
 {
+    if !value.references_vars() {
+        return Ok(());
+    }
     *value = value.substitute_variables(lookup)?;
     Ok(())
 }
@@ -163,11 +179,18 @@ fn substitute_string<F>(value: &mut String, lookup: &mut F) -> Result<(), Resolv
 where
     F: FnMut(&str) -> Option<String>,
 {
+    if !may_reference_variable(value) {
+        return Ok(());
+    }
     let parsed = InterpString::parse(value);
     if parsed.references_vars() {
         *value = parsed.substitute_variables(lookup)?.as_source();
     }
     Ok(())
+}
+
+fn may_reference_variable(value: &str) -> bool {
+    value.contains("{{") && value.contains("vars.")
 }
 
 fn substitute_option_string<F>(
@@ -225,6 +248,41 @@ where
     }
 }
 
+fn substitute_environment<F>(
+    environment: &mut RunEnvironmentSettings,
+    lookup: &mut F,
+) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    substitute_string(&mut environment.id, lookup)?;
+    substitute_option_string(&mut environment.image.reference, lookup)?;
+    substitute_dockerfile_source(&mut environment.image.dockerfile, lookup)?;
+    substitute_string_vec(&mut environment.network.allow, lookup)?;
+    substitute_string_map(&mut environment.labels, lookup)?;
+    for volume in &mut environment.volumes {
+        substitute_string(&mut volume.id, lookup)?;
+        substitute_string(&mut volume.mount_path, lookup)?;
+        substitute_option_string(&mut volume.subpath, lookup)?;
+    }
+    Ok(())
+}
+
+fn substitute_dockerfile_source<F>(
+    source: &mut Option<DockerfileSource>,
+    lookup: &mut F,
+) -> Result<(), ResolveEnvError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    match source {
+        Some(DockerfileSource::Inline(value) | DockerfileSource::Path { path: value }) => {
+            substitute_string(value, lookup)
+        }
+        None => Ok(()),
+    }
+}
+
 fn substitute_hook_type<F>(hook_type: &mut HookType, lookup: &mut F) -> Result<(), ResolveEnvError>
 where
     F: FnMut(&str) -> Option<String>,
@@ -250,8 +308,10 @@ mod run_namespace_variable_substitution_tests {
     use std::collections::HashMap;
 
     use super::{
-        HookDefinition, HookEvent, HookType, InterpString, McpHttpProtocol, McpServerSettings,
-        McpTransport, RunGoal, RunNamespace, RunPrepareSettings,
+        ArtifactsSettings, DockerfileSource, EnvironmentImageSettings, EnvironmentNetworkMode,
+        EnvironmentNetworkSettings, EnvironmentVolumeSettings, HookDefinition, HookEvent, HookType,
+        InterpString, McpHttpProtocol, McpServerSettings, McpTransport, RunCheckpointSettings,
+        RunEnvironmentSettings, RunGoal, RunNamespace, RunPrepareSettings,
     };
 
     #[test]
@@ -347,6 +407,70 @@ mod run_namespace_variable_substitution_tests {
             }
             other => panic!("expected http hook type, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn substitutes_variables_in_string_backed_settings_families() {
+        let mut run = RunNamespace {
+            checkpoint: RunCheckpointSettings {
+                exclude_globs:  vec!["tmp/{{ vars.ENV }}/**".to_string()],
+                skip_git_hooks: false,
+            },
+            environment: RunEnvironmentSettings {
+                image: EnvironmentImageSettings {
+                    reference:  Some("registry.example/{{ vars.ENV }}:latest".to_string()),
+                    dockerfile: Some(DockerfileSource::Inline(
+                        "FROM registry.example/base:{{ vars.ENV }}".to_string(),
+                    )),
+                },
+                network: EnvironmentNetworkSettings {
+                    mode:  EnvironmentNetworkMode::CidrAllowList,
+                    allow: vec!["{{ vars.CIDR }}".to_string()],
+                },
+                labels: HashMap::from([("deploy-env".to_string(), "{{ vars.ENV }}".to_string())]),
+                volumes: vec![EnvironmentVolumeSettings {
+                    id:         "vol_{{ vars.ENV }}".to_string(),
+                    mount_path: "/mnt/{{ vars.ENV }}".to_string(),
+                    subpath:    Some("cache/{{ vars.ENV }}".to_string()),
+                }],
+                ..RunEnvironmentSettings::default()
+            },
+            artifacts: ArtifactsSettings {
+                include: vec!["reports/{{ vars.ENV }}/**".to_string()],
+            },
+            ..RunNamespace::default()
+        };
+
+        run.substitute_variables(|name| match name {
+            "CIDR" => Some("10.0.0.0/8".to_string()),
+            "ENV" => Some("prod".to_string()),
+            _ => None,
+        })
+        .unwrap();
+
+        assert_eq!(run.checkpoint.exclude_globs, vec!["tmp/prod/**"]);
+        assert_eq!(
+            run.environment.image.reference.as_deref(),
+            Some("registry.example/prod:latest")
+        );
+        assert_eq!(
+            run.environment.image.dockerfile,
+            Some(DockerfileSource::Inline(
+                "FROM registry.example/base:prod".to_string()
+            ))
+        );
+        assert_eq!(run.environment.network.allow, vec!["10.0.0.0/8"]);
+        assert_eq!(
+            run.environment.labels.get("deploy-env").map(String::as_str),
+            Some("prod")
+        );
+        assert_eq!(run.environment.volumes[0].id, "vol_prod");
+        assert_eq!(run.environment.volumes[0].mount_path, "/mnt/prod");
+        assert_eq!(
+            run.environment.volumes[0].subpath.as_deref(),
+            Some("cache/prod")
+        );
+        assert_eq!(run.artifacts.include, vec!["reports/prod/**"]);
     }
 }
 

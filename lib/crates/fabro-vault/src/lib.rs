@@ -9,8 +9,8 @@ use std::{fmt, io};
 
 use chrono::{DateTime, Utc};
 use fabro_static::EnvVars;
-use fabro_types::SecretMetadata;
 pub use fabro_types::SecretType;
+use fabro_types::{SecretMetadata, is_env_style_name};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretEntry {
@@ -164,13 +164,7 @@ impl Vault {
     }
 
     fn validate_env_name(name: &str) -> Result<(), Error> {
-        let mut chars = name.chars();
-        match chars.next() {
-            Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
-            _ => return Err(Error::InvalidName(name.to_string())),
-        }
-
-        if chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        if is_env_style_name(name) {
             Ok(())
         } else {
             Err(Error::InvalidName(name.to_string()))

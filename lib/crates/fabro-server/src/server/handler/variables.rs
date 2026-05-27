@@ -53,8 +53,7 @@ async fn get_variable(
     }
     match state.variables.read().await.get(&name) {
         Some(variable) => (StatusCode::OK, Json(variable)).into_response(),
-        None => ApiError::new(StatusCode::NOT_FOUND, format!("variable not found: {name}"))
-            .into_response(),
+        None => ApiError::not_found(format!("variable not found: {name}")).into_response(),
     }
 }
 
@@ -69,11 +68,7 @@ async fn update_variable(
     let state_for_write = Arc::clone(&state);
     let result = spawn_blocking(move || {
         let mut variables = state_for_write.variables.blocking_write();
-        VariableStore::validate_name(&name)?;
-        if variables.get(&name).is_none() {
-            return Err(VariableError::NotFound(name));
-        }
-        variables.set(&name, &value, description.as_deref())
+        variables.update_existing(&name, &value, description.as_deref())
     })
     .await;
 
@@ -121,8 +116,7 @@ fn variable_error_response(err: VariableError) -> Response {
             ApiError::bad_request("invalid variable name").into_response()
         }
         VariableError::NotFound(name) => {
-            ApiError::new(StatusCode::NOT_FOUND, format!("variable not found: {name}"))
-                .into_response()
+            ApiError::not_found(format!("variable not found: {name}")).into_response()
         }
         VariableError::Io(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
