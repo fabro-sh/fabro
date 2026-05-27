@@ -1,5 +1,3 @@
-use std::any::{TypeId, type_name};
-
 use fabro_api::types::{
     Automation as ApiAutomation, AutomationTarget as ApiAutomationTarget,
     AutomationTrigger as ApiAutomationTrigger,
@@ -11,14 +9,15 @@ use fabro_automation::{
 };
 use serde_json::json;
 
-#[test]
-fn automation_contract_reuses_domain_types() {
-    assert_same_type::<ApiAutomation, Automation>();
-    assert_same_type::<ApiAutomationTarget, AutomationTarget>();
-    assert_same_type::<ApiAutomationTrigger, AutomationTrigger>();
-    assert_same_type::<ApiCreateAutomationRequest, AutomationDraft>();
-    assert_same_type::<ApiReplaceAutomationRequest, AutomationReplace>();
-}
+// Compile-time witnesses that the generated API types resolve to the same
+// types as the `fabro-automation` domain types via `with_replacement(...)`.
+// If progenitor stops reusing the domain type, these functions stop type-
+// checking and the build fails.
+const _: fn(ApiAutomation) -> Automation = |value| value;
+const _: fn(ApiAutomationTarget) -> AutomationTarget = |value| value;
+const _: fn(ApiAutomationTrigger) -> AutomationTrigger = |value| value;
+const _: fn(ApiCreateAutomationRequest) -> AutomationDraft = |value| value;
+const _: fn(ApiReplaceAutomationRequest) -> AutomationReplace = |value| value;
 
 #[test]
 fn automation_response_round_trips_public_json_shape() {
@@ -49,9 +48,6 @@ fn automation_response_round_trips_public_json_shape() {
     });
 
     let api: ApiAutomation = serde_json::from_value(value.clone()).unwrap();
-    let domain: Automation = serde_json::from_value(value.clone()).unwrap();
-
-    assert_eq!(api, domain);
     assert_eq!(serde_json::to_value(api).unwrap(), value);
 }
 
@@ -61,7 +57,7 @@ fn create_automation_request_round_trips_public_json_shape() {
         "id": "nightly-deps",
         "name": "Nightly dependency update",
         "description": "Keep dependencies fresh",
-        "enabled": false,
+        "enabled": true,
         "target": {
             "repository": "fabro-sh/fabro",
             "ref": "main",
@@ -77,9 +73,6 @@ fn create_automation_request_round_trips_public_json_shape() {
     });
 
     let api: ApiCreateAutomationRequest = serde_json::from_value(value.clone()).unwrap();
-    let domain: AutomationDraft = serde_json::from_value(value.clone()).unwrap();
-
-    assert_eq!(api, domain);
     assert_eq!(serde_json::to_value(api).unwrap(), value);
 }
 
@@ -105,18 +98,5 @@ fn replace_automation_request_round_trips_public_json_shape() {
     });
 
     let api: ApiReplaceAutomationRequest = serde_json::from_value(value.clone()).unwrap();
-    let domain: AutomationReplace = serde_json::from_value(value.clone()).unwrap();
-
-    assert_eq!(api, domain);
     assert_eq!(serde_json::to_value(api).unwrap(), value);
-}
-
-fn assert_same_type<Api: 'static, Domain: 'static>() {
-    assert_eq!(
-        TypeId::of::<Api>(),
-        TypeId::of::<Domain>(),
-        "{} should be reused as {}",
-        type_name::<Api>(),
-        type_name::<Domain>(),
-    );
 }

@@ -147,7 +147,7 @@ pub struct AutomationDraft {
     pub name:        String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    #[serde(default = "default_true")]
     pub enabled:     bool,
     pub target:      AutomationTarget,
     pub triggers:    Vec<AutomationTrigger>,
@@ -378,14 +378,6 @@ fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationVal
 
 fn default_true() -> bool {
     true
-}
-
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "serde skip_serializing_if predicates receive references"
-)]
-fn is_true(value: &bool) -> bool {
-    *value
 }
 
 #[cfg(test)]

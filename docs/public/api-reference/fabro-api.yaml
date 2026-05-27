@@ -5108,7 +5108,7 @@ components:
       name: If-Match
       in: header
       required: true
-      description: Current automation revision returned in the `ETag` header or `revision` field.
+      description: Current resource revision used for optimistic concurrency, as returned in the `ETag` response header.
       schema:
         type: string
       example: '"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
@@ -5363,7 +5363,7 @@ components:
         format: uuid
 
     ETag:
-      description: Current automation revision for optimistic concurrency.
+      description: Current resource revision for optimistic concurrency. Supply this value via `If-Match` on subsequent mutating requests.
       schema:
         type: string
       example: '"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'

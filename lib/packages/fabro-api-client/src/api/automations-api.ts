@@ -125,7 +125,7 @@ export const AutomationsApiAxiosParamCreator = function (configuration?: Configu
          * Deletes an automation definition when `If-Match` matches the current automation revision.
          * @summary Delete automation
          * @param {string} id Unique automation identifier.
-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
+         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -257,7 +257,7 @@ export const AutomationsApiAxiosParamCreator = function (configuration?: Configu
          * Replaces an automation definition when `If-Match` matches the current automation revision.
          * @summary Replace automation
          * @param {string} id Unique automation identifier.
-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
+         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
          * @param {ReplaceAutomationRequest} replaceAutomationRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -383,7 +383,7 @@ export const AutomationsApiFp = function(configuration?: Configuration) {
          * Deletes an automation definition when `If-Match` matches the current automation revision.
          * @summary Delete automation
          * @param {string} id Unique automation identifier.
-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
+         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -424,7 +424,7 @@ export const AutomationsApiFp = function(configuration?: Configuration) {
          * Replaces an automation definition when `If-Match` matches the current automation revision.
          * @summary Replace automation
          * @param {string} id Unique automation identifier.
-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
+         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
          * @param {ReplaceAutomationRequest} replaceAutomationRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -481,7 +481,7 @@ export const AutomationsApiFactory = function (configuration?: Configuration, ba
          * Deletes an automation definition when `If-Match` matches the current automation revision.
          * @summary Delete automation
          * @param {string} id Unique automation identifier.
-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
+         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -513,7 +513,7 @@ export const AutomationsApiFactory = function (configuration?: Configuration, ba
          * Replaces an automation definition when `If-Match` matches the current automation revision.
          * @summary Replace automation
          * @param {string} id Unique automation identifier.
-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
+         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
          * @param {ReplaceAutomationRequest} replaceAutomationRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -564,7 +564,7 @@ export class AutomationsApi extends BaseAPI {
      * Deletes an automation definition when `If-Match` matches the current automation revision.
      * @summary Delete automation
      * @param {string} id Unique automation identifier.
-     * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
+     * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -599,7 +599,7 @@ export class AutomationsApi extends BaseAPI {
      * Replaces an automation definition when `If-Match` matches the current automation revision.
      * @summary Replace automation
      * @param {string} id Unique automation identifier.
-     * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
+     * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
      * @param {ReplaceAutomationRequest} replaceAutomationRequest
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
