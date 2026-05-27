@@ -9,6 +9,7 @@ use fabro_api::types::RunManifest;
 use fabro_automation::{AutomationId, AutomationTarget};
 use fabro_manifest::ManifestBuildInput;
 use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId};
+use fabro_util::error::collect_chain;
 use tokio::process::Command;
 use tokio::{fs, task, time};
 
@@ -18,7 +19,7 @@ const GIT_CHECKOUT_TIMEOUT: Duration = Duration::from_secs(30);
 const GIT_REV_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AutomationRunMaterializeInput {
+pub(crate) struct AutomationRunMaterializeInput {
     pub automation_id:      AutomationId,
     pub target:             AutomationTarget,
     pub run_id:             RunId,
@@ -108,7 +109,9 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
             self.http_client.clone(),
         )
         .await
-        .map_err(|err| AutomationRunMaterializeError::CloneFailed(err.to_string()))?;
+        .map_err(|err| {
+            AutomationRunMaterializeError::CloneFailed(render_error_chain(err.as_ref()))
+        })?;
 
         run_git_plan(build_clone_plan(&clone_url, &checkout_dir, auth.as_ref())).await?;
         run_git_plan(build_fetch_ref_plan(
@@ -213,9 +216,10 @@ impl GitAuthConfig {
         let username = username
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "x-access-token".to_string());
-        let extraheader = basic_auth_header(&username, &password);
+        let encoded_credentials = BASE64_STANDARD.encode(format!("{username}:{password}"));
+        let extraheader = basic_auth_header_from_encoded(&encoded_credentials);
         Self {
-            sensitive_values: vec![password, extraheader.clone()],
+            sensitive_values: vec![password, encoded_credentials, extraheader.clone()],
             extraheader:      Some(extraheader),
         }
     }
@@ -249,11 +253,9 @@ async fn resolve_git_auth_config(
         return Ok(None);
     };
     let context = match http_client {
-        Some(client) => fabro_github::GitHubContext::with_http_client(
-            credentials,
-            github_api_base_url,
-            client,
-        ),
+        Some(client) => {
+            fabro_github::GitHubContext::with_http_client(credentials, github_api_base_url, client)
+        }
         None => fabro_github::GitHubContext::new(credentials, github_api_base_url),
     };
     let (username, password) =
@@ -262,8 +264,11 @@ async fn resolve_git_auth_config(
 }
 
 fn basic_auth_header(username: &str, password: &str) -> String {
-    let encoded = BASE64_STANDARD.encode(format!("{username}:{password}"));
-    format!("AUTHORIZATION: basic {encoded}")
+    basic_auth_header_from_encoded(&BASE64_STANDARD.encode(format!("{username}:{password}")))
+}
+
+fn basic_auth_header_from_encoded(encoded_credentials: &str) -> String {
+    format!("AUTHORIZATION: basic {encoded_credentials}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -341,6 +346,7 @@ fn build_fetch_ref_plan(
             "--depth".to_string(),
             "1".to_string(),
             "origin".to_string(),
+            "--".to_string(),
             ref_selector.to_string(),
         ],
         GIT_FETCH_TIMEOUT,
@@ -429,6 +435,10 @@ fn redact_git_output(text: &str, sensitive_values: &[String]) -> String {
     redacted
 }
 
+fn render_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    collect_chain(error).join(": ")
+}
+
 #[derive(Debug)]
 pub(crate) struct ManifestFromCheckoutInput {
     input:           AutomationRunMaterializeInput,
@@ -483,9 +493,9 @@ fn manifest_build_error(error: &anyhow::Error) -> AutomationRunMaterializeError 
             .downcast_ref::<fabro_config::Error>()
             .is_some_and(|err| matches!(err, fabro_config::Error::WorkflowNotFound(_)))
     }) {
-        AutomationRunMaterializeError::WorkflowNotFound(error.to_string())
+        AutomationRunMaterializeError::WorkflowNotFound(render_error_chain(error.as_ref()))
     } else {
-        AutomationRunMaterializeError::Manifest(error.to_string())
+        AutomationRunMaterializeError::Manifest(render_error_chain(error.as_ref()))
     }
 }
 
@@ -525,7 +535,7 @@ impl TestAutomationRunMaterializer {
         }
     }
 
-    pub fn captured_inputs(&self) -> Vec<AutomationRunMaterializeInput> {
+    pub(crate) fn captured_inputs(&self) -> Vec<AutomationRunMaterializeInput> {
         self.inner
             .lock()
             .expect("test automation materializer lock poisoned")
@@ -638,6 +648,7 @@ mod tests {
             "--depth",
             "1",
             "origin",
+            "--",
             "feature/materialize",
         ]);
         assert_eq!(fetch.current_dir.as_deref(), Some(checkout_dir.as_path()));
@@ -673,6 +684,11 @@ mod tests {
         assert!(
             !redacted.contains(&basic),
             "basic header leaked: {redacted}"
+        );
+        let encoded_secret = BASE64_STANDARD.encode(format!("x-access-token:{secret}"));
+        assert!(
+            !redacted.contains(&encoded_secret),
+            "encoded credential leaked: {redacted}"
         );
         assert!(
             redacted.contains("REDACTED"),
@@ -732,11 +748,11 @@ mod tests {
 
         let materialized = build_manifest_from_checkout(ManifestFromCheckoutInput {
             input: AutomationRunMaterializeInput {
-                automation_id:      AutomationId::new("nightly").unwrap(),
-                target:             target("fabro-sh/fabro", "main", "demo"),
+                automation_id: AutomationId::new("nightly").unwrap(),
+                target: target("fabro-sh/fabro", "main", "demo"),
                 run_id,
                 user_settings_path: user_settings_path.clone(),
-                temp_root:          temp.path().to_path_buf(),
+                temp_root: temp.path().to_path_buf(),
             },
             checkout_dir: checkout.clone(),
             repo,
