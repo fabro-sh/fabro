@@ -61,6 +61,7 @@ anyhow.workspace = true
 miette.workspace = true
 dotenvy.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
@@ -128,3 +129,4 @@ fabro-test = { workspace = true }
 fabro-macros = { path = "../fabro-macros" }
 hkdf.workspace = true
 reqwest = { workspace = true, features = ["cookies"] }
+tokio = { workspace = true, features = ["test-util", "macros"] }

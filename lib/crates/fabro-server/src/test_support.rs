@@ -236,6 +236,8 @@ impl TestAppStateBuilder {
             ),
             sandbox_provider_registry: self.sandbox_provider_registry,
             shutdown: CancellationToken::new(),
+            #[cfg(test)]
+            worker_control_bus: None,
         })
         .expect("test app state should build")
     }

@@ -34,6 +34,22 @@ impl WorkerControlEnvelope {
     }
 
     #[must_use]
+    pub fn pause_run() -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::RunPause,
+        }
+    }
+
+    #[must_use]
+    pub fn unpause_run() -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::RunUnpause,
+        }
+    }
+
+    #[must_use]
     pub fn steer(text: impl Into<String>, actor: Principal) -> Self {
         Self {
             v:       WORKER_CONTROL_PROTOCOL_VERSION,
@@ -121,6 +137,10 @@ pub enum WorkerControlMessage {
     },
     #[serde(rename = "run.cancel")]
     RunCancel,
+    #[serde(rename = "run.pause")]
+    RunPause,
+    #[serde(rename = "run.unpause")]
+    RunUnpause,
     #[serde(rename = "run.steer")]
     Steer { text: String, actor: Principal },
     #[serde(rename = "run.interrupt")]
@@ -145,6 +165,12 @@ pub enum WorkerControlMessage {
     },
     #[serde(rename = "pair.end")]
     PairEnd { pair_id: PairId, actor: Principal },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerControlDeliveryFrame {
+    pub id:       String,
+    pub envelope: WorkerControlEnvelope,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +250,26 @@ mod tests {
         let envelope = WorkerControlEnvelope::cancel_run();
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(json, r#"{"v":1,"type":"run.cancel"}"#);
+
+        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn pause_run_round_trips_through_json() {
+        let envelope = WorkerControlEnvelope::pause_run();
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(json, r#"{"v":1,"type":"run.pause"}"#);
+
+        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn unpause_run_round_trips_through_json() {
+        let envelope = WorkerControlEnvelope::unpause_run();
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(json, r#"{"v":1,"type":"run.unpause"}"#);
 
         let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, envelope);
@@ -325,5 +371,21 @@ mod tests {
         let parsed: WorkerControlEnvelope =
             serde_json::from_str(&serde_json::to_string(&end).unwrap()).unwrap();
         assert_eq!(parsed, end);
+    }
+
+    #[test]
+    fn delivery_frame_round_trips_through_json() {
+        let frame = WorkerControlDeliveryFrame {
+            id:       "local:42".to_string(),
+            envelope: WorkerControlEnvelope::cancel_run(),
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert_eq!(
+            json,
+            r#"{"id":"local:42","envelope":{"v":1,"type":"run.cancel"}}"#
+        );
+
+        let parsed: WorkerControlDeliveryFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, frame);
     }
 }

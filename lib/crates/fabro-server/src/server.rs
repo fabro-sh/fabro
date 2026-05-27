@@ -123,7 +123,7 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{ChildStderr, ChildStdin, Command};
+use tokio::process::{ChildStderr, Command};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{
     Mutex as AsyncMutex, Notify, OwnedMutexGuard, RwLock as AsyncRwLock, Semaphore, broadcast,
@@ -148,14 +148,15 @@ use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunManagementTarget,
-    RequireRunScoped, RequireRunStageScoped, RequireStageArtifact, RequiredUser,
-    principal_middleware,
+    RequireRunScoped, RequireRunStageScoped, RequireStageArtifact, RequireWorkerRunScoped,
+    RequiredUser, principal_middleware,
 };
 use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, new_files_in_flight};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
 use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
 use crate::startup::load_startup_vault;
+use crate::worker_control::{LocalWorkerControlBus, WorkerControlBus, WorkerControlBusError};
 use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
 use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
@@ -267,7 +268,6 @@ enum ExecutionResult {
 
 const WORKER_CANCEL_GRACE: Duration = Duration::from_secs(5);
 const TERMINAL_DELETE_WORKER_GRACE: Duration = Duration::from_millis(50);
-const WORKER_CONTROL_QUEUE_CAPACITY: usize = 8;
 const WORKER_CONTROL_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
 /// Per-model billing totals.
 #[derive(Default)]
@@ -289,8 +289,9 @@ pub(crate) type RegistryFactoryOverride =
 
 #[derive(Clone)]
 enum RunAnswerTransport {
-    Subprocess {
-        control_tx: mpsc::Sender<WorkerControlEnvelope>,
+    Worker {
+        run_id: RunId,
+        bus:    Arc<dyn WorkerControlBus>,
     },
     InProcess {
         interviewer:  Arc<ControlInterviewer>,
@@ -312,18 +313,46 @@ enum PairTransportError {
 }
 
 impl RunAnswerTransport {
+    async fn publish_worker_control(
+        run_id: RunId,
+        bus: &Arc<dyn WorkerControlBus>,
+        message: WorkerControlEnvelope,
+    ) -> Result<(), WorkerControlBusError> {
+        timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, bus.publish(run_id, message))
+            .await
+            .map_err(|_| WorkerControlBusError::PublishTimeout)?
+            .map(|_| ())
+    }
+
+    fn answer_error_from_bus(error: &WorkerControlBusError) -> AnswerTransportError {
+        match error {
+            WorkerControlBusError::PublishTimeout => AnswerTransportError::Timeout,
+            WorkerControlBusError::Closed
+            | WorkerControlBusError::Unavailable
+            | WorkerControlBusError::InvalidCursor { .. } => AnswerTransportError::Closed,
+        }
+    }
+
+    fn pair_error_from_bus(error: &WorkerControlBusError) -> PairTransportError {
+        match error {
+            WorkerControlBusError::PublishTimeout => PairTransportError::Timeout,
+            WorkerControlBusError::Closed
+            | WorkerControlBusError::Unavailable
+            | WorkerControlBusError::InvalidCursor { .. } => PairTransportError::Closed,
+        }
+    }
+
     async fn submit(
         &self,
         qid: &str,
         submission: AnswerSubmission,
     ) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Subprocess { control_tx } => {
+            Self::Worker { run_id, bus } => {
                 let message = WorkerControlEnvelope::interview_answer(qid.to_string(), submission);
-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                Self::publish_worker_control(*run_id, bus, message)
                     .await
-                    .map_err(|_| AnswerTransportError::Timeout)?
-                    .map_err(|_| AnswerTransportError::Closed)
+                    .map_err(|err| Self::answer_error_from_bus(&err))
             }
             Self::InProcess { interviewer, .. } => interviewer
                 .submit(qid, submission)
@@ -334,12 +363,11 @@ impl RunAnswerTransport {
 
     async fn cancel_run(&self) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Subprocess { control_tx } => {
+            Self::Worker { run_id, bus } => {
                 let message = WorkerControlEnvelope::cancel_run();
-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                Self::publish_worker_control(*run_id, bus, message)
                     .await
-                    .map_err(|_| AnswerTransportError::Timeout)?
-                    .map_err(|_| AnswerTransportError::Closed)
+                    .map_err(|err| Self::answer_error_from_bus(&err))
             }
             Self::InProcess { interviewer, .. } => {
                 interviewer.cancel_all().await;
@@ -352,12 +380,11 @@ impl RunAnswerTransport {
     /// in-process steering hub.
     async fn steer(&self, text: String, actor: Principal) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Subprocess { control_tx } => {
+            Self::Worker { run_id, bus } => {
                 let message = WorkerControlEnvelope::steer(text, actor);
-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                Self::publish_worker_control(*run_id, bus, message)
                     .await
-                    .map_err(|_| AnswerTransportError::Timeout)?
-                    .map_err(|_| AnswerTransportError::Closed)
+                    .map_err(|err| Self::answer_error_from_bus(&err))
             }
             Self::InProcess { steering_hub, .. } => {
                 steering_hub.deliver_steer(text, Some(actor));
@@ -368,12 +395,11 @@ impl RunAnswerTransport {
 
     async fn interrupt(&self, actor: Principal) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Subprocess { control_tx } => {
+            Self::Worker { run_id, bus } => {
                 let message = WorkerControlEnvelope::interrupt(actor);
-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                Self::publish_worker_control(*run_id, bus, message)
                     .await
-                    .map_err(|_| AnswerTransportError::Timeout)?
-                    .map_err(|_| AnswerTransportError::Closed)
+                    .map_err(|err| Self::answer_error_from_bus(&err))
             }
             Self::InProcess { steering_hub, .. } => {
                 steering_hub.interrupt(Some(&actor));
@@ -388,12 +414,11 @@ impl RunAnswerTransport {
         actor: Principal,
     ) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Subprocess { control_tx } => {
+            Self::Worker { run_id, bus } => {
                 let message = WorkerControlEnvelope::interrupt_then_steer(text, actor);
-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                Self::publish_worker_control(*run_id, bus, message)
                     .await
-                    .map_err(|_| AnswerTransportError::Timeout)?
-                    .map_err(|_| AnswerTransportError::Closed)
+                    .map_err(|err| Self::answer_error_from_bus(&err))
             }
             Self::InProcess { steering_hub, .. } => {
                 steering_hub.interrupt_then_steer(&text, Some(&actor));
@@ -410,12 +435,14 @@ impl RunAnswerTransport {
         actor: Principal,
     ) -> Result<(), PairTransportError> {
         match self {
-            Self::Subprocess { control_tx } => {
+            Self::Worker {
+                run_id: worker_run_id,
+                bus,
+            } => {
                 let message = WorkerControlEnvelope::start_pair(run_id, pair_id, target, actor);
-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                Self::publish_worker_control(*worker_run_id, bus, message)
                     .await
-                    .map_err(|_| PairTransportError::Timeout)?
-                    .map_err(|_| PairTransportError::Closed)
+                    .map_err(|err| Self::pair_error_from_bus(&err))
             }
             Self::InProcess { steering_hub, .. } => steering_hub
                 .start_pair(run_id, pair_id, target, Some(actor))
@@ -433,7 +460,7 @@ impl RunAnswerTransport {
         actor: Principal,
     ) -> Result<(), PairTransportError> {
         match self {
-            Self::Subprocess { control_tx } => {
+            Self::Worker { run_id, bus } => {
                 let message = WorkerControlEnvelope::pair_message(
                     pair_id,
                     message_id,
@@ -441,10 +468,9 @@ impl RunAnswerTransport {
                     client_message_id.clone(),
                     actor,
                 );
-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                Self::publish_worker_control(*run_id, bus, message)
                     .await
-                    .map_err(|_| PairTransportError::Timeout)?
-                    .map_err(|_| PairTransportError::Closed)
+                    .map_err(|err| Self::pair_error_from_bus(&err))
             }
             Self::InProcess { steering_hub, .. } => steering_hub
                 .send_pair_message(pair_id, message_id, text, client_message_id, Some(actor))
@@ -455,17 +481,40 @@ impl RunAnswerTransport {
 
     async fn end_pair(&self, pair_id: PairId, actor: Principal) -> Result<(), PairTransportError> {
         match self {
-            Self::Subprocess { control_tx } => {
+            Self::Worker { run_id, bus } => {
                 let message = WorkerControlEnvelope::end_pair(pair_id, actor);
-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                Self::publish_worker_control(*run_id, bus, message)
                     .await
-                    .map_err(|_| PairTransportError::Timeout)?
-                    .map_err(|_| PairTransportError::Closed)
+                    .map_err(|err| Self::pair_error_from_bus(&err))
             }
             Self::InProcess { steering_hub, .. } => steering_hub
                 .end_pair(pair_id, Some(actor))
                 .map(|_| ())
                 .map_err(PairTransportError::Control),
+        }
+    }
+
+    async fn pause_run(&self) -> Result<(), AnswerTransportError> {
+        match self {
+            Self::Worker { run_id, bus } => {
+                let message = WorkerControlEnvelope::pause_run();
+                Self::publish_worker_control(*run_id, bus, message)
+                    .await
+                    .map_err(|err| Self::answer_error_from_bus(&err))
+            }
+            Self::InProcess { .. } => Err(AnswerTransportError::Closed),
+        }
+    }
+
+    async fn unpause_run(&self) -> Result<(), AnswerTransportError> {
+        match self {
+            Self::Worker { run_id, bus } => {
+                let message = WorkerControlEnvelope::unpause_run();
+                Self::publish_worker_control(*run_id, bus, message)
+                    .await
+                    .map_err(|err| Self::answer_error_from_bus(&err))
+            }
+            Self::InProcess { .. } => Err(AnswerTransportError::Closed),
         }
     }
 }
@@ -1011,6 +1060,7 @@ pub struct AppState {
     started_at: Instant,
     resource_sampler: resource_sampler::ResourceSampler,
     max_concurrent_runs: usize,
+    pub(crate) worker_control_bus: Arc<dyn WorkerControlBus>,
     scheduler_notify: Notify,
     global_event_tx: broadcast::Sender<EventEnvelope>,
     /// Per-run coalescing registry for `GET /runs/{id}/files`. Concurrent
@@ -1137,6 +1187,8 @@ pub(crate) struct AppStateConfig {
     pub(crate) http_client:               Option<fabro_http::HttpClient>,
     pub(crate) sandbox_provider_registry: Option<SandboxProviderRegistry>,
     pub(crate) shutdown:                  CancellationToken,
+    #[cfg(test)]
+    pub(crate) worker_control_bus:        Option<Arc<dyn WorkerControlBus>>,
 }
 
 #[derive(Clone)]
@@ -2180,6 +2232,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         http_client,
         sandbox_provider_registry,
         shutdown,
+        #[cfg(test)]
+        worker_control_bus,
     } = config;
 
     let variables = VariableStore::load(variables_path).context("load variables")?;
@@ -2257,6 +2311,16 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     };
     let worker_tokens = worker_token_keys_from_server_secrets(&server_secrets)?;
     let github_api_base_url = github_api_base_url.unwrap_or_else(fabro_github::github_api_base_url);
+    let worker_control_bus: Arc<dyn WorkerControlBus> = {
+        #[cfg(test)]
+        {
+            worker_control_bus.unwrap_or_else(|| Arc::new(LocalWorkerControlBus::new()))
+        }
+        #[cfg(not(test))]
+        {
+            Arc::new(LocalWorkerControlBus::new())
+        }
+    };
     Ok(Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_billing: Mutex::new(BillingAccumulator::default()),
@@ -2267,6 +2331,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         started_at: Instant::now(),
         resource_sampler: resource_sampler::ResourceSampler::new(),
         max_concurrent_runs,
+        worker_control_bus,
         scheduler_notify: Notify::new(),
         global_event_tx,
         files_in_flight: new_files_in_flight(),
@@ -2715,6 +2780,13 @@ fn clear_live_run_state(run: &mut ManagedRun) {
     run.worker_pgid = None;
 }
 
+fn cleanup_worker_control_bus_for_run(state: &AppState, run_id: RunId) {
+    let bus = Arc::clone(&state.worker_control_bus);
+    tokio::spawn(async move {
+        bus.cleanup_run(run_id).await;
+    });
+}
+
 fn reconcile_live_interview_state_for_event(run: &mut ManagedRun, event: &RunEvent) {
     match &event.body {
         EventBody::InterviewCompleted(props) => {
@@ -2962,6 +3034,7 @@ async fn finish_cancelled_run_before_execution(state: &Arc<AppState>, run_id: Ru
         clear_live_run_state(managed_run);
     }
     drop(runs);
+    cleanup_worker_control_bus_for_run(state.as_ref(), run_id);
     state.scheduler_notify.notify_one();
 }
 
@@ -3097,6 +3170,7 @@ fn fail_managed_run(state: &Arc<AppState>, run_id: RunId, reason: FailureReason,
         managed_run.error = Some(message);
         clear_live_run_state(managed_run);
     }
+    cleanup_worker_control_bus_for_run(state.as_ref(), run_id);
 }
 
 fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent) {
@@ -3172,6 +3246,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             managed_run.active_api_targets.clear();
             managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_stages.clear();
+            cleanup_worker_control_bus_for_run(state, run_id);
         }
         EventBody::RunFailed(props) => {
             managed_run.status = RunStatus::Failed {
@@ -3184,6 +3259,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             managed_run.active_api_targets.clear();
             managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_stages.clear();
+            cleanup_worker_control_bus_for_run(state, run_id);
         }
         // Track active agent sessions by steerability. Activated/deactivated
         // are leased by session id so stale deactivations cannot clear a newer
@@ -3268,20 +3344,6 @@ async fn drain_worker_stderr(run_id: RunId, stderr: ChildStderr) -> anyhow::Resu
     Ok(())
 }
 
-async fn pump_worker_control_jsonl(
-    mut stdin: ChildStdin,
-    mut control_rx: mpsc::Receiver<WorkerControlEnvelope>,
-) -> anyhow::Result<()> {
-    while let Some(message) = control_rx.recv().await {
-        let mut line = serde_json::to_vec(&message)?;
-        line.push(b'\n');
-        stdin.write_all(&line).await?;
-        stdin.flush().await?;
-    }
-
-    Ok(())
-}
-
 async fn append_worker_exit_failure(
     run_store: &fabro_store::RunDatabase,
     run_id: RunId,
@@ -3318,6 +3380,21 @@ async fn append_worker_exit_failure(
         tracing::warn!(run_id = %run_id, error = %err, "Failed to append worker exit failure");
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkerCommandStdin {
+    Null,
+}
+
+impl WorkerCommandStdin {
+    fn stdio(self) -> Stdio {
+        match self {
+            Self::Null => Stdio::null(),
+        }
+    }
+}
+
+const WORKER_COMMAND_STDIN: WorkerCommandStdin = WorkerCommandStdin::Null;
 
 #[expect(
     clippy::disallowed_methods,
@@ -3365,7 +3442,7 @@ fn worker_command(
         .arg(run_id.to_string())
         .arg("--mode")
         .arg(worker_mode_arg(mode))
-        .stdin(Stdio::piped())
+        .stdin(WORKER_COMMAND_STDIN.stdio())
         .stdout(worker_stdout)
         .stderr(Stdio::piped());
 
@@ -4044,25 +4121,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     }
 
-    let Some(stdin) = child.stdin.take() else {
-        let message = "Worker stdin pipe was unavailable".to_string();
-        tracing::error!(run_id = %run_id, "{message}");
-        let _ = child.start_kill();
-        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &WorkflowError::engine(message.clone()),
-            fabro_types::RunTiming::default(),
-            FailureReason::LaunchFailed,
-            None,
-            None,
-            None,
-            None,
-        );
-        let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
-        fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
-        state.scheduler_notify.notify_one();
-        return;
-    };
-
     let Some(stderr) = child.stderr.take() else {
         let message = "Worker stderr pipe was unavailable".to_string();
         tracing::error!(run_id = %run_id, "{message}");
@@ -4082,15 +4140,16 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         return;
     };
 
-    let (control_tx, control_rx) = mpsc::channel(WORKER_CONTROL_QUEUE_CAPACITY);
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         if let Some(managed_run) = runs.get_mut(&run_id) {
-            managed_run.answer_transport = Some(RunAnswerTransport::Subprocess { control_tx });
+            managed_run.answer_transport = Some(RunAnswerTransport::Worker {
+                run_id,
+                bus: Arc::clone(&state.worker_control_bus),
+            });
         }
     }
 
-    let control_task = tokio::spawn(pump_worker_control_jsonl(stdin, control_rx));
     let stderr_task = tokio::spawn(drain_worker_stderr(run_id, stderr));
 
     let wait_status = match child.wait().await {
@@ -4114,9 +4173,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
-
-    control_task.abort();
-    let _ = control_task.await;
 
     match stderr_task.await {
         Ok(Ok(())) => {}

@@ -814,6 +814,8 @@ where
         http_client: None,
         sandbox_provider_registry: None,
         shutdown: shutdown.clone(),
+        #[cfg(test)]
+        worker_control_bus: None,
     })?;
     let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;
     if reconciled > 0 {
