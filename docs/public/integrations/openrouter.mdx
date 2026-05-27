@@ -23,6 +23,20 @@ enabled = true
 
 That's the entire configuration — Fabro ships the model catalog, base URL, and attribution headers for you.
 
+## Data handling
+
+Requests sent through OpenRouter pass through their infrastructure before reaching the underlying model. Prompt content, completions, and metadata are subject to OpenRouter's logging, moderation, and data-retention policies — review them at [openrouter.ai/docs/features/privacy-and-logging](https://openrouter.ai/docs/features/privacy-and-logging) before sending sensitive prompts. You can also use OpenRouter's per-request privacy controls (`provider.data_collection` and provider routing filters) via the `provider_options.openrouter` field described below.
+
+## Attribution (optional, opt-in)
+
+OpenRouter recognizes two attribution headers — `HTTP-Referer` (your site URL) and `X-Title` (your app name) — that surface your install on OpenRouter's public leaderboard. Fabro does NOT send these by default, so self-hosted installations stay anonymous. To opt in, add them to your settings:
+
+```toml title="settings.toml"
+[llm.providers.openrouter.extra_headers]
+"HTTP-Referer" = { literal = "https://your-site.example" }
+"X-Title" = { literal = "Your App" }
+```
+
 ## Configure credentials
 
 For server-backed runs, store `OPENROUTER_API_KEY` in the Fabro server vault:

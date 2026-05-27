@@ -9,10 +9,15 @@ enabled = false
 [providers.openrouter.auth]
 credentials = ["env:OPENROUTER_API_KEY", "vault:OPENROUTER_API_KEY"]
 
-[providers.openrouter.extra_headers]
-"HTTP-Referer" = { literal = "https://fabro.sh" }
-"X-Title" = { literal = "Fabro" }
-
+# Attribution headers (HTTP-Referer, X-Title) are NOT sent by default.
+# Self-hosted Fabro installations stay anonymous on OpenRouter's public
+# leaderboard unless the operator opts in. To advertise, add to
+# settings.toml:
+#
+#   [llm.providers.openrouter.extra_headers]
+#   "HTTP-Referer" = { literal = "https://your-site.example" }
+#   "X-Title" = { literal = "Your App" }
+#
 # To enable OpenRouter, add the following to ~/.fabro/settings.toml:
 #
 # [llm.providers.openrouter]
