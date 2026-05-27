@@ -30,9 +30,7 @@ use ulid::Ulid;
 
 use crate::auth;
 use crate::automation_materializer::AutomationRunMaterializer;
-pub use crate::automation_materializer::{
-    TestAutomationRunMaterializeInput, TestAutomationRunMaterializer,
-};
+pub use crate::automation_materializer::TestAutomationRunMaterializer;
 use crate::ip_allowlist::IpAllowlistConfig;
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 #[cfg(test)]

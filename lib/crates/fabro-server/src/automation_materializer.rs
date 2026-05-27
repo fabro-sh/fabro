@@ -7,7 +7,6 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_api::types::RunManifest;
 use fabro_automation::{AutomationId, AutomationTarget};
-use fabro_config::project::WorkflowLocation;
 use fabro_manifest::ManifestBuildInput;
 use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId};
 use tokio::process::Command;
@@ -18,8 +17,8 @@ const GIT_FETCH_TIMEOUT: Duration = Duration::from_mins(1);
 const GIT_CHECKOUT_TIMEOUT: Duration = Duration::from_secs(30);
 const GIT_REV_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Clone)]
-pub(crate) struct AutomationRunMaterializeInput {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutomationRunMaterializeInput {
     pub automation_id:      AutomationId,
     pub target:             AutomationTarget,
     pub run_id:             RunId,
@@ -101,6 +100,7 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
                 ))
             })?;
         let checkout_dir = temp_dir.path().join("repo");
+        let clone_url = github_clone_url(&repo);
         let auth = resolve_git_auth_config(
             self.github_credentials.as_ref(),
             &repo,
@@ -110,8 +110,9 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
         .await
         .map_err(|err| AutomationRunMaterializeError::CloneFailed(err.to_string()))?;
 
-        run_git_plan(build_clone_plan(&repo, &checkout_dir, auth.as_ref())).await?;
+        run_git_plan(build_clone_plan(&clone_url, &checkout_dir, auth.as_ref())).await?;
         run_git_plan(build_fetch_ref_plan(
+            &clone_url,
             &checkout_dir,
             &input.target.ref_selector,
             auth.as_ref(),
@@ -123,13 +124,10 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
             .map(|stdout| String::from_utf8_lossy(&stdout).trim().to_string())?;
 
         let manifest_input = ManifestFromCheckoutInput {
-            automation_id: input.automation_id,
-            target: input.target,
-            run_id: input.run_id,
-            user_settings_path: input.user_settings_path,
+            input,
             checkout_dir,
             repo,
-            checked_out_sha: (!checked_out_sha.is_empty()).then_some(checked_out_sha),
+            checked_out_sha: Some(checked_out_sha),
         };
         task::spawn_blocking(move || build_manifest_from_checkout(manifest_input))
             .await
@@ -200,46 +198,39 @@ fn github_metadata_url(repo: &GithubRepository) -> String {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct GitAuthConfig {
-    username:         Option<String>,
-    password:         Option<String>,
+    extraheader:      Option<String>,
     sensitive_values: Vec<String>,
 }
 
 impl GitAuthConfig {
     fn new(username: Option<String>, password: Option<String>) -> Self {
-        let mut sensitive_values = Vec::new();
-        if let Some(password) = password.as_ref().filter(|value| !value.is_empty()) {
-            sensitive_values.push(password.clone());
-            let username = username.as_deref().unwrap_or("x-access-token");
-            sensitive_values.push(basic_auth_header(username, password));
-        }
+        let Some(password) = password.filter(|value| !value.is_empty()) else {
+            return Self {
+                extraheader:      None,
+                sensitive_values: Vec::new(),
+            };
+        };
+        let username = username
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "x-access-token".to_string());
+        let extraheader = basic_auth_header(&username, &password);
         Self {
-            username,
-            password,
-            sensitive_values,
+            sensitive_values: vec![password, extraheader.clone()],
+            extraheader:      Some(extraheader),
         }
     }
 
     fn git_env(&self, clone_url: &str) -> Vec<(String, String)> {
-        let Some(password) = self.password.as_deref().filter(|value| !value.is_empty()) else {
+        let Some(extraheader) = self.extraheader.as_ref() else {
             return Vec::new();
-        };
-        let username = self.username.as_deref().unwrap_or("x-access-token");
-        let config_url = if clone_url.is_empty() {
-            "https://github.com/"
-        } else {
-            clone_url
         };
         vec![
             ("GIT_CONFIG_COUNT".to_string(), "1".to_string()),
             (
                 "GIT_CONFIG_KEY_0".to_string(),
-                format!("http.{config_url}.extraheader"),
+                format!("http.{clone_url}.extraheader"),
             ),
-            (
-                "GIT_CONFIG_VALUE_0".to_string(),
-                basic_auth_header(username, password),
-            ),
+            ("GIT_CONFIG_VALUE_0".to_string(), extraheader.clone()),
         ]
     }
 
@@ -257,17 +248,16 @@ async fn resolve_git_auth_config(
     let Some(credentials) = credentials else {
         return Ok(None);
     };
-    let (username, password) = if let Some(http_client) = http_client {
-        let context = fabro_github::GitHubContext::with_http_client(
+    let context = match http_client {
+        Some(client) => fabro_github::GitHubContext::with_http_client(
             credentials,
             github_api_base_url,
-            http_client,
-        );
-        fabro_github::resolve_clone_credentials(&context, &repo.owner, &repo.name).await?
-    } else {
-        let context = fabro_github::GitHubContext::new(credentials, github_api_base_url);
-        fabro_github::resolve_clone_credentials(&context, &repo.owner, &repo.name).await?
+            client,
+        ),
+        None => fabro_github::GitHubContext::new(credentials, github_api_base_url),
     };
+    let (username, password) =
+        fabro_github::resolve_clone_credentials(&context, &repo.owner, &repo.name).await?;
     Ok(Some(GitAuthConfig::new(username, password)))
 }
 
@@ -321,26 +311,26 @@ impl GitCommandPlan {
 }
 
 fn build_clone_plan(
-    repo: &GithubRepository,
+    clone_url: &str,
     checkout_dir: &Path,
     auth: Option<&GitAuthConfig>,
 ) -> GitCommandPlan {
-    let clone_url = github_clone_url(repo);
     GitCommandPlan::new(
         [
             "clone".to_string(),
             "--depth".to_string(),
             "1".to_string(),
             "--no-checkout".to_string(),
-            clone_url.clone(),
+            clone_url.to_string(),
             checkout_dir.display().to_string(),
         ],
         GIT_CLONE_TIMEOUT,
     )
-    .with_auth(&clone_url, auth)
+    .with_auth(clone_url, auth)
 }
 
 fn build_fetch_ref_plan(
+    clone_url: &str,
     checkout_dir: &Path,
     ref_selector: &str,
     auth: Option<&GitAuthConfig>,
@@ -356,7 +346,7 @@ fn build_fetch_ref_plan(
         GIT_FETCH_TIMEOUT,
     )
     .current_dir(checkout_dir)
-    .with_auth("", auth)
+    .with_auth(clone_url, auth)
 }
 
 fn build_checkout_ref_plan(checkout_dir: &Path) -> GitCommandPlan {
@@ -434,32 +424,31 @@ fn redact_git_output(text: &str, sensitive_values: &[String]) -> String {
         .map(String::as_str)
         .filter(|value| !value.is_empty())
     {
-        redacted = redacted.replace(value, "[REDACTED]");
+        redacted = redacted.replace(value, "REDACTED");
     }
     redacted
 }
 
 #[derive(Debug)]
 pub(crate) struct ManifestFromCheckoutInput {
-    automation_id:      AutomationId,
-    target:             AutomationTarget,
-    run_id:             RunId,
-    user_settings_path: PathBuf,
-    checkout_dir:       PathBuf,
-    repo:               GithubRepository,
-    checked_out_sha:    Option<String>,
+    input:           AutomationRunMaterializeInput,
+    checkout_dir:    PathBuf,
+    repo:            GithubRepository,
+    checked_out_sha: Option<String>,
 }
 
 fn build_manifest_from_checkout(
-    input: ManifestFromCheckoutInput,
+    args: ManifestFromCheckoutInput,
 ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError> {
-    let workflow_selector = PathBuf::from(&input.target.workflow);
-    WorkflowLocation::resolve(&workflow_selector, &input.checkout_dir)
-        .map_err(|err| AutomationRunMaterializeError::WorkflowNotFound(err.to_string()))?;
-
+    let ManifestFromCheckoutInput {
+        input,
+        checkout_dir,
+        repo,
+        checked_out_sha,
+    } = args;
     let built = fabro_manifest::build_run_manifest(ManifestBuildInput {
         workflow: input.target.workflow.as_str().into(),
-        cwd: input.checkout_dir.clone(),
+        cwd: checkout_dir,
         run_id: Some(input.run_id),
         user_settings_path: Some(input.user_settings_path),
         ..ManifestBuildInput::default()
@@ -468,9 +457,9 @@ fn build_manifest_from_checkout(
 
     let mut manifest = built.manifest;
     manifest.git = Some(GitContext {
-        origin_url:   github_metadata_url(&input.repo),
+        origin_url:   github_metadata_url(&repo),
         branch:       input.target.ref_selector,
-        sha:          input.checked_out_sha,
+        sha:          checked_out_sha,
         dirty:        DirtyStatus::Clean,
         push_outcome: PreRunPushOutcome::NotAttempted,
     });
@@ -478,7 +467,7 @@ fn build_manifest_from_checkout(
         .with_context(|| {
             format!(
                 "failed to serialize materialized manifest for automation {}",
-                input.automation_id
+                input.automation_id.as_str()
             )
         })
         .map_err(|err| AutomationRunMaterializeError::Manifest(err.to_string()))?;
@@ -507,18 +496,8 @@ pub struct TestAutomationRunMaterializer {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TestAutomationRunMaterializeInput {
-    pub automation_id:      String,
-    pub target:             AutomationTarget,
-    pub run_id:             RunId,
-    pub user_settings_path: PathBuf,
-    pub temp_root:          PathBuf,
-}
-
-#[cfg(any(test, feature = "test-support"))]
 struct TestAutomationRunMaterializerState {
-    captured_inputs: Vec<TestAutomationRunMaterializeInput>,
+    captured_inputs: Vec<AutomationRunMaterializeInput>,
     response:        Result<AutomationRunMaterialized, AutomationRunMaterializeError>,
 }
 
@@ -546,7 +525,7 @@ impl TestAutomationRunMaterializer {
         }
     }
 
-    pub fn captured_inputs(&self) -> Vec<TestAutomationRunMaterializeInput> {
+    pub fn captured_inputs(&self) -> Vec<AutomationRunMaterializeInput> {
         self.inner
             .lock()
             .expect("test automation materializer lock poisoned")
@@ -570,15 +549,7 @@ impl AutomationRunMaterializer for TestAutomationRunMaterializer {
             .inner
             .lock()
             .expect("test automation materializer lock poisoned");
-        guard
-            .captured_inputs
-            .push(TestAutomationRunMaterializeInput {
-                automation_id:      input.automation_id.to_string(),
-                target:             input.target,
-                run_id:             input.run_id,
-                user_settings_path: input.user_settings_path,
-                temp_root:          input.temp_root,
-            });
+        guard.captured_inputs.push(input);
         guard.response.clone()
     }
 }
@@ -644,10 +615,11 @@ mod tests {
     #[test]
     fn ref_checkout_command_plans_use_argv_prompt_disable_and_timeouts() {
         let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
+        let clone_url = github_clone_url(&repo);
         let temp = TempDir::new().unwrap();
         let checkout_dir = temp.path().join("repo");
 
-        let clone = build_clone_plan(&repo, &checkout_dir, None);
+        let clone = build_clone_plan(&clone_url, &checkout_dir, None);
         assert_eq!(clone.program, "git");
         assert_eq!(clone.args, vec![
             "clone",
@@ -660,7 +632,7 @@ mod tests {
         assert_eq!(clone.timeout, Duration::from_mins(2));
         assert_eq!(clone.env_value("GIT_TERMINAL_PROMPT"), Some("0"));
 
-        let fetch = build_fetch_ref_plan(&checkout_dir, "feature/materialize", None);
+        let fetch = build_fetch_ref_plan(&clone_url, &checkout_dir, "feature/materialize", None);
         assert_eq!(fetch.args, vec![
             "fetch",
             "--depth",
@@ -703,7 +675,7 @@ mod tests {
             "basic header leaked: {redacted}"
         );
         assert!(
-            redacted.contains("[REDACTED]"),
+            redacted.contains("REDACTED"),
             "expected redaction marker: {redacted}"
         );
     }
@@ -711,11 +683,12 @@ mod tests {
     #[test]
     fn credential_config_env_keeps_clone_url_uncredentialed() {
         let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
+        let clone_url = github_clone_url(&repo);
         let auth = GitAuthConfig::new(
             Some("x-access-token".to_string()),
             Some("ghu_secret".to_string()),
         );
-        let plan = build_clone_plan(&repo, Path::new("/tmp/fabro-checkout"), Some(&auth));
+        let plan = build_clone_plan(&clone_url, Path::new("/tmp/fabro-checkout"), Some(&auth));
 
         assert!(
             plan.args
@@ -758,10 +731,13 @@ mod tests {
         let sha = "0123456789abcdef0123456789abcdef01234567".to_string();
 
         let materialized = build_manifest_from_checkout(ManifestFromCheckoutInput {
-            automation_id: AutomationId::new("nightly").unwrap(),
-            target: target("fabro-sh/fabro", "main", "demo"),
-            run_id,
-            user_settings_path: user_settings_path.clone(),
+            input: AutomationRunMaterializeInput {
+                automation_id:      AutomationId::new("nightly").unwrap(),
+                target:             target("fabro-sh/fabro", "main", "demo"),
+                run_id,
+                user_settings_path: user_settings_path.clone(),
+                temp_root:          temp.path().to_path_buf(),
+            },
             checkout_dir: checkout.clone(),
             repo,
             checked_out_sha: Some(sha.clone()),

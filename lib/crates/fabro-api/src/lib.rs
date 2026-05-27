@@ -40,7 +40,8 @@ pub mod types {
     pub use fabro_types::{
         ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
         AgentToolCategory, AgentToolSource, AgentToolSummary, AgentToolsAvailableProps, AskFabro,
-        AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, CreateVariableRequest,
+        AuthMethod, AutomationRef, BilledTokenCounts, CommandTermination, Conclusion,
+        CreateVariableRequest,
         DiffStats, DiffSummary, DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory,
         FailureDetail, FailureSignature, GitContext, IdpIdentity, IntegrationConnectionKind,
         IntegrationConnectionState, IntegrationConnectionStatus, IntegrationProvider,

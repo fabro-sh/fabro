@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 use chrono::{TimeZone, Utc};
 use fabro_api::types::{
-    RepositoryRef as ApiRepositoryRef, Run as ApiRun, RunApproval as ApiRunApproval,
-    RunApprovalState as ApiRunApprovalState, RunRunnableSource as ApiRunRunnableSource,
-    RunSize as ApiRunSize,
+    AutomationRef as ApiAutomationRef, RepositoryRef as ApiRepositoryRef, Run as ApiRun,
+    RunApproval as ApiRunApproval, RunApprovalState as ApiRunApprovalState,
+    RunRunnableSource as ApiRunRunnableSource, RunSize as ApiRunSize,
 };
 use fabro_types::status::{RunStatus, SuccessReason};
 use fabro_types::{
@@ -24,6 +24,7 @@ fn run_summary_reuses_domain_types() {
     assert_same_type::<ApiRunApprovalState, RunApprovalState>();
     assert_same_type::<ApiRunRunnableSource, RunRunnableSource>();
     assert_same_type::<ApiRunSize, RunSize>();
+    assert_same_type::<ApiAutomationRef, AutomationRef>();
 }
 
 #[test]

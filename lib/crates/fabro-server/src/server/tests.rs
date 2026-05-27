@@ -3015,7 +3015,7 @@ async fn fake_automation_materializer_injection_captures_input_and_returns_manif
     assert_eq!(output.submitted_manifest_bytes, b"{\"fake\":true}".to_vec());
     let captured = fake.captured_inputs();
     assert_eq!(captured.len(), 1);
-    assert_eq!(captured[0].automation_id, "nightly");
+    assert_eq!(captured[0].automation_id.as_str(), "nightly");
     assert_eq!(captured[0].target, target);
     assert_eq!(captured[0].run_id, run_id);
     assert_eq!(captured[0].user_settings_path, user_settings_path);
