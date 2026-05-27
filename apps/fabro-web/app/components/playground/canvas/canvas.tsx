@@ -25,6 +25,45 @@ function stripGraphTitle(svg: SVGSVGElement) {
 }
 
 /**
+ * Read a node's id from its SVG `<title>` element. Graphviz writes the
+ * node's DOT identifier into a child `<title>` inside each `<g
+ * class="node">`, which we keep around precisely so click handlers can
+ * recover the id from a hit-test target.
+ */
+function nodeIdFromGroup(group: Element): string | null {
+  const title = group.querySelector(":scope > title");
+  return title?.textContent?.trim() || null;
+}
+
+/** Inline-style selection highlight. We do this via inline styles
+ *  (rather than a CSS class) because Graphviz writes `stroke=...`
+ *  attributes directly on each shape element and CSS classes alone
+ *  can't override them without `!important`. */
+const SELECT_STROKE = "rgb(45 212 191)"; // teal-400, matches fabro-web accent
+const SELECT_STROKE_WIDTH = "2";
+
+function applySelectionHighlight(svg: SVGSVGElement, selectedId: string | null) {
+  for (const group of svg.querySelectorAll<SVGGElement>("g.node")) {
+    const id = nodeIdFromGroup(group);
+    const isSelected = id !== null && id === selectedId;
+    group.classList.toggle("is-selected", isSelected);
+    group.style.cursor = "pointer";
+    const shapes = group.querySelectorAll<SVGElement>("polygon, ellipse, path");
+    for (const shape of shapes) {
+      if (isSelected) {
+        shape.style.stroke = SELECT_STROKE;
+        shape.style.strokeWidth = SELECT_STROKE_WIDTH;
+        shape.style.filter = "drop-shadow(0 0 6px rgb(20 184 166 / 0.45))";
+      } else {
+        shape.style.stroke = "";
+        shape.style.strokeWidth = "";
+        shape.style.filter = "";
+      }
+    }
+  }
+}
+
+/**
  * Canvas for the playground. Re-renders whenever the draft changes by piping
  * a themed DOT (see `render-canvas`) through `@viz-js/viz` — the same
  * Graphviz layout engine Fabro uses, so what the user sees here is exactly
@@ -33,9 +72,15 @@ function stripGraphTitle(svg: SVGSVGElement) {
 export default function PlaygroundCanvas({
   draft,
   simulation,
+  selectedNodeId,
+  onSelectNode,
 }: {
   draft: WorkflowDraft;
   simulation?: SimulationState;
+  /** Currently-inspected node id, or null. Drives the SVG highlight. */
+  selectedNodeId?: string | null;
+  /** Click-to-inspect callback. Null means the user clicked empty canvas (deselect). */
+  onSelectNode?: (id: string | null) => void;
 }) {
   const dot = useMemo(
     () => renderCanvasDot(draft, simulation),
@@ -54,6 +99,7 @@ export default function PlaygroundCanvas({
     startY: number;
     startPanX: number;
     startPanY: number;
+    moved: boolean;
   } | null>(null);
   const zoom = ZOOM_STEPS[zoomIndex]!;
 
@@ -70,6 +116,7 @@ export default function PlaygroundCanvas({
         if (innerRef.current) {
           innerRef.current.replaceChildren(svg);
         }
+        applySelectionHighlight(svg, selectedNodeId ?? null);
         setError(null);
       } catch (e) {
         if (!cancelled) {
@@ -81,17 +128,18 @@ export default function PlaygroundCanvas({
     return () => {
       cancelled = true;
     };
-  }, [dot]);
+  }, [dot, selectedNodeId]);
 
   const onPointerDown = useCallback(
     (event: React.PointerEvent) => {
       if ((event.target as HTMLElement).closest("button")) return;
       event.currentTarget.setPointerCapture(event.pointerId);
       dragState.current = {
-        startX: event.clientX,
-        startY: event.clientY,
+        startX:    event.clientX,
+        startY:    event.clientY,
         startPanX: pan.x,
         startPanY: pan.y,
+        moved:     false,
       };
     },
     [pan],
@@ -100,15 +148,35 @@ export default function PlaygroundCanvas({
   const onPointerMove = useCallback((event: React.PointerEvent) => {
     const drag = dragState.current;
     if (!drag) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 3) {
+      drag.moved = true;
+    }
     setPan({
-      x: drag.startPanX + event.clientX - drag.startX,
-      y: drag.startPanY + event.clientY - drag.startY,
+      x: drag.startPanX + dx,
+      y: drag.startPanY + dy,
     });
   }, []);
 
-  const onPointerUp = useCallback(() => {
-    dragState.current = null;
-  }, []);
+  const onPointerUp = useCallback(
+    (event: React.PointerEvent) => {
+      const drag = dragState.current;
+      dragState.current = null;
+      if (!onSelectNode || !drag || drag.moved) return;
+      // A click without drag — translate the hit into a node selection.
+      const target = event.target as Element | null;
+      const group = target?.closest("g.node");
+      if (group) {
+        const id = nodeIdFromGroup(group);
+        if (id) onSelectNode(id);
+        return;
+      }
+      // Clicked empty canvas — deselect.
+      onSelectNode(null);
+    },
+    [onSelectNode],
+  );
 
   const fitToWindow = useCallback(() => {
     const svg = svgRef.current;

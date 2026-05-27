@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { SparklesIcon } from "@heroicons/react/24/solid";
 
 import PlaygroundCanvas from "./canvas/canvas";
@@ -11,6 +11,7 @@ import type { WorkflowDraft } from "./state/draft";
 import type { ToolCall } from "./state/reducer";
 import FileTabs from "./ui/file-tabs";
 import DownloadButton from "./ui/download-button";
+import NodeInspector from "./ui/node-inspector";
 import ResetButton from "./ui/reset-button";
 import RunTrace from "./ui/run-trace";
 import SimulationControls from "./ui/simulation-controls";
@@ -52,7 +53,23 @@ export default function Playground({
   const { draft, applyCall, reset } = usePlaygroundDraft();
   const [isChatOpen, setChatOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const sim = useSimulation(draft);
+
+  // The selected node still exists in the draft, right? After a write
+  // we may have deleted it — keep selection consistent.
+  const selectedNode = useMemo(
+    () =>
+      selectedNodeId
+        ? draft.nodes.find((n) => n.id === selectedNodeId) ?? null
+        : null,
+    [draft.nodes, selectedNodeId],
+  );
+
+  const handleReset = useCallback(() => {
+    setSelectedNodeId(null);
+    reset();
+  }, [reset]);
 
   // The chat adapter is memoized on (chatEndpoint, getWorkflow, dispatch,
   // onParseFailure); we need every callback to be referentially stable
@@ -85,7 +102,7 @@ export default function Playground({
         <header className="flex items-center gap-3 px-2">
           <WorkflowHeader draft={draft} />
           <div className="ml-auto flex items-center gap-2">
-            <ResetButton onReset={reset} />
+            <ResetButton onReset={handleReset} />
             <DownloadButton draft={draft} />
             {!isChatOpen && (
               <button
@@ -102,19 +119,34 @@ export default function Playground({
 
         <div className="grid min-h-0 flex-1 grid-rows-[3fr_2fr] gap-3">
           <div className="grid min-h-0 grid-cols-[1fr_220px] gap-3">
-            <PlaygroundCanvas draft={draft} simulation={sim.state} />
+            <PlaygroundCanvas
+              draft={draft}
+              simulation={sim.state}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={setSelectedNodeId}
+            />
             <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-line bg-panel-alt/40">
-              <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-2">
-                <span className="font-mono text-[10.5px] uppercase tracking-wider text-fg-muted">
-                  Run trace
-                </span>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto">
-                <RunTrace state={sim.state} />
-              </div>
-              <div className="shrink-0 border-t border-line p-2">
-                <SimulationControls sim={sim} />
-              </div>
+              {selectedNode ? (
+                <NodeInspector
+                  node={selectedNode}
+                  draft={draft}
+                  onClose={() => setSelectedNodeId(null)}
+                />
+              ) : (
+                <>
+                  <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-2">
+                    <span className="font-mono text-[10.5px] uppercase tracking-wider text-fg-muted">
+                      Run trace
+                    </span>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    <RunTrace state={sim.state} />
+                  </div>
+                  <div className="shrink-0 border-t border-line p-2">
+                    <SimulationControls sim={sim} />
+                  </div>
+                </>
+              )}
             </aside>
           </div>
           <FileTabs draft={draft} />
