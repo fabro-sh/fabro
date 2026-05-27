@@ -34,6 +34,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             run_dir,
             source_directory,
             workflow_slug,
+            automation,
             db_prefix,
             provenance,
             manifest_blob,
@@ -54,6 +55,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             run_dir:          run_dir.clone(),
             source_directory: source_directory.clone(),
             workflow_slug:    workflow_slug.clone(),
+            automation:       automation.clone(),
             db_prefix:        db_prefix.clone(),
             provenance:       provenance.clone(),
             manifest_blob:    *manifest_blob,
@@ -1410,8 +1412,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use ::fabro_types::{
-        EventBody, FailureReason, ParallelBranchId, Principal, RunNoticeCode, RunNoticeLevel,
-        RunProvenance, StageId, SystemActorKind, fixtures, run_event as fabro_types,
+        AutomationRef, EventBody, FailureReason, ParallelBranchId, Principal, RunNoticeCode,
+        RunNoticeLevel, RunProvenance, StageId, SystemActorKind, fixtures,
+        run_event as fabro_types,
     };
     use chrono::Utc;
     use fabro_agent::{
@@ -2405,6 +2408,11 @@ mod tests {
             client:  None,
             subject: Some(user_principal("alice")),
         };
+        let automation = AutomationRef {
+            id:         "nightly".to_string(),
+            name:       Some("Nightly".to_string()),
+            trigger_id: Some("schedule_1".to_string()),
+        };
 
         let stored = to_run_event(&fixtures::RUN_1, &Event::RunCreated {
             run_id:           fixtures::RUN_1,
@@ -2417,6 +2425,7 @@ mod tests {
             run_dir:          "/tmp/run".to_string(),
             source_directory: Some("/tmp/run".to_string()),
             workflow_slug:    None,
+            automation:       Some(automation.clone()),
             db_prefix:        None,
             provenance:       Some(provenance),
             manifest_blob:    None,
@@ -2428,6 +2437,10 @@ mod tests {
         });
         let actor = stored.actor.as_ref().expect("actor set");
         assert_eq!(actor, &user_principal("alice"));
+        let EventBody::RunCreated(props) = stored.body else {
+            panic!("expected run.created body");
+        };
+        assert_eq!(props.automation, Some(automation));
     }
 
     #[test]

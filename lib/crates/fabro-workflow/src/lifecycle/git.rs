@@ -734,6 +734,7 @@ mod tests {
             run_dir: "/tmp/run".to_string(),
             source_directory: Some("/tmp/project".to_string()),
             workflow_slug: Some("metadata".to_string()),
+            automation: None,
             db_prefix: None,
             provenance: None,
             manifest_blob: None,

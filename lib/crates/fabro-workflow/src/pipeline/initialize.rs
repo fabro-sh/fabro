@@ -879,6 +879,7 @@ mod tests {
                 graph,
                 graph_source: None,
                 workflow_slug: Some("test".to_string()),
+                automation: None,
                 source_directory: Some(std::env::current_dir().unwrap().display().to_string()),
                 git: Some(fabro_types::GitContext {
                     origin_url:   String::new(),

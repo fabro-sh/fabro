@@ -128,6 +128,7 @@ fn run_spec_json() -> serde_json::Value {
         graph:            Graph::new("test"),
         graph_source:     Some("digraph test {}".to_string()),
         workflow_slug:    None,
+        automation:       None,
         source_directory: None,
         labels:           std::collections::HashMap::new(),
         provenance:       None,

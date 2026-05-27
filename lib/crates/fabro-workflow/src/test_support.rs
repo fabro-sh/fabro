@@ -173,6 +173,7 @@ async fn initialized(
         run_dir:          run_options.run_dir.display().to_string(),
         source_directory: Some(sandbox.working_directory().to_string()),
         workflow_slug:    run_options.workflow_slug.clone(),
+        automation:       None,
         db_prefix:        None,
         provenance:       None,
         manifest_blob:    None,

@@ -6,7 +6,7 @@ use fabro_types::run_event::run::{RunCreatedProps, RunParentLinkedProps, RunPare
 use fabro_types::run_event::{RunSessionTurnFailedCode, RunSessionTurnFailedProps};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
-use fabro_types::{EventBody, TurnId, WorkflowSettings, fixtures};
+use fabro_types::{AutomationRef, EventBody, TurnId, WorkflowSettings, fixtures};
 
 fn templated_settings() -> WorkflowSettings {
     let mut settings = WorkflowSettings::default();
@@ -26,6 +26,11 @@ fn run_created_props_round_trip_templated_settings() {
         run_dir:          "/tmp/run".to_string(),
         source_directory: Some("/Users/client/project".to_string()),
         workflow_slug:    Some("demo".to_string()),
+        automation:       Some(AutomationRef {
+            id:         "nightly".to_string(),
+            name:       Some("Nightly".to_string()),
+            trigger_id: Some("schedule_1".to_string()),
+        }),
         db_prefix:        Some("run_".to_string()),
         provenance:       None,
         manifest_blob:    None,
@@ -62,6 +67,8 @@ fn run_created_props_round_trip_templated_settings() {
     );
     assert_eq!(json["retried_from"], fixtures::RUN_1.to_string());
     assert_eq!(json["parent_id"], fixtures::RUN_2.to_string());
+    assert_eq!(json["automation"]["id"], "nightly");
+    assert_eq!(json["automation"]["trigger_id"], "schedule_1");
 
     let round_trip: RunCreatedProps =
         serde_json::from_value(json.clone()).expect("props should deserialize");
@@ -88,6 +95,7 @@ fn run_created_props_omits_web_url_when_absent() {
         run_dir:          "/tmp/run".to_string(),
         source_directory: None,
         workflow_slug:    None,
+        automation:       None,
         db_prefix:        None,
         provenance:       None,
         manifest_blob:    None,
@@ -120,7 +128,7 @@ fn run_created_props_omits_web_url_when_absent() {
 }
 
 #[test]
-fn run_created_props_defaults_retried_from_for_legacy_events() {
+fn run_created_props_defaults_additive_fields_for_legacy_events() {
     let json = serde_json::json!({
         "title": null,
         "settings": WorkflowSettings::default(),
@@ -132,6 +140,7 @@ fn run_created_props_defaults_retried_from_for_legacy_events() {
     let props: RunCreatedProps =
         serde_json::from_value(json).expect("legacy props should deserialize");
     assert_eq!(props.retried_from, None);
+    assert_eq!(props.automation, None);
 }
 
 #[test]

@@ -7,6 +7,7 @@ use crate::graph::Graph;
 use crate::principal::Principal;
 use crate::run_blob_id::RunBlobId;
 use crate::run_id::RunId;
+use crate::run_summary::AutomationRef;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunServerProvenance {
@@ -87,6 +88,8 @@ pub struct RunSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automation:       Option<AutomationRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_directory: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub labels:           HashMap<String, String>,
@@ -121,6 +124,11 @@ impl RunSpec {
     #[must_use]
     pub fn workflow_slug(&self) -> Option<&str> {
         self.workflow_slug.as_deref()
+    }
+
+    #[must_use]
+    pub fn automation(&self) -> Option<&AutomationRef> {
+        self.automation.as_ref()
     }
 
     #[must_use]

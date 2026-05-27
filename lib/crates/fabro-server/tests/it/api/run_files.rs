@@ -67,6 +67,7 @@ async fn append_completed_run_with_final_patch(
         run_dir:          "/tmp".to_string(),
         source_directory: None,
         workflow_slug:    None,
+        automation:       None,
         db_prefix:        None,
         provenance:       None,
         manifest_blob:    None,

@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
 use ::fabro_types::{
-    BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
-    ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind, PairTarget,
-    ParallelBranchId, PendingReason, PermissionLevel, Principal, PullRequestLink, RunBlobId,
-    RunFailure, RunId, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason, RunProvenance,
-    RunRunnableSource, RunTiming, SandboxProviderKind, StageId, StageTiming, SuccessReason,
-    run_event as fabro_types,
+    AutomationRef, BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary,
+    FailureReason, ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind,
+    PairTarget, ParallelBranchId, PendingReason, PermissionLevel, Principal, PullRequestLink,
+    RunBlobId, RunFailure, RunId, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason,
+    RunProvenance, RunRunnableSource, RunTiming, SandboxProviderKind, StageId, StageTiming,
+    SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use fabro_model::{ReasoningEffort, Speed};
@@ -37,6 +37,8 @@ pub enum Event {
         source_directory: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workflow_slug:    Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        automation:       Option<AutomationRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         db_prefix:        Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

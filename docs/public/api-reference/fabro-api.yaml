@@ -9133,6 +9133,10 @@ components:
           type: ["string", "null"]
         workflow_slug:
           type: ["string", "null"]
+        automation:
+          oneOf:
+            - $ref: "#/components/schemas/AutomationRef"
+            - type: "null"
         source_directory:
           type: ["string", "null"]
         labels:
@@ -9559,6 +9563,8 @@ components:
         id:
           type: string
         name:
+          type: ["string", "null"]
+        trigger_id:
           type: ["string", "null"]
 
     RunOrigin:

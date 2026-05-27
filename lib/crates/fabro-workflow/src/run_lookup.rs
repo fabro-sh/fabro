@@ -481,6 +481,7 @@ mod tests {
             graph:            Graph::new("test"),
             graph_source:     None,
             workflow_slug:    Some("test".to_string()),
+            automation:       None,
             source_directory: Some("/tmp/project".to_string()),
             git:              Some(fabro_types::GitContext {
                 origin_url:   String::new(),
@@ -517,6 +518,7 @@ mod tests {
             run_dir:          run_dir.display().to_string(),
             source_directory: run_spec.source_directory.clone(),
             workflow_slug:    run_spec.workflow_slug.clone(),
+            automation:       None,
             db_prefix:        None,
             provenance:       run_spec.provenance.clone(),
             manifest_blob:    None,

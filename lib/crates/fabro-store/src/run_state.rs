@@ -778,6 +778,7 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
         graph: props.graph.clone(),
         graph_source: props.workflow_source.clone(),
         workflow_slug: props.workflow_slug.clone(),
+        automation: props.automation.clone(),
         source_directory: props.source_directory.clone(),
         labels,
         provenance: props.provenance.clone(),
@@ -936,7 +937,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
             edge_count: i64::try_from(state.spec.graph.edges.len())
                 .expect("graph edge count should fit in i64"),
         },
-        automation: None,
+        automation: state.spec.automation.clone(),
         repository: Some(RepositoryRef::from_origin_and_source(
             repo_origin_url,
             source_directory.as_deref(),
@@ -1247,11 +1248,11 @@ mod tests {
         StagePromptProps, StageRetryingProps, StageStartedProps,
     };
     use fabro_types::{
-        AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
-        CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
-        FailureReason, Graph, McpServerStatus, Outcome, PendingReason, PermissionLevel,
-        PullRequestLink, QuestionType, ReasoningEffort, RunApprovalState, RunBlobId,
-        RunControlAction, RunDiff, RunEvent, RunSize, RunSpec, RunStatus, Speed,
+        AgentBackend, AutomationRef, BilledModelUsage, BilledTokenCounts, BlockedReason,
+        Checkpoint, CheckpointRecord, CommandTermination, EventBody, FailureCategory,
+        FailureDetail, FailureReason, Graph, McpServerStatus, Outcome, PendingReason,
+        PermissionLevel, PullRequestLink, QuestionType, ReasoningEffort, RunApprovalState,
+        RunBlobId, RunControlAction, RunDiff, RunEvent, RunSize, RunSpec, RunStatus, Speed,
         StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
         StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowWarning,
         StageModelUsage, StageOutcome, StageState, SubAgentStatus, SuccessReason, WorkflowSettings,
@@ -1334,6 +1335,7 @@ mod tests {
             graph:            Graph::new("test"),
             graph_source:     Some("digraph test {}".to_string()),
             workflow_slug:    None,
+            automation:       None,
             source_directory: None,
             labels:           HashMap::new(),
             provenance:       None,
@@ -1390,6 +1392,35 @@ mod tests {
         assert_eq!(
             build_summary(&projection, &fixtures::RUN_1).retried_from,
             None
+        );
+    }
+
+    #[test]
+    fn run_created_projects_automation_into_spec_and_summary() {
+        let automation = AutomationRef {
+            id:         "nightly".to_string(),
+            name:       Some("Nightly".to_string()),
+            trigger_id: Some("schedule_1".to_string()),
+        };
+        let event = test_raw_event(
+            1,
+            "run.created",
+            &json!({
+                "settings": WorkflowSettings::default(),
+                "graph": Graph::new("test"),
+                "automation": automation,
+                "labels": {},
+                "run_dir": "/tmp/run"
+            }),
+            None,
+        );
+
+        let projection = RunProjection::apply_events(&[event]).unwrap();
+
+        assert_eq!(projection.spec.automation, Some(automation.clone()));
+        assert_eq!(
+            build_summary(&projection, &fixtures::RUN_1).automation,
+            Some(automation)
         );
     }
 
@@ -2602,6 +2633,7 @@ mod tests {
             graph:            fabro_types::Graph::new("test"),
             graph_source:     None,
             workflow_slug:    Some("test".to_string()),
+            automation:       None,
             source_directory: Some("/tmp/repo".to_string()),
             git:              None,
             labels:           HashMap::new(),
@@ -2627,6 +2659,7 @@ mod tests {
             graph:            fabro_types::Graph::new("GraphName"),
             graph_source:     None,
             workflow_slug:    Some("release-flow".to_string()),
+            automation:       None,
             source_directory: Some("/tmp/repo".to_string()),
             git:              None,
             labels:           HashMap::new(),

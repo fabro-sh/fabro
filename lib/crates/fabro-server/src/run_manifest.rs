@@ -213,6 +213,7 @@ pub(crate) fn create_run_input(
         submitted_manifest_bytes: None,
         run_id: prepared.run_id,
         title: prepared.title,
+        automation: None,
         git: prepared.git,
         fork_source_ref: None,
         parent_id: prepared.parent_id,
