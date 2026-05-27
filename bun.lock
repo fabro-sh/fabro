@@ -25,6 +25,7 @@
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/xterm": "^6.0.0",
         "axios": "^1.7.0",
+        "fflate": "^0.8.3",
         "marked": "^18.0.0",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",

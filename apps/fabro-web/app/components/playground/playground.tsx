@@ -3,6 +3,8 @@ import { SparklesIcon } from "@heroicons/react/24/solid";
 
 import PlaygroundCanvas from "./canvas/canvas";
 import { usePlaygroundDraft } from "./state/persist";
+import FileTabs from "./ui/file-tabs";
+import DownloadButton from "./ui/download-button";
 
 export type PlaygroundAuthMode = "required" | "anonymous";
 
@@ -57,6 +59,7 @@ export default function Playground({
             {draft.name === "untitled" ? "untitled workflow" : draft.name}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            <DownloadButton draft={draft} />
             {!isChatOpen && (
               <button
                 type="button"
@@ -70,8 +73,9 @@ export default function Playground({
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <div className="grid min-h-0 flex-1 grid-rows-[3fr_2fr] gap-3">
           <PlaygroundCanvas draft={draft} />
+          <FileTabs draft={draft} />
         </div>
       </main>
 
