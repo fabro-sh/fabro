@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act } from "react-test-renderer";
 
-import { renderHook, setupReactTestEnv } from "~/lib/test-utils";
+import { renderHook, setupReactTestEnv } from "../../../lib/test-utils";
 import { STORAGE_KEY, usePlaygroundDraft } from "./persist";
 import { createInitialDraft } from "./draft";
 
