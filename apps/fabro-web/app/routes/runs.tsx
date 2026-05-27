@@ -287,6 +287,7 @@ function ChecksStatus({ checks }: { checks: CheckRun[] }) {
 export const handle = {
   wide:       true,
   hideHeader: true,
+  fullHeight: true,
 };
 
 function PrCard({
@@ -846,7 +847,7 @@ export default function Runs() {
     <>
       {hydratedSearch ? <Navigate to={{ search: hydratedSearch }} replace /> : null}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <div className="space-y-4">
+        <div className="flex h-full min-h-0 flex-col gap-4">
           <RunsToolbar
             query={query}
             repoFilter={repoFilter}
@@ -870,7 +871,7 @@ export default function Runs() {
 
           {view === "columns" ? (
             <>
-              <div className="flex gap-5 overflow-x-auto pb-4">
+              <div className="flex min-h-0 flex-1 gap-5 overflow-x-auto pb-4">
                 {visibleColumns.map((col) => (
                   <div key={col.id} className="w-72 shrink-0">
                     <BoardColumnView column={col} />
@@ -892,26 +893,28 @@ export default function Runs() {
               ) : null}
             </>
           ) : (
-            <RunsListView
-              data={listRunsPage.data}
-              isLoading={listRunsPage.data === undefined && listRunsPage.isLoading}
-              emptyState={
-                <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
-              }
-              sort={sort}
-              direction={direction}
-              page={page}
-              pageSize={pageSize}
-              hiddenColumns={hiddenColumns}
-              onSortClick={handleSortClick}
-              onPageChange={setPage}
-              onPageSizeChange={setPageSize}
-              query={lowerQuery}
-              repoFilter={repoFilter}
-              workflowFilter={workflowFilter}
-              statusFilter={statusFilter}
-              createdCutoffMs={createdCutoffMs}
-            />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <RunsListView
+                data={listRunsPage.data}
+                isLoading={listRunsPage.data === undefined && listRunsPage.isLoading}
+                emptyState={
+                  <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
+                }
+                sort={sort}
+                direction={direction}
+                page={page}
+                pageSize={pageSize}
+                hiddenColumns={hiddenColumns}
+                onSortClick={handleSortClick}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+                query={lowerQuery}
+                repoFilter={repoFilter}
+                workflowFilter={workflowFilter}
+                statusFilter={statusFilter}
+                createdCutoffMs={createdCutoffMs}
+              />
+            </div>
           )}
         </div>
       </DndContext>

@@ -32,9 +32,26 @@ digraph Goal {
         prompt="@prompts/audit.md"
     ]
 
+    verify [
+        label="Verify",
+        shape=parallelogram,
+        script="git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\bActorRef\b|\bActorKind\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\s*==\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
+        goal_gate=true,
+        retry_target="fixup"
+    ]
+
+    fixup [
+        label="Fixup",
+        prompt="The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures.",
+        max_visits=3
+    ]
+
     start -> work -> audit
 
-    audit -> exit [label="Done", condition="outcome=succeeded"]
+    audit -> verify [label="Done", condition="outcome=succeeded"]
     audit -> work [label="Continue", condition="outcome=failed || preferred_label=Continue"]
     audit -> work [label="No clear verdict"]
+    verify -> exit [condition="outcome=succeeded"]
+    verify -> fixup
+    fixup -> verify
 }
