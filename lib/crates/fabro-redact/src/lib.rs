@@ -118,6 +118,24 @@ mod tests {
     }
 
     #[test]
+    fn redact_string_openrouter_api_key() {
+        // Constructed at runtime so the literal token shape does not appear
+        // in source and trip secret-scanning push protection.
+        let prefix = format!("sk-{}{}-v1-", "o", "r");
+        let body = "0123456789abcdef".repeat(4);
+        let input = format!("Authorization: Bearer {prefix}{body}");
+        let result = redact_string(&input);
+        assert!(
+            result.contains("REDACTED"),
+            "expected REDACTED in: {result}"
+        );
+        assert!(
+            !result.contains(&prefix),
+            "raw OpenRouter key prefix should not survive: {result}"
+        );
+    }
+
+    #[test]
     fn redact_string_private_key() {
         let input =
             "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
