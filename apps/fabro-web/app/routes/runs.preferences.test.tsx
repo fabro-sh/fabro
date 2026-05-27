@@ -74,6 +74,33 @@ const pageRuns: PaginatedRunList = {
 };
 
 const queryCalls: Array<{ hook: string; args: unknown[] }> = [];
+const BOARD_REFRESH_EVENTS = new Set([
+  "run.submitted",
+  "run.start_requested",
+  "run.pending",
+  "run.approved",
+  "run.denied",
+  "run.runnable",
+  "run.starting",
+  "run.running",
+  "run.removing",
+  "run.paused",
+  "run.unpaused",
+  "run.blocked",
+  "run.unblocked",
+  "run.completed",
+  "run.failed",
+  "run.archived",
+  "run.unarchived",
+  "run.title.updated",
+  "interview.started",
+  "interview.completed",
+  "interview.timeout",
+  "interview.interrupted",
+  "pull_request.created",
+  "pull_request.linked",
+  "pull_request.unlinked",
+]);
 
 mock.module("../lib/queries", () => ({
   useAllRuns: (...args: unknown[]) => {
@@ -102,7 +129,7 @@ mock.module("../lib/queries", () => ({
 }));
 
 mock.module("../lib/board-events", () => ({
-  shouldRefreshBoardForEvent: () => false,
+  shouldRefreshBoardForEvent: (event: string) => BOARD_REFRESH_EVENTS.has(event),
   useBoardEvents: () => {},
 }));
 
@@ -115,6 +142,7 @@ const {
   RUNS_PREFERENCES_STORAGE_KEY,
 } = await import("./runs");
 const { default: RunChildren } = await import("./run-children");
+mock.restore();
 
 function installWindow() {
   class TestElement {}

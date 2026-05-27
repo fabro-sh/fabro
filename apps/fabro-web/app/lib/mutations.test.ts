@@ -20,24 +20,8 @@ mock.module("swr/mutation", () => ({
   default: useSWRMutationMock,
 }));
 
-mock.module("./api-client", () => ({
-  apiData: mock(),
-  authApi: {},
-  humanInTheLoopApi: {},
-  runsApi: {},
-}));
-
-mock.module("./run-actions", () => ({
-  approveRun: mock(),
-  archiveRun: mock(),
-  cancelRun: mock(),
-  denyRun: mock(),
-  isLifecycleActionError: () => false,
-  retryRun: mock(),
-  unarchiveRun: mock(),
-}));
-
 const { useArchiveRun } = await import("./mutations");
+mock.restore();
 
 beforeEach(() => {
   mutateMock.mockClear();

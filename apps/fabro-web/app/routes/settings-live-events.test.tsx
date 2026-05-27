@@ -23,6 +23,7 @@ mock.module("../lib/live-events", () => ({
 const { default: SettingsLiveEvents, appendLiveEvent, MAX_EVENTS } = await import(
   "./settings-live-events"
 );
+mock.restore();
 
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
