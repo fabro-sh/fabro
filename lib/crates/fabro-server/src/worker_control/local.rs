@@ -55,7 +55,7 @@ impl LocalWorkerControlBus {
         run_id: RunId,
         cursor: &WorkerControlCursor,
     ) -> Result<WorkerControlReceiver, WorkerControlBusError> {
-        let next_sequence = {
+        let (next_sequence, notify) = {
             let mut streams = self
                 .streams
                 .lock()
@@ -63,13 +63,14 @@ impl LocalWorkerControlBus {
             let stream = streams
                 .entry(run_id)
                 .or_insert_with(LocalRunControlStream::new);
-            stream.next_sequence_for_cursor(cursor)?
+            let next_sequence = stream.next_sequence_for_cursor(cursor)?;
+            (next_sequence, Arc::clone(&stream.notify))
         };
 
         let (tx, rx) = mpsc::channel(LOCAL_WORKER_CONTROL_SUBSCRIBER_BUFFER);
         let streams = Arc::clone(&self.streams);
         tokio::spawn(async move {
-            local_subscription_task(streams, run_id, next_sequence, tx).await;
+            local_subscription_task(streams, run_id, notify, next_sequence, tx).await;
         });
         Ok(rx)
     }
@@ -143,61 +144,47 @@ fn parse_local_sequence(id: &WorkerControlMessageId) -> Result<u64, WorkerContro
 async fn local_subscription_task(
     streams: Arc<Mutex<HashMap<RunId, LocalRunControlStream>>>,
     run_id: RunId,
+    notify: Arc<Notify>,
     mut next_sequence: Option<u64>,
     tx: mpsc::Sender<Result<WorkerControlDelivery, WorkerControlBusError>>,
 ) {
     loop {
-        let mut invalid_cursor = None;
-        let (messages, notify) = {
+        // Register interest *before* inspecting the stream so that a publish
+        // racing with this read does not cause a lost wakeup. `notify_waiters`
+        // does not leave a permit for future `notified()` calls.
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+
+        let collected = {
             let streams_guard = streams.lock().expect("worker control streams poisoned");
-            let Some(stream) = streams_guard.get(&run_id) else {
-                return;
-            };
-            let notify = Arc::clone(&stream.notify);
-            match next_sequence {
-                None => (Vec::new(), notify),
-                Some(next) => {
-                    if let Some(first_sequence) =
-                        stream.messages.front().map(|message| message.sequence)
-                    {
-                        if next < first_sequence {
-                            invalid_cursor = Some(WorkerControlBusError::invalid_cursor(
-                                format!("local:{next}"),
-                                "subscriber fell behind retained local messages",
-                            ));
-                            (Vec::new(), notify)
-                        } else {
-                            let messages = stream
-                                .messages
-                                .iter()
-                                .filter(|message| message.sequence >= next)
-                                .cloned()
-                                .collect::<Vec<_>>();
-                            (messages, notify)
-                        }
-                    } else {
-                        (Vec::new(), notify)
+            match streams_guard.get(&run_id) {
+                None => None,
+                Some(stream) => {
+                    // A `Start` subscriber that joined before any publish lazily
+                    // adopts the first retained message as its cursor.
+                    if next_sequence.is_none() {
+                        next_sequence = stream.messages.front().map(|message| message.sequence);
+                    }
+                    match next_sequence {
+                        None => Some(Ok(Vec::new())),
+                        Some(next) => Some(collect_messages_from(&stream.messages, next)),
                     }
                 }
             }
         };
 
-        if let Some(err) = invalid_cursor {
-            let _ = tx.send(Err(err)).await;
-            return;
-        }
+        let messages = match collected {
+            None => return,
+            Some(Err(err)) => {
+                let _ = tx.send(Err(err)).await;
+                return;
+            }
+            Some(Ok(messages)) => messages,
+        };
 
         if messages.is_empty() {
-            if next_sequence.is_none() {
-                let streams_guard = streams.lock().expect("worker control streams poisoned");
-                next_sequence = streams_guard
-                    .get(&run_id)
-                    .and_then(|stream| stream.messages.front().map(|message| message.sequence));
-                if next_sequence.is_some() {
-                    continue;
-                }
-            }
-            notify.notified().await;
+            notified.await;
             continue;
         }
 
@@ -208,6 +195,25 @@ async fn local_subscription_task(
             }
         }
     }
+}
+
+/// Returns the retained messages with `sequence >= next`. Cheaper than scanning
+/// the whole deque: `partition_point` is O(log N) and we only clone the tail.
+fn collect_messages_from(
+    messages: &VecDeque<LocalMessage>,
+    next: u64,
+) -> Result<Vec<LocalMessage>, WorkerControlBusError> {
+    let Some(first_sequence) = messages.front().map(|message| message.sequence) else {
+        return Ok(Vec::new());
+    };
+    if next < first_sequence {
+        return Err(WorkerControlBusError::invalid_cursor(
+            format!("local:{next}"),
+            "subscriber fell behind retained local messages",
+        ));
+    }
+    let start = messages.partition_point(|message| message.sequence < next);
+    Ok(messages.iter().skip(start).cloned().collect())
 }
 
 impl WorkerControlBus for LocalWorkerControlBus {
@@ -264,10 +270,6 @@ impl WorkerControlBus for LocalWorkerControlBus {
             }
         }
         .boxed()
-    }
-
-    fn backend_name(&self) -> &'static str {
-        "local"
     }
 }
 

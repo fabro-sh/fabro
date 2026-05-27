@@ -2075,7 +2075,6 @@ fn worker_command_uses_null_stdin_and_token_env() {
     )
     .unwrap();
 
-    assert_eq!(WORKER_COMMAND_STDIN, WorkerCommandStdin::Null);
     assert_worker_command_passes_token_only_by_env(&cmd);
 }
 
@@ -2385,13 +2384,6 @@ methods = ["dev-token"]
     assert!(err.to_string().contains(
         "Fabro server refuses to start: auth is configured but SESSION_SECRET is not set."
     ));
-}
-
-#[test]
-fn build_app_state_uses_local_worker_control_bus_by_default() {
-    let state = test_app_state();
-
-    assert_eq!(state.worker_control_bus.backend_name(), "local");
 }
 
 #[test]

@@ -5,7 +5,7 @@ use fabro_types::RunId;
 use futures_util::future::BoxFuture;
 use tokio::sync::mpsc;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct WorkerControlMessageId(String);
 
 impl WorkerControlMessageId {
@@ -119,12 +119,6 @@ pub(crate) trait WorkerControlBus: Send + Sync {
     ) -> BoxFuture<'_, Result<WorkerControlReceiver, WorkerControlBusError>>;
 
     fn cleanup_run(&self, run_id: RunId) -> BoxFuture<'_, ()>;
-
-    #[allow(
-        dead_code,
-        reason = "Used by tests and diagnostics for backend identity."
-    )]
-    fn backend_name(&self) -> &'static str;
 }
 
 #[cfg(test)]

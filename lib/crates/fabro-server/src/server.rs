@@ -3381,21 +3381,6 @@ async fn append_worker_exit_failure(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WorkerCommandStdin {
-    Null,
-}
-
-impl WorkerCommandStdin {
-    fn stdio(self) -> Stdio {
-        match self {
-            Self::Null => Stdio::null(),
-        }
-    }
-}
-
-const WORKER_COMMAND_STDIN: WorkerCommandStdin = WorkerCommandStdin::Null;
-
 #[expect(
     clippy::disallowed_methods,
     reason = "Worker subprocess startup resolves Cargo's test binary env override when present."
@@ -3442,7 +3427,7 @@ fn worker_command(
         .arg(run_id.to_string())
         .arg("--mode")
         .arg(worker_mode_arg(mode))
-        .stdin(WORKER_COMMAND_STDIN.stdio())
+        .stdin(Stdio::null())
         .stdout(worker_stdout)
         .stderr(Stdio::piped());
 

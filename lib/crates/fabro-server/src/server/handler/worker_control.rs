@@ -1,8 +1,11 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use axum::extract::ws::{CloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade};
-use fabro_interview::WorkerControlDeliveryFrame;
+use axum::extract::ws::{CloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade, close_code};
+use fabro_interview::{
+    WORKER_CONTROL_INVALID_CURSOR_REASON, WORKER_CONTROL_PONG_TIMEOUT_REASON,
+    WORKER_CONTROL_WS_LIVENESS_TIMEOUT, WORKER_CONTROL_WS_PING_INTERVAL,
+    WorkerControlDeliveryFrame,
+};
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::{self, Instant, MissedTickBehavior};
 
@@ -11,9 +14,6 @@ use super::super::{
     StatusCode, get,
 };
 use crate::worker_control::{WorkerControlBusError, WorkerControlCursor, WorkerControlReceiver};
-
-const WORKER_CONTROL_WS_PING_INTERVAL: Duration = Duration::from_secs(15);
-const WORKER_CONTROL_WS_LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Debug, serde::Deserialize)]
 struct WorkerControlStreamQuery {
@@ -86,11 +86,13 @@ async fn worker_control_websocket(socket: WebSocket, mut receiver: WorkerControl
     let mut ping_interval = time::interval(WORKER_CONTROL_WS_PING_INTERVAL);
     ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_liveness = Instant::now();
+    let liveness_timeout = time::sleep_until(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
+    tokio::pin!(liveness_timeout);
 
     loop {
-        let liveness_deadline = last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT;
-        let liveness_timeout = time::sleep_until(liveness_deadline);
-        tokio::pin!(liveness_timeout);
+        liveness_timeout
+            .as_mut()
+            .reset(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
 
         tokio::select! {
             delivery = receiver.recv() => {
@@ -145,8 +147,8 @@ async fn worker_control_websocket(socket: WebSocket, mut receiver: WorkerControl
             }
             () = &mut liveness_timeout => {
                 let _ = sender.send(WsMessage::Close(Some(CloseFrame {
-                    code: 1001,
-                    reason: "pong_timeout".into(),
+                    code: close_code::AWAY,
+                    reason: WORKER_CONTROL_PONG_TIMEOUT_REASON.into(),
                 }))).await;
                 return;
             }
@@ -156,7 +158,7 @@ async fn worker_control_websocket(socket: WebSocket, mut receiver: WorkerControl
 
 fn invalid_cursor_close_message() -> WsMessage {
     WsMessage::Close(Some(CloseFrame {
-        code:   1008,
-        reason: "invalid_cursor".into(),
+        code:   close_code::POLICY,
+        reason: WORKER_CONTROL_INVALID_CURSOR_REASON.into(),
     }))
 }

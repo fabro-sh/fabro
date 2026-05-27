@@ -1,9 +1,30 @@
+use std::time::Duration;
+
 use fabro_types::{PairId, PairMessageId, PairTarget, Principal, RunId};
 use serde::{Deserialize, Serialize};
 
 use crate::{Answer, AnswerSubmission, AnswerValue};
 
 pub const WORKER_CONTROL_PROTOCOL_VERSION: u8 = 1;
+
+/// Interval between worker-control WebSocket ping frames.
+///
+/// Server and worker both initiate pings at this cadence; either side that
+/// fails to observe inbound traffic for [`WORKER_CONTROL_WS_LIVENESS_TIMEOUT`]
+/// closes the WebSocket.
+pub const WORKER_CONTROL_WS_PING_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Maximum quiet time allowed on a worker-control WebSocket before either side
+/// declares the connection dead.
+pub const WORKER_CONTROL_WS_LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// WebSocket close-frame reason used when the server can no longer prove
+/// replay correctness for the requested cursor. Workers must treat this as
+/// fatal control-channel loss.
+pub const WORKER_CONTROL_INVALID_CURSOR_REASON: &str = "invalid_cursor";
+
+/// WebSocket close-frame reason used when the ping/pong watchdog fires.
+pub const WORKER_CONTROL_PONG_TIMEOUT_REASON: &str = "pong_timeout";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerControlEnvelope {

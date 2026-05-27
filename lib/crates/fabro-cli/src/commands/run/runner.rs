@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +9,9 @@ use fabro_client::ServerTarget;
 use fabro_config::user::active_settings_path;
 use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
 use fabro_interview::{
-    AnswerSubmission, ControlInterviewer, WorkerControlDeliveryFrame, WorkerControlEnvelope,
+    AnswerSubmission, ControlInterviewer, WORKER_CONTROL_INVALID_CURSOR_REASON,
+    WORKER_CONTROL_PONG_TIMEOUT_REASON, WORKER_CONTROL_WS_LIVENESS_TIMEOUT,
+    WORKER_CONTROL_WS_PING_INTERVAL, WorkerControlDeliveryFrame, WorkerControlEnvelope,
     WorkerControlMessage,
 };
 use fabro_model::Catalog;
@@ -288,8 +289,6 @@ fn load_worker_vault(storage_dir: Option<&Path>) -> Result<Option<Arc<AsyncRwLoc
 
 const WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 const WORKER_CONTROL_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(5);
-const WORKER_CONTROL_WS_PING_INTERVAL: Duration = Duration::from_secs(15);
-const WORKER_CONTROL_WS_LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
 
 struct WorkerControlManagerHandle {
     first_connection: Option<oneshot::Receiver<Result<()>>>,
@@ -440,16 +439,14 @@ async fn run_worker_control_manager(
     let mut first_tx = Some(first_tx);
     let mut fatal_tx = Some(fatal_tx);
     let mut backoff = WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF;
-    let mut applied_ids = HashSet::new();
-    let last_applied_id = Arc::new(Mutex::new(None::<String>));
+    let mut last_applied_id: Option<String> = None;
 
     while !done.is_cancelled() {
-        let after = last_applied_id.lock().await.clone();
         let request = match build_worker_control_stream_request(
             &target,
             &run_id,
             &worker_token,
-            after.as_deref(),
+            last_applied_id.as_deref(),
         ) {
             Ok(request) => request,
             Err(err) => {
@@ -477,8 +474,7 @@ async fn run_worker_control_manager(
                     &cancel_token,
                     &steering_hub,
                     &run_control,
-                    &mut applied_ids,
-                    &last_applied_id,
+                    &mut last_applied_id,
                     &done,
                 )
                 .await
@@ -649,18 +645,19 @@ async fn handle_worker_control_socket(
     cancel_token: &CancellationToken,
     steering_hub: &fabro_workflow::SteeringHub,
     run_control: &RunControlState,
-    applied_ids: &mut HashSet<String>,
-    last_applied_id: &Arc<Mutex<Option<String>>>,
+    last_applied_id: &mut Option<String>,
     done: &CancellationToken,
 ) -> Result<(), WorkerControlConnectError> {
     let mut ping_interval = time::interval(WORKER_CONTROL_WS_PING_INTERVAL);
     ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_liveness = Instant::now();
+    let liveness_timeout = time::sleep_until(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
+    tokio::pin!(liveness_timeout);
 
     loop {
-        let liveness_timeout =
-            time::sleep_until(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
-        tokio::pin!(liveness_timeout);
+        liveness_timeout
+            .as_mut()
+            .reset(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
 
         tokio::select! {
             () = done.cancelled() => return Ok(()),
@@ -674,7 +671,7 @@ async fn handle_worker_control_socket(
                 let _ = socket
                     .send(WebSocketMessage::Close(Some(protocol::CloseFrame {
                         code: CloseCode::Away,
-                        reason: "pong_timeout".into(),
+                        reason: WORKER_CONTROL_PONG_TIMEOUT_REASON.into(),
                     })))
                     .await;
                 return Err(WorkerControlConnectError::Other(anyhow!(
@@ -695,7 +692,6 @@ async fn handle_worker_control_socket(
                             cancel_token,
                             steering_hub,
                             run_control,
-                            applied_ids,
                             last_applied_id,
                             frame,
                         )
@@ -712,10 +708,9 @@ async fn handle_worker_control_socket(
                         last_liveness = Instant::now();
                     }
                     Ok(WebSocketMessage::Close(frame)) => {
-                        if frame
-                            .as_ref()
-                            .is_some_and(|frame| frame.reason.as_str() == "invalid_cursor")
-                        {
+                        if frame.as_ref().is_some_and(|frame| {
+                            frame.reason.as_str() == WORKER_CONTROL_INVALID_CURSOR_REASON
+                        }) {
                             return Err(WorkerControlConnectError::InvalidCursor);
                         }
                         return Ok(());
@@ -730,50 +725,21 @@ async fn handle_worker_control_socket(
     }
 }
 
-#[cfg(test)]
-fn parse_worker_control_line(line: &str) -> Option<WorkerControlEnvelope> {
-    if line.trim().is_empty() {
-        return None;
-    }
-
-    serde_json::from_str::<WorkerControlEnvelope>(line).ok()
-}
-
-#[cfg(test)]
-async fn apply_worker_control_line(
-    interviewer: &ControlInterviewer,
-    cancel_token: &CancellationToken,
-    steering_hub: &fabro_workflow::SteeringHub,
-    run_control: &RunControlState,
-    line: &str,
-) {
-    let Some(message) = parse_worker_control_line(line) else {
-        return;
-    };
-    apply_worker_control_message(
-        interviewer,
-        cancel_token,
-        steering_hub,
-        run_control,
-        message,
-    )
-    .await;
-}
-
 async fn apply_worker_control_delivery_frame(
     interviewer: &ControlInterviewer,
     cancel_token: &CancellationToken,
     steering_hub: &fabro_workflow::SteeringHub,
     run_control: &RunControlState,
-    applied_ids: &mut HashSet<String>,
-    last_applied_id: &Arc<Mutex<Option<String>>>,
+    last_applied_id: &mut Option<String>,
     frame: WorkerControlDeliveryFrame,
 ) -> bool {
-    if !applied_ids.insert(frame.id.clone()) {
+    // Duplicate ids cannot reach us under normal operation: the server replays
+    // strictly after `last_applied_id`. Guard against a server-side bug by
+    // ignoring any frame whose id is not strictly newer than what we last
+    // applied.
+    if last_applied_id.as_deref() == Some(frame.id.as_str()) {
         return false;
     }
-
-    let id = frame.id;
     apply_worker_control_message(
         interviewer,
         cancel_token,
@@ -782,7 +748,7 @@ async fn apply_worker_control_delivery_frame(
         frame.envelope,
     )
     .await;
-    *last_applied_id.lock().await = Some(id);
+    *last_applied_id = Some(frame.id);
     true
 }
 
@@ -1211,7 +1177,6 @@ fn install_signal_handlers(
     reason = "This test module prefers explicit type paths over extra imports."
 )]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -1238,11 +1203,11 @@ mod tests {
 
     use super::{
         WorkerControlConnectError, WorkerControlSocket, WorkerTitlePhase,
-        apply_worker_control_delivery_frame, apply_worker_control_line,
+        apply_worker_control_delivery_frame, apply_worker_control_message,
         build_worker_control_stream_request, connect_worker_control_stream,
         handle_worker_control_socket, initial_worker_title_phase, load_worker_vault,
-        next_worker_control_reconnect_backoff, parse_worker_control_line, stamp_system_worker,
-        worker_title, worker_title_phase_for_event,
+        next_worker_control_reconnect_backoff, stamp_system_worker, worker_title,
+        worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
 
@@ -1483,7 +1448,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_control_line_routes_answer_by_question_id() {
+    async fn worker_control_routes_answer_by_question_id() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = CancellationToken::new();
         let run_control = RunControlState::new();
@@ -1493,12 +1458,18 @@ mod tests {
         let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
 
         let hub = test_steering_hub();
-        apply_worker_control_line(
+        apply_worker_control_message(
             &interviewer,
             &cancel_token,
             &hub,
             &run_control,
-            r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"},"actor":{"kind":"system","system_kind":"engine"}}"#,
+            WorkerControlEnvelope::interview_answer(
+                "q-1",
+                fabro_interview::AnswerSubmission::system(
+                    fabro_interview::Answer::yes(),
+                    fabro_types::SystemActorKind::Engine,
+                ),
+            ),
         )
         .await;
 
@@ -1508,7 +1479,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_control_line_cancel_sets_cancel_token_and_interrupts_pending_interviews() {
+    async fn worker_control_cancel_sets_cancel_token_and_interrupts_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = CancellationToken::new();
         let run_control = RunControlState::new();
@@ -1519,12 +1490,12 @@ mod tests {
         tokio::task::yield_now().await;
 
         let hub = test_steering_hub();
-        apply_worker_control_line(
+        apply_worker_control_message(
             &interviewer,
             &cancel_token,
             &hub,
             &run_control,
-            r#"{"v":1,"type":"run.cancel"}"#,
+            WorkerControlEnvelope::cancel_run(),
         )
         .await;
 
@@ -1534,28 +1505,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_control_line_pause_and_unpause_route_to_run_control() {
+    async fn worker_control_pause_and_unpause_route_to_run_control() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = CancellationToken::new();
         let run_control = RunControlState::new();
         let hub = test_steering_hub();
 
-        apply_worker_control_line(
+        apply_worker_control_message(
             &interviewer,
             &cancel_token,
             &hub,
             &run_control,
-            r#"{"v":1,"type":"run.pause"}"#,
+            WorkerControlEnvelope::pause_run(),
         )
         .await;
         assert!(run_control.pause_requested());
 
-        apply_worker_control_line(
+        apply_worker_control_message(
             &interviewer,
             &cancel_token,
             &hub,
             &run_control,
-            r#"{"v":1,"type":"run.unpause"}"#,
+            WorkerControlEnvelope::unpause_run(),
         )
         .await;
         assert!(!run_control.pause_requested());
@@ -1567,8 +1538,7 @@ mod tests {
         let cancel_token = CancellationToken::new();
         let run_control = RunControlState::new();
         let hub = test_steering_hub();
-        let mut applied_ids = HashSet::new();
-        let last_applied_id = Arc::new(tokio::sync::Mutex::new(None));
+        let mut last_applied_id: Option<String> = None;
         let frame = fabro_interview::WorkerControlDeliveryFrame {
             id:       "local:1".to_string(),
             envelope: WorkerControlEnvelope::pause_run(),
@@ -1580,8 +1550,7 @@ mod tests {
                 &cancel_token,
                 &hub,
                 &run_control,
-                &mut applied_ids,
-                &last_applied_id,
+                &mut last_applied_id,
                 frame.clone(),
             )
             .await
@@ -1592,25 +1561,13 @@ mod tests {
                 &cancel_token,
                 &hub,
                 &run_control,
-                &mut applied_ids,
-                &last_applied_id,
+                &mut last_applied_id,
                 frame,
             )
             .await
         );
 
-        assert_eq!(*last_applied_id.lock().await, Some("local:1".to_string()));
-        assert_eq!(applied_ids.len(), 1);
-    }
-
-    #[test]
-    fn worker_control_line_parser_ignores_empty_and_invalid_lines() {
-        assert!(parse_worker_control_line("").is_none());
-        assert!(parse_worker_control_line("not json").is_none());
-        assert_eq!(
-            parse_worker_control_line(r#"{"v":1,"type":"run.cancel"}"#).unwrap(),
-            WorkerControlEnvelope::cancel_run()
-        );
+        assert_eq!(last_applied_id, Some("local:1".to_string()));
     }
 
     #[test]
@@ -1691,8 +1648,7 @@ mod tests {
         let cancel_token = CancellationToken::new();
         let hub = test_steering_hub();
         let run_control = RunControlState::new();
-        let mut applied_ids = HashSet::new();
-        let last_applied_id = Arc::new(tokio::sync::Mutex::new(None));
+        let mut last_applied_id: Option<String> = None;
         let done = CancellationToken::new();
 
         let task = tokio::spawn(async move {
@@ -1702,8 +1658,7 @@ mod tests {
                 &cancel_token,
                 &hub,
                 &run_control,
-                &mut applied_ids,
-                &last_applied_id,
+                &mut last_applied_id,
                 &done,
             )
             .await
