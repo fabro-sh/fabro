@@ -3,6 +3,7 @@ import { MinusIcon, PlusIcon } from "@heroicons/react/20/solid";
 
 import type { WorkflowDraft } from "../state/draft";
 import { renderCanvasDot } from "./render-canvas";
+import type { SimulationState } from "./simulation";
 
 const ZOOM_STEPS = [25, 50, 75, 100, 150, 200];
 const DEFAULT_ZOOM_INDEX = 3; // 100%
@@ -31,10 +32,15 @@ function stripGraphTitle(svg: SVGSVGElement) {
  */
 export default function PlaygroundCanvas({
   draft,
+  simulation,
 }: {
   draft: WorkflowDraft;
+  simulation?: SimulationState;
 }) {
-  const dot = useMemo(() => renderCanvasDot(draft), [draft]);
+  const dot = useMemo(
+    () => renderCanvasDot(draft, simulation),
+    [draft, simulation],
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);

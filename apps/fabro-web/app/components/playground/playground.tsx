@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { SparklesIcon } from "@heroicons/react/24/solid";
 
 import PlaygroundCanvas from "./canvas/canvas";
+import { useSimulation } from "./canvas/use-simulation";
 import PlaygroundChatSidebar, {
   SIDEBAR_WIDTH,
 } from "./chat/sidebar";
@@ -10,6 +11,8 @@ import type { WorkflowDraft } from "./state/draft";
 import type { ToolCall } from "./state/reducer";
 import FileTabs from "./ui/file-tabs";
 import DownloadButton from "./ui/download-button";
+import RunTrace from "./ui/run-trace";
+import SimulationControls from "./ui/simulation-controls";
 
 export type PlaygroundAuthMode = "required" | "anonymous";
 
@@ -47,6 +50,7 @@ export default function Playground({
   const { draft, applyCall } = usePlaygroundDraft();
   const [isChatOpen, setChatOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH);
+  const sim = useSimulation(draft);
 
   // The chat adapter is memoized on (chatEndpoint, getWorkflow, onToolCall);
   // we need both callbacks to be referentially stable across draft mutations
@@ -84,7 +88,22 @@ export default function Playground({
         </header>
 
         <div className="grid min-h-0 flex-1 grid-rows-[3fr_2fr] gap-3">
-          <PlaygroundCanvas draft={draft} />
+          <div className="grid min-h-0 grid-cols-[1fr_220px] gap-3">
+            <PlaygroundCanvas draft={draft} simulation={sim.state} />
+            <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-line bg-panel-alt/40">
+              <div className="flex shrink-0 items-center justify-between border-b border-line px-3 py-2">
+                <span className="font-mono text-[10.5px] uppercase tracking-wider text-fg-muted">
+                  Run trace
+                </span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                <RunTrace state={sim.state} />
+              </div>
+              <div className="shrink-0 border-t border-line p-2">
+                <SimulationControls sim={sim} />
+              </div>
+            </aside>
+          </div>
           <FileTabs draft={draft} />
         </div>
       </main>

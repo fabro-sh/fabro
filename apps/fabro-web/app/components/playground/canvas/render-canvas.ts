@@ -16,8 +16,21 @@
 
 import { graphTheme } from "../../../lib/graph-theme";
 import { isWelcomeState, type WorkflowDraft } from "../state/draft";
+import type { SimulationState } from "./simulation";
 
 const GHOST_ID = "__ghost__";
+
+/** Highlight overlay derived from the live simulation state. */
+function simulationOverlay(node: string, sim?: SimulationState): string | null {
+  if (!sim) return null;
+  if (sim.active === node) {
+    return `    ${node} [fillcolor="${graphTheme.runningFill}", color="${graphTheme.runningBorder}", fontcolor="${graphTheme.runningText}", penwidth=2]`;
+  }
+  if (sim.done.includes(node)) {
+    return `    ${node} [fillcolor="${graphTheme.completedFill}", color="${graphTheme.completedBorder}", fontcolor="${graphTheme.completedText}"]`;
+  }
+  return null;
+}
 
 /** Defaults injected at the top of the DOT, mirroring `automation-diagram`. */
 function styleHeader(): string {
@@ -68,7 +81,10 @@ function styleNode(id: string, kind: "start" | "exit" | "ghost"): string {
  * the welcome ghost are canvas-only concerns and must never leak into the
  * downloaded zip.
  */
-export function renderCanvasDot(draft: WorkflowDraft): string {
+export function renderCanvasDot(
+  draft: WorkflowDraft,
+  sim?: SimulationState,
+): string {
   const lines: string[] = [];
   lines.push("digraph Playground {");
   if (draft.goal.length > 0) {
@@ -98,6 +114,15 @@ export function renderCanvasDot(draft: WorkflowDraft): string {
     if (draft.nodes.length > 2) lines.push("");
     for (const edge of draft.edges) {
       lines.push(`    ${edge.from} -> ${edge.to}${edgeBody(edge)}`);
+    }
+  }
+
+  // Apply simulation overlays last so they win over the base theming.
+  if (sim) {
+    lines.push("");
+    for (const node of draft.nodes) {
+      const overlay = simulationOverlay(node.id, sim);
+      if (overlay) lines.push(overlay);
     }
   }
 
