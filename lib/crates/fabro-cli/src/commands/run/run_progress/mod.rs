@@ -195,55 +195,6 @@ impl ProgressUI {
             ProgressEvent::CliEnsureFailed { cli_name } => {
                 self.setup.on_cli_ensure_failed(renderer, &cli_name);
             }
-            ProgressEvent::DevcontainerResolved {
-                dockerfile_lines,
-                environment_count,
-                lifecycle_command_count,
-                workspace_folder,
-            } => {
-                SetupDisplay::on_devcontainer_resolved(
-                    renderer,
-                    dockerfile_lines,
-                    environment_count,
-                    lifecycle_command_count,
-                    &workspace_folder,
-                );
-            }
-            ProgressEvent::DevcontainerLifecycleStarted {
-                phase,
-                command_count,
-            } => {
-                self.setup
-                    .on_devcontainer_lifecycle_started(renderer, &phase, command_count);
-            }
-            ProgressEvent::DevcontainerLifecycleCompleted { phase, duration_ms } => {
-                self.setup
-                    .on_devcontainer_lifecycle_completed(renderer, &phase, duration_ms);
-            }
-            ProgressEvent::DevcontainerLifecycleFailed {
-                phase,
-                command,
-                exit_code,
-                stderr,
-            } => {
-                self.setup.on_devcontainer_lifecycle_failed(
-                    renderer, &phase, &command, exit_code, &stderr,
-                );
-            }
-            ProgressEvent::DevcontainerLifecycleCommandCompleted {
-                command,
-                command_index,
-                exit_code,
-                duration_ms,
-            } => {
-                self.setup.on_devcontainer_lifecycle_command_completed(
-                    renderer,
-                    &command,
-                    command_index,
-                    exit_code,
-                    duration_ms,
-                );
-            }
             ProgressEvent::StageStarted {
                 node_id,
                 name,
@@ -810,21 +761,6 @@ mod tests {
                 duration_ms: 2200,
             },
             Event::SetupCompleted { duration_ms: 2200 },
-            Event::DevcontainerLifecycleStarted {
-                phase:         "postCreate".into(),
-                command_count: 1,
-            },
-            Event::DevcontainerLifecycleCommandCompleted {
-                phase:       "postCreate".into(),
-                command:     "npm run setup".into(),
-                index:       0,
-                exit_code:   0,
-                duration_ms: 1400,
-            },
-            Event::DevcontainerLifecycleCompleted {
-                phase:       "postCreate".into(),
-                duration_ms: 1400,
-            },
         ];
 
         let (mut event_ui, event_buffer) = capture_ui(true);
@@ -903,31 +839,12 @@ mod tests {
                 duration_ms:       600,
             }),
         );
-        emit(&mut ui, Event::DevcontainerResolved {
-            dockerfile_lines:        24,
-            environment_count:       3,
-            lifecycle_command_count: 2,
-            workspace_folder:        "/workspace".into(),
-        });
-        emit(&mut ui, Event::DevcontainerLifecycleStarted {
-            phase:         "postCreate".into(),
-            command_count: 2,
-        });
-        emit(&mut ui, Event::DevcontainerLifecycleCompleted {
-            phase:       "postCreate".into(),
-            duration_ms: 1800,
-        });
-
         insta::assert_snapshot!(rendered(&buffer), @r"
             Sandbox: daytona (ready in 2s)
                      sandbox-1 (4 cpu, 8 GB)
                      ssh daytona@example
             Setup: 2 commands (8s)
             CLI: gh (installed, 600ms)
-            Devcontainer: resolved
-                     24 Dockerfile lines, 3 env vars, 2 lifecycle cmds, /workspace
-            Running devcontainer postCreate (2 commands)...
-            Devcontainer: postCreate (1s)
         ");
     }
 
@@ -1209,21 +1126,6 @@ mod tests {
             duration_ms: 2200,
         });
         emit(&mut ui, Event::SetupCompleted { duration_ms: 2200 });
-        emit(&mut ui, Event::DevcontainerLifecycleStarted {
-            phase:         "postCreate".into(),
-            command_count: 1,
-        });
-        emit(&mut ui, Event::DevcontainerLifecycleCommandCompleted {
-            phase:       "postCreate".into(),
-            command:     "npm run setup".into(),
-            index:       0,
-            exit_code:   0,
-            duration_ms: 1400,
-        });
-        emit(&mut ui, Event::DevcontainerLifecycleCompleted {
-            phase:       "postCreate".into(),
-            duration_ms: 1400,
-        });
         emit(&mut ui, stage_completed("code", "Code"));
 
         insta::assert_snapshot!(rendered(&buffer), @r#"
@@ -1235,9 +1137,6 @@ mod tests {
             ✓ subagent[a1] (3 turns)
           ✓ [1/1] bun install  2s
         Setup: 1 command (2s)
-        Running devcontainer postCreate (1 commands)...
-          ✓ [1/1] npm run setup  1s
-        Devcontainer: postCreate (1s)
         ✓ Code  5s  (1 turns, 0 tools, 1.5k toks)
         "#);
     }

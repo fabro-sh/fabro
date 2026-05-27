@@ -155,16 +155,6 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::PullRequestLinked { .. } => "pull_request.linked",
         Event::PullRequestUnlinked { .. } => "pull_request.unlinked",
         Event::PullRequestFailed { .. } => "pull_request.failed",
-        Event::DevcontainerResolved { .. } => "devcontainer.resolved",
-        Event::DevcontainerLifecycleStarted { .. } => "devcontainer.lifecycle.started",
-        Event::DevcontainerLifecycleCommandStarted { .. } => {
-            "devcontainer.lifecycle.command.started"
-        }
-        Event::DevcontainerLifecycleCommandCompleted { .. } => {
-            "devcontainer.lifecycle.command.completed"
-        }
-        Event::DevcontainerLifecycleCompleted { .. } => "devcontainer.lifecycle.completed",
-        Event::DevcontainerLifecycleFailed { .. } => "devcontainer.lifecycle.failed",
     }
 }
 

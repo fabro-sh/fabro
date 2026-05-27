@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::SandboxProviderKind;
+use crate::{RunSandboxFailure, SandboxProviderKind};
 
 #[derive(
     Debug,
@@ -201,14 +201,7 @@ pub struct SandboxReadyProps {
     pub url:         Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SandboxFailedProps {
-    pub provider:    String,
-    pub error:       String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub causes:      Vec<String>,
-    pub duration_ms: u64,
-}
+pub type SandboxFailedProps = RunSandboxFailure;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SandboxCleanupStartedProps {
@@ -406,53 +399,6 @@ pub struct CliEnsureFailedProps {
     pub provider:         String,
     pub error:            String,
     pub duration_ms:      u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exec_output_tail: Option<ExecOutputTail>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DevcontainerResolvedProps {
-    pub dockerfile_lines:        usize,
-    pub environment_count:       usize,
-    pub lifecycle_command_count: usize,
-    pub workspace_folder:        String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DevcontainerLifecycleStartedProps {
-    pub phase:         String,
-    pub command_count: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DevcontainerLifecycleCommandStartedProps {
-    pub phase:   String,
-    pub command: String,
-    pub index:   usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DevcontainerLifecycleCommandCompletedProps {
-    pub phase:       String,
-    pub command:     String,
-    pub index:       usize,
-    pub exit_code:   i32,
-    pub duration_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DevcontainerLifecycleCompletedProps {
-    pub phase:       String,
-    pub duration_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DevcontainerLifecycleFailedProps {
-    pub phase:            String,
-    pub command:          String,
-    pub index:            usize,
-    pub exit_code:        i32,
-    pub stderr:           String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exec_output_tail: Option<ExecOutputTail>,
 }

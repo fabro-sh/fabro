@@ -15,6 +15,7 @@ import { ErrorState } from "./state";
 import { useToast } from "./toast";
 import { apiData, humanInTheLoopApi } from "../lib/api-client";
 import { useRunState } from "../lib/queries";
+import { sandboxInstance } from "../lib/run-sandbox-lifecycle";
 import {
   buildFullScreenTerminalUrl,
   sandboxStatusDetail,
@@ -107,7 +108,7 @@ export default function TerminalView({
   const { push } = useToast();
   const stateQuery = useRunState(runId);
   const sandbox = stateQuery.data?.sandbox ?? null;
-  const provider = sandbox?.provider ?? null;
+  const provider = sandboxInstance(sandbox)?.provider ?? null;
   const sandboxDetail = sandboxStatusDetail(sandbox);
   const accessCommandLabel = terminalAccessCommandLabel(provider);
   const [connectionKey, reconnectTerminal] = useReducer((key: number) => key + 1, 0);

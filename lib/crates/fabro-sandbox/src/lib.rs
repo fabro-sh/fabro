@@ -40,7 +40,7 @@ pub use details::sandbox_details;
 #[cfg(feature = "docker")]
 pub use docker::{DockerSandbox, DockerSandboxOptions};
 pub use error::{Error, Result, default_redacted_output_tail, display_for_log};
-pub use fabro_types::{RunSandbox, SandboxProviderKind};
+pub use fabro_types::{RunSandboxInstance, SandboxProviderKind};
 pub use local::LocalSandbox;
 #[cfg(feature = "daytona")]
 pub use provider::daytona::DaytonaSandboxProvider;

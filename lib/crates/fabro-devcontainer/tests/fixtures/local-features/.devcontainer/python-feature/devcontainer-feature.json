@@ -1,9 +1,0 @@
-{
-  "id": "python-feature",
-  "version": "1.0.0",
-  "installsAfter": ["./node-feature"],
-  "containerEnv": {
-    "PYTHON_INSTALLED": "true"
-  },
-  "postCreateCommand": "echo python-post-create"
-}

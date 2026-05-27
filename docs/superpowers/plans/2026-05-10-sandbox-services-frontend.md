@@ -16,7 +16,7 @@
 - Place it between **Terminal** and **Filesystem**.
 - List all services returned by the backend.
 - Show a **Preview** action only for rows with `preview_supported: true`.
-- Do not read `devcontainer.json`.
+- Do not read repository setup metadata.
 - Do not perform browser-side HTTP checks.
 - Do not implement polling beyond normal SWR refresh/manual refresh behavior.
 

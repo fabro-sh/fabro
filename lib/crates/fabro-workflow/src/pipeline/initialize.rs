@@ -16,15 +16,10 @@ use fabro_sandbox::{
 };
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
-use futures::future::try_join_all;
-use shlex::try_quote;
-use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
-use tokio::time::timeout as tokio_timeout;
 
 use super::types::{InitOptions, Initialized, LlmSpec, Persisted, SandboxEnvSpec};
-use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::Error;
 use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::git::GitAuthor;
@@ -90,8 +85,7 @@ fn build_sandbox_env(
     spec: &SandboxEnvSpec,
     github_app: Option<&fabro_github::GitHubCredentials>,
 ) -> Result<BuiltSandboxEnv, Error> {
-    let mut env = spec.devcontainer_env.clone();
-    env.extend(spec.toml_env.clone());
+    let env = spec.toml_env.clone();
 
     let Some(permissions) = spec.github_permissions.as_ref().filter(|p| !p.is_empty()) else {
         return Ok((env, None));
@@ -273,104 +267,6 @@ fn build_llm_source(vault: Option<Arc<AsyncRwLock<Vault>>>) -> Arc<dyn Credentia
     }
 }
 
-async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
-    let Some(devcontainer) = options.devcontainer.clone() else {
-        return Ok(());
-    };
-    if !devcontainer.enabled {
-        return Ok(());
-    }
-
-    let config = fabro_devcontainer::DevcontainerResolver::resolve(&devcontainer.resolve_dir)
-        .await
-        .map_err(|e| Error::engine_with_source("Failed to resolve devcontainer", e))?;
-
-    let lifecycle_command_count = config.on_create_commands.len()
-        + config.post_create_commands.len()
-        + config.post_start_commands.len();
-    options.emitter.emit(&Event::DevcontainerResolved {
-        dockerfile_lines: config.dockerfile.lines().count(),
-        environment_count: config.environment.len(),
-        lifecycle_command_count,
-        workspace_folder: config.workspace_folder.clone(),
-    });
-
-    options
-        .sandbox
-        .apply_devcontainer_snapshot(devcontainer_to_snapshot_config(&config));
-
-    let timeout = std::time::Duration::from_mins(5);
-    let run_shell = |shell_command: String| {
-        let cwd = devcontainer.resolve_dir.clone();
-        async move {
-            let output = tokio_timeout(
-                timeout,
-                TokioCommand::new("sh")
-                    .arg("-c")
-                    .arg(&shell_command)
-                    .current_dir(&cwd)
-                    .output(),
-            )
-            .await
-            .map_err(|_| {
-                Error::engine(format!(
-                    "Devcontainer initializeCommand timed out: {shell_command}"
-                ))
-            })?
-            .map_err(|e| {
-                Error::engine_with_source(
-                    format!("Failed to execute devcontainer initializeCommand: {shell_command}"),
-                    e,
-                )
-            })?;
-
-            if !output.status.success() {
-                let code = output
-                    .status
-                    .code()
-                    .map_or_else(|| "unknown".to_string(), |code| code.to_string());
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(Error::engine(format!(
-                    "Devcontainer initializeCommand failed (exit code {code}): {shell_command}\n{stderr}"
-                )));
-            }
-            Ok::<(), Error>(())
-        }
-    };
-
-    for command in &config.initialize_commands {
-        match command {
-            fabro_devcontainer::Command::Shell(shell) => run_shell(shell.clone()).await?,
-            fabro_devcontainer::Command::Args(args) => {
-                let shell_command = args
-                    .iter()
-                    .map(|arg| try_quote(arg).unwrap_or_else(|_| arg.into()).to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                run_shell(shell_command).await?;
-            }
-            fabro_devcontainer::Command::Parallel(commands) => {
-                let futures = commands.values().cloned().map(&run_shell);
-                try_join_all(futures).await?;
-            }
-        }
-    }
-
-    options
-        .sandbox_env
-        .devcontainer_env
-        .clone_from(&config.environment);
-    options.lifecycle.devcontainer_phases = vec![
-        ("on_create".to_string(), config.on_create_commands.clone()),
-        (
-            "post_create".to_string(),
-            config.post_create_commands.clone(),
-        ),
-        ("post_start".to_string(), config.post_start_commands.clone()),
-    ];
-
-    Ok(())
-}
 /// INITIALIZE phase: prepare the sandbox, env, and handlers for execution.
 pub async fn initialize(
     persisted: Persisted,
@@ -396,8 +292,6 @@ pub async fn initialize(
             Arc::clone(&catalog),
         )))
     };
-
-    resolve_devcontainer(&mut options).await?;
 
     let attach_existing = options.checkpoint.is_some();
     options.run_options.display_base_sha = options
@@ -439,6 +333,9 @@ pub async fn initialize(
         let record = run_state.sandbox.ok_or_else(|| {
             Error::Precondition("cannot resume run: run sandbox is missing".to_string())
         })?;
+        let instance = record.instance().ok_or_else(|| {
+            Error::Precondition("cannot resume run: run sandbox was not initialized".to_string())
+        })?;
         let daytona_api_key = match &options.vault {
             Some(vault) => vault
                 .read()
@@ -448,7 +345,7 @@ pub async fn initialize(
             None => None,
         };
         let sandbox = reconnect_for_run_with_callback(
-            &record,
+            instance,
             daytona_api_key,
             Some(options.run_id),
             Some(Arc::clone(&sandbox_event_callback)),
@@ -510,11 +407,8 @@ pub async fn initialize(
     if sandbox_initialized {
         let run_sandbox = options
             .sandbox
-            .to_run_sandbox(&*sandbox, options.run_options.run_id);
-        let runtime = run_sandbox
-            .runtime
-            .as_ref()
-            .ok_or_else(|| Error::engine("initialized sandbox missing runtime metadata"))?;
+            .to_run_sandbox_instance(&*sandbox, options.run_options.run_id);
+        let runtime = &run_sandbox.runtime;
         options.emitter.emit(&Event::SandboxInitialized {
             working_directory: runtime.working_directory.clone(),
             provider:          run_sandbox.provider,
@@ -679,18 +573,6 @@ pub async fn initialize(
         options.emitter.emit(&Event::SetupCompleted {
             duration_ms: crate::millis_u64(setup_start.elapsed()),
         });
-    }
-
-    for (phase, commands) in &options.lifecycle.devcontainer_phases {
-        run_devcontainer_lifecycle(
-            sandbox.as_ref(),
-            &options.emitter,
-            phase,
-            commands,
-            options.lifecycle.setup_command_timeout_ms,
-            options.run_options.cancel_token.clone(),
-        )
-        .await?;
     }
 
     let metadata_writer = match build_metadata_writer(&options.run_options) {
@@ -940,20 +822,17 @@ mod tests {
             lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           vec![command.to_string()],
                 setup_command_timeout_ms: 1_000,
-                devcontainer_phases:      vec![],
             },
             run_options:       test_settings(&run_dir),
             workflow_path:     None,
             workflow_bundle:   None,
             hooks:             fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env:       SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::new(),
                 github_permissions: None,
                 origin_url:         None,
             },
             vault:             None,
-            devcontainer:      None,
             git:               None,
             run_control:       None,
             registry_override: None,
@@ -1025,20 +904,17 @@ mod tests {
             lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
-                devcontainer_phases:      vec![],
             },
             run_options:       test_settings(&run_dir),
             workflow_path:     None,
             workflow_bundle:   None,
             hooks:             fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env:       SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::from([("TEST_KEY".to_string(), "value".to_string())]),
                 github_permissions: None,
                 origin_url:         None,
             },
             vault:             None,
-            devcontainer:      None,
             git:               None,
             run_control:       None,
             registry_override: None,
@@ -1226,20 +1102,17 @@ mod tests {
             lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           Vec::new(),
                 setup_command_timeout_ms: 1_000,
-                devcontainer_phases:      Vec::new(),
             },
             run_options:       test_settings(&run_dir),
             workflow_path:     None,
             workflow_bundle:   None,
             hooks:             fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env:       SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::new(),
                 github_permissions: None,
                 origin_url:         None,
             },
             vault:             Some(vault),
-            devcontainer:      None,
             git:               None,
             run_control:       None,
             registry_override: None,
@@ -1325,20 +1198,17 @@ mod tests {
             lifecycle:         crate::run_options::LifecycleOptions {
                 setup_commands:           vec!["true".to_string()],
                 setup_command_timeout_ms: 1_000,
-                devcontainer_phases:      vec![],
             },
             run_options:       test_settings(&run_dir),
             workflow_path:     None,
             workflow_bundle:   None,
             hooks:             fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env:       SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::new(),
                 github_permissions: None,
                 origin_url:         None,
             },
             vault:             None,
-            devcontainer:      None,
             git:               None,
             run_control:       None,
             registry_override: None,
@@ -1442,88 +1312,17 @@ mod tests {
             lifecycle: crate::run_options::LifecycleOptions {
                 setup_commands:           vec!["sleep 5".to_string()],
                 setup_command_timeout_ms: 5_000,
-                devcontainer_phases:      vec![],
             },
             run_options,
             workflow_path: None,
             workflow_bundle: None,
             hooks: fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::new(),
                 github_permissions: None,
                 origin_url:         None,
             },
             vault: None,
-            devcontainer: None,
-            git: None,
-            run_control: None,
-            registry_override: None,
-            artifact_sink: None,
-            checkpoint: None,
-            seed_context: None,
-            fabro_run_tools: None,
-        })
-        .await;
-
-        assert!(matches!(result, Err(Error::Cancelled)));
-    }
-
-    #[tokio::test]
-    async fn initialize_cancelled_devcontainer_phase_returns_cancelled() {
-        let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join("run");
-        std::fs::create_dir_all(&run_dir).unwrap();
-        let (graph, source) = simple_graph();
-        let persisted = test_persisted(graph, source, &run_dir);
-        let cancel_token = tokio_util::sync::CancellationToken::new();
-        cancel_token.cancel();
-        let mut run_options = test_settings(&run_dir);
-        run_options.cancel_token = cancel_token;
-
-        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
-        let result = initialize(persisted, InitOptions {
-            run_id: test_run_id(),
-            run_store: {
-                let store = memory_store();
-                let inner = store.create_run(&test_run_id()).await.unwrap();
-                inner.into()
-            },
-            dry_run: false,
-            emitter: emitter.clone(),
-            sandbox: SandboxSpec::Local {
-                working_directory: std::env::current_dir().unwrap(),
-            },
-            llm: LlmSpec {
-                model:          "test-model".to_string(),
-                provider_id:    fabro_model::ProviderId::anthropic(),
-                fallback_chain: Vec::new(),
-                mcp_servers:    Vec::new(),
-                model_controls: RunModelControls::default(),
-                dry_run:        true,
-            },
-            interviewer: Arc::new(AutoApproveInterviewer::engine()),
-            steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
-            catalog: test_catalog(),
-            lifecycle: crate::run_options::LifecycleOptions {
-                setup_commands:           vec![],
-                setup_command_timeout_ms: 5_000,
-                devcontainer_phases:      vec![("on_create".to_string(), vec![
-                    fabro_devcontainer::Command::Shell("sleep 5".to_string()),
-                ])],
-            },
-            run_options,
-            workflow_path: None,
-            workflow_bundle: None,
-            hooks: fabro_hooks::HookSettings { hooks: vec![] },
-            sandbox_env: SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
-                toml_env:           HashMap::new(),
-                github_permissions: None,
-                origin_url:         None,
-            },
-            vault: None,
-            devcontainer: None,
             git: None,
             run_control: None,
             registry_override: None,

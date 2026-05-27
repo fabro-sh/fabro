@@ -36,6 +36,7 @@ import {
   formatRelativeTime,
 } from "../../lib/format";
 import { useRunPullRequest } from "../../lib/queries";
+import { sandboxRuntime } from "../../lib/run-sandbox-lifecycle";
 import { ActionsMenu, type ActionsMenuProps } from "./actions";
 import { classNames, type RunDetailRun } from "./model";
 
@@ -135,7 +136,7 @@ export function RunDetailHeader({
                 content={
                   <RepositoryPopover
                     repository={summary.repository}
-                    cloneBranch={summary.sandbox?.runtime?.clone_branch}
+                    cloneBranch={sandboxRuntime(summary.sandbox)?.clone_branch}
                   />
                 }
               >

@@ -4,8 +4,8 @@ use anyhow::Result;
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use chrono::{DateTime, Utc};
 use fabro_types::{
-    RunId, RunSandbox, SandboxDetails, SandboxNetwork, SandboxProviderKind, SandboxResources,
-    SandboxState, SandboxTimestamps,
+    RunId, RunSandboxInstance, SandboxDetails, SandboxNetwork, SandboxProviderKind,
+    SandboxResources, SandboxState, SandboxTimestamps,
 };
 
 /// Inspect the sandbox identified by `record` and return provider-neutral
@@ -20,7 +20,7 @@ use fabro_types::{
     reason = "Feature-gated providers consume some parameters only when enabled."
 )]
 pub async fn sandbox_details(
-    record: &RunSandbox,
+    record: &RunSandboxInstance,
     daytona_api_key: Option<String>,
     daytona_organization_id: Option<String>,
     run_id: Option<RunId>,
@@ -44,7 +44,7 @@ pub async fn sandbox_details(
     }
 }
 
-fn local_details(record: &RunSandbox) -> SandboxDetails {
+fn local_details(record: &RunSandboxInstance) -> SandboxDetails {
     SandboxDetails {
         sandbox:      record.clone(),
         state:        SandboxState::Running,
@@ -74,23 +74,21 @@ pub(crate) mod docker {
     use bollard::container::InspectContainerOptions;
     use bollard::models::{ContainerInspectResponse, ContainerStateStatusEnum, HostConfig};
     use fabro_types::{
-        RunId, RunSandbox, SandboxDetails, SandboxInfo, SandboxNetwork, SandboxNetworkPolicy,
-        SandboxProviderKind, SandboxResources, SandboxState, SandboxTimestamps,
+        RunId, RunSandboxInstance, SandboxDetails, SandboxInfo, SandboxNetwork,
+        SandboxNetworkPolicy, SandboxProviderKind, SandboxResources, SandboxState,
+        SandboxTimestamps,
     };
 
     use super::parse_rfc3339_utc;
     use crate::docker::WORKING_DIRECTORY;
 
     pub(super) async fn docker_details(
-        record: &RunSandbox,
+        record: &RunSandboxInstance,
         _run_id: Option<RunId>,
     ) -> Result<SandboxDetails> {
         let docker =
             Docker::connect_with_local_defaults().context("Failed to connect to Docker daemon")?;
-        let runtime = record
-            .runtime
-            .as_ref()
-            .context("Docker run sandbox missing runtime metadata")?;
+        let runtime = &record.runtime;
         let inspect = docker
             .inspect_container(&runtime.id, None::<InspectContainerOptions>)
             .await
@@ -120,13 +118,13 @@ pub(crate) mod docker {
 
     pub(super) fn map_docker_inspect(
         inspect: &ContainerInspectResponse,
-        record: &RunSandbox,
+        record: &RunSandboxInstance,
     ) -> SandboxDetails {
         let fields = docker_fields_from_inspect(inspect);
         let image = fields.image.clone().or_else(|| record.image.clone());
 
         SandboxDetails {
-            sandbox:      RunSandbox {
+            sandbox:      RunSandboxInstance {
                 image,
                 ..record.clone()
             },
@@ -274,18 +272,18 @@ pub(crate) mod docker {
     mod tests {
         use bollard::models::HostConfig;
         use fabro_types::{
-            RunSandbox, RunSandboxRuntime, SandboxNetwork, SandboxNetworkPolicy,
+            RunSandboxInstance, RunSandboxRuntime, SandboxNetwork, SandboxNetworkPolicy,
             SandboxProviderKind,
         };
 
         use super::*;
 
-        fn record() -> RunSandbox {
-            RunSandbox {
+        fn record() -> RunSandboxInstance {
+            RunSandboxInstance {
                 provider: SandboxProviderKind::Docker,
                 image:    None,
                 snapshot: None,
-                runtime:  Some(RunSandboxRuntime {
+                runtime:  RunSandboxRuntime {
                     id:                "container-abc123".to_string(),
                     working_directory: "/workspace".to_string(),
                     repo_cloned:       Some(true),
@@ -295,7 +293,7 @@ pub(crate) mod docker {
                     repos_root:        None,
                     primary_repo_path: None,
                     primary_repo_link: None,
-                }),
+                },
             }
         }
 
@@ -389,7 +387,7 @@ pub(crate) mod docker {
                 ..Default::default()
             };
             let details = map_docker_inspect(&inspect, &record());
-            let runtime = details.sandbox.runtime.expect("runtime");
+            let runtime = details.sandbox.runtime;
             assert_eq!(runtime.id, "container-abc123");
             assert_eq!(runtime.working_directory, "/workspace");
         }
@@ -497,7 +495,7 @@ pub(crate) mod daytona {
     use anyhow::{Context, Result, anyhow};
     use daytona_api_client::models::SandboxState as DaytonaState;
     use fabro_types::{
-        RunSandbox, SandboxDetails, SandboxInfo, SandboxNetwork, SandboxNetworkPolicy,
+        RunSandboxInstance, SandboxDetails, SandboxInfo, SandboxNetwork, SandboxNetworkPolicy,
         SandboxProviderKind, SandboxResources, SandboxState, SandboxTimestamps,
     };
 
@@ -505,13 +503,10 @@ pub(crate) mod daytona {
     use crate::daytona::{DAYTONA_DASHBOARD_SANDBOXES_URL, DaytonaSandbox, WORKING_DIRECTORY};
 
     pub(super) async fn daytona_details(
-        record: &RunSandbox,
+        record: &RunSandboxInstance,
         daytona_api_key: Option<String>,
     ) -> Result<SandboxDetails> {
-        let runtime = record
-            .runtime
-            .as_ref()
-            .context("Daytona run sandbox missing runtime metadata")?;
+        let runtime = &record.runtime;
         let repo_cloned = runtime
             .repo_cloned
             .context("Daytona run sandbox missing clone metadata")?;
@@ -555,11 +550,11 @@ pub(crate) mod daytona {
 
     pub(super) fn map_daytona_sandbox(
         sandbox: &daytona_sdk::Sandbox,
-        record: &RunSandbox,
+        record: &RunSandboxInstance,
     ) -> SandboxDetails {
         let fields = daytona_fields_from_sdk_sandbox(sandbox);
         SandboxDetails {
-            sandbox:      RunSandbox {
+            sandbox:      RunSandboxInstance {
                 snapshot: sandbox.snapshot.clone().or_else(|| record.snapshot.clone()),
                 ..record.clone()
             },
@@ -817,11 +812,11 @@ mod tests {
 
     #[test]
     fn local_details_returns_running_with_no_metadata() {
-        let record = RunSandbox {
+        let record = RunSandboxInstance {
             provider: SandboxProviderKind::Local,
             image:    None,
             snapshot: None,
-            runtime:  Some(fabro_types::RunSandboxRuntime {
+            runtime:  fabro_types::RunSandboxRuntime {
                 id:                "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z".to_string(),
                 working_directory: "/Users/client/project".to_string(),
                 repo_cloned:       None,
@@ -831,12 +826,12 @@ mod tests {
                 repos_root:        None,
                 primary_repo_path: None,
                 primary_repo_link: None,
-            }),
+            },
         };
         let details = local_details(&record);
         assert_eq!(details.sandbox.provider, SandboxProviderKind::Local);
         assert_eq!(details.state, SandboxState::Running);
-        let runtime = details.sandbox.runtime.as_ref().unwrap();
+        let runtime = &details.sandbox.runtime;
         assert_eq!(runtime.id, "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z");
         assert_eq!(runtime.working_directory, "/Users/client/project");
         assert!(details.region.is_none());

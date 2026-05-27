@@ -6,6 +6,7 @@ import {
   type RunSize,
   type RunStatus as ApiRunStatus,
 } from "@qltysh/fabro-api-client";
+import { sandboxRuntime } from "../lib/run-sandbox-lifecycle";
 
 export type CiStatus = "passing" | "failing" | "pending";
 
@@ -89,7 +90,7 @@ function runStatusKind(status: ApiRunStatus | null | undefined): RunStatus | nul
 
 export function mapRunListItem(item: Run): RunItem {
   const lifecycleStatus = item.lifecycle.archived ? "archived" : runStatusKind(item.lifecycle.status);
-  const runtime = item.sandbox?.runtime;
+  const runtime = sandboxRuntime(item.sandbox);
   return {
     id: item.id,
     repo: displayRepoName(item.repository?.name ?? "unknown"),

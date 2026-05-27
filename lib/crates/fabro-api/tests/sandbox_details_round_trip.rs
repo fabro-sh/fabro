@@ -10,7 +10,7 @@ use fabro_api::types::{
     SandboxState as ApiSandboxState, SandboxTimestamps as ApiSandboxTimestamps,
 };
 use fabro_types::{
-    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy,
+    RunSandboxInstance, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy,
     SandboxNetworkPolicyMode, SandboxProviderKind, SandboxResources, SandboxState,
     SandboxTimestamps,
 };
@@ -32,11 +32,11 @@ fn sandbox_details_reuses_domain_types() {
 fn sandbox_details_json_matches_openapi_shape() {
     let created_at = Utc.with_ymd_and_hms(2026, 5, 9, 12, 0, 0).unwrap();
     let details = SandboxDetails {
-        sandbox:      RunSandbox {
+        sandbox:      RunSandboxInstance {
             provider: SandboxProviderKind::Docker,
             image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
             snapshot: None,
-            runtime:  Some(RunSandboxRuntime {
+            runtime:  RunSandboxRuntime {
                 id:                "container-abc123".to_string(),
                 working_directory: "/workspace".to_string(),
                 repo_cloned:       None,
@@ -46,7 +46,7 @@ fn sandbox_details_json_matches_openapi_shape() {
                 repos_root:        Some("/repos".to_string()),
                 primary_repo_path: Some("/repos/fabro-sh/fabro".to_string()),
                 primary_repo_link: Some("/workspace/fabro".to_string()),
-            }),
+            },
         },
         state:        SandboxState::Running,
         native_state: Some("running".to_string()),
@@ -132,20 +132,12 @@ fn sandbox_details_deserializes_when_optional_fields_are_absent() {
 
     assert_eq!(details.sandbox.provider, SandboxProviderKind::Local);
     assert_eq!(
-        details
-            .sandbox
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.id.as_str()),
-        Some("local:01JNQVR7M0EJ5GKAT2SC4ERS1Z")
+        details.sandbox.runtime.id.as_str(),
+        "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z"
     );
     assert_eq!(
-        details
-            .sandbox
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.working_directory.as_str()),
-        Some("/Users/client/project")
+        details.sandbox.runtime.working_directory.as_str(),
+        "/Users/client/project"
     );
     assert_eq!(details.state, SandboxState::Unknown);
     assert!(details.sandbox.image.is_none());

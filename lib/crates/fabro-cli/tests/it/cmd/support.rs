@@ -1816,7 +1816,7 @@ pub(crate) fn compact_inspect(output: &Output) -> Value {
                     }),
                     "sandbox": sandbox.as_object().map(|_| {
                         serde_json::json!({
-                            "provider": sandbox["provider"],
+                            "provider": compact_sandbox_provider(&sandbox),
                         })
                     }),
                 })
@@ -1879,7 +1879,7 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
                     }),
                     "sandbox": sandbox.as_object().map(|_| {
                         serde_json::json!({
-                            "provider": sandbox["provider"],
+                            "provider": compact_sandbox_provider(&sandbox),
                             "working_directory": "[WORKTREE]",
                         })
                     }),
@@ -1887,6 +1887,16 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
             })
             .collect(),
     )
+}
+
+fn compact_sandbox_provider(sandbox: &Value) -> Value {
+    sandbox
+        .pointer("/instance/provider")
+        .or_else(|| sandbox.pointer("/plan/provider"))
+        .or_else(|| sandbox.pointer("/failure/provider"))
+        .or_else(|| sandbox.get("provider"))
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn write_text_file(path: &Path, content: &str) {

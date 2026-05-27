@@ -534,6 +534,10 @@ fn main() {
             &[],
         ),
         ("RunSandboxRuntime", "fabro_types::RunSandboxRuntime", &[]),
+        ("RunSandboxKind", "fabro_types::RunSandboxKind", &[]),
+        ("RunSandboxPlan", "fabro_types::RunSandboxPlan", &[]),
+        ("RunSandboxInstance", "fabro_types::RunSandboxInstance", &[]),
+        ("RunSandboxFailure", "fabro_types::RunSandboxFailure", &[]),
         ("PullRequestUser", "fabro_types::PullRequestUser", &[]),
         ("PullRequestRef", "fabro_types::PullRequestRef", &[]),
         (

@@ -1703,7 +1703,7 @@ async fn daytona_toolbox_idle_diagnostic() {
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cp_upload_download_round_trip() {
     use fabro_sandbox::reconnect::reconnect;
-    use fabro_types::{RunSandbox, SandboxProviderKind};
+    use fabro_types::{RunSandboxInstance, SandboxProviderKind};
 
     // 1. Create and initialize a real Daytona sandbox
     let env = create_env().await;
@@ -1715,12 +1715,12 @@ async fn daytona_cp_upload_download_round_trip() {
         "sandbox_info() should return the Daytona sandbox name"
     );
 
-    // 2. Build a RunSandbox (same as `fabro run` would persist)
-    let record = RunSandbox {
+    // 2. Build initialized sandbox metadata (same as `fabro run` would persist)
+    let record = RunSandboxInstance {
         provider: SandboxProviderKind::Daytona,
         image:    None,
         snapshot: None,
-        runtime:  Some(fabro_types::RunSandboxRuntime {
+        runtime:  fabro_types::RunSandboxRuntime {
             id:                sandbox_name.clone(),
             working_directory: env.working_directory().to_string(),
             repo_cloned:       Some(false),
@@ -1730,7 +1730,7 @@ async fn daytona_cp_upload_download_round_trip() {
             repos_root:        Some("/home/daytona/repos".to_string()),
             primary_repo_path: None,
             primary_repo_link: None,
-        }),
+        },
     };
 
     // 3. Reconnect via the real cp::reconnect path

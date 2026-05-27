@@ -15,7 +15,7 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunSandbox } from './run-sandbox';
+import type { RunSandboxInstance } from './run-sandbox-instance';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { SandboxNetwork } from './sandbox-network';
@@ -33,7 +33,7 @@ import type { SandboxTimestamps } from './sandbox-timestamps';
  * Provider-neutral details about the sandbox owned by a run.
  */
 export interface SandboxDetails {
-    'sandbox': RunSandbox;
+    'sandbox': RunSandboxInstance;
     'state': SandboxState;
     /**
      * Original provider state string before normalization. Display/debugging only; UI behavior keys off `state`.

@@ -57,8 +57,7 @@
               "execution/checkpoints",
               "execution/outcomes",
               "execution/failures",
-              "execution/observability",
-              "execution/devcontainers"
+              "execution/observability"
             ]
           },
           {

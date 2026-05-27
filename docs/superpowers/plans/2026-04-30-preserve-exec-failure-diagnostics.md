@@ -21,13 +21,13 @@
 - Modify `lib/crates/fabro-workflow/src/event.rs`: carry `exec_output_tail` through internal events and event-body conversion; trace only safe metadata about tails, not tail content.
 - Modify `lib/crates/fabro-workflow/src/sandbox_metadata.rs`, `lib/crates/fabro-workflow/src/lifecycle/git.rs`, and `lib/crates/fabro-workflow/src/pipeline/finalize.rs`: preserve push/write diagnostic projections without storing `fabro_sandbox::Error` inside `MetadataSnapshot`.
 - Modify `lib/crates/fabro-workflow/src/pipeline/initialize.rs`: add output-tail diagnostics to setup failures while preserving existing `stderr` field for compatibility.
-- Modify `lib/crates/fabro-workflow/src/devcontainer_bridge.rs`: add output-tail diagnostics to devcontainer lifecycle failures while preserving existing `stderr` field for compatibility.
+- Modify `lib/crates/fabro-workflow/src/pipeline/initialize.rs`: add output-tail diagnostics to setup failures while preserving existing `stderr` field for compatibility.
 - Modify `lib/crates/fabro-workflow/src/handler/llm/cli.rs`: replace CLI install's ad hoc 500-character embedded error detail with `exec_output_tail`.
 - Modify `docs/internal/logging-strategy.md`: document the policy that event payloads may contain bounded redacted tails, while tracing logs must not contain tail content by default.
 
 ## Explicit Non-Goals
 
-- Do not remove, deprecate, or stop populating `SetupFailedProps.stderr` or `DevcontainerLifecycleFailedProps.stderr` in this change. Any future removal requires a separate public event-contract deprecation plan.
+- Do not remove, deprecate, or stop populating `SetupFailedProps.stderr` in this change. Any future removal requires a separate public event-contract deprecation plan.
 - Do not add stdout/stderr tail content to `server.log`. Tracing should record safe metadata only: whether a tail exists, stream lengths, truncation booleans, and the existing safe error message.
 - Do not change `HookDecision::Block.reason` to include stdout/stderr. That is user-visible hook semantics and needs a separate design if we want durable hook diagnostics later.
 - Do not broadly refactor `sandbox_git.rs` error plumbing beyond constructor/signature updates needed by the `Error::Exec` refactor.
@@ -84,14 +84,14 @@ Keep `is_false` private to the module. Do not add another full process result ty
 
 - [x] **Step 2: Add `exec_output_tail` additively to failure props**
 
-Add this optional field to `MetadataSnapshotFailedProps`, `SetupFailedProps`, `CliEnsureFailedProps`, and `DevcontainerLifecycleFailedProps`:
+Add this optional field to `MetadataSnapshotFailedProps`, `SetupFailedProps`, and `CliEnsureFailedProps`:
 
 ```rust
 #[serde(default, skip_serializing_if = "Option::is_none")]
 pub exec_output_tail: Option<ExecOutputTail>,
 ```
 
-Do not remove existing fields, including `stderr` on setup/devcontainer failure props.
+Do not remove existing fields, including `stderr` on setup failure props.
 
 - [x] **Step 3: Re-export the projection**
 
@@ -360,9 +360,9 @@ Add `exec_output_tail: Option<fabro_types::ExecOutputTail>` to:
 - `MetadataSnapshotFailed`
 - `SetupFailed`
 - `CliEnsureFailed`
-- `DevcontainerLifecycleFailed`
+- `SetupFailed`
 
-Keep existing `stderr` fields on `SetupFailed` and `DevcontainerLifecycleFailed`.
+Keep existing `stderr` fields on `SetupFailed`.
 
 - [x] **Step 2: Map tails into `EventBody`**
 
@@ -543,11 +543,11 @@ cargo nextest run -p fabro-workflow metadata_snapshot
 
 Expected: metadata push/write failure events contain `exec_output_tail` when command output exists.
 
-## Task 5: Add Tails To Setup, Devcontainer, And CLI Install Failures
+## Task 5: Add Tails To Setup And CLI Install Failures
 
 **Files:**
 - Modify: `lib/crates/fabro-workflow/src/pipeline/initialize.rs`
-- Modify: `lib/crates/fabro-workflow/src/devcontainer_bridge.rs`
+- Modify: `lib/crates/fabro-workflow/src/pipeline/initialize.rs`
 - Modify: `lib/crates/fabro-workflow/src/handler/llm/cli.rs`
 
 - [x] **Step 1: Add setup failure tails without removing `stderr`**
@@ -567,13 +567,13 @@ options.emitter.emit(&Event::SetupFailed {
 
 Keep the existing `stderr` value for compatibility in this change.
 
-- [x] **Step 2: Add devcontainer failure tails without removing `stderr`**
+- [x] **Step 2: Add setup failure tails without removing `stderr`**
 
 For both parallel and single-command lifecycle failures, emit:
 
 ```rust
 let exec_output_tail = result.default_redacted_output_tail();
-emitter.emit(&Event::DevcontainerLifecycleFailed {
+emitter.emit(&Event::SetupFailed {
     phase: phase.clone(),
     command: name.clone(),
     index,
@@ -611,14 +611,14 @@ Add or update tests so that:
 
 - setup failure with stderr preserves `props.stderr` and adds `props.exec_output_tail.stderr`.
 - setup failure with stdout-only output adds `props.exec_output_tail.stdout`.
-- devcontainer lifecycle failure adds the nested tail while preserving `stderr`.
+- setup failure adds the nested tail while preserving `stderr`.
 - CLI ensure failure no longer embeds command output in `error`, but includes `exec_output_tail`.
 
 Run:
 
 ```bash
 cargo nextest run -p fabro-workflow setup
-cargo nextest run -p fabro-workflow devcontainer
+cargo nextest run -p fabro-workflow setup
 cargo nextest run -p fabro-workflow cli
 ```
 

@@ -113,7 +113,10 @@ pub use run_projection::{
     StageContextWindowStaleness, StageContextWindowUnavailableReason, StageContextWindowWarning,
     StageModelUsage, StageProjection, SubAgentProjection, SubAgentStatus, first_event_seq,
 };
-pub use run_sandbox::{RunSandbox, RunSandboxRuntime};
+pub use run_sandbox::{
+    RunSandbox, RunSandboxFailure, RunSandboxInstance, RunSandboxKind, RunSandboxPlan,
+    RunSandboxRuntime,
+};
 pub use run_summary::{
     AskFabro, AskFabroUnavailableReason, AutomationRef, Run, RunApproval, RunApprovalState,
     RunBillingSummary, RunError, RunLifecycle, RunLinks, RunModel, RunOrigin, RunOriginKind,

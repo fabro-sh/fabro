@@ -406,7 +406,7 @@ mod tests {
             retry_state
                 .sandbox
                 .as_ref()
-                .and_then(|sandbox| sandbox.runtime.as_ref())
+                .and_then(fabro_types::RunSandbox::instance)
                 .is_none()
         );
 
