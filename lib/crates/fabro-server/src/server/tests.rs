@@ -13360,11 +13360,13 @@ async fn pause_run_sets_pending_control_on_board_response() {
     let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
     let run_id = run_id_str.parse::<RunId>().unwrap();
 
+    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get_mut(&run_id).expect("run should exist");
         managed_run.status = RunStatus::Running;
         managed_run.worker_pid = Some(u32::MAX);
+        managed_run.answer_transport = Some(transport);
     }
 
     let req = Request::builder()
@@ -13480,11 +13482,13 @@ async fn unpause_run_sets_pending_control() {
     let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
     let run_id = run_id_str.parse::<RunId>().unwrap();
 
+    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get_mut(&run_id).expect("run should exist");
         managed_run.status = RunStatus::Paused { prior_block: None };
         managed_run.worker_pid = Some(u32::MAX);
+        managed_run.answer_transport = Some(transport);
     }
 
     let req = Request::builder()
