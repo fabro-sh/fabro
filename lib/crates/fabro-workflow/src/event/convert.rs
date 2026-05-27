@@ -46,8 +46,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
         } => EventBody::RunCreated(fabro_types::RunCreatedProps {
             title:            title.clone(),
             settings:         serde_json::from_value(settings.clone())
-                .expect("run.created settings"),
-            graph:            serde_json::from_value(graph.clone()).expect("run.created graph"),
+                .expect("run.created settings should deserialize: value was serialized from a typed struct in this session"),
+            graph:            serde_json::from_value(graph.clone()).expect("run.created graph should deserialize: value was serialized from a typed struct in this session"),
             workflow_source:  workflow_source.clone(),
             workflow_config:  workflow_config.clone(),
             labels:           labels.clone(),

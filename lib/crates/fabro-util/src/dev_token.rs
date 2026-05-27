@@ -23,7 +23,9 @@ const DEV_TOKEN_LEN: usize = DEV_TOKEN_PREFIX.len() + DEV_TOKEN_HEX_LEN;
 
 pub fn generate_dev_token() -> String {
     let mut bytes = [0_u8; DEV_TOKEN_RANDOM_BYTES];
-    OsRng.try_fill_bytes(&mut bytes).expect("OS RNG");
+    OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS RNG should always be available; a failure indicates a broken system RNG that would compromise token security");
 
     let mut token = String::with_capacity(DEV_TOKEN_LEN);
     token.push_str(DEV_TOKEN_PREFIX);

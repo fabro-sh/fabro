@@ -254,11 +254,11 @@ impl Backend {
     }
 }
 
-async fn select_backend() -> Backend {
+async fn select_backend() -> Result<Backend> {
     select_backend_for_gh_command("gh").await
 }
 
-async fn select_backend_for_gh_command(gh_command: &str) -> Backend {
+async fn select_backend_for_gh_command(gh_command: &str) -> Result<Backend> {
     // Check if gh is available
     let gh_version = TokioCommand::new(gh_command)
         .arg("--version")
@@ -266,11 +266,11 @@ async fn select_backend_for_gh_command(gh_command: &str) -> Backend {
         .await;
     let Ok(output) = gh_version else {
         debug!("gh CLI not found, using HTTP backend");
-        return Backend::Http(http_client().expect("failed to build HTTP client"));
+        return Ok(Backend::Http(http_client()?));
     };
     if !output.status.success() {
         debug!("gh --version failed, using HTTP backend");
-        return Backend::Http(http_client().expect("failed to build HTTP client"));
+        return Ok(Backend::Http(http_client()?));
     }
 
     // Check if gh is authenticated
@@ -281,11 +281,11 @@ async fn select_backend_for_gh_command(gh_command: &str) -> Backend {
     match auth_status {
         Ok(o) if o.status.success() => {
             debug!("gh CLI available and authenticated, using Gh backend");
-            Backend::Gh
+            Ok(Backend::Gh)
         }
         _ => {
             debug!("gh not authenticated, using HTTP backend");
-            Backend::Http(http_client().expect("failed to build HTTP client"))
+            Ok(Backend::Http(http_client()?))
         }
     }
 }
@@ -454,7 +454,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
         return run_upgrade_brew(&args, cli, printer, channel);
     }
 
-    let backend = select_backend().await;
+    let backend = select_backend().await?;
 
     let current =
         Version::parse(env!("CARGO_PKG_VERSION")).context("failed to parse current version")?;
@@ -703,7 +703,7 @@ async fn check_and_print_notice(printer: Printer) -> Result<()> {
             }
         }
         InstallSource::Tarball => {
-            let backend = select_backend().await;
+            let backend = select_backend().await?;
             let tag = backend.fetch_latest_release_tag().await?;
             parse_version_from_tag(&tag)?
         }
@@ -896,7 +896,9 @@ mod tests {
 
     #[tokio::test]
     async fn select_backend_falls_back_to_http_when_gh_is_missing() {
-        let backend = select_backend_for_gh_command("fabro-test-gh-that-should-not-exist").await;
+        let backend = select_backend_for_gh_command("fabro-test-gh-that-should-not-exist")
+            .await
+            .unwrap();
         assert!(matches!(backend, Backend::Http(_)));
     }
 

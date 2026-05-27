@@ -80,7 +80,7 @@ fn init_inner(level: TelemetryLevel, anonymous_id: String) {
     let ctx = context::build_context();
     let (tx, rx) = mpsc::channel();
 
-    let handle = std::thread::Builder::new()
+    let handle = match std::thread::Builder::new()
         .name("telemetry".to_string())
         .spawn(move || {
             buffer::consumer_loop(
@@ -95,8 +95,13 @@ fn init_inner(level: TelemetryLevel, anonymous_id: String) {
                     sender::emit(tracks);
                 },
             );
-        })
-        .expect("failed to spawn telemetry thread");
+        }) {
+        Ok(h) => h,
+        Err(err) => {
+            tracing::debug!(%err, "telemetry: failed to spawn background thread; telemetry disabled");
+            return;
+        }
+    };
 
     let _ = GLOBAL.set(Global {
         sender: Mutex::new(Some(tx)),

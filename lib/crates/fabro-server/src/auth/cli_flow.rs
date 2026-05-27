@@ -1051,7 +1051,9 @@ fn oauth_invalid(
 
 fn random_secret() -> String {
     let mut bytes = [0_u8; 32];
-    OsRng.try_fill_bytes(&mut bytes).expect("OS RNG");
+    OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS RNG should always be available; a failure indicates a broken system RNG that would compromise secret security");
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
@@ -1162,7 +1164,9 @@ fn remove_cli_flow_cookie(jar: &mut CookieJar, key: &Key, secure: bool) {
 
 fn random_auth_code() -> String {
     let mut bytes = [0_u8; 32];
-    OsRng.try_fill_bytes(&mut bytes).expect("OS RNG");
+    OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS RNG should always be available; a failure indicates a broken system RNG that would compromise auth code security");
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
