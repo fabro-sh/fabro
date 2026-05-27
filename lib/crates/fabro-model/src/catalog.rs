@@ -1818,6 +1818,40 @@ enabled = true
     }
 
     #[test]
+    fn builtin_openrouter_provider_is_opt_in() {
+        let openrouter = ProviderId::new("openrouter");
+        let builtin = Catalog::builtin();
+
+        assert!(builtin.provider(&openrouter).is_none());
+        assert!(builtin.list(Some(&openrouter)).is_empty());
+
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.openrouter]
+enabled = true
+",
+        ))
+        .expect("enabled OpenRouter override should build from the built-in provider settings");
+
+        let provider = catalog
+            .provider(&openrouter)
+            .expect("enabled OpenRouter provider should be present");
+        assert_eq!(provider.adapter, AdapterKind::OpenAiCompatible);
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+
+        let models = catalog.list(Some(&openrouter));
+        assert_eq!(models.len(), 17);
+
+        let default = catalog
+            .default_for_provider(&openrouter)
+            .expect("openrouter catalog should have a default model");
+        assert_eq!(default.id, "anthropic/claude-sonnet-4-6");
+    }
+
+    #[test]
     fn builtin_get_by_id() {
         let m = Catalog::builtin().get("claude-opus-4-6").unwrap();
         assert_eq!(m.id, "claude-opus-4-6");
