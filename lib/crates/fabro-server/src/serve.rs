@@ -714,6 +714,7 @@ where
     };
     let storage = Storage::new(&data_dir);
     let vault_path = storage.secrets_path();
+    let variables_path = storage.variables_path();
     let server_env_path = storage.runtime_directory().env_path();
     runtime_settings.server_settings = runtime_settings
         .server_settings
@@ -804,6 +805,7 @@ where
         store,
         artifact_store,
         vault_path,
+        variables_path,
         preloaded_vault: Some(startup_vault),
         server_secrets,
         env_lookup,
@@ -1249,9 +1251,9 @@ mod tests {
         apply_effective_log_destination, bind_tcp_host_with_fallback,
         build_local_object_store_with_preference, build_object_store_from_settings_with_lookup,
         build_slatedb_store, force_exit_after_shutdown, resolve_bind_request_from_server_settings,
-        resolve_github_webhook_ip_allowlist, resolve_startup_github_webhook_ip_allowlist,
-        serve_overrides, serve_until_shutdown, server_bind_title, server_title,
-        spawn_shutdown_orchestrator_inner,
+        resolve_github_webhook_ip_allowlist, resolve_interp,
+        resolve_startup_github_webhook_ip_allowlist, serve_overrides, serve_until_shutdown,
+        server_bind_title, server_title, spawn_shutdown_orchestrator_inner,
     };
     use crate::server::ResolvedAppStateSettings;
 
@@ -1284,6 +1286,16 @@ mod tests {
             &toml::to_string(&document).expect("fixture should serialize"),
         )
         .expect("settings should resolve")
+    }
+
+    #[test]
+    fn server_settings_interpolation_rejects_variables() {
+        let err = resolve_interp(&InterpString::parse("{{ vars.STORAGE_ROOT }}")).unwrap_err();
+
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("failed to resolve {{ vars.STORAGE_ROOT }}"));
+        assert!(rendered.contains("variable \"STORAGE_ROOT\""));
+        assert!(rendered.contains("not supported in this interpolation context"));
     }
 
     fn resolved_runtime_settings(source: &str) -> ResolvedAppStateSettings {

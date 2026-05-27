@@ -47,6 +47,7 @@ pub mod system_integrations;
 pub mod timing;
 pub mod todo;
 pub mod transcript;
+pub mod variable;
 
 pub use artifact::ArtifactUpload;
 pub use auth::{IdpIdentity, IdpIdentityError};
@@ -159,4 +160,7 @@ pub use todo::{TodoListKind, TodoListProjection, TodoPatch, TodoProjection, Todo
 pub use transcript::{
     AudioData, ContentPart, DocumentData, ImageData, MessageId, MessageKind, MessageSource,
     PairMessageRef, ThinkingData, ToolCall, ToolResult, TranscriptMessage,
+};
+pub use variable::{
+    CreateVariableRequest, UpdateVariableRequest, Variable, VariableListResponse, is_env_style_name,
 };

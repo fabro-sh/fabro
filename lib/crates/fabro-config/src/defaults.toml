@@ -30,7 +30,7 @@ id = "default"
 provider = "docker"
 
 [environments.default.image]
-ref = "buildpack-deps:noble"
+docker = "buildpack-deps:noble"
 
 [environments.default.resources]
 cpu = 2
@@ -47,7 +47,7 @@ provider = "local"
 provider = "docker"
 
 [environments.docker.image]
-ref = "buildpack-deps:noble"
+docker = "buildpack-deps:noble"
 
 [environments.docker.resources]
 cpu = 2

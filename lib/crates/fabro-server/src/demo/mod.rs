@@ -1757,7 +1757,7 @@ mod runs {
         let environment = EnvironmentSettings {
             provider: EnvironmentProvider::Daytona,
             image: EnvironmentImageSettings {
-                reference:  Some("api-server-dev".into()),
+                docker:     Some("api-server-dev".into()),
                 dockerfile: None,
             },
             resources: EnvironmentResourcesSettings {

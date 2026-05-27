@@ -437,6 +437,22 @@ fn main() {
             &[],
         ),
         ("SecretMetadata", "fabro_types::SecretMetadata", &[]),
+        ("Variable", "fabro_types::Variable", &[]),
+        (
+            "VariableListResponse",
+            "fabro_types::VariableListResponse",
+            &[],
+        ),
+        (
+            "CreateVariableRequest",
+            "fabro_types::CreateVariableRequest",
+            &[],
+        ),
+        (
+            "UpdateVariableRequest",
+            "fabro_types::UpdateVariableRequest",
+            &[],
+        ),
         ("InterviewOption", "fabro_types::InterviewOption", &[]),
         (
             "InterviewQuestionRecord",

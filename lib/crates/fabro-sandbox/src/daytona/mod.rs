@@ -57,6 +57,74 @@ pub use crate::config::{
     DaytonaSnapshotSettings as DaytonaSnapshotConfig, DaytonaVolumeMount, DockerfileSource,
 };
 
+pub mod snapshot_identity {
+    use hmac::{Hmac, Mac};
+    use serde::Serialize;
+    use sha2::{Digest, Sha256};
+    use uuid::Uuid;
+
+    use super::{DaytonaSnapshotConfig, DockerfileSource};
+
+    const IDENTITY_VERSION: u8 = 1;
+    const PROVIDER: &str = "daytona";
+    const TENANT: &str = "single-tenant";
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    #[derive(Serialize)]
+    struct SnapshotManifest<'a> {
+        identity_version:  u8,
+        provider:          &'static str,
+        tenant:            &'static str,
+        dockerfile_sha256: &'a str,
+        cpu:               Option<i32>,
+        memory_gb:         Option<i32>,
+        disk_gb:           Option<i32>,
+        entrypoint:        Option<&'static str>,
+    }
+
+    pub fn snapshot_name(api_key: &str, config: &DaytonaSnapshotConfig) -> crate::Result<String> {
+        let manifest = canonical_manifest(config)?;
+        let mut mac = HmacSha256::new_from_slice(api_key.as_bytes())
+            .expect("HMAC-SHA256 accepts keys of any length");
+        mac.update(&manifest);
+        let digest = mac.finalize().into_bytes();
+        let mut bytes = [0_u8; 16];
+        bytes.copy_from_slice(&digest[..16]);
+        Ok(format!("fabro-{}", Uuid::new_v8(bytes)))
+    }
+
+    fn canonical_manifest(config: &DaytonaSnapshotConfig) -> crate::Result<Vec<u8>> {
+        let dockerfile = match &config.dockerfile {
+            Some(DockerfileSource::Inline(text)) => text.as_str(),
+            Some(DockerfileSource::Path { .. }) => {
+                return Err(crate::Error::message(
+                    "Daytona snapshot dockerfile path should have been resolved to inline content before sandbox creation",
+                ));
+            }
+            None => {
+                return Err(crate::Error::message(
+                    "Daytona custom snapshots require image.dockerfile",
+                ));
+            }
+        };
+        let dockerfile_sha256 = hex::encode(Sha256::digest(dockerfile.as_bytes()));
+        let manifest = SnapshotManifest {
+            identity_version:  IDENTITY_VERSION,
+            provider:          PROVIDER,
+            tenant:            TENANT,
+            dockerfile_sha256: &dockerfile_sha256,
+            cpu:               config.cpu,
+            memory_gb:         config.memory,
+            disk_gb:           config.disk,
+            entrypoint:        None,
+        };
+        serde_json::to_vec(&manifest).map_err(|err| {
+            crate::Error::context("Failed to serialize Daytona snapshot identity", err)
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct DaytonaKeyCheck {
     pub key_name: String,
@@ -126,6 +194,18 @@ async fn build_daytona_client(
     api_key: Option<String>,
 ) -> Result<daytona_sdk::Client, daytona_sdk::DaytonaError> {
     build_daytona_client_with(api_key, None, None, None).await
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Standalone Daytona sandbox construction falls back to the documented process env var."
+)]
+fn resolve_daytona_api_key(api_key: Option<String>) -> Option<String> {
+    api_key.filter(|key| !key.is_empty()).or_else(|| {
+        std::env::var(EnvVars::DAYTONA_API_KEY)
+            .ok()
+            .filter(|key| !key.is_empty())
+    })
 }
 
 pub(crate) async fn build_daytona_client_with(
@@ -242,8 +322,10 @@ fn command_kind(command: &str) -> &'static str {
 pub struct DaytonaSandbox {
     config:            DaytonaConfig,
     client:            daytona_sdk::Client,
+    api_key:           Option<String>,
     github_app:        Option<GitHubCredentials>,
     sandbox:           OnceCell<daytona_sdk::Sandbox>,
+    snapshot_name:     OnceCell<String>,
     rg_available:      OnceCell<bool>,
     event_callback:    Option<SandboxEventCallback>,
     /// HTTPS origin URL stored after clone so we can refresh push credentials
@@ -271,14 +353,17 @@ impl DaytonaSandbox {
         clone_branch: Option<String>,
         api_key: Option<String>,
     ) -> crate::Result<Self> {
-        let client = build_daytona_client(api_key)
+        let api_key = resolve_daytona_api_key(api_key);
+        let client = build_daytona_client(api_key.clone())
             .await
             .map_err(|e| crate::Error::context("Failed to create Daytona client", e))?;
         Ok(Self {
             config,
             client,
+            api_key,
             github_app,
             sandbox: OnceCell::new(),
+            snapshot_name: OnceCell::new(),
             rg_available: OnceCell::const_new(),
             event_callback: None,
             origin_url: OnceCell::new(),
@@ -302,7 +387,8 @@ impl DaytonaSandbox {
         clone_origin_url: Option<String>,
         clone_branch: Option<String>,
     ) -> crate::Result<Self> {
-        let client = build_daytona_client(api_key)
+        let api_key = resolve_daytona_api_key(api_key);
+        let client = build_daytona_client(api_key.clone())
             .await
             .map_err(|e| crate::Error::context("Failed to create Daytona client", e))?;
         let sdk_sandbox = client.get(sandbox_name).await.map_err(|e| {
@@ -326,8 +412,10 @@ impl DaytonaSandbox {
         Ok(Self {
             config: DaytonaConfig::default(),
             client,
+            api_key,
             github_app: None,
             sandbox: sandbox_cell,
+            snapshot_name: OnceCell::new(),
             rg_available: OnceCell::const_new(),
             event_callback: None,
             origin_url,
@@ -477,8 +565,12 @@ impl DaytonaSandbox {
     /// If the snapshot doesn't exist and a dockerfile is provided, creates it
     /// and polls until it reaches `Active` state. Returns an error if the
     /// snapshot is in a terminal failure state.
-    async fn ensure_snapshot(&self, snap_cfg: &DaytonaSnapshotConfig) -> crate::Result<()> {
-        match self.client.snapshot.get(&snap_cfg.name).await {
+    async fn ensure_snapshot(
+        &self,
+        name: &str,
+        snap_cfg: &DaytonaSnapshotConfig,
+    ) -> crate::Result<()> {
+        match self.client.snapshot.get(name).await {
             Ok(dto) => {
                 use daytona_api_client::models::SnapshotState;
                 match dto.state {
@@ -486,7 +578,7 @@ impl DaytonaSandbox {
                     SnapshotState::Error | SnapshotState::BuildFailed => {
                         return Err(crate::Error::message(format!(
                             "Snapshot '{}' is in state '{}': {}",
-                            snap_cfg.name,
+                            name,
                             dto.state,
                             dto.error_reason.unwrap_or_default()
                         )));
@@ -494,7 +586,7 @@ impl DaytonaSandbox {
                     _ => {
                         // Building/Pending/Pulling — fall through to poll
                         self.emit(SandboxEvent::SnapshotCreating {
-                            name: snap_cfg.name.clone(),
+                            name: name.to_string(),
                         });
                     }
                 }
@@ -504,24 +596,22 @@ impl DaytonaSandbox {
                     Some(DockerfileSource::Inline(s)) => s.as_str(),
                     Some(DockerfileSource::Path { .. }) => {
                         return Err(crate::Error::message(format!(
-                            "Snapshot '{}': dockerfile path should have been resolved to inline content before sandbox creation",
-                            snap_cfg.name
+                            "Snapshot '{name}': dockerfile path should have been resolved to inline content before sandbox creation"
                         )));
                     }
                     None => {
                         return Err(crate::Error::message(format!(
-                            "Snapshot '{}' does not exist and no dockerfile provided to create it",
-                            snap_cfg.name
+                            "Snapshot '{name}' does not exist and no dockerfile provided to create it"
                         )));
                     }
                 };
 
                 self.emit(SandboxEvent::SnapshotCreating {
-                    name: snap_cfg.name.clone(),
+                    name: name.to_string(),
                 });
 
                 let params = daytona_sdk::CreateSnapshotParams {
-                    name:       snap_cfg.name.clone(),
+                    name:       name.to_string(),
                     image:      daytona_sdk::ImageSource::Custom(
                         daytona_sdk::DockerImage::from_dockerfile(dockerfile),
                     ),
@@ -534,22 +624,19 @@ impl DaytonaSandbox {
                     entrypoint: None,
                 };
                 self.client.snapshot.create(&params).await.map_err(|e| {
-                    crate::Error::context(
-                        format!("Failed to create snapshot '{}'", snap_cfg.name),
-                        e,
-                    )
+                    crate::Error::context(format!("Failed to create snapshot '{name}'"), e)
                 })?;
             }
             Err(e) => {
                 return Err(crate::Error::context(
-                    format!("Failed to get snapshot '{}'", snap_cfg.name),
+                    format!("Failed to get snapshot '{name}'"),
                     e,
                 ));
             }
         }
 
         // Poll until Active (or terminal failure).
-        self.poll_snapshot_active(&snap_cfg.name).await
+        self.poll_snapshot_active(name).await
     }
 
     /// Poll a snapshot until it reaches `Active` state, with exponential
@@ -689,11 +776,29 @@ impl Sandbox for DaytonaSandbox {
         });
         let init_start = Instant::now();
 
-        let params = if let Some(ref snap_cfg) = self.config.snapshot {
+        let params = if let Some(snap_cfg) = self
+            .config
+            .snapshot
+            .as_ref()
+            .filter(|snapshot| snapshot.dockerfile.is_some())
+        {
+            let api_key = self.api_key.as_deref().ok_or_else(|| {
+                self.fail_init(
+                    init_start,
+                    crate::Error::message(format!(
+                        "{} is required to compute Daytona snapshot identity",
+                        EnvVars::DAYTONA_API_KEY
+                    )),
+                )
+            })?;
+            let snapshot_name = match snapshot_identity::snapshot_name(api_key, snap_cfg) {
+                Ok(name) => name,
+                Err(err) => return Err(self.fail_init(init_start, err)),
+            };
             let snap_start = Instant::now();
-            if let Err(e) = self.ensure_snapshot(snap_cfg).await {
+            if let Err(e) = self.ensure_snapshot(&snapshot_name, snap_cfg).await {
                 self.emit(SandboxEvent::SnapshotFailed {
-                    name:   snap_cfg.name.clone(),
+                    name:   snapshot_name.clone(),
                     error:  e.to_string(),
                     causes: e.causes(),
                 });
@@ -701,15 +806,17 @@ impl Sandbox for DaytonaSandbox {
             }
             let snap_duration = u64::try_from(snap_start.elapsed().as_millis()).unwrap_or(u64::MAX);
             self.emit(SandboxEvent::SnapshotReady {
-                name:        snap_cfg.name.clone(),
+                name:        snapshot_name.clone(),
                 duration_ms: snap_duration,
             });
+            let _ = self.snapshot_name.set(snapshot_name.clone());
 
             daytona_sdk::CreateParams::Snapshot(daytona_sdk::SnapshotParams {
                 base:     self.base_params(),
-                snapshot: snap_cfg.name.clone(),
+                snapshot: snapshot_name,
             })
         } else {
+            let _ = self.snapshot_name.set(DEFAULT_SNAPSHOT.to_string());
             daytona_sdk::CreateParams::Snapshot(daytona_sdk::SnapshotParams {
                 base:     self.base_params(),
                 snapshot: DEFAULT_SNAPSHOT.to_string(),
@@ -1142,6 +1249,10 @@ impl Sandbox for DaytonaSandbox {
             .get()
             .map(|s| s.name.clone())
             .unwrap_or_default()
+    }
+
+    fn snapshot_info(&self) -> Option<String> {
+        self.snapshot_name.get().cloned()
     }
 
     async fn setup_git(
@@ -2200,6 +2311,57 @@ mod tests {
             .await
     }
 
+    async fn mock_daytona_sandbox(
+        server: &MockServer,
+        api_key: &str,
+        config: DaytonaConfig,
+    ) -> DaytonaSandbox {
+        let client = build_daytona_client_with(
+            Some(api_key.to_string()),
+            Some(server.base_url()),
+            None,
+            Some(fabro_test::test_http_client()),
+        )
+        .await
+        .expect("mock Daytona client should build");
+
+        DaytonaSandbox {
+            config,
+            client,
+            api_key: Some(api_key.to_string()),
+            github_app: None,
+            sandbox: OnceCell::new(),
+            snapshot_name: OnceCell::new(),
+            rg_available: OnceCell::const_new(),
+            event_callback: None,
+            origin_url: OnceCell::new(),
+            repo_cloned: OnceCell::new(),
+            working_directory: OnceCell::new(),
+            run_id: None,
+            clone_origin_url: None,
+            clone_branch: None,
+        }
+    }
+
+    fn snapshot_body(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": name,
+            "name": name,
+            "state": "active",
+            "general": false,
+            "cpu": 2.0,
+            "gpu": 0.0,
+            "mem": 4.0,
+            "disk": 20.0,
+            "size": null,
+            "entrypoint": null,
+            "errorReason": null,
+            "lastUsedAt": null,
+            "createdAt": "2026-05-01T00:00:00Z",
+            "updatedAt": "2026-05-01T00:00:00Z"
+        })
+    }
+
     #[test]
     fn daytona_config_defaults() {
         let config = DaytonaConfig::default();
@@ -2245,6 +2407,123 @@ subpath = "agents"
         assert_eq!(volumes[0].volume_id, "vol_auth");
         assert_eq!(volumes[0].mount_path, "/home/daytona/.config");
         assert_eq!(volumes[0].subpath.as_deref(), Some("agents"));
+    }
+
+    #[test]
+    fn computed_snapshot_identity_is_deterministic_and_keyed() {
+        let config = DaytonaSnapshotConfig {
+            cpu:        Some(2),
+            memory:     Some(4),
+            disk:       Some(10),
+            dockerfile: Some(DockerfileSource::Inline(
+                "FROM ubuntu:24.04\nRUN apt-get update".to_string(),
+            )),
+        };
+
+        let first = snapshot_identity::snapshot_name("dtn_secret", &config).unwrap();
+        let second = snapshot_identity::snapshot_name("dtn_secret", &config).unwrap();
+        let rotated_key = snapshot_identity::snapshot_name("dtn_rotated", &config).unwrap();
+
+        assert_eq!(first, second);
+        assert_ne!(first, rotated_key);
+        let uuid = first
+            .strip_prefix("fabro-")
+            .and_then(|raw| uuid::Uuid::parse_str(raw).ok())
+            .expect("snapshot name should be fabro-<uuid>");
+        assert_eq!(uuid.get_version_num(), 8);
+        assert_eq!(uuid.get_variant(), uuid::Variant::RFC4122);
+    }
+
+    #[test]
+    fn computed_snapshot_identity_changes_for_generation_inputs() {
+        let base = DaytonaSnapshotConfig {
+            cpu:        Some(2),
+            memory:     Some(4),
+            disk:       Some(10),
+            dockerfile: Some(DockerfileSource::Inline("FROM ubuntu:24.04".to_string())),
+        };
+        let base_name = snapshot_identity::snapshot_name("dtn_secret", &base).unwrap();
+
+        let cases = [
+            DaytonaSnapshotConfig {
+                dockerfile: Some(DockerfileSource::Inline(
+                    "FROM ubuntu:24.04\n# roll cache".to_string(),
+                )),
+                ..base.clone()
+            },
+            DaytonaSnapshotConfig {
+                cpu: Some(4),
+                ..base.clone()
+            },
+            DaytonaSnapshotConfig {
+                memory: Some(8),
+                ..base.clone()
+            },
+            DaytonaSnapshotConfig {
+                disk: Some(20),
+                ..base.clone()
+            },
+        ];
+
+        for changed in cases {
+            let changed_name = snapshot_identity::snapshot_name("dtn_secret", &changed).unwrap();
+            assert_ne!(base_name, changed_name);
+        }
+    }
+
+    #[test]
+    fn computed_snapshot_identity_excludes_raw_dockerfile_and_key_material() {
+        let config = DaytonaSnapshotConfig {
+            cpu:        None,
+            memory:     None,
+            disk:       None,
+            dockerfile: Some(DockerfileSource::Inline(
+                "FROM private.example.com/secret-image\nRUN echo raw-secret".to_string(),
+            )),
+        };
+
+        let name = snapshot_identity::snapshot_name("dtn_super_secret_key", &config).unwrap();
+
+        assert!(name.starts_with("fabro-"));
+        assert!(!name.contains("private.example.com"));
+        assert!(!name.contains("raw-secret"));
+        assert!(!name.contains("dtn_super_secret_key"));
+    }
+
+    #[tokio::test]
+    async fn ensure_snapshot_uses_computed_snapshot_name_for_daytona_api_calls() {
+        let api_key = "dtn_secret";
+        let snapshot = DaytonaSnapshotConfig {
+            cpu:        Some(2),
+            memory:     Some(4),
+            disk:       Some(10),
+            dockerfile: Some(DockerfileSource::Inline("FROM ubuntu:24.04".to_string())),
+        };
+        let computed_name = snapshot_identity::snapshot_name(api_key, &snapshot).unwrap();
+        let server = MockServer::start_async().await;
+        let path = format!("/snapshots/{computed_name}");
+        let get_snapshot = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path(path.as_str())
+                    .header("authorization", "Bearer dtn_secret");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(snapshot_body(&computed_name));
+            })
+            .await;
+        let config = DaytonaConfig {
+            snapshot: Some(snapshot.clone()),
+            ..DaytonaConfig::default()
+        };
+        let sandbox = mock_daytona_sandbox(&server, api_key, config).await;
+
+        sandbox
+            .ensure_snapshot(&computed_name, &snapshot)
+            .await
+            .expect("existing computed snapshot should be accepted");
+
+        get_snapshot.assert_async().await;
     }
 
     #[tokio::test]

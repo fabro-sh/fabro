@@ -45,6 +45,7 @@ fabro-api = { path = "../fabro-api" }
 fabro-client = { path = "../fabro-client" }
 fabro-store = { path = "../fabro-store" }
 fabro-vault = { path = "../fabro-vault" }
+fabro-variable = { path = "../fabro-variable" }
 fabro-http.workspace = true
 fabro-redact.workspace = true
 fabro-static.workspace = true

@@ -18,6 +18,6 @@
 import type { DockerfileSource } from './dockerfile-source';
 
 export interface EnvironmentImageSettings {
-    'ref': string | null;
+    'docker': string | null;
     'dockerfile': DockerfileSource | null;
 }

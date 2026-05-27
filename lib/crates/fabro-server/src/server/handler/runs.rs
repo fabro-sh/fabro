@@ -19,10 +19,11 @@ use fabro_api::types::{
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
 use fabro_llm::client::Client as LlmClient;
+use fabro_types::settings::ResolveEnvError;
 use fabro_types::{
     Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, StageContextWindow,
     StageContextWindowStaleness, StageContextWindowUnavailableReason, StageHandler,
-    StageModelUsage, StageProjection, SystemActorKind, parse_blob_ref,
+    StageModelUsage, StageProjection, SystemActorKind, WorkflowSettings, parse_blob_ref,
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
@@ -599,7 +600,7 @@ async fn create_run(
     let explicit_title_supplied = req.title.is_some();
     let manifest_run_defaults = state.manifest_run_defaults();
     let manifest_environment_defaults = state.manifest_environment_defaults();
-    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+    let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
         manifest_environment_defaults.as_ref(),
         &req,
@@ -607,6 +608,10 @@ async fn create_run(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
+    if let Err(err) = substitute_run_variables(&state, &mut prepared.settings).await {
+        return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
+            .into_response();
+    }
     let run_id = prepared.run_id.unwrap_or_else(RunId::new);
     let provider = run_manifest::effective_sandbox_provider(&prepared.settings.run);
     if let Some(error) =
@@ -856,7 +861,7 @@ async fn run_preflight(
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
     let manifest_environment_defaults = state.manifest_environment_defaults();
-    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+    let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
         manifest_environment_defaults.as_ref(),
         &req,
@@ -864,6 +869,10 @@ async fn run_preflight(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
+    if let Err(err) = substitute_run_variables(&state, &mut prepared.settings).await {
+        return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
+            .into_response();
+    }
     let mut validated = match run_manifest::validate_prepared_manifest(&prepared, state.catalog()) {
         Ok(validated) => validated,
         Err(WorkflowError::Parse(_)) => {
@@ -889,7 +898,7 @@ async fn validate_run_manifest(
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
     let manifest_environment_defaults = state.manifest_environment_defaults();
-    let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+    let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
         manifest_environment_defaults.as_ref(),
         &req,
@@ -897,6 +906,10 @@ async fn validate_run_manifest(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
+    if let Err(err) = substitute_run_variables(&state, &mut prepared.settings).await {
+        return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
+            .into_response();
+    }
     let validated = match run_manifest::validate_prepared_manifest(&prepared, state.catalog()) {
         Ok(validated) => validated,
         Err(WorkflowError::Parse(_)) => {
@@ -909,6 +922,16 @@ async fn validate_run_manifest(
         Json(run_manifest::validate_response(&prepared, &validated)),
     )
         .into_response()
+}
+
+async fn substitute_run_variables(
+    state: &AppState,
+    settings: &mut WorkflowSettings,
+) -> Result<(), ResolveEnvError> {
+    let variables = state.variables.read().await;
+    settings
+        .run
+        .substitute_variables(|name| variables.get_value(name).map(str::to_string))
 }
 
 async fn get_run_status(

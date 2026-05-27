@@ -629,6 +629,7 @@ mod tests {
                 graph:            fabro_types::Graph::new("metadata"),
                 graph_source:     None,
                 workflow_slug:    Some("metadata".to_string()),
+                automation:       None,
                 source_directory: Some("/Users/client/project".to_string()),
                 git:              Some(GitContext {
                     origin_url:   "https://github.com/fabro-sh/fabro.git".to_string(),

@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { AutomationRef } from './automation-ref';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { ForkSourceRef } from './fork-source-ref';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -35,6 +38,7 @@ export interface RunSpec {
     'graph': { [key: string]: any; };
     'graph_source'?: string | null;
     'workflow_slug'?: string | null;
+    'automation'?: AutomationRef | null;
     'source_directory'?: string | null;
     'labels'?: { [key: string]: string; };
     'provenance'?: RunProvenance | null;

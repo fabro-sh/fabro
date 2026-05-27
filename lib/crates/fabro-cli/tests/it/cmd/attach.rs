@@ -937,8 +937,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 "env": {},
                 "id": "local",
                 "image": {
-                  "dockerfile": null,
-                  "ref": null
+                  "docker": null,
+                  "dockerfile": null
                 },
                 "labels": {},
                 "lifecycle": {

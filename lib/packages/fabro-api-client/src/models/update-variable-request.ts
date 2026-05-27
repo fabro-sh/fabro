@@ -13,14 +13,17 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { DockerfileSource } from './dockerfile-source';
 
-export interface DaytonaSnapshotSettings {
-    'name': string;
-    'cpu': number | null;
-    'memory_gb': number | null;
-    'disk_gb': number | null;
-    'dockerfile': DockerfileSource | null;
+/**
+ * Request to update a variable.
+ */
+export interface UpdateVariableRequest {
+    /**
+     * Replacement value. Empty values are allowed.
+     */
+    'value': string;
+    /**
+     * Optional operator-facing description. Omitted descriptions preserve the existing value.
+     */
+    'description'?: string;
 }

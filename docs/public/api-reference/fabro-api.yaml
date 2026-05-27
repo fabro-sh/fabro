@@ -4433,6 +4433,176 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── Variables ────────────────────────────────────────────────────────
+
+  /api/v1/variables:
+    get:
+      operationId: listVariables
+      tags: [Variables]
+      summary: List variables
+      description: Returns non-sensitive variables, including values.
+      responses:
+        "200":
+          description: Variable list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VariableListResponse"
+    post:
+      operationId: createVariable
+      tags: [Variables]
+      summary: Store or update a variable
+      description: Stores a non-sensitive variable for run config interpolation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVariableRequest"
+      responses:
+        "200":
+          description: Variable stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Variable"
+        "400":
+          description: Invalid variable name or request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Variable store write failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/variables/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
+        description: Variable name.
+    get:
+      operationId: getVariable
+      tags: [Variables]
+      summary: Get a variable
+      responses:
+        "200":
+          description: Variable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Variable"
+        "400":
+          description: Invalid variable name
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Variable not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateVariable
+      tags: [Variables]
+      summary: Replace a variable value
+      description: Replaces a variable value and preserves the existing description when omitted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVariableRequest"
+      responses:
+        "200":
+          description: Variable updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Variable"
+        "400":
+          description: Invalid variable name or request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Variable not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Variable store write failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteVariable
+      tags: [Variables]
+      summary: Delete a variable
+      responses:
+        "204":
+          description: Variable deleted
+        "400":
+          description: Invalid variable name
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Variable not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Variable store write failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Repos ────────────────────────────────────────────────────────────
 
   /api/v1/repos/github/{owner}/{name}:
@@ -9133,6 +9303,10 @@ components:
           type: ["string", "null"]
         workflow_slug:
           type: ["string", "null"]
+        automation:
+          oneOf:
+            - $ref: "#/components/schemas/AutomationRef"
+            - type: "null"
         source_directory:
           type: ["string", "null"]
         labels:
@@ -9559,6 +9733,8 @@ components:
         id:
           type: string
         name:
+          type: ["string", "null"]
+        trigger_id:
           type: ["string", "null"]
 
     RunOrigin:
@@ -12240,9 +12416,9 @@ components:
 
     EnvironmentImageSettings:
       type: object
-      required: [ref, dockerfile]
+      required: [docker, dockerfile]
       properties:
-        ref:
+        docker:
           type: ["string", "null"]
         dockerfile:
           oneOf:
@@ -13161,6 +13337,78 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SecretMetadata"
+
+    Variable:
+      description: Non-sensitive variable available for run config interpolation.
+      type: object
+      required:
+        - name
+        - value
+        - created_at
+        - updated_at
+      properties:
+        name:
+          type: string
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
+          description: Env-style variable name.
+          example: DEPLOY_ENV
+        value:
+          type: string
+          description: Variable value.
+          example: production
+        description:
+          type: string
+          description: Optional operator-facing description of the variable.
+        created_at:
+          type: string
+          format: date-time
+          description: When the variable was first stored.
+        updated_at:
+          type: string
+          format: date-time
+          description: When the variable was last updated.
+
+    VariableListResponse:
+      description: List of stored variables.
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Variable"
+
+    CreateVariableRequest:
+      description: Request to store or update a variable.
+      type: object
+      required:
+        - name
+        - value
+      properties:
+        name:
+          type: string
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$"
+          description: Env-style variable name.
+        value:
+          type: string
+          description: Variable value. Empty values are allowed.
+        description:
+          type: string
+          description: Optional operator-facing description of the variable.
+
+    UpdateVariableRequest:
+      description: Request to update a variable.
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          description: Replacement value. Empty values are allowed.
+        description:
+          type: string
+          description: Optional operator-facing description. Omitted descriptions preserve the existing value.
 
     RepoCheckResponse:
       description: Repository access check result.

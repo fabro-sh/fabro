@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use super::{BilledTokenCounts, ExecOutputTail, RunNoticeLevel};
 use crate::status::{BlockedReason, PendingReason, SuccessReason};
 use crate::{
-    DiffSummary, ForkSourceRef, GitContext, Graph, PairId, PairTarget, RunBlobId, RunControlAction,
-    RunFailure, RunId, RunProvenance, RunTiming, WorkflowSettings,
+    AutomationRef, DiffSummary, ForkSourceRef, GitContext, Graph, PairId, PairTarget, RunBlobId,
+    RunControlAction, RunFailure, RunId, RunProvenance, RunTiming, WorkflowSettings,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,6 +26,8 @@ pub struct RunCreatedProps {
     pub source_directory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug:    Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automation:       Option<AutomationRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub db_prefix:        Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

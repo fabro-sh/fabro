@@ -1,8 +1,9 @@
-//! Env var interpolation for config strings.
+//! Env var and run variable interpolation for config strings.
 //!
 //! Any string field may use `{{ env.NAME }}` tokens, either as a whole value or
-//! as one or more substrings inside a larger string. Resolution happens only
-//! when the field is consumed, and provenance tracking lets outward-facing
+//! as one or more substrings inside a larger string. Run-scoped settings may
+//! additionally use non-sensitive `{{ vars.NAME }}` tokens. Resolution happens
+//! only when the field is consumed, and provenance tracking lets outward-facing
 //! renderers redact env-sourced values uniformly.
 
 use std::fmt;
@@ -10,7 +11,10 @@ use std::fmt;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// A config string that may contain `{{ env.NAME }}` tokens.
+use crate::variable::is_env_style_name;
+
+/// A config string that may contain `{{ env.NAME }}` or `{{ vars.NAME }}`
+/// tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpString {
     segments: Vec<Segment>,
@@ -20,6 +24,7 @@ pub struct InterpString {
 enum Segment {
     Literal(String),
     EnvVar(String),
+    Variable(String),
 }
 
 impl InterpString {
@@ -30,7 +35,9 @@ impl InterpString {
 
         match segments.last_mut() {
             Some(Segment::Literal(existing)) => existing.push_str(text),
-            Some(Segment::EnvVar(_)) | None => segments.push(Segment::Literal(text.to_owned())),
+            Some(Segment::EnvVar(_) | Segment::Variable(_)) | None => {
+                segments.push(Segment::Literal(text.to_owned()));
+            }
         }
     }
 
@@ -45,6 +52,16 @@ impl InterpString {
             return None;
         }
         Some(name.to_owned())
+    }
+
+    fn parse_vars_token(token: &str) -> Option<String> {
+        let trimmed = token.trim();
+        let name = trimmed.strip_prefix("vars.")?;
+        if is_env_style_name(name) {
+            Some(name.to_owned())
+        } else {
+            None
+        }
     }
 
     /// Parse a raw string into its literal/env-var segments.
@@ -66,6 +83,8 @@ impl InterpString {
                 let token = &after_open[..close];
                 if let Some(name) = Self::parse_env_token(token) {
                     segments.push(Segment::EnvVar(name));
+                } else if let Some(name) = Self::parse_vars_token(token) {
+                    segments.push(Segment::Variable(name));
                 } else {
                     Self::push_literal(&mut segments, &rest[start..start + 2 + close + 2]);
                 }
@@ -89,7 +108,7 @@ impl InterpString {
         Self { segments }
     }
 
-    /// True when this string contains no env var tokens.
+    /// True when this string contains no interpolation tokens.
     #[must_use]
     pub fn is_literal(&self) -> bool {
         self.segments
@@ -105,6 +124,14 @@ impl InterpString {
             .any(|seg| matches!(seg, Segment::EnvVar(_)))
     }
 
+    /// True when this string contains at least one run variable token.
+    #[must_use]
+    pub fn references_vars(&self) -> bool {
+        self.segments
+            .iter()
+            .any(|seg| matches!(seg, Segment::Variable(_)))
+    }
+
     /// The env var names referenced by this string, in source order.
     #[must_use]
     pub fn env_var_names(&self) -> Vec<&str> {
@@ -112,7 +139,19 @@ impl InterpString {
             .iter()
             .filter_map(|seg| match seg {
                 Segment::EnvVar(name) => Some(name.as_str()),
-                Segment::Literal(_) => None,
+                Segment::Literal(_) | Segment::Variable(_) => None,
+            })
+            .collect()
+    }
+
+    /// The run variable names referenced by this string, in source order.
+    #[must_use]
+    pub fn var_names(&self) -> Vec<&str> {
+        self.segments
+            .iter()
+            .filter_map(|seg| match seg {
+                Segment::Variable(name) => Some(name.as_str()),
+                Segment::Literal(_) | Segment::EnvVar(_) => None,
             })
             .collect()
     }
@@ -126,6 +165,11 @@ impl InterpString {
                 Segment::Literal(text) => out.push_str(text),
                 Segment::EnvVar(name) => {
                     out.push_str("{{ env.");
+                    out.push_str(name);
+                    out.push_str(" }}");
+                }
+                Segment::Variable(name) => {
+                    out.push_str("{{ vars.");
                     out.push_str(name);
                     out.push_str(" }}");
                 }
@@ -151,10 +195,13 @@ impl InterpString {
                 Segment::Literal(text) => value.push_str(text),
                 Segment::EnvVar(name) => {
                     let Some(resolved) = lookup(name) else {
-                        return Err(ResolveEnvError { name: name.clone() });
+                        return Err(ResolveEnvError::missing_env(name));
                     };
                     value.push_str(&resolved);
                     used.push(name.clone());
+                }
+                Segment::Variable(name) => {
+                    return Err(ResolveEnvError::unsupported_variable(name));
                 }
             }
         }
@@ -165,6 +212,73 @@ impl InterpString {
             Provenance::EnvSourced { names: used }
         };
         Ok(Resolved { value, provenance })
+    }
+
+    /// Resolve env and run variable tokens with separate lookup functions.
+    ///
+    /// Variables are non-sensitive, so variable-only interpolation does not
+    /// mark the value as env-sourced for redaction.
+    pub fn resolve_with_variables<F, G>(
+        &self,
+        mut env_lookup: F,
+        mut variable_lookup: G,
+    ) -> Result<Resolved, ResolveEnvError>
+    where
+        F: FnMut(&str) -> Option<String>,
+        G: FnMut(&str) -> Option<String>,
+    {
+        let mut value = String::new();
+        let mut used_env = Vec::new();
+        for seg in &self.segments {
+            match seg {
+                Segment::Literal(text) => value.push_str(text),
+                Segment::EnvVar(name) => {
+                    let Some(resolved) = env_lookup(name) else {
+                        return Err(ResolveEnvError::missing_env(name));
+                    };
+                    value.push_str(&resolved);
+                    used_env.push(name.clone());
+                }
+                Segment::Variable(name) => {
+                    let Some(resolved) = variable_lookup(name) else {
+                        return Err(ResolveEnvError::missing_variable(name));
+                    };
+                    value.push_str(&resolved);
+                }
+            }
+        }
+
+        let provenance = if used_env.is_empty() {
+            Provenance::Literal
+        } else {
+            Provenance::EnvSourced { names: used_env }
+        };
+        Ok(Resolved { value, provenance })
+    }
+
+    /// Substitute only `{{ vars.* }}` tokens while preserving `{{ env.* }}`
+    /// tokens for their existing consumption-time env lookup.
+    pub fn substitute_variables<F>(&self, mut lookup: F) -> Result<Self, ResolveEnvError>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        let mut segments = Vec::new();
+        for seg in &self.segments {
+            match seg {
+                Segment::Literal(text) => Self::push_literal(&mut segments, text),
+                Segment::EnvVar(name) => segments.push(Segment::EnvVar(name.clone())),
+                Segment::Variable(name) => {
+                    let Some(resolved) = lookup(name) else {
+                        return Err(ResolveEnvError::missing_variable(name));
+                    };
+                    Self::push_literal(&mut segments, &resolved);
+                }
+            }
+        }
+        if segments.is_empty() {
+            segments.push(Segment::Literal(String::new()));
+        }
+        Ok(Self { segments })
     }
 }
 
@@ -201,15 +315,59 @@ pub enum Provenance {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveEnvError {
     pub name: String,
+    pub kind: ResolveEnvErrorKind,
+}
+
+impl ResolveEnvError {
+    fn missing_env(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            kind: ResolveEnvErrorKind::MissingEnv,
+        }
+    }
+
+    fn missing_variable(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            kind: ResolveEnvErrorKind::MissingVariable,
+        }
+    }
+
+    fn unsupported_variable(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            kind: ResolveEnvErrorKind::UnsupportedVariable,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveEnvErrorKind {
+    MissingEnv,
+    MissingVariable,
+    UnsupportedVariable,
 }
 
 impl fmt::Display for ResolveEnvError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "environment variable {:?} referenced by {{{{ env.{} }}}} is not set",
-            self.name, self.name
-        )
+        match self.kind {
+            ResolveEnvErrorKind::MissingEnv => write!(
+                f,
+                "environment variable {:?} referenced by {{{{ env.{} }}}} is not set",
+                self.name, self.name
+            ),
+            ResolveEnvErrorKind::MissingVariable => write!(
+                f,
+                "variable {:?} referenced by {{{{ vars.{} }}}} is not set",
+                self.name, self.name
+            ),
+            ResolveEnvErrorKind::UnsupportedVariable => write!(
+                f,
+                "variable {:?} referenced by {{{{ vars.{} }}}} is not supported in this \
+                 interpolation context",
+                self.name, self.name
+            ),
+        }
     }
 }
 
@@ -353,5 +511,52 @@ mod tests {
         assert_eq!(parsed.s.as_source(), "Bearer {{ env.TOKEN }}");
         let rendered = serde_json::to_string(&parsed).unwrap();
         assert_eq!(rendered, input);
+    }
+
+    #[test]
+    fn vars_reference_round_trips_source() {
+        let s = InterpString::parse("{{ vars.RUNTIME_TOKEN }}");
+
+        assert_eq!(s.var_names(), vec!["RUNTIME_TOKEN"]);
+        assert_eq!(s.as_source(), "{{ vars.RUNTIME_TOKEN }}");
+    }
+
+    #[test]
+    fn resolve_with_variables_substitutes_env_and_var_tokens() {
+        let s = InterpString::parse("https://{{ env.REGION }}.{{ vars.DOMAIN }}");
+
+        let resolved = s
+            .resolve_with_variables(
+                lookup_from(&[("REGION", "us-east-1")]),
+                lookup_from(&[("DOMAIN", "example.com")]),
+            )
+            .unwrap();
+
+        assert_eq!(resolved.value, "https://us-east-1.example.com");
+        assert_eq!(resolved.provenance, Provenance::EnvSourced {
+            names: vec!["REGION".into()],
+        });
+    }
+
+    #[test]
+    fn resolve_with_variables_reports_missing_variable() {
+        let s = InterpString::parse("{{ vars.MISSING }}");
+
+        let err = s
+            .resolve_with_variables(lookup_from(&[]), lookup_from(&[]))
+            .unwrap_err();
+
+        assert_eq!(err.name, "MISSING");
+        assert_eq!(err.kind, ResolveEnvErrorKind::MissingVariable);
+    }
+
+    #[test]
+    fn env_only_resolution_rejects_vars_reference() {
+        let s = InterpString::parse("{{ vars.RUNTIME_TOKEN }}");
+
+        let err = s.resolve(lookup_from(&[])).unwrap_err();
+
+        assert_eq!(err.name, "RUNTIME_TOKEN");
+        assert_eq!(err.kind, ResolveEnvErrorKind::UnsupportedVariable);
     }
 }

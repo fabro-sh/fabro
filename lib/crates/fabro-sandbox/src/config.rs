@@ -125,7 +125,6 @@ pub enum DockerfileSource {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DaytonaSnapshotSettings {
-    pub name:       String,
     pub cpu:        Option<i32>,
     pub memory:     Option<i32>,
     pub disk:       Option<i32>,

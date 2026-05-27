@@ -64,8 +64,14 @@ pub(crate) fn migrate_settings_path(
         ))
     })?;
 
+    let environment_id = layer
+        .run
+        .as_ref()
+        .and_then(|run| run.environment.as_ref())
+        .and_then(|environment| environment.id.as_deref())
+        .unwrap_or("default");
     let warning = format!(
-        "Migrated legacy [run.sandbox] settings in {} to [run.environment] and [environments.default]. Backup written to {}. {REMOVAL_NOTE}",
+        "Migrated legacy [run.sandbox] settings in {} to [run.environment] and [environments.{environment_id}]. Backup written to {}. {REMOVAL_NOTE}",
         path.display(),
         backup_path.display()
     );
@@ -88,7 +94,7 @@ fn migrate_contents(original_contents: &str, path: &Path) -> Result<Option<Strin
     }
     if has_new_environment_config(&doc) {
         return Err(Error::other(format!(
-            "Legacy [run.sandbox] settings in {} could not be auto-migrated because the file already contains [run.environment] or [environments.default]. Remove one config style and retry.",
+            "Legacy [run.sandbox] settings in {} could not be auto-migrated because the file already contains [run.environment] or [environments]. Remove one config style and retry.",
             path.display()
         )));
     }
@@ -117,12 +123,8 @@ fn has_new_environment_config(doc: &DocumentMut) -> bool {
         .and_then(Item::as_table)
         .and_then(|run| run.get("environment"))
         .is_some();
-    let has_default_environment = doc
-        .get("environments")
-        .and_then(Item::as_table)
-        .and_then(|envs| envs.get("default"))
-        .is_some();
-    has_run_environment || has_default_environment
+    let has_environment_catalog = doc.get("environments").and_then(Item::as_table).is_some();
+    has_run_environment || has_environment_catalog
 }
 
 fn migrate_document(doc: &mut DocumentMut) -> std::result::Result<(), MigrationFailure> {
@@ -185,10 +187,14 @@ fn migrate_document(doc: &mut DocumentMut) -> std::result::Result<(), MigrationF
         ensure_table(doc.as_table_mut(), &["run", "clone"])["enabled"] =
             Item::Value(Value::from(false));
     }
+    let environment_id = match active_provider {
+        Some(EnvironmentProvider::Daytona) => "daytona",
+        _ => "default",
+    };
     ensure_table(doc.as_table_mut(), &["run", "environment"])["id"] =
-        Item::Value(Value::from("default"));
+        Item::Value(Value::from(environment_id));
 
-    let env = ensure_table(doc.as_table_mut(), &["environments", "default"]);
+    let env = ensure_table(doc.as_table_mut(), &["environments", environment_id]);
     if let Some(p) = provider_str {
         env["provider"] = Item::Value(Value::from(p));
     }
@@ -271,7 +277,7 @@ fn migrate_daytona_snapshot(snapshot_item: &Item, env: &mut Table, unsupported: 
 
     for (key, item) in snapshot {
         match key {
-            "name" => ensure_table(env, &["image"])["ref"] = item.clone(),
+            "name" => {}
             "cpu" => ensure_table(env, &["resources"])["cpu"] = item.clone(),
             "memory" => ensure_table(env, &["resources"])["memory"] = item.clone(),
             "disk" => ensure_table(env, &["resources"])["disk"] = item.clone(),
@@ -301,7 +307,7 @@ fn migrate_docker(sandbox: &Table, env: &mut Table, unsupported: &mut Vec<String
                     unsupported.push("run.sandbox.docker.skip_clone".to_string());
                 }
             }
-            "image" => ensure_table(env, &["image"])["ref"] = item.clone(),
+            "image" => ensure_table(env, &["image"])["docker"] = item.clone(),
             "memory_limit" => ensure_table(env, &["resources"])["memory"] = item.clone(),
             "cpu_quota" => {
                 if let Some(cpu_quota) = item.as_integer() {
@@ -488,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_only_daytona_config_migrates_to_default_environment() {
+    fn provider_only_daytona_config_migrates_to_daytona_environment() {
         let migrated = migrate(
             r#"
 _version = 1
@@ -505,10 +511,10 @@ provider = "daytona"
             .expect("migrated settings should resolve")
             .run;
 
-        assert_eq!(resolved.environment.id, "default");
+        assert_eq!(resolved.environment.id, "daytona");
         assert_eq!(resolved.environment.provider, EnvironmentProvider::Daytona);
         assert!(migrated.contains("[run.environment]"));
-        assert!(migrated.contains("[environments.default]"));
+        assert!(migrated.contains("[environments.daytona]"));
         assert!(!migrated.contains("[run.sandbox]"));
     }
 
@@ -561,7 +567,9 @@ subpath = "agents"
             .run
             .environment;
 
-        assert_eq!(resolved.image.reference.as_deref(), Some("fabro-v11"));
+        assert_eq!(resolved.id, "daytona");
+        assert_eq!(resolved.image.docker.as_deref(), None);
+        assert!(resolved.image.dockerfile.is_some());
         assert_eq!(resolved.resources.cpu, Some(8));
         assert_eq!(
             resolved.resources.memory.map(|size| size.as_bytes()),
@@ -619,7 +627,7 @@ cpu_quota = 200000
 
         assert_eq!(resolved.provider, EnvironmentProvider::Docker);
         assert_eq!(
-            resolved.image.reference.as_deref(),
+            resolved.image.docker.as_deref(),
             Some("buildpack-deps:noble")
         );
         assert_eq!(resolved.resources.cpu, Some(2));
@@ -674,7 +682,8 @@ provider = "daytona"
 
         assert_eq!(backup, original);
         assert!(rewritten.contains("[run.environment]"));
-        assert!(rewritten.contains("[environments.default]"));
+        assert!(rewritten.contains("[environments.daytona]"));
+        assert!(report.warning.contains("[environments.daytona]"));
         assert!(report.warning.contains("temporary compatibility migration"));
     }
 

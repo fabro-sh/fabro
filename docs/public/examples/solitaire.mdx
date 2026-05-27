@@ -278,7 +278,6 @@ id = "python-dev"
 provider = "daytona"
 
 [environments.python-dev.image]
-ref = "python-dev"
 dockerfile = "FROM python:3.12-slim\nRUN apt-get update && apt-get install -y git libncurses-dev"
 
 [environments.python-dev.resources]

@@ -30,9 +30,9 @@ pub use fabro_api::types::{
     BatchRunLifecycleSummary, BillingByModel, BillingStageRef, CloseRunPullRequestResponse,
     CompletionContentPart, CompletionMessage, CompletionMessageRole, CompletionResponse,
     CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
-    CreateRunPullRequestRequest, CreateSecretRequest, DeleteRunResponse, DeleteRunSandbox,
-    DeleteSecretRequest, DenyRunRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow,
-    ErrorResponseEntry, ForkRequest, ForkResponse, IntegrationConnectionKind,
+    CreateRunPullRequestRequest, CreateSecretRequest, CreateVariableRequest, DeleteRunResponse,
+    DeleteRunSandbox, DeleteSecretRequest, DenyRunRequest, DiskUsageResponse, DiskUsageRunRow,
+    DiskUsageSummaryRow, ErrorResponseEntry, ForkRequest, ForkResponse, IntegrationConnectionKind,
     IntegrationConnectionState, IntegrationConnectionStatus, IntegrationProvider,
     IntegrationStatus, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
     MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
@@ -46,7 +46,8 @@ pub use fabro_api::types::{
     SystemDiskResourceScope, SystemDiskResources, SystemInfoResponse, SystemIntegrationStatus,
     SystemIntegrationsResponse, SystemMemoryResourceScope, SystemMemoryResources,
     SystemRepairRunIssue, SystemRepairRunsResponse, SystemResourcesResponse, SystemRunCounts,
-    TimelineEntryResponse, VncPreviewResponse, WriteBlobResponse,
+    TimelineEntryResponse, UpdateVariableRequest, VariableListResponse, VncPreviewResponse,
+    WriteBlobResponse,
 };
 use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 #[cfg(test)]
@@ -103,6 +104,7 @@ use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
 };
 use fabro_util::version::FABRO_VERSION;
+use fabro_variable::{Error as VariableError, VariableStore};
 use fabro_vault::{Error as VaultError, SecretType, Vault};
 use fabro_workflow::artifact_upload::ArtifactSink;
 #[cfg(test)]
@@ -1019,6 +1021,7 @@ pub struct AppState {
     parent_link_lock: AsyncMutex<()>,
 
     pub(crate) vault: Arc<AsyncRwLock<Vault>>,
+    pub(crate) variables: Arc<AsyncRwLock<VariableStore>>,
     pub(super) server_secrets: ServerSecrets,
     pub(crate) llm_source: Arc<dyn CredentialSource>,
     manifest_run_defaults: RwLock<Arc<RunLayer>>,
@@ -1125,6 +1128,7 @@ pub(crate) struct AppStateConfig {
     pub(crate) store:                     Arc<Database>,
     pub(crate) artifact_store:            ArtifactStore,
     pub(crate) vault_path:                PathBuf,
+    pub(crate) variables_path:            PathBuf,
     pub(crate) preloaded_vault:           Option<Vault>,
     pub(crate) server_secrets:            ServerSecrets,
     pub(crate) env_lookup:                EnvLookup,
@@ -2167,6 +2171,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         store,
         artifact_store,
         vault_path,
+        variables_path,
         preloaded_vault,
         server_secrets,
         env_lookup,
@@ -2177,6 +2182,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         shutdown,
     } = config;
 
+    let variables = VariableStore::load(variables_path).context("load variables")?;
+    let variables = Arc::new(AsyncRwLock::new(variables));
     let vault = match preloaded_vault {
         Some(vault) => vault,
         None => load_startup_vault(&vault_path)?,
@@ -2266,6 +2273,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         pull_request_create_locks: Arc::new(Mutex::new(HashMap::new())),
         parent_link_lock: AsyncMutex::new(()),
         vault,
+        variables,
         server_secrets,
         llm_source,
         manifest_run_defaults: RwLock::new(current_manifest_run_defaults),

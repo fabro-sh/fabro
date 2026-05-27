@@ -71,7 +71,6 @@ overwritten.
 </Note>
 
 [environments.cloud.image]
-ref = "rust-dev"
 dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get install -y git ripgrep"
 # Or keep the Dockerfile next to this TOML file:
 # dockerfile = { path = "./Dockerfile" }
@@ -111,7 +110,6 @@ Snapshots let you pre-build an environment image so each run starts with depende
 
 ```toml title="run.toml"
 [environments.cloud.image]
-ref = "my-snapshot"
 dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 
 [environments.cloud.resources]
@@ -120,10 +118,10 @@ memory = 8
 disk = 20
 ```
 
-When a run starts with a snapshot configured, Fabro looks up the snapshot by name. If it doesn't exist and a `dockerfile` is provided, Fabro creates it automatically and polls until it reaches `Active` state (up to 10 minutes). `dockerfile` can be inline content or `{ path = "..." }`; paths are resolved relative to the TOML file that declares them and are bundled into run manifests. If the snapshot already exists, it's reused immediately.
+When a run starts with `image.dockerfile`, Fabro computes an internal snapshot name and looks up that snapshot in Daytona. If it doesn't exist, Fabro creates it automatically and polls until it reaches `Active` state (up to 10 minutes). `dockerfile` can be inline content or `{ path = "..." }`; paths are resolved relative to the TOML file that declares them and are bundled into run manifests. If the snapshot already exists, it's reused immediately.
 
 <Note>
-If a snapshot is configured by name but doesn't exist and no `dockerfile` is provided, the run fails immediately. If no snapshot is configured at all, sandboxes are created from the `daytona-medium` snapshot which includes standard dev tools (git, etc.).
+If no Dockerfile is configured, sandboxes are created from the `daytona-medium` snapshot which includes standard dev tools (git, etc.). To force a new custom snapshot, change the Dockerfile text, for example by adding a comment.
 </Note>
 
 ## Private repositories
@@ -214,9 +212,9 @@ The `DAYTONA_API_KEY` vault secret is missing, invalid, or missing the required 
 
 If doctor reports missing scopes, regenerate the Daytona key with `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`, then save it again with `fabro secret set DAYTONA_API_KEY`.
 
-### "Snapshot does not exist and no dockerfile provided"
+### Custom snapshot did not roll
 
-The run config references a snapshot name that doesn't exist on Daytona, and no `dockerfile` is provided to create it. Either create the snapshot manually in the Daytona dashboard or add `image.dockerfile` under the selected `[environments.<slug>.image]`.
+Custom Daytona snapshot names are computed from the Dockerfile, resource hints, tenant scope, and Daytona API key. To force a new custom snapshot, change `image.dockerfile` text under the selected `[environments.<slug>.image]`.
 
 ### "Timed out waiting for snapshot to become active"
 

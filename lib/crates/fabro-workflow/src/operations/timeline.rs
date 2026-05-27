@@ -245,6 +245,7 @@ mod tests {
                 graph:            Graph::new("test"),
                 graph_source:     None,
                 workflow_slug:    None,
+                automation:       None,
                 source_directory: None,
                 labels:           HashMap::new(),
                 provenance:       None,

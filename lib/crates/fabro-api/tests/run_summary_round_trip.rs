@@ -9,10 +9,10 @@ use fabro_api::types::{
 };
 use fabro_types::status::{RunStatus, SuccessReason};
 use fabro_types::{
-    AskFabro, AskFabroUnavailableReason, DiffSummary, PullRequestLink, RepositoryProvider,
-    RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary, RunId, RunLifecycle,
-    RunLinks, RunOrigin, RunRunnableSource, RunSize, RunTimestamps, RunTiming, WorkflowRef,
-    fixtures,
+    AskFabro, AskFabroUnavailableReason, AutomationRef, DiffSummary, PullRequestLink,
+    RepositoryProvider, RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary,
+    RunId, RunLifecycle, RunLinks, RunOrigin, RunRunnableSource, RunSize, RunTimestamps, RunTiming,
+    WorkflowRef, fixtures,
 };
 use serde_json::json;
 
@@ -77,7 +77,11 @@ fn run_summary_json_matches_openapi_shape() {
             node_count: 7,
             edge_count: 9,
         },
-        automation:       None,
+        automation:       Some(AutomationRef {
+            id:         "nightly".to_string(),
+            name:       Some("Nightly".to_string()),
+            trigger_id: Some("schedule_1".to_string()),
+        }),
         repository:       Some(RepositoryRef {
             name:       "fabro".to_string(),
             origin_url: None,
@@ -146,7 +150,11 @@ fn run_summary_json_matches_openapi_shape() {
                 "node_count": 7,
                 "edge_count": 9
             },
-            "automation": null,
+            "automation": {
+                "id": "nightly",
+                "name": "Nightly",
+                "trigger_id": "schedule_1"
+            },
             "repository": {
                 "name": "fabro",
                 "origin_url": null,
