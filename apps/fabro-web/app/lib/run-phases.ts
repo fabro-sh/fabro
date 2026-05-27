@@ -29,11 +29,12 @@ export function deriveRunPhases(
   let runnableMs: number | null = null;
   let startingMs: number | null = null;
   let runningMs: number | null = null;
-  let remaining = 5;
+  let terminalMs: number | null = null;
+  let remaining = 6;
 
   for (const event of events ?? []) {
     if (remaining === 0) break;
-    let target: "startRequested" | "pending" | "runnable" | "starting" | "running" | null = null;
+    let target: "startRequested" | "pending" | "runnable" | "starting" | "running" | "terminal" | null = null;
     switch (event.event) {
       case "run.start_requested":
         if (startRequestedMs == null) target = "startRequested";
@@ -50,6 +51,10 @@ export function deriveRunPhases(
       case "run.running":
         if (runningMs == null) target = "running";
         break;
+      case "run.completed":
+      case "run.failed":
+        if (terminalMs == null) target = "terminal";
+        break;
     }
     if (target == null) continue;
     const ms = Date.parse(event.ts);
@@ -60,6 +65,7 @@ export function deriveRunPhases(
       case "runnable": runnableMs = ms; break;
       case "starting": startingMs = ms; break;
       case "running": runningMs = ms; break;
+      case "terminal": terminalMs = ms; break;
     }
     remaining -= 1;
   }
@@ -70,7 +76,7 @@ export function deriveRunPhases(
     kind: "submitted",
     label: PHASE_LABEL.submitted,
     startMs: createdMs,
-    endMs: startRequestedMs ?? pendingMs ?? runnableMs ?? startingMs ?? runningMs,
+    endMs: startRequestedMs ?? pendingMs ?? runnableMs ?? startingMs ?? runningMs ?? terminalMs,
   });
 
   if (pendingMs != null) {
@@ -78,7 +84,7 @@ export function deriveRunPhases(
       kind: "pending",
       label: PHASE_LABEL.pending,
       startMs: pendingMs,
-      endMs: runnableMs ?? startingMs ?? runningMs,
+      endMs: runnableMs ?? startingMs ?? runningMs ?? terminalMs,
     });
   }
 
@@ -87,7 +93,7 @@ export function deriveRunPhases(
       kind: "runnable",
       label: PHASE_LABEL.runnable,
       startMs: runnableMs,
-      endMs: startingMs ?? runningMs,
+      endMs: startingMs ?? runningMs ?? terminalMs,
     });
   }
 
@@ -96,7 +102,7 @@ export function deriveRunPhases(
       kind: "initializing",
       label: PHASE_LABEL.initializing,
       startMs: startingMs,
-      endMs: runningMs,
+      endMs: runningMs ?? terminalMs,
     });
   }
 

@@ -9,6 +9,7 @@ const T_PENDING = "2026-05-23T12:00:02.000Z";
 const T_RUNNABLE = "2026-05-23T12:00:03.000Z";
 const T_STARTING = "2026-05-23T12:00:04.000Z";
 const T_RUNNING = "2026-05-23T12:00:10.000Z";
+const T_FAILED = "2026-05-23T12:00:12.000Z";
 
 function makeEvent(name: string, ts: string, seq: number): EventEnvelope {
   return {
@@ -112,6 +113,38 @@ describe("deriveRunPhases", () => {
     expect(phases[0]!.endMs).toBe(Date.parse(T_STARTING));
     expect(phases[1]!.startMs).toBe(Date.parse(T_STARTING));
     expect(phases[1]!.endMs).toBe(Date.parse(T_RUNNING));
+  });
+
+  test("closes initializing at run.failed when the run never reaches running", () => {
+    const phases = deriveRunPhases(
+      [
+        makeEvent("run.start_requested", T_REQUESTED, 1),
+        makeEvent("run.runnable", T_RUNNABLE, 2),
+        makeEvent("run.starting", T_STARTING, 3),
+        makeEvent("run.failed", T_FAILED, 4),
+      ],
+      CREATED,
+    );
+    expect(phases).toEqual([
+      {
+        kind: "submitted",
+        label: "Submitted",
+        startMs: Date.parse(CREATED),
+        endMs: Date.parse(T_REQUESTED),
+      },
+      {
+        kind: "runnable",
+        label: "Runnable",
+        startMs: Date.parse(T_RUNNABLE),
+        endMs: Date.parse(T_STARTING),
+      },
+      {
+        kind: "initializing",
+        label: "Initializing",
+        startMs: Date.parse(T_STARTING),
+        endMs: Date.parse(T_FAILED),
+      },
+    ]);
   });
 
   test("uses run.starting as fallback end for submitted when pre-execution events are missing", () => {
