@@ -1,0 +1,134 @@
+---
+title: "OpenRouter"
+description: "Route Fabro models through OpenRouter to access many models with a single API key"
+---
+
+[OpenRouter](https://openrouter.ai) is an OpenAI-compatible gateway that proxies many model providers behind one API and one billing account. Fabro includes a disabled `openrouter` provider entry with a curated catalog of 17 models so you can opt in from `settings.toml` without changing Fabro code.
+
+## Prerequisites
+
+- An OpenRouter account
+- An OpenRouter API key from [openrouter.ai/keys](https://openrouter.ai/keys)
+
+## Enable the provider
+
+Add the provider override to `~/.fabro/settings.toml`:
+
+```toml title="settings.toml"
+_version = 1
+
+[llm.providers.openrouter]
+enabled = true
+```
+
+That's the entire configuration — Fabro ships the model catalog, base URL, and attribution headers for you.
+
+## Configure credentials
+
+For server-backed runs, store `OPENROUTER_API_KEY` in the Fabro server vault:
+
+```bash
+fabro provider login openrouter
+```
+
+Or via the generic secret command:
+
+```bash
+fabro secret set OPENROUTER_API_KEY sk-or-v1-...
+```
+
+Standalone local SDK/CLI runs can use an env-backed credential source:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+## Included models
+
+The 17 models below ship with the provider. Use the Fabro model ID (left column) in workflows or on the CLI; Fabro sends OpenRouter's slug (right column) over the wire.
+
+| Fabro model ID | OpenRouter slug |
+| --- | --- |
+| `anthropic/claude-opus-4-7` | `anthropic/claude-opus-4.7` |
+| `anthropic/claude-sonnet-4-6` | `anthropic/claude-sonnet-4.6` |
+| `anthropic/claude-haiku-4-5` | `anthropic/claude-haiku-4.5` |
+| `openai/gpt-5.4` | `openai/gpt-5.4` |
+| `openai/gpt-5.5` | `openai/gpt-5.5` |
+| `google/gemini-3.1-pro-preview` | `google/gemini-3.1-pro-preview` |
+| `google/gemini-3.5-flash` | `google/gemini-3.5-flash` |
+| `xiaomi/mimo-v2.5-pro` | `xiaomi/mimo-v2.5-pro` |
+| `minimax/minimax-m2.7` | `minimax/minimax-m2.7` |
+| `deepseek/deepseek-v4-pro` | `deepseek/deepseek-v4-pro` |
+| `deepseek/deepseek-v4-flash` | `deepseek/deepseek-v4-flash` |
+| `moonshotai/kimi-k2.6` | `moonshotai/kimi-k2.6` |
+| `qwen/qwen3-coder` | `qwen/qwen3-coder` |
+| `qwen/qwen3.6-flash` | `qwen/qwen3.6-flash` |
+| `z-ai/glm-4.6` | `z-ai/glm-4.6` |
+| `nvidia/nemotron-3-super-120b-a12b` | `nvidia/nemotron-3-super-120b-a12b` |
+| `mistralai/devstral-2512` | `mistralai/devstral-2512` |
+
+The default model is `anthropic/claude-sonnet-4-6`. The small default (used for utility tasks like generated run titles) is `anthropic/claude-haiku-4-5`.
+
+## Use OpenRouter models
+
+```bash
+fabro model list --provider openrouter
+fabro model test --model anthropic/claude-sonnet-4-6
+fabro run workflow.fabro --model deepseek/deepseek-v4-flash
+```
+
+In workflow stylesheets:
+
+```dot title="workflow.fabro"
+digraph Example {
+    graph [
+        model_stylesheet="
+            * { model: anthropic/claude-sonnet-4-6; }
+        "
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    work  [label="Work", prompt="Use the configured OpenRouter model."]
+    exit  [shape=Msquare, label="Exit"]
+
+    start -> work -> exit
+}
+```
+
+## Provider routing (advanced)
+
+OpenRouter accepts top-level request fields that aren't part of the OpenAI Chat Completions schema, such as `provider` (routing preferences), `models` (fallback list), `transforms`, and `plugins`. Fabro forwards these through the existing `provider_options.openrouter` request field when calling the API directly:
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-6",
+  "messages": [...],
+  "provider_options": {
+    "openrouter": {
+      "provider": { "sort": "throughput" },
+      "models": ["openai/gpt-5.5", "google/gemini-3.1-pro-preview"]
+    }
+  }
+}
+```
+
+See [OpenRouter's provider routing documentation](https://openrouter.ai/docs/features/provider-routing) for the full set of supported fields.
+
+## Troubleshooting
+
+**"No API key configured"** — For server-backed runs, set `vault:OPENROUTER_API_KEY` with `fabro provider login openrouter`. For standalone local usage, export `OPENROUTER_API_KEY` in the invoking shell.
+
+**"Provider not enabled"** — Confirm `[llm.providers.openrouter]` has `enabled = true` in your `settings.toml`.
+
+**Model not found** — Check that the OpenRouter slug for the model is still current at [openrouter.ai/models](https://openrouter.ai/models). Vendors occasionally rename or deprecate slugs.
+
+## Further reading
+
+<Columns cols={2}>
+  <Card title="Models" icon="microchip" href="/core-concepts/models">
+    How Fabro routes model IDs, providers, and fallbacks.
+  </Card>
+  <Card title="Settings Configuration" icon="gear" href="/reference/user-configuration">
+    Full reference for `[llm.providers.<id>]` and `[llm.models.<id>]`.
+  </Card>
+</Columns>

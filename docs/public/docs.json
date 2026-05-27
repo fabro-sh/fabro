@@ -94,6 +94,7 @@
               "integrations/github",
               "integrations/daytona",
               "integrations/litellm",
+              "integrations/openrouter",
               "integrations/slack",
               "integrations/brave-search"
             ]
@@ -255,6 +256,8 @@
             "group": "May 2026",
             "icon": "clock-rotate-left",
             "pages": [
+              "changelog/2026-05-28",
+              "changelog/2026-05-27",
               "changelog/2026-05-26",
               "changelog/2026-05-25",
               "changelog/2026-05-24",

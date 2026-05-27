@@ -1,0 +1,52 @@
+---
+title: "OpenRouter as an opt-in provider"
+date: "2026-05-28"
+---
+
+## OpenRouter ships as a built-in opt-in provider
+
+Fabro now includes [OpenRouter](https://openrouter.ai) as a built-in catalog provider. OpenRouter is an OpenAI-compatible gateway that proxies many model providers behind a single API and one billing account. The catalog ships disabled — flip a single toggle in `~/.fabro/settings.toml` to opt in:
+
+```toml
+[llm.providers.openrouter]
+enabled = true
+```
+
+Then run `fabro provider login openrouter` (or set `OPENROUTER_API_KEY`) and the 17 curated models become available with no further configuration.
+
+## Curated model catalog
+
+Unlike LiteLLM or Ollama — where you declare the models your proxy serves — Fabro ships the OpenRouter catalog for you. The starter set covers the three majors plus the most popular open-weights models on OpenRouter:
+
+- Anthropic: Claude Opus 4.7, Sonnet 4.6, Haiku 4.5
+- OpenAI: GPT-5.4, GPT-5.5
+- Google: Gemini 3.1 Pro Preview, Gemini 3.5 Flash
+- Open-weights: Xiaomi MiMo v2.5 Pro, MiniMax M2.7, DeepSeek V4 Pro/Flash, Kimi K2.6, Qwen3 Coder, Qwen3.6 Flash, GLM 4.6, Nemotron 3 Super 120B, Devstral 2512
+
+Model IDs use OpenRouter's vendor-namespaced slug convention so they don't collide with direct-provider entries:
+
+```bash
+fabro model list --provider openrouter
+fabro run workflow.fabro --model deepseek/deepseek-v4-flash
+fabro run workflow.fabro --model anthropic/claude-sonnet-4-6
+```
+
+## Typed workflow attrs for OpenRouter routing
+
+Five `openrouter_*` stage attrs let you steer OpenRouter's provider routing from `workflow.fabro` stylesheets without dropping to the API: `openrouter_provider_sort`, `openrouter_fallback_models`, `openrouter_transforms`, `openrouter_allow_fallbacks`, `openrouter_data_collection`. Power users calling `POST /api/v1/completions` directly can continue to set `provider_options.openrouter` for the full set of OpenRouter request fields.
+
+## Authoritative cost telemetry
+
+Every OpenRouter response includes an inline `usage.cost` field with authoritative USD billing. Fabro surfaces this as `Response.cost_usd` with `cost_source = "authoritative"`. Direct providers populate the same field from catalog prices with `cost_source = "estimated"`.
+
+## More
+
+<Accordion title="API">
+- New `cost_usd` and `cost_source` fields on `CompletionResponse` (also surfaced in the generated TypeScript client)
+- New `OPENROUTER_API_KEY` recognized as an optional vault secret across CLI and server code paths
+</Accordion>
+
+<Accordion title="Improvements">
+- The OpenAI-compatible adapter now parses `prompt_tokens_details.cached_tokens` and `cache_write_tokens` from provider responses, which keeps cached-token cost math accurate for any OpenAI-compatible provider that emits them
+- Refactored the OpenAI-Chat-Completions wire layer into a shared `openai_chat` module so OpenRouter and OpenAI-compatible providers reuse one HTTP pipeline
+</Accordion>

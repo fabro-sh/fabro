@@ -114,6 +114,13 @@ vision = false
 reasoning = false
 ```
 
+For [OpenRouter](/integrations/openrouter), Fabro ships a disabled provider entry with 17 curated models. Enable it with a single section in settings — no model declarations needed:
+
+```toml title="settings.toml"
+[llm.providers.openrouter]
+enabled = true
+```
+
 `api_id` is the model name sent to the provider API. Omit it when the Fabro model ID and provider model ID are the same.
 
 Model roles are separate: `default = true` controls normal model selection for workflow execution, while `small_default = true` marks the provider's small/cheap utility model for metadata tasks such as generated run titles. If a provider has no small default, Fabro falls back to that provider's normal default.
