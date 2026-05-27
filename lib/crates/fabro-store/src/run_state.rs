@@ -814,7 +814,7 @@ fn sandbox_plan_from_projection_or_settings(state: &RunProjection) -> RunSandbox
     state
         .sandbox
         .as_ref()
-        .map(|sandbox| sandbox.plan.clone())
+        .map(|sandbox| sandbox.plan().clone())
         .unwrap_or_else(|| sandbox_plan(&state.spec.settings.run.environment))
 }
 

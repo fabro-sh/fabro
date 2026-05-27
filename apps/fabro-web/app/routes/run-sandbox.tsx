@@ -10,8 +10,9 @@ import {
   formatBytesAsMemory,
   formatCpuCores,
 } from "../lib/format";
-import { useRunSandboxDetails, useRunState } from "../lib/queries";
+import { useRun, useRunSandboxDetails, useRunState } from "../lib/queries";
 import {
+  SANDBOX_LIFECYCLE_DISPLAY,
   sandboxInstance,
   sandboxIsReady,
   sandboxLifecycleKind,
@@ -275,22 +276,15 @@ function SandboxLifecycleStateView({
 }) {
   const kind = sandboxLifecycleKind(sandbox);
   const failure = sandbox?.failure ?? null;
-  const title =
-    kind === "planned"
-      ? "Not created"
-      : kind === "initializing"
-        ? "Initializing"
-        : kind === "failed"
-          ? "Failed"
-          : "No sandbox";
+  const display = kind ? SANDBOX_LIFECYCLE_DISPLAY[kind] : null;
+  const title = display?.label ?? "No sandbox";
   const description =
     kind === "planned"
       ? "Run sandbox was not created."
-      : kind === "initializing"
-        ? "The sandbox is being created."
-        : kind === "failed"
-          ? failure?.error ?? "Sandbox creation failed."
-          : "This run has no sandbox or its provider does not expose details.";
+      : kind === "failed"
+        ? failure?.error ?? display?.description
+        : display?.description
+          ?? "This run has no sandbox or its provider does not expose details.";
 
   const action = failure?.causes?.length ? (
         <div className={`mt-3 space-y-1 text-xs text-fg-muted ${compact ? "" : "max-w-lg"}`}>
@@ -305,10 +299,12 @@ function SandboxLifecycleStateView({
 
 export default function RunSandbox({ params }: { params: { id: string } }) {
   const runStateQuery = useRunState(params.id);
-  const lifecycleSandbox = runStateQuery.data?.sandbox ?? null;
+  const runQuery = useRun(params.id);
+  const lifecycleSandbox = runStateQuery.data?.sandbox ?? runQuery.data?.sandbox ?? null;
   const lifecycleReady = sandboxIsReady(lifecycleSandbox);
+  const lifecycleSourcesLoading = runStateQuery.isLoading || runQuery.isLoading;
   const shouldLoadDetails =
-    lifecycleReady || (!lifecycleSandbox && !runStateQuery.isLoading);
+    lifecycleReady || (!lifecycleSandbox && !lifecycleSourcesLoading);
   const sandboxQuery = useRunSandboxDetails(shouldLoadDetails ? params.id : undefined);
   const details = sandboxQuery.data ?? null;
   const provider =

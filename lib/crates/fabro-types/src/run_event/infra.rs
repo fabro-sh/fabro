@@ -201,14 +201,7 @@ pub struct SandboxReadyProps {
     pub url:         Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SandboxFailedProps {
-    pub provider:    String,
-    pub error:       String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub causes:      Vec<String>,
-    pub duration_ms: u64,
-}
+pub type SandboxFailedProps = crate::run_sandbox::RunSandboxFailure;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SandboxCleanupStartedProps {

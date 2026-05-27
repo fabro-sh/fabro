@@ -43,10 +43,10 @@ pub struct RunSandboxFailure {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunSandbox {
-    pub kind:     RunSandboxKind,
-    pub plan:     RunSandboxPlan,
-    pub instance: Option<RunSandboxInstance>,
-    pub failure:  Option<RunSandboxFailure>,
+    kind:     RunSandboxKind,
+    plan:     RunSandboxPlan,
+    instance: Option<RunSandboxInstance>,
+    failure:  Option<RunSandboxFailure>,
 }
 
 impl RunSandbox {
@@ -88,6 +88,22 @@ impl RunSandbox {
 
     pub fn instance(&self) -> Option<&RunSandboxInstance> {
         self.instance.as_ref()
+    }
+
+    pub fn into_instance(self) -> Option<RunSandboxInstance> {
+        self.instance
+    }
+
+    pub fn kind(&self) -> RunSandboxKind {
+        self.kind
+    }
+
+    pub fn plan(&self) -> &RunSandboxPlan {
+        &self.plan
+    }
+
+    pub fn failure(&self) -> Option<&RunSandboxFailure> {
+        self.failure.as_ref()
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -134,17 +150,27 @@ struct RunSandboxWire {
     failure:  Option<RunSandboxFailure>,
 }
 
+#[derive(Serialize)]
+struct RunSandboxWireRef<'a> {
+    kind:     RunSandboxKind,
+    plan:     &'a RunSandboxPlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    instance: Option<&'a RunSandboxInstance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    failure:  Option<&'a RunSandboxFailure>,
+}
+
 impl Serialize for RunSandbox {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         self.validate().map_err(S::Error::custom)?;
-        RunSandboxWire {
+        RunSandboxWireRef {
             kind:     self.kind,
-            plan:     self.plan.clone(),
-            instance: self.instance.clone(),
-            failure:  self.failure.clone(),
+            plan:     &self.plan,
+            instance: self.instance.as_ref(),
+            failure:  self.failure.as_ref(),
         }
         .serialize(serializer)
     }

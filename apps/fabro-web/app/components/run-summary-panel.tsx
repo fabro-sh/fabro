@@ -13,7 +13,11 @@ import {
 } from "../lib/format";
 import { principalDisplay } from "../lib/principal-display";
 import { useRun, useRunArtifacts, useRunSandboxDetails } from "../lib/queries";
-import { sandboxIsReady, sandboxLifecycleKind } from "../lib/run-sandbox-lifecycle";
+import {
+  SANDBOX_LIFECYCLE_DISPLAY,
+  sandboxIsReady,
+  sandboxLifecycleKind,
+} from "../lib/run-sandbox-lifecycle";
 import { SANDBOX_STATE_DISPLAY } from "../lib/sandbox-state";
 import { Tooltip } from "./ui";
 
@@ -83,33 +87,6 @@ function SandboxValue({
     </div>
   );
 }
-
-const SANDBOX_LIFECYCLE_DISPLAY = {
-  planned: {
-    label:       "Not created",
-    description: "The sandbox instance was not created.",
-    dot:         "bg-fg-muted",
-    text:        "text-fg-muted",
-  },
-  initializing: {
-    label:       "Initializing",
-    description: "The sandbox is being created.",
-    dot:         "bg-amber",
-    text:        "text-amber",
-  },
-  ready: {
-    label:       "Ready",
-    description: "The sandbox instance is available.",
-    dot:         "bg-teal-500",
-    text:        "text-teal-500",
-  },
-  failed: {
-    label:       "Failed",
-    description: "Sandbox creation failed.",
-    dot:         "bg-coral",
-    text:        "text-coral",
-  },
-} as const;
 
 function SandboxLifecycleValue({
   kind,

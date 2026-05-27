@@ -11,6 +11,13 @@ let currentLoading = false;
 let currentError: Error | null = null;
 
 mock.module("../lib/queries", () => ({
+  useRun: () => ({
+    data:         null,
+    error:        null,
+    isLoading:    false,
+    isValidating: false,
+    mutate:       mock(() => Promise.resolve(null)),
+  }),
   useRunState: () => ({
     data:         currentRunState,
     error:        null,

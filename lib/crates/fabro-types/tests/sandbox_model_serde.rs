@@ -63,18 +63,12 @@ fn run_sandbox_serializes_canonical_identity_without_identifier() {
 
 #[test]
 fn run_sandbox_ready_requires_instance() {
-    let sandbox = RunSandbox {
-        kind:     fabro_types::RunSandboxKind::Ready,
-        plan:     RunSandboxPlan {
-            provider: SandboxProviderKind::Docker,
-            image:    None,
-            snapshot: None,
-        },
-        instance: None,
-        failure:  None,
-    };
+    let sandbox = json!({
+        "kind": "ready",
+        "plan": { "provider": "docker" }
+    });
 
-    assert!(serde_json::to_value(&sandbox).is_err());
+    assert!(serde_json::from_value::<RunSandbox>(sandbox).is_err());
 }
 
 #[test]

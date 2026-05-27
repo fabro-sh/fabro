@@ -3,16 +3,43 @@ import type {
   RunProjection,
   RunSandbox,
   RunSandboxInstance,
+  RunSandboxKind,
   RunSandboxRuntime,
 } from "@qltysh/fabro-api-client";
 
-export type SandboxLifecycleKind =
-  | "planned"
-  | "initializing"
-  | "ready"
-  | "failed";
+export type SandboxLifecycleKind = RunSandboxKind;
 
-type MaybeSandbox = Run["sandbox"] | RunProjection["sandbox"] | null | undefined;
+export type MaybeSandbox = Run["sandbox"] | RunProjection["sandbox"] | null | undefined;
+
+export const SANDBOX_LIFECYCLE_DISPLAY: Record<
+  SandboxLifecycleKind,
+  { label: string; description: string; dot: string; text: string }
+> = {
+  planned: {
+    label:       "Not created",
+    description: "The sandbox instance was not created.",
+    dot:         "bg-fg-muted",
+    text:        "text-fg-muted",
+  },
+  initializing: {
+    label:       "Initializing",
+    description: "The sandbox is being created.",
+    dot:         "bg-amber",
+    text:        "text-amber",
+  },
+  ready: {
+    label:       "Ready",
+    description: "The sandbox instance is available.",
+    dot:         "bg-teal-500",
+    text:        "text-teal-500",
+  },
+  failed: {
+    label:       "Failed",
+    description: "Sandbox creation failed.",
+    dot:         "bg-coral",
+    text:        "text-coral",
+  },
+};
 
 export function sandboxLifecycleKind(
   sandbox: MaybeSandbox,

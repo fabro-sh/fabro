@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use fabro_sandbox::{TerminalSize, open_terminal_for_run};
-use fabro_types::{SandboxProviderKind, SandboxServiceDiscoverySource, SandboxServiceListMeta};
+use fabro_types::{
+    RunSandboxInstance, SandboxProviderKind, SandboxServiceDiscoverySource, SandboxServiceListMeta,
+};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 
@@ -402,7 +404,7 @@ async fn create_ssh_access(
 
     match record.provider {
         SandboxProviderKind::Daytona => {
-            let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
+            let sandbox = match reconnect_daytona_sandbox_instance(&state, &record).await {
                 Ok(sandbox) => sandbox,
                 Err(response) => return response,
             };
@@ -416,7 +418,7 @@ async fn create_ssh_access(
             }
         }
         SandboxProviderKind::Docker => {
-            let sandbox = match reconnect_run_sandbox(&state, &id).await {
+            let sandbox = match reconnect_run_sandbox_instance(&state, &id, &record).await {
                 Ok(sandbox) => sandbox,
                 Err(response) => return response,
             };
@@ -462,7 +464,7 @@ async fn create_sandbox_vnc_preview(
         )
         .into_response();
     }
-    let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
+    let sandbox = match reconnect_daytona_sandbox_instance(&state, &record).await {
         Ok(sandbox) => sandbox,
         Err(response) => return response,
     };
@@ -560,7 +562,7 @@ async fn list_sandbox_services(
         Err(response) => return response,
     };
     let provider = record.provider;
-    let sandbox = match reconnect_run_sandbox(&state, &id).await {
+    let sandbox = match reconnect_run_sandbox_instance(&state, &id, &record).await {
         Ok(sandbox) => sandbox,
         Err(response) => return response,
     };
@@ -849,8 +851,16 @@ async fn reconnect_run_sandbox(
     run_id: &RunId,
 ) -> Result<Box<dyn Sandbox>, Response> {
     let record = load_run_sandbox_instance(state, run_id).await?;
+    reconnect_run_sandbox_instance(state, run_id, &record).await
+}
+
+async fn reconnect_run_sandbox_instance(
+    state: &Arc<AppState>,
+    run_id: &RunId,
+    record: &RunSandboxInstance,
+) -> Result<Box<dyn Sandbox>, Response> {
     let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
-    let sandbox = reconnect_for_run(&record, daytona_api_key, Some(*run_id))
+    let sandbox = reconnect_for_run(record, daytona_api_key, Some(*run_id))
         .await
         .map_err(|err| {
             let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
@@ -867,6 +877,13 @@ async fn reconnect_daytona_sandbox(
     run_id: &RunId,
 ) -> Result<DaytonaSandbox, Response> {
     let record = load_run_sandbox_instance(state, run_id).await?;
+    reconnect_daytona_sandbox_instance(state, &record).await
+}
+
+async fn reconnect_daytona_sandbox_instance(
+    state: &Arc<AppState>,
+    record: &RunSandboxInstance,
+) -> Result<DaytonaSandbox, Response> {
     if record.provider != SandboxProviderKind::Daytona {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -909,7 +926,7 @@ async fn load_run_sandbox_instance(
         Ok(run_store) => match run_store.state().await {
             Ok(run_state) => run_state
                 .sandbox
-                .and_then(|sandbox| sandbox.instance)
+                .and_then(|sandbox| sandbox.into_instance())
                 .ok_or_else(|| ApiError::not_found("Run sandbox was not created.").into_response()),
             Err(err) => Err(
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
