@@ -30,6 +30,8 @@ import type {
   SystemInfoResponse,
   SystemIntegrationsResponse,
   SystemResourcesResponse,
+  Variable,
+  VariableListResponse,
   VncPreviewResponse,
   WorkflowDetailResponse,
   WorkflowSettings,
@@ -52,6 +54,7 @@ import {
   secretsApi,
   settingsApi,
   systemApi,
+  variablesApi,
   workflowsApi,
   type PaginatedEnvelope,
 } from "./api-client";
@@ -471,5 +474,19 @@ export function useSecrets() {
   return useSWR<SecretListResponse>(
     queryKeys.secrets.list(),
     () => apiData(() => secretsApi.listSecrets()),
+  );
+}
+
+export function useVariables() {
+  return useSWR<VariableListResponse>(
+    queryKeys.variables.list(),
+    () => apiData(() => variablesApi.listVariables()),
+  );
+}
+
+export function useVariable(name: string | undefined) {
+  return useSWR<Variable | null>(
+    name ? queryKeys.variables.detail(name) : null,
+    () => apiNullableData(() => variablesApi.getVariable(name!)),
   );
 }

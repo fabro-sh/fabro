@@ -2,6 +2,7 @@ import {
   BoltIcon,
   ChartBarSquareIcon,
   CircleStackIcon,
+  CodeBracketIcon,
   Cog6ToothIcon,
   CpuChipIcon,
   CubeTransparentIcon,
@@ -64,6 +65,13 @@ export const navSections: NavSection[] = [
         icon: ShieldCheckIcon,
         description: "Authentication and network allowlist.",
         match: (p) => p.startsWith("/settings/security"),
+      },
+      {
+        name: "Variables",
+        href: "/settings/variables",
+        icon: CodeBracketIcon,
+        description: "Non-sensitive values for run config interpolation.",
+        match: (p) => p.startsWith("/settings/variables"),
       },
       {
         name: "Secrets",

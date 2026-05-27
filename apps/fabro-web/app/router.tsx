@@ -41,6 +41,9 @@ import * as SettingsModels from "./routes/settings-models";
 import * as SettingsSandboxes from "./routes/settings-sandboxes";
 import * as SettingsSecrets from "./routes/settings-secrets";
 import * as SettingsSecretsNew from "./routes/settings-secrets-new";
+import * as SettingsVariables from "./routes/settings-variables";
+import * as SettingsVariablesNew from "./routes/settings-variables-new";
+import * as SettingsVariablesEdit from "./routes/settings-variables-edit";
 import * as SettingsMonitoring from "./routes/settings-monitoring";
 import * as SettingsSecurity from "./routes/settings-security";
 import * as SettingsStorage from "./routes/settings-storage";
@@ -148,6 +151,9 @@ export const routes: RouteObject[] = [
               route("integrations", SettingsIntegrations),
               route("sandboxes", SettingsSandboxes),
               route("security", SettingsSecurity),
+              route("variables", SettingsVariables),
+              route("variables/new", SettingsVariablesNew),
+              route("variables/:name/edit", SettingsVariablesEdit),
               route("secrets", SettingsSecrets),
               route("secrets/new", SettingsSecretsNew),
               route("server", SettingsGeneral),
