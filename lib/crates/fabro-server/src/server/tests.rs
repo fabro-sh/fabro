@@ -14330,9 +14330,13 @@ async fn list_runs_includes_live_metadata_from_run_state() {
         .expect("run should be in board");
 
     assert_eq!(item["pull_request"]["number"].as_u64(), Some(42));
-    assert_eq!(item["sandbox"]["runtime"]["id"].as_str(), Some("sb-test"));
+    assert_eq!(item["sandbox"]["kind"].as_str(), Some("ready"));
     assert_eq!(
-        item["sandbox"]["runtime"]["working_directory"].as_str(),
+        item["sandbox"]["instance"]["runtime"]["id"].as_str(),
+        Some("sb-test")
+    );
+    assert_eq!(
+        item["sandbox"]["instance"]["runtime"]["working_directory"].as_str(),
         Some("/sandbox/workdir")
     );
     assert!(item["current_question"].is_object());
@@ -14391,7 +14395,7 @@ async fn list_runs_page_limit_preserves_metadata_for_paged_items() {
     assert_eq!(data.len(), 1);
 
     let item = &data[0];
-    let sandbox_id = item["sandbox"]["runtime"]["id"]
+    let sandbox_id = item["sandbox"]["instance"]["runtime"]["id"]
         .as_str()
         .expect("paged item should still include sandbox metadata");
     assert!(matches!(sandbox_id, "sb-first" | "sb-second"));

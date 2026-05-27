@@ -13,15 +13,15 @@ To migrate:
 
 ## Tighter server secret boundaries
 
-Server startup now validates authority-bearing secrets at the server boundary instead of letting every subprocess inherit whatever happened to be in the parent environment. Worker subprocesses receive a scoped worker token when they need one, then scrub it from their process environment before launching hooks, sandbox commands, devcontainer setup, MCP stdio, or other descendants.
+Server startup now validates authority-bearing secrets at the server boundary instead of letting every subprocess inherit whatever happened to be in the parent environment. Worker subprocesses receive a scoped worker token when they need one, then scrub it from their process environment before launching hooks, sandbox commands, MCP stdio, or other descendants.
 
 That change reduces the chance of leaking server-level credentials into user-controlled command paths while preserving authenticated run operations. It also makes install-time and startup-time secret handling easier to reason about for self-hosted deployments.
 
-## Faster workflow finishing and devcontainer setup
+## Faster workflow finishing
 
-Several workflow phases now do less serialized work. Retros load the event log once, devcontainer `Command::Parallel` entries actually run concurrently, and final patch creation can overlap with finalize commit work.
+Several workflow phases now do less serialized work. Retros load the event log once, and final patch creation can overlap with finalize commit work.
 
-Users should notice this most on longer workflows with large event logs, devcontainer initialization, or expensive final patch generation. The behavior is the same, but the slow tail of a run has fewer avoidable waits.
+Users should notice this most on longer workflows with large event logs or expensive final patch generation. The behavior is the same, but the slow tail of a run has fewer avoidable waits.
 
 ## More
 

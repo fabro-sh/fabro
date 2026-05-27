@@ -1213,8 +1213,10 @@ async fn reconnect_run_sandbox(
 ) -> std::result::Result<Box<dyn Sandbox>, ApiError> {
     let record = projection
         .sandbox
-        .clone()
-        .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "Run has no active sandbox."))?;
+        .as_ref()
+        .and_then(fabro_types::RunSandbox::instance)
+        .cloned()
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Run sandbox was not created."))?;
     let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
     let sandbox = reconnect_for_run(&record, daytona_api_key, Some(*run_id))
         .await

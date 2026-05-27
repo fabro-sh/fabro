@@ -10438,13 +10438,55 @@ components:
         - docker
         - daytona
 
-    RunSandbox:
-      description: Canonical sandbox environment record for a run.
+    RunSandboxKind:
+      description: Lifecycle state for a run sandbox request.
+      type: string
+      enum:
+        - planned
+        - initializing
+        - ready
+        - failed
+
+    RunSandboxPlan:
+      description: Requested sandbox provider and base image/snapshot from run settings.
       type: object
       required:
         - provider
-        - image
-        - snapshot
+      properties:
+        provider:
+          $ref: "#/components/schemas/SandboxProviderKind"
+        image:
+          type: ["string", "null"]
+        snapshot:
+          type: ["string", "null"]
+
+    RunSandbox:
+      description: Sandbox lifecycle record for a run. A run can have a requested sandbox plan before it has an initialized sandbox instance.
+      type: object
+      required:
+        - kind
+        - plan
+      properties:
+        kind:
+          $ref: "#/components/schemas/RunSandboxKind"
+        plan:
+          $ref: "#/components/schemas/RunSandboxPlan"
+        instance:
+          oneOf:
+            - $ref: "#/components/schemas/RunSandboxInstance"
+            - type: "null"
+          description: Present only when `kind` is `ready`.
+        failure:
+          oneOf:
+            - $ref: "#/components/schemas/RunSandboxFailure"
+            - type: "null"
+          description: Present only when `kind` is `failed`.
+
+    RunSandboxInstance:
+      description: Initialized sandbox provider and runtime metadata.
+      type: object
+      required:
+        - provider
         - runtime
       properties:
         provider:
@@ -10454,9 +10496,30 @@ components:
         snapshot:
           type: ["string", "null"]
         runtime:
-          oneOf:
-            - $ref: "#/components/schemas/RunSandboxRuntime"
-            - type: "null"
+          $ref: "#/components/schemas/RunSandboxRuntime"
+
+    RunSandboxFailure:
+      description: Sandbox initialization failure details.
+      type: object
+      required:
+        - provider
+        - error
+        - causes
+        - duration_ms
+      properties:
+        provider:
+          type: string
+          description: Provider reported by the sandbox initialization event.
+        error:
+          type: string
+        causes:
+          type: array
+          items:
+            type: string
+        duration_ms:
+          type: integer
+          format: uint64
+          minimum: 0
 
     RunSandboxRuntime:
       type: object
@@ -11326,7 +11389,7 @@ components:
         - timestamps
       properties:
         sandbox:
-          $ref: "#/components/schemas/RunSandbox"
+          $ref: "#/components/schemas/RunSandboxInstance"
         state:
           $ref: "#/components/schemas/SandboxState"
         native_state:

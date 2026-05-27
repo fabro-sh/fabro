@@ -1,4 +1,0 @@
-{
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "remoteUser": "alpha-user"
-}

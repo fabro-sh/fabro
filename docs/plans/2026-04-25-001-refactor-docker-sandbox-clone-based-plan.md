@@ -129,7 +129,7 @@ These calls live in `lib/crates/fabro-workflow/src/pipeline/initialize.rs:77-204
 - **Docker socket permission management.** No GID shim, `group_add` automation, or Docker Desktop-specific setup logic in Fabro.
 - **Non-GitHub clone origins.** GitLab, Bitbucket, arbitrary SSH/HTTPS remotes, and generic credentials are follow-up work. With `skip_clone = false`, present non-GitHub origins fail clearly. With `skip_clone = true`, the provider creates an empty workspace as an escape hatch, but repository files are not present.
 - **Exact-SHA execution.** Branch-based clone behavior matches Daytona's current model. Optional submitted-SHA pinning is a follow-up.
-- **Devcontainer integration with Docker provider.** Today's devcontainer code resolves config against the host filesystem before sandbox init; the clone-only model breaks that. Devcontainer-mode runs require a follow-up plan that resolves devcontainer config against the cloned `/workspace`.
+- **Repository-derived setup with Docker provider.** Host-resolved setup metadata would break under the clone-only model. Any repository-derived setup must resolve against the cloned `/workspace`.
 - **Auto-fallback to local when Docker is unreachable.** If `connect_with_local_defaults()` fails, the run fails with the Docker connection error.
 - **Named-volume copy-from-host as an alternative to clone.** Evaluated and rejected: it reintroduces host-CLI / server-Docker coupling.
 - **Real DinD nesting.** Socket-mounted sibling containers through the host daemon are sufficient for self-hosting.

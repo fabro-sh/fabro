@@ -5,7 +5,7 @@ use std::path::PathBuf;
     reason = "Feature-gated branches consume these imports when optional backends are enabled."
 )]
 use anyhow::{Context, Result, bail};
-use fabro_types::{RunId, RunSandbox, SandboxProviderKind};
+use fabro_types::{RunId, RunSandboxInstance, SandboxProviderKind};
 
 use crate::SandboxEventCallback;
 #[cfg(feature = "daytona")]
@@ -24,7 +24,7 @@ use crate::local::LocalSandbox;
     reason = "Feature-gated sandbox backends leave some parameters unused on partial builds."
 )]
 pub async fn reconnect(
-    record: &RunSandbox,
+    record: &RunSandboxInstance,
     daytona_api_key: Option<String>,
 ) -> Result<Box<dyn crate::Sandbox>> {
     reconnect_for_run(record, daytona_api_key, None).await
@@ -35,7 +35,7 @@ pub async fn reconnect(
     reason = "Feature-gated sandbox backends leave parameters unused on partial builds."
 )]
 pub async fn reconnect_for_run(
-    record: &RunSandbox,
+    record: &RunSandboxInstance,
     daytona_api_key: Option<String>,
     run_id: Option<RunId>,
 ) -> Result<Box<dyn crate::Sandbox>> {
@@ -47,15 +47,12 @@ pub async fn reconnect_for_run(
     reason = "Feature-gated sandbox backends leave parameters unused on partial builds."
 )]
 pub async fn reconnect_for_run_with_callback(
-    record: &RunSandbox,
+    record: &RunSandboxInstance,
     daytona_api_key: Option<String>,
     run_id: Option<RunId>,
     event_callback: Option<SandboxEventCallback>,
 ) -> Result<Box<dyn crate::Sandbox>> {
-    let runtime = record
-        .runtime
-        .as_ref()
-        .context("run sandbox missing runtime metadata")?;
+    let runtime = &record.runtime;
     match record.provider {
         SandboxProviderKind::Local => {
             let mut sandbox = LocalSandbox::new(PathBuf::from(&runtime.working_directory));

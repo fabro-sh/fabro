@@ -61,7 +61,7 @@ There is no startup-time secret generation. A temporary startup migration moves 
 
 - Worker and render-graph subprocesses start from `env_clear()` and re-add only explicit allowlisted variables.
 - Authority-bearing values are re-injected intentionally. For worker subprocesses this is `FABRO_WORKER_TOKEN`, plus any explicitly required internal value such as a vault-derived `GITHUB_APP_PRIVATE_KEY`; it is not user auth state such as `FABRO_DEV_TOKEN` or `auth.json`.
-- The worker reads `FABRO_WORKER_TOKEN` from its env at startup (in `main()` before Tokio initializes) and immediately calls `std::env::remove_var` to scrub it. The token then flows through function arguments to `runner::execute`. Every descendant process (hooks, sandbox commands, devcontainer setup, MCP stdio, etc.) therefore inherits a worker env that no longer contains the bearer, so an unscrubbed spawn site cannot leak it.
+- The worker reads `FABRO_WORKER_TOKEN` from its env at startup (in `main()` before Tokio initializes) and immediately calls `std::env::remove_var` to scrub it. The token then flows through function arguments to `runner::execute`. Every descendant process (hooks, sandbox commands, MCP stdio, etc.) therefore inherits a worker env that no longer contains the bearer, so an unscrubbed spawn site cannot leak it.
 - The daemon child inherits the parent env unchanged except for output-format hygiene (`FABRO_JSON` removal).
 
 ## Tests

@@ -1827,7 +1827,6 @@ dependencies = [
  "fabro-checkpoint",
  "fabro-client",
  "fabro-config",
- "fabro-devcontainer",
  "fabro-dump",
  "fabro-github",
  "fabro-graphviz",
@@ -1990,23 +1989,6 @@ dependencies = [
  "toml_edit",
  "tracing-subscriber",
  "walkdir",
-]
-
-[[package]]
-name = "fabro-devcontainer"
-version = "0.246.0-nightly.0"
-dependencies = [
- "fabro-http",
- "fabro-static",
- "fabro-util",
- "insta",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2693,7 +2675,6 @@ dependencies = [
  "fabro-checkpoint",
  "fabro-config",
  "fabro-core",
- "fabro-devcontainer",
  "fabro-dump",
  "fabro-github",
  "fabro-graphviz",

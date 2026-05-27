@@ -664,8 +664,79 @@ describe("RunDetail full-height child routes", () => {
     expect(navigated).toEqual(["/runs/run_retry"]);
   });
 
-  test("shows the Sandbox tab when the run has a sandbox", async () => {
-    currentRunState = { sandbox: { provider: "docker", id: "container-1" } };
+  test("hides the Sandbox tab for a planned sandbox without an instance", async () => {
+    currentRunState = {
+      sandbox: {
+        kind: "planned",
+        plan: { provider: "docker", image: null, snapshot: null },
+      },
+    };
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+    });
+
+    const sandboxLinks = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href === "/runs/run_1/sandbox",
+    );
+    expect(sandboxLinks).toHaveLength(0);
+  });
+
+  for (const kind of ["initializing", "ready", "failed"] as const) {
+    test(`shows the Sandbox tab for ${kind} sandbox state`, async () => {
+      currentRunState = {
+        sandbox: {
+          kind,
+          plan: { provider: "docker", image: null, snapshot: null },
+          instance: kind === "ready"
+            ? {
+              provider: "docker",
+              image: null,
+              snapshot: null,
+              runtime: {
+                id: "container-1",
+                working_directory: "/workspace",
+                repo_cloned: null,
+                clone_origin_url: null,
+                clone_branch: null,
+              },
+            }
+            : undefined,
+          failure: kind === "failed"
+            ? {
+              provider: "docker",
+              error: "Docker daemon unavailable",
+              causes: [],
+              duration_ms: 42,
+            }
+            : undefined,
+        },
+      };
+      const renderer = await renderRunDetail({
+        initialEntry: "/runs/run_1",
+      });
+
+      const sandboxLinks = renderer.root.findAll(
+        (node) =>
+          node.type === "a" &&
+          node.props.href === "/runs/run_1/sandbox" &&
+          node.children.includes("Sandbox"),
+      );
+      expect(sandboxLinks).toHaveLength(1);
+    });
+  }
+
+  test("shows the Sandbox tab for legacy sandbox state with runtime metadata", async () => {
+    currentRunState = {
+      sandbox: {
+        provider: "docker",
+        runtime: {
+          id:                "container-1",
+          working_directory: "/workspace",
+        },
+      },
+    };
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1",
     });

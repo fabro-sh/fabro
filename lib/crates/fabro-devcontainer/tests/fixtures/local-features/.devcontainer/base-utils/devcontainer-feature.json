@@ -1,8 +1,0 @@
-{
-  "id": "base-utils",
-  "version": "1.0.0",
-  "containerEnv": {
-    "BASE_UTILS_INSTALLED": "true"
-  },
-  "onCreateCommand": "echo base-utils-setup"
-}

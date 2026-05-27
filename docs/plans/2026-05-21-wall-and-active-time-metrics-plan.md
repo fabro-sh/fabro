@@ -46,7 +46,7 @@ visits. Parallel work is summed, so run active time can exceed run wall time.
     not `runtime_secs`.
 - Keep `duration_ms` only for unrelated subsystem-specific operational events
   where the name is still local and unambiguous, such as sandbox setup,
-  metadata snapshot, devcontainer lifecycle, and hook execution. The cleanup
+  metadata snapshot, setup commands, and hook execution. The cleanup
   target is public run/stage runtime semantics.
 - Update OpenAPI and regenerate the Rust and TypeScript API clients after
   schema edits.

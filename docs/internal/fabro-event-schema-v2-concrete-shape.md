@@ -307,7 +307,7 @@ V2 should keep the current hand-coded domain split for prop structs:
 - run props in [`run.rs`](/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-types/src/run_event/run.rs)
 - stage and checkpoint props in [`stage.rs`](/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-types/src/run_event/stage.rs)
 - agent props in [`agent.rs`](/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-types/src/run_event/agent.rs)
-- infra/setup/devcontainer props in [`infra.rs`](/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-types/src/run_event/infra.rs)
+- infra/setup props in [`infra.rs`](/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-types/src/run_event/infra.rs)
 - parallel/interview/git/misc props in [`misc.rs`](/Users/bhelmkamp/p/fabro-sh/fabro/lib/crates/fabro-types/src/run_event/misc.rs)
 
 That split is part of the design quality. V2 should keep adding hand-coded prop structs, not collapse everything into generic maps.
@@ -404,7 +404,6 @@ V2 keeps the current durable family surface broadly intact.
 - `cli.ensure.*` (legacy only)
 - `command.*`
 - `agent.cli.*`
-- `devcontainer.*`
 - `pull_request.*`
 - `artifact.captured`
 - `ssh.ready`

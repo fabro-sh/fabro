@@ -737,41 +737,6 @@ pub enum Event {
     PullRequestFailed {
         error: String,
     },
-    DevcontainerResolved {
-        dockerfile_lines:        usize,
-        environment_count:       usize,
-        lifecycle_command_count: usize,
-        workspace_folder:        String,
-    },
-    DevcontainerLifecycleStarted {
-        phase:         String,
-        command_count: usize,
-    },
-    DevcontainerLifecycleCommandStarted {
-        phase:   String,
-        command: String,
-        index:   usize,
-    },
-    DevcontainerLifecycleCommandCompleted {
-        phase:       String,
-        command:     String,
-        index:       usize,
-        exit_code:   i32,
-        duration_ms: u64,
-    },
-    DevcontainerLifecycleCompleted {
-        phase:       String,
-        duration_ms: u64,
-    },
-    DevcontainerLifecycleFailed {
-        phase:            String,
-        command:          String,
-        index:            usize,
-        exit_code:        i32,
-        stderr:           String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        exec_output_tail: Option<fabro_types::ExecOutputTail>,
-    },
 }
 
 impl Event {
@@ -1594,77 +1559,6 @@ impl Event {
             }
             Self::PullRequestFailed { error, .. } => {
                 error!(error = %error, "Pull request creation failed");
-            }
-            Self::DevcontainerResolved {
-                dockerfile_lines,
-                environment_count,
-                lifecycle_command_count,
-                workspace_folder,
-            } => {
-                info!(
-                    dockerfile_lines,
-                    environment_count,
-                    lifecycle_command_count,
-                    workspace_folder,
-                    "Devcontainer resolved"
-                );
-            }
-            Self::DevcontainerLifecycleStarted {
-                phase,
-                command_count,
-            } => {
-                info!(phase, command_count, "Devcontainer lifecycle started");
-            }
-            Self::DevcontainerLifecycleCommandStarted {
-                phase,
-                command,
-                index,
-            } => {
-                debug!(
-                    phase,
-                    command, index, "Devcontainer lifecycle command started"
-                );
-            }
-            Self::DevcontainerLifecycleCommandCompleted {
-                phase,
-                command,
-                index,
-                exit_code,
-                duration_ms,
-            } => {
-                debug!(
-                    phase,
-                    command,
-                    index,
-                    exit_code,
-                    duration_ms,
-                    "Devcontainer lifecycle command completed"
-                );
-            }
-            Self::DevcontainerLifecycleCompleted { phase, duration_ms } => {
-                info!(phase, duration_ms, "Devcontainer lifecycle completed");
-            }
-            Self::DevcontainerLifecycleFailed {
-                phase,
-                command,
-                index,
-                exit_code,
-                exec_output_tail,
-                ..
-            } => {
-                let tail = fabro_types::ExecOutputTail::trace_summary(exec_output_tail.as_ref());
-                error!(
-                    phase,
-                    command,
-                    index,
-                    exit_code,
-                    exec_output_tail_present = tail.present,
-                    exec_stdout_tail_bytes = tail.stdout_bytes,
-                    exec_stderr_tail_bytes = tail.stderr_bytes,
-                    exec_stdout_truncated = tail.stdout_truncated,
-                    exec_stderr_truncated = tail.stderr_truncated,
-                    "Devcontainer lifecycle command failed"
-                );
             }
         }
     }

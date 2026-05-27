@@ -232,7 +232,7 @@ pub struct EngineServices {
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `execute` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
-    /// Environment variables from devcontainer and `[sandbox.env]` config.
+    /// Environment variables from `[sandbox.env]` config.
     pub base_env:         HashMap<String, String>,
     /// GitHub token source used to inject `GITHUB_TOKEN` at the point of use.
     pub github_token:     Option<Arc<GitHubTokenSource>>,

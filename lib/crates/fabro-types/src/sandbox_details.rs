@@ -4,11 +4,11 @@ use chrono::{DateTime, Utc};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 
-use crate::RunSandbox;
+use crate::RunSandboxInstance;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SandboxDetails {
-    pub sandbox:      RunSandbox,
+    pub sandbox:      RunSandboxInstance,
     pub state:        SandboxState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_state: Option<String>,
@@ -187,11 +187,11 @@ mod tests {
     #[test]
     fn serializes_with_snake_case_state() {
         let details = SandboxDetails {
-            sandbox:      RunSandbox {
+            sandbox:      RunSandboxInstance {
                 provider: crate::SandboxProviderKind::Docker,
                 image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
                 snapshot: None,
-                runtime:  Some(crate::RunSandboxRuntime {
+                runtime:  crate::RunSandboxRuntime {
                     id:                "container-abc123".to_string(),
                     working_directory: "/workspace".to_string(),
                     repo_cloned:       None,
@@ -201,7 +201,7 @@ mod tests {
                     repos_root:        None,
                     primary_repo_path: None,
                     primary_repo_link: None,
-                }),
+                },
             },
             state:        SandboxState::Running,
             native_state: Some("running".to_string()),
@@ -232,10 +232,10 @@ mod tests {
                 "sandbox": {
                     "provider": "docker",
                     "image": "ghcr.io/fabro/sandbox:latest",
-                    "runtime": {
-                        "id": "container-abc123",
-                        "working_directory": "/workspace"
-                    }
+                "runtime": {
+                    "id": "container-abc123",
+                    "working_directory": "/workspace"
+                }
                 },
                 "state": "running",
                 "native_state": "running",
@@ -271,10 +271,10 @@ mod tests {
                 "provider": "local",
                 "image": null,
                 "snapshot": null,
-                "runtime": {
-                    "id": "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z",
-                    "working_directory": "/Users/client/project"
-                }
+                    "runtime": {
+                        "id": "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z",
+                        "working_directory": "/Users/client/project"
+                    }
             },
             "state": "unknown",
             "resources": {},
@@ -284,20 +284,12 @@ mod tests {
 
         assert_eq!(details.sandbox.provider, crate::SandboxProviderKind::Local);
         assert_eq!(
-            details
-                .sandbox
-                .runtime
-                .as_ref()
-                .map(|runtime| runtime.id.as_str()),
-            Some("local:01JNQVR7M0EJ5GKAT2SC4ERS1Z")
+            details.sandbox.runtime.id.as_str(),
+            "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z"
         );
         assert_eq!(
-            details
-                .sandbox
-                .runtime
-                .as_ref()
-                .map(|runtime| runtime.working_directory.as_str()),
-            Some("/Users/client/project")
+            details.sandbox.runtime.working_directory.as_str(),
+            "/Users/client/project"
         );
         assert_eq!(details.state, SandboxState::Unknown);
         assert!(details.sandbox.image.is_none());

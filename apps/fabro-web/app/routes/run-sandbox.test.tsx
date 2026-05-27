@@ -6,10 +6,25 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import type { SandboxDetails } from "@qltysh/fabro-api-client";
 
 let currentDetails: SandboxDetails | null = null;
+let currentRunState: any = null;
 let currentLoading = false;
 let currentError: Error | null = null;
 
 mock.module("../lib/queries", () => ({
+  useRun: () => ({
+    data:         null,
+    error:        null,
+    isLoading:    false,
+    isValidating: false,
+    mutate:       mock(() => Promise.resolve(null)),
+  }),
+  useRunState: () => ({
+    data:         currentRunState,
+    error:        null,
+    isLoading:    false,
+    isValidating: false,
+    mutate:       mock(() => Promise.resolve(currentRunState)),
+  }),
   useRunSandboxDetails: () => ({
     data:         currentDetails,
     error:        currentError,
@@ -95,14 +110,15 @@ function sandboxDetails(
   } = {},
 ): SandboxDetails {
   const sandbox = overrides.sandbox ?? {};
+  const { sandbox: _sandboxOverride, ...detailOverrides } = overrides;
   return {
     sandbox: {
       provider: "docker",
       image:    null,
       snapshot: null,
       runtime:  {
-        id:                null,
-        working_directory: null,
+        id:                "",
+        working_directory: "",
         repo_cloned:       null,
         clone_origin_url:  null,
         clone_branch:      null,
@@ -117,7 +133,7 @@ function sandboxDetails(
     network:      networkDetails(),
     labels:       {},
     timestamps:   { created_at: null, last_activity_at: null },
-    ...overrides,
+    ...detailOverrides,
   };
 }
 
@@ -166,6 +182,7 @@ afterEach(() => {
     act(() => renderer.unmount());
   }
   currentDetails = null;
+  currentRunState = null;
   currentLoading = false;
   currentError = null;
 });
@@ -352,7 +369,52 @@ describe("RunSandbox route", () => {
         Array.isArray(node.children) &&
         node.children.includes("No sandbox"),
     );
-    expect(titles).toHaveLength(1);
+    expect(titles).toHaveLength(2);
+  });
+
+  test("renders a planned sandbox as not created without controls", () => {
+    currentRunState = {
+      sandbox: {
+        kind: "planned",
+        plan: { provider: "docker", image: null, snapshot: null },
+      },
+    };
+    currentDetails = null;
+    currentError = new Error("Run sandbox was not created.");
+    const renderer = renderRoute();
+
+    expect(textContent(renderer)).toContain("Not created");
+    const tabs = renderer.root.findAll(
+      (node) => node.type === "button" && node.props.role === "tab",
+    );
+    expect(tabs).toHaveLength(0);
+  });
+
+  test("renders a failed sandbox lifecycle without service or file controls", () => {
+    currentRunState = {
+      sandbox: {
+        kind: "failed",
+        plan: { provider: "docker", image: null, snapshot: null },
+        failure: {
+          provider: "docker",
+          error: "Docker daemon unavailable",
+          causes: ["connection refused"],
+          duration_ms: 42,
+        },
+      },
+    };
+    currentDetails = null;
+    currentError = new Error("Run sandbox was not created.");
+    const renderer = renderRoute("/runs/run_1/sandbox?mode=services");
+
+    const copy = textContent(renderer);
+    expect(copy).toContain("Failed");
+    expect(copy).toContain("Docker daemon unavailable");
+    expect(copy).toContain("connection refused");
+    const tabs = renderer.root.findAll(
+      (node) => node.type === "button" && node.props.role === "tab",
+    );
+    expect(tabs).toHaveLength(0);
   });
 
   test("Terminal is the default right-column mode", () => {

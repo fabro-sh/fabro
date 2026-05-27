@@ -1,7 +1,0 @@
-services:
-  app:
-    environment:
-      - "DEBUG=true"
-      - "LOG_LEVEL=verbose"
-    ports:
-      - "4000:4000"

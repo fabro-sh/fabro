@@ -16,7 +16,7 @@
 - Use only `ss -H -ltnp` for v1; do not add `netstat` or `lsof` fallback.
 - Return all parsed listening TCP ports, including ports outside Daytona's preview range.
 - Compute preview support outside the sandbox command: `provider == "daytona" && 3000 <= port <= 9999`.
-- Do not probe HTTP readiness and do not read `devcontainer.json`.
+- Do not probe HTTP readiness or read repository setup metadata.
 
 ## Files
 

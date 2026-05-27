@@ -1,5 +1,6 @@
 import { Link, Outlet, type UIMatch } from "react-router";
 
+import { sandboxTabVisible, type MaybeSandbox } from "../../lib/run-sandbox-lifecycle";
 import { classNames } from "./model";
 
 interface RunDetailTabDefinition {
@@ -21,12 +22,10 @@ const allTabs: RunDetailTabDefinition[] = [
 export type RunDetailTab = RunDetailTabDefinition;
 
 export function runHasSandbox(runState: unknown): boolean {
-  return !!(
-    runState &&
-    typeof runState === "object" &&
-    "sandbox" in runState &&
-    (runState as { sandbox?: unknown }).sandbox
-  );
+  if (!runState || typeof runState !== "object" || !("sandbox" in runState)) {
+    return false;
+  }
+  return sandboxTabVisible((runState as { sandbox?: MaybeSandbox }).sandbox);
 }
 
 export function buildRunDetailTabs({

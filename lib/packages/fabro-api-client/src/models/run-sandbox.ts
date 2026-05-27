@@ -15,17 +15,23 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunSandboxRuntime } from './run-sandbox-runtime';
+import type { RunSandboxFailure } from './run-sandbox-failure';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxProviderKind } from './sandbox-provider-kind';
+import type { RunSandboxInstance } from './run-sandbox-instance';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunSandboxKind } from './run-sandbox-kind';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunSandboxPlan } from './run-sandbox-plan';
 
 /**
- * Canonical sandbox environment record for a run.
+ * Sandbox lifecycle record for a run. A run can have a requested sandbox plan before it has an initialized sandbox instance.
  */
 export interface RunSandbox {
-    'provider': SandboxProviderKind;
-    'image': string | null;
-    'snapshot': string | null;
-    'runtime': RunSandboxRuntime | null;
+    'kind': RunSandboxKind;
+    'plan': RunSandboxPlan;
+    'instance'?: RunSandboxInstance | null;
+    'failure'?: RunSandboxFailure | null;
 }

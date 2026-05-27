@@ -78,7 +78,11 @@ describe("terminal view helpers", () => {
       image: null,
       snapshot: null,
       runtime: null,
-    })).toBe("docker");
+    })).toBeNull();
+    expect(sandboxStatusDetail({
+      kind: "planned",
+      plan: { provider: "docker" },
+    })).toBeNull();
     expect(sandboxStatusDetail(null)).toBeNull();
   });
 });

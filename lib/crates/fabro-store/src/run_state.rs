@@ -13,10 +13,11 @@ use fabro_types::{
     McpServerProjection, McpServerStatus, Outcome, PendingInterviewRecord, PendingReason,
     PullRequestLink, RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary,
     RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
-    RunProjection, RunSandbox, RunSandboxRuntime, RunSize, RunSpec, RunStatus, RunTimestamps,
-    SandboxProviderKind, StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome,
-    StageProjection, StageState, StartRecord, SubAgentProjection, SubAgentStatus, TodoListKind,
-    TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
+    RunProjection, RunSandbox, RunSandboxFailure, RunSandboxInstance, RunSandboxPlan,
+    RunSandboxRuntime, RunSize, RunSpec, RunStatus, RunTimestamps, SandboxProviderKind,
+    StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome, StageProjection,
+    StageState, StartRecord, SubAgentProjection, SubAgentStatus, TodoListKind, TodoListProjection,
+    TodoProjection, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
 
@@ -259,27 +260,37 @@ impl RunProjectionReducer for RunProjection {
                     diff: diff_from_checkpoint_props(props),
                 });
             }
+            EventBody::SandboxInitializing(_) => {
+                let plan = sandbox_plan_from_projection_or_settings(self);
+                self.sandbox = Some(RunSandbox::initializing(plan));
+            }
+            EventBody::SandboxFailed(props) => {
+                let plan = sandbox_plan_from_projection_or_settings(self);
+                self.sandbox = Some(RunSandbox::failed(plan, RunSandboxFailure {
+                    provider:    props.provider.clone(),
+                    error:       props.error.clone(),
+                    causes:      props.causes.clone(),
+                    duration_ms: props.duration_ms,
+                }));
+            }
             EventBody::SandboxInitialized(props) => {
-                let sandbox = self.sandbox.get_or_insert(RunSandbox {
+                let plan = sandbox_plan_from_projection_or_settings(self);
+                self.sandbox = Some(RunSandbox::ready(plan, RunSandboxInstance {
                     provider: props.provider,
-                    image:    None,
-                    snapshot: None,
-                    runtime:  None,
-                });
-                sandbox.provider = props.provider;
-                sandbox.image.clone_from(&props.image);
-                sandbox.snapshot.clone_from(&props.snapshot);
-                sandbox.runtime = Some(RunSandboxRuntime {
-                    id:                props.id.clone(),
-                    working_directory: props.working_directory.clone(),
-                    repo_cloned:       props.repo_cloned,
-                    clone_origin_url:  props.clone_origin_url.clone(),
-                    clone_branch:      props.clone_branch.clone(),
-                    workspace_root:    props.workspace_root.clone(),
-                    repos_root:        props.repos_root.clone(),
-                    primary_repo_path: props.primary_repo_path.clone(),
-                    primary_repo_link: props.primary_repo_link.clone(),
-                });
+                    image:    props.image.clone(),
+                    snapshot: props.snapshot.clone(),
+                    runtime:  RunSandboxRuntime {
+                        id:                props.id.clone(),
+                        working_directory: props.working_directory.clone(),
+                        repo_cloned:       props.repo_cloned,
+                        clone_origin_url:  props.clone_origin_url.clone(),
+                        clone_branch:      props.clone_branch.clone(),
+                        workspace_root:    props.workspace_root.clone(),
+                        repos_root:        props.repos_root.clone(),
+                        primary_repo_path: props.primary_repo_path.clone(),
+                        primary_repo_link: props.primary_repo_link.clone(),
+                    },
+                }));
             }
             EventBody::PullRequestCreated(props) => {
                 self.pull_request = Some(PullRequestLink {
@@ -794,20 +805,28 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
     projection.parent_id = props.parent_id;
     projection.retried_from = props.retried_from;
     projection.web_url.clone_from(&props.web_url);
-    projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.environment));
+    projection.sandbox = Some(RunSandbox::planned(sandbox_plan(
+        &projection.spec.settings.run.environment,
+    )));
     Ok(projection)
 }
 
-fn planned_sandbox(settings: &RunEnvironmentSettings) -> RunSandbox {
+fn sandbox_plan_from_projection_or_settings(state: &RunProjection) -> RunSandboxPlan {
+    state.sandbox.as_ref().map_or_else(
+        || sandbox_plan(&state.spec.settings.run.environment),
+        |sandbox| sandbox.plan().clone(),
+    )
+}
+
+fn sandbox_plan(settings: &RunEnvironmentSettings) -> RunSandboxPlan {
     let provider = SandboxProviderKind::from(settings.provider);
-    RunSandbox {
+    RunSandboxPlan {
         provider,
         image: (settings.provider == EnvironmentProvider::Docker)
             .then(|| settings.image.docker.clone())
             .flatten()
             .filter(|image| !image.is_empty()),
         snapshot: None,
-        runtime: None,
     }
 }
 
@@ -1380,7 +1399,7 @@ mod tests {
         docker.provider = EnvironmentProvider::Docker;
         docker.image.docker = Some("ubuntu:24.04".to_string());
 
-        let planned_docker = super::planned_sandbox(&docker);
+        let planned_docker = super::sandbox_plan(&docker);
         assert_eq!(planned_docker.image.as_deref(), Some("ubuntu:24.04"));
         assert_eq!(planned_docker.snapshot, None);
 
@@ -1388,7 +1407,7 @@ mod tests {
         daytona.provider = EnvironmentProvider::Daytona;
         daytona.image.dockerfile = Some(DockerfileSource::Inline("FROM ubuntu:24.04".to_string()));
 
-        let planned_daytona = super::planned_sandbox(&daytona);
+        let planned_daytona = super::sandbox_plan(&daytona);
         assert_eq!(planned_daytona.image, None);
         assert_eq!(planned_daytona.snapshot, None);
     }
@@ -1411,9 +1430,10 @@ mod tests {
             .unwrap();
 
         let sandbox = state.sandbox.expect("sandbox should be projected");
-        assert_eq!(sandbox.image, None);
+        let instance = sandbox.instance().expect("sandbox should be ready");
+        assert_eq!(instance.image, None);
         assert_eq!(
-            sandbox.snapshot.as_deref(),
+            instance.snapshot.as_deref(),
             Some("fabro-11111111-2222-8333-8444-555555555555")
         );
     }
@@ -1467,6 +1487,155 @@ mod tests {
             build_summary(&projection, &fixtures::RUN_1).automation,
             Some(automation)
         );
+    }
+
+    #[test]
+    fn run_created_projects_planned_sandbox_lifecycle() {
+        let state = RunProjection::apply_events(&[test_raw_event(
+            1,
+            "run.created",
+            &json!({
+                "settings": WorkflowSettings::default(),
+                "graph": Graph::new("test"),
+                "labels": {},
+                "run_dir": "/tmp/run"
+            }),
+            None,
+        )])
+        .unwrap();
+
+        let sandbox = serde_json::to_value(state.sandbox.as_ref().unwrap()).unwrap();
+        assert_eq!(sandbox["kind"], "planned");
+        assert_eq!(sandbox["plan"]["provider"], "local");
+        assert!(sandbox.get("instance").is_none());
+        assert!(sandbox.get("failure").is_none());
+    }
+
+    #[test]
+    fn sandbox_lifecycle_events_update_projected_sandbox_state() {
+        let mut state = RunProjection::apply_events(&[test_raw_event(
+            1,
+            "run.created",
+            &json!({
+                "settings": WorkflowSettings::default(),
+                "graph": Graph::new("test"),
+                "labels": {},
+                "run_dir": "/tmp/run"
+            }),
+            None,
+        )])
+        .unwrap();
+
+        state
+            .apply_event(&test_raw_event(
+                2,
+                "sandbox.initializing",
+                &json!({ "provider": "docker" }),
+                None,
+            ))
+            .unwrap();
+        let initializing = serde_json::to_value(state.sandbox.as_ref().unwrap()).unwrap();
+        assert_eq!(initializing["kind"], "initializing");
+        assert!(initializing.get("instance").is_none());
+
+        state
+            .apply_event(&test_raw_event(
+                3,
+                "sandbox.initialized",
+                &json!({
+                    "provider": "docker",
+                    "id": "container-abc123",
+                    "working_directory": "/workspace",
+                    "image": "ubuntu:24.04",
+                    "repo_cloned": true,
+                    "clone_origin_url": "https://github.com/fabro-sh/fabro.git",
+                    "clone_branch": "main"
+                }),
+                None,
+            ))
+            .unwrap();
+        let ready = serde_json::to_value(state.sandbox.as_ref().unwrap()).unwrap();
+        assert_eq!(ready["kind"], "ready");
+        assert_eq!(ready["plan"]["provider"], "local");
+        assert_eq!(ready["instance"]["provider"], "docker");
+        assert_eq!(ready["instance"]["image"], "ubuntu:24.04");
+        assert_eq!(ready["instance"]["runtime"]["id"], "container-abc123");
+        assert_eq!(
+            ready["instance"]["runtime"]["working_directory"],
+            "/workspace"
+        );
+
+        state
+            .apply_event(&test_raw_event(
+                4,
+                "sandbox.failed",
+                &json!({
+                    "provider": "docker",
+                    "error": "Docker daemon unavailable",
+                    "causes": ["connection refused"],
+                    "duration_ms": 42
+                }),
+                None,
+            ))
+            .unwrap();
+        let failed = serde_json::to_value(state.sandbox.as_ref().unwrap()).unwrap();
+        assert_eq!(failed["kind"], "failed");
+        assert_eq!(failed["failure"]["provider"], "docker");
+        assert_eq!(failed["failure"]["error"], "Docker daemon unavailable");
+        assert_eq!(failed["failure"]["causes"], json!(["connection refused"]));
+        assert_eq!(failed["failure"]["duration_ms"], 42);
+        assert!(failed.get("instance").is_none());
+    }
+
+    #[test]
+    fn run_failed_before_sandbox_events_leaves_sandbox_planned() {
+        let state = RunProjection::apply_events(&[
+            test_raw_event(
+                1,
+                "run.created",
+                &json!({
+                    "settings": WorkflowSettings::default(),
+                    "graph": Graph::new("test"),
+                    "labels": {},
+                    "run_dir": "/tmp/run"
+                }),
+                None,
+            ),
+            test_raw_event(
+                2,
+                "run.runnable",
+                &json!({ "source": "start_requested" }),
+                None,
+            ),
+            test_raw_event(3, "run.starting", &json!({}), None),
+            test_raw_event(4, "run.running", &json!({}), None),
+            test_raw_event(
+                5,
+                "run.failed",
+                &json!({
+                    "failure": {
+                        "reason": "sandbox_init_failed",
+                        "detail": {
+                            "message": "Failed before sandbox initialized",
+                            "category": "transient_infra"
+                        }
+                    },
+                    "timing": {
+                        "wall_time_ms": 1,
+                        "inference_time_ms": 0,
+                        "tool_time_ms": 0,
+                        "active_time_ms": 0
+                    }
+                }),
+                None,
+            ),
+        ])
+        .unwrap();
+
+        let sandbox = serde_json::to_value(state.sandbox.as_ref().unwrap()).unwrap();
+        assert_eq!(sandbox["kind"], "planned");
+        assert!(sandbox.get("instance").is_none());
+        assert!(sandbox.get("failure").is_none());
     }
 
     fn test_raw_event(

@@ -289,7 +289,6 @@ pub mod billing_rollup;
 pub mod command_log;
 pub(crate) mod condition;
 pub mod context;
-pub mod devcontainer_bridge;
 pub mod error;
 pub mod event;
 pub mod file_resolver;

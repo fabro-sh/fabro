@@ -1059,7 +1059,7 @@ impl AskFabroReadiness {
         } else if run
             .sandbox
             .as_ref()
-            .and_then(|sandbox| sandbox.runtime.as_ref())
+            .and_then(fabro_types::RunSandbox::instance)
             .is_none()
         {
             Some(AskFabroUnavailableReason::SandboxNotReady)
@@ -2439,12 +2439,15 @@ async fn delete_run_sandbox_resource(
         .environment
         .lifecycle
         .preserve;
-    let Some(record) = projection.sandbox else {
+    let Some(record) = projection
+        .sandbox
+        .as_ref()
+        .and_then(fabro_types::RunSandbox::instance)
+        .cloned()
+    else {
         return Ok(SandboxDeleteOutcome::Cleaned);
     };
-    let Some(runtime) = record.runtime.as_ref() else {
-        return Ok(SandboxDeleteOutcome::Cleaned);
-    };
+    let runtime = &record.runtime;
     if preserve {
         return Ok(SandboxDeleteOutcome::Preserved(DeleteRunResponse {
             deleted:           true,

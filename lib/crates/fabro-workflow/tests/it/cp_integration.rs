@@ -15,7 +15,7 @@
 )]
 
 use fabro_sandbox::reconnect::reconnect;
-use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProviderKind};
+use fabro_types::{RunSandboxInstance, RunSandboxRuntime, SandboxProviderKind};
 
 const DOCKER_MANAGED_LABEL: &str = "sh.fabro.managed";
 const DOCKER_CP_IMAGE: &str = "buildpack-deps:noble";
@@ -24,12 +24,12 @@ const DOCKER_CP_IMAGE: &str = "buildpack-deps:noble";
 // Local sandbox
 // ---------------------------------------------------------------------------
 
-fn local_record(working_directory: &std::path::Path) -> RunSandbox {
-    RunSandbox {
+fn local_record(working_directory: &std::path::Path) -> RunSandboxInstance {
+    RunSandboxInstance {
         provider: SandboxProviderKind::Local,
         image:    None,
         snapshot: None,
-        runtime:  Some(RunSandboxRuntime {
+        runtime:  RunSandboxRuntime {
             id:                "local:test".to_string(),
             working_directory: working_directory.to_string_lossy().to_string(),
             repo_cloned:       None,
@@ -39,7 +39,7 @@ fn local_record(working_directory: &std::path::Path) -> RunSandbox {
             repos_root:        None,
             primary_repo_path: None,
             primary_repo_link: None,
-        }),
+        },
     }
 }
 
@@ -135,12 +135,12 @@ async fn local_cp_creates_parent_dirs() {
 // Docker sandbox
 // ---------------------------------------------------------------------------
 
-fn docker_record(container_id: &str) -> RunSandbox {
-    RunSandbox {
+fn docker_record(container_id: &str) -> RunSandboxInstance {
+    RunSandboxInstance {
         provider: SandboxProviderKind::Docker,
         image:    None,
         snapshot: None,
-        runtime:  Some(RunSandboxRuntime {
+        runtime:  RunSandboxRuntime {
             id:                container_id.to_string(),
             working_directory: "/workspace".to_string(),
             repo_cloned:       Some(false),
@@ -150,7 +150,7 @@ fn docker_record(container_id: &str) -> RunSandbox {
             repos_root:        Some("/repos".to_string()),
             primary_repo_path: None,
             primary_repo_link: None,
-        }),
+        },
     }
 }
 

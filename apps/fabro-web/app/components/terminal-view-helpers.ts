@@ -1,4 +1,5 @@
 import type { RunSandbox } from "@qltysh/fabro-api-client";
+import { sandboxInstance, sandboxRuntime } from "../lib/run-sandbox-lifecycle";
 
 export const TERMINAL_DOCK_CLEARANCE_CLASS =
   "pb-[calc(0.125rem+var(--fabro-interview-dock-clearance,0px))]";
@@ -40,5 +41,6 @@ export function terminalAccessCommandLabel(provider: string | null): string | nu
 }
 
 export function sandboxStatusDetail(sandbox: RunSandbox | null | undefined): string | null {
-  return sandbox?.runtime?.id ?? sandbox?.provider ?? null;
+  const instance = sandboxInstance(sandbox);
+  return sandboxRuntime(sandbox)?.id ?? instance?.provider ?? null;
 }

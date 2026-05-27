@@ -239,16 +239,9 @@ pub struct LlmSpec {
 
 #[derive(Clone)]
 pub struct SandboxEnvSpec {
-    pub devcontainer_env:   HashMap<String, String>,
     pub toml_env:           HashMap<String, String>,
     pub github_permissions: Option<HashMap<String, String>>,
     pub origin_url:         Option<String>,
-}
-
-#[derive(Clone)]
-pub struct DevcontainerSpec {
-    pub enabled:     bool,
-    pub resolve_dir: PathBuf,
 }
 
 pub struct InitOptions {
@@ -268,7 +261,6 @@ pub struct InitOptions {
     pub hooks:             fabro_hooks::HookSettings,
     pub sandbox_env:       SandboxEnvSpec,
     pub vault:             Option<Arc<AsyncRwLock<Vault>>>,
-    pub devcontainer:      Option<DevcontainerSpec>,
     pub git:               Option<GitCheckpointOptions>,
     pub registry_override: Option<Arc<HandlerRegistry>>,
     pub artifact_sink:     Option<ArtifactSink>,

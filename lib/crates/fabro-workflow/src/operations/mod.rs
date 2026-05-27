@@ -24,5 +24,5 @@ pub use start::{StartServices, Started, start};
 pub use timeline::{ForkTarget, RunTimeline, TimelineEntry, build_timeline, timeline};
 pub use validate::{ValidateInput, validate};
 
-pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec};
+pub use crate::pipeline::{LlmSpec, SandboxEnvSpec};
 pub use crate::transforms::RenderMode;
