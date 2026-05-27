@@ -15,6 +15,7 @@
 
 
 export * from './api/auth-api';
+export * from './api/automations-api';
 export * from './api/billing-api';
 export * from './api/completions-api';
 export * from './api/discovery-api';

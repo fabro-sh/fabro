@@ -9,16 +9,14 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Automation {
     pub id:          AutomationId,
     pub revision:    AutomationRevision,
     pub name:        String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default = "default_true")]
     pub enabled:     bool,
     pub target:      AutomationTarget,
-    #[serde(default)]
     pub triggers:    Vec<AutomationTrigger>,
 }
 
@@ -97,8 +95,8 @@ impl Automation {
 #[serde(deny_unknown_fields)]
 pub struct AutomationTarget {
     pub repository:   String,
-    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
-    pub ref_selector: Option<String>,
+    #[serde(rename = "ref")]
+    pub ref_selector: String,
     pub workflow:     String,
 }
 
@@ -131,17 +129,15 @@ impl AutomationTrigger {
 #[serde(deny_unknown_fields)]
 pub struct ApiTrigger {
     pub id:      AutomationTriggerId,
-    #[serde(default = "default_true")]
     pub enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduleTrigger {
-    pub id:      AutomationTriggerId,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    pub cron:    String,
+    pub id:         AutomationTriggerId,
+    pub enabled:    bool,
+    pub expression: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,10 +147,9 @@ pub struct AutomationDraft {
     pub name:        String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub enabled:     bool,
     pub target:      AutomationTarget,
-    #[serde(default)]
     pub triggers:    Vec<AutomationTrigger>,
 }
 
@@ -176,10 +171,8 @@ pub struct AutomationReplace {
     pub name:        String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default = "default_true")]
     pub enabled:     bool,
     pub target:      AutomationTarget,
-    #[serde(default)]
     pub triggers:    Vec<AutomationTrigger>,
 }
 
@@ -246,9 +239,7 @@ fn validate_fields(value: &AutomationReplace) -> Result<(), AutomationValidation
         return Err(AutomationValidationError::EmptyName);
     }
     validate_repository_slug(&value.target.repository)?;
-    if let Some(ref_selector) = &value.target.ref_selector {
-        validate_git_ref_selector(ref_selector)?;
-    }
+    validate_git_ref_selector(&value.target.ref_selector)?;
     validate_workflow_selector(&value.target.workflow)?;
     validate_triggers(&value.triggers)
 }
@@ -365,16 +356,16 @@ fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationVal
                 has_api_trigger = true;
             }
             AutomationTrigger::Schedule(trigger) => {
-                if trigger.cron.split_whitespace().count() != 5 {
+                if trigger.expression.split_whitespace().count() != 5 {
                     return Err(AutomationValidationError::InvalidCronFieldCount {
                         trigger_id: id.to_string(),
-                        expression: trigger.cron.clone(),
+                        expression: trigger.expression.clone(),
                     });
                 }
-                cron_parser.parse(&trigger.cron).map_err(|source| {
+                cron_parser.parse(&trigger.expression).map_err(|source| {
                     AutomationValidationError::InvalidCronExpression {
                         trigger_id: id.to_string(),
-                        expression: trigger.cron.clone(),
+                        expression: trigger.expression.clone(),
                         source,
                     }
                 })?;
@@ -389,6 +380,14 @@ fn default_true() -> bool {
     true
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if predicates receive references"
+)]
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -399,7 +398,7 @@ mod tests {
     fn target() -> AutomationTarget {
         AutomationTarget {
             repository:   "fabro-sh/fabro".to_string(),
-            ref_selector: Some("main".to_string()),
+            ref_selector: "main".to_string(),
             workflow:     ".fabro/workflows/test/workflow.toml".to_string(),
         }
     }
@@ -413,9 +412,9 @@ mod tests {
 
     fn schedule_trigger(id: &str, cron: &str) -> AutomationTrigger {
         AutomationTrigger::Schedule(ScheduleTrigger {
-            id:      AutomationTriggerId::new(id).unwrap(),
-            enabled: true,
-            cron:    cron.to_string(),
+            id:         AutomationTriggerId::new(id).unwrap(),
+            enabled:    true,
+            expression: cron.to_string(),
         })
     }
 
@@ -432,11 +431,13 @@ workflow = "release"
 [[triggers]]
 type = "api"
 id = "manual"
+enabled = true
 
 [[triggers]]
 type = "schedule"
 id = "nightly"
-cron = "0 0 * * *"
+enabled = true
+expression = "0 0 * * *"
 "#;
 
         let automation =
@@ -469,7 +470,7 @@ cron = "0 0 * * *"
                 enabled:     true,
                 target:      AutomationTarget {
                     repository:   "not/github/slug".to_string(),
-                    ref_selector: Some("main".to_string()),
+                    ref_selector: "main".to_string(),
                     workflow:     "release".to_string(),
                 },
                 triggers:    vec![api_trigger("manual")],
@@ -480,7 +481,7 @@ cron = "0 0 * * *"
                 enabled:     true,
                 target:      AutomationTarget {
                     repository:   "fabro-sh/fabro".to_string(),
-                    ref_selector: Some("main;rm".to_string()),
+                    ref_selector: "main;rm".to_string(),
                     workflow:     "release".to_string(),
                 },
                 triggers:    vec![api_trigger("manual")],
@@ -491,7 +492,7 @@ cron = "0 0 * * *"
                 enabled:     true,
                 target:      AutomationTarget {
                     repository:   "fabro-sh/fabro".to_string(),
-                    ref_selector: Some("main".to_string()),
+                    ref_selector: "main".to_string(),
                     workflow:     "../release".to_string(),
                 },
                 triggers:    vec![api_trigger("manual")],

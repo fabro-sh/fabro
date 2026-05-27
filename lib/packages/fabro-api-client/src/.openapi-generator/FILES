@@ -1,5 +1,6 @@
 api.ts
 api/auth-api.ts
+api/automations-api.ts
 api/billing-api.ts
 api/completions-api.ts
 api/discovery-api.ts
@@ -54,7 +55,13 @@ models/auth-method.ts
 models/auth-session-user.ts
 models/auth-session.ts
 models/auth-sessions-response.ts
+models/automation-api-trigger.ts
+models/automation-list-response.ts
 models/automation-ref.ts
+models/automation-schedule-trigger.ts
+models/automation-target.ts
+models/automation-trigger.ts
+models/automation.ts
 models/batch-delete-runs-request.ts
 models/batch-delete-runs-response.ts
 models/batch-delete-runs-result.ts
@@ -84,6 +91,7 @@ models/completion-tool-choice.ts
 models/completion-tool-definition.ts
 models/completion-usage.ts
 models/conclusion.ts
+models/create-automation-request.ts
 models/create-completion-request.ts
 models/create-run-pull-request-request.ts
 models/create-run-session-request.ts
@@ -293,6 +301,7 @@ models/related-workflow-diagnostic.ts
 models/render-workflow-graph-direction.ts
 models/render-workflow-graph-format.ts
 models/render-workflow-graph-request.ts
+models/replace-automation-request.ts
 models/repo-check-response-permissions.ts
 models/repo-check-response.ts
 models/repository-ref.ts

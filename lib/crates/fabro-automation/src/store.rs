@@ -294,7 +294,7 @@ mod tests {
     fn target() -> AutomationTarget {
         AutomationTarget {
             repository:   "fabro-sh/fabro".to_string(),
-            ref_selector: Some("main".to_string()),
+            ref_selector: "main".to_string(),
             workflow:     "release".to_string(),
         }
     }
@@ -312,9 +312,9 @@ mod tests {
                     enabled: true,
                 }),
                 AutomationTrigger::Schedule(ScheduleTrigger {
-                    id:      AutomationTriggerId::new("nightly").unwrap(),
-                    enabled: true,
-                    cron:    "0 0 * * *".to_string(),
+                    id:         AutomationTriggerId::new("nightly").unwrap(),
+                    enabled:    true,
+                    expression: "0 0 * * *".to_string(),
                 }),
             ],
         }

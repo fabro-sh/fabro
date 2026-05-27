@@ -15,6 +15,8 @@ tags:
     description: Browser authentication
   - name: Runs
     description: Run management operations
+  - name: Automations
+    description: Server-managed automation definitions and automation-triggered runs
   - name: Sandboxes
     description: Provider-backed sandbox inventory
   - name: Sessions
@@ -3940,6 +3942,288 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── Automations ──────────────────────────────────────────────────────
+
+  /api/v1/automations:
+    get:
+      operationId: listAutomations
+      tags: [Automations]
+      summary: List automations
+      description: Returns all configured automation definitions.
+      responses:
+        "200":
+          description: Automation definitions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationListResponse"
+    post:
+      operationId: createAutomation
+      tags: [Automations]
+      summary: Create automation
+      description: Creates a new automation definition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAutomationRequest"
+      responses:
+        "201":
+          description: Automation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Automation"
+        "400":
+          description: Malformed JSON request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Automation id already exists
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Automation failed domain validation
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/automations/{id}:
+    get:
+      operationId: retrieveAutomation
+      tags: [Automations]
+      summary: Retrieve automation
+      description: Returns one automation definition by id.
+      parameters:
+        - $ref: "#/components/parameters/AutomationId"
+      responses:
+        "200":
+          description: Automation definition
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Automation"
+        "404":
+          description: Automation not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: replaceAutomation
+      tags: [Automations]
+      summary: Replace automation
+      description: Replaces an automation definition when `If-Match` matches the current automation revision.
+      parameters:
+        - $ref: "#/components/parameters/AutomationId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceAutomationRequest"
+      responses:
+        "200":
+          description: Automation replaced
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Automation"
+        "400":
+          description: Malformed JSON request body or invalid revision header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Automation not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Automation revision mismatch
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Automation failed domain validation
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing required `If-Match` header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteAutomation
+      tags: [Automations]
+      summary: Delete automation
+      description: Deletes an automation definition when `If-Match` matches the current automation revision.
+      parameters:
+        - $ref: "#/components/parameters/AutomationId"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "204":
+          description: Automation deleted
+        "400":
+          description: Invalid revision header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Automation not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Automation revision mismatch
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing required `If-Match` header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/automations/{id}/runs:
+    get:
+      operationId: listAutomationRuns
+      tags: [Automations]
+      summary: List automation runs
+      description: Returns durable runs created by one automation.
+      parameters:
+        - $ref: "#/components/parameters/AutomationId"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+      responses:
+        "200":
+          description: Paginated durable runs for the automation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedRunList"
+        "400":
+          description: Invalid pagination parameter
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Automation not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createAutomationRun
+      tags: [Automations]
+      summary: Create automation run
+      description: Creates a new run by firing the automation's enabled API trigger.
+      parameters:
+        - $ref: "#/components/parameters/AutomationId"
+      responses:
+        "201":
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          description: Automation not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Automation is disabled or has no enabled API trigger
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Automation target could not be materialized into a run
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Workflows ────────────────────────────────────────────────────────
 
   /api/v1/workflows:
@@ -4810,6 +5094,25 @@ components:
         type: string
       example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
 
+    AutomationId:
+      name: id
+      in: path
+      required: true
+      description: Unique automation identifier.
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+      example: nightly-deps
+
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Current automation revision returned in the `ETag` header or `revision` field.
+      schema:
+        type: string
+      example: '"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+
     RunSelector:
       name: selector
       in: query
@@ -5058,6 +5361,12 @@ components:
       schema:
         type: string
         format: uuid
+
+    ETag:
+      description: Current automation revision for optimistic concurrency.
+      schema:
+        type: string
+      example: '"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
 
   schemas:
     AuthConfigResponse:
@@ -5520,6 +5829,193 @@ components:
             Dev token used to bootstrap login. Only included when the operator
             chose the personal access token flow; GitHub App installs rely on
             OAuth and do not receive a dev token.
+
+    # ── Automations ──────────────────────────────────────────────────────
+
+    Automation:
+      description: Public automation definition.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - revision
+        - name
+        - description
+        - enabled
+        - target
+        - triggers
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+          example: nightly-deps
+        revision:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: Stable revision used with `If-Match` for optimistic concurrency.
+          example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        name:
+          type: string
+          example: Nightly dependency update
+        description:
+          type: ["string", "null"]
+          example: Keeps dependencies fresh.
+        enabled:
+          type: boolean
+          example: true
+        target:
+          $ref: "#/components/schemas/AutomationTarget"
+        triggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationTrigger"
+
+    AutomationTarget:
+      description: Repository and workflow selected by an automation.
+      type: object
+      additionalProperties: false
+      required:
+        - repository
+        - ref
+        - workflow
+      properties:
+        repository:
+          type: string
+          description: GitHub repository slug in `owner/repo` form.
+          example: fabro-sh/fabro
+        ref:
+          type: string
+          description: Branch, tag, or SHA selector resolved when materializing a run.
+          example: main
+        workflow:
+          type: string
+          description: Workflow slug or path resolved in the target repository.
+          example: dependency-update
+
+    AutomationTrigger:
+      description: |
+        Automation trigger configuration. Unknown `type` discriminator values
+        are reported by handlers as domain validation errors with HTTP 422.
+      oneOf:
+        - $ref: "#/components/schemas/AutomationApiTrigger"
+        - $ref: "#/components/schemas/AutomationScheduleTrigger"
+      discriminator:
+        propertyName: type
+        mapping:
+          api: "#/components/schemas/AutomationApiTrigger"
+          schedule: "#/components/schemas/AutomationScheduleTrigger"
+
+    AutomationApiTrigger:
+      description: Trigger that allows callers to create runs through the automation API.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - enabled
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+          example: manual
+        type:
+          type: string
+          enum: [api]
+        enabled:
+          type: boolean
+          example: true
+
+    AutomationScheduleTrigger:
+      description: Cron schedule trigger evaluated in UTC.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - enabled
+        - expression
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+          example: nightly
+        type:
+          type: string
+          enum: [schedule]
+        enabled:
+          type: boolean
+          example: true
+        expression:
+          type: string
+          description: Five-field cron expression evaluated in UTC.
+          example: "0 3 * * *"
+
+    CreateAutomationRequest:
+      description: Request body for creating an automation.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - target
+        - triggers
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+          example: nightly-deps
+        name:
+          type: string
+          example: Nightly dependency update
+        description:
+          type: ["string", "null"]
+          example: Keeps dependencies fresh.
+        enabled:
+          type: boolean
+          default: true
+        target:
+          $ref: "#/components/schemas/AutomationTarget"
+        triggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationTrigger"
+
+    ReplaceAutomationRequest:
+      description: Request body for replacing an automation.
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - enabled
+        - target
+        - triggers
+      properties:
+        name:
+          type: string
+          example: Nightly dependency update
+        description:
+          type: ["string", "null"]
+          example: Keeps dependencies fresh.
+        enabled:
+          type: boolean
+        target:
+          $ref: "#/components/schemas/AutomationTarget"
+        triggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationTrigger"
+
+    AutomationListResponse:
+      description: List envelope for automation definitions.
+      type: object
+      additionalProperties: false
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Automation"
 
     # ── Pagination ───────────────────────────────────────────────────────
 

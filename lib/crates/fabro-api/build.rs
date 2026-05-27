@@ -185,6 +185,7 @@ fn main() {
 
     let mut settings = GenerationSettings::default();
     settings.with_interface(InterfaceStyle::Builder);
+    const NO_TYPE_IMPLS: &[TypeImpl] = &[];
     let replacements: &[(&str, &str, &[TypeImpl])] = &[
         ("RunStatus", "fabro_types::status::RunStatus", &[]),
         ("PendingReason", "fabro_types::status::PendingReason", &[]),
@@ -627,6 +628,27 @@ fn main() {
         ("SandboxResources", "fabro_types::SandboxResources", &[]),
         ("SandboxTimestamps", "fabro_types::SandboxTimestamps", &[]),
         ("AskFabro", "fabro_types::AskFabro", &[]),
+        ("Automation", "fabro_automation::Automation", NO_TYPE_IMPLS),
+        (
+            "AutomationTarget",
+            "fabro_automation::AutomationTarget",
+            NO_TYPE_IMPLS,
+        ),
+        (
+            "AutomationTrigger",
+            "fabro_automation::AutomationTrigger",
+            NO_TYPE_IMPLS,
+        ),
+        (
+            "CreateAutomationRequest",
+            "fabro_automation::AutomationDraft",
+            NO_TYPE_IMPLS,
+        ),
+        (
+            "ReplaceAutomationRequest",
+            "fabro_automation::AutomationReplace",
+            NO_TYPE_IMPLS,
+        ),
         ("SessionId", "fabro_types::SessionId", &[]),
         ("TurnId", "fabro_types::TurnId", &[]),
         ("SessionStatus", "fabro_types::SessionStatus", &[]),

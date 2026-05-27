@@ -1724,6 +1724,7 @@ name = "fabro-api"
 version = "0.246.0-nightly.0"
 dependencies = [
  "chrono",
+ "fabro-automation",
  "fabro-config",
  "fabro-model",
  "fabro-types",
