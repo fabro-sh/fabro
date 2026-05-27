@@ -44,7 +44,6 @@ import { buildRunCommitOptions } from "./run-files/commit-options";
 import { VirtualizedDiffList } from "./run-files/virtualized-diff-list";
 import { useLocationHash, useMediaQuery } from "../hooks/effects";
 import { useFocusAfterRefreshCompletes } from "../hooks/use-focus-after-refresh";
-import { useLastSuccessfulRunFilesData } from "../hooks/use-last-successful-run-files-data";
 import { useMinimumRefreshSpinner } from "../hooks/use-minimum-refresh-spinner";
 import { useRunFileDeepLinkFocus } from "../hooks/use-run-file-deep-link";
 import { ApiError, extractRequestId } from "../lib/api-client";
@@ -452,6 +451,9 @@ export default function RunFiles() {
           toSha:   selectedCommit.toSha,
         }
       : runFileScopeSelection(selectedScope);
+  const effectiveScope = fileSelection.kind === "commit"
+    ? `commit:${fileSelection.toSha}`
+    : fileSelection.scope;
   const filesQuery = useRunFiles(
     waitingForCommitSelection ? undefined : params.id,
     fileSelection,
@@ -460,13 +462,14 @@ export default function RunFiles() {
   const { push } = useToast();
   const narrow = useNarrowViewport();
   const runStatus = runQuery.data?.lifecycle.status.kind;
-
-  const runFilesData = useLastSuccessfulRunFilesData({
-    currentData: filesQuery.data,
-    emptyTransitionMessage: emptyTransitionToastMessage,
-    push,
-  });
-  const data: PaginatedRunFileList | null = runFilesData.data;
+  // `useRunFiles` owns server-state retention with SWR `keepPreviousData`; when
+  // a revalidation fails, SWR keeps the last successful payload in `data`.
+  const data: PaginatedRunFileList | null = filesQuery.data ?? null;
+  const dataFetchedAt = useMemo(() => data ? Date.now() : null, [data]);
+  const [refreshConfirmation, setRefreshConfirmation] = useState<{
+    scope: string;
+    toSha: string;
+  } | null>(null);
 
   const isInitialLoading = (waitingForCommitSelection || filesQuery.isLoading) && !data;
   const isRevalidating = filesQuery.isValidating;
@@ -478,12 +481,12 @@ export default function RunFiles() {
   // on with no data).
   const apiError = filesQuery.error instanceof ApiError ? filesQuery.error : null;
   const revalidationError =
-    apiError && runFilesData.hasLastGoodData
+    apiError && data
       ? `Couldn't refresh (${apiError.status}).`
       : null;
-  const initialError = apiError && !runFilesData.hasLastGoodData ? apiError : null;
+  const initialError = apiError && !data ? apiError : null;
 
-  const freshness = useFreshness(data?.meta ?? null, runFilesData.lastFetchedAt);
+  const freshness = useFreshness(data?.meta ?? null, dataFetchedAt);
 
   // Persisted desktop preference + md-breakpoint forced unified.
   const [persistedStyle, setPersistedStyle] = useState<DiffStyle>(
@@ -507,9 +510,28 @@ export default function RunFiles() {
     start: startMinRefresh,
   } = useMinimumRefreshSpinner(MIN_REFRESH_SPIN_MS);
   const handleRefresh = useCallback(() => {
+    const previousFileCount = data?.data.length ?? null;
+    const previousToSha = data?.meta.to_sha ?? null;
     startMinRefresh();
-    void filesQuery.mutate();
-  }, [filesQuery, startMinRefresh]);
+    void filesQuery.mutate()
+      .then((nextData) => {
+        if (nextData) {
+          const message = emptyTransitionToastMessage(
+            previousFileCount,
+            nextData.data.length,
+          );
+          if (message) push({ message });
+        }
+
+        const nextToSha = nextData?.meta.to_sha ?? null;
+        setRefreshConfirmation(
+          previousToSha && nextToSha === previousToSha
+            ? { scope: effectiveScope, toSha: nextToSha }
+            : null,
+        );
+      })
+      .catch(() => undefined);
+  }, [data, effectiveScope, filesQuery, push, startMinRefresh]);
   const handlePickerChange = useCallback(
     (selection: DiffPickerValue) => {
       const search = new URLSearchParams(routeLocation.search);
@@ -597,17 +619,12 @@ export default function RunFiles() {
     selectedCommit && selectedCommit.fromSha
       ? { kind: "commit", sha: selectedCommit.sha }
       : { kind: "scope", scope: showScopePicker ? selectedScope : "committed" };
-  const effectiveScope = fileSelection.kind === "commit"
-    ? `commit:${fileSelection.toSha}`
-    : fileSelection.scope;
-
-  // Refresh is disabled when the server reports the same `to_sha` it
-  // reported on the previous successful fetch — no new checkpoint yet.
-  // `runFilesData.previousToSha` intentionally lags the current payload by one
-  // committed render.
-  const prevToSha = runFilesData.previousToSha;
+  // Refresh is disabled only after a user-triggered refresh confirms that the
+  // same selection still resolves to the same `to_sha` — no new checkpoint yet.
   const refreshDisabled =
-    !!meta.to_sha && prevToSha !== null && prevToSha === meta.to_sha;
+    !!meta.to_sha &&
+    refreshConfirmation?.scope === effectiveScope &&
+    refreshConfirmation.toSha === meta.to_sha;
 
   const toolbar = (
     <Toolbar

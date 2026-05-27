@@ -5,8 +5,8 @@ import type { RunArtifactEntry } from "@qltysh/fabro-api-client";
 
 import { EmptyState, ErrorState, LoadingState } from "../components/state";
 import { StageSidebar } from "../components/stage-sidebar";
+import { stageArtifactDownloadUrl } from "../lib/api-client";
 import { formatBytes } from "../lib/format";
-import { useStageArtifactDownloadHref } from "../hooks/use-stage-artifact-download-href";
 import { useRunArtifacts, useRunStages } from "../lib/queries";
 import { formatStageLabel, mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 
@@ -178,12 +178,12 @@ function StageGroupCard({ runId, group }: { runId: string; group: StageGroup }) 
 }
 
 function ArtifactRow({ runId, entry }: { runId: string; entry: RunArtifactEntry }) {
-  const href = useStageArtifactDownloadHref({
+  const href = stageArtifactDownloadUrl(
     runId,
-    stageId:      entry.stage_id,
-    relativePath: entry.relative_path,
-    retry:        entry.retry,
-  });
+    entry.stage_id,
+    entry.relative_path,
+    entry.retry,
+  );
 
   return (
     <li className="flex items-center gap-4 px-4 py-2">

@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
 import {
   type InstallFinishResponse,
@@ -49,15 +49,22 @@ export function useInstallGithubCallbackError({
   dispatchInstall: (action: InstallGithubCallbackAction) => void;
   pathname: string;
 }) {
+  const consumedErrorPathRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (shouldConsumeInstallGithubErrorForPath(pathname)) {
       const { error, sanitizedUrl } = consumeInstallGithubErrorFromUrl(window.location.href);
       if (error) {
+        consumedErrorPathRef.current = pathname;
         dispatchInstall({ type: "saveErrorChanged", message: error });
         window.history.replaceState(window.history.state, "", sanitizedUrl);
         return;
       }
+      if (consumedErrorPathRef.current === pathname) {
+        return;
+      }
     }
+    consumedErrorPathRef.current = null;
     dispatchInstall({ type: "saveErrorChanged", message: null });
   }, [dispatchInstall, pathname]);
 }

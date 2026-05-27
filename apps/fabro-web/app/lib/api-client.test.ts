@@ -137,10 +137,10 @@ describe("fetchAllPages", () => {
 });
 
 describe("stageArtifactDownloadUrl", () => {
-  test("builds the download href through generated client metadata", async () => {
-    await expect(
+  test("builds the escaped download href", () => {
+    expect(
       stageArtifactDownloadUrl("run 1", "stage@1", "logs/output.txt", 2),
-    ).resolves.toBe(
+    ).toBe(
       "/api/v1/runs/run%201/stages/stage%401/artifacts/download?filename=logs%2Foutput.txt&retry=2",
     );
   });

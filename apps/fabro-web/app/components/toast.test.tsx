@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { useEffect } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { toast as sonnerToast, useSonner } from "sonner";
 
@@ -18,10 +17,7 @@ function CaptureToastApi({
   onReady?: (api: ReturnType<typeof useToast>) => void;
 }) {
   const api = useToast();
-
-  useEffect(() => {
-    onReady?.(api);
-  }, [api, onReady]);
+  onReady?.(api);
 
   return null;
 }

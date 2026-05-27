@@ -23,7 +23,6 @@ import {
 } from "../../components/runs-list/preferences";
 import { serializeHiddenColumns } from "../../components/runs-list/toggleable-column";
 import type { ToggleableColumn } from "../../components/runs-list/toggleable-column";
-import { useHydrateSearchParamsOnce } from "../../hooks/use-hydrate-search-params-once";
 
 export function useRunsWorkspacePreferences() {
   const [urlSearchParams, setSearchParams] = useSearchParams();
@@ -31,6 +30,8 @@ export function useRunsWorkspacePreferences() {
     () => resolveRunsWorkspaceSearchParams(urlSearchParams),
     [urlSearchParams],
   );
+  const hydratedSearch =
+    searchParams === urlSearchParams ? null : `?${searchParams.toString()}`;
   const preferences = useMemo(
     () => runsWorkspacePreferencesFromSearchParams(searchParams),
     [searchParams],
@@ -102,13 +103,8 @@ export function useRunsWorkspacePreferences() {
     [updatePreferences],
   );
 
-  useHydrateSearchParamsOnce({
-    resolvedSearchParams: searchParams,
-    setSearchParams,
-    urlSearchParams,
-  });
-
   return {
+    hydratedSearch,
     query,
     repoFilter,
     workflowFilter,

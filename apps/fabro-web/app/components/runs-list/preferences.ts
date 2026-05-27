@@ -328,7 +328,7 @@ export function loadStoredRunsWorkspaceSearchParams(
 // `/runs`), fall back to stored preferences so the first render already
 // reflects the user's view/archived/etc. choice instead of route defaults.
 // Without this, users whose only runs are archived briefly see the empty
-// Quick Start landing before a post-commit effect restores `archived=1`.
+// Quick Start landing before a post-commit URL repair restores `archived=1`.
 export function resolveRunsWorkspaceSearchParams(
   urlSearchParams: URLSearchParams,
 ): URLSearchParams {
@@ -355,7 +355,7 @@ export function persistRunsWorkspacePreferences(
 }
 
 const CHILD_RUNS_LIST_PREFERENCES_VERSION = 1;
-const CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY = "fabro:run-children-preferences:v1";
+export const CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY = "fabro:run-children-preferences:v1";
 const CHILD_RUNS_LIST_PARAM_KEYS = [
   "search",
   "created",

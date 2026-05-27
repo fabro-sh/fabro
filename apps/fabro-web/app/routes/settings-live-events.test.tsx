@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { useEffect } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { MemoryRouter, Route, Routes } from "react-router";
 
@@ -17,12 +16,7 @@ mock.module("../lib/live-events", () => ({
     };
   },
   useLiveEventsSubscription: (onEvent: (payload: LiveEventPayload) => void) => {
-    useEffect(() => {
-      capturedOnEvent = onEvent;
-      return () => {
-        if (capturedOnEvent === onEvent) capturedOnEvent = null;
-      };
-    }, [onEvent]);
+    capturedOnEvent = onEvent;
   },
 }));
 

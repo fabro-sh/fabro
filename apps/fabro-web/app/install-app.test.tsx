@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { AxiosAdapter } from "axios";
+import { StrictMode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import TestRenderer, { act } from "react-test-renderer";
 
@@ -209,11 +210,13 @@ describe("InstallApp", () => {
       let renderer: TestRenderer.ReactTestRenderer | null = null;
       await act(async () => {
         renderer = TestRenderer.create(
-          <MemoryRouter initialEntries={["/install/github?error=github-app-manifest-conversion-failed"]}>
-            <Routes>
-              <Route path="/install/*" element={<InstallApp />} />
-            </Routes>
-          </MemoryRouter>,
+          <StrictMode>
+            <MemoryRouter initialEntries={["/install/github?error=github-app-manifest-conversion-failed"]}>
+              <Routes>
+                <Route path="/install/*" element={<InstallApp />} />
+              </Routes>
+            </MemoryRouter>
+          </StrictMode>,
         );
       });
 

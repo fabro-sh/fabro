@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { Navigate, useParams, useSearchParams } from "react-router";
 import { ArrowPathIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import type { ListRunsSortEnum } from "@qltysh/fabro-api-client";
 
@@ -24,7 +24,6 @@ import { SECONDARY_BUTTON_CLASS } from "../components/ui";
 import { ApiError } from "../lib/api-client";
 import { formatRelativeTime } from "../lib/format";
 import { useRun, useRunsPage } from "../lib/queries";
-import { useHydrateSearchParamsOnce } from "../hooks/use-hydrate-search-params-once";
 import { useTickingNow } from "../lib/time";
 import { useDataUpdatedAt } from "../hooks/use-data-updated-at";
 
@@ -39,6 +38,8 @@ export default function RunChildren() {
     () => resolveChildRunsListSearchParams(urlSearchParams),
     [urlSearchParams],
   );
+  const hydratedSearch =
+    searchParams === urlSearchParams ? null : `?${searchParams.toString()}`;
 
   const query = searchParams.get("search") ?? "";
   const sort = parseSort(searchParams.get("sort"));
@@ -89,12 +90,6 @@ export default function RunChildren() {
     [updatePreferences],
   );
 
-  useHydrateSearchParamsOnce({
-    resolvedSearchParams: searchParams,
-    setSearchParams,
-    urlSearchParams,
-  });
-
   const childRunsQuery = useRunsPage(
     {
       parentId:        id,
@@ -114,101 +109,115 @@ export default function RunChildren() {
     void childRunsQuery.mutate();
     void runQuery.mutate();
   }, [childRunsQuery, runQuery]);
+  const searchHydration = hydratedSearch
+    ? <Navigate to={{ search: hydratedSearch }} replace />
+    : null;
 
   if (childRunsQuery.isLoading && !childRunsQuery.data) {
-    return <LoadingState label="Loading child runs…" />;
+    return (
+      <>
+        {searchHydration}
+        <LoadingState label="Loading child runs…" />
+      </>
+    );
   }
 
   const apiError =
     childRunsQuery.error instanceof ApiError ? childRunsQuery.error : null;
   if (apiError && !childRunsQuery.data) {
     return (
-      <ErrorState
-        title="Couldn't load child runs"
-        description={`Server returned ${apiError.status}.`}
-        onRetry={handleRefresh}
-      />
+      <>
+        {searchHydration}
+        <ErrorState
+          title="Couldn't load child runs"
+          description={`Server returned ${apiError.status}.`}
+          onRetry={handleRefresh}
+        />
+      </>
     );
   }
 
   const lowerQuery = query.toLowerCase();
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-64">
-          <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          <input
-            type="text"
-            name="search"
-            aria-label="Search child runs"
-            placeholder="Search child runs…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
-          />
-        </div>
-
-        <div className="ml-auto flex items-center gap-3">
-          {updatedAt != null ? (
-            <span className="font-mono text-xs text-fg-muted">
-              Updated{" "}
-              {formatRelativeTime(new Date(updatedAt).toISOString(), now)}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={childRunsQuery.isValidating}
-            aria-label={
-              childRunsQuery.isValidating
-                ? "Refreshing child runs"
-                : "Refresh child runs"
-            }
-            title="Refresh"
-            className="inline-flex size-9 items-center justify-center rounded-md border border-line bg-panel/80 text-fg-3 transition-colors hover:bg-panel hover:text-fg disabled:cursor-default disabled:opacity-60 disabled:hover:bg-panel/80 disabled:hover:text-fg-3"
-          >
-            <ArrowPathIcon
-              className={`size-4 ${childRunsQuery.isValidating ? "animate-spin [animation-duration:450ms]" : ""}`}
-              aria-hidden="true"
+    <>
+      {searchHydration}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-64">
+            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
+            <input
+              type="text"
+              name="search"
+              aria-label="Search child runs"
+              placeholder="Search child runs…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
             />
-          </button>
-          <ColumnPickerButton hidden={hiddenColumns} onChange={setHiddenColumns} />
-        </div>
-      </div>
+          </div>
 
-      <RunsListView
-        data={childRunsQuery.data ?? undefined}
-        isLoading={childRunsQuery.data == null && childRunsQuery.isLoading}
-        emptyState={
-          <EmptyState
-            title="No child runs"
-            description="When you launch another run with this run as its parent, it will appear here."
-            action={
-              <a
-                href="https://docs.fabro.sh/execution/child-runs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className={SECONDARY_BUTTON_CLASS}
-              >
-                Learn about child runs
-              </a>
-            }
-          />
-        }
-        sort={sort}
-        direction={direction}
-        page={page}
-        pageSize={pageSize}
-        hiddenColumns={hiddenColumns}
-        onSortClick={handleSortClick}
-        onPageChange={setPage}
-        onPageSizeChange={setPageSize}
-        query={lowerQuery}
-        repoFilter="all"
-        workflowFilter="all"
-        createdCutoffMs={null}
-      />
-    </div>
+          <div className="ml-auto flex items-center gap-3">
+            {updatedAt != null ? (
+              <span className="font-mono text-xs text-fg-muted">
+                Updated{" "}
+                {formatRelativeTime(new Date(updatedAt).toISOString(), now)}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={childRunsQuery.isValidating}
+              aria-label={
+                childRunsQuery.isValidating
+                  ? "Refreshing child runs"
+                  : "Refresh child runs"
+              }
+              title="Refresh"
+              className="inline-flex size-9 items-center justify-center rounded-md border border-line bg-panel/80 text-fg-3 transition-colors hover:bg-panel hover:text-fg disabled:cursor-default disabled:opacity-60 disabled:hover:bg-panel/80 disabled:hover:text-fg-3"
+            >
+              <ArrowPathIcon
+                className={`size-4 ${childRunsQuery.isValidating ? "animate-spin [animation-duration:450ms]" : ""}`}
+                aria-hidden="true"
+              />
+            </button>
+            <ColumnPickerButton hidden={hiddenColumns} onChange={setHiddenColumns} />
+          </div>
+        </div>
+
+        <RunsListView
+          data={childRunsQuery.data ?? undefined}
+          isLoading={childRunsQuery.data == null && childRunsQuery.isLoading}
+          emptyState={
+            <EmptyState
+              title="No child runs"
+              description="When you launch another run with this run as its parent, it will appear here."
+              action={
+                <a
+                  href="https://docs.fabro.sh/execution/child-runs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={SECONDARY_BUTTON_CLASS}
+                >
+                  Learn about child runs
+                </a>
+              }
+            />
+          }
+          sort={sort}
+          direction={direction}
+          page={page}
+          pageSize={pageSize}
+          hiddenColumns={hiddenColumns}
+          onSortClick={handleSortClick}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+          query={lowerQuery}
+          repoFilter="all"
+          workflowFilter="all"
+          createdCutoffMs={null}
+        />
+      </div>
+    </>
   );
 }

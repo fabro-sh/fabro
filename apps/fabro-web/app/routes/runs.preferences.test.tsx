@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import type { PaginatedRunList, Run } from "@qltysh/fabro-api-client";
 
 import { ToastProvider } from "../components/toast";
+import { CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY } from "../components/runs-list/preferences";
 import { setupReactTestEnv } from "../lib/test-utils";
 
 class MemoryStorage {
@@ -79,9 +80,22 @@ mock.module("../lib/queries", () => ({
     queryCalls.push({ hook: "useAllRuns", args });
     return { data: allRuns, isLoading: false };
   },
+  useRun: (...args: unknown[]) => {
+    queryCalls.push({ hook: "useRun", args });
+    return {
+      data:      run(String(args[0] ?? "run-1")),
+      isLoading: false,
+      mutate:    () => Promise.resolve(undefined),
+    };
+  },
   useRunsPage: (...args: unknown[]) => {
     queryCalls.push({ hook: "useRunsPage", args });
-    return { data: pageRuns, isLoading: false };
+    return {
+      data:         pageRuns,
+      isLoading:    false,
+      isValidating: false,
+      mutate:       () => Promise.resolve(pageRuns),
+    };
   },
   useAuthConfig: () => ({ data: { methods: ["github"] } }),
   useSystemInfo: () => ({ data: { server_url: "http://127.0.0.1:32276" } }),
@@ -100,6 +114,7 @@ const {
   default: Runs,
   RUNS_PREFERENCES_STORAGE_KEY,
 } = await import("./runs");
+const { default: RunChildren } = await import("./run-children");
 
 function installWindow() {
   class TestElement {}
@@ -135,6 +150,23 @@ function restoreWindow() {
 async function renderRuns(initialEntry: string) {
   const router = createMemoryRouter(
     [{ path: "/runs", element: <Runs /> }],
+    { initialEntries: [initialEntry] },
+  );
+  let renderer!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>,
+    );
+  });
+  mountedRenderers.push(renderer);
+  return { renderer, router };
+}
+
+async function renderChildRuns(initialEntry: string) {
+  const router = createMemoryRouter(
+    [{ path: "/runs/:id/children", element: <RunChildren /> }],
     { initialEntries: [initialEntry] },
   );
   let renderer!: TestRenderer.ReactTestRenderer;
@@ -210,14 +242,41 @@ describe("Runs workspace preference restoration", () => {
 
     // The first frame the user sees must already reflect stored prefs.
     // Before this was fixed, the route briefly rendered the columns view
-    // with includeArchived=false (default state) before a post-commit
-    // useEffect restored the URL, flashing the Quick Start empty state for
+    // with includeArchived=false (default state) before a post-commit URL
+    // repair restored the URL, flashing the Quick Start empty state for
     // users whose only runs were archived.
     const firstAllRuns = queryCalls.find((c) => c.hook === "useAllRuns");
     const firstRunsPage = queryCalls.find((c) => c.hook === "useRunsPage");
     expect(firstAllRuns?.args).toEqual([{ includeArchived: true }, false]);
     expect(firstRunsPage?.args[0]).toMatchObject({ includeArchived: true });
     expect(firstRunsPage?.args[1]).toBe(true);
+  });
+
+  test("child runs applies stored list prefs on the first render and hydrates the URL", async () => {
+    storage.setItem(
+      CHILD_RUNS_LIST_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version:   1,
+        sort:      "title",
+        direction: "asc",
+        size:      50,
+      }),
+    );
+
+    const { router } = await renderChildRuns("/runs/parent-run/children");
+
+    const firstRunsPage = queryCalls.find((c) => c.hook === "useRunsPage");
+    expect(firstRunsPage?.args[0]).toMatchObject({
+      parentId:  "parent-run",
+      sort:      "title",
+      direction: "asc",
+      limit:     50,
+      offset:    0,
+    });
+    expect(firstRunsPage?.args[1]).toBe(true);
+
+    await flushEffects();
+    expect(router.state.location.search).toBe("?sort=title&direction=asc&size=50");
   });
 
   test("/runs?view=columns ignores stored list view", async () => {

@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from "react";
-import { Link } from "react-router";
+import { Link, Navigate } from "react-router";
 import { CheckIcon, ChevronDownIcon, CommandLineIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
@@ -717,6 +717,7 @@ function RunsLandingEmpty({
 
 export default function Runs() {
   const {
+    hydratedSearch,
     query,
     repoFilter,
     workflowFilter,
@@ -842,75 +843,78 @@ export default function Runs() {
   );
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <div className="space-y-4">
-        <RunsToolbar
-          query={query}
-          repoFilter={repoFilter}
-          workflowFilter={workflowFilter}
-          createdFilter={createdFilter}
-          statusFilter={statusFilter}
-          includeArchived={includeArchived}
-          view={view}
-          hiddenColumns={hiddenColumns}
-          allRepos={allRepos}
-          allWorkflows={allWorkflows}
-          onQueryChange={setQuery}
-          onRepoFilterChange={setRepoFilter}
-          onWorkflowFilterChange={setWorkflowFilter}
-          onCreatedFilterChange={setCreatedFilter}
-          onStatusFilterChange={setStatusFilter}
-          onIncludeArchivedChange={setIncludeArchived}
-          onViewChange={setView}
-          onHiddenColumnsChange={setHiddenColumns}
-        />
-
-        {view === "columns" ? (
-          <>
-            <div className="flex gap-5 overflow-x-auto pb-4">
-              {visibleColumns.map((col) => (
-                <div key={col.id} className="w-72 shrink-0">
-                  <BoardColumnView column={col} />
-                </div>
-              ))}
-            </div>
-            {isLandingReady && totalRuns === 0 ? (
-              <RunsLandingEmpty
-                hasGitHubAuth={hasGitHubAuth}
-                serverUrl={serverUrl}
-              />
-            ) : totalRuns > 0 && filteredRuns === 0 ? (
-              <div className="py-8">
-                <EmptyState
-                  title="No matching runs"
-                  description="Try clearing the search or repo filter."
-                />
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <RunsListView
-            data={listRunsPage.data}
-            isLoading={listRunsPage.data === undefined && listRunsPage.isLoading}
-            emptyState={
-              <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
-            }
-            sort={sort}
-            direction={direction}
-            page={page}
-            pageSize={pageSize}
-            hiddenColumns={hiddenColumns}
-            onSortClick={handleSortClick}
-            onPageChange={setPage}
-            onPageSizeChange={setPageSize}
-            query={lowerQuery}
+    <>
+      {hydratedSearch ? <Navigate to={{ search: hydratedSearch }} replace /> : null}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <div className="space-y-4">
+          <RunsToolbar
+            query={query}
             repoFilter={repoFilter}
             workflowFilter={workflowFilter}
+            createdFilter={createdFilter}
             statusFilter={statusFilter}
-            createdCutoffMs={createdCutoffMs}
+            includeArchived={includeArchived}
+            view={view}
+            hiddenColumns={hiddenColumns}
+            allRepos={allRepos}
+            allWorkflows={allWorkflows}
+            onQueryChange={setQuery}
+            onRepoFilterChange={setRepoFilter}
+            onWorkflowFilterChange={setWorkflowFilter}
+            onCreatedFilterChange={setCreatedFilter}
+            onStatusFilterChange={setStatusFilter}
+            onIncludeArchivedChange={setIncludeArchived}
+            onViewChange={setView}
+            onHiddenColumnsChange={setHiddenColumns}
           />
-        )}
-      </div>
-    </DndContext>
+
+          {view === "columns" ? (
+            <>
+              <div className="flex gap-5 overflow-x-auto pb-4">
+                {visibleColumns.map((col) => (
+                  <div key={col.id} className="w-72 shrink-0">
+                    <BoardColumnView column={col} />
+                  </div>
+                ))}
+              </div>
+              {isLandingReady && totalRuns === 0 ? (
+                <RunsLandingEmpty
+                  hasGitHubAuth={hasGitHubAuth}
+                  serverUrl={serverUrl}
+                />
+              ) : totalRuns > 0 && filteredRuns === 0 ? (
+                <div className="py-8">
+                  <EmptyState
+                    title="No matching runs"
+                    description="Try clearing the search or repo filter."
+                  />
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <RunsListView
+              data={listRunsPage.data}
+              isLoading={listRunsPage.data === undefined && listRunsPage.isLoading}
+              emptyState={
+                <RunsLandingEmpty hasGitHubAuth={hasGitHubAuth} serverUrl={serverUrl} />
+              }
+              sort={sort}
+              direction={direction}
+              page={page}
+              pageSize={pageSize}
+              hiddenColumns={hiddenColumns}
+              onSortClick={handleSortClick}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              query={lowerQuery}
+              repoFilter={repoFilter}
+              workflowFilter={workflowFilter}
+              statusFilter={statusFilter}
+              createdCutoffMs={createdCutoffMs}
+            />
+          )}
+        </div>
+      </DndContext>
+    </>
   );
 }

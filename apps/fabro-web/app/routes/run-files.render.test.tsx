@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { useRef } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { MemoryRouter, Route, Routes } from "react-router";
+import { toast as sonnerToast } from "sonner";
 
 import { ToastProvider } from "../components/toast";
 
@@ -177,6 +178,22 @@ function renderRunFiles(initialEntry = "/runs/run_1/files") {
   return renderer!;
 }
 
+function treeText(
+  node: ReturnType<TestRenderer.ReactTestRenderer["toJSON"]>,
+): string {
+  if (!node) return "";
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(treeText).join("");
+  return (node.children ?? []).map(treeText).join("");
+}
+
+async function flushAsyncUpdates() {
+  await act(async () => {
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 describe("RunFiles rendering", () => {
   afterEach(() => {
     act(() => {
@@ -193,6 +210,7 @@ describe("RunFiles rendering", () => {
     virtualizerCalls.length = 0;
     providerCalls.length = 0;
     useRunFilesCalls.length = 0;
+    sonnerToast.dismiss();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
@@ -305,5 +323,18 @@ describe("RunFiles rendering", () => {
     const lastCall = patchDiffCalls[patchDiffCalls.length - 1];
     expect(lastCall.patch).toContain("+uncommitted");
     expect(lastCall.mountId).not.toBe(firstMountId);
+  });
+
+  test("refreshing from a populated diff to an empty diff shows a no-changes toast", async () => {
+    currentFilesPayload = makePayload(1);
+    const renderer = renderRunFiles("/runs/run_1/files?scope=all");
+
+    currentFilesPayload = makePayload(0);
+    await act(async () => {
+      renderer.root.findByProps({ "aria-label": "Refresh files" }).props.onClick();
+    });
+    await flushAsyncUpdates();
+
+    expect(treeText(renderer.toJSON())).toContain("No changes in this run.");
   });
 });

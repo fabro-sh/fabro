@@ -1,15 +1,10 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 
 /**
- * Captures wall-clock time when an async data identity becomes available. The
- * timestamp update is ignored for nullish values and has no cleanup.
+ * Captures a stable wall-clock timestamp for the current async data identity.
+ * The value is derived during render and stays stable until that identity
+ * changes.
  */
 export function useDataUpdatedAt<T>(data: T | null | undefined): number | null {
-  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (data != null) setUpdatedAt(Date.now());
-  }, [data]);
-
-  return updatedAt;
+  return useMemo(() => data != null ? Date.now() : null, [data]);
 }
