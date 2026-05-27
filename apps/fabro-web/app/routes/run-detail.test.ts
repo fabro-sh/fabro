@@ -437,7 +437,7 @@ describe("actionMenuSeparatorVisibility", () => {
 });
 
 describe("handleLifecycleToastResult", () => {
-  type PushedToast = { message: string; action?: { label: string; onClick: () => void } };
+  type PushedToast = { message: string };
 
   function makeToastApi() {
     const pushed: PushedToast[] = [];

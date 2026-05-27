@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router";
 import { graphTheme } from "../lib/graph-theme";
 import { ApiError } from "../lib/api-client";
 import { useRun, useRunGraph, useRunStages } from "../lib/queries";
+import { FloatingTooltip } from "../components/floating-tooltip";
 import { RunSummaryPanel } from "../components/run-summary-panel";
 import { StagePopover } from "../components/stage-popover";
 import { StageSidebar } from "../components/stage-sidebar";
-import { hoverCardStyle } from "../components/hover-card-style";
 import {
   GRAPH_DEFAULT_ZOOM_INDEX,
   GRAPH_ZOOM_STEPS,
@@ -300,22 +299,19 @@ export default function RunOverview() {
           />
         )}
       </div>
-      {hoveredNode &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            role="tooltip"
-            style={hoverCardStyle(hoveredNode.rect)}
-            className="pointer-events-none fixed z-50 max-w-[18rem] rounded-lg bg-panel p-3 text-xs text-fg-2 shadow-xl outline-1 -outline-offset-1 outline-line-strong"
-          >
-            <StagePopover
-              runId={id!}
-              stage={hoveredNode.stage}
-              duration={hoveredNode.stage.duration}
-            />
-          </div>,
-          document.body,
-        )}
+      {hoveredNode && (
+        <FloatingTooltip
+          rect={hoveredNode.rect}
+          placement="top"
+          className="max-w-[18rem] rounded-lg bg-panel p-3 text-xs text-fg-2 shadow-xl outline-1 -outline-offset-1 outline-line-strong"
+        >
+          <StagePopover
+            runId={id!}
+            stage={hoveredNode.stage}
+            duration={hoveredNode.stage.duration}
+          />
+        </FloatingTooltip>
+      )}
     </div>
   );
 }

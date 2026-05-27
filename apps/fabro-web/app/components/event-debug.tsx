@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   Listbox,
   ListboxButton,
@@ -26,6 +25,7 @@ import {
   highlightJson,
   type DebugCategory,
 } from "./event-debug-helpers";
+import { FloatingTooltip } from "./floating-tooltip";
 
 export function DebugEventRow({
   event,
@@ -416,19 +416,15 @@ function DnaPopover({
   anchorRect: DOMRect;
   runStart: string | undefined;
 }) {
-  if (typeof document === "undefined") return null;
   const category = debugCategory(event.event);
-  const left = anchorRect.left + anchorRect.width / 2;
-  const top = anchorRect.top;
-  return createPortal(
-    <div
-      role="tooltip"
-      style={{ left, top }}
-      className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-[calc(100%+8px)] whitespace-nowrap rounded-md bg-panel-alt px-2.5 py-1 text-xs text-fg shadow-lg outline-1 -outline-offset-1 outline-line-strong"
+  return (
+    <FloatingTooltip
+      rect={anchorRect}
+      placement="top"
+      className="whitespace-nowrap rounded-md bg-panel-alt px-2.5 py-1 text-xs text-fg shadow-lg outline-1 -outline-offset-1 outline-line-strong"
     >
       {`${debugCategoryLabel(category)} · ${friendlyEventName(event.event)} · ${formatElapsed(event.ts, runStart)}`}
-    </div>,
-    document.body,
+    </FloatingTooltip>
   );
 }
 
@@ -628,20 +624,16 @@ function ThreadDnaPopover({
   item: ThreadDnaItem;
   anchorRect: DOMRect;
 }) {
-  if (typeof document === "undefined") return null;
-  const left = anchorRect.left + anchorRect.width / 2;
-  const top = anchorRect.top;
   const elapsed = formatThreadElapsed(item.startMs);
   const duration =
     item.durationMs > 0 ? formatThreadDuration(item.durationMs) : "instant";
-  return createPortal(
-    <div
-      role="tooltip"
-      style={{ left, top }}
-      className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-[calc(100%+8px)] whitespace-nowrap rounded-md bg-panel-alt px-2.5 py-1 text-xs text-fg shadow-lg outline-1 -outline-offset-1 outline-line-strong"
+  return (
+    <FloatingTooltip
+      rect={anchorRect}
+      placement="top"
+      className="whitespace-nowrap rounded-md bg-panel-alt px-2.5 py-1 text-xs text-fg shadow-lg outline-1 -outline-offset-1 outline-line-strong"
     >
       {`${THREAD_CATEGORY_LABEL[item.category]} · ${item.label} · ${elapsed} · ${duration}`}
-    </div>,
-    document.body,
+    </FloatingTooltip>
   );
 }

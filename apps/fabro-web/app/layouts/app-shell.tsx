@@ -12,8 +12,9 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
+import { Toaster } from "sonner";
 import { ErrorState } from "../components/state";
-import { ToastProvider } from "../components/toast";
+import { TooltipProvider } from "../components/ui";
 import { AskFabroLayoutProvider, useAskFabroLayout } from "../lib/ask-fabro-layout";
 import { DemoModeProvider } from "../lib/demo-mode";
 import { useAuthMe } from "../lib/queries";
@@ -63,7 +64,7 @@ export default function AppShell() {
 
   return (
     <DemoModeProvider value={demoMode}>
-    <ToastProvider>
+    <TooltipProvider delayDuration={200} skipDelayDuration={300}>
     <AskFabroLayoutProvider>
     <div
       className={classNames(
@@ -247,8 +248,11 @@ export default function AppShell() {
       )}
       <ShellMain fullHeight={fullHeight} maxWidth={maxWidth} />
     </div>
+    {typeof document !== "undefined" && (
+      <Toaster richColors position="bottom-right" />
+    )}
     </AskFabroLayoutProvider>
-    </ToastProvider>
+    </TooltipProvider>
     </DemoModeProvider>
   );
 }

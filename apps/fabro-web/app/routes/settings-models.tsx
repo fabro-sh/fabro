@@ -26,6 +26,7 @@ import {
   SortHeader,
   type SortDirection,
 } from "../components/runs-list/sort-header";
+import { Tooltip } from "../components/ui";
 import { formatContextWindow, formatTokensPerSecond } from "../lib/format";
 
 export function meta() {
@@ -512,7 +513,13 @@ function TestStatusCell({ state }: { state: RowState | undefined }) {
     );
   }
   return (
-    <span className="group/test-error relative inline-flex">
+    <Tooltip
+      label={
+        <span className="block w-[32rem] max-w-[80vw] whitespace-pre-line break-words text-left font-mono leading-relaxed">
+          {state.message}
+        </span>
+      }
+    >
       <span
         aria-label={`Failed: ${state.message}`}
         className="inline-flex cursor-default items-center text-coral focus:outline-none"
@@ -520,42 +527,34 @@ function TestStatusCell({ state }: { state: RowState | undefined }) {
       >
         <XCircleIcon className="size-4 h-lh shrink-0" />
       </span>
-      <span
-        role="tooltip"
-        className="pointer-events-none invisible absolute right-0 top-full z-30 mt-1.5 w-[32rem] max-w-[80vw] whitespace-pre-line break-words rounded-md bg-panel p-3 text-left font-mono text-xs leading-relaxed text-fg-2 opacity-0 shadow-2xl shadow-black/40 ring-1 ring-line-strong transition-opacity duration-100 group-hover/test-error:visible group-hover/test-error:opacity-100 group-focus-within/test-error:visible group-focus-within/test-error:opacity-100"
-      >
-        {state.message}
-      </span>
-    </span>
+    </Tooltip>
   );
 }
 
 function ModelNameCell({ model }: { model: Model }) {
   const hasAliases = model.aliases.length > 0;
   const nameNode = hasAliases ? (
-    <span className="group/aliases relative inline-flex">
+    <Tooltip
+      label={
+        <span className="block min-w-[10rem]">
+          <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+            Aliases
+          </span>
+          {model.aliases.map((alias) => (
+            <span key={alias} className="block font-mono text-fg-2">
+              {alias}
+            </span>
+          ))}
+        </span>
+      }
+    >
       <button
         type="button"
-        aria-describedby={`aliases-${model.id}`}
         className="cursor-default font-mono text-xs text-fg-2 underline decoration-dotted decoration-fg-muted underline-offset-4 hover:decoration-fg-3 focus:outline-none focus-visible:text-fg"
       >
         {model.id}
       </button>
-      <span
-        role="tooltip"
-        id={`aliases-${model.id}`}
-        className="pointer-events-none invisible absolute left-0 top-full z-30 mt-1.5 min-w-[10rem] rounded-md bg-panel p-2 text-xs opacity-0 shadow-2xl shadow-black/40 ring-1 ring-line-strong transition-opacity duration-100 group-hover/aliases:visible group-hover/aliases:opacity-100 group-focus-within/aliases:visible group-focus-within/aliases:opacity-100"
-      >
-        <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-fg-muted">
-          Aliases
-        </span>
-        {model.aliases.map((alias) => (
-          <span key={alias} className="block font-mono text-fg-2">
-            {alias}
-          </span>
-        ))}
-      </span>
-    </span>
+    </Tooltip>
   ) : (
     <span className="font-mono text-xs text-fg-2">{model.id}</span>
   );
