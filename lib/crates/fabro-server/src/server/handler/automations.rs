@@ -38,7 +38,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn list_automations(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
-    let data = state.automation_store.list().await;
+    let data = state.automation_store().list().await;
     let total = data.len();
     (
         StatusCode::OK,
@@ -55,7 +55,7 @@ async fn create_automation(
     State(state): State<Arc<AppState>>,
     Json(draft): Json<AutomationDraft>,
 ) -> Result<Response, ApiError> {
-    let automation = state.automation_store.create(draft).await?;
+    let automation = state.automation_store().create(draft).await?;
     Ok((StatusCode::CREATED, Json(automation)).into_response())
 }
 
@@ -65,7 +65,7 @@ async fn get_automation(
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let id = parse_path_id(id)?;
-    match state.automation_store.get(&id).await {
+    match state.automation_store().get(&id).await {
         Some(automation) => Ok(automation_with_etag_response(StatusCode::OK, automation)),
         None => Err(ApiError::not_found(format!("automation not found: {id}"))),
     }
@@ -81,7 +81,7 @@ async fn replace_automation(
     let id = parse_path_id(id)?;
     let expected = parse_required_if_match(&headers, &id)?;
     let automation = state
-        .automation_store
+        .automation_store()
         .replace(&id, &expected, replacement)
         .await?;
     Ok(automation_with_etag_response(StatusCode::OK, automation))
@@ -95,7 +95,7 @@ async fn delete_automation(
 ) -> Result<Response, ApiError> {
     let id = parse_path_id(id)?;
     let expected = parse_required_if_match(&headers, &id)?;
-    state.automation_store.delete(&id, &expected).await?;
+    state.automation_store().delete(&id, &expected).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

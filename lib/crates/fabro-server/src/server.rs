@@ -1008,7 +1008,7 @@ pub struct AppState {
     store: Arc<Database>,
     session_runtimes: SessionRuntimeManager,
     artifact_store: ArtifactStore,
-    pub(crate) automation_store: Arc<AutomationStore>,
+    automation_store: Arc<AutomationStore>,
     worker_tokens: WorkerTokenKeys,
     started_at: Instant,
     resource_sampler: resource_sampler::ResourceSampler,
@@ -1044,6 +1044,12 @@ pub struct AppState {
 }
 
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
+
+impl AppState {
+    pub(crate) fn automation_store(&self) -> &AutomationStore {
+        &self.automation_store
+    }
+}
 
 pub(crate) struct AskFabroReadiness {
     default_model: Option<String>,
