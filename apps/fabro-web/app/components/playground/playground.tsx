@@ -11,8 +11,10 @@ import type { WorkflowDraft } from "./state/draft";
 import type { ToolCall } from "./state/reducer";
 import FileTabs from "./ui/file-tabs";
 import DownloadButton from "./ui/download-button";
+import ResetButton from "./ui/reset-button";
 import RunTrace from "./ui/run-trace";
 import SimulationControls from "./ui/simulation-controls";
+import WorkflowHeader from "./ui/workflow-header";
 
 export type PlaygroundAuthMode = "required" | "anonymous";
 
@@ -47,7 +49,7 @@ export default function Playground({
   chatEndpoint,
   authMode: _authMode,
 }: PlaygroundProps) {
-  const { draft, applyCall } = usePlaygroundDraft();
+  const { draft, applyCall, reset } = usePlaygroundDraft();
   const [isChatOpen, setChatOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH);
   const sim = useSimulation(draft);
@@ -68,11 +70,9 @@ export default function Playground({
     <div className="relative isolate -mx-4 -my-6 flex h-[calc(100%+3rem)] sm:-mx-6 lg:-mx-8">
       <main className="flex h-full min-h-0 flex-1 flex-col gap-3 p-3">
         <header className="flex items-center gap-3 px-2">
-          <h1 className="text-base font-semibold text-fg">Playground</h1>
-          <span className="text-sm text-fg-3">
-            {draft.name === "untitled" ? "untitled workflow" : draft.name}
-          </span>
+          <WorkflowHeader draft={draft} />
           <div className="ml-auto flex items-center gap-2">
+            <ResetButton onReset={reset} />
             <DownloadButton draft={draft} />
             {!isChatOpen && (
               <button
