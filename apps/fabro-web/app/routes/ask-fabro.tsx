@@ -36,6 +36,7 @@ export default function AskFabro() {
         runId="demo"
         width={width}
         onWidthChange={setWidth}
+        onResizeActiveChange={() => {}}
       />
     </div>
   );

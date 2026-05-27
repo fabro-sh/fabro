@@ -8,7 +8,6 @@ import { XMarkIcon } from "@heroicons/react/24/outline";
 import remarkGfm from "remark-gfm";
 
 import { createAskFabroAdapter } from "../../lib/ask-fabro-runtime";
-import { useAskFabroLayout } from "../../lib/ask-fabro-layout";
 import SidebarComposer from "./sidebar-composer";
 import SidebarWelcome from "./sidebar-welcome";
 import ToolCallSummary from "./tool-call-summary";
@@ -44,6 +43,7 @@ export default function AskFabroSidebar({
   defaultModel,
   width,
   onWidthChange,
+  onResizeActiveChange,
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -51,6 +51,7 @@ export default function AskFabroSidebar({
   defaultModel?: string | null;
   width: number;
   onWidthChange: (width: number) => void;
+  onResizeActiveChange: (active: boolean) => void;
 }) {
   const adapter = useMemo(
     () => createAskFabroAdapter({ runId, defaultModel }),
@@ -58,7 +59,6 @@ export default function AskFabroSidebar({
   );
   const runtime = useLocalRuntime(adapter);
 
-  const { setIsResizing } = useAskFabroLayout();
   const [isDragging, setIsDragging] = useState(false);
   // Pointer X and width captured at drag start, so each move resolves to an
   // absolute width rather than accumulating rounding error.
@@ -69,7 +69,7 @@ export default function AskFabroSidebar({
     event.currentTarget.setPointerCapture(event.pointerId);
     dragOrigin.current = { x: event.clientX, width };
     setIsDragging(true);
-    setIsResizing(true);
+    onResizeActiveChange(true);
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -88,7 +88,7 @@ export default function AskFabroSidebar({
     event.currentTarget.releasePointerCapture(event.pointerId);
     dragOrigin.current = null;
     setIsDragging(false);
-    setIsResizing(false);
+    onResizeActiveChange(false);
   };
 
   return (

@@ -42,6 +42,7 @@ import {
   testInstallSandbox,
 } from "./install-api";
 import { INSTALL_PROVIDERS } from "./install-config";
+import { useInstallSessionQuery } from "./install-query";
 import {
   CopyButton,
   ErrorMessage,
@@ -53,10 +54,9 @@ import { LoadingState } from "./components/state";
 import {
   useInstallGithubCallbackError,
   useInstallRestartHealthPolling,
-  useInstallRootRedirect,
-  useInstallSessionLoader,
   useInstallTokenFromUrl,
 } from "./hooks/use-install-effects";
+import { consumeInstallTokenFromUrl } from "./mode";
 
 const INSTALL_STEPS = [
   { id: "welcome", label: "Welcome", href: "/install/welcome" },
@@ -77,9 +77,9 @@ type GithubOwnerKind = "personal" | "org";
 
 type SessionState =
   | { status: "idle" }
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "ready"; data: InstallSessionResponse };
+  | { status: "loading"; token: string }
+  | { status: "error"; token: string | null; message: string }
+  | { status: "ready"; token: string; data: InstallSessionResponse };
 
 type TokenForm = { token: string; username: string };
 
@@ -134,9 +134,8 @@ type InstallState = {
 type InstallAction =
   | { type: "manualTokenChanged"; value: string }
   | { type: "sessionCleared" }
-  | { type: "sessionRequested" }
-  | { type: "sessionReady"; session: InstallSessionResponse }
-  | { type: "sessionFailed"; message: string }
+  | { type: "sessionReady"; token: string; session: InstallSessionResponse }
+  | { type: "sessionFailed"; token: string | null; message: string }
   | { type: "saveErrorChanged"; message: string | null }
   | { type: "submittingChanged"; submitting: boolean }
   | { type: "timedOutChanged"; timedOut: boolean }
@@ -177,6 +176,7 @@ function initialInstallState(): InstallState {
 
 function hydrateInstallState(
   state: InstallState,
+  token: string,
   session: InstallSessionResponse,
 ): InstallState {
   let githubStrategy = state.githubStrategy;
@@ -200,7 +200,7 @@ function hydrateInstallState(
 
   return {
     ...state,
-    sessionState:    { status: "ready", data: session },
+    sessionState:    { status: "ready", token, data: session },
     canonicalUrl:
       state.canonicalUrl ||
       session.server?.canonical_url ||
@@ -220,12 +220,10 @@ function installReducer(state: InstallState, action: InstallAction): InstallStat
       return { ...state, manualToken: action.value };
     case "sessionCleared":
       return { ...state, sessionState: { status: "idle" } };
-    case "sessionRequested":
-      return { ...state, sessionState: { status: "loading" } };
     case "sessionReady":
-      return hydrateInstallState(state, action.session);
+      return hydrateInstallState(state, action.token, action.session);
     case "sessionFailed":
-      return { ...state, sessionState: { status: "error", message: action.message } };
+      return { ...state, sessionState: { status: "error", token: action.token, message: action.message } };
     case "saveErrorChanged":
       return { ...state, saveError: action.message };
     case "submittingChanged":
@@ -286,15 +284,55 @@ function installReducer(state: InstallState, action: InstallAction): InstallStat
   }
 }
 
+function installSessionErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Install session failed";
+}
+
+function sessionStateForInstallToken(
+  installToken: string | null,
+  sessionState: SessionState,
+  queryError: unknown,
+): SessionState {
+  if (!installToken) {
+    return sessionState.status === "error" && sessionState.token === null
+      ? sessionState
+      : { status: "idle" };
+  }
+
+  if (
+    (sessionState.status === "ready" || sessionState.status === "error") &&
+    sessionState.token === installToken
+  ) {
+    return sessionState;
+  }
+
+  if (queryError) {
+    return {
+      status:  "error",
+      token:   installToken,
+      message: installSessionErrorMessage(queryError),
+    };
+  }
+
+  return { status: "loading", token: installToken };
+}
+
+function readInitialInstallToken(): string | null {
+  const stored = readStoredInstallToken();
+  if (stored) return stored;
+  if (typeof window === "undefined") return null;
+  return consumeInstallTokenFromUrl(window.location.href).token;
+}
+
 /**
  * Coordinates install-mode browser integrations: token/error URL scrubbing,
- * install-session loading, and restart health polling. Timers, intervals, and
- * in-flight requests are cancelled when their install identity changes.
+ * install-session query state, and restart health polling. Timers, intervals,
+ * and in-flight requests are cancelled when their install identity changes.
  */
 function useInstallController() {
   const { pathname } = useLocation();
   const [installToken, setInstallToken] = useState<string | null>(() =>
-    readStoredInstallToken(),
+    readInitialInstallToken(),
   );
   const [installState, dispatchInstall] = useReducer(
     installReducer,
@@ -302,13 +340,54 @@ function useInstallController() {
     initialInstallState,
   );
   const { finishState } = installState;
+  const installSessionQuery = useInstallSessionQuery(installToken, {
+    onSuccess: (session) => {
+      if (!installToken) return;
+      dispatchInstall({ type: "sessionReady", token: installToken, session });
+    },
+    onError: (error) => {
+      dispatchInstall({
+        type:    "sessionFailed",
+        token:   installToken,
+        message: installSessionErrorMessage(error),
+      });
+    },
+  });
 
   useInstallTokenFromUrl({ setInstallToken });
   useInstallGithubCallbackError({ dispatchInstall, pathname });
-  useInstallSessionLoader({ dispatchInstall, installToken });
   useInstallRestartHealthPolling({ dispatchInstall, finishState });
+  const sessionState = sessionStateForInstallToken(
+    installToken,
+    installState.sessionState,
+    installSessionQuery.error,
+  );
+  const controllerState =
+    sessionState === installState.sessionState
+      ? installState
+      : { ...installState, sessionState };
+  const refreshInstallSession = async () => {
+    if (!installToken) {
+      throw new Error("Install token is required to refresh the session.");
+    }
+    const nextSession = await getInstallSession(installToken);
+    dispatchInstall({
+      type:    "sessionReady",
+      token:   installToken,
+      session: nextSession,
+    });
+    await installSessionQuery.mutate(nextSession, { revalidate: false });
+    return nextSession;
+  };
 
-  return { pathname, installToken, setInstallToken, installState, dispatchInstall };
+  return {
+    pathname,
+    installToken,
+    setInstallToken,
+    installState: controllerState,
+    dispatchInstall,
+    refreshInstallSession,
+  };
 }
 
 export default function InstallApp() {
@@ -319,6 +398,7 @@ export default function InstallApp() {
     setInstallToken,
     installState,
     dispatchInstall,
+    refreshInstallSession,
   } = useInstallController();
   const {
     sessionState,
@@ -336,8 +416,6 @@ export default function InstallApp() {
     timedOut,
   } = installState;
   const session = sessionState.status === "ready" ? sessionState.data : null;
-
-  useInstallRootRedirect({ installToken, session, finishState, pathname, navigate });
 
   const currentStep = useMemo<StepId>(
     () =>
@@ -364,6 +442,7 @@ export default function InstallApp() {
           if (!nextToken) {
             dispatchInstall({
               type:    "sessionFailed",
+              token:   null,
               message: "Paste the install token from the server logs.",
             });
             return;
@@ -387,8 +466,7 @@ export default function InstallApp() {
     try {
       await args.action();
       if (args.next) {
-        const nextSession = await getInstallSession(installToken);
-        dispatchInstall({ type: "sessionReady", session: nextSession });
+        await refreshInstallSession();
         navigate(args.next);
       }
     } catch (error) {
@@ -418,8 +496,8 @@ export default function InstallApp() {
     );
   }
 
-  // Covers both sessionState "loading" AND the brief "idle" window between
-  // the initial render and the session-fetch hook. Without this guard,
+  // Covers both sessionState "loading" AND the brief "idle" window before the
+  // install session query reports data. Without this guard,
   // screens like GithubAppDoneScreen see `session == null` and navigate away
   // before the first fetch finishes — trapping the user in a redirect loop.
   if (!session) {
@@ -428,6 +506,10 @@ export default function InstallApp() {
         <LoadingState label="Connecting to install session…" />
       </InstallLayout>
     );
+  }
+
+  if ((pathname === "/" || pathname === "/install") && !finishState) {
+    return <Navigate to="/install/welcome" replace />;
   }
 
   if (finishState && pathname !== "/install/finishing") {

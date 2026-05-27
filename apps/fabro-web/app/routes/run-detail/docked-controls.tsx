@@ -19,7 +19,6 @@ import {
   type ApiQuestion,
   type AskFabro,
 } from "@qltysh/fabro-api-client";
-import { usePublishedAskFabroSidebarWidth } from "../../lib/ask-fabro-layout";
 import { classNames } from "./model";
 
 const ASK_FABRO_UNAVAILABLE_TOOLTIPS: Record<
@@ -50,11 +49,19 @@ export function RunDetailAskFabroShell({
   const askDefaultModel = askFabro?.default_model ?? null;
   const [askOpen, setAskOpen] = useState(false);
   const [askWidth, setAskWidth] = useState(SIDEBAR_WIDTH);
+  const [resizeActive, setResizeActive] = useState(false);
   const sidebarWidth = askAvailable && askOpen ? askWidth : 0;
-  const { isResizing } = usePublishedAskFabroSidebarWidth(sidebarWidth);
+  const isResizing = askAvailable && resizeActive;
+  const shellLayoutStyle = `:root {
+  --fabro-ask-sidebar-width: ${sidebarWidth}px;
+  --fabro-ask-sidebar-transition: ${
+    isResizing ? "none" : "padding 300ms cubic-bezier(0.16, 1, 0.3, 1)"
+  };
+}`;
 
   return (
     <>
+      <style>{shellLayoutStyle}</style>
       {children({
         askTrigger: (
           <AskFabroTriggerButton
@@ -76,6 +83,7 @@ export function RunDetailAskFabroShell({
             defaultModel={askDefaultModel}
             width={askWidth}
             onWidthChange={setAskWidth}
+            onResizeActiveChange={setResizeActive}
           />
         </div>
       )}

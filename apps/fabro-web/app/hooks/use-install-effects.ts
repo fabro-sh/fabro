@@ -1,10 +1,7 @@
-import { startTransition, useEffect, type Dispatch, type SetStateAction } from "react";
-import type { NavigateFunction } from "react-router";
+import { useEffect, type Dispatch, type SetStateAction } from "react";
 
 import {
   type InstallFinishResponse,
-  type InstallSessionResponse,
-  getInstallSession,
   persistInstallToken,
 } from "../install-api";
 import { shouldRedirectAfterHealthPoll } from "../install-flow";
@@ -13,12 +10,6 @@ import {
   consumeInstallTokenFromUrl,
   shouldConsumeInstallGithubErrorForPath,
 } from "../mode";
-
-type InstallSessionAction =
-  | { type: "sessionCleared" }
-  | { type: "sessionRequested" }
-  | { type: "sessionReady"; session: InstallSessionResponse }
-  | { type: "sessionFailed"; message: string };
 
 type InstallGithubCallbackAction =
   | { type: "saveErrorChanged"; message: string | null };
@@ -69,44 +60,6 @@ export function useInstallGithubCallbackError({
     }
     dispatchInstall({ type: "saveErrorChanged", message: null });
   }, [dispatchInstall, pathname]);
-}
-
-/**
- * Drives the install session state machine from the current install token. The
- * in-flight session request is ignored after token changes or unmounts.
- */
-export function useInstallSessionLoader({
-  dispatchInstall,
-  installToken,
-}: {
-  dispatchInstall: (action: InstallSessionAction) => void;
-  installToken: string | null;
-}) {
-  useEffect(() => {
-    if (!installToken) {
-      dispatchInstall({ type: "sessionCleared" });
-      return;
-    }
-
-    let cancelled = false;
-    dispatchInstall({ type: "sessionRequested" });
-    getInstallSession(installToken)
-      .then((nextSession) => {
-        if (cancelled) return;
-        dispatchInstall({ type: "sessionReady", session: nextSession });
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        dispatchInstall({
-          type:    "sessionFailed",
-          message: error instanceof Error ? error.message : "Install session failed",
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [dispatchInstall, installToken]);
 }
 
 /**
@@ -165,32 +118,4 @@ export function useInstallRestartHealthPolling({
       window.clearInterval(interval);
     };
   }, [dispatchInstall, finishState]);
-}
-
-/**
- * Synchronizes the install root route with the loaded install session by
- * replacing the URL once the async session is ready. Duplicate development calls
- * are harmless because React Router replaces to the same destination.
- */
-export function useInstallRootRedirect({
-  finishState,
-  installToken,
-  navigate,
-  pathname,
-  session,
-}: {
-  finishState: InstallFinishResponse | null;
-  installToken: string | null;
-  navigate: NavigateFunction;
-  pathname: string;
-  session: InstallSessionResponse | null;
-}) {
-  useEffect(() => {
-    if (!installToken || !session) return;
-    if ((pathname === "/" || pathname === "/install") && !finishState) {
-      startTransition(() => {
-        navigate("/install/welcome", { replace: true });
-      });
-    }
-  }, [finishState, installToken, navigate, pathname, session]);
 }
