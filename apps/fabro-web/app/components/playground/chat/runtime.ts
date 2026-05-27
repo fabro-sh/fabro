@@ -4,12 +4,11 @@
  * Posts the full draft alongside the message history to
  * `POST /api/v1/playground/chat` on each turn (the server is stateless),
  * then streams the resulting SSE: text deltas accumulate into the
- * assistant transcript, and `tool_call_end` events fire `onToolCall` so
- * the playground reducer can apply them in real time as they arrive.
- *
- * Modeled after `app/lib/ask-fabro-runtime.ts` and
- * `app/lib/session-stream.ts`, but deliberately small and free of any
- * session bookkeeping — the playground has no notion of a remote session.
+ * assistant transcript, and the model's `write_workflow_file` tool call
+ * carries the full new `workflow.fabro` content. We parse the content,
+ * diff it against the current draft, and animate the resulting reducer
+ * ops into the canvas so the user sees the new graph build in
+ * node-by-node instead of replacing instantly.
  */
 
 import type {
@@ -19,12 +18,13 @@ import type {
 } from "@assistant-ui/react";
 
 import type { WorkflowDraft } from "../state/draft";
-import type { ToolCall, ToolCallName } from "../state/reducer";
+import { animateOps } from "../state/animate";
+import { diffDrafts } from "../state/diff";
+import { parseFabro } from "../state/parse-fabro";
+import type { ToolCall } from "../state/reducer";
 
 type AdapterMessage = Parameters<ChatModelAdapter["run"]>[0]["messages"][number];
 
-/** A subset of `StreamEvent` (see `fabro-llm/src/types.rs`) that the
- *  playground adapter actually acts on. Other variants are ignored. */
 type StreamEvent =
   | { type: "stream_start" }
   | { type: "text_delta"; delta: string; text_id?: string | null }
@@ -38,21 +38,25 @@ interface WireToolCall {
   arguments: Record<string, unknown> | string;
 }
 
-const TOOL_NAMES: ReadonlySet<ToolCallName> = new Set<ToolCallName>([
-  "set_workflow_meta",
-  "add_node",
-  "update_node",
-  "delete_node",
-  "connect",
-  "disconnect",
-]);
+interface WriteWorkflowFileArgs {
+  file_name?: string;
+  content?: string;
+}
 
 export interface PlaygroundAdapterOptions {
   chatEndpoint: string;
-  /** Reads the latest draft. Called once per turn (not per event). */
+  /** Reads the latest draft. Called once per `write_workflow_file` to compute the diff. */
   getWorkflow: () => WorkflowDraft;
-  /** Fires for every validated tool call as it arrives over SSE. */
-  onToolCall: (call: ToolCall) => void;
+  /** Apply a single reducer op. Called repeatedly as the animation runs. */
+  dispatch: (call: ToolCall) => void;
+  /**
+   * Called when the model's emitted DOT cannot be parsed. The caller is
+   * expected to inform the user and optionally submit a synthetic
+   * follow-up turn asking the model to re-emit a valid file.
+   */
+  onParseFailure?: (info: { message: string; rawContent: string }) => void;
+  /** Milliseconds between animation steps. Default 220ms. */
+  stepDelayMs?: number;
   /** Override fetch for tests. */
   fetchImpl?: typeof fetch;
 }
@@ -126,19 +130,17 @@ export function createPlaygroundAdapter(
             }
             yield snapshot();
           } else if (event.type === "tool_call_end") {
-            const call = parseToolCall(event.tool_call);
-            if (call) {
-              options.onToolCall(call);
-              parts.push({
-                type:        "tool-call",
-                toolCallId:  event.tool_call.id,
-                toolName:    call.name,
-                args:        call.args as never,
-                argsText:    JSON.stringify(call.args),
-              });
-              activeTextIndex = null;
-              yield snapshot();
-            }
+            const handled = handleToolCallEnd(event.tool_call, options);
+            parts.push({
+              type:        "tool-call",
+              toolCallId:  event.tool_call.id,
+              toolName:    event.tool_call.name,
+              args:        handled.args as never,
+              argsText:    JSON.stringify(handled.args),
+              isError:     handled.isError,
+            });
+            activeTextIndex = null;
+            yield snapshot();
           } else if (event.type === "error") {
             throw new Error(
               `playground chat stream error: ${JSON.stringify(event.error)}`,
@@ -155,6 +157,69 @@ export function createPlaygroundAdapter(
   };
 }
 
+interface HandledToolCall {
+  args: Record<string, unknown>;
+  isError: boolean;
+}
+
+function handleToolCallEnd(
+  wire: WireToolCall,
+  options: PlaygroundAdapterOptions,
+): HandledToolCall {
+  const args = parseArgs(wire.arguments);
+  if (wire.name !== "write_workflow_file") {
+    // Ignore unrecognised tools — log to console for diagnostic but
+    // don't crash the turn.
+    console.warn(`playground: ignoring unknown tool call "${wire.name}"`);
+    return { args, isError: true };
+  }
+
+  const writeArgs = args as WriteWorkflowFileArgs;
+  const content = typeof writeArgs.content === "string" ? writeArgs.content : "";
+  if (!content) {
+    options.onParseFailure?.({
+      message:    "write_workflow_file emitted with no `content` argument.",
+      rawContent: "",
+    });
+    return { args, isError: true };
+  }
+
+  const parsed = parseFabro(content);
+  if (parsed.ok === false) {
+    options.onParseFailure?.({
+      message:    parsed.error,
+      rawContent: content,
+    });
+    return { args, isError: true };
+  }
+
+  const prev = options.getWorkflow();
+  const ops = diffDrafts(prev, parsed.draft);
+  if (ops.length === 0) {
+    // Model wrote a workflow identical to the current state — nothing
+    // to animate, just surface the ack.
+    return { args, isError: false };
+  }
+
+  animateOps(ops, {
+    dispatch:    options.dispatch,
+    stepDelayMs: options.stepDelayMs,
+  });
+  return { args, isError: false };
+}
+
+function parseArgs(raw: Record<string, unknown> | string): Record<string, unknown> {
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  if (raw && typeof raw === "object") return raw;
+  return {};
+}
+
 function parseFrame(frame: string): StreamEvent | null {
   const dataLine = frame
     .split(/\r?\n/)
@@ -169,26 +234,9 @@ function parseFrame(frame: string): StreamEvent | null {
   }
 }
 
-function parseToolCall(wire: WireToolCall): ToolCall | null {
-  if (!TOOL_NAMES.has(wire.name as ToolCallName)) return null;
-  let args: Record<string, unknown>;
-  if (typeof wire.arguments === "string") {
-    try {
-      args = JSON.parse(wire.arguments) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  } else if (wire.arguments && typeof wire.arguments === "object") {
-    args = wire.arguments;
-  } else {
-    return null;
-  }
-  return { name: wire.name as ToolCallName, args } as ToolCall;
-}
-
 interface SerializedPart {
   kind: "text";
-  data: { text: string };
+  data: string;
 }
 
 interface SerializedMessage {
@@ -197,10 +245,17 @@ interface SerializedMessage {
 }
 
 function serializeMessage(message: AdapterMessage): SerializedMessage {
-  const text = extractText(message);
+  let text = extractText(message);
+  // Anthropic rejects empty text blocks, so when an assistant turn
+  // contained only tool calls (no prose) we substitute a brief
+  // placeholder that keeps the conversation history shape while
+  // signalling "I wrote a workflow file last turn".
+  if (text === "" && message.role === "assistant" && hasToolCall(message)) {
+    text = "(Wrote workflow.fabro)";
+  }
   return {
     role:    message.role,
-    content: [{ kind: "text", data: { text } }],
+    content: [{ kind: "text", data: text }],
   };
 }
 
@@ -212,4 +267,10 @@ function extractText(message: AdapterMessage): string {
     }
   }
   return segments.join("\n");
+}
+
+function hasToolCall(message: AdapterMessage): boolean {
+  return message.content.some(
+    (part: { type: string }) => part.type === "tool-call",
+  );
 }

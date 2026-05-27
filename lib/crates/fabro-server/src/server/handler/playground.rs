@@ -3,9 +3,10 @@
 //! POST /api/v1/playground/chat drives a single turn of the chat-driven
 //! workflow builder at /playground in fabro-web. The server is stateless
 //! across turns: the browser owns the workflow draft and sends the full
-//! state with every request, the server runs the LLM with a fixed
-//! pure-write tool surface, and tool calls stream back over SSE for the
-//! client to apply to its local reducer.
+//! state with every request; the server runs the LLM with a single
+//! file-write tool surface and streams the result back over SSE. The
+//! browser parses the emitted `workflow.fabro` content, diffs it against
+//! its current draft, and animates the resulting changes into the canvas.
 
 use std::sync::Arc;
 
@@ -22,9 +23,9 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/playground/chat", post(create_playground_chat))
 }
 
-/// Renders the workflow draft into a compact textual summary the model can
-/// reason about. Same format we'd write to `workflow.fabro` if we
-/// committed the state, minus theming/comments.
+/// Renders the workflow draft as a compact DOT-style summary the model
+/// can read for current state. Same shape as the file the model writes
+/// back via `write_workflow_file`, minus theming/comments.
 fn summarize_workflow(workflow: &PlaygroundWorkflowDraft) -> String {
     if workflow
         .nodes
@@ -84,28 +85,59 @@ fn build_system_prompt(workflow: &PlaygroundWorkflowDraft) -> String {
     };
 
     format!(
-        "You are Ask Fabro, helping the user build a Fabro workflow inside the \
-         /playground builder. Fabro workflows are Graphviz digraphs where each \
-         node's `shape` picks the handler:\n\
+        "You are Ask Fabro, helping the user build a Fabro workflow inside \
+         the /playground builder. Fabro workflows are Graphviz digraphs where \
+         each node's `shape` picks the handler:\n\
          - box: agent (multi-turn LLM with tools — the default)\n\
          - tab: a single LLM call\n\
-         - parallelogram: a shell script (use `script` attribute)\n\
+         - parallelogram: a shell script (use a `script` attribute)\n\
          - hexagon: a human gate (pause for review)\n\
-         - diamond: a conditional branch (multiple outgoing edges with `condition`)\n\
+         - diamond: a conditional branch (multiple outgoing edges with a `condition`)\n\
          - component: fan-out parallel\n\
          - tripleoctagon: merge parallel\n\
          - house: a sub-workflow\n\
          \n\
-         You mutate the user's draft only by calling tools — never by writing \
-         the DOT yourself. Available tools: set_workflow_meta, add_node, \
-         update_node, delete_node, connect, disconnect.\n\
+         To update the workflow, call the `write_workflow_file` tool exactly \
+         once per turn with the full new contents of `workflow.fabro`. The \
+         file you write REPLACES the previous one — always emit the complete \
+         workflow, even nodes and edges that didn't change.\n\
          \n\
-         Conventions: snake_case node ids (e.g. `run_tests`, `open_pr`). The \
-         `start` and `exit` terminals are reserved — never add/edit/delete \
-         them, just `connect` other nodes through them. Pick a clear \
-         snake_case name for the workflow as soon as the user's intent is \
-         obvious, via set_workflow_meta. Keep prose replies brief — the \
-         canvas tells the visual story, you ack what changed.\n\
+         Always include a brief one-line acknowledgement before the tool \
+         call so the chat doesn't feel silent — something like \"Built the \
+         lint/test/PR pipeline.\" or \"Added the fix-and-retry loop.\". \
+         Keep it to one sentence; the canvas shows the details.\n\
+         \n\
+         DOT template:\n\
+         ```\n\
+         digraph snake_case_name {{\n\
+         \x20   graph [goal=\"One-sentence goal.\"]\n\
+         \x20   rankdir=LR\n\
+         \n\
+         \x20   start [shape=Mdiamond, label=\"Start\"]\n\
+         \x20   exit  [shape=Msquare, label=\"Exit\"]\n\
+         \n\
+         \x20   plan [shape=box, label=\"Plan\", prompt=\"Plan the work.\"]\n\
+         \x20   implement [shape=box, label=\"Implement\", prompt=\"...\"]\n\
+         \n\
+         \x20   start -> plan\n\
+         \x20   plan -> implement\n\
+         \x20   implement -> exit\n\
+         }}\n\
+         ```\n\
+         \n\
+         Rules:\n\
+         - snake_case node ids (e.g. `run_tests`, `open_pr`).\n\
+         - `start` (shape=Mdiamond) and `exit` (shape=Msquare) are reserved \
+         terminals — always present, never renamed, never have prompts.\n\
+         - Pick a clear snake_case name for the digraph (the `digraph <name>` \
+         token) as soon as the user's intent is obvious.\n\
+         - Preserve existing node ids across turns. Only invent a new id for \
+         a genuinely new node — don't rename `lint` to `lint_step` just \
+         because you're regenerating the file.\n\
+         - Every user-added node must be on a path from `start` to `exit`.\n\
+         - For `diamond` branches, give each outgoing edge a `condition` \
+         attribute (e.g. `gate -> happy_path [condition=\"outcome=approved\"]`).\n\
+         - Escape `\\` and `\"` inside attribute strings.\n\
          \n\
          Current draft\n\
          -------------\n\
@@ -117,117 +149,35 @@ fn build_system_prompt(workflow: &PlaygroundWorkflowDraft) -> String {
     )
 }
 
-/// The pure-write tool surface exposed to the model. Mirrors the
-/// `ToolCall` discriminated union in
-/// `app/components/playground/state/reducer.ts` exactly.
+/// The single file-write tool the model uses to update the workflow.
+/// Each turn the model emits one call with the full new contents of
+/// `workflow.fabro`. The browser parses the content, diffs it against
+/// its current draft, and animates the resulting changes into the
+/// canvas.
 fn playground_tools() -> Vec<ToolDefinition> {
-    vec![
-        ToolDefinition {
-            name:        "set_workflow_meta".into(),
-            description: "Set the workflow's snake_case name and / or its goal sentence.".into(),
-            parameters:  json!({
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "snake_case workflow id (e.g. release_notes). Used as `fabro run <name>`."
-                    },
-                    "goal": {
-                        "type": "string",
-                        "description": "One-sentence goal for the graph attribute."
-                    }
+    vec![ToolDefinition {
+        name:        "write_workflow_file".into(),
+        description: "Write the full new contents of a workflow file. For the playground, only \
+                      `workflow.fabro` is meaningful — the model emits the complete DOT for the \
+                      current desired state of the workflow. The previous file is replaced \
+                      atomically; always include every node and edge, not just changes."
+            .into(),
+        parameters:  json!({
+            "type": "object",
+            "required": ["file_name", "content"],
+            "properties": {
+                "file_name": {
+                    "type": "string",
+                    "enum": ["workflow.fabro"],
+                    "description": "Target file name. Currently only `workflow.fabro` is supported."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full DOT contents of the workflow file. Must be a complete `digraph <name> { ... }` block including `start` and `exit` terminals and every desired node and edge."
                 }
-            }),
-        },
-        ToolDefinition {
-            name:        "add_node".into(),
-            description: "Add a new node to the draft. Reject snake_case-violating ids and \
-                          the reserved ids `start` / `exit`."
-                .into(),
-            parameters:  json!({
-                "type": "object",
-                "required": ["id", "label", "shape"],
-                "properties": {
-                    "id": { "type": "string", "description": "snake_case node id." },
-                    "label": { "type": "string", "description": "Human-readable label." },
-                    "shape": {
-                        "type": "string",
-                        "enum": ["box", "tab", "parallelogram", "hexagon", "diamond", "component", "tripleoctagon", "house"],
-                        "description": "Fabro shape — picks the node's handler."
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "description": "Prose body for agent/tab/parallelogram nodes."
-                    },
-                    "attrs": {
-                        "type": "object",
-                        "description": "Free-form Graphviz attributes (max_visits, goal_gate, script, timeout, ...)."
-                    }
-                }
-            }),
-        },
-        ToolDefinition {
-            name:        "update_node".into(),
-            description: "Update fields on an existing user-added node. Only the supplied \
-                          fields change."
-                .into(),
-            parameters:  json!({
-                "type": "object",
-                "required": ["id"],
-                "properties": {
-                    "id": { "type": "string" },
-                    "label": { "type": "string" },
-                    "shape": {
-                        "type": "string",
-                        "enum": ["box", "tab", "parallelogram", "hexagon", "diamond", "component", "tripleoctagon", "house"]
-                    },
-                    "prompt": { "type": "string" },
-                    "attrs": { "type": "object" }
-                }
-            }),
-        },
-        ToolDefinition {
-            name:        "delete_node".into(),
-            description: "Delete a user-added node and any edges that referenced it. \
-                          `start` and `exit` cannot be deleted."
-                .into(),
-            parameters:  json!({
-                "type": "object",
-                "required": ["id"],
-                "properties": { "id": { "type": "string" } }
-            }),
-        },
-        ToolDefinition {
-            name:        "connect".into(),
-            description: "Add a directed edge between two existing nodes.".into(),
-            parameters:  json!({
-                "type": "object",
-                "required": ["from", "to"],
-                "properties": {
-                    "from": { "type": "string" },
-                    "to": { "type": "string" },
-                    "condition": {
-                        "type": "string",
-                        "description": "For diamond branches, e.g. `outcome=succeeded`."
-                    },
-                    "label": { "type": "string" },
-                    "attrs": { "type": "object" }
-                }
-            }),
-        },
-        ToolDefinition {
-            name:        "disconnect".into(),
-            description: "Remove an existing edge between two nodes.".into(),
-            parameters:  json!({
-                "type": "object",
-                "required": ["from", "to"],
-                "properties": {
-                    "from": { "type": "string" },
-                    "to": { "type": "string" }
-                }
-            }),
-        },
-    ]
+            }
+        }),
+    }]
 }
 
 fn convert_api_message(msg: &CompletionMessage) -> LlmMessage {
@@ -308,16 +258,16 @@ async fn create_playground_chat(
     let stream_result = match client.stream(&request).await {
         Ok(s) => s,
         Err(e) => {
+            error!(error = ?e, "playground: LLM stream call failed");
             return ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
                 .into_response();
         }
     };
 
-    // Forward StreamEvents as `stream_event` SSE frames — same shape as
-    // /api/v1/completions. The browser-side adapter listens for
-    // `tool_call_end` events (which carry the parsed args) and applies
-    // them to its reducer; `text_delta` events stream into the chat
-    // transcript.
+    // Forward StreamEvents as `stream_event` SSE frames. The browser-side
+    // adapter listens for the `tool_call_end` event carrying the
+    // `write_workflow_file` arguments, parses the DOT, diffs it against
+    // its current draft, and animates the diff into the canvas.
     let sse_stream = tokio_stream::StreamExt::filter_map(stream_result, |event| match event {
         Ok(ref evt) => match serde_json::to_string(evt) {
             Ok(json) => Some(Ok::<_, std::convert::Infallible>(
@@ -332,14 +282,17 @@ async fn create_playground_chat(
                 .to_string(),
             ))),
         },
-        Err(e) => Some(Ok(Event::default().event("stream_event").data(
-            json!({
-                "type": "error",
-                "error": {"Stream": {"message": e.to_string()}},
-                "raw": null
-            })
-            .to_string(),
-        ))),
+        Err(e) => {
+            error!(error = %e, "playground: stream event error");
+            Some(Ok(Event::default().event("stream_event").data(
+                json!({
+                    "type": "error",
+                    "error": {"Stream": {"message": e.to_string()}},
+                    "raw": null
+                })
+                .to_string(),
+            )))
+        }
     });
     let sse_stream =
         futures_util::StreamExt::take_until(sse_stream, state.shutdown_token().cancelled_owned());
@@ -396,8 +349,8 @@ mod tests {
         let prompt = build_system_prompt(&empty_draft());
         assert!(prompt.contains("(empty —"));
         assert!(prompt.contains("(unnamed)"));
-        assert!(prompt.contains("set_workflow_meta"));
-        assert!(prompt.contains("add_node"));
+        assert!(prompt.contains("write_workflow_file"));
+        assert!(prompt.contains("digraph snake_case_name"));
     }
 
     #[test]
@@ -427,18 +380,18 @@ mod tests {
     }
 
     #[test]
-    fn tool_surface_covers_every_reducer_action() {
+    fn tool_surface_is_single_file_write_tool() {
         let tools = playground_tools();
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-        for expected in [
-            "set_workflow_meta",
-            "add_node",
-            "update_node",
-            "delete_node",
-            "connect",
-            "disconnect",
-        ] {
-            assert!(names.contains(&expected), "missing tool: {expected}");
-        }
+        assert_eq!(tools.len(), 1, "expected exactly one tool");
+        let tool = &tools[0];
+        assert_eq!(tool.name, "write_workflow_file");
+        let params = serde_json::to_value(&tool.parameters).expect("serialize params");
+        let required = params
+            .get("required")
+            .and_then(|r| r.as_array())
+            .expect("required array");
+        let required_names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(required_names.contains(&"file_name"));
+        assert!(required_names.contains(&"content"));
     }
 }

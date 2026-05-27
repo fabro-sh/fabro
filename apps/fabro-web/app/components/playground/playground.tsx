@@ -54,16 +54,29 @@ export default function Playground({
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH);
   const sim = useSimulation(draft);
 
-  // The chat adapter is memoized on (chatEndpoint, getWorkflow, onToolCall);
-  // we need both callbacks to be referentially stable across draft mutations
-  // so the adapter doesn't get rebuilt mid-turn. `draftRef` lets
-  // `getWorkflow` read the latest draft without becoming a dependency.
+  // The chat adapter is memoized on (chatEndpoint, getWorkflow, dispatch,
+  // onParseFailure); we need every callback to be referentially stable
+  // across draft mutations so the adapter doesn't get rebuilt mid-turn.
+  // `draftRef` lets `getWorkflow` read the latest draft without becoming a
+  // dependency.
   const draftRef = useRef<WorkflowDraft>(draft);
   draftRef.current = draft;
   const getWorkflow = useCallback(() => draftRef.current, []);
-  const onToolCall = useCallback(
+  const dispatch = useCallback(
     (call: ToolCall) => applyCall(call),
     [applyCall],
+  );
+  const onParseFailure = useCallback(
+    (info: { message: string; rawContent: string }) => {
+      // For now: log to the dev console. The chat itself already
+      // surfaces "1 tool call, 1 with an error" via the tool-call
+      // summary's `isError` flag, which is the user-visible signal
+      // that something went wrong. A future iteration could auto-
+      // submit a follow-up turn that nudges the model to re-emit
+      // valid DOT.
+      console.warn("[playground] failed to parse workflow file:", info.message);
+    },
+    [],
   );
 
   return (
@@ -113,7 +126,8 @@ export default function Playground({
         onClose={() => setChatOpen(false)}
         chatEndpoint={chatEndpoint}
         getWorkflow={getWorkflow}
-        onToolCall={onToolCall}
+        dispatch={dispatch}
+        onParseFailure={onParseFailure}
         width={sidebarWidth}
         onWidthChange={setSidebarWidth}
       />

@@ -25,16 +25,19 @@ const SIDEBAR_MAX_WIDTH = SIDEBAR_WIDTH * 2;
  * but talks to `/api/v1/playground/chat` via `createPlaygroundAdapter`
  * instead of the session-scoped Ask Fabro runtime.
  *
- * Tool calls from the LLM stream into `onToolCall`, which the parent wires
- * to the playground draft reducer so the canvas paints live as the model
- * builds the graph.
+ * Each turn the model emits one `write_workflow_file` tool call with the
+ * full new DOT contents; the adapter parses, diffs against the current
+ * draft, and animates the resulting reducer ops into the canvas. `dispatch`
+ * is called once per animated op; `onParseFailure` fires if the model's
+ * DOT couldn't be parsed.
  */
 export default function PlaygroundChatSidebar({
   isOpen,
   onClose,
   chatEndpoint,
   getWorkflow,
-  onToolCall,
+  dispatch,
+  onParseFailure,
   width,
   onWidthChange,
 }: {
@@ -42,15 +45,22 @@ export default function PlaygroundChatSidebar({
   onClose: () => void;
   chatEndpoint: string;
   getWorkflow: () => WorkflowDraft;
-  onToolCall: (call: ToolCall) => void;
+  dispatch: (call: ToolCall) => void;
+  onParseFailure?: (info: { message: string; rawContent: string }) => void;
   width: number;
   onWidthChange: (width: number) => void;
 }) {
   // The adapter is referentially-stable across renders because it reads the
   // draft via `getWorkflow` on each turn — no need to memoise on draft.
   const adapter = useMemo(
-    () => createPlaygroundAdapter({ chatEndpoint, getWorkflow, onToolCall }),
-    [chatEndpoint, getWorkflow, onToolCall],
+    () =>
+      createPlaygroundAdapter({
+        chatEndpoint,
+        getWorkflow,
+        dispatch,
+        onParseFailure,
+      }),
+    [chatEndpoint, getWorkflow, dispatch, onParseFailure],
   );
   const runtime = useLocalRuntime(adapter);
 
