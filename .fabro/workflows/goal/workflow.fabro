@@ -13,6 +13,8 @@ digraph Goal {
         thread_id="goal",
         fidelity="full",
         max_visits=12,
+        model="gpt-55",
+        reasoning_effort="xhigh",
         prompt="@prompts/continue.md"
     ]
 
@@ -25,6 +27,8 @@ digraph Goal {
         output_schema="routing",
         output_retries=2,
         max_visits=12,
+        model="gpt-55",
+        reasoning_effort="xhigh",
         prompt="@prompts/audit.md"
     ]
 

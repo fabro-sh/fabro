@@ -97,7 +97,7 @@ fn build_policy_with_hashes(script_hashes: &[String]) -> String {
          script-src 'self'{inline_script_sources} 'wasm-unsafe-eval'; \
          style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; \
          font-src 'self' https://fonts.gstatic.com; \
-         img-src 'self' data: blob:; \
+         img-src 'self' data: blob: https://avatars.githubusercontent.com; \
          connect-src 'self' ws: wss:; \
          worker-src 'self' blob:; \
          manifest-src 'self'; \

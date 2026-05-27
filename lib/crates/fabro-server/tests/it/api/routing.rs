@@ -378,7 +378,10 @@ async fn security_headers_are_applied_to_all_responses() {
         csp.contains("font-src 'self' https://fonts.gstatic.com"),
         "got: {csp}"
     );
-    assert!(csp.contains("img-src 'self' data: blob:"), "got: {csp}");
+    assert!(
+        csp.contains("img-src 'self' data: blob: https://avatars.githubusercontent.com"),
+        "got: {csp}"
+    );
     assert!(csp.contains("connect-src 'self' ws: wss:"), "got: {csp}");
     assert!(csp.contains("worker-src 'self' blob:"), "got: {csp}");
     assert!(csp.contains("frame-ancestors 'none'"), "got: {csp}");

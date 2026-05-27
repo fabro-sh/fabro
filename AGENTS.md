@@ -135,7 +135,8 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 
 ## Strategy docs
 
-When working on Rust crates, read the relevant strategy doc **before** making changes:
+When working in an area covered by a strategy doc, read the relevant document
+**before** making changes:
 
 - **`docs/internal/logging-strategy.md`** — read when adding `tracing` calls (`info!`, `debug!`, `warn!`, `error!`), working on error handling paths, or adding new operations that should be observable
 - **`docs/internal/events-strategy.md`** — read when adding or modifying `Event` variants, touching `Emitter`/`emit()`, changing `progress.jsonl` output, or adding new workflow stage types
@@ -143,6 +144,7 @@ When working on Rust crates, read the relevant strategy doc **before** making ch
 - **`docs/internal/server-secrets-strategy.md`** — read when adding or changing server-level secrets, startup validation, install-time secret persistence, or subprocess env inheritance/scrubbing
 - **`docs/internal/migrations-strategy.md`** — read when adding or changing temporary compatibility migrations, startup/file rewrites, migration runners, backups, or removal deadlines
 - **`docs/internal/error-handling-strategy.md`** — read when changing error types, using `anyhow`/`thiserror`, adding `.map_err(...)`, converting errors to `String`, changing API error responses, or touching CLI/miette/log/telemetry error rendering
+- **`docs/internal/react-effects-policy.md`** — read when adding or refactoring React effects in `apps/fabro-web`; direct `useEffect` calls should be avoided in component code
 
 ## Shell quoting in sandbox code
 
