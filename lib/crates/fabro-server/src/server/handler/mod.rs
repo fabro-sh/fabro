@@ -17,6 +17,7 @@ pub(in crate::server) mod graph;
 pub(in crate::server) mod lifecycle;
 mod models;
 mod pair;
+mod playground;
 mod pull_requests;
 pub(in crate::server) mod runs;
 mod sandbox;
@@ -182,6 +183,7 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
         .merge(graph::manifest_routes())
         .merge(models::routes())
         .merge(completions::routes())
+        .merge(playground::routes())
 }
 
 pub(super) fn real_routes() -> Router<Arc<AppState>> {
@@ -223,4 +225,5 @@ pub(super) fn real_routes() -> Router<Arc<AppState>> {
         .merge(sessions::routes())
         .merge(system::routes())
         .merge(completions::routes())
+        .merge(playground::routes())
 }

@@ -5317,6 +5317,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── Playground ────────────────────────────────────────────────────────
+
+  /api/v1/playground/chat:
+    post:
+      operationId: createPlaygroundChat
+      tags: [Playground]
+      summary: Chat with the playground assistant
+      description: |
+        Drives a single turn of the playground chat that builds a workflow
+        graph incrementally. The server is stateless: each request includes
+        the full current draft, and the response streams text deltas plus
+        structured tool calls (`set_workflow_meta`, `add_node`, `update_node`,
+        `delete_node`, `connect`, `disconnect`) which the client applies to
+        its local draft.
+
+        Responses are always SSE. Frames use `event: stream_event` with a
+        JSON-serialized StreamEvent payload — see /api/v1/completions for the
+        StreamEvent shape. Tool calls arrive on `tool_call_end` events with
+        the tool name and parsed JSON arguments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePlaygroundChatRequest"
+      responses:
+        "200":
+          description: SSE stream of text deltas and tool calls.
+        "400":
+          description: Invalid request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Settings ──────────────────────────────────────────────────────────
 
   /api/v1/settings:
@@ -7857,6 +7895,95 @@ components:
           $ref: "#/components/schemas/CompletionUsage"
         output:
           description: Parsed structured output when schema was provided.
+
+    # ── Playground ────────────────────────────────────────────────────────
+    # Types backing POST /api/v1/playground/chat — a chat-driven, structured
+    # workflow-building surface. Distinct from internal Fabro workflow types
+    # because this draft is intermediate state shared between the model and
+    # the browser, not a runnable graph.
+
+    PlaygroundWorkflowNode:
+      type: object
+      required: [id, label, shape]
+      properties:
+        id:
+          type: string
+          description: Unique within the draft; snake_case.
+        label:
+          type: string
+        shape:
+          type: string
+          description: >
+            Graphviz shape name. `mdiamond` / `msquare` are reserved for
+            the implicit `start` / `exit` terminals.
+        prompt:
+          type: string
+          description: Prose body for agent / tab / parallelogram nodes.
+        attrs:
+          type: object
+          additionalProperties: true
+          description: >
+            Free-form bag of Graphviz attributes (`max_visits`, `goal_gate`,
+            `script`, etc.).
+
+    PlaygroundWorkflowEdge:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        condition:
+          type: string
+          description: For diamond branches (e.g. `outcome=succeeded`).
+        label:
+          type: string
+        attrs:
+          type: object
+          additionalProperties: true
+
+    PlaygroundWorkflowDraft:
+      description: >
+        The full in-flight workflow state submitted with each chat turn.
+        The server is stateless across turns; the browser owns the draft and
+        applies the streamed tool calls to it.
+      type: object
+      required: [name, goal, nodes, edges]
+      properties:
+        name:
+          type: string
+          description: snake_case workflow id (or `untitled` if unnamed).
+        goal:
+          type: string
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaygroundWorkflowNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaygroundWorkflowEdge"
+
+    CreatePlaygroundChatRequest:
+      description: >
+        Body of POST /api/v1/playground/chat. The server uses `workflow` as
+        context for the model's system prompt and exposes a fixed,
+        pure-write tool surface (`set_workflow_meta`, `add_node`,
+        `update_node`, `delete_node`, `connect`, `disconnect`).
+      type: object
+      required: [messages, workflow]
+      properties:
+        messages:
+          type: array
+          description: assistant-ui-style message history for the turn.
+          items:
+            $ref: "#/components/schemas/CompletionMessage"
+        workflow:
+          $ref: "#/components/schemas/PlaygroundWorkflowDraft"
+        model:
+          type: string
+          description: Model id or alias. Server picks the default if omitted.
 
     PaginatedSavedQueryList:
       description: Paginated list of saved queries.
