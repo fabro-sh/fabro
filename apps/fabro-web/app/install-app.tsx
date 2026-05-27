@@ -1,11 +1,10 @@
-import { startTransition, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useMemo, useReducer, useRef, useState } from "react";
 import type { FormEvent, ReactNode, Ref } from "react";
 import {
   Link,
   Navigate,
   useLocation,
   useNavigate,
-  type NavigateFunction,
 } from "react-router";
 import {
   ArrowLeftIcon,
@@ -43,12 +42,6 @@ import {
   testInstallSandbox,
 } from "./install-api";
 import { INSTALL_PROVIDERS } from "./install-config";
-import { shouldRedirectAfterHealthPoll } from "./install-flow";
-import {
-  consumeInstallGithubErrorFromUrl,
-  consumeInstallTokenFromUrl,
-  shouldConsumeInstallGithubErrorForPath,
-} from "./mode";
 import {
   CopyButton,
   ErrorMessage,
@@ -57,6 +50,13 @@ import {
   SECONDARY_BUTTON_CLASS,
 } from "./components/ui";
 import { LoadingState } from "./components/state";
+import {
+  useInstallGithubCallbackError,
+  useInstallRestartHealthPolling,
+  useInstallRootRedirect,
+  useInstallSessionLoader,
+  useInstallTokenFromUrl,
+} from "./hooks/use-install-effects";
 
 const INSTALL_STEPS = [
   { id: "welcome", label: "Welcome", href: "/install/welcome" },
@@ -303,131 +303,12 @@ function useInstallController() {
   );
   const { finishState } = installState;
 
-  useEffect(() => {
-    const { token, sanitizedUrl } = consumeInstallTokenFromUrl(window.location.href);
-    if (!token) return;
-
-    persistInstallToken(token);
-    // react-doctor-disable-next-line react-doctor/no-initialize-state -- The token is persisted and scrubbed from the URL after the client mounts.
-    setInstallToken(token);
-    window.history.replaceState(window.history.state, "", sanitizedUrl);
-  }, []);
-
-  useEffect(() => {
-    if (shouldConsumeInstallGithubErrorForPath(pathname)) {
-      const { error, sanitizedUrl } = consumeInstallGithubErrorFromUrl(window.location.href);
-      if (error) {
-        dispatchInstall({ type: "saveErrorChanged", message: error });
-        window.history.replaceState(window.history.state, "", sanitizedUrl);
-        return;
-      }
-    }
-    dispatchInstall({ type: "saveErrorChanged", message: null });
-  }, [pathname]);
-
-  useEffect(() => {
-    if (!installToken) {
-      dispatchInstall({ type: "sessionCleared" });
-      return;
-    }
-
-    let cancelled = false;
-    dispatchInstall({ type: "sessionRequested" });
-    getInstallSession(installToken)
-      .then((nextSession) => {
-        if (cancelled) return;
-        dispatchInstall({ type: "sessionReady", session: nextSession });
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        dispatchInstall({
-          type:    "sessionFailed",
-          message: error instanceof Error ? error.message : "Install session failed",
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [installToken]);
-
-  // react-doctor-disable-next-line react-doctor/no-fetch-in-effect -- This is install-mode restart polling, not cacheable app data.
-  useEffect(() => {
-    if (!finishState) return;
-
-    dispatchInstall({ type: "timedOutChanged", timedOut: false });
-    const deadline = window.setTimeout(() => {
-      dispatchInstall({ type: "timedOutChanged", timedOut: true });
-    }, 30_000);
-
-    const controller = new AbortController();
-    let inFlight = false;
-    const poll = async () => {
-      if (inFlight || controller.signal.aborted) return;
-      inFlight = true;
-      try {
-        // react-doctor-disable-next-line react-doctor/no-fetch-in-effect -- This health probe is tied to install restart polling, not cacheable app data.
-        const response = await fetch("/health", { signal: controller.signal });
-        const body = response.ok
-          ? ((await response.json()) as { mode?: string })
-          : undefined;
-        if (
-          shouldRedirectAfterHealthPoll({
-            kind: "response",
-            ok: response.ok,
-            mode: body?.mode,
-          })
-        ) {
-          window.location.href = finishState.restart_url;
-        }
-      } catch {
-        if (controller.signal.aborted) return;
-        if (shouldRedirectAfterHealthPoll({ kind: "error" })) {
-          window.location.href = finishState.restart_url;
-        }
-      } finally {
-        inFlight = false;
-      }
-    };
-    const interval = window.setInterval(poll, 2_000);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(deadline);
-      window.clearInterval(interval);
-    };
-  }, [finishState]);
+  useInstallTokenFromUrl({ setInstallToken });
+  useInstallGithubCallbackError({ dispatchInstall, pathname });
+  useInstallSessionLoader({ dispatchInstall, installToken });
+  useInstallRestartHealthPolling({ dispatchInstall, finishState });
 
   return { pathname, installToken, setInstallToken, installState, dispatchInstall };
-}
-
-/**
- * Synchronizes the install root route with the loaded install session by
- * replacing the URL once the async session is ready.
- */
-function useInstallRootRedirect({
-  installToken,
-  session,
-  finishState,
-  pathname,
-  navigate,
-}: {
-  installToken: string | null;
-  session: InstallSessionResponse | null;
-  finishState: FinishState;
-  pathname: string;
-  navigate: NavigateFunction;
-}) {
-  // react-doctor-disable-next-line react-doctor/no-effect-chain -- Navigation waits for the async install session before leaving the token/root entry route.
-  useEffect(() => {
-    if (!installToken || !session) return;
-    // react-doctor-disable-next-line react-doctor/no-event-handler -- This redirects from root/install exactly once after the async session becomes available.
-    if ((pathname === "/" || pathname === "/install") && !finishState) {
-      startTransition(() => {
-        navigate("/install/welcome", { replace: true });
-      });
-    }
-  }, [finishState, installToken, pathname, navigate, session]);
 }
 
 export default function InstallApp() {
@@ -538,7 +419,7 @@ export default function InstallApp() {
   }
 
   // Covers both sessionState "loading" AND the brief "idle" window between
-  // the initial render and the session-fetch useEffect. Without this guard,
+  // the initial render and the session-fetch hook. Without this guard,
   // screens like GithubAppDoneScreen see `session == null` and navigate away
   // before the first fetch finishes — trapping the user in a redirect loop.
   if (!session) {
