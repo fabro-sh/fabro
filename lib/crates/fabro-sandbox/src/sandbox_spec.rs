@@ -136,10 +136,7 @@ impl SandboxSpec {
                 RunSandbox {
                     provider: self.provider(),
                     image:    None,
-                    snapshot: config
-                        .snapshot
-                        .as_ref()
-                        .map(|snapshot| snapshot.name.clone()),
+                    snapshot: sandbox.snapshot_info(),
                     runtime:  Some(RunSandboxRuntime {
                         id,
                         working_directory: working_directory.clone(),

@@ -135,6 +135,7 @@ mod tests {
             graph,
             graph_source: None,
             workflow_slug: Some("ship".to_string()),
+            automation: None,
             source_directory: Some("/tmp/project".to_string()),
             git: Some(fabro_types::GitContext {
                 origin_url:   String::new(),
@@ -168,6 +169,7 @@ mod tests {
             run_dir:          run_dir.to_string_lossy().to_string(),
             source_directory: record.source_directory.clone(),
             workflow_slug:    record.workflow_slug.clone(),
+            automation:       record.automation.clone(),
             db_prefix:        None,
             provenance:       record.provenance.clone(),
             manifest_blob:    None,

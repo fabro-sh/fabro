@@ -1,4 +1,4 @@
-import type { Principal, PrincipalSystem, RunSpec } from "../src";
+import type { AutomationRef, Principal, PrincipalSystem, RunSpec } from "../src";
 
 type AssertFalse<T extends false> = T;
 type AssertExtends<T extends U, U> = true;
@@ -49,12 +49,27 @@ type SubjectIsNotAny = AssertFalse<IsAny<Subject>>;
 type SubjectExtendsPrincipal = AssertExtends<Subject, Principal>;
 type PrincipalExtendsSubject = AssertExtends<Principal, Subject>;
 
+type Automation = NonNullable<RunSpec["automation"]>;
+type AutomationExtendsRef = AssertExtends<Automation, AutomationRef>;
+type AutomationTriggerId = NonNullable<AutomationRef["trigger_id"]>;
+
 const _principalSubject: Subject = {
   kind: "system",
   system_kind: "watchdog",
 };
 
+const _automation: Automation = {
+  id: "nightly",
+  name: "Nightly",
+  trigger_id: "schedule_1",
+};
+
+const _automationTriggerId: AutomationTriggerId = "schedule_1";
+
 void (null as unknown as SubjectIsNotAny);
 void (null as unknown as SubjectExtendsPrincipal);
 void (null as unknown as PrincipalExtendsSubject);
+void (null as unknown as AutomationExtendsRef);
 void _principalSubject;
+void _automation;
+void _automationTriggerId;

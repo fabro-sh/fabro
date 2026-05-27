@@ -33,7 +33,6 @@ id = "fabro-dev"
 provider = "daytona" # local | docker | daytona
 
 [environments.fabro-dev.image]
-ref = "fabro-v11"              # Docker image or Daytona snapshot name
 dockerfile = { path = "Dockerfile" }
 
 [environments.fabro-dev.resources]
@@ -99,7 +98,7 @@ id = "default"
 provider = "docker"
 
 [environments.default.image]
-ref = "buildpack-deps:noble"
+docker = "buildpack-deps:noble"
 
 [environments.default.resources]
 cpu = 2
@@ -114,8 +113,8 @@ stop_on_terminal = true
 
 | Environment field | Local | Docker | Daytona |
 |---|---|---|---|
-| `image.ref` | Ignored | Docker image | Snapshot name |
-| `image.dockerfile` | Ignored | Warning; ignored | Snapshot Dockerfile; requires `image.ref` |
+| `image.docker` | Ignored | Docker image | Error |
+| `image.dockerfile` | Ignored | Warning; ignored | Snapshot Dockerfile; Fabro computes the snapshot name |
 | `resources.cpu` | Warning; ignored | `cpu_quota = cpu * 100000` | Snapshot CPU |
 | `resources.memory` | Warning; ignored | Container memory limit | Snapshot memory |
 | `resources.disk` | Warning; ignored | Warning; ignored | Snapshot disk |
@@ -143,7 +142,7 @@ Fabro hard-errors if a local environment asks for blocked or CIDR-restricted net
 
 ## Docker
 
-Docker runs tools inside a container created from `image.ref`. Docker is the built-in default provider.
+Docker runs tools inside a container created from `image.docker`. Docker is the built-in default provider.
 
 ```toml
 [run.environment]
@@ -153,7 +152,7 @@ id = "ci"
 provider = "docker"
 
 [environments.ci.image]
-ref = "buildpack-deps:noble"
+docker = "buildpack-deps:noble"
 
 [environments.ci.resources]
 cpu = 2
@@ -167,7 +166,7 @@ Docker and Daytona are clone-based providers. When a run has a GitHub origin, Fa
 
 ## Daytona
 
-Daytona runs tools in a cloud sandbox. `image.ref` is the snapshot name. If `image.dockerfile` is set and the snapshot does not exist, Fabro creates the snapshot; `image.ref` is required so the snapshot has a name.
+Daytona runs tools in a cloud sandbox. Without `image.dockerfile`, Fabro uses Daytona's built-in `daytona-medium` snapshot. With `image.dockerfile`, Fabro computes a deterministic internal snapshot name from the Dockerfile, resource hints, a single-tenant scope, and the Daytona API key.
 
 ```toml
 [run.environment]
@@ -177,7 +176,6 @@ id = "cloud"
 provider = "daytona"
 
 [environments.cloud.image]
-ref = "rust-dev"
 dockerfile = { path = "Dockerfile" }
 
 [environments.cloud.resources]

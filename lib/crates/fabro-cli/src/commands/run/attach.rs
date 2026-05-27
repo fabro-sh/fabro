@@ -838,6 +838,7 @@ mod tests {
             graph: fabro_types::Graph::new("test"),
             graph_source: None,
             workflow_slug: None,
+            automation: None,
             source_directory: None,
             labels: std::collections::HashMap::default(),
             provenance: None,

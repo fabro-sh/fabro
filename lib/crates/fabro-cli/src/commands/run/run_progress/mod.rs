@@ -697,6 +697,8 @@ mod tests {
                 repos_root:        None,
                 primary_repo_path: None,
                 primary_repo_link: None,
+                image:             None,
+                snapshot:          None,
             },
             agent_event("code", AgentEvent::ToolCallStarted {
                 tool_name:    "read_file".into(),
@@ -1045,6 +1047,8 @@ mod tests {
             repos_root:        None,
             primary_repo_path: None,
             primary_repo_link: None,
+            image:             None,
+            snapshot:          None,
         });
         emit(
             &mut ui,

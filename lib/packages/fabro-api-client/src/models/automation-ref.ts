@@ -17,4 +17,5 @@
 export interface AutomationRef {
     'id': string;
     'name': string | null;
+    'trigger_id'?: string | null;
 }

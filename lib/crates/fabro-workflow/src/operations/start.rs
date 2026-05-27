@@ -1295,7 +1295,7 @@ reasoning = false
         let settings = settings_from_run_layer(RunLayer {
             environment: Some(RunEnvironmentLayer {
                 image: Some(EnvironmentImageLayer {
-                    reference: Some("ubuntu:24.04".to_string()),
+                    docker: Some("ubuntu:24.04".to_string()),
                     ..EnvironmentImageLayer::default()
                 }),
                 resources: Some(EnvironmentResourcesLayer {
@@ -1406,6 +1406,7 @@ reasoning = false
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
                 title: None,
+                automation: None,
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
@@ -1827,6 +1828,7 @@ reasoning = false
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
                 title: None,
+                automation: None,
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,

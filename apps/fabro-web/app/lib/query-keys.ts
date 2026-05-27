@@ -107,4 +107,8 @@ export const queryKeys = {
   secrets: {
     list: () => ["secrets", "list"] as const,
   },
+  variables: {
+    list: () => ["variables", "list"] as const,
+    detail: (name: string) => ["variables", "detail", name] as const,
+  },
 };

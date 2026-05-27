@@ -4,7 +4,7 @@ use fabro_types::graph::Graph;
 use fabro_types::run::{DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome, RunSpec};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
-use fabro_types::{WorkflowSettings, fixtures};
+use fabro_types::{AutomationRef, WorkflowSettings, fixtures};
 
 fn templated_settings() -> WorkflowSettings {
     let mut settings = WorkflowSettings::default();
@@ -20,6 +20,11 @@ fn run_spec_round_trips_templated_settings() {
         graph:            Graph::new("ship"),
         graph_source:     None,
         workflow_slug:    Some("demo".to_string()),
+        automation:       Some(AutomationRef {
+            id:         "nightly".to_string(),
+            name:       Some("Nightly".to_string()),
+            trigger_id: Some("schedule_1".to_string()),
+        }),
         source_directory: Some("/Users/client/project".to_string()),
         labels:           HashMap::from([("team".to_string(), "platform".to_string())]),
         provenance:       None,
@@ -54,6 +59,8 @@ fn run_spec_round_trips_templated_settings() {
     assert_eq!(json["git"]["dirty"], "clean");
     assert_eq!(json["git"]["push_outcome"]["type"], "succeeded");
     assert_eq!(json["fork_source_ref"]["checkpoint_sha"], "def456");
+    assert_eq!(json["automation"]["id"], "nightly");
+    assert_eq!(json["automation"]["trigger_id"], "schedule_1");
     let round_trip: RunSpec =
         serde_json::from_value(json.clone()).expect("record should deserialize");
 
@@ -65,4 +72,18 @@ fn run_spec_round_trips_templated_settings() {
         round_trip.settings.run.goal,
         Some(RunGoal::Inline(InterpString::parse("Ship {{ env.TASK }}")))
     );
+}
+
+#[test]
+fn run_spec_defaults_automation_for_legacy_specs() {
+    let json = serde_json::json!({
+        "run_id": fixtures::RUN_1,
+        "settings": WorkflowSettings::default(),
+        "graph": Graph::new("ship"),
+        "labels": {}
+    });
+
+    let record: RunSpec = serde_json::from_value(json).expect("legacy spec should deserialize");
+
+    assert_eq!(record.automation, None);
 }

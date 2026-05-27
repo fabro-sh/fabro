@@ -44,7 +44,7 @@ function sampleSettings({
   const environmentId = labels.project ?? snapshot;
   const environment = {
     provider: "daytona",
-    image: { ref: snapshot, dockerfile: null },
+    image: { docker: null, dockerfile: null },
     resources: {
       cpu,
       memory: `${memoryGb}GB`,

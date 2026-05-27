@@ -24,6 +24,7 @@ fn sample_run_spec() -> RunSpec {
         graph: Graph::new("ship"),
         graph_source: None,
         workflow_slug: Some("demo".to_string()),
+        automation: None,
         source_directory: Some("/Users/client/project".to_string()),
         labels: HashMap::from([("team".to_string(), "platform".to_string())]),
         provenance: None,

@@ -413,6 +413,8 @@ pub async fn initialize(
             working_directory: runtime.working_directory.clone(),
             provider:          run_sandbox.provider,
             id:                runtime.id.clone(),
+            image:             run_sandbox.image.clone(),
+            snapshot:          run_sandbox.snapshot.clone(),
             repo_cloned:       runtime.repo_cloned,
             clone_origin_url:  runtime.clone_origin_url.clone(),
             clone_branch:      runtime.clone_branch.clone(),
@@ -761,6 +763,7 @@ mod tests {
                 graph,
                 graph_source: None,
                 workflow_slug: Some("test".to_string()),
+                automation: None,
                 source_directory: Some(std::env::current_dir().unwrap().display().to_string()),
                 git: Some(fabro_types::GitContext {
                     origin_url:   String::new(),

@@ -9303,6 +9303,10 @@ components:
           type: ["string", "null"]
         workflow_slug:
           type: ["string", "null"]
+        automation:
+          oneOf:
+            - $ref: "#/components/schemas/AutomationRef"
+            - type: "null"
         source_directory:
           type: ["string", "null"]
         labels:
@@ -9729,6 +9733,8 @@ components:
         id:
           type: string
         name:
+          type: ["string", "null"]
+        trigger_id:
           type: ["string", "null"]
 
     RunOrigin:
@@ -12347,9 +12353,9 @@ components:
 
     EnvironmentImageSettings:
       type: object
-      required: [ref, dockerfile]
+      required: [docker, dockerfile]
       properties:
-        ref:
+        docker:
           type: ["string", "null"]
         dockerfile:
           oneOf:

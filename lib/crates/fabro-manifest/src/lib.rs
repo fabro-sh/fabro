@@ -84,7 +84,7 @@ pub fn build_run_overrides(input: RunOverrideInput<'_>) -> RunLayer {
     .then(|| RunEnvironmentLayer {
         id: input.environment.map(ToOwned::to_owned),
         image: input.docker_image.map(|image| EnvironmentImageLayer {
-            reference: Some(image.to_string()),
+            docker: Some(image.to_string()),
             ..EnvironmentImageLayer::default()
         }),
         lifecycle: input
@@ -1215,7 +1215,6 @@ id = "daytona"
 provider = "daytona"
 
 [environments.daytona.image]
-ref = "fabro-test"
 dockerfile = { path = "Dockerfile" }
 "#,
         )

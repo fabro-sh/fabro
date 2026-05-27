@@ -104,9 +104,11 @@ pub struct WorkflowRef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AutomationRef {
-    pub id:   String,
+    pub id:         String,
     #[serde(default)]
-    pub name: Option<String>,
+    pub name:       Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

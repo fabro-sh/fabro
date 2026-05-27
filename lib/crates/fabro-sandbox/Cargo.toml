@@ -30,6 +30,10 @@ serde_json.workspace = true
 strum.workspace = true
 tracing.workspace = true
 base64.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+hex.workspace = true
+uuid.workspace = true
 fabro-proc = { path = "../fabro-proc" }
 fabro-static.workspace = true
 fabro-util = { path = "../fabro-util" }
@@ -66,7 +70,6 @@ rustls = { version = "0.23", default-features = false, features = ["std", "ring"
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = "3"
-uuid.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 httpmock = "0.8"

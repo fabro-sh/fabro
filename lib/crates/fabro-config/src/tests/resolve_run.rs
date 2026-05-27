@@ -48,7 +48,7 @@ fn resolves_run_defaults_from_empty_settings() {
     assert_eq!(settings.environment.id, "default");
     assert_eq!(settings.environment.provider, EnvironmentProvider::Docker);
     assert_eq!(
-        settings.environment.image.reference.as_deref(),
+        settings.environment.image.docker.as_deref(),
         Some("buildpack-deps:noble")
     );
     assert_eq!(settings.environment.resources.cpu, Some(2));
@@ -89,7 +89,7 @@ preserve = true
 provider = "daytona"
 
 [environments.fabro-dev.image]
-ref = "fabro-v11"
+dockerfile = "FROM ubuntu:24.04"
 
 [environments.fabro-dev.resources]
 cpu = 8
@@ -123,7 +123,8 @@ NODE_ENV = "development"
 
     assert_eq!(environment.id, "fabro-dev");
     assert_eq!(environment.provider, EnvironmentProvider::Daytona);
-    assert_eq!(environment.image.reference.as_deref(), Some("fabro-v11"));
+    assert_eq!(environment.image.docker.as_deref(), None);
+    assert!(environment.image.dockerfile.is_some());
     assert_eq!(environment.resources.cpu, Some(8));
     assert_eq!(
         environment.resources.memory.map(|size| size.as_bytes()),
@@ -390,7 +391,7 @@ provider = "local"
 
     assert_eq!(settings.environment.id, "host");
     assert_eq!(settings.environment.provider, EnvironmentProvider::Local);
-    assert!(settings.environment.image.reference.is_none());
+    assert!(settings.environment.image.docker.is_none());
 }
 
 #[test]
@@ -465,8 +466,8 @@ mode = "block"
 }
 
 #[test]
-fn daytona_dockerfile_without_image_ref_errors() {
-    let err = WorkflowSettingsBuilder::from_toml(
+fn daytona_dockerfile_without_image_ref_resolves() {
+    let settings = WorkflowSettingsBuilder::from_toml(
         r#"
 _version = 1
 
@@ -480,12 +481,55 @@ provider = "daytona"
 dockerfile = { path = "Dockerfile" }
 "#,
     )
-    .expect_err("daytona dockerfile needs a snapshot name");
+    .expect("daytona dockerfile should not need a user-supplied snapshot name")
+    .run;
+
+    assert_eq!(settings.environment.provider, EnvironmentProvider::Daytona);
+    assert!(settings.environment.image.docker.is_none());
+    assert!(settings.environment.image.dockerfile.is_some());
+}
+
+#[test]
+fn daytona_image_docker_errors() {
+    let err = WorkflowSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[run.environment]
+id = "cloud"
+
+[environments.cloud]
+provider = "daytona"
+
+[environments.cloud.image]
+docker = "ubuntu:24.04"
+"#,
+    )
+    .expect_err("daytona should reject docker image selection");
 
     let message = err.to_string();
     assert!(
-        message.contains("image.ref"),
-        "expected daytona dockerfile/image.ref diagnostic, got: {message}"
+        message.contains("image.docker") && message.contains("daytona"),
+        "expected daytona image.docker diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn image_ref_is_rejected_as_unknown_field() {
+    let err = WorkflowSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[run.environment.image]
+ref = "ubuntu:24.04"
+"#,
+    )
+    .expect_err("image.ref should not be accepted");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("unknown field") && message.contains("ref"),
+        "expected unknown field diagnostic for image.ref, got: {message}"
     );
 }
 

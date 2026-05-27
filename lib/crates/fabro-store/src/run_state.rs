@@ -267,6 +267,8 @@ impl RunProjectionReducer for RunProjection {
                     runtime:  None,
                 });
                 sandbox.provider = props.provider;
+                sandbox.image.clone_from(&props.image);
+                sandbox.snapshot.clone_from(&props.snapshot);
                 sandbox.runtime = Some(RunSandboxRuntime {
                     id:                props.id.clone(),
                     working_directory: props.working_directory.clone(),
@@ -778,6 +780,7 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
         graph: props.graph.clone(),
         graph_source: props.workflow_source.clone(),
         workflow_slug: props.workflow_slug.clone(),
+        automation: props.automation.clone(),
         source_directory: props.source_directory.clone(),
         labels,
         provenance: props.provenance.clone(),
@@ -800,12 +803,10 @@ fn planned_sandbox(settings: &RunEnvironmentSettings) -> RunSandbox {
     RunSandbox {
         provider,
         image: (settings.provider == EnvironmentProvider::Docker)
-            .then(|| settings.image.reference.clone())
+            .then(|| settings.image.docker.clone())
             .flatten()
             .filter(|image| !image.is_empty()),
-        snapshot: (settings.provider == EnvironmentProvider::Daytona)
-            .then(|| settings.image.reference.clone())
-            .flatten(),
+        snapshot: None,
         runtime: None,
     }
 }
@@ -936,7 +937,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
             edge_count: i64::try_from(state.spec.graph.edges.len())
                 .expect("graph edge count should fit in i64"),
         },
-        automation: None,
+        automation: state.spec.automation.clone(),
         repository: Some(RepositoryRef::from_origin_and_source(
             repo_origin_url,
             source_directory.as_deref(),
@@ -1246,12 +1247,13 @@ mod tests {
         RunCompletedProps, RunControlEffectProps, StageCompletedProps, StageFailedProps,
         StagePromptProps, StageRetryingProps, StageStartedProps,
     };
+    use fabro_types::settings::run::{DockerfileSource, EnvironmentProvider};
     use fabro_types::{
-        AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
-        CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
-        FailureReason, Graph, McpServerStatus, Outcome, PendingReason, PermissionLevel,
-        PullRequestLink, QuestionType, ReasoningEffort, RunApprovalState, RunBlobId,
-        RunControlAction, RunDiff, RunEvent, RunSize, RunSpec, RunStatus, Speed,
+        AgentBackend, AutomationRef, BilledModelUsage, BilledTokenCounts, BlockedReason,
+        Checkpoint, CheckpointRecord, CommandTermination, EventBody, FailureCategory,
+        FailureDetail, FailureReason, Graph, McpServerStatus, Outcome, PendingReason,
+        PermissionLevel, PullRequestLink, QuestionType, ReasoningEffort, RunApprovalState,
+        RunBlobId, RunControlAction, RunDiff, RunEvent, RunSize, RunSpec, RunStatus, Speed,
         StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
         StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowWarning,
         StageModelUsage, StageOutcome, StageState, SubAgentStatus, SuccessReason, WorkflowSettings,
@@ -1334,6 +1336,7 @@ mod tests {
             graph:            Graph::new("test"),
             graph_source:     Some("digraph test {}".to_string()),
             workflow_slug:    None,
+            automation:       None,
             source_directory: None,
             labels:           HashMap::new(),
             provenance:       None,
@@ -1372,6 +1375,50 @@ mod tests {
     }
 
     #[test]
+    fn planned_sandbox_uses_docker_image_and_hides_daytona_snapshot_until_init() {
+        let mut docker = WorkflowSettings::default().run.environment;
+        docker.provider = EnvironmentProvider::Docker;
+        docker.image.docker = Some("ubuntu:24.04".to_string());
+
+        let planned_docker = super::planned_sandbox(&docker);
+        assert_eq!(planned_docker.image.as_deref(), Some("ubuntu:24.04"));
+        assert_eq!(planned_docker.snapshot, None);
+
+        let mut daytona = WorkflowSettings::default().run.environment;
+        daytona.provider = EnvironmentProvider::Daytona;
+        daytona.image.dockerfile = Some(DockerfileSource::Inline("FROM ubuntu:24.04".to_string()));
+
+        let planned_daytona = super::planned_sandbox(&daytona);
+        assert_eq!(planned_daytona.image, None);
+        assert_eq!(planned_daytona.snapshot, None);
+    }
+
+    #[test]
+    fn sandbox_initialized_updates_image_and_snapshot_projection_fields() {
+        let mut state = initialized_projection();
+        state
+            .apply_event(&test_raw_event(
+                1,
+                "sandbox.initialized",
+                &json!({
+                    "provider": "daytona",
+                    "id": "fabro-run-sandbox",
+                    "working_directory": "/home/daytona/workspace",
+                    "snapshot": "fabro-11111111-2222-8333-8444-555555555555"
+                }),
+                None,
+            ))
+            .unwrap();
+
+        let sandbox = state.sandbox.expect("sandbox should be projected");
+        assert_eq!(sandbox.image, None);
+        assert_eq!(
+            sandbox.snapshot.as_deref(),
+            Some("fabro-11111111-2222-8333-8444-555555555555")
+        );
+    }
+
+    #[test]
     fn legacy_run_created_projects_retried_from_none() {
         let event = test_raw_event(
             1,
@@ -1390,6 +1437,35 @@ mod tests {
         assert_eq!(
             build_summary(&projection, &fixtures::RUN_1).retried_from,
             None
+        );
+    }
+
+    #[test]
+    fn run_created_projects_automation_into_spec_and_summary() {
+        let automation = AutomationRef {
+            id:         "nightly".to_string(),
+            name:       Some("Nightly".to_string()),
+            trigger_id: Some("schedule_1".to_string()),
+        };
+        let event = test_raw_event(
+            1,
+            "run.created",
+            &json!({
+                "settings": WorkflowSettings::default(),
+                "graph": Graph::new("test"),
+                "automation": automation,
+                "labels": {},
+                "run_dir": "/tmp/run"
+            }),
+            None,
+        );
+
+        let projection = RunProjection::apply_events(&[event]).unwrap();
+
+        assert_eq!(projection.spec.automation, Some(automation.clone()));
+        assert_eq!(
+            build_summary(&projection, &fixtures::RUN_1).automation,
+            Some(automation)
         );
     }
 
@@ -2602,6 +2678,7 @@ mod tests {
             graph:            fabro_types::Graph::new("test"),
             graph_source:     None,
             workflow_slug:    Some("test".to_string()),
+            automation:       None,
             source_directory: Some("/tmp/repo".to_string()),
             git:              None,
             labels:           HashMap::new(),
@@ -2627,6 +2704,7 @@ mod tests {
             graph:            fabro_types::Graph::new("GraphName"),
             graph_source:     None,
             workflow_slug:    Some("release-flow".to_string()),
+            automation:       None,
             source_directory: Some("/tmp/repo".to_string()),
             git:              None,
             labels:           HashMap::new(),

@@ -13,7 +13,7 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, ProviderId};
 use fabro_store::Database;
 use fabro_types::{
-    ForkSourceRef, GitContext, ManifestPath, RunId, RunProvenance, WorkflowSettings,
+    AutomationRef, ForkSourceRef, GitContext, ManifestPath, RunId, RunProvenance, WorkflowSettings,
 };
 use fabro_util::json::normalize_json_value;
 use tokio::task::spawn_blocking;
@@ -41,6 +41,7 @@ pub struct CreateRunInput {
     pub submitted_manifest_bytes: Option<Vec<u8>>,
     pub run_id: Option<RunId>,
     pub title: Option<String>,
+    pub automation: Option<AutomationRef>,
     pub git: Option<GitContext>,
     pub fork_source_ref: Option<ForkSourceRef>,
     pub parent_id: Option<RunId>,
@@ -68,6 +69,7 @@ struct PersistCreateOptions {
     source_name:          Option<String>,
     labels:               HashMap<String, String>,
     source_directory:     Option<String>,
+    automation:           Option<AutomationRef>,
     git:                  Option<GitContext>,
     fork_source_ref:      Option<ForkSourceRef>,
     provenance:           Option<RunProvenance>,
@@ -102,6 +104,7 @@ pub async fn create(
         submitted_manifest_bytes,
         run_id,
         title,
+        automation,
         git,
         fork_source_ref,
         parent_id,
@@ -144,6 +147,7 @@ pub async fn create(
                 source_name,
                 labels,
                 source_directory,
+                automation,
                 git,
                 fork_source_ref,
                 provenance,
@@ -240,6 +244,7 @@ async fn persist_created_run(
             run_dir: persisted.run_dir().display().to_string(),
             source_directory: record.source_directory.clone(),
             workflow_slug: record.workflow_slug.clone(),
+            automation: record.automation.clone(),
             db_prefix: None,
             provenance: record.provenance.clone(),
             manifest_blob,
@@ -356,6 +361,7 @@ fn persist_validated(
         source_name: _,
         labels,
         source_directory,
+        automation,
         git,
         fork_source_ref,
         provenance,
@@ -379,6 +385,7 @@ fn persist_validated(
         graph: validated.graph().clone(),
         graph_source: Some(validated.source().to_string()),
         workflow_slug,
+        automation,
         source_directory,
         labels,
         provenance,
@@ -1096,6 +1103,7 @@ mod tests {
                 submitted_manifest_bytes: None,
                 run_id: None,
                 title: None,
+                automation: None,
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
@@ -1157,6 +1165,7 @@ mod tests {
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
                 title: None,
+                automation: None,
                 git: Some(fabro_types::GitContext {
                     origin_url:   String::new(),
                     branch:       "main".to_string(),
@@ -1274,6 +1283,7 @@ mod tests {
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_2),
                 title: None,
+                automation: None,
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
@@ -1313,6 +1323,7 @@ mod tests {
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_2),
                 title: None,
+                automation: None,
                 git: Some(fabro_types::GitContext {
                     origin_url:   "https://github.com/acme/widgets".to_string(),
                     branch:       String::new(),
@@ -1371,6 +1382,11 @@ mod tests {
             Duration::from_millis(1),
             None,
         ));
+        let automation = fabro_types::AutomationRef {
+            id:         "nightly".to_string(),
+            name:       Some("Nightly".to_string()),
+            trigger_id: Some("schedule_1".to_string()),
+        };
         let created = create(
             store.as_ref(),
             CreateRunInput {
@@ -1386,6 +1402,7 @@ mod tests {
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_3),
                 title: None,
+                automation: Some(automation.clone()),
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
@@ -1400,8 +1417,14 @@ mod tests {
         .unwrap();
         let run_store = store.open_run_reader(&created.run_id).await.unwrap();
         let events = run_store.list_events().await.unwrap();
+        let state = run_store.state().await.unwrap();
 
         assert_eq!(events.first().unwrap().event.event_name(), "run.created");
+        assert_eq!(
+            created.persisted.run_spec().automation,
+            Some(automation.clone())
+        );
+        assert_eq!(state.spec.automation, Some(automation));
     }
 
     #[tokio::test]
@@ -1432,6 +1455,7 @@ mod tests {
                 submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_64),
                 title: None,
+                automation: None,
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,

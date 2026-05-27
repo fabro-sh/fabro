@@ -281,6 +281,7 @@ mod tests {
                 run_dir:          "/tmp".to_string(),
                 source_directory: None,
                 workflow_slug:    None,
+                automation:       None,
                 db_prefix:        None,
                 provenance:       None,
                 manifest_blob:    None,

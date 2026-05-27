@@ -47,6 +47,35 @@ fn run_event_round_trips_run_created_with_web_url() {
 }
 
 #[test]
+fn run_event_round_trips_sandbox_initialized_image_and_snapshot() {
+    assert_run_event_round_trip(json!({
+        "id": "evt_sandbox_initialized",
+        "ts": "2026-04-29T12:00:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "sandbox.initialized",
+        "properties": {
+            "provider": "daytona",
+            "id": "fabro-run-sandbox",
+            "working_directory": "/home/daytona/workspace",
+            "snapshot": "fabro-11111111-2222-8333-8444-555555555555"
+        }
+    }));
+
+    assert_run_event_round_trip(json!({
+        "id": "evt_sandbox_initialized_docker",
+        "ts": "2026-04-29T12:01:00Z",
+        "run_id": fixtures::RUN_1,
+        "event": "sandbox.initialized",
+        "properties": {
+            "provider": "docker",
+            "id": "container-id",
+            "working_directory": "/workspace",
+            "image": "ubuntu:24.04"
+        }
+    }));
+}
+
+#[test]
 fn run_event_round_trips_run_interrupt() {
     let value = json!({
         "id": "evt_run_interrupt",

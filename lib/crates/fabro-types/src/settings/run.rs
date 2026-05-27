@@ -256,7 +256,7 @@ where
     F: FnMut(&str) -> Option<String>,
 {
     substitute_string(&mut environment.id, lookup)?;
-    substitute_option_string(&mut environment.image.reference, lookup)?;
+    substitute_option_string(&mut environment.image.docker, lookup)?;
     substitute_dockerfile_source(&mut environment.image.dockerfile, lookup)?;
     substitute_string_vec(&mut environment.network.allow, lookup)?;
     substitute_string_map(&mut environment.labels, lookup)?;
@@ -418,7 +418,7 @@ mod run_namespace_variable_substitution_tests {
             },
             environment: RunEnvironmentSettings {
                 image: EnvironmentImageSettings {
-                    reference:  Some("registry.example/{{ vars.ENV }}:latest".to_string()),
+                    docker:     Some("registry.example/{{ vars.ENV }}:latest".to_string()),
                     dockerfile: Some(DockerfileSource::Inline(
                         "FROM registry.example/base:{{ vars.ENV }}".to_string(),
                     )),
@@ -450,7 +450,7 @@ mod run_namespace_variable_substitution_tests {
 
         assert_eq!(run.checkpoint.exclude_globs, vec!["tmp/prod/**"]);
         assert_eq!(
-            run.environment.image.reference.as_deref(),
+            run.environment.image.docker.as_deref(),
             Some("registry.example/prod:latest")
         );
         assert_eq!(
@@ -755,8 +755,7 @@ pub enum EnvironmentNetworkMode {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentImageSettings {
-    #[serde(rename = "ref")]
-    pub reference:  Option<String>,
+    pub docker:     Option<String>,
     pub dockerfile: Option<DockerfileSource>,
 }
 
