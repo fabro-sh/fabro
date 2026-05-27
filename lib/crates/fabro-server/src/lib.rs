@@ -9,6 +9,11 @@
 )]
 
 pub mod auth;
+#[allow(
+    dead_code,
+    reason = "Automation scheduler wiring will call the materializer; issue #398 adds the shared core first."
+)]
+mod automation_materializer;
 mod canonical_host;
 mod canonical_origin;
 pub mod csp;

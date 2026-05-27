@@ -9,6 +9,7 @@ use std::sync::{Arc as StdArc, Mutex as StdMutex};
 use axum::body::Body;
 use axum::http::{Method, Request, header};
 use chrono::{Duration as ChronoDuration, Utc};
+use fabro_automation::{AutomationId, AutomationTarget};
 use fabro_config::ServerSettingsBuilder;
 use fabro_config::bind::Bind;
 use fabro_interview::{
@@ -40,6 +41,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{Layer, Registry};
 
 use super::*;
+use crate::automation_materializer::AutomationRunMaterializeInput;
 use crate::github_webhooks::compute_signature;
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 use crate::test_support::*;
@@ -1662,6 +1664,7 @@ fn slack_app_state_with_secret_sources(
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        automation_materializer_override: None,
     })
     .expect("slack test app state should build")
 }
@@ -1761,6 +1764,7 @@ fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        automation_materializer_override: None,
     })
     .expect("slack disabled test app state should build");
 
@@ -2065,6 +2069,7 @@ methods = ["dev-token"]
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        automation_materializer_override: None,
     }) else {
         panic!("build_app_state should require SESSION_SECRET")
     };
@@ -2192,6 +2197,7 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        automation_materializer_override: None,
     })
 }
 
@@ -2865,6 +2871,155 @@ async fn post_run_manifest(app: &Router, manifest: serde_json::Value) -> serde_j
         .await
         .unwrap();
     response_json!(response, StatusCode::CREATED).await
+}
+
+#[tokio::test]
+async fn post_runs_create_regression_keeps_api_behavior_without_automation_metadata() {
+    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let mut manifest = minimal_manifest_json(MINIMAL_DOT);
+    manifest["title"] = json!("API title");
+
+    let body = post_run_manifest(&app, manifest).await;
+    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
+
+    assert_eq!(body["title"], "API title");
+    assert!(body["automation"].is_null());
+    assert_eq!(body["lifecycle"]["status"]["kind"], "submitted");
+    let summary = state
+        .store
+        .get_cached_summary(&run_id, Utc::now())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(summary.automation.is_none());
+}
+
+#[tokio::test]
+async fn create_run_from_manifest_helper_persists_without_automation_metadata() {
+    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
+    let manifest: RunManifest = serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
+    let submitted_manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+    let run_id = RunId::new();
+
+    let response = Box::pin(handler::runs::create_run_from_manifest(
+        Arc::clone(&state),
+        handler::runs::CreateRunFromManifestRequest {
+            manifest,
+            submitted_manifest_bytes,
+            explicit_run_id: Some(run_id),
+            explicit_title_supplied: false,
+            actor: Principal::System {
+                system_kind: SystemActorKind::Engine,
+            },
+            headers: HeaderMap::new(),
+            automation: None,
+        },
+    ))
+    .await;
+
+    let body = response_json!(response, StatusCode::CREATED).await;
+    assert_eq!(body["id"], run_id.to_string());
+    assert!(body["automation"].is_null());
+    let summary = state
+        .store
+        .get_cached_summary(&run_id, Utc::now())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(summary.automation.is_none());
+}
+
+#[tokio::test]
+async fn create_run_from_manifest_helper_persists_automation_metadata() {
+    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
+    let manifest: RunManifest = serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
+    let submitted_manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+    let run_id = RunId::new();
+    let automation = fabro_types::AutomationRef {
+        id:         "nightly".to_string(),
+        name:       Some("Nightly".to_string()),
+        trigger_id: Some("schedule".to_string()),
+    };
+
+    let response = Box::pin(handler::runs::create_run_from_manifest(
+        Arc::clone(&state),
+        handler::runs::CreateRunFromManifestRequest {
+            manifest,
+            submitted_manifest_bytes,
+            explicit_run_id: Some(run_id),
+            explicit_title_supplied: false,
+            actor: Principal::System {
+                system_kind: SystemActorKind::Engine,
+            },
+            headers: HeaderMap::new(),
+            automation: Some(automation.clone()),
+        },
+    ))
+    .await;
+
+    let body = response_json!(response, StatusCode::CREATED).await;
+    assert_eq!(body["automation"]["id"], automation.id);
+    assert_eq!(
+        body["automation"]["name"],
+        automation.name.as_deref().unwrap()
+    );
+    assert_eq!(
+        body["automation"]["trigger_id"],
+        automation.trigger_id.as_deref().unwrap()
+    );
+    let summary = state
+        .store
+        .get_cached_summary(&run_id, Utc::now())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(summary.automation, Some(automation));
+}
+
+#[tokio::test]
+async fn fake_automation_materializer_injection_captures_input_and_returns_manifest() {
+    let materialized_manifest: RunManifest =
+        serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
+    let fake = TestAutomationRunMaterializer::succeed(
+        materialized_manifest.clone(),
+        b"{\"fake\":true}".to_vec(),
+    );
+    let state = TestAppStateBuilder::new()
+        .automation_materializer(fake.clone())
+        .build();
+    let run_id = RunId::new();
+    let user_settings_path = PathBuf::from("/tmp/fabro/settings.toml");
+    let temp_root = PathBuf::from("/tmp/fabro/automation");
+    let target = AutomationTarget {
+        repository:   "fabro-sh/fabro".to_string(),
+        ref_selector: "main".to_string(),
+        workflow:     "demo".to_string(),
+    };
+
+    let output = state
+        .materialize_automation_run(AutomationRunMaterializeInput {
+            automation_id: AutomationId::new("nightly").unwrap(),
+            target: target.clone(),
+            run_id,
+            user_settings_path: user_settings_path.clone(),
+            temp_root: temp_root.clone(),
+        })
+        .await
+        .expect("fake materializer should succeed");
+
+    assert_eq!(
+        serde_json::to_value(&output.manifest).unwrap(),
+        serde_json::to_value(&materialized_manifest).unwrap()
+    );
+    assert_eq!(output.submitted_manifest_bytes, b"{\"fake\":true}".to_vec());
+    let captured = fake.captured_inputs();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].automation_id, "nightly");
+    assert_eq!(captured[0].target, target);
+    assert_eq!(captured[0].run_id, run_id);
+    assert_eq!(captured[0].user_settings_path, user_settings_path);
+    assert_eq!(captured[0].temp_root, temp_root);
 }
 
 async fn mock_openai_title_response<'a>(
@@ -5289,6 +5444,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        automation_materializer_override: None,
     };
     let state = build_app_state(config).expect("test app state should build");
     if let Some(token) = token {

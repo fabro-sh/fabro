@@ -69,6 +69,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
 anyhow.workspace = true
+async-trait.workspace = true
 clap.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
@@ -110,7 +111,6 @@ http-body-util = "0.1"
 httpmock = "0.8"
 serde_yaml = "0.9"
 tracing-subscriber.workspace = true
-async-trait.workspace = true
 tokio-util.workspace = true
 fabro-macros = { path = "../fabro-macros" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }

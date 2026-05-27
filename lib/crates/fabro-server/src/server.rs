@@ -140,6 +140,10 @@ use tracing::{Instrument, debug, error, info, warn};
 use ulid::Ulid;
 
 use crate::auth::{self, GithubEndpoints, auth_translation_middleware, demo_routing_middleware};
+use crate::automation_materializer::{
+    AutomationRunMaterializeError, AutomationRunMaterializeInput, AutomationRunMaterialized,
+    AutomationRunMaterializer, ProductionAutomationRunMaterializer,
+};
 use crate::canonical_origin::resolve_canonical_origin;
 use crate::error::ApiError;
 use crate::github_webhooks::{
@@ -1009,6 +1013,8 @@ pub struct AppState {
     session_runtimes: SessionRuntimeManager,
     artifact_store: ArtifactStore,
     automation_store: Arc<AutomationStore>,
+    #[cfg(any(test, feature = "test-support"))]
+    automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
     worker_tokens: WorkerTokenKeys,
     started_at: Instant,
     resource_sampler: resource_sampler::ResourceSampler,
@@ -1048,6 +1054,33 @@ type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
 impl AppState {
     pub(crate) fn automation_store(&self) -> &AutomationStore {
         &self.automation_store
+    }
+
+    #[allow(
+        dead_code,
+        reason = "Automation scheduler wiring will call this after issue #398's materialization core."
+    )]
+    pub(crate) async fn materialize_automation_run(
+        &self,
+        input: AutomationRunMaterializeInput,
+    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError> {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(materializer) = self.automation_materializer_override.as_ref() {
+            return materializer.materialize(input).await;
+        }
+
+        let settings = self.server_settings();
+        let credentials = self
+            .github_credentials(&settings.server.integrations.github)
+            .ok()
+            .flatten();
+        ProductionAutomationRunMaterializer::new(
+            credentials,
+            self.github_api_base_url.clone(),
+            self.http_client.clone(),
+        )
+        .materialize(input)
+        .await
     }
 }
 
@@ -1130,21 +1163,23 @@ async fn lock_pull_request_create(
 }
 
 pub(crate) struct AppStateConfig {
-    pub(crate) resolved_settings:         ResolvedAppStateSettings,
+    pub(crate) resolved_settings: ResolvedAppStateSettings,
     pub(crate) registry_factory_override: Option<Box<RegistryFactoryOverride>>,
-    pub(crate) max_concurrent_runs:       usize,
-    pub(crate) store:                     Arc<Database>,
-    pub(crate) artifact_store:            ArtifactStore,
-    pub(crate) vault_path:                PathBuf,
-    pub(crate) variables_path:            PathBuf,
-    pub(crate) preloaded_vault:           Option<Vault>,
-    pub(crate) server_secrets:            ServerSecrets,
-    pub(crate) env_lookup:                EnvLookup,
-    pub(crate) github_api_base_url:       Option<String>,
-    pub(crate) active_config_path:        PathBuf,
-    pub(crate) http_client:               Option<fabro_http::HttpClient>,
+    pub(crate) max_concurrent_runs: usize,
+    pub(crate) store: Arc<Database>,
+    pub(crate) artifact_store: ArtifactStore,
+    pub(crate) vault_path: PathBuf,
+    pub(crate) variables_path: PathBuf,
+    pub(crate) preloaded_vault: Option<Vault>,
+    pub(crate) server_secrets: ServerSecrets,
+    pub(crate) env_lookup: EnvLookup,
+    pub(crate) github_api_base_url: Option<String>,
+    pub(crate) active_config_path: PathBuf,
+    pub(crate) http_client: Option<fabro_http::HttpClient>,
     pub(crate) sandbox_provider_registry: Option<SandboxProviderRegistry>,
-    pub(crate) shutdown:                  CancellationToken,
+    pub(crate) shutdown: CancellationToken,
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
 }
 
 #[derive(Clone)]
@@ -2195,6 +2230,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         http_client,
         sandbox_provider_registry,
         shutdown,
+        #[cfg(any(test, feature = "test-support"))]
+        automation_materializer_override,
     } = config;
 
     let automation_dir = automation_dir_for_active_config(&active_config_path);
@@ -2285,6 +2322,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         session_runtimes: SessionRuntimeManager::new(),
         artifact_store,
         automation_store,
+        #[cfg(any(test, feature = "test-support"))]
+        automation_materializer_override,
         worker_tokens,
         started_at: Instant::now(),
         resource_sampler: resource_sampler::ResourceSampler::new(),

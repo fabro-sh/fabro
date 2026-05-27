@@ -29,6 +29,10 @@ use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
 use crate::auth;
+use crate::automation_materializer::AutomationRunMaterializer;
+pub use crate::automation_materializer::{
+    TestAutomationRunMaterializeInput, TestAutomationRunMaterializer,
+};
 use crate::ip_allowlist::IpAllowlistConfig;
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 #[cfg(test)]
@@ -71,6 +75,7 @@ pub struct TestAppStateBuilder {
     server_secret_env:         HashMap<String, String>,
     env_lookup:                EnvLookup,
     llm_catalog_settings:      LlmCatalogSettings,
+    automation_materializer:   Option<Arc<dyn AutomationRunMaterializer>>,
 }
 
 impl Default for TestAppStateBuilder {
@@ -89,6 +94,7 @@ impl Default for TestAppStateBuilder {
             server_secret_env:         HashMap::new(),
             env_lookup:                default_env_lookup(),
             llm_catalog_settings:      LlmCatalogSettings::default(),
+            automation_materializer:   None,
         }
     }
 }
@@ -142,6 +148,11 @@ impl TestAppStateBuilder {
 
     pub fn llm_catalog_settings(mut self, settings: LlmCatalogSettings) -> Self {
         self.llm_catalog_settings = settings;
+        self
+    }
+
+    pub fn automation_materializer(mut self, materializer: TestAutomationRunMaterializer) -> Self {
+        self.automation_materializer = Some(materializer.into_materializer());
         self
     }
 
@@ -240,6 +251,7 @@ impl TestAppStateBuilder {
             ),
             sandbox_provider_registry: self.sandbox_provider_registry,
             shutdown: CancellationToken::new(),
+            automation_materializer_override: self.automation_materializer,
         })
     }
 }
