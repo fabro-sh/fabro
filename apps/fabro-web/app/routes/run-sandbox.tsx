@@ -10,9 +10,16 @@ import {
   formatBytesAsMemory,
   formatCpuCores,
 } from "../lib/format";
-import { useRunSandboxDetails } from "../lib/queries";
+import { useRunSandboxDetails, useRunState } from "../lib/queries";
+import {
+  sandboxInstance,
+  sandboxIsReady,
+  sandboxLifecycleKind,
+  sandboxRuntime,
+} from "../lib/run-sandbox-lifecycle";
 import { SANDBOX_STATE_DISPLAY } from "../lib/sandbox-state";
 import type {
+  RunSandbox,
   SandboxDetails,
   SandboxNetwork,
   SandboxResources,
@@ -259,9 +266,56 @@ function DetailsColumn({ details }: { details: SandboxDetails | null }) {
   );
 }
 
+function SandboxLifecycleStateView({
+  sandbox,
+  compact = false,
+}: {
+  sandbox: RunSandbox | null | undefined;
+  compact?: boolean;
+}) {
+  const kind = sandboxLifecycleKind(sandbox);
+  const failure = sandbox?.failure ?? null;
+  const title =
+    kind === "planned"
+      ? "Not created"
+      : kind === "initializing"
+        ? "Initializing"
+        : kind === "failed"
+          ? "Failed"
+          : "No sandbox";
+  const description =
+    kind === "planned"
+      ? "Run sandbox was not created."
+      : kind === "initializing"
+        ? "The sandbox is being created."
+        : kind === "failed"
+          ? failure?.error ?? "Sandbox creation failed."
+          : "This run has no sandbox or its provider does not expose details.";
+
+  const action = failure?.causes?.length ? (
+        <div className={`mt-3 space-y-1 text-xs text-fg-muted ${compact ? "" : "max-w-lg"}`}>
+          {failure.causes.map((cause) => (
+            <p key={cause}>{cause}</p>
+          ))}
+        </div>
+      ) : null;
+
+  return <EmptyState title={title} description={description} action={action} />;
+}
+
 export default function RunSandbox({ params }: { params: { id: string } }) {
-  const sandboxQuery = useRunSandboxDetails(params.id);
-  const provider = sandboxQuery.data?.sandbox.provider ?? null;
+  const runStateQuery = useRunState(params.id);
+  const lifecycleSandbox = runStateQuery.data?.sandbox ?? null;
+  const lifecycleReady = sandboxIsReady(lifecycleSandbox);
+  const shouldLoadDetails =
+    lifecycleReady || (!lifecycleSandbox && !runStateQuery.isLoading);
+  const sandboxQuery = useRunSandboxDetails(shouldLoadDetails ? params.id : undefined);
+  const details = sandboxQuery.data ?? null;
+  const provider =
+    details?.sandbox.provider
+    ?? sandboxInstance(lifecycleSandbox)?.provider
+    ?? null;
+  const ready = lifecycleReady || !!details;
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedMode = useMemo(
     () => normalizeSandboxMode(searchParams.get("mode")),
@@ -288,14 +342,14 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
   }, [setSearchParams]);
 
   const modeToggle = useMemo(
-    () => (
+    () => ready ? (
       <ModeToggle
         mode={mode}
         onChange={setMode}
         vncAvailable={vncTabAvailable(provider)}
       />
-    ),
-    [mode, provider, setMode],
+    ) : null,
+    [mode, provider, ready, setMode],
   );
 
   // The outer flex spans from the tab bar's bottom border down to the
@@ -307,7 +361,9 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
       <aside
         className={`w-80 shrink-0 min-h-0 overflow-y-auto pt-3 pr-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
       >
-        {sandboxQuery.error ? (
+        {!ready && lifecycleSandbox ? (
+          <SandboxLifecycleStateView sandbox={lifecycleSandbox} compact />
+        ) : sandboxQuery.error ? (
           <ErrorState
             title="Sandbox unavailable"
             description={
@@ -317,14 +373,18 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
             }
           />
         ) : sandboxQuery.isLoading && !sandboxQuery.data ? null : (
-          <DetailsColumn details={sandboxQuery.data ?? null} />
+          <DetailsColumn details={details} />
         )}
       </aside>
       <div className="flex min-w-0 min-h-0 flex-1 flex-col border-l border-line">
         <div
           className={`flex min-h-0 flex-1 flex-col pt-3 pl-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
         >
-          {(() => {
+          {!ready ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <SandboxLifecycleStateView sandbox={lifecycleSandbox} />
+            </div>
+          ) : (() => {
             if (mode === "terminal") {
               return <TerminalView runId={params.id} leading={modeToggle} />;
             }
@@ -332,7 +392,10 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
               return <ServicesPanel runId={params.id} leading={modeToggle} />;
             }
             if (mode === "filesystem") {
-              const rootDirectory = sandboxQuery.data?.sandbox.runtime?.working_directory ?? null;
+              const rootDirectory =
+                details?.sandbox?.runtime?.working_directory
+                ?? sandboxRuntime(lifecycleSandbox)?.working_directory
+                ?? null;
               return (
                 <FilesystemPanel
                   key={rootDirectory ?? "default-root"}

@@ -13,6 +13,7 @@ import {
 } from "../lib/format";
 import { principalDisplay } from "../lib/principal-display";
 import { useRun, useRunArtifacts, useRunSandboxDetails } from "../lib/queries";
+import { sandboxIsReady, sandboxLifecycleKind } from "../lib/run-sandbox-lifecycle";
 import { SANDBOX_STATE_DISPLAY } from "../lib/sandbox-state";
 import { Tooltip } from "./ui";
 
@@ -83,6 +84,52 @@ function SandboxValue({
   );
 }
 
+const SANDBOX_LIFECYCLE_DISPLAY = {
+  planned: {
+    label:       "Not created",
+    description: "The sandbox instance was not created.",
+    dot:         "bg-fg-muted",
+    text:        "text-fg-muted",
+  },
+  initializing: {
+    label:       "Initializing",
+    description: "The sandbox is being created.",
+    dot:         "bg-amber",
+    text:        "text-amber",
+  },
+  ready: {
+    label:       "Ready",
+    description: "The sandbox instance is available.",
+    dot:         "bg-teal-500",
+    text:        "text-teal-500",
+  },
+  failed: {
+    label:       "Failed",
+    description: "Sandbox creation failed.",
+    dot:         "bg-coral",
+    text:        "text-coral",
+  },
+} as const;
+
+function SandboxLifecycleValue({
+  kind,
+}: {
+  kind: keyof typeof SANDBOX_LIFECYCLE_DISPLAY;
+}) {
+  const display = SANDBOX_LIFECYCLE_DISPLAY[kind];
+  return (
+    <div className="flex items-center gap-2">
+      <Tooltip label={display.description}>
+        <span
+          aria-hidden="true"
+          className={`size-2 rounded-full ${display.dot}`}
+        />
+      </Tooltip>
+      <span className={`${VALUE_CLASS} ${display.text}`}>{display.label}</span>
+    </div>
+  );
+}
+
 export function RunSummaryPanelView({
   run,
   runLoading,
@@ -95,6 +142,7 @@ export function RunSummaryPanelView({
   const created = run?.created_by ? principalDisplay(run.created_by) : null;
   const diff = run?.diff ?? null;
   const cost = formatUsdMicros(run?.billing?.total_usd_micros);
+  const sandboxKind = sandboxLifecycleKind(run?.sandbox);
 
   return (
     <div className="rounded-md border border-line bg-panel/60 px-6 py-4">
@@ -135,6 +183,8 @@ export function RunSummaryPanelView({
             <Skeleton widthClass="w-24" />
           ) : sandboxState ? (
             <SandboxValue state={sandboxState} resources={sandboxResources} />
+          ) : sandboxKind ? (
+            <SandboxLifecycleValue kind={sandboxKind} />
           ) : (
           <EmptyValue />
           )}
@@ -177,8 +227,11 @@ export function RunSummaryPanelView({
 
 export function RunSummaryPanel({ runId }: { runId: string }) {
   const runQuery = useRun(runId);
-  const sandboxQuery = useRunSandboxDetails(runId);
+  const sandboxQuery = useRunSandboxDetails(
+    sandboxIsReady(runQuery.data?.sandbox) ? runId : undefined,
+  );
   const artifactsQuery = useRunArtifacts(runId);
+  const sandboxReady = sandboxIsReady(runQuery.data?.sandbox);
 
   return (
     <RunSummaryPanelView
@@ -186,7 +239,7 @@ export function RunSummaryPanel({ runId }: { runId: string }) {
       runLoading={runQuery.isLoading && !runQuery.data}
       sandboxState={sandboxQuery.data?.state ?? null}
       sandboxResources={sandboxQuery.data?.resources ?? null}
-      sandboxLoading={sandboxQuery.isLoading && !sandboxQuery.data}
+      sandboxLoading={sandboxReady && sandboxQuery.isLoading && !sandboxQuery.data}
       artifactsCount={artifactsQuery.data?.data.length ?? null}
       artifactsLoading={artifactsQuery.isLoading && !artifactsQuery.data}
     />

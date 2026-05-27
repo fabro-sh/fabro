@@ -439,6 +439,9 @@ pub async fn initialize(
         let record = run_state.sandbox.ok_or_else(|| {
             Error::Precondition("cannot resume run: run sandbox is missing".to_string())
         })?;
+        let instance = record.instance().ok_or_else(|| {
+            Error::Precondition("cannot resume run: run sandbox was not initialized".to_string())
+        })?;
         let daytona_api_key = match &options.vault {
             Some(vault) => vault
                 .read()
@@ -448,7 +451,7 @@ pub async fn initialize(
             None => None,
         };
         let sandbox = reconnect_for_run_with_callback(
-            &record,
+            instance,
             daytona_api_key,
             Some(options.run_id),
             Some(Arc::clone(&sandbox_event_callback)),
@@ -510,11 +513,8 @@ pub async fn initialize(
     if sandbox_initialized {
         let run_sandbox = options
             .sandbox
-            .to_run_sandbox(&*sandbox, options.run_options.run_id);
-        let runtime = run_sandbox
-            .runtime
-            .as_ref()
-            .ok_or_else(|| Error::engine("initialized sandbox missing runtime metadata"))?;
+            .to_run_sandbox_instance(&*sandbox, options.run_options.run_id);
+        let runtime = &run_sandbox.runtime;
         options.emitter.emit(&Event::SandboxInitialized {
             working_directory: runtime.working_directory.clone(),
             provider:          run_sandbox.provider,

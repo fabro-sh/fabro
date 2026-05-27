@@ -9,7 +9,7 @@ use fabro_github::GitHubCredentials;
     unused_imports,
     reason = "Daytona-enabled builds persist RunId in the sandbox spec."
 )]
-use fabro_types::{RunId, RunSandbox, RunSandboxRuntime, SandboxProviderKind};
+use fabro_types::{RunId, RunSandboxInstance, RunSandboxRuntime, SandboxProviderKind};
 
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use crate::clone_source;
@@ -63,8 +63,12 @@ impl SandboxSpec {
         }
     }
 
-    /// Build a RunSandbox for persistence.
-    pub fn to_run_sandbox(&self, sandbox: &dyn Sandbox, run_id: RunId) -> RunSandbox {
+    /// Build initialized sandbox metadata for persistence.
+    pub fn to_run_sandbox_instance(
+        &self,
+        sandbox: &dyn Sandbox,
+        run_id: RunId,
+    ) -> RunSandboxInstance {
         let working_directory = sandbox.working_directory().to_string();
         let id = {
             let info = sandbox.sandbox_info();
@@ -93,11 +97,11 @@ impl SandboxSpec {
                     docker::WORKING_DIRECTORY,
                     docker::REPOS_ROOT,
                 );
-                RunSandbox {
+                RunSandboxInstance {
                     provider: self.provider(),
                     image:    (!config.image.is_empty()).then(|| config.image.clone()),
                     snapshot: None,
-                    runtime:  Some(RunSandboxRuntime {
+                    runtime:  RunSandboxRuntime {
                         id,
                         working_directory: working_directory.clone(),
                         repo_cloned,
@@ -113,7 +117,7 @@ impl SandboxSpec {
                         primary_repo_link: layout
                             .as_ref()
                             .map(|layout| layout.primary_repo_link.clone()),
-                    }),
+                    },
                 }
             }
             #[cfg(feature = "daytona")]
@@ -133,14 +137,14 @@ impl SandboxSpec {
                     daytona::WORKING_DIRECTORY,
                     daytona::REPOS_ROOT,
                 );
-                RunSandbox {
+                RunSandboxInstance {
                     provider: self.provider(),
                     image:    None,
                     snapshot: config
                         .snapshot
                         .as_ref()
                         .map(|snapshot| snapshot.name.clone()),
-                    runtime:  Some(RunSandboxRuntime {
+                    runtime:  RunSandboxRuntime {
                         id,
                         working_directory: working_directory.clone(),
                         repo_cloned,
@@ -156,14 +160,14 @@ impl SandboxSpec {
                         primary_repo_link: layout
                             .as_ref()
                             .map(|layout| layout.primary_repo_link.clone()),
-                    }),
+                    },
                 }
             }
-            _ => RunSandbox {
+            _ => RunSandboxInstance {
                 provider: self.provider(),
                 image:    None,
                 snapshot: None,
-                runtime:  Some(RunSandboxRuntime {
+                runtime:  RunSandboxRuntime {
                     id,
                     working_directory,
                     repo_cloned: None,
@@ -173,7 +177,7 @@ impl SandboxSpec {
                     repos_root: None,
                     primary_repo_path: None,
                     primary_repo_link: None,
-                }),
+                },
             },
         }
     }
@@ -288,8 +292,8 @@ mod tests {
         sandbox.working_dir = "/workspace/rack-test";
 
         let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
-        let record = spec.to_run_sandbox(&sandbox, run_id);
-        let runtime = record.runtime.expect("runtime");
+        let record = spec.to_run_sandbox_instance(&sandbox, run_id);
+        let runtime = record.runtime;
 
         assert_eq!(runtime.working_directory, "/workspace/rack-test");
         assert_eq!(runtime.repo_cloned, Some(true));
@@ -326,8 +330,8 @@ mod tests {
         sandbox.working_dir = "/workspace";
 
         let run_id: RunId = "01HY0000000000000000000000".parse().unwrap();
-        let record = spec.to_run_sandbox(&sandbox, run_id);
-        let runtime = record.runtime.expect("runtime");
+        let record = spec.to_run_sandbox_instance(&sandbox, run_id);
+        let runtime = record.runtime;
 
         assert_eq!(runtime.working_directory, "/workspace");
         assert_eq!(runtime.repo_cloned, Some(false));

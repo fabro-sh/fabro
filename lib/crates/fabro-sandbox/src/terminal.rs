@@ -1,9 +1,8 @@
 use async_trait::async_trait;
 #[cfg(feature = "daytona")]
 use fabro_static::EnvVars;
-use fabro_types::{RunId, SandboxProviderKind};
+use fabro_types::{RunId, RunSandboxInstance, SandboxProviderKind};
 
-use crate::RunSandbox;
 #[cfg(any(feature = "daytona", feature = "docker"))]
 use crate::Sandbox;
 #[cfg(feature = "daytona")]
@@ -35,17 +34,14 @@ pub trait TerminalSession: Send + Sync {
 }
 
 pub async fn open_terminal_for_run(
-    record: &RunSandbox,
+    record: &RunSandboxInstance,
     daytona_api_key: Option<String>,
     daytona_organization_id: Option<String>,
     run_id: Option<RunId>,
     size: TerminalSize,
 ) -> crate::Result<Box<dyn TerminalSession>> {
     #[cfg(any(feature = "daytona", feature = "docker"))]
-    let runtime = record
-        .runtime
-        .as_ref()
-        .ok_or_else(|| crate::Error::message("Run sandbox is missing runtime metadata"))?;
+    let runtime = &record.runtime;
     #[cfg(not(feature = "daytona"))]
     let _ = (&daytona_api_key, &daytona_organization_id);
     #[cfg(not(feature = "docker"))]

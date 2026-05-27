@@ -83,6 +83,58 @@ describe("RunSummaryPanelView", () => {
     expect(instanceText(cellAfterLabel(tree, "Sandbox"))).toBe(EMPTY_VALUE);
   });
 
+  test("renders planned sandbox on a failed run as not created", () => {
+    const tree = render({
+      run: makeRun({
+        lifecycle: { status: { kind: "failed", reason: "sandbox_init_failed" } },
+        sandbox: {
+          kind: "planned",
+          plan: { provider: "docker", image: null, snapshot: null },
+        },
+      }),
+      sandboxState: null,
+      sandboxResources: null,
+    });
+
+    expect(instanceText(cellAfterLabel(tree, "Sandbox"))).toBe("Not created");
+  });
+
+  test("renders sandbox lifecycle state before details are available", () => {
+    const tree = render({
+      run: makeRun({
+        sandbox: {
+          kind: "initializing",
+          plan: { provider: "docker", image: null, snapshot: null },
+        },
+      }),
+      sandboxState: null,
+      sandboxResources: null,
+    });
+
+    expect(instanceText(cellAfterLabel(tree, "Sandbox"))).toBe("Initializing");
+  });
+
+  test("renders failed sandbox lifecycle error before details are available", () => {
+    const tree = render({
+      run: makeRun({
+        sandbox: {
+          kind: "failed",
+          plan: { provider: "docker", image: null, snapshot: null },
+          failure: {
+            provider: "docker",
+            error: "Docker daemon unavailable",
+            causes: [],
+            duration_ms: 42,
+          },
+        },
+      }),
+      sandboxState: null,
+      sandboxResources: null,
+    });
+
+    expect(instanceText(cellAfterLabel(tree, "Sandbox"))).toBe("Failed");
+  });
+
   test("shows unavailable copy when artifacts count is zero", () => {
     const tree = render({ run: makeRun(), artifactsCount: 0 });
     expect(instanceText(cellAfterLabel(tree, "Artifacts"))).toBe(EMPTY_VALUE);
