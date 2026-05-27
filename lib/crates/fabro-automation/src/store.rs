@@ -6,7 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs;
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::{Mutex, RwLock};
-use tracing::warn;
 
 use crate::{
     Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationRevision,
@@ -21,9 +20,13 @@ pub struct AutomationStore {
 }
 
 impl AutomationStore {
-    pub async fn load(dir: impl Into<PathBuf>) -> Result<Self, AutomationStoreError> {
+    /// Synchronously load every persisted automation in `dir`. Returns an error
+    /// if any file fails to parse or validate; the caller decides startup
+    /// failure policy. Synchronous because it runs once at construction time
+    /// (typically during server startup) and is invoked from non-async code.
+    pub fn load(dir: impl Into<PathBuf>) -> Result<Self, AutomationStoreError> {
         let dir = dir.into();
-        let automations = load_automations(&dir).await?;
+        let automations = load_automations(&dir)?;
         Ok(Self {
             dir,
             mutations: Mutex::new(()),
@@ -118,48 +121,40 @@ impl AutomationStore {
     }
 }
 
-async fn load_automations(
-    dir: &Path,
-) -> Result<HashMap<AutomationId, Automation>, AutomationStoreError> {
-    let mut entries = match fs::read_dir(dir).await {
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Automation directory scan runs once at startup, before the runtime needs to make progress; std::fs avoids needing a Tokio runtime for the caller."
+)]
+fn load_automations(dir: &Path) -> Result<HashMap<AutomationId, Automation>, AutomationStoreError> {
+    let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(HashMap::new()),
         Err(err) => return Err(AutomationStoreError::io(dir, err)),
     };
 
     let mut automations = HashMap::new();
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|err| AutomationStoreError::io(dir, err))?
-    {
+    for entry in entries {
+        let entry = entry.map_err(|err| AutomationStoreError::io(dir, err))?;
         let path = entry.path();
-        let file_type = match entry.file_type().await {
-            Ok(file_type) => file_type,
-            Err(err) => {
-                warn_load_failure(&path, &AutomationStoreError::io(path.clone(), err));
-                continue;
-            }
-        };
+        let file_type = entry
+            .file_type()
+            .map_err(|err| AutomationStoreError::io(&path, err))?;
         if !file_type.is_file() || !is_toml_file(&path) {
             continue;
         }
-
-        match load_automation_file(&path).await {
-            Ok(automation) => {
-                automations.insert(automation.id.clone(), automation);
-            }
-            Err(err) => warn_load_failure(&path, &err),
-        }
+        let automation = load_automation_file(&path)?;
+        automations.insert(automation.id.clone(), automation);
     }
     Ok(automations)
 }
 
-async fn load_automation_file(path: &Path) -> Result<Automation, AutomationStoreError> {
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Sync sibling of `load_automations`; only invoked from the synchronous startup load path."
+)]
+fn load_automation_file(path: &Path) -> Result<Automation, AutomationStoreError> {
     let id = id_from_path(path)?;
-    let bytes = fs::read(path)
-        .await
-        .map_err(|err| AutomationStoreError::io(path, err))?;
+    let bytes = std::fs::read(path).map_err(|err| AutomationStoreError::io(path, err))?;
     Automation::from_persisted_path(id, &bytes, path)
 }
 
@@ -272,15 +267,6 @@ fn automation_path(dir: &Path, id: &AutomationId) -> PathBuf {
     dir.join(format!("{id}.toml"))
 }
 
-fn warn_load_failure(path: &Path, err: &AutomationStoreError) {
-    warn!(
-        path = %path.display(),
-        failure_kind = err.kind(),
-        error = %err,
-        "Skipping automation file"
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use tokio::fs;
@@ -336,39 +322,19 @@ mod tests {
     #[tokio::test]
     async fn missing_directory_loads_empty_store() {
         let dir = tempfile::tempdir().unwrap();
-        let store = AutomationStore::load(dir.path().join("automations"))
-            .await
-            .unwrap();
+        let store = AutomationStore::load(dir.path().join("automations")).unwrap();
 
         assert!(store.list().await.is_empty());
     }
 
     #[tokio::test]
-    async fn load_skips_invalid_files_and_keeps_valid_automations() {
+    async fn load_ignores_non_toml_files_and_keeps_valid_automations() {
         let dir = tempfile::tempdir().unwrap();
         let automation_dir = dir.path().join("automations");
         fs::create_dir_all(&automation_dir).await.unwrap();
         fs::write(automation_dir.join("notes.txt"), "ignore")
             .await
             .unwrap();
-        fs::write(automation_dir.join("bad name.toml"), "name = \"Bad\"")
-            .await
-            .unwrap();
-        fs::write(automation_dir.join("broken.toml"), "not valid toml =")
-            .await
-            .unwrap();
-        fs::write(
-            automation_dir.join("empty-name.toml"),
-            r#"
-name = " "
-
-[target]
-repository = "fabro-sh/fabro"
-workflow = "release"
-"#,
-        )
-        .await
-        .unwrap();
         fs::write(
             automation_dir.join("valid.toml"),
             r#"
@@ -383,7 +349,7 @@ workflow = "release"
         .await
         .unwrap();
 
-        let store = AutomationStore::load(&automation_dir).await.unwrap();
+        let store = AutomationStore::load(&automation_dir).unwrap();
         let automations = store.list().await;
 
         assert_eq!(automations.len(), 1);
@@ -392,28 +358,36 @@ workflow = "release"
     }
 
     #[tokio::test]
-    async fn create_does_not_overwrite_existing_malformed_file() {
+    async fn load_fails_on_malformed_toml() {
         let dir = tempfile::tempdir().unwrap();
         let automation_dir = dir.path().join("automations");
         fs::create_dir_all(&automation_dir).await.unwrap();
-        let path = automation_dir.join("nightly.toml");
-        fs::write(&path, "not valid toml =").await.unwrap();
+        fs::write(automation_dir.join("broken.toml"), "not valid toml =")
+            .await
+            .unwrap();
 
-        let store = AutomationStore::load(&automation_dir).await.unwrap();
-        let result = store.create(draft("nightly", "Nightly")).await;
+        let err = AutomationStore::load(&automation_dir).unwrap_err();
+        assert!(matches!(err, AutomationStoreError::Parse { .. }));
+    }
 
-        assert!(matches!(
-            result,
-            Err(AutomationStoreError::AlreadyExists { id }) if id.as_str() == "nightly"
-        ));
-        assert_eq!(fs::read_to_string(&path).await.unwrap(), "not valid toml =");
+    #[tokio::test]
+    async fn load_fails_on_invalid_filename_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let automation_dir = dir.path().join("automations");
+        fs::create_dir_all(&automation_dir).await.unwrap();
+        fs::write(automation_dir.join("Bad Name.toml"), "name = \"Bad\"")
+            .await
+            .unwrap();
+
+        let err = AutomationStore::load(&automation_dir).unwrap_err();
+        assert!(matches!(err, AutomationStoreError::InvalidFilename { .. }));
     }
 
     #[tokio::test]
     async fn create_replace_and_delete_round_trip_files_and_revisions() {
         let dir = tempfile::tempdir().unwrap();
         let automation_dir = dir.path().join("automations");
-        let store = AutomationStore::load(&automation_dir).await.unwrap();
+        let store = AutomationStore::load(&automation_dir).unwrap();
 
         let created = store.create(draft("nightly", "Nightly")).await.unwrap();
         let path = automation_dir.join("nightly.toml");

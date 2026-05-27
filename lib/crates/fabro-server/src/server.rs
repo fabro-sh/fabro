@@ -50,7 +50,7 @@ pub use fabro_api::types::{
     WriteBlobResponse,
 };
 use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
-use fabro_automation::{Automation, AutomationId, AutomationStore};
+use fabro_automation::AutomationStore;
 #[cfg(test)]
 use fabro_config::RunSettingsBuilder;
 use fabro_config::daemon::ServerDaemon;
@@ -125,7 +125,6 @@ use tempfile::NamedTempFile;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, Command};
-use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{
     Mutex as AsyncMutex, Notify, OwnedMutexGuard, RwLock as AsyncRwLock, Semaphore, broadcast,
@@ -1009,7 +1008,7 @@ pub struct AppState {
     store: Arc<Database>,
     session_runtimes: SessionRuntimeManager,
     artifact_store: ArtifactStore,
-    automation_store: Arc<AutomationStore>,
+    pub(crate) automation_store: Arc<AutomationStore>,
     worker_tokens: WorkerTokenKeys,
     started_at: Instant,
     resource_sampler: resource_sampler::ResourceSampler,
@@ -1217,10 +1216,6 @@ impl AppState {
 
     pub(crate) fn catalog(&self) -> Arc<Catalog> {
         Arc::clone(&self.catalog.read().expect("catalog lock poisoned"))
-    }
-
-    pub(crate) fn automation_store(&self) -> Arc<AutomationStore> {
-        Arc::clone(&self.automation_store)
     }
 
     pub(crate) fn active_config_path(&self) -> &std::path::Path {
@@ -2177,84 +2172,6 @@ fn automation_dir_for_active_config(active_config_path: &std::path::Path) -> Pat
         .join("automations")
 }
 
-fn is_automation_toml_file(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension == "toml")
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Startup state construction is synchronous; validate existing automation files before async state is available."
-)]
-fn validate_startup_automation_files(dir: &std::path::Path) -> anyhow::Result<()> {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => {
-            return Err(err)
-                .with_context(|| format!("failed to read automation directory {}", dir.display()));
-        }
-    };
-
-    for entry in entries {
-        let entry = entry.with_context(|| {
-            format!(
-                "failed to read automation directory entry in {}",
-                dir.display()
-            )
-        })?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("failed to inspect automation file {}", path.display()))?;
-        if !file_type.is_file() || !is_automation_toml_file(&path) {
-            continue;
-        }
-
-        let stem = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .ok_or_else(|| {
-                anyhow::anyhow!("automation filename is not valid UTF-8: {}", path.display())
-            })?;
-        let id = AutomationId::new(stem)
-            .map_err(anyhow::Error::new)
-            .with_context(|| format!("invalid automation filename {}", path.display()))?;
-        let bytes = std::fs::read(&path)
-            .with_context(|| format!("failed to read automation file {}", path.display()))?;
-        Automation::from_toml_bytes(id, &bytes)
-            .map_err(anyhow::Error::new)
-            .with_context(|| format!("failed to load automation file {}", path.display()))?;
-    }
-
-    Ok(())
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Startup state construction is synchronous; load the async automation store on an isolated one-shot runtime."
-)]
-fn load_automation_store_for_startup(automation_dir: PathBuf) -> anyhow::Result<AutomationStore> {
-    validate_startup_automation_files(&automation_dir)?;
-    let loader = std::thread::Builder::new()
-        .name("fabro-automation-store-load".to_string())
-        .spawn(move || -> anyhow::Result<AutomationStore> {
-            let runtime = TokioRuntimeBuilder::new_current_thread()
-                .enable_all()
-                .build()
-                .context("failed to build automation store loader runtime")?;
-            runtime
-                .block_on(AutomationStore::load(automation_dir))
-                .map_err(anyhow::Error::new)
-        })
-        .context("failed to spawn automation store loader")?;
-
-    loader
-        .join()
-        .map_err(|_| anyhow::anyhow!("automation store loader panicked"))?
-}
-
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
@@ -2275,8 +2192,11 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     } = config;
 
     let automation_dir = automation_dir_for_active_config(&active_config_path);
-    let automation_store =
-        Arc::new(load_automation_store_for_startup(automation_dir).context("load automations")?);
+    let automation_store = Arc::new(
+        AutomationStore::load(automation_dir)
+            .map_err(anyhow::Error::new)
+            .context("load automations")?,
+    );
     let variables = VariableStore::load(variables_path).context("load variables")?;
     let variables = Arc::new(AsyncRwLock::new(variables));
     let vault = match preloaded_vault {

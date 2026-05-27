@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use axum::extract::rejection::JsonRejection;
 use axum::http::{HeaderMap, HeaderValue, header};
 use fabro_automation::{
     Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationRevision,
@@ -39,8 +38,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn list_automations(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
-    let store = state.automation_store();
-    let data = store.list().await;
+    let data = state.automation_store.list().await;
     let total = data.len();
     (
         StatusCode::OK,
@@ -55,32 +53,21 @@ async fn list_automations(_auth: RequiredUser, State(state): State<Arc<AppState>
 async fn create_automation(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
-    body: Result<Json<AutomationDraft>, JsonRejection>,
-) -> Response {
-    let draft = match parse_json_body(body) {
-        Ok(draft) => draft,
-        Err(err) => return err.into_response(),
-    };
-    let store = state.automation_store();
-    match store.create(draft).await {
-        Ok(automation) => (StatusCode::CREATED, Json(automation)).into_response(),
-        Err(err) => automation_store_error_response(err),
-    }
+    Json(draft): Json<AutomationDraft>,
+) -> Result<Response, ApiError> {
+    let automation = state.automation_store.create(draft).await?;
+    Ok((StatusCode::CREATED, Json(automation)).into_response())
 }
 
 async fn get_automation(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Response {
-    let id = match parse_path_id(id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    let store = state.automation_store();
-    match store.get(&id).await {
-        Some(automation) => automation_with_etag_response(StatusCode::OK, automation),
-        None => ApiError::not_found(format!("automation not found: {id}")).into_response(),
+) -> Result<Response, ApiError> {
+    let id = parse_path_id(id)?;
+    match state.automation_store.get(&id).await {
+        Some(automation) => Ok(automation_with_etag_response(StatusCode::OK, automation)),
+        None => Err(ApiError::not_found(format!("automation not found: {id}"))),
     }
 }
 
@@ -89,26 +76,15 @@ async fn replace_automation(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    body: Result<Json<AutomationReplace>, JsonRejection>,
-) -> Response {
-    let id = match parse_path_id(id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    let expected = match parse_required_if_match(&headers, &id) {
-        Ok(revision) => revision,
-        Err(err) => return err.into_response(),
-    };
-    let replacement = match parse_json_body(body) {
-        Ok(replacement) => replacement,
-        Err(err) => return err.into_response(),
-    };
-
-    let store = state.automation_store();
-    match store.replace(&id, &expected, replacement).await {
-        Ok(automation) => automation_with_etag_response(StatusCode::OK, automation),
-        Err(err) => automation_store_error_response(err),
-    }
+    Json(replacement): Json<AutomationReplace>,
+) -> Result<Response, ApiError> {
+    let id = parse_path_id(id)?;
+    let expected = parse_required_if_match(&headers, &id)?;
+    let automation = state
+        .automation_store
+        .replace(&id, &expected, replacement)
+        .await?;
+    Ok(automation_with_etag_response(StatusCode::OK, automation))
 }
 
 async fn delete_automation(
@@ -116,46 +92,16 @@ async fn delete_automation(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Response {
-    let id = match parse_path_id(id) {
-        Ok(id) => id,
-        Err(err) => return err.into_response(),
-    };
-    let expected = match parse_required_if_match(&headers, &id) {
-        Ok(revision) => revision,
-        Err(err) => return err.into_response(),
-    };
-
-    let store = state.automation_store();
-    match store.delete(&id, &expected).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(err) => automation_store_error_response(err),
-    }
+) -> Result<Response, ApiError> {
+    let id = parse_path_id(id)?;
+    let expected = parse_required_if_match(&headers, &id)?;
+    state.automation_store.delete(&id, &expected).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 fn parse_path_id(id: String) -> Result<AutomationId, ApiError> {
     AutomationId::new(id)
         .map_err(|err| ApiError::bad_request(format!("invalid automation id: {err}")))
-}
-
-fn parse_json_body<T>(body: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
-    match body {
-        Ok(Json(value)) => Ok(value),
-        Err(JsonRejection::JsonDataError(err)) => Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!("invalid automation request: {err}"),
-        )),
-        Err(JsonRejection::JsonSyntaxError(err)) => Err(ApiError::bad_request(format!(
-            "malformed JSON request body: {err}"
-        ))),
-        Err(JsonRejection::MissingJsonContentType(_)) => {
-            Err(ApiError::bad_request("request body must be JSON"))
-        }
-        Err(JsonRejection::BytesRejection(err)) => Err(ApiError::bad_request(format!(
-            "failed to read request body: {err}"
-        ))),
-        Err(rejection) => Err(ApiError::bad_request(rejection.to_string())),
-    }
 }
 
 fn parse_required_if_match(
@@ -184,49 +130,43 @@ fn unquote_etag(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-fn etag_value(revision: &AutomationRevision) -> HeaderValue {
-    HeaderValue::from_str(&format!("\"{revision}\""))
-        .expect("automation revisions are valid ETag header values")
-}
-
 fn automation_with_etag_response(status: StatusCode, automation: Automation) -> Response {
-    let etag = etag_value(&automation.revision);
+    let etag = HeaderValue::from_str(&format!("\"{}\"", automation.revision))
+        .expect("automation revisions are valid ETag header values");
     let mut response = (status, Json(automation)).into_response();
     response.headers_mut().insert(header::ETAG, etag);
     response
 }
 
-fn automation_store_error_response(err: AutomationStoreError) -> Response {
-    match err {
-        AutomationStoreError::NotFound { id } => {
-            ApiError::not_found(format!("automation not found: {id}")).into_response()
+impl From<AutomationStoreError> for ApiError {
+    fn from(err: AutomationStoreError) -> Self {
+        match err {
+            AutomationStoreError::NotFound { id } => {
+                Self::not_found(format!("automation not found: {id}"))
+            }
+            AutomationStoreError::AlreadyExists { id } => Self::new(
+                StatusCode::CONFLICT,
+                format!("automation already exists: {id}"),
+            ),
+            AutomationStoreError::StaleRevision { id, .. } => Self::new(
+                StatusCode::CONFLICT,
+                format!("automation revision is stale: {id}"),
+            ),
+            AutomationStoreError::Validation { source } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, source.to_string())
+            }
+            // The handlers parse `If-Match` before reaching the store, so a
+            // missing-revision error from the store would indicate an internal
+            // bug rather than a client problem.
+            AutomationStoreError::MissingRevision { .. }
+            | AutomationStoreError::InvalidFilename { .. }
+            | AutomationStoreError::Parse { .. }
+            | AutomationStoreError::InvalidUtf8 { .. }
+            | AutomationStoreError::Serialize { .. }
+            | AutomationStoreError::Io { .. } => Self::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "automation store operation failed",
+            ),
         }
-        AutomationStoreError::AlreadyExists { id } => ApiError::new(
-            StatusCode::CONFLICT,
-            format!("automation already exists: {id}"),
-        )
-        .into_response(),
-        AutomationStoreError::MissingRevision { id } => ApiError::new(
-            StatusCode::PRECONDITION_REQUIRED,
-            format!("automation revision is required: {id}"),
-        )
-        .into_response(),
-        AutomationStoreError::StaleRevision { id, .. } => ApiError::new(
-            StatusCode::CONFLICT,
-            format!("automation revision is stale: {id}"),
-        )
-        .into_response(),
-        AutomationStoreError::Validation { source } => {
-            ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, source.to_string()).into_response()
-        }
-        AutomationStoreError::InvalidFilename { .. }
-        | AutomationStoreError::Parse { .. }
-        | AutomationStoreError::InvalidUtf8 { .. }
-        | AutomationStoreError::Serialize { .. }
-        | AutomationStoreError::Io { .. } => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "automation store operation failed",
-        )
-        .into_response(),
     }
 }
