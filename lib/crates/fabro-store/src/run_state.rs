@@ -812,11 +812,10 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
 }
 
 fn sandbox_plan_from_projection_or_settings(state: &RunProjection) -> RunSandboxPlan {
-    state
-        .sandbox
-        .as_ref()
-        .map(|sandbox| sandbox.plan().clone())
-        .unwrap_or_else(|| sandbox_plan(&state.spec.settings.run.environment))
+    state.sandbox.as_ref().map_or_else(
+        || sandbox_plan(&state.spec.settings.run.environment),
+        |sandbox| sandbox.plan().clone(),
+    )
 }
 
 fn sandbox_plan(settings: &RunEnvironmentSettings) -> RunSandboxPlan {

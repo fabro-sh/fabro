@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::SandboxProviderKind;
+use crate::{RunSandboxFailure, SandboxProviderKind};
 
 #[derive(
     Debug,
@@ -201,7 +201,7 @@ pub struct SandboxReadyProps {
     pub url:         Option<String>,
 }
 
-pub type SandboxFailedProps = crate::run_sandbox::RunSandboxFailure;
+pub type SandboxFailedProps = RunSandboxFailure;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SandboxCleanupStartedProps {

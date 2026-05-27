@@ -50,7 +50,7 @@ fn sandbox_cp_run_without_sandbox_json_errors_cleanly() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-      × run sandbox missing runtime metadata
+      × Run sandbox was not created.
     ");
 }
 

@@ -926,7 +926,7 @@ async fn load_run_sandbox_instance(
         Ok(run_store) => match run_store.state().await {
             Ok(run_state) => run_state
                 .sandbox
-                .and_then(|sandbox| sandbox.into_instance())
+                .and_then(fabro_types::RunSandbox::into_instance)
                 .ok_or_else(|| ApiError::not_found("Run sandbox was not created.").into_response()),
             Err(err) => Err(
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),

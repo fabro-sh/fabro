@@ -27,7 +27,7 @@ async fn vnc_for_missing_run_returns_not_found() {
 }
 
 #[tokio::test]
-async fn vnc_for_run_without_sandbox_returns_conflict() {
+async fn vnc_for_run_without_sandbox_returns_not_found() {
     let app = fabro_server::test_support::build_test_router(test_app_state());
     let create_req = Request::builder()
         .method("POST")
@@ -51,7 +51,7 @@ async fn vnc_for_run_without_sandbox_returns_conflict() {
 
     response_status(
         response,
-        StatusCode::NOT_IMPLEMENTED,
+        StatusCode::NOT_FOUND,
         format!("POST /api/v1/runs/{run_id}/sandbox/vnc"),
     )
     .await;

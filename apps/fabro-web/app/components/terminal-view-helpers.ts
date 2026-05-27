@@ -42,5 +42,5 @@ export function terminalAccessCommandLabel(provider: string | null): string | nu
 
 export function sandboxStatusDetail(sandbox: RunSandbox | null | undefined): string | null {
   const instance = sandboxInstance(sandbox);
-  return sandboxRuntime(sandbox)?.id ?? instance?.provider ?? sandbox?.plan?.provider ?? null;
+  return sandboxRuntime(sandbox)?.id ?? instance?.provider ?? null;
 }

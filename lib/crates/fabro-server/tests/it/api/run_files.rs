@@ -14,7 +14,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::test_support::test_app_state_with_store;
 use fabro_store::{ArtifactStore, Database};
-use fabro_types::{Graph, RunId, WorkflowSettings};
+use fabro_types::{Graph, RunId, SandboxProviderKind, WorkflowSettings};
 use fabro_workflow::event as workflow_event;
 use fabro_workflow::run_status::SuccessReason;
 use object_store::memory::InMemory as MemoryObjectStore;
@@ -123,6 +123,33 @@ async fn append_completed_run_with_final_patch(
     )
     .await
     .expect("append WorkflowRunCompleted");
+}
+
+async fn append_local_sandbox_initialized(store: &Database, run_id: &RunId) {
+    let run_store = store.open_run(run_id).await.expect("open run store");
+    workflow_event::append_event(
+        &run_store,
+        run_id,
+        &workflow_event::Event::SandboxInitialized {
+            working_directory: std::env::current_dir()
+                .expect("test should run inside a source checkout")
+                .display()
+                .to_string(),
+            provider:          SandboxProviderKind::Local,
+            id:                "local:test-sandbox".to_string(),
+            image:             None,
+            snapshot:          None,
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
+        },
+    )
+    .await
+    .expect("append SandboxInitialized");
 }
 
 #[tokio::test]
@@ -311,6 +338,7 @@ diff --git a/.env.production b/.env.production
 +SECRET=new
 ";
     append_completed_run_with_final_patch(&store, &run_id, patch).await;
+    append_local_sandbox_initialized(&store, &run_id).await;
 
     let req = Request::builder()
         .method("GET")
@@ -345,7 +373,7 @@ diff --git a/.env.production b/.env.production
 }
 
 #[tokio::test]
-async fn unavailable_sandbox_falls_back_to_final_patch_for_every_scope() {
+async fn planned_sandbox_rejects_files_for_every_scope() {
     let settings = test_settings();
     let (store, artifact_store) = store_bundle();
     let state = test_app_state_with_store(
@@ -376,15 +404,15 @@ diff --git a/src/lib.rs b/src/lib.rs
         let resp = app.clone().oneshot(req).await.unwrap();
         let body = response_json(
             resp,
-            StatusCode::OK,
+            StatusCode::NOT_FOUND,
             format!("GET /api/v1/runs/{run_id}/files?scope={scope}"),
         )
         .await;
 
-        assert_eq!(body["meta"]["source"].as_str(), Some("final_patch"));
-        assert_eq!(body["meta"]["scope"].as_str(), Some("committed"));
-        assert_eq!(body["meta"]["degraded"].as_bool(), Some(true));
-        assert_eq!(body["data"].as_array().map(Vec::len), Some(1));
+        assert_eq!(
+            body["errors"][0]["detail"].as_str(),
+            Some("Run sandbox was not created.")
+        );
     }
 }
 
