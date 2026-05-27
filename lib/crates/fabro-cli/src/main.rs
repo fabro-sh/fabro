@@ -363,6 +363,9 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
             Commands::Secret(ns) => {
                 commands::secret::dispatch(ns, &base_ctx).await?;
             }
+            Commands::Variable(ns) => {
+                commands::variable::dispatch(ns, &base_ctx).await?;
+            }
             Commands::Settings(args) => {
                 Box::pin(commands::config::execute(&args, &base_ctx)).await?;
             }

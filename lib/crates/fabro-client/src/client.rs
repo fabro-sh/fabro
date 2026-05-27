@@ -715,6 +715,60 @@ impl Client {
         Ok(())
     }
 
+    pub async fn list_variables(&self) -> Result<Vec<types::Variable>> {
+        let response = self
+            .send_api(|client| async move { client.list_variables().send().await })
+            .await?;
+        Ok(response.into_inner().data)
+    }
+
+    pub async fn get_variable(&self, name: &str) -> Result<types::Variable> {
+        let response = self
+            .send_api(
+                |client| async move { client.get_variable().name(name.to_string()).send().await },
+            )
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn create_variable(
+        &self,
+        body: types::CreateVariableRequest,
+    ) -> Result<types::Variable> {
+        let response = self
+            .send_api(
+                |client| async move { client.create_variable().body(body.clone()).send().await },
+            )
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn update_variable(
+        &self,
+        name: &str,
+        body: types::UpdateVariableRequest,
+    ) -> Result<types::Variable> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .update_variable()
+                    .name(name.to_string())
+                    .body(body.clone())
+                    .send()
+                    .await
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn delete_variable(&self, name: &str) -> Result<()> {
+        self.send_api(|client| async move {
+            client.delete_variable().name(name.to_string()).send().await
+        })
+        .await?;
+        Ok(())
+    }
+
     pub async fn list_models(
         &self,
         provider: Option<&str>,

@@ -93,6 +93,26 @@ fn secret_list_uses_json_output_format_from_home_config() {
 }
 
 #[test]
+fn variable_list_uses_json_output_format_from_home_config() {
+    let context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "_version = 1\n\n[cli.output]\nformat = \"json\"\n",
+    );
+
+    let output = context
+        .command()
+        .args(["variable", "list"])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let value: Value =
+        serde_json::from_slice(&output.stdout).expect("variable list config JSON should parse");
+    assert!(value.is_array(), "variable list JSON should be an array");
+}
+
+#[test]
 fn completion_succeeds_with_json_output_format_from_home_config() {
     let context = test_context!();
     context.write_home(

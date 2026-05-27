@@ -676,6 +676,35 @@ pub(crate) struct SecretSetArgs {
     pub(crate) description: Option<String>,
 }
 
+#[derive(Args)]
+pub(crate) struct VariableListArgs;
+
+#[derive(Args)]
+pub(crate) struct VariableGetArgs {
+    /// Name of the variable to get
+    pub(crate) name: String,
+}
+
+#[derive(Args)]
+pub(crate) struct VariableRmArgs {
+    /// Name of the variable to remove
+    pub(crate) name: String,
+}
+
+#[derive(Args)]
+pub(crate) struct VariableSetArgs {
+    /// Name of the variable
+    pub(crate) name:        String,
+    /// Value to store
+    pub(crate) value:       Option<String>,
+    /// Read the variable value from stdin
+    #[arg(long, conflicts_with = "value")]
+    pub(crate) value_stdin: bool,
+    /// Optional human-readable description
+    #[arg(long)]
+    pub(crate) description: Option<String>,
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct ResumeArgs {
     #[command(flatten)]
@@ -1261,6 +1290,8 @@ pub(crate) enum Commands {
     Parent(ParentNamespace),
     /// Manage server-owned secrets
     Secret(SecretNamespace),
+    /// Manage server-owned variables
+    Variable(VariableNamespace),
     /// Inspect effective settings
     Settings(SettingsArgs),
     /// Workflow operations
@@ -1376,6 +1407,12 @@ impl Commands {
                 SecretCommand::Rm(_) => "secret rm",
                 SecretCommand::Set(_) => "secret set",
             },
+            Self::Variable(ns) => match &ns.command {
+                VariableCommand::List(_) => "variable list",
+                VariableCommand::Get(_) => "variable get",
+                VariableCommand::Rm(_) => "variable rm",
+                VariableCommand::Set(_) => "variable set",
+            },
             Self::Settings(_) => "settings",
             Self::Workflow(ns) => match &ns.command {
                 WorkflowCommand::List(_) => "workflow list",
@@ -1477,6 +1514,28 @@ pub(crate) enum SecretCommand {
     Rm(SecretRmArgs),
     /// Set a secret value
     Set(SecretSetArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct VariableNamespace {
+    #[command(flatten)]
+    pub(crate) target: ServerTargetArgs,
+
+    #[command(subcommand)]
+    pub(crate) command: VariableCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum VariableCommand {
+    /// List variables
+    #[command(alias = "ls")]
+    List(VariableListArgs),
+    /// Get a variable value
+    Get(VariableGetArgs),
+    /// Remove a variable
+    Rm(VariableRmArgs),
+    /// Set a variable value
+    Set(VariableSetArgs),
 }
 
 #[derive(Args)]

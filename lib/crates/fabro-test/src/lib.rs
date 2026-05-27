@@ -1454,6 +1454,13 @@ impl TestContext {
         cmd
     }
 
+    /// Build a `variable` subcommand.
+    pub fn variable(&self) -> Command {
+        let mut cmd = self.command();
+        cmd.arg("variable");
+        cmd
+    }
+
     /// Build a `doctor` subcommand.
     pub fn doctor(&self) -> Command {
         let mut cmd = self.command();

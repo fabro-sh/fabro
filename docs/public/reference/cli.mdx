@@ -104,6 +104,7 @@ fabro [OPTIONS] [COMMAND]
 | `fabro uninstall` | Uninstall Fabro from this machine |
 | `fabro upgrade` | Upgrade fabro to the latest version |
 | `fabro validate` | Validate a workflow |
+| `fabro variable` | Manage server-owned variables |
 | `fabro version` | Show client and server version information |
 | `fabro wait` | Block until a workflow run completes |
 | `fabro workflow` | Workflow operations |
@@ -1570,6 +1571,87 @@ fabro validate [OPTIONS] <WORKFLOW>
 | Name | Description |
 | --- | --- |
 | `WORKFLOW` | Path to the .fabro workflow file |
+
+### `fabro variable`
+
+Manage server-owned variables
+
+```bash
+fabro variable [OPTIONS] <COMMAND>
+```
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+
+#### Subcommands
+
+| Command | Description |
+| --- | --- |
+| `fabro variable get` | Get a variable value |
+| `fabro variable list` | List variables |
+| `fabro variable rm` | Remove a variable |
+| `fabro variable set` | Set a variable value |
+
+#### `fabro variable get`
+
+Get a variable value
+
+```bash
+fabro variable get [OPTIONS] <NAME>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `NAME` | Name of the variable to get |
+
+#### `fabro variable list`
+
+List variables
+
+```bash
+fabro variable list [OPTIONS]
+```
+
+#### `fabro variable rm`
+
+Remove a variable
+
+```bash
+fabro variable rm [OPTIONS] <NAME>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `NAME` | Name of the variable to remove |
+
+#### `fabro variable set`
+
+Set a variable value
+
+```bash
+fabro variable set [OPTIONS] <NAME> [VALUE]
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `NAME` | Name of the variable |
+| `VALUE` | Value to store |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--description <description>` | Optional human-readable description |
+| `--value-stdin` | Read the variable value from stdin |
 
 ### `fabro version`
 

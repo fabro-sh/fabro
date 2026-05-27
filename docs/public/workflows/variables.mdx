@@ -59,6 +59,25 @@ fabro run .fabro/workflows/check/workflow.toml -I repo_name=fabro-2 --input lang
 
 CLI input values use TOML scalar parsing when possible. Quoted strings, booleans, integers, and floats keep their typed values; unquoted bare text falls back to a string. Empty values such as `foo=` are accepted as empty strings. Arrays, inline tables, and datetimes are rejected.
 
+## Server-managed run config variables
+
+Use server-managed variables for non-sensitive values that should be shared across runs, such as deployment environments, default branches, regions, or image tags:
+
+```bash
+fabro variable set DEPLOY_ENV staging --description "Deployment target"
+```
+
+Run configuration strings can reference these values with `{{ vars.NAME }}`:
+
+```toml title="workflow.toml"
+_version = 1
+
+[run]
+goal = "Deploy {{ vars.DEPLOY_ENV }}"
+```
+
+Variables are intentionally readable: `fabro variable list` and `fabro variable get DEPLOY_ENV` show stored values. Do not store tokens, API keys, or credentials as variables; use `fabro secret set` for sensitive values.
+
 ## `goal`
 
 Agent and prompt nodes also receive the workflow goal at runtime:

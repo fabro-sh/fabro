@@ -46,6 +46,7 @@ fn help() {
       pr          Pull request operations
       parent      Manage run parent links
       secret      Manage server-owned secrets
+      variable    Manage server-owned variables
       settings    Inspect effective settings
       workflow    Workflow operations
       discord     Open the Discord community in the browser
