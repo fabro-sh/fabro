@@ -1,6 +1,5 @@
 import {
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -12,27 +11,22 @@ type FloatingTooltipPlacement = "top" | "bottom";
 
 const VIEWPORT_MARGIN = 12;
 const OFFSET = 8;
+const DEFAULT_CLASS_NAME =
+  "whitespace-nowrap rounded-md bg-panel-alt px-2.5 py-1 text-xs text-fg shadow-lg outline-1 -outline-offset-1 outline-line-strong";
 
 function clamp(value: number, min: number, max: number): number {
   if (max < min) return (min + max) / 2;
   return Math.min(Math.max(value, min), max);
 }
 
-function viewportSize() {
-  return {
-    height: window.innerHeight,
-    width:  window.innerWidth,
-  };
-}
-
 function resolvePlacement(
   rect: DOMRect,
   placement: FloatingTooltipPlacement,
   height: number,
+  viewportHeight: number,
 ): FloatingTooltipPlacement {
   if (height <= 0) return placement;
 
-  const { height: viewportHeight } = viewportSize();
   const fitsTop = rect.top - OFFSET - height >= VIEWPORT_MARGIN;
   const fitsBottom = rect.bottom + OFFSET + height <= viewportHeight - VIEWPORT_MARGIN;
 
@@ -47,7 +41,8 @@ function floatingStyle(
   placement: FloatingTooltipPlacement,
   size: { height: number; width: number },
 ): CSSProperties {
-  const { height: viewportHeight, width: viewportWidth } = viewportSize();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
   const centerX = rect.left + rect.width / 2;
   const availableWidth = Math.max(0, viewportWidth - VIEWPORT_MARGIN * 2);
   const width = size.width > 0 ? Math.min(size.width, availableWidth) : 0;
@@ -57,7 +52,7 @@ function floatingStyle(
   const left = width > 0
     ? clamp(centerX, minCenter, maxCenter)
     : clamp(centerX, VIEWPORT_MARGIN, viewportWidth - VIEWPORT_MARGIN);
-  const resolvedPlacement = resolvePlacement(rect, placement, size.height);
+  const resolvedPlacement = resolvePlacement(rect, placement, size.height, viewportHeight);
 
   if (resolvedPlacement === "top") {
     const top = size.height > 0
@@ -86,7 +81,7 @@ export function FloatingTooltip({
   rect,
   placement,
   children,
-  className = "",
+  className = DEFAULT_CLASS_NAME,
 }: {
   rect: DOMRect;
   placement: FloatingTooltipPlacement;
@@ -95,22 +90,18 @@ export function FloatingTooltip({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ height: 0, width: 0 });
-  const portalTarget = typeof document === "undefined" ? null : document.body;
-  const style = useMemo(
-    () =>
-      typeof window === "undefined"
-        ? undefined
-        : floatingStyle(rect, placement, size),
-    [placement, rect, size],
-  );
 
   useLayoutEffect(() => {
     const node = ref.current;
-    if (!node || typeof window === "undefined") return;
+    if (!node) return;
 
     const updateSize = () => {
       const next = node.getBoundingClientRect();
-      setSize({ height: next.height, width: next.width });
+      setSize((prev) =>
+        prev.height === next.height && prev.width === next.width
+          ? prev
+          : { height: next.height, width: next.width },
+      );
     };
 
     updateSize();
@@ -124,19 +115,19 @@ export function FloatingTooltip({
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateSize);
     };
-  }, [children, rect]);
+  }, []);
 
-  if (!portalTarget || !style) return null;
+  if (typeof document === "undefined") return null;
 
   return createPortal(
     <div
       ref={ref}
       role="tooltip"
-      style={style}
+      style={floatingStyle(rect, placement, size)}
       className={`pointer-events-none fixed z-50 ${className}`}
     >
       {children}
     </div>,
-    portalTarget,
+    document.body,
   );
 }

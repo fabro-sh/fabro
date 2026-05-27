@@ -203,7 +203,7 @@ describe("useToast", () => {
     let renderer: TestRenderer.ReactTestRenderer | null = null;
     await act(async () => {
       renderer = TestRenderer.create(
-        <ToastProvider autoDismissMs={1000}>
+        <ToastProvider>
           <span>wrapped child</span>
         </ToastProvider>,
       );

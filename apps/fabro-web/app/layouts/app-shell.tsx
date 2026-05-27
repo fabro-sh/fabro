@@ -64,7 +64,7 @@ export default function AppShell() {
 
   return (
     <DemoModeProvider value={demoMode}>
-    <TooltipProvider delayDuration={200} skipDelayDuration={300}>
+    <TooltipProvider>
     <AskFabroLayoutProvider>
     <div
       className={classNames(

@@ -138,7 +138,10 @@ export function ConfirmDialog({
   );
 }
 
-const TooltipProviderMountedContext = createContext(false);
+const TOOLTIP_DELAY_DURATION = 200;
+const TOOLTIP_SKIP_DELAY_DURATION = 300;
+
+const HasTooltipProviderContext = createContext(false);
 
 type TooltipProviderProps = ComponentProps<typeof TooltipPrimitive.Provider>;
 
@@ -146,15 +149,25 @@ function canUseOverlayDom() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-export function TooltipProvider({ children, ...props }: TooltipProviderProps) {
+export function TooltipProvider({
+  delayDuration = TOOLTIP_DELAY_DURATION,
+  skipDelayDuration = TOOLTIP_SKIP_DELAY_DURATION,
+  children,
+  ...props
+}: TooltipProviderProps) {
   if (!canUseOverlayDom()) {
     return <>{children}</>;
   }
-
   return (
-    <TooltipProviderMountedContext.Provider value={true}>
-      <TooltipPrimitive.Provider {...props}>{children}</TooltipPrimitive.Provider>
-    </TooltipProviderMountedContext.Provider>
+    <HasTooltipProviderContext.Provider value={true}>
+      <TooltipPrimitive.Provider
+        delayDuration={delayDuration}
+        skipDelayDuration={skipDelayDuration}
+        {...props}
+      >
+        {children}
+      </TooltipPrimitive.Provider>
+    </HasTooltipProviderContext.Provider>
   );
 }
 
@@ -165,40 +178,34 @@ export function Tooltip({
   label: ReactNode;
   children: ReactNode;
 }) {
-  const hasProvider = useContext(TooltipProviderMountedContext);
+  // Tests and isolated mounts may render <Tooltip> without an ancestor
+  // <TooltipProvider>; Radix throws in that case, so supply a local provider.
+  const hasProvider = useContext(HasTooltipProviderContext);
 
   if (!canUseOverlayDom()) {
     return <span className="inline-flex">{children}</span>;
   }
 
-  const tooltip = (
+  const root = (
     <TooltipPrimitive.Root>
-      <TooltipPrimitive.Trigger asChild className="inline-flex">
-        {children}
+      <TooltipPrimitive.Trigger asChild>
+        <span className="inline-flex">{children}</span>
       </TooltipPrimitive.Trigger>
-      {typeof document !== "undefined" && (
-        <TooltipPrimitive.Portal>
-          <TooltipPrimitive.Content
-            side="top"
-            align="center"
-            sideOffset={6}
-            collisionPadding={12}
-            className="pointer-events-none z-50 max-w-[min(32rem,calc(100vw-1.5rem))] rounded-md bg-panel px-2 py-1 text-xs text-fg-2 shadow-lg outline-1 -outline-offset-1 outline-line-strong"
-          >
-            {label}
-          </TooltipPrimitive.Content>
-        </TooltipPrimitive.Portal>
-      )}
+      <TooltipPrimitive.Portal>
+        <TooltipPrimitive.Content
+          side="top"
+          align="center"
+          sideOffset={6}
+          collisionPadding={12}
+          className="pointer-events-none z-50 max-w-[min(32rem,calc(100vw-1.5rem))] rounded-md bg-panel px-2 py-1 text-xs text-fg-2 shadow-lg outline-1 -outline-offset-1 outline-line-strong"
+        >
+          {label}
+        </TooltipPrimitive.Content>
+      </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>
   );
 
-  if (hasProvider) return tooltip;
-
-  return (
-    <TooltipPrimitive.Provider delayDuration={200} skipDelayDuration={300}>
-      {tooltip}
-    </TooltipPrimitive.Provider>
-  );
+  return hasProvider ? root : <TooltipProvider>{root}</TooltipProvider>;
 }
 
 /**
@@ -220,25 +227,22 @@ export function HoverCard({
   if (!canUseOverlayDom()) {
     return <span className={className}>{children}</span>;
   }
-
   return (
     <HoverCardPrimitive.Root openDelay={openDelay} closeDelay={0}>
-      <HoverCardPrimitive.Trigger asChild className={className}>
-        {children}
+      <HoverCardPrimitive.Trigger asChild>
+        <span className={className}>{children}</span>
       </HoverCardPrimitive.Trigger>
-      {typeof document !== "undefined" && (
-        <HoverCardPrimitive.Portal>
-          <HoverCardPrimitive.Content
-            side="bottom"
-            align="start"
-            sideOffset={6}
-            collisionPadding={12}
-            className="pointer-events-none z-50 max-w-[18rem] rounded-lg bg-panel p-3 text-xs text-fg-2 shadow-xl outline-1 -outline-offset-1 outline-line-strong"
-          >
-            {content}
-          </HoverCardPrimitive.Content>
-        </HoverCardPrimitive.Portal>
-      )}
+      <HoverCardPrimitive.Portal>
+        <HoverCardPrimitive.Content
+          side="bottom"
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          className="pointer-events-none z-50 max-w-[18rem] rounded-lg bg-panel p-3 text-xs text-fg-2 shadow-xl outline-1 -outline-offset-1 outline-line-strong"
+        >
+          {content}
+        </HoverCardPrimitive.Content>
+      </HoverCardPrimitive.Portal>
     </HoverCardPrimitive.Root>
   );
 }
