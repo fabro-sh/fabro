@@ -7,6 +7,8 @@ use axum::response::{IntoResponse, Response};
 use fabro_static::EnvVars;
 use tokio::fs;
 
+use crate::csp;
+
 const INSTALL_MODE_MARKER: &str = "__FABRO_MODE__ = \"install\"";
 
 // Tiny shell shown in `--watch-web` mode when the requested asset isn't on disk
@@ -245,7 +247,10 @@ fn inject_install_mode(bytes: Vec<u8>) -> Vec<u8> {
 
     let injected = html.replace(
         "</head>",
-        "    <script>window.__FABRO_MODE__ = \"install\";</script>\n  </head>",
+        &format!(
+            "    <script>{}</script>\n  </head>",
+            csp::INSTALL_MODE_SCRIPT_BODY
+        ),
     );
     assert!(
         injected.contains(INSTALL_MODE_MARKER),

@@ -13,12 +13,15 @@ use sha2::{Digest, Sha256};
 
 static POLICY: OnceLock<String> = OnceLock::new();
 
+pub(crate) const INSTALL_MODE_SCRIPT_BODY: &str = "window.__FABRO_MODE__ = \"install\";";
+
 pub fn policy() -> &'static str {
     POLICY.get_or_init(build_policy)
 }
 
 fn build_policy() -> String {
-    let script_hashes = inline_script_hashes_from_embedded_index();
+    let mut script_hashes = inline_script_hashes_from_embedded_index();
+    script_hashes.push(script_hash(INSTALL_MODE_SCRIPT_BODY));
     build_policy_with_hashes(&script_hashes)
 }
 
@@ -57,11 +60,15 @@ pub(crate) fn inline_script_hashes(html: &str) -> Vec<String> {
         };
         let content_end = content_start + close_rel;
         let body = &html[content_start..content_end];
-        let hash = Sha256::digest(body.as_bytes());
-        hashes.push(format!("sha256-{}", STANDARD.encode(hash)));
+        hashes.push(script_hash(body));
         cursor = content_end;
     }
     hashes
+}
+
+fn script_hash(script: &str) -> String {
+    let hash = Sha256::digest(script.as_bytes());
+    format!("sha256-{}", STANDARD.encode(hash))
 }
 
 fn build_policy_with_hashes(script_hashes: &[String]) -> String {
@@ -79,18 +86,19 @@ fn build_policy_with_hashes(script_hashes: &[String]) -> String {
     };
     // `'wasm-unsafe-eval'` lets `@viz-js/viz` instantiate the Graphviz
     // WASM module for graph rendering. `'unsafe-inline'` on style-src is
-    // accepted as a pragmatic concession — React and Tailwind's runtime
-    // utilities regularly set inline `style=` attributes, and a CSP
-    // violation on every mouse-hover would make the report-only output
-    // useless. The meaningful XSS protection still comes from the
-    // script-src restrictions above.
+    // accepted as a pragmatic concession — React and UI utilities regularly
+    // set inline `style=` attributes, and blocking those would break normal
+    // interactions. The meaningful XSS protection still comes from the
+    // script-src restrictions above. `ws:`/`wss:` keep the same-origin
+    // terminal WebSocket working across browsers that do not treat `'self'`
+    // as matching WebSocket schemes for connect-src.
     format!(
         "default-src 'self'; \
          script-src 'self'{inline_script_sources} 'wasm-unsafe-eval'; \
          style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; \
          font-src 'self' https://fonts.gstatic.com; \
          img-src 'self' data: blob:; \
-         connect-src 'self'; \
+         connect-src 'self' ws: wss:; \
          worker-src 'self' blob:; \
          manifest-src 'self'; \
          frame-ancestors 'none'; \
@@ -137,6 +145,16 @@ mod tests {
     }
 
     #[test]
+    fn policy_allows_install_mode_inline_bootstrap() {
+        let policy = build_policy();
+        let expected_hash = script_hash(INSTALL_MODE_SCRIPT_BODY);
+        assert!(
+            policy.contains(&format!("'{expected_hash}'")),
+            "install-mode inline script hash should be present in CSP: {policy}"
+        );
+    }
+
+    #[test]
     fn policy_is_constructed_with_expected_directives() {
         let policy = build_policy_with_hashes(&["sha256-abc".to_string()]);
         assert!(policy.contains("default-src 'self'"));
@@ -146,6 +164,7 @@ mod tests {
         );
         assert!(policy.contains("font-src 'self' https://fonts.gstatic.com"));
         assert!(policy.contains("style-src 'self' https://fonts.googleapis.com 'unsafe-inline'"));
+        assert!(policy.contains("connect-src 'self' ws: wss:"));
         assert!(policy.contains("frame-ancestors 'none'"));
         assert!(policy.contains("object-src 'none'"));
     }

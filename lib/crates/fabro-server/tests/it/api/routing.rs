@@ -350,17 +350,23 @@ async fn security_headers_are_applied_to_all_responses() {
         "no-cache"
     );
 
-    // CSP is shipped in Report-Only mode and must cover the sources the
-    // embedded SPA actually loads: same-origin scripts, Google Fonts,
-    // WASM instantiation (viz-js), data: and blob: images, blob: workers.
+    // CSP must cover the sources the embedded SPA actually loads: same-origin
+    // scripts, Google Fonts, WASM instantiation (viz-js), data: and blob:
+    // images, blob: workers, and terminal WebSockets.
     // Inline hashes are optional because the current SPA ships only
     // external module scripts.
     let csp = spa_response
         .headers()
-        .get("content-security-policy-report-only")
-        .expect("CSP Report-Only header should be emitted")
+        .get("content-security-policy")
+        .expect("CSP header should be emitted")
         .to_str()
         .expect("CSP should be ASCII");
+    assert!(
+        !spa_response
+            .headers()
+            .contains_key("content-security-policy-report-only"),
+        "CSP should be enforced, not report-only"
+    );
     assert!(csp.contains("default-src 'self'"), "got: {csp}");
     assert!(csp.contains("script-src 'self'"), "got: {csp}");
     assert!(csp.contains("'wasm-unsafe-eval'"), "got: {csp}");
@@ -373,6 +379,7 @@ async fn security_headers_are_applied_to_all_responses() {
         "got: {csp}"
     );
     assert!(csp.contains("img-src 'self' data: blob:"), "got: {csp}");
+    assert!(csp.contains("connect-src 'self' ws: wss:"), "got: {csp}");
     assert!(csp.contains("worker-src 'self' blob:"), "got: {csp}");
     assert!(csp.contains("frame-ancestors 'none'"), "got: {csp}");
     assert!(csp.contains("object-src 'none'"), "got: {csp}");

@@ -20,16 +20,9 @@ pub async fn layer(req: Request, next: Next) -> Response {
 }
 
 fn apply_csp(headers: &mut HeaderMap) {
-    // Ship in Report-Only mode while the policy settles — browsers emit
-    // violations to DevTools and any configured report endpoint without
-    // actually blocking the offending resource. Flip to
-    // `Content-Security-Policy` once real-world use confirms no false
-    // positives.
     if let Ok(value) = HeaderValue::from_str(csp::policy()) {
         headers
-            .entry(HeaderName::from_static(
-                "content-security-policy-report-only",
-            ))
+            .entry(HeaderName::from_static("content-security-policy"))
             .or_insert(value);
     }
 }
@@ -191,6 +184,14 @@ mod tests {
         assert_eq!(headers.get("cache-control").unwrap(), "no-store");
         assert_eq!(headers.get("pragma").unwrap(), "no-cache");
         assert_eq!(headers.get("vary").unwrap(), "Accept-Encoding");
+    }
+
+    #[test]
+    fn csp_is_enforced_not_report_only() {
+        let mut headers = HeaderMap::new();
+        apply_csp(&mut headers);
+        assert!(headers.contains_key("content-security-policy"));
+        assert!(!headers.contains_key("content-security-policy-report-only"));
     }
 
     #[test]

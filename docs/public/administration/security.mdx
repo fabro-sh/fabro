@@ -16,7 +16,7 @@ Fabro is single-tenant software designed for small, trusted teams. The following
 | **Multi-tenancy** | Not supported. Fabro is single-tenant only — there is no organization or tenant isolation. |
 | **Roles or ACLs** | Not supported. All authenticated users have identical, full access to every run, workflow, and API endpoint. |
 | **Rate limiting** | Not implemented. The API server does not throttle requests. |
-| **Security headers** | Not configured. The API does not set `Strict-Transport-Security`, `Content-Security-Policy`, `X-Frame-Options`, or similar headers. |
+| **Custom security header policy** | Not configurable. Fabro emits default security headers, including enforced `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, and `Strict-Transport-Security` when HTTPS is detected. |
 
 ## Security recommendations
 
