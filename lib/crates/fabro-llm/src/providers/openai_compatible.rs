@@ -181,8 +181,18 @@ struct ApiFunction {
     reason = "Field names mirror the provider API payload."
 )]
 struct ApiUsage {
-    prompt_tokens:     i64,
-    completion_tokens: i64,
+    prompt_tokens:         i64,
+    completion_tokens:     i64,
+    #[serde(default)]
+    prompt_tokens_details: Option<ApiPromptTokensDetails>,
+    #[serde(default)]
+    cache_write_tokens:    Option<i64>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ApiPromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<i64>,
 }
 
 // --- Streaming response types ---
@@ -587,6 +597,12 @@ impl ProviderAdapter for Adapter {
             .map_or_else(TokenCounts::default, |u| TokenCounts {
                 input_tokens: u.prompt_tokens,
                 output_tokens: u.completion_tokens,
+                cache_read_tokens: u
+                    .prompt_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.cached_tokens)
+                    .unwrap_or(0),
+                cache_write_tokens: u.cache_write_tokens.unwrap_or(0),
                 ..TokenCounts::default()
             });
 
@@ -829,6 +845,12 @@ impl StreamState {
             self.usage = TokenCounts {
                 input_tokens: usage.prompt_tokens,
                 output_tokens: usage.completion_tokens,
+                cache_read_tokens: usage
+                    .prompt_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.cached_tokens)
+                    .unwrap_or(0),
+                cache_write_tokens: usage.cache_write_tokens.unwrap_or(0),
                 ..TokenCounts::default()
             };
         }
@@ -1046,6 +1068,48 @@ mod tests {
         let usage = chunk.usage.unwrap();
         assert_eq!(usage.prompt_tokens, 10);
         assert_eq!(usage.completion_tokens, 20);
+        assert!(usage.prompt_tokens_details.is_none());
+        assert!(usage.cache_write_tokens.is_none());
+    }
+
+    #[test]
+    fn stream_chunk_usage_parses_cached_tokens() {
+        let json = r#"{"id":"chatcmpl-1","model":"gpt-4","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":80},"cache_write_tokens":12}}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        let usage = chunk.usage.unwrap();
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.completion_tokens, 50);
+        assert_eq!(
+            usage
+                .prompt_tokens_details
+                .as_ref()
+                .and_then(|d| d.cached_tokens),
+            Some(80)
+        );
+        assert_eq!(usage.cache_write_tokens, Some(12));
+    }
+
+    #[test]
+    fn stream_state_process_usage_populates_cache_counts() {
+        let http_resp =
+            fabro_http::Response::from(http::Response::builder().status(200).body("").unwrap());
+        let mut state = StreamState::new(
+            http_resp,
+            "openrouter".into(),
+            "model".into(),
+            None,
+            Some(std::time::Duration::from_secs(30)),
+        );
+
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"id":"c1","model":"m1","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":80},"cache_write_tokens":12}}"#,
+        )
+        .unwrap();
+        let _ = state.process_chunk(&chunk);
+        assert_eq!(state.usage.input_tokens, 100);
+        assert_eq!(state.usage.output_tokens, 50);
+        assert_eq!(state.usage.cache_read_tokens, 80);
+        assert_eq!(state.usage.cache_write_tokens, 12);
     }
 
     #[test]
