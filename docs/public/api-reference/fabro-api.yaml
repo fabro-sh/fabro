@@ -6011,11 +6011,27 @@ components:
       additionalProperties: false
       required:
         - data
+        - meta
       properties:
         data:
           type: array
           items:
             $ref: "#/components/schemas/Automation"
+        meta:
+          $ref: "#/components/schemas/AutomationListMeta"
+
+    AutomationListMeta:
+      description: Metadata for automation list responses.
+      type: object
+      additionalProperties: false
+      required:
+        - total
+      properties:
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total number of configured automation definitions.
 
     # ── Pagination ───────────────────────────────────────────────────────
 

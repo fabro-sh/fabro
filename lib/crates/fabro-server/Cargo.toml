@@ -21,6 +21,7 @@ required-features = ["test-support"]
 workspace = true
 
 [dependencies]
+fabro-automation = { path = "../fabro-automation" }
 fabro-auth = { path = "../fabro-auth" }
 fabro-install = { path = "../fabro-install" }
 fabro-spa = { path = "../fabro-spa" }

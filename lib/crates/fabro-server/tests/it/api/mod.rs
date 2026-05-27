@@ -1,4 +1,5 @@
 mod auth_sessions;
+mod automations;
 mod cli_auth_token;
 mod docs;
 mod events;

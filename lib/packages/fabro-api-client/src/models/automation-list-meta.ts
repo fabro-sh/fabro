@@ -13,15 +13,13 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { Automation } from './automation';
-import type { AutomationListMeta } from './automation-list-meta';
 
 /**
- * List envelope for automation definitions.
+ * Metadata for automation list responses.
  */
-export interface AutomationListResponse {
-    'data': Array<Automation>;
-    'meta': AutomationListMeta;
+export interface AutomationListMeta {
+    /**
+     * Total number of configured automation definitions.
+     */
+    'total': number;
 }

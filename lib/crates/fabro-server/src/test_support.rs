@@ -198,6 +198,10 @@ impl TestAppStateBuilder {
     }
 
     pub fn build(self) -> Arc<AppState> {
+        self.try_build().expect("test app state should build")
+    }
+
+    pub fn try_build(self) -> anyhow::Result<Arc<AppState>> {
         let (store, artifact_store) = self.store_bundle.unwrap_or_else(test_store_bundle);
         let vault_path = self.vault_path.unwrap_or_else(test_secret_store_path);
         if !self.vault_entries.is_empty() {
@@ -211,9 +215,9 @@ impl TestAppStateBuilder {
         let server_env_path = self
             .server_env_path
             .unwrap_or_else(|| vault_path.with_file_name("server.env"));
-        let active_config_path = self.active_config_path.unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("fabro-test-settings-{}.toml", Ulid::new()))
-        });
+        let active_config_path = self
+            .active_config_path
+            .unwrap_or_else(|| vault_path.with_file_name("settings.toml"));
         build_app_state(AppStateConfig {
             resolved_settings: resolved_runtime_settings_for_tests(
                 self.server_settings,
@@ -237,7 +241,6 @@ impl TestAppStateBuilder {
             sandbox_provider_registry: self.sandbox_provider_registry,
             shutdown: CancellationToken::new(),
         })
-        .expect("test app state should build")
     }
 }
 
