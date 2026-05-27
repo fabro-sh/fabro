@@ -1,23 +1,12 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_util::terminal::Styles;
 
 use crate::args::SecretListArgs;
 use crate::command_context::CommandContext;
-use crate::shared::print_json_pretty;
-
-fn format_age(dt: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    let dur = now.signed_duration_since(dt);
-    if dur.num_days() > 0 {
-        format!("{}d ago", dur.num_days())
-    } else if dur.num_hours() > 0 {
-        format!("{}h ago", dur.num_hours())
-    } else {
-        format!("{}m ago", dur.num_minutes().max(1))
-    }
-}
+use crate::shared::{format_age, print_json_pretty};
 
 pub(super) async fn list_command(_args: &SecretListArgs, ctx: &CommandContext) -> Result<()> {
     let client = ctx.server().await?;

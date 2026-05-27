@@ -195,6 +195,21 @@ pub(crate) fn format_duration_ms(ms: u64) -> String {
     }
 }
 
+/// Format a UTC timestamp as a coarse "N{d,h,m} ago" string relative to `now`.
+pub(crate) fn format_age(
+    dt: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let dur = now.signed_duration_since(dt);
+    if dur.num_days() > 0 {
+        format!("{}d ago", dur.num_days())
+    } else if dur.num_hours() > 0 {
+        format!("{}h ago", dur.num_hours())
+    } else {
+        format!("{}m ago", dur.num_minutes().max(1))
+    }
+}
+
 pub(crate) fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * KB;
