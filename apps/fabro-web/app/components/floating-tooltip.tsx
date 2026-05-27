@@ -8,6 +8,7 @@ import {
 import { createPortal } from "react-dom";
 
 type FloatingTooltipPlacement = "top" | "bottom";
+type FloatingTooltipSize = { height: number; width: number };
 
 const VIEWPORT_MARGIN = 12;
 const OFFSET = 8;
@@ -39,10 +40,11 @@ function resolvePlacement(
 function floatingStyle(
   rect: DOMRect,
   placement: FloatingTooltipPlacement,
-  size: { height: number; width: number },
+  size: FloatingTooltipSize,
+  viewport: FloatingTooltipSize,
 ): CSSProperties {
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
+  const viewportWidth = viewport.width;
+  const viewportHeight = viewport.height;
   const centerX = rect.left + rect.width / 2;
   const availableWidth = Math.max(0, viewportWidth - VIEWPORT_MARGIN * 2);
   const width = size.width > 0 ? Math.min(size.width, availableWidth) : 0;
@@ -77,6 +79,10 @@ function floatingStyle(
   };
 }
 
+function viewportSize(): FloatingTooltipSize {
+  return { height: window.innerHeight, width: window.innerWidth };
+}
+
 export function FloatingTooltip({
   rect,
   placement,
@@ -90,6 +96,9 @@ export function FloatingTooltip({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ height: 0, width: 0 });
+  const [viewport, setViewport] = useState<FloatingTooltipSize>(() =>
+    typeof window === "undefined" ? { height: 0, width: 0 } : viewportSize(),
+  );
 
   useLayoutEffect(() => {
     const node = ref.current;
@@ -103,17 +112,24 @@ export function FloatingTooltip({
           : { height: next.height, width: next.width },
       );
     };
+    const updateViewport = () => {
+      const next = viewportSize();
+      setViewport((prev) =>
+        prev.height === next.height && prev.width === next.width ? prev : next,
+      );
+    };
 
     updateSize();
+    updateViewport();
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(updateSize);
     resizeObserver?.observe(node);
-    window.addEventListener("resize", updateSize);
+    window.addEventListener("resize", updateViewport);
     return () => {
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateSize);
+      window.removeEventListener("resize", updateViewport);
     };
   }, []);
 
@@ -123,7 +139,7 @@ export function FloatingTooltip({
     <div
       ref={ref}
       role="tooltip"
-      style={floatingStyle(rect, placement, size)}
+      style={floatingStyle(rect, placement, size, viewport)}
       className={`pointer-events-none fixed z-50 ${className}`}
     >
       {children}
