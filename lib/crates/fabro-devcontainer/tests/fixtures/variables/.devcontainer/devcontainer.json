@@ -1,9 +1,0 @@
-{
-  "image": "ubuntu:22.04",
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
-  "remoteEnv": {
-    "PROJECT_ROOT": "${containerWorkspaceFolder}",
-    "PROJECT_NAME": "${containerWorkspaceFolderBasename}"
-  },
-  "postCreateCommand": "echo ${containerWorkspaceFolder}"
-}

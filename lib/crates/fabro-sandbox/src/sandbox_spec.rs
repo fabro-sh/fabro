@@ -14,7 +14,7 @@ use fabro_types::{RunId, RunSandbox, RunSandboxRuntime, SandboxProviderKind};
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use crate::clone_source;
 #[cfg(feature = "daytona")]
-use crate::daytona::{self, DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
+use crate::daytona::{self, DaytonaConfig, DaytonaSandbox};
 #[cfg(feature = "docker")]
 use crate::docker::{self, DockerSandbox, DockerSandboxOptions};
 use crate::local::LocalSandbox;
@@ -175,14 +175,6 @@ impl SandboxSpec {
                     primary_repo_link: None,
                 }),
             },
-        }
-    }
-
-    /// Apply devcontainer snapshot config. Only Daytona uses this.
-    #[cfg(feature = "daytona")]
-    pub fn apply_devcontainer_snapshot(&mut self, snapshot: DaytonaSnapshotConfig) {
-        if let Self::Daytona { config, .. } = self {
-            config.snapshot = Some(snapshot);
         }
     }
 

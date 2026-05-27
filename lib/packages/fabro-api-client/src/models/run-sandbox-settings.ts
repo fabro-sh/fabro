@@ -27,7 +27,6 @@ export interface RunSandboxSettings {
     'provider': SandboxProvider;
     'preserve': boolean;
     'stop_on_terminal': boolean;
-    'devcontainer': boolean;
     'env': { [key: string]: string; };
     'docker': DockerSettings | null;
     'daytona': DaytonaSettings | null;

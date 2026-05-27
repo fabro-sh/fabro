@@ -1,5 +1,0 @@
-services:
-  app:
-    image: node:22
-    environment:
-      - "OVERRIDE_VAR=true"

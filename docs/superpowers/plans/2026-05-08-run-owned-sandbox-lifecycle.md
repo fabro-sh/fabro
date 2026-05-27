@@ -131,7 +131,7 @@ Attach-existing must not:
 - create an empty provider workspace
 - overwrite persisted sandbox identity
 
-Setup-command/devcontainer behavior on resume should remain checkpoint-aware: do not rerun provider creation, clone, or devcontainer snapshot creation. Only rerun explicit resume setup commands already defined by the sandbox/provider when needed to reattach to the existing run branch.
+Setup-command behavior on resume should remain checkpoint-aware: do not rerun provider creation or clone. Only rerun explicit resume setup commands already defined by the sandbox/provider when needed to reattach to the existing run branch.
 
 ## Delete And Preserve API Semantics
 

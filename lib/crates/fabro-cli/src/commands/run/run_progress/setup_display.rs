@@ -12,8 +12,6 @@ pub(super) struct SetupDisplay {
     pub(super) sandbox_bar: Option<ProgressBar>,
     pub(super) setup_bar: Option<ProgressBar>,
     pub(super) setup_command_count: u64,
-    pub(super) devcontainer_bar: Option<ProgressBar>,
-    pub(super) devcontainer_command_count: u64,
     pub(super) cli_ensure_bar: Option<ProgressBar>,
 }
 
@@ -25,8 +23,6 @@ impl SetupDisplay {
             sandbox_bar: None,
             setup_bar: None,
             setup_command_count: 0,
-            devcontainer_bar: None,
-            devcontainer_command_count: 0,
             cli_ensure_bar: None,
         }
     }
@@ -36,9 +32,6 @@ impl SetupDisplay {
             bar.finish_and_clear();
         }
         if let Some(bar) = self.setup_bar.take() {
-            bar.finish_and_clear();
-        }
-        if let Some(bar) = self.devcontainer_bar.take() {
             bar.finish_and_clear();
         }
         if let Some(bar) = self.cli_ensure_bar.take() {
@@ -303,143 +296,6 @@ impl SetupDisplay {
             }
         } else {
             renderer.print_line(4, &message);
-        }
-    }
-
-    pub(super) fn on_devcontainer_resolved(
-        renderer: &ProgressRenderer,
-        dockerfile_lines: u64,
-        environment_count: u64,
-        lifecycle_command_count: u64,
-        workspace_folder: &str,
-    ) {
-        let detail = format!(
-            "{dockerfile_lines} Dockerfile lines, {environment_count} env vars, \
-             {lifecycle_command_count} lifecycle cmds, {workspace_folder}"
-        );
-
-        if renderer.is_tty() {
-            let bar = renderer.add_spinner();
-            bar.set_style(styles::style_header_done());
-            bar.finish_with_message("Devcontainer: resolved".to_string());
-            let detail_bar = renderer.insert_after(&bar);
-            detail_bar.set_style(styles::style_sandbox_detail());
-            detail_bar.finish_with_message(detail);
-        } else {
-            renderer.print_line(4, "Devcontainer: resolved");
-            renderer.print_line(13, &detail);
-        }
-    }
-
-    pub(super) fn on_devcontainer_lifecycle_started(
-        &mut self,
-        renderer: &ProgressRenderer,
-        phase: &str,
-        command_count: u64,
-    ) {
-        self.devcontainer_command_count = command_count;
-
-        if renderer.is_tty() {
-            let bar = renderer.add_spinner();
-            bar.set_style(styles::style_header_running());
-            bar.set_message(format!(
-                "Running devcontainer {phase} ({command_count} commands)..."
-            ));
-            bar.enable_steady_tick(Duration::from_millis(100));
-            self.devcontainer_bar = Some(bar);
-        } else {
-            renderer.print_line(
-                4,
-                &format!("Running devcontainer {phase} ({command_count} commands)..."),
-            );
-        }
-    }
-
-    pub(super) fn on_devcontainer_lifecycle_completed(
-        &mut self,
-        renderer: &ProgressRenderer,
-        phase: &str,
-        duration_ms: u64,
-    ) {
-        let dur = format_duration_ms(duration_ms);
-
-        if renderer.is_tty() {
-            if let Some(bar) = self.devcontainer_bar.take() {
-                bar.set_style(styles::style_header_done());
-                bar.set_prefix(dur);
-                bar.finish_with_message(format!("Devcontainer: {phase}"));
-            }
-        } else {
-            renderer.print_line(4, &format!("Devcontainer: {phase} ({dur})"));
-        }
-    }
-
-    pub(super) fn on_devcontainer_lifecycle_failed(
-        &mut self,
-        renderer: &ProgressRenderer,
-        phase: &str,
-        command: &str,
-        exit_code: i64,
-        stderr: &str,
-    ) {
-        if let Some(bar) = self.devcontainer_bar.take() {
-            bar.abandon();
-        }
-
-        let summary = if stderr.len() > 120 {
-            &stderr[..120]
-        } else {
-            stderr
-        };
-        let message = format!(
-            "{} Devcontainer {phase} command failed (exit {exit_code}): {command}\n         {summary}",
-            renderer.styles().red.apply_to("Error:")
-        );
-
-        if renderer.is_tty() {
-            let bar = renderer.add_spinner();
-            bar.set_style(styles::style_static_dim());
-            bar.finish_with_message(message);
-        } else {
-            renderer.print_line(4, &message);
-        }
-    }
-
-    pub(super) fn on_devcontainer_lifecycle_command_completed(
-        &self,
-        renderer: &ProgressRenderer,
-        command: &str,
-        command_index: u64,
-        exit_code: i64,
-        duration_ms: u64,
-    ) {
-        if !self.verbose {
-            return;
-        }
-
-        let glyph = if exit_code == 0 {
-            styles::green_check(renderer.styles())
-        } else {
-            styles::red_cross(renderer.styles())
-        };
-        let msg = format!(
-            "{glyph} [{}/{}] {}",
-            command_index + 1,
-            self.devcontainer_command_count,
-            styles::truncate(command, 60)
-        );
-        let dur = format_duration_ms(duration_ms);
-
-        if renderer.is_tty() {
-            let bar = match &self.devcontainer_bar {
-                Some(devcontainer_bar) => renderer.insert_before(devcontainer_bar),
-                None => renderer.add_spinner(),
-            };
-            bar.set_style(styles::style_tool_done());
-            bar.set_prefix(dur);
-            bar.finish_with_message(msg);
-        } else {
-            renderer.print_line(6, &format!("{msg}  {dur}"));
         }
     }
 }

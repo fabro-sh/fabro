@@ -100,32 +100,6 @@ pub(super) enum ProgressEvent {
     CliEnsureFailed {
         cli_name: String,
     },
-    DevcontainerResolved {
-        dockerfile_lines:        u64,
-        environment_count:       u64,
-        lifecycle_command_count: u64,
-        workspace_folder:        String,
-    },
-    DevcontainerLifecycleStarted {
-        phase:         String,
-        command_count: u64,
-    },
-    DevcontainerLifecycleCompleted {
-        phase:       String,
-        duration_ms: u64,
-    },
-    DevcontainerLifecycleFailed {
-        phase:     String,
-        command:   String,
-        exit_code: i64,
-        stderr:    String,
-    },
-    DevcontainerLifecycleCommandCompleted {
-        command:       String,
-        command_index: u64,
-        exit_code:     i64,
-        duration_ms:   u64,
-    },
     StageStarted {
         node_id: String,
         name:    String,
@@ -308,40 +282,6 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
         EventBody::CliEnsureFailed(props) => Some(ProgressEvent::CliEnsureFailed {
             cli_name: props.cli_name.clone(),
         }),
-        EventBody::DevcontainerResolved(props) => Some(ProgressEvent::DevcontainerResolved {
-            dockerfile_lines:        props.dockerfile_lines as u64,
-            environment_count:       props.environment_count as u64,
-            lifecycle_command_count: props.lifecycle_command_count as u64,
-            workspace_folder:        props.workspace_folder.clone(),
-        }),
-        EventBody::DevcontainerLifecycleStarted(props) => {
-            Some(ProgressEvent::DevcontainerLifecycleStarted {
-                phase:         props.phase.clone(),
-                command_count: props.command_count as u64,
-            })
-        }
-        EventBody::DevcontainerLifecycleCompleted(props) => {
-            Some(ProgressEvent::DevcontainerLifecycleCompleted {
-                phase:       props.phase.clone(),
-                duration_ms: props.duration_ms,
-            })
-        }
-        EventBody::DevcontainerLifecycleFailed(props) => {
-            Some(ProgressEvent::DevcontainerLifecycleFailed {
-                phase:     props.phase.clone(),
-                command:   props.command.clone(),
-                exit_code: i64::from(props.exit_code),
-                stderr:    props.stderr.clone(),
-            })
-        }
-        EventBody::DevcontainerLifecycleCommandCompleted(props) => {
-            Some(ProgressEvent::DevcontainerLifecycleCommandCompleted {
-                command:       props.command.clone(),
-                command_index: props.index as u64,
-                exit_code:     i64::from(props.exit_code),
-                duration_ms:   props.duration_ms,
-            })
-        }
         EventBody::StageStarted(_) => Some(ProgressEvent::StageStarted {
             node_id,
             name: node_label,

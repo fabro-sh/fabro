@@ -38,8 +38,8 @@ use crate::handler::HandlerRegistry;
 use crate::handler::llm::routing;
 use crate::outcome::{Outcome, StageOutcome};
 use crate::pipeline::{
-    self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
-    PullRequestOptions, SandboxEnvSpec, build_conclusion_from_store, classify_engine_result,
+    self, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted, PullRequestOptions,
+    SandboxEnvSpec, build_conclusion_from_store, classify_engine_result,
 };
 use crate::records::Checkpoint;
 use crate::run_control::RunControlState;
@@ -62,7 +62,6 @@ struct RunSession {
     lifecycle:         LifecycleOptions,
     hooks:             fabro_hooks::HookSettings,
     sandbox_env:       SandboxEnvSpec,
-    devcontainer:      Option<DevcontainerSpec>,
     seed_context:      Option<Context>,
     run_store:         RunStoreHandle,
     event_sink:        RunEventSink,
@@ -421,13 +420,10 @@ impl RunSession {
         let github_permissions: Option<HashMap<String, String>> =
             (!services.github_permissions.is_empty()).then(|| services.github_permissions.clone());
         let sandbox_env = SandboxEnvSpec {
-            devcontainer_env: HashMap::new(),
             toml_env,
             github_permissions,
             origin_url: record.repo_origin_url().map(str::to_string),
         };
-
-        let devcontainer = None;
 
         let interviewer: Arc<dyn Interviewer> = if resolved.execution.approval == ApprovalMode::Auto
         {
@@ -458,13 +454,11 @@ impl RunSession {
             lifecycle: LifecycleOptions {
                 setup_commands:           resolved.prepare.commands.clone(),
                 setup_command_timeout_ms: resolved.prepare.timeout_ms,
-                devcontainer_phases:      Vec::new(),
             },
             hooks: fabro_hooks::HookSettings {
                 hooks: resolved.hooks.iter().map(runtime_hook_definition).collect(),
             },
             sandbox_env,
-            devcontainer,
             seed_context: None,
             run_store: services.run_store,
             artifact_sink: services.artifact_sink,
@@ -855,7 +849,6 @@ impl RunSession {
             hooks: self.hooks,
             sandbox_env: self.sandbox_env,
             vault: self.vault,
-            devcontainer: self.devcontainer,
             git: self.git,
             registry_override: self.registry_override,
             artifact_sink: self.artifact_sink,

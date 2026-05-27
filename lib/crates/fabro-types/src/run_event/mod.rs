@@ -358,18 +358,6 @@ pub enum EventBody {
     PullRequestUnlinked(PullRequestUnlinkedProps),
     #[serde(rename = "pull_request.failed")]
     PullRequestFailed(PullRequestFailedProps),
-    #[serde(rename = "devcontainer.resolved")]
-    DevcontainerResolved(DevcontainerResolvedProps),
-    #[serde(rename = "devcontainer.lifecycle.started")]
-    DevcontainerLifecycleStarted(DevcontainerLifecycleStartedProps),
-    #[serde(rename = "devcontainer.lifecycle.command.started")]
-    DevcontainerLifecycleCommandStarted(DevcontainerLifecycleCommandStartedProps),
-    #[serde(rename = "devcontainer.lifecycle.command.completed")]
-    DevcontainerLifecycleCommandCompleted(DevcontainerLifecycleCommandCompletedProps),
-    #[serde(rename = "devcontainer.lifecycle.completed")]
-    DevcontainerLifecycleCompleted(DevcontainerLifecycleCompletedProps),
-    #[serde(rename = "devcontainer.lifecycle.failed")]
-    DevcontainerLifecycleFailed(DevcontainerLifecycleFailedProps),
     Unknown {
         name:       String,
         properties: Value,
@@ -580,16 +568,6 @@ impl EventBody {
             Self::PullRequestLinked(_) => "pull_request.linked",
             Self::PullRequestUnlinked(_) => "pull_request.unlinked",
             Self::PullRequestFailed(_) => "pull_request.failed",
-            Self::DevcontainerResolved(_) => "devcontainer.resolved",
-            Self::DevcontainerLifecycleStarted(_) => "devcontainer.lifecycle.started",
-            Self::DevcontainerLifecycleCommandStarted(_) => {
-                "devcontainer.lifecycle.command.started"
-            }
-            Self::DevcontainerLifecycleCommandCompleted(_) => {
-                "devcontainer.lifecycle.command.completed"
-            }
-            Self::DevcontainerLifecycleCompleted(_) => "devcontainer.lifecycle.completed",
-            Self::DevcontainerLifecycleFailed(_) => "devcontainer.lifecycle.failed",
             Self::Unknown { name, .. } => name.as_str(),
         }
     }
@@ -762,12 +740,6 @@ fn is_known_event_name(event: &str) -> bool {
             | "pull_request.linked"
             | "pull_request.unlinked"
             | "pull_request.failed"
-            | "devcontainer.resolved"
-            | "devcontainer.lifecycle.started"
-            | "devcontainer.lifecycle.command.started"
-            | "devcontainer.lifecycle.command.completed"
-            | "devcontainer.lifecycle.completed"
-            | "devcontainer.lifecycle.failed"
     )
 }
 

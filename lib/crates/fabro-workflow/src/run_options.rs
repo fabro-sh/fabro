@@ -78,6 +78,4 @@ pub struct LifecycleOptions {
     pub setup_commands:           Vec<String>,
     /// Timeout in milliseconds for each setup command.
     pub setup_command_timeout_ms: u64,
-    /// Devcontainer lifecycle phases and their commands.
-    pub devcontainer_phases:      Vec<(String, Vec<fabro_devcontainer::Command>)>,
 }

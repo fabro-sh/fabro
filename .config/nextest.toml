@@ -16,10 +16,6 @@ leak-timeout = "500ms"
     slow-timeout = { period = "15s", terminate-after = 4 }
 
     [[profile.default.overrides]]
-    filter = "package(fabro-devcontainer) & test(resolve_features_integration)"
-    slow-timeout = { period = "10s", terminate-after = 3 }
-
-    [[profile.default.overrides]]
     filter = "package(fabro-workflow)"
     slow-timeout = { period = "2s", terminate-after = 3 }
 

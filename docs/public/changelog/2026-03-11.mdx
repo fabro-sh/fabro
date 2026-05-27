@@ -52,10 +52,6 @@ fabro graph -o flow.svg    # SVG to file
 - Retro step now shows tool call progress while the retro agent works
 </Accordion>
 
-<Accordion title="API">
-- Added `devcontainer` field to `SandboxConfiguration` OpenAPI schema
-</Accordion>
-
 <Accordion title="Improvements">
 - Context compaction now produces higher-quality summaries: the summarization prompt is framed as a handoff document, and recent user messages are preserved through compaction so the agent retains the user's actual words
 - Retro agent limits increased to 20 tool rounds and a 3-minute timeout for complex runs

@@ -1,5 +1,5 @@
 ---
-title: "One-line installer, MCP servers, devcontainers, and new CLI commands"
+title: "One-line installer, MCP servers, and new CLI commands"
 date: "2026-03-10"
 ---
 
@@ -23,15 +23,6 @@ Agents running inside sandboxes can now access MCP tools during workflow runs. A
 type = "sandbox"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless"]
 port = 3100
-```
-
-## Devcontainer support in sandboxes
-
-Workflows can now use your project's `devcontainer.json` to configure sandbox environments. When `devcontainer = true` is set in the sandbox config, Fabro resolves the devcontainer from the repo, uses its Dockerfile for the Daytona snapshot, runs lifecycle hooks (`onCreateCommand`, `postCreateCommand`, `postStartCommand`), and merges devcontainer environment variables into the sandbox. Unsupported `COPY`/`ADD` instructions in base Dockerfiles are detected and reported.
-
-```toml title="workflow.toml"
-[sandbox]
-devcontainer = true
 ```
 
 <Warning>

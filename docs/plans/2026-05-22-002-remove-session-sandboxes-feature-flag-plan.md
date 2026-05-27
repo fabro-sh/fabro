@@ -23,7 +23,7 @@ Remove the `session_sandboxes` feature flag and the now-empty `[features]` setti
   - Regenerate Rust API types and TypeScript Axios client.
 - Update current docs:
   - Remove `[features]` from active configuration docs, generated options docs, API docs, and unknown-key guidance.
-  - Do not touch unrelated meanings of "features" such as Cargo features, LLM model features, or devcontainer features.
+  - Do not touch unrelated meanings of "features" such as Cargo features or LLM model features.
 
 ## Test Plan
 
