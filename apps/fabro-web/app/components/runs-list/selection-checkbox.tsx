@@ -1,5 +1,3 @@
-import { useEffect, useRef } from "react";
-
 export function SelectionCheckbox({
   checked,
   indeterminate = false,
@@ -13,13 +11,11 @@ export function SelectionCheckbox({
   onChange:       () => void;
   ariaLabel:      string;
 }) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = indeterminate;
-  }, [indeterminate]);
   return (
     <input
-      ref={ref}
+      ref={(input) => {
+        if (input) input.indeterminate = indeterminate;
+      }}
       type="checkbox"
       aria-label={ariaLabel}
       checked={checked}

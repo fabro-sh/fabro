@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { graphTheme } from "../lib/graph-theme";
 import { ApiError } from "../lib/api-client";
 import { useRun, useRunGraph, useRunStages } from "../lib/queries";
 import { FloatingTooltip } from "../components/floating-tooltip";
@@ -14,19 +13,12 @@ import {
 import { GraphToolbar } from "../components/graph-toolbar";
 import { EmptyState, ErrorState } from "../components/state";
 import {
-  ACTIVE_STAGE_STATES,
-  SUCCEEDED_STAGE_STATES,
-  aggregateGraphNodeStatus,
   mapRunStagesToSidebarStages,
-  type Stage,
 } from "../lib/stage-sidebar";
-
-const HOVER_OPEN_DELAY_MS = 200;
-
-interface NodeHover {
-  stage: Stage;
-  rect:  DOMRect;
-}
+import {
+  useAnnotatedRunGraphSvg,
+  type RunGraphNodeHover,
+} from "../hooks/use-annotated-run-graph-svg";
 
 export const handle = { wide: true };
 
@@ -64,153 +56,21 @@ export default function RunOverview() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const zoom = GRAPH_ZOOM_STEPS[zoomIndex];
-  const [hoveredNode, setHoveredNode] = useState<NodeHover | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<RunGraphNodeHover | null>(null);
 
-  // Per-stage lookup keyed by latest visit's `stageId`, used when the SVG's
-  // imperative hover handlers need to resolve a node to its sidebar Stage.
-  const stageById = useMemo(() => {
-    const map = new Map<string, Stage>();
-    for (const stage of stages) map.set(stage.id, stage);
-    return map;
-  }, [stages]);
-
-  // Render SVG with stage annotations
-  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- This effect mutates local Set/Map instances and the Graphviz SVG DOM; it does not call React state setters.
-  useEffect(() => {
-    const inner = innerRef.current;
-    if (!inner || !graphSvg) return;
-
-    inner.innerHTML = graphSvg;
-    const svg = inner.querySelector("svg");
-    if (!svg) return;
-    svgRef.current = svg;
-
-    const gt = graphTheme;
-    const aggregated = aggregateGraphNodeStatus(stages);
-    const runningDotIds = new Set<string>();
-    const failedDotIds = new Set<string>();
-    const completedDotIds = new Set<string>();
-    const dotIdToStageId = new Map<string, string>();
-    for (const [nodeId, { displayStatus, latestStageId }] of aggregated) {
-      dotIdToStageId.set(nodeId, latestStageId);
-      if (ACTIVE_STAGE_STATES.has(displayStatus)) {
-        runningDotIds.add(nodeId);
-      } else if (displayStatus === "failed") {
-        failedDotIds.add(nodeId);
-      } else if (SUCCEEDED_STAGE_STATES.has(displayStatus)) {
-        completedDotIds.add(nodeId);
-      }
-    }
-
-    const ns = "http://www.w3.org/2000/svg";
-    let openTimer: ReturnType<typeof setTimeout> | null = null;
-    const clearOpenTimer = () => {
-      if (openTimer !== null) {
-        clearTimeout(openTimer);
-        openTimer = null;
-      }
-    };
-    const listeners: Array<{ target: Element; type: string; listener: EventListener }> = [];
-    const addListener = (target: Element, type: string, listener: EventListener) => {
-      target.addEventListener(type, listener);
-      listeners.push({ target, type, listener });
-    };
-
-    for (const group of svg.querySelectorAll(".node")) {
-      const nodeId = group.querySelector("title")?.textContent?.trim();
-      if (!nodeId) continue;
-
-      const stageId = dotIdToStageId.get(nodeId);
-      const stage = stageId ? stageById.get(stageId) : undefined;
-      if (stageId) {
-        (group as SVGElement).style.cursor = "pointer";
-        addListener(group, "click", () => navigate(`/runs/${id}/stages/${stageId}`));
-      }
-      if (stage) {
-        addListener(group, "mouseenter", () => {
-          clearOpenTimer();
-          const target = group as SVGGElement;
-          openTimer = setTimeout(() => {
-            openTimer = null;
-            setHoveredNode({ stage, rect: target.getBoundingClientRect() });
-          }, HOVER_OPEN_DELAY_MS);
-        });
-        addListener(group, "mouseleave", () => {
-          clearOpenTimer();
-          setHoveredNode(null);
-        });
-      }
-
-      // Color exit node based on run outcome
-      if (nodeId === "exit" && terminalOutcome) {
-        const isSuccess = terminalOutcome === "succeeded";
-        const fill = isSuccess ? gt.completedFill : gt.failedFill;
-        const border = isSuccess ? gt.completedBorder : gt.failedBorder;
-        const text = isSuccess ? gt.completedText : gt.failedText;
-        for (const shape of group.querySelectorAll("ellipse, polygon, path")) {
-          shape.setAttribute("fill", fill);
-          shape.setAttribute("stroke", border);
-        }
-        for (const t of group.querySelectorAll("text")) {
-          t.setAttribute("fill", text);
-        }
-      } else if (runningDotIds.has(nodeId)) {
-        for (const shape of group.querySelectorAll("ellipse, polygon, path")) {
-          shape.setAttribute("fill", gt.runningFill);
-          shape.setAttribute("stroke", gt.runningBorder);
-          shape.setAttribute("stroke-width", "2");
-
-          const animFill = document.createElementNS(ns, "animate");
-          animFill.setAttribute("attributeName", "fill");
-          animFill.setAttribute("values", `${gt.runningFill};${gt.runningPulseFill};${gt.runningFill}`);
-          animFill.setAttribute("dur", "1.5s");
-          animFill.setAttribute("repeatCount", "indefinite");
-          shape.appendChild(animFill);
-
-          const animStroke = document.createElementNS(ns, "animate");
-          animStroke.setAttribute("attributeName", "stroke");
-          animStroke.setAttribute("values", `${gt.runningBorder};${gt.runningPulseStroke};${gt.runningBorder}`);
-          animStroke.setAttribute("dur", "1.5s");
-          animStroke.setAttribute("repeatCount", "indefinite");
-          shape.appendChild(animStroke);
-
-          const animWidth = document.createElementNS(ns, "animate");
-          animWidth.setAttribute("attributeName", "stroke-width");
-          animWidth.setAttribute("values", "2;3.5;2");
-          animWidth.setAttribute("dur", "1.5s");
-          animWidth.setAttribute("repeatCount", "indefinite");
-          shape.appendChild(animWidth);
-        }
-        for (const text of group.querySelectorAll("text")) {
-          text.setAttribute("fill", gt.runningText);
-        }
-      } else if (failedDotIds.has(nodeId)) {
-        for (const shape of group.querySelectorAll("ellipse, polygon, path")) {
-          shape.setAttribute("fill", gt.failedFill);
-          shape.setAttribute("stroke", gt.failedBorder);
-        }
-        for (const text of group.querySelectorAll("text")) {
-          text.setAttribute("fill", gt.failedText);
-        }
-      } else if (completedDotIds.has(nodeId)) {
-        for (const shape of group.querySelectorAll("ellipse, polygon, path")) {
-          shape.setAttribute("fill", gt.completedFill);
-          shape.setAttribute("stroke", gt.completedBorder);
-        }
-        for (const text of group.querySelectorAll("text")) {
-          text.setAttribute("fill", gt.completedText);
-        }
-      }
-    }
-
-    return () => {
-      clearOpenTimer();
-      for (const { target, type, listener } of listeners) {
-        target.removeEventListener(type, listener);
-      }
-      setHoveredNode(null);
-    };
-  }, [stages, stageById, graphSvg, id, navigate, terminalOutcome]);
+  const openStage = useCallback(
+    (stageId: string) => navigate(`/runs/${id}/stages/${stageId}`),
+    [id, navigate],
+  );
+  useAnnotatedRunGraphSvg({
+    graphSvg,
+    innerRef,
+    onHoverChange: setHoveredNode,
+    onStageClick:  openStage,
+    stages,
+    svgRef,
+    terminalOutcome,
+  });
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;

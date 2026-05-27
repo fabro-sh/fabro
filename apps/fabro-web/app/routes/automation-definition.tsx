@@ -1,25 +1,14 @@
-import { useEffect, useState } from "react";
 import { useOutletContext, useParams } from "react-router";
 import type { BundledLanguage } from "@pierre/diffs";
-import { registerDotLanguage } from "../data/register-dot-language";
 import { workflowData, type WorkflowEntry } from "./automation-detail";
 import { CollapsibleFile } from "../components/collapsible-file";
+import { useDotLanguageReady } from "../hooks/use-dot-language-ready";
 
 export default function AutomationDefinition() {
   const { name } = useParams();
   const context = useOutletContext<{ workflow?: WorkflowEntry } | null>();
   const workflow = context?.workflow ?? workflowData[name ?? ""];
-  const [dotReady, setDotReady] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    registerDotLanguage().then(() => {
-      if (!cancelled) setDotReady(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const dotReady = useDotLanguageReady();
 
   if (workflow == null) {
     return <p className="text-sm text-fg-muted">No settings found.</p>;

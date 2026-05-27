@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useState,
   type ReactNode,
   type RefObject,
@@ -20,7 +19,7 @@ import {
   type ApiQuestion,
   type AskFabro,
 } from "@qltysh/fabro-api-client";
-import { useAskFabroLayout } from "../../lib/ask-fabro-layout";
+import { usePublishedAskFabroSidebarWidth } from "../../lib/ask-fabro-layout";
 import { classNames } from "./model";
 
 const ASK_FABRO_UNAVAILABLE_TOOLTIPS: Record<
@@ -52,12 +51,7 @@ export function RunDetailAskFabroShell({
   const [askOpen, setAskOpen] = useState(false);
   const [askWidth, setAskWidth] = useState(SIDEBAR_WIDTH);
   const sidebarWidth = askAvailable && askOpen ? askWidth : 0;
-  const { setSidebarWidth, isResizing } = useAskFabroLayout();
-
-  useEffect(() => {
-    setSidebarWidth(sidebarWidth);
-    return () => setSidebarWidth(0);
-  }, [sidebarWidth, setSidebarWidth]);
+  const { isResizing } = usePublishedAskFabroSidebarWidth(sidebarWidth);
 
   return (
     <>

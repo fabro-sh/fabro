@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useRef,
   useState,
   type CSSProperties,
@@ -27,6 +28,7 @@ import {
   usePreviewRun,
   useRetryRun,
   useUnarchiveRun,
+  type LifecycleMutationResult,
 } from "../lib/mutations";
 import { useRunEvents } from "../lib/run-events";
 import { useRunToasts } from "../hooks/use-run-toasts";
@@ -36,6 +38,7 @@ import {
   canRetry,
   deleteErrorMessage,
   deleteRun,
+  type LifecycleAction,
 } from "../lib/run-actions";
 import {
   type ActionGroups,
@@ -47,8 +50,9 @@ import {
 } from "./run-detail/docked-controls";
 import { RunDetailHeader } from "./run-detail/header";
 import {
+  createLifecycleToastState,
   lifecycleActionVisibility,
-  useLifecycleToastResults,
+  updateLifecycleToastState,
 } from "./run-detail/lifecycle-toasts";
 import {
   buildRunDetailRun,
@@ -62,6 +66,8 @@ import {
 } from "./run-detail/tabs-shell";
 
 export const handle = { hideHeader: true };
+
+type LifecycleTrigger = () => Promise<LifecycleMutationResult | undefined>;
 
 export function meta({ data }: any) {
   const run = data?.run;
@@ -95,6 +101,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const { push, dismiss } = useToast();
+  const lifecycleToastStateRef = useRef(createLifecycleToastState());
   const filesCount = runQuery.data?.diff?.files_changed ?? null;
   const childrenCount = runQuery.data?.children_count ?? null;
   const hasSandbox = runHasSandbox(runStateQuery.data);
@@ -110,17 +117,27 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   useRunEvents(params.id);
   useRunToasts(params.id);
 
-  useLifecycleToastResults(
-    {
-      cancel:    cancelMutation.data,
-      approve:   approveMutation.data,
-      deny:      denyMutation.data,
-      archive:   archiveMutation.data,
-      unarchive: unarchiveMutation.data,
-      retry:     retryMutation.data,
+  const handleLifecycleMutationResult = useCallback(
+    (
+      intent: LifecycleAction,
+      result: LifecycleMutationResult | undefined,
+    ) => {
+      updateLifecycleToastState(
+        intent,
+        result,
+        lifecycleToastStateRef,
+        { push, dismiss },
+        intent === "retry" ? navigate : undefined,
+      );
     },
-    { push, dismiss },
-    navigate,
+    [dismiss, navigate, push],
+  );
+  const triggerLifecycleAction = useCallback(
+    async (intent: LifecycleAction, trigger: LifecycleTrigger) => {
+      const result = await trigger();
+      handleLifecycleMutationResult(intent, result);
+    },
+    [handleLifecycleMutationResult],
   );
 
   if (runQuery.isLoading && !run) {
@@ -198,9 +215,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         key:          "interrupt",
         label:        "Send interrupt",
         pendingLabel: "Interrupting…",
-        pending:      interruptMutation.isMutating,
-        disabled:     statusKind !== "running",
-        onSelect:     () => void interruptMutation.trigger(),
+          pending:      interruptMutation.isMutating,
+          disabled:     statusKind !== "running",
+          onSelect:     () => void interruptMutation.trigger(),
       },
       {
         key:      "steer",
@@ -218,7 +235,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           label:        "Retry",
           pendingLabel: "Retrying…",
           pending:      retryPending,
-          onSelect:     () => void retryMutation.trigger(),
+          onSelect:     () => void triggerLifecycleAction("retry", retryMutation.trigger),
         }]
         : []),
       ...(visibility.showArchive
@@ -227,7 +244,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           label:        "Archive",
           pendingLabel: "Archiving…",
           pending:      archivePending,
-          onSelect:     () => void archiveMutation.trigger(),
+          onSelect:     () => void triggerLifecycleAction("archive", archiveMutation.trigger),
         }]
         : []),
       ...(visibility.showUnarchive
@@ -236,7 +253,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           label:        "Unarchive",
           pendingLabel: "Restoring…",
           pending:      unarchivePending,
-          onSelect:     () => void unarchiveMutation.trigger(),
+          onSelect:     () => void triggerLifecycleAction("unarchive", unarchiveMutation.trigger),
         }]
         : []),
     ],
@@ -247,7 +264,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           label:        "Deny",
           pendingLabel: "Denying…",
           pending:      denyPending,
-          onSelect:     () => void denyMutation.trigger(),
+          onSelect:     () => void triggerLifecycleAction("deny", denyMutation.trigger),
         }]
         : []),
       ...(visibility.showPrimaryCancel
@@ -256,7 +273,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           label:        "Cancel",
           pendingLabel: "Cancelling…",
           pending:      cancelPending,
-          onSelect:     () => void cancelMutation.trigger(),
+          onSelect:     () => void triggerLifecycleAction("cancel", cancelMutation.trigger),
         }]
         : []),
       ...(visibility.showDelete
@@ -292,7 +309,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
               approval: {
                 visible: approvalActionVisible,
                 pending: approvePending,
-                onApprove: () => void approveMutation.trigger(),
+                onApprove: () => void triggerLifecycleAction("approve", approveMutation.trigger),
               },
               menu: {
                 runId: params.id,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import {
@@ -18,7 +18,7 @@ import { Tooltip } from "../components/ui";
 import { eventDedupeKey } from "../lib/cross-tab-sse";
 import { formatAbsoluteTs } from "../lib/format";
 import {
-  subscribeToLiveEvents,
+  useLiveEventsSubscription,
   type LiveEventPayload,
 } from "../lib/live-events";
 
@@ -49,11 +49,9 @@ export default function SettingsLiveEvents() {
   const [selectedCategories, setSelectedCategories] = useState<DebugCategory[]>([]);
   const [search, setSearch] = useState("");
 
-  useEffect(() => {
-    return subscribeToLiveEvents((payload) => {
-      setEvents((prev) => appendLiveEvent(prev, payload));
-    });
-  }, []);
+  useLiveEventsSubscription((payload) => {
+    setEvents((prev) => appendLiveEvent(prev, payload));
+  });
 
   const filtered = useMemo<LiveEventPayload[]>(() => {
     const useCategoryFilter = selectedCategories.length > 0;

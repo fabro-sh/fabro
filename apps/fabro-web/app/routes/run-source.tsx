@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useParams } from "react-router";
 import type { BundledLanguage } from "@pierre/diffs";
 import { useRunGraphSource, useRunStages } from "../lib/queries";
 import { LoadingState } from "../components/state";
 import { StageSidebar } from "../components/stage-sidebar";
 import { CollapsibleFile } from "../components/collapsible-file";
-import { registerDotLanguage } from "../data/register-dot-language";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
+import { useDotLanguageReady } from "../hooks/use-dot-language-ready";
 
 export const handle = { wide: true };
 
@@ -18,17 +18,7 @@ export default function RunSource() {
     () => mapRunStagesToSidebarStages(stagesQuery.data),
     [stagesQuery.data],
   );
-  const [dotReady, setDotReady] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    registerDotLanguage().then(() => {
-      if (!cancelled) setDotReady(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const dotReady = useDotLanguageReady();
 
   const source = sourceQuery.data;
   const loading = source === undefined && !sourceQuery.error;

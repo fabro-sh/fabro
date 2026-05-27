@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router";
 import { StageState, type RunStage } from "@qltysh/fabro-api-client";
 
@@ -11,6 +11,7 @@ import {
   stageStatusTone,
 } from "../lib/stage-sidebar";
 import { deriveRunPhases, type RunPhase } from "../lib/run-phases";
+import { useTickingNow } from "../lib/time";
 import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 interface WaterfallProps {
@@ -34,15 +35,6 @@ interface Row {
 }
 
 const MIN_BAR_WIDTH_PCT = 0.4;
-
-function useTickingNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
 
 function stageBarClass(status: StageState): string {
   switch (status) {
@@ -194,7 +186,7 @@ export function RunWaterfall({
   createdAtIso,
   completedAtIso,
 }: WaterfallProps) {
-  const nowMs = useTickingNow(1000);
+  const nowMs = useTickingNow(true, 1000);
   const rows = useMemo(
     () => buildRows({ runId, events, stages, createdAtIso, nowMs }),
     [runId, events, stages, createdAtIso, nowMs],

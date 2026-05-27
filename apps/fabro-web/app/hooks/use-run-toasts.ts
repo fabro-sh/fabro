@@ -7,6 +7,10 @@ import type { MutateFn } from "../lib/sse";
 const NOOP_MUTATE = (() => undefined) as MutateFn;
 const DEDUPE_WINDOW = 256;
 
+/**
+ * Synchronizes toast notifications with a run-scoped SSE stream. Changing
+ * `runId` resubscribes, and the active subscription is closed on unmount.
+ */
 export function useRunToasts(runId: string | undefined) {
   const { push } = useToast();
   const seenEventIdsRef = useRef(new Set<string>());

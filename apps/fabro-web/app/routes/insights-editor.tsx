@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useLocation } from "react-router";
 import {
   Dialog,
@@ -16,6 +16,7 @@ import {
   PencilIcon,
 } from "@heroicons/react/24/outline";
 import { formatBytes } from "../lib/format";
+import { useMountEffect, useResizeObserver } from "../hooks/effects";
 
 // ── Types ──
 
@@ -113,20 +114,12 @@ function BarChart({ result }: { result: QueryResult }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) {
-        setContainerWidth(entry.contentRect.width);
-      }
-    });
-    // react-doctor-disable-next-line react-doctor/no-initialize-state -- ResizeObserver is the first reliable source for this rendered container's width.
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  useResizeObserver(containerRef, (entries) => {
+    const entry = entries[0];
+    if (entry) {
+      setContainerWidth(entry.contentRect.width);
+    }
+  });
 
   const labelCol = result.columns[0];
   const valueCols = result.columns.slice(1).filter((col) => {
@@ -411,7 +404,7 @@ export default function InsightsEditor() {
     }, delay);
   }, [sql]);
 
-  useEffect(() => {
+  useMountEffect(() => {
     const runRequestIds = runRequestIdRef;
     const runTimeouts = runTimeoutRef;
     return () => {
@@ -421,7 +414,7 @@ export default function InsightsEditor() {
         runTimeouts.current = null;
       }
     };
-  }, []);
+  });
 
   return (
     <div className="space-y-4">

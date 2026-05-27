@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { ArrowPathIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import type { ListRunsSortEnum } from "@qltysh/fabro-api-client";
@@ -24,6 +24,9 @@ import { SECONDARY_BUTTON_CLASS } from "../components/ui";
 import { ApiError } from "../lib/api-client";
 import { formatRelativeTime } from "../lib/format";
 import { useRun, useRunsPage } from "../lib/queries";
+import { useHydrateSearchParamsOnce } from "../hooks/use-hydrate-search-params-once";
+import { useTickingNow } from "../lib/time";
+import { useDataUpdatedAt } from "../hooks/use-data-updated-at";
 
 export const handle = { wide: true, hideSteerBar: true };
 
@@ -86,13 +89,11 @@ export default function RunChildren() {
     [updatePreferences],
   );
 
-  const hydratedFromStorage = useRef(false);
-  useEffect(() => {
-    if (hydratedFromStorage.current) return;
-    hydratedFromStorage.current = true;
-    if (searchParams === urlSearchParams) return;
-    setSearchParams(searchParams, { replace: true });
-  }, [searchParams, urlSearchParams, setSearchParams]);
+  useHydrateSearchParamsOnce({
+    resolvedSearchParams: searchParams,
+    setSearchParams,
+    urlSearchParams,
+  });
 
   const childRunsQuery = useRunsPage(
     {
@@ -106,20 +107,8 @@ export default function RunChildren() {
     id != null,
   );
 
-  const lastFetchedAtRef = useRef<number | null>(null);
-  const [now, setNow] = useState<number>(() => Date.now());
-
-  useEffect(() => {
-    if (childRunsQuery.data) {
-      lastFetchedAtRef.current = Date.now();
-      setNow(Date.now());
-    }
-  }, [childRunsQuery.data]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 15_000);
-    return () => window.clearInterval(interval);
-  }, []);
+  const now = useTickingNow(true, 15_000);
+  const updatedAt = useDataUpdatedAt(childRunsQuery.data);
 
   const handleRefresh = useCallback(() => {
     void childRunsQuery.mutate();
@@ -142,7 +131,6 @@ export default function RunChildren() {
     );
   }
 
-  const updatedAt = lastFetchedAtRef.current;
   const lowerQuery = query.toLowerCase();
 
   return (

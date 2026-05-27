@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
-import { useEffect } from "react";
+
+import { useDocumentEvent } from "../../hooks/effects";
 
 export function isEditableElement(el: Element | null): boolean {
   if (!el) return false;
@@ -23,9 +24,9 @@ export function useFileKeyboardNav(
   containerRef: RefObject<HTMLDivElement | null>,
   fileCount: number,
 ) {
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const onKey = (event: KeyboardEvent) => {
+  useDocumentEvent(
+    "keydown",
+    (event) => {
       if (event.key !== "j" && event.key !== "k") return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isEditableElement(document.activeElement)) return;
@@ -50,10 +51,8 @@ export function useFileKeyboardNav(
       const target = rows[nextIdx];
       target.focus({ preventScroll: false });
       target.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-    // fileCount drives re-attachment so rows picked up after data changes
-    // stay addressable without stale references.
-  }, [containerRef, fileCount]);
+    },
+    undefined,
+    fileCount > 0,
+  );
 }

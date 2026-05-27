@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ArrowDownIcon, ArrowRightIcon, MinusIcon, PlusIcon } from "@heroicons/react/20/solid";
 import { graphTheme } from "../lib/graph-theme";
+import { useRenderedVizDiagram } from "../hooks/use-rendered-viz-diagram";
 
 type Direction = "LR" | "TB";
 
@@ -71,38 +72,20 @@ export default function AutomationDiagram() {
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const [direction, setDirection] = useState<Direction>("LR");
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const zoom = ZOOM_STEPS[zoomIndex];
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function render() {
-      const { instance } = await import("@viz-js/viz");
-      const viz = await instance();
-      if (cancelled) return;
-
-      try {
-        const svg = viz.renderSVGElement(buildDot(direction));
-        stripGraphTitle(svg);
-
-        svgRef.current = svg;
-        if (innerRef.current) {
-          innerRef.current.replaceChildren(svg);
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to render diagram");
-      }
-    }
-
-    setPan({ x: 0, y: 0 });
-    render();
-    return () => { cancelled = true; };
-  }, [direction]);
+  const resetPan = useCallback(() => setPan({ x: 0, y: 0 }), []);
+  const error = useRenderedVizDiagram({
+    buildDot,
+    identity:      direction,
+    innerRef,
+    onRenderStart: resetPan,
+    prepareSvg:    stripGraphTitle,
+    svgRef,
+  });
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;

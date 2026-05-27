@@ -286,6 +286,11 @@ function installReducer(state: InstallState, action: InstallAction): InstallStat
   }
 }
 
+/**
+ * Coordinates install-mode browser integrations: token/error URL scrubbing,
+ * install-session loading, and restart health polling. Timers, intervals, and
+ * in-flight requests are cancelled when their install identity changes.
+ */
 function useInstallController() {
   const { pathname } = useLocation();
   const [installToken, setInstallToken] = useState<string | null>(() =>
@@ -396,6 +401,10 @@ function useInstallController() {
   return { pathname, installToken, setInstallToken, installState, dispatchInstall };
 }
 
+/**
+ * Synchronizes the install root route with the loaded install session by
+ * replacing the URL once the async session is ready.
+ */
 function useInstallRootRedirect({
   installToken,
   session,

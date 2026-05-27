@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import {
@@ -28,6 +28,7 @@ import {
 } from "../components/runs-list/sort-header";
 import { Tooltip } from "../components/ui";
 import { formatContextWindow, formatTokensPerSecond } from "../lib/format";
+import { useDebouncedValue } from "../hooks/effects";
 
 export function meta() {
   return [{ title: "Models — Fabro" }];
@@ -607,13 +608,4 @@ function sortModels(
     return cmp * sign;
   });
   return sorted;
-}
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(id);
-  }, [value, delayMs]);
-  return debounced;
 }

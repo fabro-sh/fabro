@@ -1,4 +1,4 @@
-import { createContext, use, useMemo, useState } from "react";
+import { createContext, use, useEffect, useMemo, useState } from "react";
 
 /**
  * Layout coordination for the docked "Ask Fabro" sidebar. The run detail page
@@ -48,4 +48,19 @@ export function AskFabroLayoutProvider({
 
 export function useAskFabroLayout(): AskFabroLayout {
   return use(AskFabroLayoutContext);
+}
+
+/**
+ * Synchronizes a mounted run-detail sidebar with the layout context consumed by
+ * the app shell. The published width is reset to 0 on unmount.
+ */
+export function usePublishedAskFabroSidebarWidth(width: number) {
+  const { setSidebarWidth, isResizing } = useAskFabroLayout();
+
+  useEffect(() => {
+    setSidebarWidth(width);
+    return () => setSidebarWidth(0);
+  }, [setSidebarWidth, width]);
+
+  return { isResizing };
 }

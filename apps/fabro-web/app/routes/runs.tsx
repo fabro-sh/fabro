@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router";
 import { CheckIcon, ChevronDownIcon, CommandLineIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
@@ -780,13 +780,14 @@ export default function Runs() {
     ),
   );
   allWorkflows.sort();
-  const [columns, setColumns] = useState(initialColumns);
+  const [columnsState, setColumnsState] = useState(() => ({
+    base:    initialColumns,
+    columns: initialColumns,
+  }));
+  const columns =
+    columnsState.base === initialColumns ? columnsState.columns : initialColumns;
   const lowerQuery = query.toLowerCase();
   useBoardEvents();
-
-  useEffect(() => {
-    setColumns(initialColumns);
-  }, [initialColumns]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -797,15 +798,16 @@ export default function Runs() {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    setColumns((prev) =>
-      prev.map((col) => {
+    setColumnsState({
+      base:    initialColumns,
+      columns: columns.map((col) => {
         const oldIndex = col.items.findIndex((item) => item.id === active.id);
         const newIndex = col.items.findIndex((item) => item.id === over.id);
         if (oldIndex === -1 || newIndex === -1) return col;
         return { ...col, items: arrayMove(col.items, oldIndex, newIndex) };
       }),
-    );
-  }, []);
+    });
+  }, [columns, initialColumns]);
 
   const totalRuns = columns.reduce((sum, col) => sum + col.items.length, 0);
 

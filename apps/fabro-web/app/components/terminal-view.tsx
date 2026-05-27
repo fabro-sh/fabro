@@ -1,12 +1,9 @@
 import {
   useCallback,
-  useEffect,
   useReducer,
   useRef,
   useState,
 } from "react";
-import type { Terminal as XtermTerminal } from "@xterm/xterm";
-import type { FitAddon as XtermFitAddon } from "@xterm/addon-fit";
 import {
   ArrowPathIcon,
   ArrowTopRightOnSquareIcon,
@@ -20,51 +17,18 @@ import { apiData, humanInTheLoopApi } from "../lib/api-client";
 import { useRunState } from "../lib/queries";
 import {
   buildFullScreenTerminalUrl,
-  buildTerminalWebSocketUrl,
-  parseTerminalServerMessage,
   sandboxStatusDetail,
   terminalAccessCommandLabel,
 } from "./terminal-view-helpers";
+import {
+  TERMINAL_BACKGROUND,
+  useTerminalSession,
+  type ConnectionStatus,
+  type TerminalConnectionError,
+} from "../hooks/use-terminal-session";
 
 const ICON_BUTTON_CLASS =
   "inline-flex size-9 items-center justify-center rounded-lg text-fg-2 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-teal-500";
-
-type ConnectionStatus = "connecting" | "ready" | "closed" | "error";
-
-const TERMINAL_BACKGROUND = "#05080F";
-
-// Pin the cell to a whole-pixel height so xterm's fit math stays exact.
-// fontSize × lineHeight = 13 × (19/13) = 19px → no sub-pixel rounding,
-// no bottom-row clipping.
-const TERMINAL_FONT_SIZE = 13;
-const TERMINAL_CELL_HEIGHT_PX = 19;
-const TERMINAL_LINE_HEIGHT = TERMINAL_CELL_HEIGHT_PX / TERMINAL_FONT_SIZE;
-
-const TERMINAL_THEME = {
-  background:          TERMINAL_BACKGROUND,
-  foreground:          "#E6EDF3",
-  cursor:              "#7AC4E5",
-  cursorAccent:        "#05080F",
-  selectionBackground: "#1F4F73",
-
-  black:   "#05080F",
-  red:     "#FF6B6B",
-  green:   "#5EE6A8",
-  yellow:  "#FFC857",
-  blue:    "#82AAFF",
-  magenta: "#C792EA",
-  cyan:    "#7AC4E5",
-  white:   "#D5DCE3",
-
-  brightBlack:   "#4B5563",
-  brightRed:     "#FF8B8B",
-  brightGreen:   "#85F5C2",
-  brightYellow:  "#FFD98A",
-  brightBlue:    "#A4C4FF",
-  brightMagenta: "#E0B6FF",
-  brightCyan:    "#A8DFF5",
-  brightWhite:   "#FFFFFF",
-};
 
 function terminalAccessCommandCopiedMessage(provider: string | null): string {
   return provider === "docker" ? "Docker exec command copied." : "SSH command copied.";
@@ -74,15 +38,6 @@ function terminalAccessCommandErrorMessage(provider: string | null): string {
   return provider === "docker"
     ? "Could not copy Docker exec command."
     : "Could not copy SSH command.";
-}
-
-function sendResize(socket: WebSocket | null, terminal: XtermTerminal | null) {
-  if (!socket || socket.readyState !== WebSocket.OPEN || !terminal) return;
-  socket.send(JSON.stringify({
-    type: "resize",
-    cols: terminal.cols,
-    rows: terminal.rows,
-  }));
 }
 
 function statusDotClasses(status: ConnectionStatus): string {
@@ -157,12 +112,16 @@ export default function TerminalView({
   const accessCommandLabel = terminalAccessCommandLabel(provider);
   const [connectionKey, reconnectTerminal] = useReducer((key: number) => key + 1, 0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
-  const [error, setError] = useState<{ message: string; recoverable: boolean } | null>(null);
+  const [error, setError] = useState<TerminalConnectionError | null>(null);
   const terminalEl = useRef<HTMLDivElement | null>(null);
-  const terminalRef = useRef<XtermTerminal | null>(null);
-  const fitRef = useRef<XtermFitAddon | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
   const headingId = `run-terminal-${runId}`;
+  useTerminalSession({
+    connectionKey,
+    runId,
+    setError,
+    setStatus,
+    terminalEl,
+  });
 
   const reconnect = useCallback(() => {
     setError(null);
@@ -187,132 +146,6 @@ export default function TerminalView({
       });
     }
   }, [accessCommandLabel, runId, provider, push]);
-
-  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup -- listeners, socket, xterm, and ResizeObserver are disposed in the returned cleanup.
-  useEffect(() => {
-    if (!terminalEl.current) return undefined;
-
-    let disposed = false;
-    let resizeObserver: ResizeObserver | null = null;
-    const textEncoder = new TextEncoder();
-    const disposables: Array<{ dispose: () => void }> = [];
-
-    async function connect() {
-      setStatus("connecting");
-      setError(null);
-
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
-        import("@xterm/xterm"),
-        import("@xterm/addon-fit"),
-      ]);
-      if (disposed || !terminalEl.current) return;
-
-      const terminal = new Terminal({
-        cursorBlink: true,
-        convertEol: true,
-        fontFamily: "\"JetBrains Mono\", ui-monospace, monospace",
-        fontSize: TERMINAL_FONT_SIZE,
-        lineHeight: TERMINAL_LINE_HEIGHT,
-        scrollback: 5000,
-        theme: TERMINAL_THEME,
-      });
-      const fitAddon = new FitAddon();
-      terminal.loadAddon(fitAddon);
-      terminal.open(terminalEl.current);
-      fitAddon.fit();
-      terminal.focus();
-      terminalRef.current = terminal;
-      fitRef.current = fitAddon;
-
-      const socket = new WebSocket(buildTerminalWebSocketUrl(window.location, runId));
-      socket.binaryType = "arraybuffer";
-      socketRef.current = socket;
-
-      disposables.push(terminal.onData((data) => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(textEncoder.encode(data));
-        }
-      }));
-
-      const handleOpen = () => {
-        sendResize(socket, terminal);
-      };
-      const handleMessage = (event: MessageEvent) => {
-        if (typeof event.data === "string") {
-          const message = parseTerminalServerMessage(event.data);
-          if (!message) return;
-          if (message.type === "ready") {
-            setStatus("ready");
-            return;
-          }
-          if (message.type === "closed") {
-            setStatus("closed");
-            return;
-          }
-          setStatus("error");
-          setError({
-            message: message.message ?? "Terminal session failed.",
-            recoverable: false,
-          });
-          return;
-        }
-        const bytes = event.data instanceof ArrayBuffer
-          ? new Uint8Array(event.data)
-          : event.data;
-        terminal.write(bytes);
-      };
-      const handleClose = () => {
-        setStatus((current) => current === "error" ? current : "closed");
-      };
-      const handleError = () => {
-        setStatus("error");
-        setError({
-          message: "Terminal WebSocket connection failed.",
-          recoverable: true,
-        });
-      };
-      socket.addEventListener("open", handleOpen);
-      socket.addEventListener("message", handleMessage);
-      socket.addEventListener("close", handleClose);
-      socket.addEventListener("error", handleError);
-      disposables.push({
-        dispose: () => {
-          socket.removeEventListener("open", handleOpen);
-          socket.removeEventListener("message", handleMessage);
-          socket.removeEventListener("close", handleClose);
-          socket.removeEventListener("error", handleError);
-        },
-      });
-
-      resizeObserver = new ResizeObserver(() => {
-        fitAddon.fit();
-        sendResize(socket, terminal);
-      });
-      resizeObserver.observe(terminalEl.current);
-
-      if (typeof document !== "undefined" && document.fonts?.ready) {
-        void document.fonts.ready.then(() => {
-          if (disposed) return;
-          fitAddon.fit();
-          sendResize(socket, terminal);
-        });
-      }
-    }
-
-    void connect();
-
-    return () => {
-      disposed = true;
-      resizeObserver?.disconnect();
-      for (const disposable of disposables) disposable.dispose();
-      socketRef.current?.send(JSON.stringify({ type: "close" }));
-      socketRef.current?.close();
-      socketRef.current = null;
-      terminalRef.current?.dispose();
-      terminalRef.current = null;
-      fitRef.current = null;
-    };
-  }, [connectionKey, runId]);
 
   return (
     <section

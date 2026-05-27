@@ -1,4 +1,6 @@
-import { useEffect, useReducer } from "react";
+import { useReducer } from "react";
+
+import { useInterval } from "../hooks/effects";
 
 /**
  * Re-renders the calling component every `intervalMs` milliseconds while
@@ -7,11 +9,7 @@ import { useEffect, useReducer } from "react";
  */
 export function useTickingNow(active: boolean, intervalMs = 1000): number {
   const [now, tick] = useReducer(() => Date.now(), undefined, Date.now);
-  useEffect(() => {
-    if (!active) return;
-    const interval = setInterval(tick, intervalMs);
-    return () => clearInterval(interval);
-  }, [active, intervalMs]);
+  useInterval(tick, intervalMs, active);
   return now;
 }
 

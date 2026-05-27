@@ -1,8 +1,6 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
 } from "react";
 import { useSearchParams } from "react-router";
 import type { BoardColumn, ListRunsSortEnum } from "@qltysh/fabro-api-client";
@@ -25,6 +23,7 @@ import {
 } from "../../components/runs-list/preferences";
 import { serializeHiddenColumns } from "../../components/runs-list/toggleable-column";
 import type { ToggleableColumn } from "../../components/runs-list/toggleable-column";
+import { useHydrateSearchParamsOnce } from "../../hooks/use-hydrate-search-params-once";
 
 export function useRunsWorkspacePreferences() {
   const [urlSearchParams, setSearchParams] = useSearchParams();
@@ -103,13 +102,11 @@ export function useRunsWorkspacePreferences() {
     [updatePreferences],
   );
 
-  const hydratedFromStorage = useRef(false);
-  useEffect(() => {
-    if (hydratedFromStorage.current) return;
-    hydratedFromStorage.current = true;
-    if (searchParams === urlSearchParams) return;
-    setSearchParams(searchParams, { replace: true });
-  }, [searchParams, urlSearchParams, setSearchParams]);
+  useHydrateSearchParamsOnce({
+    resolvedSearchParams: searchParams,
+    setSearchParams,
+    urlSearchParams,
+  });
 
   return {
     query,

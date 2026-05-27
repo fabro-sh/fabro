@@ -256,6 +256,10 @@ function stageIdFromPayload(payload: RunEventPayload): string | undefined {
   return typeof nodeId === "string" ? nodeId : undefined;
 }
 
+/**
+ * Synchronizes React/SWR with a run-scoped SSE stream. Changing `runId`
+ * resubscribes, and the active subscription is closed on unmount.
+ */
 export function useRunEvents(runId: string | undefined) {
   const { mutate } = useSWRConfig();
 

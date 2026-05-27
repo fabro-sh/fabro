@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Listbox,
   ListboxButton,
@@ -26,6 +26,7 @@ import {
   type DebugCategory,
 } from "./event-debug-helpers";
 import { FloatingTooltip } from "./floating-tooltip";
+import { useWindowEvent } from "../hooks/effects";
 
 export function DebugEventRow({
   event,
@@ -77,16 +78,14 @@ export function DetailsPanel({
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  // react-doctor-disable-next-line react-doctor/prefer-use-effect-event -- React's useEffectEvent is not in the installed React type surface yet.
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleKey(event: KeyboardEvent) {
+  useWindowEvent(
+    "keydown",
+    (event) => {
       if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-    // react-doctor-disable-next-line react-doctor/prefer-use-effect-event -- React's useEffectEvent is not in the installed React type surface yet.
-  }, [isOpen, onClose]);
+    },
+    undefined,
+    isOpen,
+  );
 
   return (
     <div

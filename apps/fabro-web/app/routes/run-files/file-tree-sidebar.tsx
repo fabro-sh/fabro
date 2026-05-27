@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useMemo,
   useRef,
   type CSSProperties,
@@ -17,6 +16,7 @@ import {
 } from "@pierre/trees";
 import pierreDark from "@pierre/theme/pierre-dark";
 import type { FileDiff } from "@qltysh/fabro-api-client";
+import { useChangedFilesTreeSync } from "../../hooks/use-changed-files-tree-sync";
 
 type TreeThemeStyle = CSSProperties & Record<`--${string}`, string | number>;
 
@@ -117,39 +117,19 @@ export function FileTreeSidebar({
     },
   });
 
-  const didSyncModelRef = useRef(false);
-  useEffect(() => {
-    if (!didSyncModelRef.current) {
-      didSyncModelRef.current = true;
-      return;
-    }
-    model.resetPaths(paths);
-    model.setGitStatus(gitStatus);
-    pendingSelectedPathRef.current = null;
-    const currentSelectedPath = selectedPathRef.current;
-    syncSelection(
-      model,
-      model.getSelectedPaths(),
-      currentSelectedPath && changedPathsRef.current.has(currentSelectedPath)
-        ? currentSelectedPath
-        : null,
-    );
-  }, [gitStatus, model, paths]);
-
   const selection = useFileTreeSelection(model);
-  useEffect(() => {
-    const pendingSelectedPath = pendingSelectedPathRef.current;
-    // react-doctor-disable-next-line react-doctor/no-event-handler -- This keeps Pierre's imperative tree model aligned after the tree emits a selection change.
-    if (pendingSelectedPath === selectedPath) {
-      pendingSelectedPathRef.current = null;
-    }
-    const nextSelectedPath = pendingSelectedPath ?? selectedPath;
-    syncSelection(
-      model,
-      selection,
-      nextSelectedPath && changedPaths.has(nextSelectedPath) ? nextSelectedPath : null,
-    );
-  }, [changedPaths, model, selectedPath, selection]);
+  useChangedFilesTreeSync({
+    changedPaths,
+    changedPathsRef,
+    gitStatus,
+    model,
+    paths,
+    pendingSelectedPathRef,
+    selectedPath,
+    selectedPathRef,
+    selection,
+    syncSelection,
+  });
 
   const themeStyles = useMemo<TreeThemeStyle>(
     () => ({

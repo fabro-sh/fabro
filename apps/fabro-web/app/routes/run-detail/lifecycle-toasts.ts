@@ -1,5 +1,3 @@
-import { useEffect, useRef } from "react";
-
 import type { ToastInput } from "../../components/toast";
 import type {
   LifecycleMutationResult,
@@ -27,17 +25,35 @@ interface ToastApi {
   dismiss: (id: string) => void;
 }
 
-const INITIAL_LIFECYCLE_TOAST_STATE: LifecycleToastState = {
-  activeArchiveToastId: null,
-  lastProcessed: {
-    cancel:    null,
-    approve:   null,
-    deny:      null,
-    archive:   null,
-    unarchive: null,
-    retry:     null,
-  },
-};
+export function createLifecycleToastState(): LifecycleToastState {
+  return {
+    activeArchiveToastId: null,
+    lastProcessed: {
+      cancel:    null,
+      approve:   null,
+      deny:      null,
+      archive:   null,
+      unarchive: null,
+      retry:     null,
+    },
+  };
+}
+
+export function updateLifecycleToastState(
+  intent: LifecycleAction,
+  result: RunDetailActionResult | undefined,
+  stateRef: { current: LifecycleToastState },
+  toastApi: ToastApi,
+  navigate?: (path: string) => void,
+) {
+  stateRef.current = handleLifecycleToastResult(
+    intent,
+    result,
+    stateRef.current,
+    toastApi,
+    navigate,
+  );
+}
 
 export function lifecycleActionVisibility(status: string | null | undefined) {
   return {
@@ -110,72 +126,4 @@ export function handleLifecycleToastResult(
 
   toastApi.push({ message: "Run restored." });
   return { ...nextState, activeArchiveToastId: null };
-}
-
-function useLifecycleToastResult(
-  intent: LifecycleAction,
-  result: RunDetailActionResult | undefined,
-  stateRef: { current: LifecycleToastState },
-  toastApi: ToastApi,
-  navigate?: (path: string) => void,
-) {
-  const { dismiss, push } = toastApi;
-
-  useEffect(() => {
-    stateRef.current = handleLifecycleToastResult(
-      intent,
-      result,
-      stateRef.current,
-      { dismiss, push },
-      navigate,
-    );
-  }, [dismiss, intent, navigate, push, result, stateRef]);
-}
-
-export function useLifecycleToastResults(
-  results: Record<LifecycleAction, RunDetailActionResult | undefined>,
-  toastApi: ToastApi,
-  navigate: (path: string) => void,
-) {
-  const lifecycleToastStateRef = useRef<LifecycleToastState>(
-    INITIAL_LIFECYCLE_TOAST_STATE,
-  );
-
-  useLifecycleToastResult(
-    "cancel",
-    results.cancel,
-    lifecycleToastStateRef,
-    toastApi,
-  );
-  useLifecycleToastResult(
-    "archive",
-    results.archive,
-    lifecycleToastStateRef,
-    toastApi,
-  );
-  useLifecycleToastResult(
-    "approve",
-    results.approve,
-    lifecycleToastStateRef,
-    toastApi,
-  );
-  useLifecycleToastResult(
-    "deny",
-    results.deny,
-    lifecycleToastStateRef,
-    toastApi,
-  );
-  useLifecycleToastResult(
-    "unarchive",
-    results.unarchive,
-    lifecycleToastStateRef,
-    toastApi,
-  );
-  useLifecycleToastResult(
-    "retry",
-    results.retry,
-    lifecycleToastStateRef,
-    toastApi,
-    navigate,
-  );
 }

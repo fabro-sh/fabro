@@ -93,6 +93,10 @@ function boardRunKeys() {
   return runListCacheMatchers();
 }
 
+/**
+ * Synchronizes React/SWR with the shared board SSE stream. The subscription is
+ * closed before resubscribe and on unmount.
+ */
 export function useBoardEvents() {
   const { mutate } = useSWRConfig();
 

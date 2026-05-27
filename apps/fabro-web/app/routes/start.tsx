@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import {
   Listbox,
   ListboxButton,
@@ -50,10 +50,6 @@ export default function Start() {
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
-
   function autoResize() {
     const el = textareaRef.current;
     if (!el) return;
@@ -96,6 +92,7 @@ export default function Start() {
                 onKeyDown={handleKeyDown}
                 aria-label="Workflow prompt"
                 placeholder="Describe a workflow, pipeline, or automation..."
+                autoFocus
                 rows={3}
                 className="w-full resize-none bg-transparent px-5 pt-4 pb-14 text-[15px] leading-relaxed text-fg-2 placeholder:text-fg-muted focus:outline-none"
               />

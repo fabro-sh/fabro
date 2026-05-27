@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { Key } from "swr";
 
 import {
@@ -62,4 +63,19 @@ export function subscribeToLiveEvents(
         },
       }),
   });
+}
+
+/**
+ * Synchronizes React with the shared live-events SSE stream. The subscription is
+ * closed before resubscribe and on unmount; `onEvent` sees the latest render.
+ */
+export function useLiveEventsSubscription(
+  onEvent: (payload: LiveEventPayload) => void,
+) {
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+
+  useEffect(() => {
+    return subscribeToLiveEvents((payload) => onEventRef.current(payload));
+  }, []);
 }

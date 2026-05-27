@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { useInterval } from "../../hooks/effects";
 import {
   isRunStatus,
   mapRunToRunItem,
@@ -13,10 +14,7 @@ export function classNames(...classes: Array<string | false | null | undefined>)
 
 export function useTickingNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
+  useInterval(() => setNow(Date.now()), intervalMs);
   return now;
 }
 

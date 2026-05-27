@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -32,6 +31,7 @@ import { EmptyState, ErrorState, LoadingState } from "../../components/state";
 import { SECONDARY_BUTTON_CLASS, Tooltip } from "../../components/ui";
 import { workerFactory } from "../../lib/pierre-diffs-worker";
 import { stringHash } from "../run-files/cache-keys";
+import { useResetFileTreePaths } from "../../hooks/use-file-tree-model";
 
 export const DEFAULT_DIR = "/";
 
@@ -371,9 +371,7 @@ function DirectoryPane({
     },
   });
 
-  useEffect(() => {
-    model.resetPaths(treeInputs.paths);
-  }, [model, treeInputs.paths]);
+  useResetFileTreePaths(model, treeInputs.paths);
 
   const themeStyles = useMemo<TreeThemeStyle>(
     () => ({

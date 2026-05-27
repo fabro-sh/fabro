@@ -1,15 +1,14 @@
 import {
-  useLayoutEffect,
-  useRef,
-  useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  useFloatingTooltipMeasurements,
+  type FloatingTooltipSize,
+} from "../hooks/use-floating-tooltip-measurements";
 
 type FloatingTooltipPlacement = "top" | "bottom";
-type FloatingTooltipSize = { height: number; width: number };
-
 const VIEWPORT_MARGIN = 12;
 const OFFSET = 8;
 const DEFAULT_CLASS_NAME =
@@ -79,10 +78,6 @@ function floatingStyle(
   };
 }
 
-function viewportSize(): FloatingTooltipSize {
-  return { height: window.innerHeight, width: window.innerWidth };
-}
-
 export function FloatingTooltip({
   rect,
   placement,
@@ -94,44 +89,7 @@ export function FloatingTooltip({
   children: ReactNode;
   className?: string;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ height: 0, width: 0 });
-  const [viewport, setViewport] = useState<FloatingTooltipSize>(() =>
-    typeof window === "undefined" ? { height: 0, width: 0 } : viewportSize(),
-  );
-
-  useLayoutEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-
-    const updateSize = () => {
-      const next = node.getBoundingClientRect();
-      setSize((prev) =>
-        prev.height === next.height && prev.width === next.width
-          ? prev
-          : { height: next.height, width: next.width },
-      );
-    };
-    const updateViewport = () => {
-      const next = viewportSize();
-      setViewport((prev) =>
-        prev.height === next.height && prev.width === next.width ? prev : next,
-      );
-    };
-
-    updateSize();
-    updateViewport();
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(updateSize);
-    resizeObserver?.observe(node);
-    window.addEventListener("resize", updateViewport);
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateViewport);
-    };
-  }, []);
+  const { ref, size, viewport } = useFloatingTooltipMeasurements();
 
   if (typeof document === "undefined") return null;
 
