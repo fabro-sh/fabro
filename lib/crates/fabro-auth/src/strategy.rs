@@ -71,13 +71,13 @@ pub fn strategy_for(
             // openai(), and the install flow hard-codes `ProviderId::openai()`.
             // This check catches future regressions where a new call site
             // forgets the constraint.
-            if provider_id.as_str() != ProviderId::OPENAI {
-                panic!(
-                    "CodexDevice auth is only constructed by CLI code for the \
-                     OpenAI provider; all existing call sites enforce this pairing: \
-                     got provider_id={provider_id}"
-                );
-            }
+            assert_eq!(
+                provider_id.as_str(),
+                ProviderId::OPENAI,
+                "CodexDevice auth is only constructed by CLI code for the \
+                 OpenAI provider; all existing call sites enforce this pairing: \
+                 got provider_id={provider_id}"
+            );
             Box::new(CodexDeviceStrategy::new(config))
         }
     }

@@ -129,7 +129,10 @@ impl SemanticState {
         for id in &edge_stmt.nodes {
             self.ensure_node(id);
             if let Some(cls) = subgraph_class {
-                let node = self.graph.nodes.get_mut(id).expect("node was just inserted by ensure_node, so get_mut cannot return None");
+                let node =
+                    self.graph.nodes.get_mut(id).expect(
+                        "node was just inserted by ensure_node, so get_mut cannot return None",
+                    );
                 Self::add_class_to_node(node, cls);
             }
         }

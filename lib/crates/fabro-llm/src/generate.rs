@@ -210,7 +210,9 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, Error> {
                 tool_results,
             });
 
-            let last = steps.last().expect("steps is non-empty: element was pushed on the line above");
+            let last = steps
+                .last()
+                .expect("steps is non-empty: element was pushed on the line above");
             let should_continue = !tool_calls.is_empty()
                 && last.response.finish_reason == FinishReason::ToolCalls
                 && round < max_tool_rounds
@@ -229,7 +231,9 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, Error> {
                 }
             }
 
-            let last = steps.last().expect("steps is non-empty: element was pushed on the line above");
+            let last = steps
+                .last()
+                .expect("steps is non-empty: element was pushed on the line above");
             messages.push(last.response.message.clone());
             for result in &last.tool_results {
                 messages.push(Message::tool_result(

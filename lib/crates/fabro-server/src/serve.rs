@@ -1102,7 +1102,7 @@ async fn shutdown_signal() {
     let ctrl_c = async {
         if let Err(err) = signal::ctrl_c().await {
             warn!(%err, "failed to install Ctrl+C handler; Ctrl+C will not trigger graceful shutdown");
-            std::future::pending::<()>().await
+            std::future::pending::<()>().await;
         }
     };
 
@@ -1114,7 +1114,7 @@ async fn shutdown_signal() {
             }
             Err(err) => {
                 warn!(%err, "failed to install SIGTERM handler; SIGTERM will not trigger graceful shutdown");
-                std::future::pending::<()>().await
+                std::future::pending::<()>().await;
             }
         }
     };

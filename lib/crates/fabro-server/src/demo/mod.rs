@@ -229,7 +229,8 @@ pub(crate) async fn list_run_commits_stub(
                 source:         RunCommitsMetaSource::Sandbox,
                 base_sha:       sha_newtype::<RunCommitsMetaBaseSha>(parent),
                 head_sha:       sha_newtype::<RunCommitsMetaHeadSha>(sha),
-                limit:          std::num::NonZeroU64::new(100).expect("hardcoded literal 100 is non-zero"),
+                limit:          std::num::NonZeroU64::new(100)
+                    .expect("hardcoded literal 100 is non-zero"),
                 total_returned: 1,
                 truncated:      false,
             },
