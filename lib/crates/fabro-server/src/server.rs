@@ -50,6 +50,7 @@ pub use fabro_api::types::{
     WriteBlobResponse,
 };
 use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
+use fabro_automation::AutomationStore;
 #[cfg(test)]
 use fabro_config::RunSettingsBuilder;
 use fabro_config::daemon::ServerDaemon;
@@ -1056,6 +1057,7 @@ pub struct AppState {
     store: Arc<Database>,
     session_runtimes: SessionRuntimeManager,
     artifact_store: ArtifactStore,
+    automation_store: Arc<AutomationStore>,
     worker_tokens: WorkerTokenKeys,
     started_at: Instant,
     resource_sampler: resource_sampler::ResourceSampler,
@@ -1092,6 +1094,12 @@ pub struct AppState {
 }
 
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
+
+impl AppState {
+    pub(crate) fn automation_store(&self) -> &AutomationStore {
+        &self.automation_store
+    }
+}
 
 pub(crate) struct AskFabroReadiness {
     default_model: Option<String>,
@@ -2215,6 +2223,13 @@ fn build_sandbox_provider_registry(
     SandboxProviderRegistry::new(providers)
 }
 
+fn automation_dir_for_active_config(active_config_path: &std::path::Path) -> PathBuf {
+    active_config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("automations")
+}
+
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
@@ -2236,6 +2251,12 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         worker_control_bus,
     } = config;
 
+    let automation_dir = automation_dir_for_active_config(&active_config_path);
+    let automation_store = Arc::new(
+        AutomationStore::load(automation_dir)
+            .map_err(anyhow::Error::new)
+            .context("load automations")?,
+    );
     let variables = VariableStore::load(variables_path).context("load variables")?;
     let variables = Arc::new(AsyncRwLock::new(variables));
     let vault = match preloaded_vault {
@@ -2327,6 +2348,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         store,
         session_runtimes: SessionRuntimeManager::new(),
         artifact_store,
+        automation_store,
         worker_tokens,
         started_at: Instant::now(),
         resource_sampler: resource_sampler::ResourceSampler::new(),

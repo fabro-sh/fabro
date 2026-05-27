@@ -152,7 +152,7 @@ export function canUnarchive(status: string | null | undefined): boolean {
 export function canRetry(run: Pick<Run, "lifecycle"> | null | undefined): boolean {
   if (!run || run.lifecycle.archived) return false;
   const status = run.lifecycle.status;
-  return status.kind === "failed" || status.kind === "dead";
+  return status.kind === "succeeded" || status.kind === "failed" || status.kind === "dead";
 }
 
 export function canDelete(status: string | null | undefined): boolean {

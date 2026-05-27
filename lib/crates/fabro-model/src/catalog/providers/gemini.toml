@@ -16,7 +16,6 @@ display_name = "Gemini 3.1 Pro (Preview)"
 family = "gemini-3"
 training = "2025-01-01"
 knowledge_cutoff = "January 2025"
-default = true
 estimated_output_tps = 85
 aliases = ["gemini-pro"]
 
@@ -67,6 +66,7 @@ display_name = "Gemini 3.5 Flash"
 family = "gemini-3"
 training = "2025-01-01"
 knowledge_cutoff = "January 2025"
+default = true
 estimated_output_tps = 150
 aliases = ["gemini-35-flash"]
 

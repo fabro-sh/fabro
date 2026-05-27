@@ -1120,7 +1120,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active, succeeded, and archived runs are not retryable.
+         * Creates a fresh run from the terminal source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active and archived runs are not retryable.
          * @summary Retry Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1868,7 +1868,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active, succeeded, and archived runs are not retryable.
+         * Creates a fresh run from the terminal source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active and archived runs are not retryable.
          * @summary Retry Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -2264,7 +2264,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.retrieveRunGraphSource(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active, succeeded, and archived runs are not retryable.
+         * Creates a fresh run from the terminal source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active and archived runs are not retryable.
          * @summary Retry Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -2652,7 +2652,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Creates a fresh run from the failed or dead source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active, succeeded, and archived runs are not retryable.
+     * Creates a fresh run from the terminal source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active and archived runs are not retryable.
      * @summary Retry Run
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.

@@ -10761,8 +10761,8 @@ async fn retry_missing_run_returns_not_found() {
 }
 
 #[tokio::test]
-async fn retry_non_retryable_run_returns_conflict() {
-    let state = test_app_state();
+async fn retry_succeeded_run_creates_and_queues_new_run() {
+    let state = test_app_state_with_isolated_storage();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let source_run_id = RunId::new();
     create_durable_run_with_events(&state, source_run_id, &[
@@ -10776,6 +10776,68 @@ async fn retry_non_retryable_run_returns_conflict() {
             final_patch:          None,
             diff_summary:         None,
             billing:              None,
+        },
+    ])
+    .await;
+    let source_events_before = state
+        .store
+        .open_run(&source_run_id)
+        .await
+        .unwrap()
+        .list_events()
+        .await
+        .unwrap()
+        .len();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{source_run_id}/retry")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::CREATED).await;
+    let new_run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+    assert_ne!(new_run_id, source_run_id);
+    assert_eq!(body["retried_from"], source_run_id.to_string());
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
+
+    let source_store = state.store.open_run(&source_run_id).await.unwrap();
+    assert_eq!(
+        source_store.list_events().await.unwrap().len(),
+        source_events_before
+    );
+    assert_eq!(
+        source_store.state().await.unwrap().status,
+        RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        }
+    );
+
+    let new_state = state
+        .store
+        .open_run(&new_run_id)
+        .await
+        .unwrap()
+        .state()
+        .await
+        .unwrap();
+    assert_eq!(new_state.retried_from, Some(source_run_id));
+    assert_eq!(new_state.status, RunStatus::Runnable);
+}
+
+#[tokio::test]
+async fn retry_active_run_returns_conflict() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let source_run_id = RunId::new();
+    create_durable_run_with_events(&state, source_run_id, &[
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
         },
     ])
     .await;

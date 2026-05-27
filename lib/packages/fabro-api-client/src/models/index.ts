@@ -31,6 +31,7 @@ export * from './auth-session-user';
 export * from './auth-sessions-response';
 export * from './automation';
 export * from './automation-api-trigger';
+export * from './automation-list-meta';
 export * from './automation-list-response';
 export * from './automation-ref';
 export * from './automation-schedule-trigger';

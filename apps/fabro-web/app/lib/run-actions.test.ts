@@ -427,13 +427,14 @@ describe("run lifecycle actions", () => {
     expect(canApprove(makeRun({ kind: "runnable" }))).toBe(false);
   });
 
-  test("canRetry allows failed (including cancelled) and dead runs except archived runs", () => {
+  test("canRetry allows terminal runs except archived runs", () => {
     expect(canRetry(makeRun({ kind: "failed", reason: "workflow_error" }))).toBe(true);
     expect(canRetry(makeRun({ kind: "dead" }))).toBe(true);
     expect(canRetry(makeRun({ kind: "failed", reason: "cancelled" }))).toBe(true);
-    expect(canRetry(makeRun({ kind: "succeeded", reason: "completed" }))).toBe(false);
+    expect(canRetry(makeRun({ kind: "succeeded", reason: "completed" }))).toBe(true);
     expect(canRetry(makeRun({ kind: "running" }))).toBe(false);
     expect(canRetry(makeRun({ kind: "failed", reason: "workflow_error" }, true))).toBe(false);
+    expect(canRetry(makeRun({ kind: "succeeded", reason: "completed" }, true))).toBe(false);
   });
 
   test("isTerminalCancelledRun distinguishes immediate cancel success from in-flight cancellation", () => {

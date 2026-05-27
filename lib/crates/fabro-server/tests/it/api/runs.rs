@@ -150,7 +150,7 @@ _version = 1
         created["ask_fabro"]["unavailable_reason"],
         "sandbox_not_ready"
     );
-    assert_eq!(created["ask_fabro"]["default_model"], "gpt-5.4");
+    assert_eq!(created["ask_fabro"]["default_model"], "gpt-5.5");
 
     let get_request = Request::builder()
         .method("GET")

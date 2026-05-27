@@ -2076,10 +2076,10 @@ paths:
       tags: [Runs]
       summary: Retry Run
       description: >
-        Creates a fresh run from the failed or dead source run's captured
+        Creates a fresh run from the terminal source run's captured
         durable definition, records `retried_from` on the new run, and schedules
-        it for execution. The source run is left unchanged. Active, succeeded,
-        and archived runs are not retryable.
+        it for execution. The source run is left unchanged. Active and archived
+        runs are not retryable.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -6011,11 +6011,27 @@ components:
       additionalProperties: false
       required:
         - data
+        - meta
       properties:
         data:
           type: array
           items:
             $ref: "#/components/schemas/Automation"
+        meta:
+          $ref: "#/components/schemas/AutomationListMeta"
+
+    AutomationListMeta:
+      description: Metadata for automation list responses.
+      type: object
+      additionalProperties: false
+      required:
+        - total
+      properties:
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total number of configured automation definitions.
 
     # ── Pagination ───────────────────────────────────────────────────────
 

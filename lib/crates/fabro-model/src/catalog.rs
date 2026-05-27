@@ -1874,12 +1874,12 @@ enabled = true
         let m = Catalog::builtin()
             .default_for_provider(&ProviderId::openai())
             .unwrap();
-        assert_eq!(m.id, "gpt-5.4");
+        assert_eq!(m.id, "gpt-5.5");
 
         let m = Catalog::builtin()
             .default_for_provider(&ProviderId::gemini())
             .unwrap();
-        assert_eq!(m.id, "gemini-3.1-pro-preview");
+        assert_eq!(m.id, "gemini-3.5-flash");
     }
 
     #[test]
@@ -1903,7 +1903,7 @@ enabled = true
         let m = Catalog::builtin()
             .probe_for_provider(&ProviderId::gemini())
             .unwrap();
-        assert_eq!(m.id, "gemini-3.1-pro-preview");
+        assert_eq!(m.id, "gemini-3.5-flash");
     }
 
     #[test]
@@ -2496,7 +2496,7 @@ probe = false
                 .probe_for_provider(&ProviderId::openai())
                 .unwrap()
                 .id,
-            "gpt-5.4"
+            "gpt-5.5"
         );
     }
 
@@ -2905,7 +2905,7 @@ small_default = false
                 .small_default_for_provider(&ProviderId::openai())
                 .unwrap()
                 .id,
-            "gpt-5.4"
+            "gpt-5.5"
         );
     }
 

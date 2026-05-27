@@ -15,7 +15,6 @@ display_name = "GPT-5.4"
 family = "gpt-5"
 training = "2025-08-31"
 knowledge_cutoff = "April 2025"
-default = true
 estimated_output_tps = 70
 aliases = ["gpt54", "gpt-54", "gpt-5.2", "gpt5", "gpt-5.3-codex", "codex"]
 
@@ -41,6 +40,7 @@ display_name = "GPT-5.5"
 family = "gpt-5"
 training = "2025-12-01"
 knowledge_cutoff = "December 2025"
+default = true
 estimated_output_tps = 70
 aliases = ["gpt55", "gpt-55"]
 
