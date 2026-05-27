@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use axum::extract::ws::{CloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade, close_code};
+use axum::extract::ws::{
+    CloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade, close_code,
+};
 use fabro_interview::{
     WORKER_CONTROL_INVALID_CURSOR_REASON, WORKER_CONTROL_PONG_TIMEOUT_REASON,
     WORKER_CONTROL_WS_LIVENESS_TIMEOUT, WORKER_CONTROL_WS_PING_INTERVAL,

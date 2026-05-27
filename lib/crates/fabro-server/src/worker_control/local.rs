@@ -23,8 +23,9 @@ pub(crate) struct LocalWorkerControlBus {
 }
 
 struct LocalRunControlStream {
-    messages: VecDeque<LocalMessage>,
-    notify:   Arc<Notify>,
+    messages:    VecDeque<LocalMessage>,
+    notify:      Arc<Notify>,
+    has_trimmed: bool,
 }
 
 #[derive(Clone)]
@@ -60,9 +61,17 @@ impl LocalWorkerControlBus {
                 .streams
                 .lock()
                 .expect("worker control streams poisoned");
-            let stream = streams
-                .entry(run_id)
-                .or_insert_with(LocalRunControlStream::new);
+            let stream = match cursor {
+                WorkerControlCursor::Start => streams
+                    .entry(run_id)
+                    .or_insert_with(LocalRunControlStream::new),
+                WorkerControlCursor::After(id) => streams.get_mut(&run_id).ok_or_else(|| {
+                    WorkerControlBusError::invalid_cursor(
+                        id.as_str(),
+                        "message id is not retained for this run",
+                    )
+                })?,
+            };
             let next_sequence = stream.next_sequence_for_cursor(cursor)?;
             (next_sequence, Arc::clone(&stream.notify))
         };
@@ -90,8 +99,9 @@ impl LocalWorkerControlBus {
 impl LocalRunControlStream {
     fn new() -> Self {
         Self {
-            messages: VecDeque::new(),
-            notify:   Arc::new(Notify::new()),
+            messages:    VecDeque::new(),
+            notify:      Arc::new(Notify::new()),
+            has_trimmed: false,
         }
     }
 
@@ -100,6 +110,9 @@ impl LocalRunControlStream {
         cursor: &WorkerControlCursor,
     ) -> Result<Option<u64>, WorkerControlBusError> {
         match cursor {
+            WorkerControlCursor::Start if self.has_trimmed => Err(
+                WorkerControlBusError::invalid_cursor("start", "retained local stream is trimmed"),
+            ),
             WorkerControlCursor::Start => Ok(self.messages.front().map(|message| message.sequence)),
             WorkerControlCursor::After(id) => {
                 let requested_sequence = parse_local_sequence(id)?;
@@ -125,6 +138,7 @@ impl LocalRunControlStream {
     fn trim_retained(&mut self) {
         while self.messages.len() > LOCAL_WORKER_CONTROL_RETAINED_MESSAGES_PER_RUN {
             self.messages.pop_front();
+            self.has_trimmed = true;
         }
     }
 }
@@ -163,12 +177,19 @@ async fn local_subscription_task(
                 Some(stream) => {
                     // A `Start` subscriber that joined before any publish lazily
                     // adopts the first retained message as its cursor.
-                    if next_sequence.is_none() {
-                        next_sequence = stream.messages.front().map(|message| message.sequence);
-                    }
-                    match next_sequence {
-                        None => Some(Ok(Vec::new())),
-                        Some(next) => Some(collect_messages_from(&stream.messages, next)),
+                    if next_sequence.is_none() && stream.has_trimmed {
+                        Some(Err(WorkerControlBusError::invalid_cursor(
+                            "start",
+                            "retained local stream is trimmed",
+                        )))
+                    } else {
+                        if next_sequence.is_none() {
+                            next_sequence = stream.messages.front().map(|message| message.sequence);
+                        }
+                        match next_sequence {
+                            None => Some(Ok(Vec::new())),
+                            Some(next) => Some(collect_messages_from(&stream.messages, next)),
+                        }
                     }
                 }
             }
@@ -399,6 +420,27 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, WorkerControlBusError::InvalidCursor { .. }));
+
+        let err = bus
+            .subscribe(fixtures::RUN_1, WorkerControlCursor::Start)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, WorkerControlBusError::InvalidCursor { .. }));
+    }
+
+    #[tokio::test]
+    async fn after_cursor_for_unknown_run_does_not_create_stream() {
+        let bus = LocalWorkerControlBus::new();
+        let err = bus
+            .subscribe(
+                fixtures::RUN_1,
+                WorkerControlCursor::After(WorkerControlMessageId::new("local:1")),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, WorkerControlBusError::InvalidCursor { .. }));
+        assert_eq!(bus.retained_len(&fixtures::RUN_1), 0);
     }
 
     #[tokio::test]

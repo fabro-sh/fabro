@@ -1,3 +1,4 @@
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -289,6 +290,38 @@ fn load_worker_vault(storage_dir: Option<&Path>) -> Result<Option<Arc<AsyncRwLoc
 
 const WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 const WORKER_CONTROL_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(5);
+const WORKER_CONTROL_APPLIED_ID_DEDUPE_CAPACITY: usize = 2048;
+
+#[derive(Default)]
+struct AppliedWorkerControlDeliveryIds {
+    last:   Option<String>,
+    order:  VecDeque<String>,
+    recent: HashSet<String>,
+}
+
+impl AppliedWorkerControlDeliveryIds {
+    fn last_applied_id(&self) -> Option<&str> {
+        self.last.as_deref()
+    }
+
+    fn contains(&self, id: &str) -> bool {
+        self.recent.contains(id)
+    }
+
+    fn record(&mut self, id: String) {
+        if !self.recent.insert(id.clone()) {
+            self.last = Some(id);
+            return;
+        }
+        self.order.push_back(id.clone());
+        self.last = Some(id);
+        while self.order.len() > WORKER_CONTROL_APPLIED_ID_DEDUPE_CAPACITY {
+            if let Some(evicted) = self.order.pop_front() {
+                self.recent.remove(&evicted);
+            }
+        }
+    }
+}
 
 struct WorkerControlManagerHandle {
     first_connection: Option<oneshot::Receiver<Result<()>>>,
@@ -439,14 +472,14 @@ async fn run_worker_control_manager(
     let mut first_tx = Some(first_tx);
     let mut fatal_tx = Some(fatal_tx);
     let mut backoff = WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF;
-    let mut last_applied_id: Option<String> = None;
+    let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
 
     while !done.is_cancelled() {
         let request = match build_worker_control_stream_request(
             &target,
             &run_id,
             &worker_token,
-            last_applied_id.as_deref(),
+            applied_ids.last_applied_id(),
         ) {
             Ok(request) => request,
             Err(err) => {
@@ -474,7 +507,7 @@ async fn run_worker_control_manager(
                     &cancel_token,
                     &steering_hub,
                     &run_control,
-                    &mut last_applied_id,
+                    &mut applied_ids,
                     &done,
                 )
                 .await
@@ -645,7 +678,7 @@ async fn handle_worker_control_socket(
     cancel_token: &CancellationToken,
     steering_hub: &fabro_workflow::SteeringHub,
     run_control: &RunControlState,
-    last_applied_id: &mut Option<String>,
+    applied_ids: &mut AppliedWorkerControlDeliveryIds,
     done: &CancellationToken,
 ) -> Result<(), WorkerControlConnectError> {
     let mut ping_interval = time::interval(WORKER_CONTROL_WS_PING_INTERVAL);
@@ -692,7 +725,7 @@ async fn handle_worker_control_socket(
                             cancel_token,
                             steering_hub,
                             run_control,
-                            last_applied_id,
+                            applied_ids,
                             frame,
                         )
                         .await;
@@ -730,16 +763,16 @@ async fn apply_worker_control_delivery_frame(
     cancel_token: &CancellationToken,
     steering_hub: &fabro_workflow::SteeringHub,
     run_control: &RunControlState,
-    last_applied_id: &mut Option<String>,
+    applied_ids: &mut AppliedWorkerControlDeliveryIds,
     frame: WorkerControlDeliveryFrame,
 ) -> bool {
     // Duplicate ids cannot reach us under normal operation: the server replays
-    // strictly after `last_applied_id`. Guard against a server-side bug by
-    // ignoring any frame whose id is not strictly newer than what we last
-    // applied.
-    if last_applied_id.as_deref() == Some(frame.id.as_str()) {
+    // strictly after the last applied id. Guard against a server-side bug or
+    // reconnect race by ignoring recently-applied delivery ids.
+    if applied_ids.contains(&frame.id) {
         return false;
     }
+    let frame_id = frame.id;
     apply_worker_control_message(
         interviewer,
         cancel_token,
@@ -748,7 +781,7 @@ async fn apply_worker_control_delivery_frame(
         frame.envelope,
     )
     .await;
-    *last_applied_id = Some(frame.id);
+    applied_ids.record(frame_id);
     true
 }
 
@@ -1202,8 +1235,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        WorkerControlConnectError, WorkerControlSocket, WorkerTitlePhase,
-        apply_worker_control_delivery_frame, apply_worker_control_message,
+        AppliedWorkerControlDeliveryIds, WorkerControlConnectError, WorkerControlSocket,
+        WorkerTitlePhase, apply_worker_control_delivery_frame, apply_worker_control_message,
         build_worker_control_stream_request, connect_worker_control_stream,
         handle_worker_control_socket, initial_worker_title_phase, load_worker_vault,
         next_worker_control_reconnect_backoff, stamp_system_worker, worker_title,
@@ -1538,7 +1571,7 @@ mod tests {
         let cancel_token = CancellationToken::new();
         let run_control = RunControlState::new();
         let hub = test_steering_hub();
-        let mut last_applied_id: Option<String> = None;
+        let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
         let frame = fabro_interview::WorkerControlDeliveryFrame {
             id:       "local:1".to_string(),
             envelope: WorkerControlEnvelope::pause_run(),
@@ -1550,7 +1583,7 @@ mod tests {
                 &cancel_token,
                 &hub,
                 &run_control,
-                &mut last_applied_id,
+                &mut applied_ids,
                 frame.clone(),
             )
             .await
@@ -1561,13 +1594,13 @@ mod tests {
                 &cancel_token,
                 &hub,
                 &run_control,
-                &mut last_applied_id,
+                &mut applied_ids,
                 frame,
             )
             .await
         );
 
-        assert_eq!(last_applied_id, Some("local:1".to_string()));
+        assert_eq!(applied_ids.last_applied_id(), Some("local:1"));
     }
 
     #[test]
@@ -1648,7 +1681,7 @@ mod tests {
         let cancel_token = CancellationToken::new();
         let hub = test_steering_hub();
         let run_control = RunControlState::new();
-        let mut last_applied_id: Option<String> = None;
+        let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
         let done = CancellationToken::new();
 
         let task = tokio::spawn(async move {
@@ -1658,7 +1691,7 @@ mod tests {
                 &cancel_token,
                 &hub,
                 &run_control,
-                &mut last_applied_id,
+                &mut applied_ids,
                 &done,
             )
             .await
