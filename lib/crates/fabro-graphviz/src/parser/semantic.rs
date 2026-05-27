@@ -95,7 +95,7 @@ impl SemanticState {
             .graph
             .nodes
             .get_mut(&node_stmt.id)
-            .expect("just ensured");
+            .expect("node was just inserted by ensure_node, so get_mut cannot return None");
         if let Some(attrs) = &node_stmt.attrs {
             for (k, v) in attrs {
                 node.attrs.insert(k.clone(), convert_value(v));
@@ -115,7 +115,7 @@ impl SemanticState {
                 .graph
                 .nodes
                 .get_mut(&node_stmt.id)
-                .expect("just ensured");
+                .expect("node was just inserted by ensure_node, so get_mut cannot return None");
             for cls in class_str.split(',') {
                 let cls = cls.trim().to_string();
                 if !cls.is_empty() && !node.classes.contains(&cls) {
@@ -129,7 +129,7 @@ impl SemanticState {
         for id in &edge_stmt.nodes {
             self.ensure_node(id);
             if let Some(cls) = subgraph_class {
-                let node = self.graph.nodes.get_mut(id).expect("just ensured");
+                let node = self.graph.nodes.get_mut(id).expect("node was just inserted by ensure_node, so get_mut cannot return None");
                 Self::add_class_to_node(node, cls);
             }
         }

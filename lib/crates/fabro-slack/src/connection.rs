@@ -59,7 +59,7 @@ pub fn process_message(
     let ack_json = envelope
         .envelope_id
         .as_deref()
-        .map(|id| serde_json::to_string(&SocketAck::new(id)).expect("ack serialization"));
+        .map(|id| serde_json::to_string(&SocketAck::new(id)).expect("SocketAck serialization cannot fail: it contains only a String field with no custom serializer"));
 
     let action = dispatch(&envelope, thread_registry);
 

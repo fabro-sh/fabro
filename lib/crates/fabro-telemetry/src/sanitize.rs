@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 static NUMERIC_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\d+(\.\d+)*$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"^\d+(\.\d+)*$").expect("hardcoded regex literal is always syntactically valid"));
 
 /// Sanitize CLI arguments for telemetry, redacting potentially sensitive
 /// values.

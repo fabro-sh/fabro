@@ -424,7 +424,7 @@ pub enum McpServerStatus {
 /// `StageProjection::first_event_seq`. Run event seqs always start at 1.
 #[must_use]
 pub fn first_event_seq(seq: u32) -> NonZeroU32 {
-    NonZeroU32::new(seq).expect("event seq starts at 1")
+    NonZeroU32::new(seq).expect("event sequence numbers are 1-based so seq is always non-zero at this call site")
 }
 
 impl StageProjection {

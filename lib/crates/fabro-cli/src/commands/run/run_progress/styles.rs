@@ -10,7 +10,7 @@ macro_rules! cached_style {
         pub(super) fn $name() -> ProgressStyle {
             static STYLE: OnceLock<ProgressStyle> = OnceLock::new();
             STYLE
-                .get_or_init(|| ProgressStyle::with_template($template).expect("valid template"))
+                .get_or_init(|| ProgressStyle::with_template($template).expect("hardcoded progress template is always syntactically valid"))
                 .clone()
         }
     };

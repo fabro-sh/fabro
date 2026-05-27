@@ -48,7 +48,7 @@ pub fn apply_stylesheet(stylesheet: &Stylesheet, graph: &mut Graph) {
         let node = graph
             .nodes
             .get_mut(node_id.as_str())
-            .expect("node must exist");
+            .expect("node_id was collected from graph.nodes.keys() on the line above, so it must still exist");
         for (prop, (val, _)) in &applied {
             if !node.attrs.contains_key(prop) {
                 node.attrs
