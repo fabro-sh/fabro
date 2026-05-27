@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import type { AssistantRuntime } from "@assistant-ui/react";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
@@ -8,10 +9,10 @@ import { XMarkIcon } from "@heroicons/react/24/outline";
 import remarkGfm from "remark-gfm";
 
 import SidebarComposer from "../../chats/sidebar-composer";
-import ToolCallSummary from "../../chats/tool-call-summary";
 import type { WorkflowDraft } from "../state/draft";
 import type { ToolCall } from "../state/reducer";
 import { createPlaygroundAdapter } from "./runtime";
+import PlaygroundToolCallSummary from "./tool-call-summary";
 import PlaygroundWelcome from "./welcome";
 
 const MarkdownText = makeMarkdownText({ remarkPlugins: [remarkGfm] });
@@ -31,6 +32,9 @@ const SIDEBAR_MAX_WIDTH = SIDEBAR_WIDTH * 2;
  * is called once per animated op; `onParseFailure` fires if the model's
  * DOT couldn't be parsed.
  */
+/** Max consecutive auto-retries when the model's DOT fails to parse. */
+const MAX_AUTO_RETRIES = 2;
+
 export default function PlaygroundChatSidebar({
   isOpen,
   onClose,
@@ -50,6 +54,40 @@ export default function PlaygroundChatSidebar({
   width: number;
   onWidthChange: (width: number) => void;
 }) {
+  // The runtime is created from the adapter (chicken-and-egg) so we stash
+  // it in a ref after creation. The adapter's onParseFailure callback
+  // reads from this ref to call `runtime.thread.append` for auto-retry.
+  const runtimeRef = useRef<AssistantRuntime | null>(null);
+  const autoRetriesRef = useRef(0);
+
+  const handleParseFailure = useCallback(
+    (info: { message: string; rawContent: string }) => {
+      if (
+        runtimeRef.current !== null &&
+        autoRetriesRef.current < MAX_AUTO_RETRIES
+      ) {
+        autoRetriesRef.current++;
+        runtimeRef.current.thread.append({
+          role:    "user",
+          content: [
+            {
+              type: "text",
+              text:
+                `The DOT you wrote couldn't be parsed: ${info.message}. ` +
+                `Please re-emit a complete \`workflow.fabro\` with valid syntax.`,
+            },
+          ],
+        });
+      }
+      onParseFailure?.(info);
+    },
+    [onParseFailure],
+  );
+
+  const handleParseSuccess = useCallback(() => {
+    autoRetriesRef.current = 0;
+  }, []);
+
   // The adapter is referentially-stable across renders because it reads the
   // draft via `getWorkflow` on each turn — no need to memoise on draft.
   const adapter = useMemo(
@@ -58,11 +96,13 @@ export default function PlaygroundChatSidebar({
         chatEndpoint,
         getWorkflow,
         dispatch,
-        onParseFailure,
+        onParseFailure: handleParseFailure,
+        onParseSuccess: handleParseSuccess,
       }),
-    [chatEndpoint, getWorkflow, dispatch, onParseFailure],
+    [chatEndpoint, getWorkflow, dispatch, handleParseFailure, handleParseSuccess],
   );
   const runtime = useLocalRuntime(adapter);
+  runtimeRef.current = runtime;
 
   const [isDragging, setIsDragging] = useState(false);
   const dragOrigin = useRef<{ x: number; width: number } | null>(null);
@@ -143,7 +183,7 @@ export default function PlaygroundChatSidebar({
                 ThreadWelcome: PlaygroundWelcome,
               }}
               assistantMessage={{
-                components: { Text: MarkdownText, ToolFallback: ToolCallSummary },
+                components: { Text: MarkdownText, ToolFallback: PlaygroundToolCallSummary },
                 allowCopy: false,
                 allowReload: false,
                 allowSpeak: false,

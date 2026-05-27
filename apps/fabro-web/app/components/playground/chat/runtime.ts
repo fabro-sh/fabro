@@ -55,6 +55,8 @@ export interface PlaygroundAdapterOptions {
    * follow-up turn asking the model to re-emit a valid file.
    */
   onParseFailure?: (info: { message: string; rawContent: string }) => void;
+  /** Called when the model's DOT parses successfully — handy for resetting auto-retry counters. */
+  onParseSuccess?: () => void;
   /** Milliseconds between animation steps. Default 220ms. */
   stepDelayMs?: number;
   /** Override fetch for tests. */
@@ -69,7 +71,7 @@ export function createPlaygroundAdapter(
   return {
     async *run({ messages, abortSignal }) {
       const body = {
-        messages: messages.map(serializeMessage),
+        messages: serializeMessages(messages),
         workflow: options.getWorkflow(),
       };
 
@@ -193,6 +195,7 @@ function handleToolCallEnd(
     return { args, isError: true };
   }
 
+  options.onParseSuccess?.();
   const prev = options.getWorkflow();
   const ops = diffDrafts(prev, parsed.draft);
   if (ops.length === 0) {
@@ -234,29 +237,111 @@ function parseFrame(frame: string): StreamEvent | null {
   }
 }
 
-interface SerializedPart {
-  kind: "text";
-  data: string;
-}
+type SerializedPart =
+  | { kind: "text"; data: string }
+  | {
+      kind: "tool_call";
+      data: {
+        id: string;
+        name: string;
+        type: string;
+        arguments: Record<string, unknown>;
+      };
+    }
+  | {
+      kind: "tool_result";
+      data: {
+        tool_call_id: string;
+        content: unknown;
+        is_error: boolean;
+      };
+    };
 
 interface SerializedMessage {
   role: "user" | "assistant" | "system";
   content: SerializedPart[];
 }
 
-function serializeMessage(message: AdapterMessage): SerializedMessage {
-  let text = extractText(message);
-  // Anthropic rejects empty text blocks, so when an assistant turn
-  // contained only tool calls (no prose) we substitute a brief
-  // placeholder that keeps the conversation history shape while
-  // signalling "I wrote a workflow file last turn".
-  if (text === "" && message.role === "assistant" && hasToolCall(message)) {
-    text = "(Wrote workflow.fabro)";
+/**
+ * Stateful pass over the assistant-ui message history to produce the
+ * Anthropic-friendly wire format.
+ *
+ * Two non-obvious things this handles:
+ *
+ *   1. Assistant turns with `tool-call` parts are serialized as
+ *      proper `kind: "tool_call"` content blocks (carrying id, name,
+ *      arguments) rather than being stripped to text-only as chunk 10
+ *      did. The model gets to see what it actually wrote last turn.
+ *
+ *   2. Anthropic requires every `tool_use` block in an assistant
+ *      message to be matched by a `tool_result` block in the next
+ *      user message. The playground reducer doesn't surface real
+ *      tool results (everything is pure-write client-side), so we
+ *      synthesize `{ok: true, applied: true}` results and prepend
+ *      them to the next user message's content array.
+ */
+function serializeMessages(messages: readonly AdapterMessage[]): SerializedMessage[] {
+  const out: SerializedMessage[] = [];
+  let pendingToolResults: SerializedPart[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === "assistant") {
+      const content: SerializedPart[] = [];
+      const toolCallIds: string[] = [];
+      for (const part of msg.content as readonly { type: string; [k: string]: unknown }[]) {
+        if (
+          part.type === "text" &&
+          typeof part.text === "string" &&
+          part.text.length > 0
+        ) {
+          content.push({ kind: "text", data: part.text });
+        } else if (part.type === "tool-call") {
+          const id = String(part.toolCallId ?? "");
+          const name = String(part.toolName ?? "");
+          const rawArgs = part.args;
+          const args =
+            rawArgs && typeof rawArgs === "object"
+              ? (rawArgs as Record<string, unknown>)
+              : {};
+          content.push({
+            kind: "tool_call",
+            data: { id, name, type: "function", arguments: args },
+          });
+          toolCallIds.push(id);
+        }
+      }
+      if (content.length === 0) continue;
+      out.push({ role: "assistant", content });
+
+      pendingToolResults = toolCallIds.map((id) => ({
+        kind:    "tool_result",
+        data:    {
+          tool_call_id: id,
+          content:      { ok: true, applied: true },
+          is_error:     false,
+        },
+      }));
+      continue;
+    }
+
+    if (msg.role === "user") {
+      const text = extractText(msg);
+      const content: SerializedPart[] = [...pendingToolResults];
+      if (text.length > 0) content.push({ kind: "text", data: text });
+      pendingToolResults = [];
+      if (content.length === 0) continue;
+      out.push({ role: "user", content });
+      continue;
+    }
+
+    // system / fallback
+    const text = extractText(msg);
+    if (text.length > 0) {
+      out.push({ role: msg.role, content: [{ kind: "text", data: text }] });
+    }
   }
-  return {
-    role:    message.role,
-    content: [{ kind: "text", data: text }],
-  };
+
+  return out;
 }
 
 function extractText(message: AdapterMessage): string {
@@ -267,10 +352,4 @@ function extractText(message: AdapterMessage): string {
     }
   }
   return segments.join("\n");
-}
-
-function hasToolCall(message: AdapterMessage): boolean {
-  return message.content.some(
-    (part: { type: string }) => part.type === "tool-call",
-  );
 }
