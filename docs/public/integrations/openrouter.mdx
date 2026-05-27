@@ -109,11 +109,12 @@ digraph Example {
 }
 ```
 
-## Provider routing (advanced)
+## Provider routing (via API or SDK)
 
-OpenRouter accepts top-level request fields that aren't part of the OpenAI Chat Completions schema, such as `provider` (routing preferences), `models` (fallback list), `transforms`, and `plugins`. Fabro forwards these through the existing `provider_options.openrouter` request field when calling the API directly:
+OpenRouter accepts top-level request fields that aren't part of the OpenAI Chat Completions schema — `provider` (routing preferences), `models` (fallback list), `transforms`, `plugins`. Fabro forwards these through the `provider_options.openrouter` field on the request body when calling `POST /api/v1/completions` directly or constructing a `Request` via the Rust/TypeScript SDK:
 
 ```json
+// POST /api/v1/completions request body
 {
   "model": "anthropic/claude-sonnet-4-6",
   "messages": [...],
@@ -127,6 +128,10 @@ OpenRouter accepts top-level request fields that aren't part of the OpenAI Chat 
 ```
 
 See [OpenRouter's provider routing documentation](https://openrouter.ai/docs/features/provider-routing) for the full set of supported fields.
+
+<Note>
+Workflow files (`workflow.fabro`, `workflow.toml`) don't currently expose `provider_options` — stage attributes can set `model`, `provider`, and `reasoning_effort`, but not provider-specific request fields. Use the API or SDK directly when you need OpenRouter routing controls per call.
+</Note>
 
 ## Troubleshooting
 
