@@ -1073,6 +1073,25 @@ mod tests {
     }
 
     #[test]
+    fn api_response_usage_parses_cached_tokens() {
+        // Non-streaming response uses ApiResponse, which is a distinct
+        // code path from the streaming StreamChunk parse. Verify the
+        // same cached-token fields land on TokenCounts via that path.
+        let json = r#"{"id":"chatcmpl-1","model":"anthropic/claude-sonnet-4.6","choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":80},"cache_write_tokens":12}}"#;
+        let resp: ApiResponse = serde_json::from_str(json).unwrap();
+        let u = resp.usage.unwrap();
+        assert_eq!(u.prompt_tokens, 100);
+        assert_eq!(u.completion_tokens, 50);
+        assert_eq!(
+            u.prompt_tokens_details
+                .as_ref()
+                .and_then(|d| d.cached_tokens),
+            Some(80)
+        );
+        assert_eq!(u.cache_write_tokens, Some(12));
+    }
+
+    #[test]
     fn stream_chunk_usage_parses_cached_tokens() {
         let json = r#"{"id":"chatcmpl-1","model":"gpt-4","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":80},"cache_write_tokens":12}}"#;
         let chunk: StreamChunk = serde_json::from_str(json).unwrap();
