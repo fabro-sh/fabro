@@ -270,8 +270,8 @@ interface SerializedMessage {
  *
  *   1. Assistant turns with `tool-call` parts are serialized as
  *      proper `kind: "tool_call"` content blocks (carrying id, name,
- *      arguments) rather than being stripped to text-only as chunk 10
- *      did. The model gets to see what it actually wrote last turn.
+ *      arguments) so the model gets to see what it actually wrote
+ *      last turn instead of just the surrounding text.
  *
  *   2. Anthropic requires every `tool_use` block in an assistant
  *      message to be matched by a `tool_result` block in the next

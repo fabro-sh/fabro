@@ -5327,15 +5327,15 @@ paths:
       description: |
         Drives a single turn of the playground chat that builds a workflow
         graph incrementally. The server is stateless: each request includes
-        the full current draft, and the response streams text deltas plus
-        structured tool calls (`set_workflow_meta`, `add_node`, `update_node`,
-        `delete_node`, `connect`, `disconnect`) which the client applies to
-        its local draft.
+        the full current draft, and the response streams text deltas plus a
+        single `write_workflow_file` tool call carrying the full new contents
+        of `workflow.fabro` for the client to parse, diff against its local
+        draft, and animate into the canvas.
 
         Responses are always SSE. Frames use `event: stream_event` with a
         JSON-serialized StreamEvent payload — see /api/v1/completions for the
-        StreamEvent shape. Tool calls arrive on `tool_call_end` events with
-        the tool name and parsed JSON arguments.
+        StreamEvent shape. The tool call arrives on a `tool_call_end` event
+        with the tool name and parsed JSON arguments.
       requestBody:
         required: true
         content:
@@ -7968,9 +7968,9 @@ components:
     CreatePlaygroundChatRequest:
       description: >
         Body of POST /api/v1/playground/chat. The server uses `workflow` as
-        context for the model's system prompt and exposes a fixed,
-        pure-write tool surface (`set_workflow_meta`, `add_node`,
-        `update_node`, `delete_node`, `connect`, `disconnect`).
+        context for the model's system prompt and exposes a single
+        `write_workflow_file` tool that emits the full new contents of
+        `workflow.fabro` each turn.
       type: object
       required: [messages, workflow]
       properties:

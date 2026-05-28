@@ -3,8 +3,7 @@
  *
  * Inline-everything style: the manifest carries the full DOT and
  * `workflow.toml` source in `workflows[key].{source, config}`, so the
- * server doesn't need a temp dir or git commit. See the runs-API
- * notes in `playground_build_plan.md` for the schema details.
+ * server doesn't need a temp dir or git commit.
  */
 import { renderFabro } from "../files/render-fabro";
 import { renderWorkflowToml } from "../files/render-toml";

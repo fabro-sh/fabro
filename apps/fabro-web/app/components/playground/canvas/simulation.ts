@@ -14,8 +14,8 @@
  * - Cycle break → stop after `MAX_TOTAL_STEPS` total visits in case the
  *   graph has no path to `exit`.
  *
- * Pure function; the React layer in `chunk 8`'s play-button drives the
- * cadence with `setInterval`.
+ * Pure function; the React layer's play-button drives the cadence with
+ * `setInterval`.
  */
 
 import { EXIT_ID, START_ID, type WorkflowDraft } from "../state/draft";

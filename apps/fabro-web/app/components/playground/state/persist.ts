@@ -74,8 +74,8 @@ function loadInitial(): WorkflowDraft {
 
 /**
  * Drives the playground draft. State is owned by a `useReducer` so the chat
- * adapter (chunk 7) can `applyCall(...)` for each tool call streamed in over
- * SSE, and the canvas (chunk 3) just re-renders.
+ * adapter can `applyCall(...)` for each tool call streamed in over SSE, and
+ * the canvas just re-renders.
  *
  * Returns a stable handle whose methods are referentially stable across
  * renders.
