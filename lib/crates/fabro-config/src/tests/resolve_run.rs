@@ -377,8 +377,8 @@ channel = "#ops"
 }
 
 #[test]
-fn toml_run_environment_lifecycle_override_is_rejected() {
-    let err = super::workflow_settings_from_toml(
+fn toml_run_environment_lifecycle_override_is_applied() {
+    let settings = super::workflow_settings_from_toml(
         r"
 _version = 1
 
@@ -386,13 +386,9 @@ _version = 1
 stop_on_terminal = false
 ",
     )
-    .expect_err("TOML environment lifecycle overrides should be rejected");
+    .expect("TOML environment lifecycle overrides should resolve");
 
-    let message = err.to_string();
-    assert!(
-        message.contains("[run.environment.lifecycle] is now server-managed"),
-        "expected server-managed environment override diagnostic, got: {message}"
-    );
+    assert!(!settings.run.environment.lifecycle.stop_on_terminal);
 }
 
 #[test]

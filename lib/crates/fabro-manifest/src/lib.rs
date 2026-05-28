@@ -1214,7 +1214,7 @@ mod tests {
     }
 
     #[test]
-    fn build_manifest_rejects_project_environment_catalog_definitions() {
+    fn build_manifest_accepts_project_environment_catalog_definitions() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
         let workflow_dir = project.join(".fabro/workflows/demo");
@@ -1228,10 +1228,7 @@ mod tests {
 id = "daytona"
 
 [environments.daytona]
-provider = "daytona"
-
-[environments.daytona.image]
-dockerfile = { path = "Dockerfile" }
+provider = "local"
 "#,
         )
         .unwrap();
@@ -1246,19 +1243,21 @@ dockerfile = { path = "Dockerfile" }
         )
         .unwrap();
 
-        let err = build_run_manifest(ManifestBuildInput {
+        let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
             environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
-        .unwrap_err();
+        .expect("project environment catalog definitions should be accepted");
 
-        assert!(
-            err.to_string()
-                .contains("[environments.daytona] is now server-managed"),
-            "unexpected error: {err:#}"
-        );
+        assert!(built.manifest.configs.iter().any(|config| {
+            config.type_ == types::ManifestConfigType::Project
+                && config
+                    .source
+                    .as_deref()
+                    .is_some_and(|source| source.contains("[environments.daytona]"))
+        }));
     }
 
     #[test]

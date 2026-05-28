@@ -652,7 +652,7 @@ mod tests {
 
     use fabro_types::settings::InterpString;
     use fabro_types::settings::cli::OutputVerbosity;
-    use fabro_types::settings::run::{ApprovalMode, RunMode};
+    use fabro_types::settings::run::{ApprovalMode, EnvironmentProvider, RunMode};
 
     use super::{RunSettingsBuilder, WorkflowSettingsBuilder, server_runtime_settings_from_toml};
     use crate::{
@@ -748,42 +748,55 @@ command = ["demo-mcp"]
     }
 
     #[test]
-    fn workflow_environment_catalog_definition_is_rejected() {
-        let err = WorkflowSettingsBuilder::new()
+    fn workflow_environment_catalog_definition_overrides_server_catalog() {
+        let settings = WorkflowSettingsBuilder::new()
+            .server_manifest_defaults(RunLayer::default(), seeded_environment_catalog())
             .workflow_toml(
                 r#"
 _version = 1
 
+[run.environment]
+id = "default"
+
 [environments.cloud]
 provider = "docker"
+
+[environments.default]
+provider = "local"
 "#,
             )
-            .expect_err("workflow environment catalogs should be server-managed");
+            .expect("workflow environment catalogs should be accepted")
+            .build()
+            .expect("settings should resolve");
 
-        let message = err.to_string();
-        assert!(
-            message.contains("[environments.cloud] is now server-managed"),
-            "expected targeted server-managed environment diagnostic, got: {message}"
+        assert_eq!(
+            settings.run.environment.provider,
+            EnvironmentProvider::Local
         );
     }
 
     #[test]
-    fn project_environment_catalog_definition_is_rejected() {
-        let err = WorkflowSettingsBuilder::new()
+    fn project_environment_catalog_definition_is_accepted() {
+        let settings = WorkflowSettingsBuilder::new()
+            .server_manifest_defaults(RunLayer::default(), seeded_environment_catalog())
             .project_toml(
                 r#"
 _version = 1
+
+[run.environment]
+id = "cloud"
 
 [environments.cloud]
 provider = "docker"
 "#,
             )
-            .expect_err("project environment catalogs should be server-managed");
+            .expect("project environment catalogs should be accepted")
+            .build()
+            .expect("settings should resolve");
 
-        let message = err.to_string();
-        assert!(
-            message.contains("[environments.cloud] is now server-managed"),
-            "expected targeted server-managed environment diagnostic, got: {message}"
+        assert_eq!(
+            settings.run.environment.provider,
+            EnvironmentProvider::Docker
         );
     }
 

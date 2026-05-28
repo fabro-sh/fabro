@@ -32,7 +32,6 @@ pub enum ParseError {
     Toml(String),
     Version(VersionError),
     UnknownTopLevelKey { key: String, hint: Option<String> },
-    ServerManagedEnvironment { path: String },
 }
 
 impl fmt::Display for ParseError {
@@ -50,10 +49,6 @@ impl fmt::Display for ParseError {
                     )
                 }
             }
-            Self::ServerManagedEnvironment { path } => write!(
-                f,
-                "[{path}] is now server-managed; move this definition to the server environments directory"
-            ),
         }
     }
 }
@@ -127,61 +122,19 @@ pub enum SettingsSource {
 
 impl SettingsSource {
     /// `ActiveSettings` is the aggregated server-side settings file. Other
-    /// sources are leaf user configs that cannot define environment catalogs.
+    /// sources are client-provided leaf configs and must not be rewritten while
+    /// building or preparing a run manifest.
     #[must_use]
     pub(crate) fn runs_settings_migrations(self) -> bool {
-        matches!(self, Self::ActiveSettings | Self::User)
-    }
-
-    #[must_use]
-    pub(crate) fn forbids_environment_catalog(self) -> bool {
-        !matches!(self, Self::ActiveSettings)
+        matches!(self, Self::ActiveSettings)
     }
 }
 
 pub fn validate_settings_source(
-    layer: &SettingsLayer,
-    source: SettingsSource,
+    _layer: &SettingsLayer,
+    _source: SettingsSource,
 ) -> Result<(), ParseError> {
-    if source.forbids_environment_catalog() {
-        if let Some(id) = layer.environments.keys().min() {
-            return Err(ParseError::ServerManagedEnvironment {
-                path: format!("environments.{id}"),
-            });
-        }
-    }
-
-    if let Some(path) = toml_run_environment_override_path(layer) {
-        return Err(ParseError::ServerManagedEnvironment { path });
-    }
-
     Ok(())
-}
-
-fn toml_run_environment_override_path(layer: &SettingsLayer) -> Option<String> {
-    let environment = layer.run.as_ref()?.environment.as_ref()?;
-    if environment.image.is_some() {
-        return Some("run.environment.image".to_string());
-    }
-    if environment.resources.is_some() {
-        return Some("run.environment.resources".to_string());
-    }
-    if environment.network.is_some() {
-        return Some("run.environment.network".to_string());
-    }
-    if environment.lifecycle.is_some() {
-        return Some("run.environment.lifecycle".to_string());
-    }
-    if !environment.labels.is_empty() {
-        return Some("run.environment.labels".to_string());
-    }
-    if environment.volumes.is_some() {
-        return Some("run.environment.volumes".to_string());
-    }
-    if !environment.env.is_empty() {
-        return Some("run.environment.env".to_string());
-    }
-    None
 }
 
 fn validate_version(raw: &toml::Value) -> Result<(), VersionError> {

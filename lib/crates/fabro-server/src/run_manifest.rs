@@ -1562,7 +1562,7 @@ enabled = {clone_enabled}
         assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
     }
     #[test]
-    fn prepare_manifest_rejects_project_environment_catalog_definitions() {
+    fn prepare_manifest_accepts_project_environment_catalog_definitions() {
         let mut manifest = minimal_manifest();
         manifest.configs.push(types::ManifestConfig {
             path:   Some(".fabro/project.toml".to_string()),
@@ -1573,26 +1573,22 @@ enabled = {clone_enabled}
 id = "cloud"
 
 [environments.cloud]
-provider = "daytona"
-
-[environments.cloud.image]
-dockerfile = { path = "Dockerfile" }
+provider = "local"
 "#
                 .to_string(),
             ),
             type_:  types::ManifestConfigType::Project,
         });
 
-        let Err(err) = prepare_manifest(
+        let prepared = prepare_manifest(
             &manifest_run_defaults(Some(&default_settings_fixture())),
             &manifest,
-        ) else {
-            panic!("project environment catalog should fail");
-        };
-        let message = format!("{err:#}");
-        assert!(
-            message.contains("[environments.cloud] is now server-managed"),
-            "expected server-managed environment error, got: {message}"
+        )
+        .expect("project environment catalog should resolve");
+
+        assert_eq!(
+            prepared.settings.run.environment.provider,
+            EnvironmentProvider::Local
         );
     }
 

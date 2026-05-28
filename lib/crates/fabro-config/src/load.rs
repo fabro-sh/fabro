@@ -104,4 +104,27 @@ provider = "daytona"
             .expect("read migrated environment file");
         assert!(environment.contains("provider = \"daytona\""));
     }
+
+    #[test]
+    fn load_settings_path_keeps_user_environment_catalog_in_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("settings.toml");
+        let source = r#"
+_version = 1
+
+[run.environment]
+id = "client"
+
+[environments.client]
+provider = "local"
+"#;
+        std::fs::write(&path, source).expect("write user settings");
+
+        let layer =
+            load_settings_path(&path, SettingsSource::User).expect("user settings should load");
+
+        assert!(layer.environments.contains_key("client"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+        assert!(!dir.path().join("environments/client.toml").exists());
+    }
 }
