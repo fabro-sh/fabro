@@ -23,34 +23,33 @@ export type PlaygroundAuthMode = "required" | "anonymous";
 export type PlaygroundProps = {
   /**
    * URL the chat adapter posts each turn against. Externalised so the same
-   * component tree can re-embed in the marketing site against a public,
-   * rate-limited variant of the endpoint later.
+   * component tree can re-embed against a public, rate-limited variant of
+   * the endpoint later.
    */
   chatEndpoint: string;
   /**
    * `required` — assume the parent shell has already enforced authentication
    * (current fabro-web routes do this via `AppShell`).
-   * `anonymous` — anonymous embed mode for a future marketing-site island;
-   * not used by fabro-web today.
+   * `anonymous` — anonymous embed mode for non-authenticated contexts; not
+   * used by fabro-web today.
    */
   authMode: PlaygroundAuthMode;
   /**
    * Override the "Run for real" button to redirect somewhere instead of
-   * opening the in-page modal that POSTs to `/api/v1/runs`. Set this on
-   * the marketing-site embed (where the visitor has no project to run
-   * against) to send them to a CTA URL such as `/download`. When unset,
-   * the button uses the default in-page launch flow.
+   * opening the in-page modal that POSTs to `/api/v1/runs`. Set this in
+   * embed contexts where the visitor has no project to run against, to
+   * send them to a CTA URL such as `/download`. When unset, the button
+   * uses the default in-page launch flow.
    */
   realRunRedirect?: RealRunRedirect;
 };
 
 /**
  * The playground feature surface, deliberately framed as a standalone
- * component tree so it can later be lifted into the Astro marketing site
- * as a React island (engineering-as-marketing). It must not depend on
- * `AppShell`, react-router context, or any of fabro-web's app-wide stores;
- * any cross-cutting concern (chat endpoint, auth mode, theme) flows in
- * through props.
+ * component tree so it can later be re-embedded as a self-contained React
+ * subtree in other contexts. It must not depend on `AppShell`, react-router
+ * context, or any of fabro-web's app-wide stores; any cross-cutting concern
+ * (chat endpoint, auth mode, theme) flows in through props.
  *
  * Layout mirrors `/ask-fabro`: workspace on the left, a docked chat
  * column on the right that drives the canvas via streamed tool calls.

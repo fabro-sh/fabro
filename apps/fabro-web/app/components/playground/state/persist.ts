@@ -4,8 +4,8 @@
  * The playground deliberately keeps state in the browser: the server is
  * stateless across chat turns (each turn POSTs the full draft and gets back
  * text + tool calls). That makes the same component tree trivially
- * re-embeddable in the marketing site later, and means a refresh just
- * re-hydrates from `localStorage` rather than hitting any API.
+ * re-embeddable in other contexts later, and means a refresh just re-
+ * hydrates from `localStorage` rather than hitting any API.
  */
 
 import { useCallback, useEffect, useReducer, useRef } from "react";

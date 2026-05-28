@@ -5,8 +5,8 @@
  * the user's work.
  *
  * Kept deliberately small and self-contained so the playground component
- * subtree can be lifted into the marketing site as a standalone island
- * without dragging fabro-web's app shell along.
+ * subtree can be re-embedded elsewhere as a standalone island without
+ * dragging fabro-web's app shell along.
  */
 
 /** All Graphviz shape names Fabro recognises. Each shape picks a handler. */

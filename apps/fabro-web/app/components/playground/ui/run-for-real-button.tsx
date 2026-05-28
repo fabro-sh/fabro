@@ -17,10 +17,10 @@ export interface RealRunRedirect {
  * - **Default** (fabro-web): the button opens a confirmation modal that
  *   POSTs the workflow to `/api/v1/runs` and redirects to the resulting
  *   run page.
- * - **Redirect** (marketing-site embed): when `redirect` is supplied, the
- *   button renders as a plain anchor pointing at the configured href.
- *   The marketing site doesn't have a real backend to launch against, so
- *   we send visitors to a CTA URL (e.g. `/download`) instead.
+ * - **Redirect** (custom embed): when `redirect` is supplied, the button
+ *   renders as a plain anchor pointing at the configured href. Use this
+ *   in embed contexts that have no backend to launch against, to send
+ *   visitors to a CTA URL (e.g. `/download`) instead.
  *
  * Disabled in the welcome state for the default mode — running an empty
  * workflow is pointless. The redirect mode stays enabled because the
