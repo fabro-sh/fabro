@@ -168,7 +168,7 @@ fn make_openai_compatible_twin_client(provider: &Provider, twin: &OpenAiTwinOpti
     Client::new(providers, Some(provider_name), Vec::new())
 }
 
-async fn make_openai_compatible_twin_session(
+fn make_openai_compatible_twin_session(
     provider: Provider,
     model: &str,
     cwd: &Path,
@@ -306,8 +306,7 @@ async fn openai_compatible_twin_preserves_raw_apply_patch_arguments() {
         tmp.path(),
         config,
         &twin,
-    )
-    .await;
+    );
     session.initialize().await.unwrap();
     let mut rx = session.subscribe();
 
