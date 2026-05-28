@@ -29,12 +29,8 @@ use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
 use crate::auth;
-<<<<<<< HEAD
-=======
 use crate::automation_materializer::AutomationRunMaterializer;
 pub use crate::automation_materializer::TestAutomationRunMaterializer;
-use crate::ip_allowlist::IpAllowlistConfig;
->>>>>>> origin/main
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 #[cfg(test)]
 use crate::principal_middleware::{AuthContextSlot, RequestAuthContext};
