@@ -1,8 +1,30 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::WorkflowSettings as ApiWorkflowSettings;
-use fabro_config::WorkflowSettingsBuilder;
+use fabro_config::{EnvironmentLayer, MergeMap, RunLayer, SettingsLayer, WorkflowSettingsBuilder};
 use fabro_types::WorkflowSettings;
+
+fn seeded_environment_catalog() -> MergeMap<EnvironmentLayer> {
+    r#"
+[environments.default]
+provider = "docker"
+
+[environments.default.image]
+docker = "buildpack-deps:noble"
+"#
+    .parse::<SettingsLayer>()
+    .expect("seeded environment catalog should parse")
+    .environments
+}
+
+fn workflow_settings_from_toml(source: &str) -> WorkflowSettings {
+    WorkflowSettingsBuilder::new()
+        .server_manifest_defaults(RunLayer::default(), seeded_environment_catalog())
+        .workflow_toml(source)
+        .expect("workflow settings should parse")
+        .build()
+        .expect("workflow settings should resolve")
+}
 
 #[test]
 fn workflow_settings_family_reuses_domain_types() {
@@ -11,7 +33,7 @@ fn workflow_settings_family_reuses_domain_types() {
 
 #[test]
 fn workflow_settings_json_matches_openapi_shape() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = workflow_settings_from_toml(
         r#"
 _version = 1
 
@@ -28,8 +50,7 @@ goal = "Ship it"
 [run.execution]
 approval = "auto"
 "#,
-    )
-    .expect("settings should resolve");
+    );
 
     let json = serde_json::to_value(&settings).expect("workflow settings should serialize");
     assert!(
@@ -53,15 +74,14 @@ approval = "auto"
 
 #[test]
 fn workflow_settings_json_includes_run_checkpoint_skip_git_hooks() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = workflow_settings_from_toml(
         r#"
 _version = 1
 
 [run.checkpoint]
 skip_git_hooks = true
 "#,
-    )
-    .expect("settings with run.checkpoint.skip_git_hooks should resolve");
+    );
 
     let json = serde_json::to_value(&settings).expect("workflow settings should serialize");
     assert_eq!(json["run"]["checkpoint"]["skip_git_hooks"], true);
@@ -78,8 +98,7 @@ skip_git_hooks = true
 
 #[test]
 fn workflow_settings_default_run_checkpoint_skip_git_hooks_is_false() {
-    let settings = WorkflowSettingsBuilder::from_toml("_version = 1\n")
-        .expect("default settings should resolve");
+    let settings = workflow_settings_from_toml("_version = 1\n");
     let json = serde_json::to_value(&settings).expect("workflow settings should serialize");
     assert_eq!(json["run"]["checkpoint"]["skip_git_hooks"], false);
 }

@@ -210,14 +210,11 @@ async fn run_config_substitutes_variables_before_persisting_settings() {
         "source": r#"
 _version = 1
 
+[run]
+goal = "secret: {{ vars.RUNTIME_TOKEN }}"
+
 [run.environment]
 id = "local"
-
-[environments.local]
-provider = "local"
-
-[environments.local.env]
-RUNTIME_TOKEN = "{{ vars.RUNTIME_TOKEN }}"
 "#
     }]);
 
@@ -247,8 +244,5 @@ RUNTIME_TOKEN = "{{ vars.RUNTIME_TOKEN }}"
     )
     .await;
 
-    assert_eq!(
-        body["run"]["environment"]["env"]["RUNTIME_TOKEN"],
-        "token-from-variable"
-    );
+    assert_eq!(body["run"]["goal"]["value"], "secret: token-from-variable");
 }

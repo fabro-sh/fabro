@@ -260,9 +260,6 @@ _version = 1
 
 [[run.prepare.steps]]
 script = "project-setup"
-
-[run.environment.lifecycle]
-preserve = true
 "#,
     )
     .expect("external workflow project config should write");
@@ -355,10 +352,6 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
     assert_eq!(
         run_spec["settings"]["run"]["execution"]["approval"].as_str(),
         Some("auto")
-    );
-    assert_eq!(
-        run_spec["settings"]["run"]["environment"]["lifecycle"]["preserve"].as_bool(),
-        Some(true)
     );
     assert_eq!(
         run_spec["settings"]["run"]["model"]["name"].as_str(),

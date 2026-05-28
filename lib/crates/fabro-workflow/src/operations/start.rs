@@ -1213,6 +1213,10 @@ mod tests {
 
     fn settings_from_run_layer(run: RunLayer) -> WorkflowSettings {
         WorkflowSettingsBuilder::new()
+            .server_manifest_defaults(
+                RunLayer::default(),
+                fabro_environment::seeded_catalog_layer(),
+            )
             .run_overrides(run)
             .build()
             .expect("settings should resolve")

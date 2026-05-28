@@ -414,12 +414,6 @@ goal = "Exercise sandbox commands"
 [run.environment]
 id = "local"
 
-[environments.local]
-provider = "local"
-
-[environments.local.lifecycle]
-preserve = true
-
 "#,
     );
 

@@ -75,6 +75,7 @@ fabro-vault = { path = "../fabro-vault" }
 base64.workspace = true
 fabro-acp = { path = "../fabro-acp", features = ["test-support"] }
 fabro-api = { path = "../fabro-api" }
+fabro-environment = { path = "../fabro-environment" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona", "docker", "test-support"] }
 fabro-mcp = { path = "../fabro-mcp" }
 tokio = { workspace = true, features = ["test-util", "macros"] }

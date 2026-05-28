@@ -21,6 +21,19 @@ const SEEDS: &[(&str, &str)] = &[
     ("daytona", DAYTONA_ENVIRONMENT_TOML),
 ];
 
+/// Returns the built-in seeded environment catalog as a `MergeMap` of
+/// `EnvironmentLayer`s. Useful for client-side manifest validation where no
+/// live `EnvironmentStore` is available.
+pub fn seeded_catalog_layer() -> MergeMap<EnvironmentLayer> {
+    let mut catalog: HashMap<String, EnvironmentLayer> = HashMap::new();
+    for (id, body) in SEEDS {
+        let layer: EnvironmentLayer =
+            toml::from_str(body).expect("built-in environment seed should parse");
+        catalog.insert((*id).to_string(), layer);
+    }
+    MergeMap::from(catalog)
+}
+
 const DEFAULT_ENVIRONMENT_TOML: &str = r#"provider = "docker"
 
 [image]
@@ -418,6 +431,15 @@ mod tests {
         EnvironmentDraft {
             id:       EnvironmentId::new(id).unwrap(),
             settings: settings(provider),
+        }
+    }
+
+    #[test]
+    fn seeded_catalog_layer_contains_built_ins() {
+        let catalog = super::seeded_catalog_layer();
+        let inner = catalog.into_inner();
+        for id in ["default", "local", "docker", "daytona"] {
+            assert!(inner.contains_key(id), "missing {id}");
         }
     }
 

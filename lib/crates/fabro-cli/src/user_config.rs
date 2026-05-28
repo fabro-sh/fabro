@@ -96,9 +96,10 @@ fn load_settings_document_with_lookup(
 }
 
 fn load_run_settings(config_path: Option<&Path>) -> anyhow::Result<RunNamespace> {
+    let catalog = fabro_environment::seeded_catalog_layer();
     Ok(match config_path {
-        Some(path) => RunSettingsBuilder::load_from(path)?,
-        None => RunSettingsBuilder::load_default()?,
+        Some(path) => RunSettingsBuilder::load_from_with_catalog(path, catalog)?,
+        None => RunSettingsBuilder::load_default_with_catalog(catalog)?,
     })
 }
 
@@ -360,8 +361,11 @@ pub(crate) fn load_resolved_settings_from_toml(
     let storage_override = storage_dir.map(Path::to_path_buf);
     let storage_dir = storage_dir_from_document(&document, storage_dir)?;
     let pre_tracing_config = pre_tracing_config_from_document(&document)?;
-    let run_settings = RunSettingsBuilder::from_toml(source)
-        .map_err(|err| SharedError::new(anyhow::Error::new(err)));
+    let run_settings = RunSettingsBuilder::from_toml_with_catalog(
+        source,
+        fabro_environment::seeded_catalog_layer(),
+    )
+    .map_err(|err| SharedError::new(anyhow::Error::new(err)));
     let server_settings = ServerSettingsBuilder::from_toml(source)
         .map(|settings| match storage_override.as_deref() {
             Some(dir) => settings.with_storage_override(dir),

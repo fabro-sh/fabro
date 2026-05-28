@@ -170,13 +170,37 @@ impl RunSettingsBuilder {
         Self::from_layer(&layer)
     }
 
+    pub fn load_default_with_catalog(catalog: MergeMap<EnvironmentLayer>) -> Result<RunNamespace> {
+        let mut layer = load_settings_config(None)?;
+        layer.environments = layer.environments.combine(catalog);
+        Self::from_layer(&layer)
+    }
+
     pub fn load_from(path: &Path) -> Result<RunNamespace> {
         let layer = load_settings_path(path, SettingsSource::DirectRun)?;
         Self::from_layer(&layer)
     }
 
+    pub fn load_from_with_catalog(
+        path: &Path,
+        catalog: MergeMap<EnvironmentLayer>,
+    ) -> Result<RunNamespace> {
+        let mut layer = load_settings_path(path, SettingsSource::DirectRun)?;
+        layer.environments = layer.environments.combine(catalog);
+        Self::from_layer(&layer)
+    }
+
     pub fn from_toml(source: &str) -> Result<RunNamespace> {
         let layer = parse_settings_toml(source, SettingsSource::DirectRun)?;
+        Self::from_layer(&layer)
+    }
+
+    pub fn from_toml_with_catalog(
+        source: &str,
+        catalog: MergeMap<EnvironmentLayer>,
+    ) -> Result<RunNamespace> {
+        let mut layer = parse_settings_toml(source, SettingsSource::DirectRun)?;
+        layer.environments = layer.environments.combine(catalog);
         Self::from_layer(&layer)
     }
 

@@ -19,6 +19,7 @@ pub(crate) fn run(
     let built = build_run_manifest(ManifestBuildInput {
         workflow: args.workflow.clone(),
         cwd: base_ctx.cwd().to_path_buf(),
+        environment_defaults: fabro_environment::seeded_catalog_layer(),
         user_settings_path: Some(active_settings_path(None)),
         ..Default::default()
     })?;

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_api::types;
-use fabro_config::{CliLayer, EnvironmentLayer, MergeMap, RunGoalLayer, RunLayer};
+use fabro_config::{CliLayer, RunGoalLayer, RunLayer};
 use fabro_manifest::{ManifestBuildInput, RunOverrideInput};
 use fabro_model::Catalog;
 use fabro_tool::{ToolError, ToolResult, ValidatedCreateRunSpec};
@@ -24,7 +24,7 @@ pub fn build_run_tool_manifest(
         input_overrides:      spec.inputs.clone(),
         args:                 run_tool_manifest_args(spec),
         run_id:               spec.run_id,
-        environment_defaults: MergeMap::<EnvironmentLayer>::default(),
+        environment_defaults: fabro_environment::seeded_catalog_layer(),
         user_settings_path:   Some(user_settings_path.to_path_buf()),
     })
     .map_err(|err| ToolError::from_anyhow(&err))?;

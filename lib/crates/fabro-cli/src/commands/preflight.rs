@@ -29,6 +29,7 @@ pub(crate) async fn execute(
         cli_overrides: cli_args_config.cli,
         input_overrides: cli_args_config.input_overrides,
         args: preflight_manifest_args(&args),
+        environment_defaults: fabro_environment::seeded_catalog_layer(),
         user_settings_path: Some(active_settings_path(None)),
         ..Default::default()
     })?;

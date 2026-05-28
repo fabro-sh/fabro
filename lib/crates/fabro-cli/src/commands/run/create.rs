@@ -48,6 +48,7 @@ pub(crate) async fn create_run(
         input_overrides: cli_args_config.input_overrides,
         args: run_manifest_args(args),
         run_id,
+        environment_defaults: fabro_environment::seeded_catalog_layer(),
         user_settings_path: Some(active_settings_path(None)),
     })?;
 

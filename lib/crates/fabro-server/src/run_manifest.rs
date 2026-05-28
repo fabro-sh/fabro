@@ -70,17 +70,6 @@ pub(crate) fn manifest_run_defaults(run: Option<&RunLayer>) -> RunLayer {
     run.cloned().unwrap_or_default()
 }
 
-pub(crate) fn prepare_manifest(
-    manifest_run_defaults: &RunLayer,
-    manifest: &types::RunManifest,
-) -> Result<PreparedManifest> {
-    prepare_manifest_with_environment_defaults(
-        manifest_run_defaults,
-        &MergeMap::default(),
-        manifest,
-    )
-}
-
 pub(crate) fn prepare_manifest_with_environment_defaults(
     manifest_run_defaults: &RunLayer,
     manifest_environment_defaults: &MergeMap<EnvironmentLayer>,

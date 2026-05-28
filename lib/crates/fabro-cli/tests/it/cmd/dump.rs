@@ -180,12 +180,6 @@ goal = "Generate oversized command output and artifacts"
 [run.environment]
 id = "local"
 
-[environments.local]
-provider = "local"
-
-[environments.local.lifecycle]
-preserve = true
-
 [run.artifacts]
 include = ["assets/**"]
 "#,

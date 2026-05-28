@@ -4,26 +4,6 @@ _version = 1
 enabled = true
 draft = false
 
-[run.environment]
-id = "fabro-dev"
-
-[environments.fabro-dev]
-provider = "daytona"
-
-[environments.fabro-dev.lifecycle]
-auto_stop = "30m"
-
-[environments.fabro-dev.labels]
-repo = "fabro-sh/fabro"
-
-[environments.fabro-dev.image]
-dockerfile = { path = "Dockerfile" }
-
-[environments.fabro-dev.resources]
-cpu = 8
-memory = "16GB"
-disk = "20GB"
-
 # [[run.hooks]]
 # id = "cargo-fmt"
 # name = "cargo-fmt"
