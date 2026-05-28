@@ -186,7 +186,7 @@ pub fn responses_sse_response(plan: &ResponsePlan, transport: TransportOptions) 
             &json!({
                 "type": "response.function_call_arguments.delta",
                 "item_id": item_id,
-                "delta": tool_call.arguments.to_string(),
+                "delta": ResponsePlan::tool_call_arguments_text(tool_call),
                 "output_index": next_output_index,
             }),
         ));
@@ -195,7 +195,7 @@ pub fn responses_sse_response(plan: &ResponsePlan, transport: TransportOptions) 
             &json!({
                 "type": "response.function_call_arguments.done",
                 "item_id": item_id,
-                "arguments": tool_call.arguments.to_string(),
+                "arguments": ResponsePlan::tool_call_arguments_text(tool_call),
                 "output_index": next_output_index,
             }),
         ));
@@ -208,7 +208,7 @@ pub fn responses_sse_response(plan: &ResponsePlan, transport: TransportOptions) 
                     "type": "function_call",
                     "call_id": tool_call.id,
                     "name": tool_call.name,
-                    "arguments": tool_call.arguments.to_string(),
+                    "arguments": ResponsePlan::tool_call_arguments_text(tool_call),
                 },
                 "output_index": next_output_index,
             }),
@@ -293,12 +293,13 @@ pub fn chat_sse_response(plan: &ResponsePlan, transport: TransportOptions) -> Re
             "choices": [{
                 "index": 0,
                 "delta": {
-                    "tool_calls": plan.tool_calls.iter().map(|tool_call| json!({
+                    "tool_calls": plan.tool_calls.iter().enumerate().map(|(index, tool_call)| json!({
+                        "index": index,
                         "id": tool_call.id,
                         "type": "function",
                         "function": {
                             "name": tool_call.name,
-                            "arguments": tool_call.arguments.to_string(),
+                            "arguments": ResponsePlan::tool_call_arguments_text(tool_call),
                         }
                     })).collect::<Vec<_>>()
                 },

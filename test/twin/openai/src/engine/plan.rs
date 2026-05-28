@@ -15,19 +15,27 @@ pub struct ResponsePlan {
 
 #[derive(Clone, Debug)]
 pub struct ToolCallPlan {
-    pub id:        String,
-    pub name:      String,
-    pub arguments: Value,
+    pub id:            String,
+    pub name:          String,
+    pub arguments:     Value,
+    pub raw_arguments: Option<String>,
 }
 
 impl ResponsePlan {
+    pub fn tool_call_arguments_text(tool_call: &ToolCallPlan) -> String {
+        tool_call
+            .raw_arguments
+            .clone()
+            .unwrap_or_else(|| tool_call.arguments.to_string())
+    }
+
     fn responses_tool_call_item(tool_call: &ToolCallPlan) -> Value {
         json!({
             "id": format!("fc_{}", tool_call.id),
             "type": "function_call",
             "call_id": tool_call.id,
             "name": tool_call.name,
-            "arguments": tool_call.arguments.to_string(),
+            "arguments": Self::tool_call_arguments_text(tool_call),
         })
     }
 
@@ -103,7 +111,7 @@ impl ResponsePlan {
                         "type": "function",
                         "function": {
                             "name": tool_call.name,
-                            "arguments": tool_call.arguments.to_string(),
+                            "arguments": Self::tool_call_arguments_text(tool_call),
                         }
                     })).collect::<Vec<_>>(),
                 }

@@ -10,13 +10,13 @@ use std::sync::Arc;
 
 use fabro_agent::subagent::SessionFactory;
 use fabro_agent::{
-    AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile, Session,
-    SessionOptions, SubAgentManager, WebFetchSummarizer,
+    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
+    Session, SessionOptions, SubAgentManager, WebFetchSummarizer,
 };
 use fabro_auth::EnvCredentialSource;
 use fabro_llm::client::Client;
 use fabro_llm::provider::ProviderAdapter;
-use fabro_llm::providers::OpenAiAdapter;
+use fabro_llm::providers::{OpenAiAdapter, OpenAiCompatibleAdapter};
 use fabro_model::{Catalog, ModelHandle, ProviderId};
 use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
@@ -157,6 +157,31 @@ fn make_twin_client(twin: &OpenAiTwinOptions) -> Client {
     Client::new(providers, Some("openai".to_string()), Vec::new())
 }
 
+fn make_openai_compatible_twin_client(provider: &Provider, twin: &OpenAiTwinOptions) -> Client {
+    let provider_name = provider.to_string();
+    let adapter: Arc<dyn ProviderAdapter> = Arc::new(
+        OpenAiCompatibleAdapter::new(twin.api_key.clone(), twin.base_url.clone())
+            .with_name(provider_name.clone()),
+    );
+    let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
+    providers.insert(provider_name.clone(), adapter);
+    Client::new(providers, Some(provider_name), Vec::new())
+}
+
+async fn make_openai_compatible_twin_session(
+    provider: Provider,
+    model: &str,
+    cwd: &Path,
+    config: SessionOptions,
+    twin: &OpenAiTwinOptions,
+) -> Session {
+    let client = make_openai_compatible_twin_client(&provider, twin);
+    let profile: Arc<dyn AgentProfile> =
+        Arc::new(OpenAiProfile::new(model).with_provider_id(provider));
+    let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
+    Session::new(client, profile, env, config, None)
+}
+
 macro_rules! provider_test {
     ($scenario:ident, $provider:expr, $model:expr, $prefix:ident, keys = [$($key:expr),+ $(,)?]) => {
         paste::paste! {
@@ -243,6 +268,69 @@ macro_rules! provider_tests {
             keys = ["INCEPTION_API_KEY"]
         );
     };
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn openai_compatible_twin_preserves_raw_apply_patch_arguments() {
+    let tmp = tempfile::tempdir().expect("failed to create tempdir");
+    let file_path = tmp.path().join("data.txt");
+    std::fs::write(&file_path, "old\n").expect("failed to write data.txt");
+
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let twin = OpenAiTwinOptions { base_url, api_key };
+    let patch = "\
+*** Begin Patch
+*** Update File: data.txt
+@@
+-old
++new
+*** End Patch
+";
+
+    TwinScenarios::new(twin.api_key.clone())
+        .scenario(
+            TwinScenario::chat_completions("gpt-5.4-mini")
+                .input_contains("Replace old with new")
+                .tool_call(TwinToolCall::apply_patch_raw_arguments(patch)),
+        )
+        .load(twin_openai().await)
+        .await;
+
+    let config = SessionOptions {
+        max_turns: 2,
+        ..SessionOptions::default()
+    };
+    let mut session = make_openai_compatible_twin_session(
+        ProviderId::new("litellm"),
+        "gpt-5.4-mini",
+        tmp.path(),
+        config,
+        &twin,
+    )
+    .await;
+    session.initialize().await.unwrap();
+    let mut rx = session.subscribe();
+
+    session
+        .process_input("Replace old with new in data.txt using apply_patch")
+        .await
+        .expect("process_input failed");
+
+    let mut tool_results = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        if let AgentEvent::ToolCallCompleted {
+            tool_name,
+            output,
+            is_error,
+            ..
+        } = event.event
+        {
+            tool_results.push(format!("{tool_name}: is_error={is_error} output={output}"));
+        }
+    }
+
+    let content = std::fs::read_to_string(file_path).expect("failed to read data.txt");
+    assert_eq!(content, "new\n", "tool results: {tool_results:#?}");
 }
 
 provider_tests!(simple_file_creation);

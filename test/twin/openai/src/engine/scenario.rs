@@ -55,9 +55,11 @@ pub enum ScenarioScript {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ToolCallTemplate {
-    pub id:        Option<String>,
-    pub name:      String,
-    pub arguments: Value,
+    pub id:            Option<String>,
+    pub name:          String,
+    pub arguments:     Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_arguments: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -250,11 +252,12 @@ fn build_plan_from_script(
             .into_iter()
             .enumerate()
             .map(|(index, tool_call)| ToolCallPlan {
-                id:        tool_call
+                id:            tool_call
                     .id
                     .unwrap_or_else(|| format!("call_{response_number}_{index}")),
-                name:      tool_call.name,
-                arguments: tool_call.arguments,
+                name:          tool_call.name,
+                arguments:     tool_call.arguments,
+                raw_arguments: tool_call.raw_arguments,
             })
             .collect(),
         input_tokens: 1,
