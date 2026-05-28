@@ -2560,10 +2560,7 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
 }
 
 fn test_worker_ref(pid: u32) -> WorkerRef {
-    WorkerRef::Local {
-        pid,
-        process_group_id: Some(pid),
-    }
+    WorkerRef::Local { pid }
 }
 
 #[cfg(unix)]
@@ -2784,21 +2781,19 @@ impl WorkerRuntime for RecordingWorkerRuntime {
         anyhow::bail!("recording runtime does not start workers")
     }
 
-    async fn request_stop(&self, worker_ref: &WorkerRef) -> anyhow::Result<()> {
+    async fn request_stop(&self, worker_ref: &WorkerRef) {
         self.requested
             .lock()
             .expect("requested lock poisoned")
             .push(worker_ref.clone());
-        Ok(())
     }
 
-    async fn force_stop(&self, worker_ref: &WorkerRef) -> anyhow::Result<()> {
+    async fn force_stop(&self, worker_ref: &WorkerRef) {
         self.forced
             .lock()
             .expect("forced lock poisoned")
             .push(worker_ref.clone());
         self.alive.store(false, Ordering::Relaxed);
-        Ok(())
     }
 
     async fn is_alive(&self, _worker_ref: &WorkerRef) -> bool {

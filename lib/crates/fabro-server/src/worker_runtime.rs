@@ -6,26 +6,27 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use fabro_static::EnvVars;
 use fabro_types::RunId;
+use fabro_types::settings::server::LogDestination;
 use futures_util::future::BoxFuture;
 use tokio::io::AsyncRead;
-use tokio::process::{ChildStderr, Command};
+use tokio::process::Command;
 
 use crate::spawn_env::apply_worker_env;
 
 #[async_trait]
 pub(crate) trait WorkerRuntime: Send + Sync {
     async fn start(&self, spec: WorkerLaunchSpec) -> Result<StartedWorker>;
-    async fn request_stop(&self, worker_ref: &WorkerRef) -> Result<()>;
-    async fn force_stop(&self, worker_ref: &WorkerRef) -> Result<()>;
+    async fn request_stop(&self, worker_ref: &WorkerRef);
+    async fn force_stop(&self, worker_ref: &WorkerRef);
     async fn is_alive(&self, worker_ref: &WorkerRef) -> bool;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum WorkerRef {
-    Local {
-        pid:              u32,
-        process_group_id: Option<u32>,
-    },
+    /// A worker running as a local subprocess. `pre_exec_setpgid` ensures the
+    /// child is the leader of its own process group with `pgid == pid`, so a
+    /// single PID identifies both the process and its group.
+    Local { pid: u32 },
 }
 
 pub(crate) struct WorkerLaunchSpec {
@@ -36,26 +37,19 @@ pub(crate) struct WorkerLaunchSpec {
     pub(crate) run_id:                 RunId,
     pub(crate) mode:                   &'static str,
     pub(crate) worker_token:           String,
-    pub(crate) stdout:                 WorkerStdout,
+    pub(crate) log_destination:        LogDestination,
     pub(crate) fabro_log:              Option<String>,
-    pub(crate) fabro_log_destination:  &'static str,
     pub(crate) active_config_path:     PathBuf,
     pub(crate) github_app_private_key: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WorkerStdout {
-    Inherit,
-    Null,
-}
-
 pub(crate) struct StartedWorker {
     pub(crate) worker_ref: WorkerRef,
-    pub(crate) stderr:     Option<Pin<Box<dyn AsyncRead + Send + 'static>>>,
+    pub(crate) stderr:     Pin<Box<dyn AsyncRead + Send + 'static>>,
     pub(crate) wait:       BoxFuture<'static, Result<WorkerExit>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) struct WorkerExit {
     pub(crate) success: bool,
     pub(crate) detail:  String,
@@ -70,10 +64,11 @@ impl LocalWorkerRuntime {
     }
 
     pub(crate) fn command_for_spec(spec: &WorkerLaunchSpec) -> Command {
-        let worker_stdout = match spec.stdout {
-            WorkerStdout::Inherit => Stdio::inherit(),
-            WorkerStdout::Null => Stdio::null(),
+        let worker_stdout = match spec.log_destination {
+            LogDestination::Stdout => Stdio::inherit(),
+            LogDestination::File => Stdio::null(),
         };
+        let log_destination_env: &'static str = spec.log_destination.into();
 
         let mut cmd = Command::new(&spec.executable);
         cmd.arg("__run-worker")
@@ -95,7 +90,7 @@ impl LocalWorkerRuntime {
         if let Some(level) = spec.fabro_log.as_deref() {
             cmd.env(EnvVars::FABRO_LOG, level);
         }
-        cmd.env(EnvVars::FABRO_LOG_DESTINATION, spec.fabro_log_destination);
+        cmd.env(EnvVars::FABRO_LOG_DESTINATION, log_destination_env);
         cmd.env(EnvVars::FABRO_CONFIG, &spec.active_config_path);
         cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
         cmd.env(EnvVars::FABRO_WORKER_TOKEN, &spec.worker_token);
@@ -118,7 +113,12 @@ impl WorkerRuntime for LocalWorkerRuntime {
             .context("spawning run worker process")?;
 
         let pid = child.id().context("worker process did not report a PID")?;
-        let stderr = child.stderr.take().map(box_stderr);
+        let stderr: Pin<Box<dyn AsyncRead + Send + 'static>> = Box::pin(
+            child
+                .stderr
+                .take()
+                .context("worker child stderr should be piped")?,
+        );
         let wait: BoxFuture<'static, Result<WorkerExit>> = Box::pin(async move {
             let status = child.wait().await.context("worker wait failed")?;
             Ok(WorkerExit {
@@ -128,64 +128,37 @@ impl WorkerRuntime for LocalWorkerRuntime {
         });
 
         Ok(StartedWorker {
-            worker_ref: WorkerRef::Local {
-                pid,
-                process_group_id: Some(pid),
-            },
+            worker_ref: WorkerRef::Local { pid },
             stderr,
             wait,
         })
     }
 
-    async fn request_stop(&self, worker_ref: &WorkerRef) -> Result<()> {
-        match worker_ref {
-            WorkerRef::Local { pid, .. } => {
-                #[cfg(unix)]
-                fabro_proc::sigterm(*pid);
-
-                #[cfg(not(unix))]
-                let _ = pid;
-            }
-        }
-        Ok(())
+    async fn request_stop(&self, worker_ref: &WorkerRef) {
+        let WorkerRef::Local { pid } = worker_ref;
+        #[cfg(unix)]
+        fabro_proc::sigterm(*pid);
+        #[cfg(not(unix))]
+        let _ = pid;
     }
 
-    async fn force_stop(&self, worker_ref: &WorkerRef) -> Result<()> {
-        match worker_ref {
-            WorkerRef::Local {
-                pid,
-                process_group_id,
-            } => {
-                #[cfg(unix)]
-                fabro_proc::sigkill_process_group(process_group_id.unwrap_or(*pid));
-
-                #[cfg(not(unix))]
-                let _ = (pid, process_group_id);
-            }
-        }
-        Ok(())
+    async fn force_stop(&self, worker_ref: &WorkerRef) {
+        let WorkerRef::Local { pid } = worker_ref;
+        #[cfg(unix)]
+        fabro_proc::sigkill_process_group(*pid);
+        #[cfg(not(unix))]
+        let _ = pid;
     }
 
     async fn is_alive(&self, worker_ref: &WorkerRef) -> bool {
-        match worker_ref {
-            WorkerRef::Local {
-                pid,
-                process_group_id,
-            } => {
-                #[cfg(unix)]
-                {
-                    fabro_proc::process_group_alive(process_group_id.unwrap_or(*pid))
-                }
-                #[cfg(not(unix))]
-                {
-                    let _ = process_group_id;
-                    fabro_proc::process_running(*pid)
-                }
-            }
+        let WorkerRef::Local { pid } = worker_ref;
+        #[cfg(unix)]
+        {
+            fabro_proc::process_group_alive(*pid)
+        }
+        #[cfg(not(unix))]
+        {
+            fabro_proc::process_running(*pid)
         }
     }
-}
-
-fn box_stderr(stderr: ChildStderr) -> Pin<Box<dyn AsyncRead + Send + 'static>> {
-    Box::pin(stderr)
 }

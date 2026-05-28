@@ -163,7 +163,7 @@ use crate::spawn_env::apply_render_graph_env;
 use crate::startup::load_startup_vault;
 use crate::worker_control::{LocalWorkerControlBus, WorkerControlBus, WorkerControlBusError};
 use crate::worker_runtime::{
-    LocalWorkerRuntime, WorkerExit, WorkerLaunchSpec, WorkerRef, WorkerRuntime, WorkerStdout,
+    LocalWorkerRuntime, WorkerExit, WorkerLaunchSpec, WorkerRef, WorkerRuntime,
 };
 use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
 use crate::{
@@ -2688,7 +2688,7 @@ async fn terminate_worker_for_deletion(
         return;
     };
 
-    let _ = worker_runtime.request_stop(&worker_ref).await;
+    worker_runtime.request_stop(&worker_ref).await;
 
     let deadline = Instant::now() + grace;
     while Instant::now() < deadline && worker_runtime.is_alive(&worker_ref).await {
@@ -2696,7 +2696,7 @@ async fn terminate_worker_for_deletion(
     }
 
     if worker_runtime.is_alive(&worker_ref).await {
-        let _ = worker_runtime.force_stop(&worker_ref).await;
+        worker_runtime.force_stop(&worker_ref).await;
         let kill_deadline = Instant::now() + Duration::from_secs(1);
         while Instant::now() < kill_deadline && worker_runtime.is_alive(&worker_ref).await {
             sleep(Duration::from_millis(50)).await;
@@ -3016,36 +3016,62 @@ async fn shutdown_active_workers_with_grace(
     state.begin_shutdown();
     let workers = live_worker_processes(state.as_ref());
 
-    for worker in &workers {
-        let _ = state.worker_runtime.request_stop(&worker.worker_ref).await;
-    }
+    join_all(
+        workers
+            .iter()
+            .map(|worker| state.worker_runtime.request_stop(&worker.worker_ref)),
+    )
+    .await;
 
-    let deadline = Instant::now() + grace;
-    while Instant::now() < deadline && any_workers_alive(state.as_ref(), &workers).await {
-        sleep(poll_interval).await;
-    }
+    let survivors = poll_until_dead(state.as_ref(), &workers, grace, poll_interval).await;
 
-    let mut survivors = Vec::new();
-    for worker in &workers {
-        if state.worker_runtime.is_alive(&worker.worker_ref).await {
-            survivors.push(worker.worker_ref.clone());
+    if !survivors.is_empty() {
+        join_all(
+            survivors
+                .iter()
+                .map(|worker_ref| state.worker_runtime.force_stop(worker_ref)),
+        )
+        .await;
+        // Wait for the kernel to reap the killed workers so callers can
+        // assume the processes are actually gone when shutdown returns.
+        let kill_deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < kill_deadline
+            && !alive_refs(state.as_ref(), &survivors).await.is_empty()
+        {
+            sleep(poll_interval).await;
         }
-    }
-    for worker_ref in survivors {
-        let _ = state.worker_runtime.force_stop(&worker_ref).await;
     }
 
     persist_shutdown_run_failures(state, &workers).await?;
     Ok(workers.len())
 }
 
-async fn any_workers_alive(state: &AppState, workers: &[LiveWorkerProcess]) -> bool {
-    for worker in workers {
-        if state.worker_runtime.is_alive(&worker.worker_ref).await {
-            return true;
+/// Poll until either the deadline expires or every worker is dead, returning
+/// the set of workers still alive when polling stopped.
+async fn poll_until_dead(
+    state: &AppState,
+    workers: &[LiveWorkerProcess],
+    grace: Duration,
+    poll_interval: Duration,
+) -> Vec<WorkerRef> {
+    let refs: Vec<WorkerRef> = workers.iter().map(|w| w.worker_ref.clone()).collect();
+    let deadline = Instant::now() + grace;
+    loop {
+        let alive = alive_refs(state, &refs).await;
+        if alive.is_empty() || Instant::now() >= deadline {
+            return alive;
         }
+        sleep(poll_interval).await;
     }
-    false
+}
+
+async fn alive_refs(state: &AppState, refs: &[WorkerRef]) -> Vec<WorkerRef> {
+    let liveness = join_all(refs.iter().map(|r| state.worker_runtime.is_alive(r))).await;
+    refs.iter()
+        .zip(liveness)
+        .filter(|(_, alive)| *alive)
+        .map(|(r, _)| r.clone())
+        .collect()
 }
 
 async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
@@ -3392,6 +3418,28 @@ async fn drain_worker_stderr(
     Ok(())
 }
 
+async fn fail_worker_launch(
+    state: &Arc<AppState>,
+    run_store: &fabro_store::RunDatabase,
+    run_id: RunId,
+    err: anyhow::Error,
+) {
+    tracing::error!(run_id = %run_id, error = %err, "Failed to spawn worker");
+    let message = format!("Failed to spawn worker: {err}");
+    let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+        &WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
+        fabro_types::RunTiming::default(),
+        FailureReason::LaunchFailed,
+        None,
+        None,
+        None,
+        None,
+    );
+    let _ = workflow_event::append_event(run_store, &run_id, &failure_event).await;
+    fail_managed_run(state, run_id, FailureReason::LaunchFailed, message);
+    state.scheduler_notify.notify_one();
+}
+
 async fn append_worker_exit_failure(
     run_store: &fabro_store::RunDatabase,
     run_id: RunId,
@@ -3461,17 +3509,12 @@ fn worker_launch_spec(
     };
     let worker_token = issue_worker_token_with_scopes(state.worker_token_keys(), &run_id, scopes)
         .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
-    let server_destination = resolved_log_destination(state)?;
-    let stdout = match server_destination {
-        LogDestination::Stdout => WorkerStdout::Inherit,
-        LogDestination::File => WorkerStdout::Null,
-    };
+    let log_destination = resolved_log_destination(state)?;
     let fabro_log = if (state.env_lookup)(EnvVars::FABRO_LOG).is_none() {
         state.server_settings().server.logging.level.clone()
     } else {
         None
     };
-    let fabro_log_destination: &'static str = server_destination.into();
 
     Ok(WorkerLaunchSpec {
         executable,
@@ -3481,9 +3524,8 @@ fn worker_launch_spec(
         run_id,
         mode: worker_mode_arg(mode),
         worker_token,
-        stdout,
+        log_destination,
         fabro_log,
-        fabro_log_destination,
         active_config_path: state.active_config_path().to_path_buf(),
         github_app_private_key: state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY),
     })
@@ -4092,44 +4134,14 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     .context("worker_launch_spec task failed")
     .and_then(|inner| inner);
 
-    let worker_launch_spec = match start_result {
-        Ok(spec) => spec,
-        Err(err) => {
-            tracing::error!(run_id = %run_id, error = %err, "Failed to spawn worker");
-            let message = format!("Failed to spawn worker: {err}");
-            let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-                &WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
-                fabro_types::RunTiming::default(),
-                FailureReason::LaunchFailed,
-                None,
-                None,
-                None,
-                None,
-            );
-            let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
-            fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
-            state.scheduler_notify.notify_one();
-            return;
-        }
+    let launch_result = match start_result {
+        Ok(spec) => state.worker_runtime.start(spec).await,
+        Err(err) => Err(err),
     };
-
-    let started_worker = match state.worker_runtime.start(worker_launch_spec).await {
+    let started_worker = match launch_result {
         Ok(worker) => worker,
         Err(err) => {
-            tracing::error!(run_id = %run_id, error = %err, "Failed to spawn worker");
-            let message = format!("Failed to spawn worker: {err}");
-            let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-                &WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
-                fabro_types::RunTiming::default(),
-                FailureReason::LaunchFailed,
-                None,
-                None,
-                None,
-                None,
-            );
-            let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
-            fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
-            state.scheduler_notify.notify_one();
+            fail_worker_launch(&state, &run_store, run_id, err).await;
             return;
         }
     };
@@ -4153,16 +4165,14 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     }
 
-    let stderr_task = started_worker
-        .stderr
-        .map(|stderr| tokio::spawn(drain_worker_stderr(run_id, stderr)));
+    let stderr_task = tokio::spawn(drain_worker_stderr(run_id, started_worker.stderr));
 
     let worker_exit = match started_worker.wait.await {
         Ok(exit) => exit,
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed while waiting on worker");
             let message = format!("Worker wait failed: {err}");
-            let _ = state.worker_runtime.force_stop(&worker_ref).await;
+            state.worker_runtime.force_stop(&worker_ref).await;
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine_with_source("Worker wait failed", err),
                 fabro_types::RunTiming::default(),
@@ -4179,15 +4189,13 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
 
-    if let Some(stderr_task) = stderr_task {
-        match stderr_task.await {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                tracing::warn!(run_id = %run_id, error = %err, "Worker stderr drain failed");
-            }
-            Err(err) => {
-                tracing::warn!(run_id = %run_id, error = %err, "Worker stderr task panicked");
-            }
+    match stderr_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            tracing::warn!(run_id = %run_id, error = %err, "Worker stderr drain failed");
+        }
+        Err(err) => {
+            tracing::warn!(run_id = %run_id, error = %err, "Worker stderr task panicked");
         }
     }
 

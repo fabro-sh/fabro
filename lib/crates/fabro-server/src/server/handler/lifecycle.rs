@@ -359,7 +359,7 @@ fn schedule_worker_force_stop(state: Arc<AppState>, run_id: RunId, worker_ref: W
         if current_ref.as_ref() == Some(&worker_ref)
             && state.worker_runtime.is_alive(&worker_ref).await
         {
-            let _ = state.worker_runtime.force_stop(&worker_ref).await;
+            state.worker_runtime.force_stop(&worker_ref).await;
         }
     });
 }
@@ -451,7 +451,7 @@ async fn cancel_run(
     };
     if !delivered_control {
         if let Some(worker_ref) = worker_ref {
-            let _ = state.worker_runtime.request_stop(&worker_ref).await;
+            state.worker_runtime.request_stop(&worker_ref).await;
             schedule_worker_force_stop(Arc::clone(&state), id, worker_ref);
         }
     }
