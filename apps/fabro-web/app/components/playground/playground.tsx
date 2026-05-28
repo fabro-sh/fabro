@@ -13,6 +13,7 @@ import FileTabs from "./ui/file-tabs";
 import DownloadButton from "./ui/download-button";
 import NodeInspector from "./ui/node-inspector";
 import ResetButton from "./ui/reset-button";
+import RunForRealButton, { type RealRunRedirect } from "./ui/run-for-real-button";
 import RunTrace from "./ui/run-trace";
 import SimulationControls from "./ui/simulation-controls";
 import WorkflowHeader from "./ui/workflow-header";
@@ -33,6 +34,14 @@ export type PlaygroundProps = {
    * not used by fabro-web today.
    */
   authMode: PlaygroundAuthMode;
+  /**
+   * Override the "Run for real" button to redirect somewhere instead of
+   * opening the in-page modal that POSTs to `/api/v1/runs`. Set this on
+   * the marketing-site embed (where the visitor has no project to run
+   * against) to send them to a CTA URL such as `/download`. When unset,
+   * the button uses the default in-page launch flow.
+   */
+  realRunRedirect?: RealRunRedirect;
 };
 
 /**
@@ -49,6 +58,7 @@ export type PlaygroundProps = {
 export default function Playground({
   chatEndpoint,
   authMode: _authMode,
+  realRunRedirect,
 }: PlaygroundProps) {
   const { draft, applyCall, reset } = usePlaygroundDraft();
   const [isChatOpen, setChatOpen] = useState(true);
@@ -104,6 +114,7 @@ export default function Playground({
           <div className="ml-auto flex items-center gap-2">
             <ResetButton onReset={handleReset} />
             <DownloadButton draft={draft} />
+            <RunForRealButton draft={draft} redirect={realRunRedirect} />
             {!isChatOpen && (
               <button
                 type="button"
