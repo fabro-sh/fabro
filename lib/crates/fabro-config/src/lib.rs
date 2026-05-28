@@ -63,7 +63,8 @@ pub use layers::{
 pub use logging::{resolve_log_destination, resolve_log_destination_with_env};
 pub use parse::ParseError;
 pub use resolve::{
-    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server, resolve_workflow,
+    ResolveError, resolve_cli, resolve_environment_layer, resolve_project, resolve_run,
+    resolve_server, resolve_workflow,
 };
 use serde::de::DeserializeOwned;
 pub use storage::{RunScratch, RuntimeDirectory, Storage};

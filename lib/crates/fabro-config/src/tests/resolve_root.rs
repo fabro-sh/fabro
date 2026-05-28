@@ -1,7 +1,7 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunMode;
 
-use crate::{ServerSettingsBuilder, SettingsLayer, WorkflowSettingsBuilder};
+use crate::{ServerSettingsBuilder, SettingsLayer};
 
 #[test]
 fn resolves_root_settings_require_explicit_server_auth_methods() {
@@ -35,11 +35,12 @@ methods = ["github"]
 [server.auth.github]
 allowed_usernames = []
 
+"#;
+    let workflow_source = r#"
+_version = 1
+
 [run.environment]
 id = "bad"
-
-[environments.bad]
-provider = "not-a-provider"
 "#;
 
     let mut rendered = Vec::new();
@@ -54,7 +55,16 @@ provider = "not-a-provider"
         .map(|error| error.to_string()),
     );
     rendered.extend(
-        match fabro_config::WorkflowSettingsBuilder::from_toml(source)
+        match super::workflow_settings_from_toml_with_catalog(
+            workflow_source,
+            r#"
+[environments.bad]
+provider = "not-a-provider"
+"#
+            .parse::<SettingsLayer>()
+            .expect("bad environment catalog should parse")
+            .environments,
+        )
             .expect_err("invalid run settings should fail")
         {
             fabro_config::Error::Resolve { errors, .. } => errors,
@@ -92,7 +102,7 @@ name = "gpt-5"
 "#;
 
     let workflow_settings =
-        WorkflowSettingsBuilder::from_toml(source).expect("workflow settings should resolve");
+        super::workflow_settings_from_toml(source).expect("workflow settings should resolve");
     let server = ServerSettingsBuilder::from_toml(source).expect("server settings should resolve");
 
     let project_json = serde_json::to_value(&workflow_settings.project)
@@ -126,7 +136,7 @@ name = "gpt-5"
 #[test]
 fn workflow_settings_resolve_defaults_and_expose_fields() {
     let settings = SettingsLayer::default();
-    let resolved = fabro_config::WorkflowSettingsBuilder::from_layer(&settings)
+    let resolved = super::workflow_settings_from_layer(settings)
         .expect("defaults should resolve");
 
     let project_json =
@@ -141,7 +151,7 @@ fn workflow_settings_resolve_defaults_and_expose_fields() {
 
 #[test]
 fn workflow_settings_combine_labels_with_later_namespaces_winning() {
-    let labels = fabro_config::WorkflowSettingsBuilder::from_toml(
+    let labels = super::workflow_settings_from_toml(
         r#"
 _version = 1
 
@@ -169,16 +179,20 @@ shared = "run"
 
 #[test]
 fn workflow_settings_report_invalid_environment_provider() {
-    let errors = match fabro_config::WorkflowSettingsBuilder::from_toml(
+    let errors = match super::workflow_settings_from_toml_with_catalog(
         r#"
 _version = 1
 
 [run.environment]
 id = "bad"
-
+"#,
+        r#"
 [environments.bad]
 provider = "not-a-provider"
-"#,
+"#
+        .parse::<SettingsLayer>()
+        .expect("bad environment catalog should parse")
+        .environments,
     )
     .expect_err("invalid workflow settings should fail")
     {
@@ -196,20 +210,24 @@ provider = "not-a-provider"
 
 #[test]
 fn workflow_settings_accumulate_multiple_run_errors() {
-    let rendered = fabro_config::WorkflowSettingsBuilder::from_toml(
+    let rendered = super::workflow_settings_from_toml_with_catalog(
         r#"
 _version = 1
 
 [run.environment]
 id = "bad"
 
-[environments.bad]
-provider = "not-a-provider"
-
 [[run.prepare.steps]]
 script = "echo hi"
 command = ["echo", "hi"]
 "#,
+        r#"
+[environments.bad]
+provider = "not-a-provider"
+"#
+        .parse::<SettingsLayer>()
+        .expect("bad environment catalog should parse")
+        .environments,
     )
     .expect_err("invalid workflow settings should fail")
     .to_string();

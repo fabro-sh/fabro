@@ -12,6 +12,7 @@ use fabro_config::{
     MergeMap, RunLayer, SettingsLayer, WorkflowSettingsBuilder, parse_input_overrides,
     parse_labels,
 };
+use fabro_config::parse::{self, SettingsSource};
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
@@ -116,6 +117,7 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
             &config.source,
             &config.path,
             &workflow_input.files,
+            SettingsSource::Workflow,
         )?;
         workflow_settings_builder = workflow_settings_builder.workflow_layer(layer);
     }
@@ -130,6 +132,7 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
                 source,
                 &config_path,
                 &workflow_input.files,
+                SettingsSource::Project,
             )?;
             workflow_settings_builder = workflow_settings_builder.project_layer(layer);
         }
@@ -331,12 +334,15 @@ fn settings_layer_with_resolved_dockerfiles(
     source: &str,
     config_path: &ManifestPath,
     files: &HashMap<ManifestPath, String>,
+    settings_source: SettingsSource,
 ) -> Result<SettingsLayer> {
     // Parse via `SettingsLayer` so unknown nested keys (like a stale
     // `[server.integrations.github.permissions]` after the move to
     // `[run.integrations.github.permissions]`) trip `deny_unknown_fields`.
     let mut layer = source
         .parse::<SettingsLayer>()
+        .context("Failed to parse run config TOML")?;
+    parse::validate_settings_source(&layer, settings_source)
         .context("Failed to parse run config TOML")?;
     resolve_manifest_dockerfiles(&mut layer, config_path, files)?;
     Ok(layer)
@@ -416,11 +422,6 @@ fn resolve_manifest_dockerfiles(
         .and_then(|environment| environment.image.as_mut())
     {
         resolve_manifest_dockerfile(image, config_path, files)?;
-    }
-    for environment in layer.environments.values_mut() {
-        if let Some(image) = environment.image.as_mut() {
-            resolve_manifest_dockerfile(image, config_path, files)?;
-        }
     }
     Ok(())
 }

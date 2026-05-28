@@ -2008,6 +2008,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-environment"
+version = "0.246.0-nightly.0"
+dependencies = [
+ "fabro-config",
+ "fabro-types",
+ "hex",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "toml_edit",
+]
+
+[[package]]
 name = "fabro-github"
 version = "0.246.0-nightly.0"
 dependencies = [

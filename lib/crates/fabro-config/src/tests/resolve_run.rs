@@ -3,11 +3,35 @@ use fabro_types::settings::run::{
     ApprovalMode, EnvironmentNetworkMode, EnvironmentProvider, RunGoal, RunMode,
 };
 
-use crate::{SettingsLayer, WorkflowSettingsBuilder};
+use crate::{MergeMap, SettingsLayer};
+
+fn catalog(source: &str) -> MergeMap<crate::EnvironmentLayer> {
+    source
+        .parse::<SettingsLayer>()
+        .expect("environment catalog should parse")
+        .environments
+}
+
+fn workflow_settings_from_toml_with_catalog(
+    source: &str,
+    catalog: &str,
+) -> crate::Result<fabro_types::WorkflowSettings> {
+    super::workflow_settings_from_toml_with_catalog(source, self::catalog(catalog))
+}
+
+fn workflow_settings_from_toml(source: &str) -> crate::Result<fabro_types::WorkflowSettings> {
+    super::workflow_settings_from_toml(source)
+}
+
+fn workflow_settings_from_layer(
+    layer: SettingsLayer,
+) -> std::result::Result<fabro_types::WorkflowSettings, crate::ResolveErrors> {
+    super::workflow_settings_from_layer(layer)
+}
 
 #[test]
 fn run_model_controls_round_trip_through_resolve() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = super::workflow_settings_from_toml(
         r#"
 _version = 1
 
@@ -28,7 +52,7 @@ speed = "fast"
 
 #[test]
 fn run_model_controls_default_to_none() {
-    let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
+    let settings = super::workflow_settings_from_layer(SettingsLayer::default())
         .expect("empty settings should resolve")
         .run;
 
@@ -38,7 +62,7 @@ fn run_model_controls_default_to_none() {
 
 #[test]
 fn resolves_run_defaults_from_empty_settings() {
-    let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
+    let settings = super::workflow_settings_from_layer(SettingsLayer::default())
         .expect("empty settings should resolve")
         .run;
 
@@ -71,20 +95,15 @@ fn resolves_run_defaults_from_empty_settings() {
 }
 
 #[test]
-fn resolves_named_daytona_environment_and_run_overrides() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+fn resolves_named_daytona_environment_from_injected_catalog() {
+    let settings = workflow_settings_from_toml_with_catalog(
         r#"
 _version = 1
 
 [run.environment]
 id = "fabro-dev"
-
-[run.environment.resources]
-memory = "32GB"
-
-[run.environment.lifecycle]
-preserve = true
-
+"#,
+        r#"
 [environments.fabro-dev]
 provider = "daytona"
 
@@ -128,7 +147,7 @@ NODE_ENV = "development"
     assert_eq!(environment.resources.cpu, Some(8));
     assert_eq!(
         environment.resources.memory.map(|size| size.as_bytes()),
-        Some(32_000_000_000)
+        Some(16_000_000_000)
     );
     assert_eq!(
         environment.resources.disk.map(|size| size.as_bytes()),
@@ -139,7 +158,7 @@ NODE_ENV = "development"
         EnvironmentNetworkMode::CidrAllowList
     );
     assert_eq!(environment.network.allow, vec!["10.0.0.0/8"]);
-    assert!(environment.lifecycle.preserve);
+    assert!(!environment.lifecycle.preserve);
     assert_eq!(
         environment
             .lifecycle
@@ -167,7 +186,7 @@ NODE_ENV = "development"
 
 #[test]
 fn resolves_run_level_clone_branch_controls() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = super::workflow_settings_from_toml(
         r"
 _version = 1
 
@@ -195,7 +214,7 @@ push = false
 
 #[test]
 fn disabling_run_branch_forces_meta_branch_off() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = super::workflow_settings_from_toml(
         r"
 _version = 1
 
@@ -217,7 +236,7 @@ push = true
 
 #[test]
 fn pull_request_requires_pushed_run_branch() {
-    let disabled_branch = WorkflowSettingsBuilder::from_toml(
+    let disabled_branch = super::workflow_settings_from_toml(
         r"
 _version = 1
 
@@ -235,7 +254,7 @@ enabled = true
         "expected run branch validation error, got: {message}"
     );
 
-    let disabled_push = WorkflowSettingsBuilder::from_toml(
+    let disabled_push = super::workflow_settings_from_toml(
         r"
 _version = 1
 
@@ -273,7 +292,7 @@ provider = "local"
 
 #[test]
 fn resolved_run_chat_surfaces_are_slack_only() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = super::workflow_settings_from_toml(
         r##"
 _version = 1
 
@@ -358,8 +377,8 @@ channel = "#ops"
 }
 
 #[test]
-fn resolves_explicit_stop_on_terminal_false() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+fn toml_run_environment_lifecycle_override_is_rejected() {
+    let err = super::workflow_settings_from_toml(
         r"
 _version = 1
 
@@ -367,21 +386,25 @@ _version = 1
 stop_on_terminal = false
 ",
     )
-    .expect("environment stop_on_terminal setting should resolve")
-    .run;
+    .expect_err("TOML environment lifecycle overrides should be rejected");
 
-    assert!(!settings.environment.lifecycle.stop_on_terminal);
+    let message = err.to_string();
+    assert!(
+        message.contains("[run.environment.lifecycle] is now server-managed"),
+        "expected server-managed environment override diagnostic, got: {message}"
+    );
 }
 
 #[test]
 fn resolves_minimal_local_environment() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = workflow_settings_from_toml_with_catalog(
         r#"
 _version = 1
 
 [run.environment]
 id = "host"
-
+"#,
+        r#"
 [environments.host]
 provider = "local"
 "#,
@@ -396,7 +419,7 @@ provider = "local"
 
 #[test]
 fn missing_environment_slug_errors() {
-    let err = WorkflowSettingsBuilder::from_toml(
+    let err = super::workflow_settings_from_toml(
         r#"
 _version = 1
 
@@ -415,13 +438,14 @@ id = "missing"
 
 #[test]
 fn docker_cidr_allow_list_errors() {
-    let err = WorkflowSettingsBuilder::from_toml(
+    let err = workflow_settings_from_toml_with_catalog(
         r#"
 _version = 1
 
 [run.environment]
 id = "locked"
-
+"#,
+        r#"
 [environments.locked]
 provider = "docker"
 
@@ -441,13 +465,14 @@ allow = ["10.0.0.0/8"]
 
 #[test]
 fn local_blocked_network_errors() {
-    let err = WorkflowSettingsBuilder::from_toml(
+    let err = workflow_settings_from_toml_with_catalog(
         r#"
 _version = 1
 
 [run.environment]
 id = "host"
-
+"#,
+        r#"
 [environments.host]
 provider = "local"
 
@@ -467,13 +492,14 @@ mode = "block"
 
 #[test]
 fn daytona_dockerfile_without_image_ref_resolves() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = workflow_settings_from_toml_with_catalog(
         r#"
 _version = 1
 
 [run.environment]
 id = "cloud"
-
+"#,
+        r#"
 [environments.cloud]
 provider = "daytona"
 
@@ -491,13 +517,14 @@ dockerfile = { path = "Dockerfile" }
 
 #[test]
 fn daytona_image_docker_errors() {
-    let err = WorkflowSettingsBuilder::from_toml(
+    let err = workflow_settings_from_toml_with_catalog(
         r#"
 _version = 1
 
 [run.environment]
 id = "cloud"
-
+"#,
+        r#"
 [environments.cloud]
 provider = "daytona"
 
@@ -516,7 +543,7 @@ docker = "ubuntu:24.04"
 
 #[test]
 fn image_ref_is_rejected_as_unknown_field() {
-    let err = WorkflowSettingsBuilder::from_toml(
+    let err = super::workflow_settings_from_toml(
         r#"
 _version = 1
 
@@ -535,7 +562,7 @@ ref = "ubuntu:24.04"
 
 #[test]
 fn preserves_goal_variants_and_model_sources() {
-    let settings = WorkflowSettingsBuilder::from_toml(
+    let settings = super::workflow_settings_from_toml(
         r#"
 _version = 1
 
@@ -582,7 +609,7 @@ mod run_integrations_github_permissions {
     use fabro_types::settings::InterpString;
 
     use crate::layers::Combine;
-    use crate::{SettingsLayer, WorkflowSettingsBuilder};
+    use crate::SettingsLayer;
 
     fn parse_settings(source: &str) -> SettingsLayer {
         source
@@ -641,7 +668,7 @@ contents = "read"
         );
         let merged = workflow.combine(user);
 
-        let resolved = WorkflowSettingsBuilder::from_layer(&merged)
+        let resolved = super::workflow_settings_from_layer(merged)
             .expect("merged settings should resolve")
             .run;
 
@@ -664,7 +691,7 @@ contents = "read"
         );
         let merged = workflow.combine(user);
 
-        let resolved = WorkflowSettingsBuilder::from_layer(&merged)
+        let resolved = super::workflow_settings_from_layer(merged)
             .expect("merged settings should resolve")
             .run;
 
@@ -697,7 +724,7 @@ contents = "read"
         );
         let merged = workflow.combine(user);
 
-        let resolved = WorkflowSettingsBuilder::from_layer(&merged)
+        let resolved = super::workflow_settings_from_layer(merged)
             .expect("merged settings should resolve")
             .run;
 
@@ -727,7 +754,7 @@ issues = "read"
 
     #[test]
     fn resolver_preserves_interp_string_in_permissions() {
-        let resolved = WorkflowSettingsBuilder::from_toml(
+        let resolved = super::workflow_settings_from_toml(
             r#"
 _version = 1
 
@@ -752,7 +779,7 @@ issues = "{{ env.GH_PERM_LEVEL }}"
 
 mod run_agent_fabro_tools {
     use crate::layers::Combine;
-    use crate::{SettingsLayer, WorkflowSettingsBuilder};
+    use crate::SettingsLayer;
 
     fn parse_settings(source: &str) -> SettingsLayer {
         source
@@ -762,7 +789,7 @@ mod run_agent_fabro_tools {
 
     #[test]
     fn defaults_to_false_when_run_agent_is_absent() {
-        let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
+        let settings = super::workflow_settings_from_layer(SettingsLayer::default())
             .expect("empty settings should resolve")
             .run;
 
@@ -771,7 +798,7 @@ mod run_agent_fabro_tools {
 
     #[test]
     fn resolves_true_from_run_agent_table() {
-        let settings = WorkflowSettingsBuilder::from_toml(
+        let settings = super::workflow_settings_from_toml(
             r"
 _version = 1
 
@@ -786,7 +813,7 @@ fabro_tools = true
 
     #[test]
     fn resolves_explicit_false_from_run_agent_table() {
-        let settings = WorkflowSettingsBuilder::from_toml(
+        let settings = super::workflow_settings_from_toml(
             r"
 _version = 1
 
@@ -819,7 +846,7 @@ fabro_tools = true
         );
         let merged = workflow.combine(user);
 
-        let settings = WorkflowSettingsBuilder::from_layer(&merged)
+        let settings = super::workflow_settings_from_layer(merged)
             .expect("merged settings should resolve")
             .run;
 
@@ -831,7 +858,7 @@ mod run_checkpoint_skip_git_hooks {
     //! Layer + resolver tests for `[run.checkpoint] skip_git_hooks`.
 
     use crate::layers::Combine;
-    use crate::{SettingsLayer, WorkflowSettingsBuilder};
+    use crate::SettingsLayer;
 
     fn parse_settings(source: &str) -> SettingsLayer {
         source
@@ -841,7 +868,7 @@ mod run_checkpoint_skip_git_hooks {
 
     #[test]
     fn resolves_skip_git_hooks_true_when_set() {
-        let settings = WorkflowSettingsBuilder::from_toml(
+        let settings = super::workflow_settings_from_toml(
             r"
 _version = 1
 
@@ -857,7 +884,7 @@ skip_git_hooks = true
 
     #[test]
     fn resolves_skip_git_hooks_false_when_omitted() {
-        let settings = WorkflowSettingsBuilder::from_layer(&SettingsLayer::default())
+        let settings = super::workflow_settings_from_layer(SettingsLayer::default())
             .expect("empty settings should resolve")
             .run;
 
@@ -884,7 +911,7 @@ skip_git_hooks = true
         );
         let merged = workflow.combine(user);
 
-        let settings = WorkflowSettingsBuilder::from_layer(&merged)
+        let settings = super::workflow_settings_from_layer(merged)
             .expect("merged settings should resolve")
             .run;
 
@@ -914,7 +941,7 @@ exclude_globs = ["**/lower/**"]
         );
         let merged = workflow.combine(user);
 
-        let settings = WorkflowSettingsBuilder::from_layer(&merged)
+        let settings = super::workflow_settings_from_layer(merged)
             .expect("merged settings should resolve")
             .run;
 

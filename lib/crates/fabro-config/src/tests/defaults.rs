@@ -2,7 +2,7 @@ use fabro_types::settings::cli::OutputFormat;
 use fabro_types::settings::run::{ApprovalMode, RunMode};
 use fabro_types::settings::server::ObjectStoreProvider;
 
-use crate::{Combine, ServerSettingsBuilder, SettingsLayer, WorkflowSettingsBuilder};
+use crate::{Combine, ServerSettingsBuilder, SettingsLayer};
 
 fn parse(source: &str) -> SettingsLayer {
     source
@@ -62,13 +62,7 @@ fn apply_builtin_defaults_materializes_expected_layer() {
             .and_then(|environment| environment.id.as_deref()),
         Some("default")
     );
-    assert_eq!(
-        layer
-            .environments
-            .get("default")
-            .and_then(|environment| environment.provider.as_deref()),
-        Some("docker")
-    );
+    assert!(layer.environments.is_empty());
     assert_eq!(
         layer
             .run
@@ -134,8 +128,7 @@ mode = "dry_run"
 "#,
     );
 
-    let settings =
-        WorkflowSettingsBuilder::from_layer(&layer).expect("workflow settings should resolve");
+    let settings = super::workflow_settings_from_layer(layer).expect("workflow settings should resolve");
 
     assert_eq!(settings.run.execution.mode, RunMode::DryRun);
     assert_eq!(settings.run.execution.approval, ApprovalMode::Prompt);

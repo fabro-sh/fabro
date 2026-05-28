@@ -26,40 +26,6 @@ push = true
 [run.environment]
 id = "default"
 
-[environments.default]
-provider = "docker"
-
-[environments.default.image]
-docker = "buildpack-deps:noble"
-
-[environments.default.resources]
-cpu = 2
-memory = "4GB"
-
-[environments.default.lifecycle]
-preserve = false
-stop_on_terminal = true
-
-[environments.local]
-provider = "local"
-
-[environments.docker]
-provider = "docker"
-
-[environments.docker.image]
-docker = "buildpack-deps:noble"
-
-[environments.docker.resources]
-cpu = 2
-memory = "4GB"
-
-[environments.docker.lifecycle]
-preserve = false
-stop_on_terminal = true
-
-[environments.daytona]
-provider = "daytona"
-
 [cli.output]
 format = "text"
 verbosity = "normal"

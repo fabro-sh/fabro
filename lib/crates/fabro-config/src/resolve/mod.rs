@@ -7,6 +7,7 @@ mod server;
 mod workflow;
 
 pub use cli::resolve_cli;
+pub use environment::resolve_environment_layer;
 pub(crate) use environment::resolve_run_environment;
 pub use error::ResolveError;
 use fabro_types::settings::InterpString;
@@ -56,7 +57,7 @@ mod tests {
 
     use fabro_types::settings::run::{HookType, McpHttpProtocol, McpTransport, TlsMode};
 
-    use crate::{SettingsLayer, WorkflowSettingsBuilder};
+    use crate::SettingsLayer;
 
     #[test]
     fn resolve_preserves_source_templates_for_mcp_and_hook_strings() {
@@ -99,7 +100,7 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
         .parse::<SettingsLayer>()
         .expect("settings fixture should parse");
 
-        let resolved = WorkflowSettingsBuilder::from_layer(&settings)
+        let resolved = crate::tests::workflow_settings_from_layer(settings)
             .expect("run settings should resolve")
             .run;
         let mcps = &resolved.agent.mcps;

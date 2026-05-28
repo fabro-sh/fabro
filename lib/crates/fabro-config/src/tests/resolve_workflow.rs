@@ -1,10 +1,10 @@
-use crate::{SettingsLayer, WorkflowSettingsBuilder};
+use crate::SettingsLayer;
 
 #[test]
 fn resolves_workflow_defaults_from_empty_settings() {
     let settings = SettingsLayer::default();
 
-    let workflow = WorkflowSettingsBuilder::from_layer(&settings)
+    let workflow = super::workflow_settings_from_layer(settings)
         .expect("empty settings should resolve")
         .workflow;
 
@@ -16,7 +16,7 @@ fn resolves_workflow_defaults_from_empty_settings() {
 
 #[test]
 fn resolves_workflow_graph_and_metadata() {
-    let workflow = WorkflowSettingsBuilder::from_toml(
+    let workflow = super::workflow_settings_from_toml(
         r#"
 _version = 1
 

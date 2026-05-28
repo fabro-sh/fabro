@@ -638,10 +638,10 @@ pub(crate) async fn create_run_from_manifest(
         automation,
     } = request;
     let manifest_run_defaults = state.manifest_run_defaults();
-    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let manifest_environment_defaults = state.environment_store().catalog_layer();
     let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
-        manifest_environment_defaults.as_ref(),
+        &manifest_environment_defaults,
         &manifest,
     ) {
         Ok(prepared) => prepared,
@@ -902,10 +902,10 @@ async fn run_preflight(
     Json(req): Json<RunManifest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let manifest_environment_defaults = state.environment_store().catalog_layer();
     let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
-        manifest_environment_defaults.as_ref(),
+        &manifest_environment_defaults,
         &req,
     ) {
         Ok(prepared) => prepared,
@@ -939,10 +939,10 @@ async fn validate_run_manifest(
     Json(req): Json<RunManifest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let manifest_environment_defaults = state.environment_store().catalog_layer();
     let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
-        manifest_environment_defaults.as_ref(),
+        &manifest_environment_defaults,
         &req,
     ) {
         Ok(prepared) => prepared,

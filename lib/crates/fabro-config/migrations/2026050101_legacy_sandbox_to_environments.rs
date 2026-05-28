@@ -19,7 +19,6 @@ pub(crate) const REMOVAL_NOTE: &str =
 
 #[derive(Debug)]
 pub(crate) struct LegacySandboxMigrationReport {
-    pub(crate) layer:   SettingsLayer,
     pub(crate) warning: String,
     #[cfg(test)]
     backup_path:        PathBuf,
@@ -77,14 +76,13 @@ pub(crate) fn migrate_settings_path(
     );
 
     Ok(Some(LegacySandboxMigrationReport {
-        layer,
         warning,
         #[cfg(test)]
         backup_path,
     }))
 }
 
-fn migrate_contents(original_contents: &str, path: &Path) -> Result<Option<String>> {
+pub(crate) fn migrate_contents(original_contents: &str, path: &Path) -> Result<Option<String>> {
     let Ok(mut doc) = original_contents.parse::<DocumentMut>() else {
         return Ok(None);
     };

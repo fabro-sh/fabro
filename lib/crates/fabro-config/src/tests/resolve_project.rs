@@ -1,10 +1,10 @@
-use crate::{SettingsLayer, WorkflowSettingsBuilder};
+use crate::SettingsLayer;
 
 #[test]
 fn resolves_project_defaults_from_empty_settings() {
     let settings = SettingsLayer::default();
 
-    let project = WorkflowSettingsBuilder::from_layer(&settings)
+    let project = super::workflow_settings_from_layer(settings)
         .expect("empty settings should resolve")
         .project;
 
@@ -20,7 +20,7 @@ fn resolves_project_defaults_from_empty_settings() {
 
 #[test]
 fn resolves_project_metadata_and_ignores_deprecated_directory() {
-    let project = WorkflowSettingsBuilder::from_toml(
+    let project = super::workflow_settings_from_toml(
         r#"
 _version = 1
 

@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoal, RunNamespace};
 
-use crate::load::{load_settings_path, resolve_goal_file_path};
+use crate::load::{load_settings_path_with_source, resolve_goal_file_path};
+use crate::parse::{SettingsSource, validate_settings_source};
 use crate::{Result, RunGoalLayer, RunLayer, SettingsLayer};
 
 /// Load and parse a run config from a TOML file.
@@ -22,7 +23,7 @@ use crate::{Result, RunGoalLayer, RunLayer, SettingsLayer};
 /// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
 pub(crate) fn load_run_config(path: &Path) -> Result<SettingsLayer> {
-    load_settings_path(path)
+    load_settings_path_with_source(path, SettingsSource::Workflow)
 }
 
 /// Parse a settings TOML source string and extract its `[run]` layer.
@@ -42,6 +43,8 @@ pub(crate) fn load_run_config(path: &Path) -> Result<SettingsLayer> {
 pub fn parse_run_layer_from_settings_toml(source: &str) -> Result<RunLayer> {
     let layer = source
         .parse::<SettingsLayer>()
+        .map_err(|err| crate::Error::parse("Failed to parse run config TOML", err))?;
+    validate_settings_source(&layer, SettingsSource::DirectRun)
         .map_err(|err| crate::Error::parse("Failed to parse run config TOML", err))?;
     Ok(layer.run.unwrap_or_default())
 }

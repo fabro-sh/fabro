@@ -37,12 +37,26 @@ pub(crate) fn resolve_run_environment(
         .clone()
         .into_environment_override()
         .combine(base.clone());
-    let environment = resolve_environment_layer(&merged, "run.environment", errors);
+    let environment = resolve_environment_fields(&merged, "run.environment", errors);
     validate_provider_capabilities(&environment, "run.environment", errors);
     RunEnvironmentSettings::from_environment(id, environment)
 }
 
-fn resolve_environment_layer(
+pub fn resolve_environment_layer(
+    layer: &EnvironmentLayer,
+    path: &str,
+) -> Result<EnvironmentSettings, Vec<ResolveError>> {
+    let mut errors = Vec::new();
+    let environment = resolve_environment_fields(layer, path, &mut errors);
+    validate_provider_capabilities(&environment, path, &mut errors);
+    if errors.is_empty() {
+        Ok(environment)
+    } else {
+        Err(errors)
+    }
+}
+
+fn resolve_environment_fields(
     layer: &EnvironmentLayer,
     path: &str,
     errors: &mut Vec<ResolveError>,

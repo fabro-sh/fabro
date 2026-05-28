@@ -402,7 +402,7 @@ directory = "custom/"
             Some("custom/".to_string())
         );
 
-        let project = WorkflowSettingsBuilder::from_toml(
+        let project = crate::tests::workflow_settings_from_toml(
             r#"
 _version = 1
 

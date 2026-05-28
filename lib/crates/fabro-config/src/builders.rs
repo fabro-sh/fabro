@@ -8,7 +8,8 @@ use fabro_types::{ServerSettings, UserSettings, WorkflowSettings};
 use fabro_util::error::SharedError;
 
 use crate::defaults::DEFAULTS_LAYER;
-use crate::load::load_settings_path;
+use crate::load::{load_settings_path, load_settings_path_with_source};
+use crate::parse::{SettingsSource, validate_settings_source};
 use crate::resolve::{
     ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server, resolve_workflow,
 };
@@ -90,6 +91,7 @@ impl ServerSettingsBuilder {
         let layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::ActiveSettings)?;
         Self::from_layer(&layer)
     }
 
@@ -119,12 +121,12 @@ impl UserSettingsBuilder {
     }
 
     pub fn load_from(path: &Path) -> Result<UserSettings> {
-        let layer = load_settings_path(path)?;
+        let layer = load_settings_path_with_source(path, SettingsSource::User)?;
         Self::from_layer(&layer)
     }
 
     pub fn load_from_with_cli_overrides(path: &Path, cli: &CliLayer) -> Result<UserSettings> {
-        let layer = load_settings_path(path)?;
+        let layer = load_settings_path_with_source(path, SettingsSource::User)?;
         Self::from_layer_with_cli_overrides(&layer, cli)
     }
 
@@ -132,6 +134,7 @@ impl UserSettingsBuilder {
         let layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::User)?;
         Self::from_layer(&layer)
     }
 
@@ -139,6 +142,7 @@ impl UserSettingsBuilder {
         let layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::User)?;
         Self::from_layer_with_cli_overrides(&layer, cli)
     }
 
@@ -176,7 +180,7 @@ impl RunSettingsBuilder {
     }
 
     pub fn load_from(path: &Path) -> Result<RunNamespace> {
-        let layer = load_settings_path(path)?;
+        let layer = load_settings_path_with_source(path, SettingsSource::DirectRun)?;
         Self::from_layer(&layer)
     }
 
@@ -184,6 +188,7 @@ impl RunSettingsBuilder {
         let layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::DirectRun)?;
         Self::from_layer(&layer)
     }
 
@@ -244,6 +249,7 @@ pub fn server_runtime_settings_from_toml(
     let layer = source
         .parse::<SettingsLayer>()
         .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+    validate_parsed_source(&layer, SettingsSource::ActiveSettings)?;
     resolve_server_runtime_settings(layer, run_overrides, server_overrides)
 }
 
@@ -412,6 +418,11 @@ fn cost_rates_to_catalog(rates: &CostRates) -> model_catalog::CostRates {
     }
 }
 
+fn validate_parsed_source(layer: &SettingsLayer, source: SettingsSource) -> Result<()> {
+    validate_settings_source(layer, source)
+        .map_err(|err| Error::parse("Failed to parse settings file", err))
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct WorkflowSettingsBuilder {
     args:     SettingsLayer,
@@ -431,6 +442,7 @@ impl WorkflowSettingsBuilder {
         let layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::Workflow)?;
         Self::from_layer(&layer)
             .map_err(|errors| Error::resolve("failed to resolve workflow settings", errors.into()))
     }
@@ -459,6 +471,7 @@ impl WorkflowSettingsBuilder {
         let layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::Workflow)?;
         Ok(self.workflow_layer(layer))
     }
 
@@ -466,6 +479,7 @@ impl WorkflowSettingsBuilder {
         let mut layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::Workflow)?;
         layer.run = Some(run);
         Ok(self.workflow_layer(layer))
     }
@@ -484,6 +498,7 @@ impl WorkflowSettingsBuilder {
         let layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::Project)?;
         Ok(self.project_layer(layer))
     }
 
@@ -491,12 +506,16 @@ impl WorkflowSettingsBuilder {
         let mut layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::Project)?;
         layer.run = Some(run);
         Ok(self.project_layer(layer))
     }
 
     pub fn project_file(self, path: &Path) -> Result<Self> {
-        Ok(self.project_layer(load_settings_path(path)?))
+        Ok(self.project_layer(load_settings_path_with_source(
+            path,
+            SettingsSource::Project,
+        )?))
     }
 
     #[must_use]
@@ -509,11 +528,15 @@ impl WorkflowSettingsBuilder {
         let layer = source
             .parse::<SettingsLayer>()
             .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        validate_parsed_source(&layer, SettingsSource::User)?;
         Ok(self.user_layer(layer))
     }
 
     pub fn user_file(self, path: &Path) -> Result<Self> {
-        Ok(self.user_layer(load_settings_path(path)?))
+        Ok(self.user_layer(load_settings_path_with_source(
+            path,
+            SettingsSource::User,
+        )?))
     }
 
     #[must_use]
@@ -643,11 +666,24 @@ mod tests {
     use fabro_types::settings::run::{ApprovalMode, RunMode};
 
     use super::{RunSettingsBuilder, WorkflowSettingsBuilder, server_runtime_settings_from_toml};
-    use crate::{CliLayer, CliOutputLayer, ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer};
+    use crate::{
+        CliLayer, CliOutputLayer, ReplaceMap, RunExecutionLayer, RunLayer, RunModelLayer,
+        SettingsLayer,
+    };
+
+    fn seeded_environment_catalog() -> crate::MergeMap<crate::EnvironmentLayer> {
+        r#"
+[environments.default]
+provider = "local"
+"#
+        .parse::<SettingsLayer>()
+        .expect("seeded catalog should parse")
+        .environments
+    }
 
     #[test]
-    fn run_settings_builder_resolves_run_namespace() {
-        let settings = RunSettingsBuilder::from_toml(
+    fn run_settings_builder_requires_injected_environment_catalog() {
+        let err = RunSettingsBuilder::from_toml(
             r#"
 _version = 1
 
@@ -659,15 +695,19 @@ type = "stdio"
 command = ["demo-mcp"]
 "#,
         )
-        .expect("run settings should resolve");
+        .expect_err("run settings should not resolve without a server environment catalog");
 
-        assert_eq!(settings.execution.mode, RunMode::DryRun);
-        assert!(settings.agent.mcps.contains_key("demo"));
+        let message = err.to_string();
+        assert!(
+            message.contains("run.environment.id") && message.contains("unknown environment"),
+            "expected missing server environment catalog diagnostic, got: {message}"
+        );
     }
 
     #[test]
     fn workflow_builder_preserves_run_overrides_when_cli_overrides_are_added() {
         let settings = WorkflowSettingsBuilder::new()
+            .server_manifest_defaults(RunLayer::default(), seeded_environment_catalog())
             .run_overrides(RunLayer {
                 metadata: ReplaceMap::from(HashMap::from([("env".to_string(), "cli".to_string())])),
                 model: Some(RunModelLayer {
@@ -716,6 +756,46 @@ command = ["demo-mcp"]
         );
         assert_eq!(settings.run.execution.mode, RunMode::DryRun);
         assert_eq!(settings.run.execution.approval, ApprovalMode::Auto);
+    }
+
+    #[test]
+    fn workflow_environment_catalog_definition_is_rejected() {
+        let err = WorkflowSettingsBuilder::new()
+            .workflow_toml(
+                r#"
+_version = 1
+
+[environments.cloud]
+provider = "docker"
+"#,
+            )
+            .expect_err("workflow environment catalogs should be server-managed");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("[environments.cloud] is now server-managed"),
+            "expected targeted server-managed environment diagnostic, got: {message}"
+        );
+    }
+
+    #[test]
+    fn project_environment_catalog_definition_is_rejected() {
+        let err = WorkflowSettingsBuilder::new()
+            .project_toml(
+                r#"
+_version = 1
+
+[environments.cloud]
+provider = "docker"
+"#,
+            )
+            .expect_err("project environment catalogs should be server-managed");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("[environments.cloud] is now server-managed"),
+            "expected targeted server-managed environment diagnostic, got: {message}"
+        );
     }
 
     #[test]

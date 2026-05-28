@@ -26,6 +26,7 @@ fabro-auth = { path = "../fabro-auth" }
 fabro-install = { path = "../fabro-install" }
 fabro-spa = { path = "../fabro-spa" }
 fabro-config = { path = "../fabro-config" }
+fabro-environment.workspace = true
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }

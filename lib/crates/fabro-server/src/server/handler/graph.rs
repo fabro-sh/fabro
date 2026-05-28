@@ -41,10 +41,10 @@ async fn render_graph_from_manifest(
     Json(req): Json<RenderWorkflowGraphRequest>,
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
-    let manifest_environment_defaults = state.manifest_environment_defaults();
+    let manifest_environment_defaults = state.environment_store().catalog_layer();
     let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
-        manifest_environment_defaults.as_ref(),
+        &manifest_environment_defaults,
         &req.manifest,
     ) {
         Ok(prepared) => prepared,
