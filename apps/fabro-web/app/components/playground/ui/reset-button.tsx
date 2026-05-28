@@ -1,17 +1,18 @@
 import { useState } from "react";
-import { TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon } from "@heroicons/react/24/outline";
 
 /**
- * "Start over" — wipes the localStorage draft and resets the canvas back
- * to the welcome state. Confirms inline before firing so a misclick on
- * an actively-built graph doesn't silently torch the user's work.
+ * "Start over" — wipes the localStorage draft and resets the canvas
+ * back to the welcome state. Confirms inline before firing so a
+ * misclick on an actively-built graph doesn't silently torch the
+ * user's work.
  */
 export default function ResetButton({ onReset }: { onReset: () => void }) {
   const [confirming, setConfirming] = useState(false);
 
   if (confirming) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md bg-coral/10 px-2 py-1 text-xs text-coral ring-1 ring-coral/30">
+      <span className="inline-flex items-center gap-1 rounded-md bg-coral/10 px-2 py-1 text-sm text-coral ring-1 ring-coral/30">
         <span>Start over?</span>
         <button
           type="button"
@@ -38,11 +39,11 @@ export default function ResetButton({ onReset }: { onReset: () => void }) {
     <button
       type="button"
       onClick={() => setConfirming(true)}
-      title="Start over with an empty workflow"
-      className="inline-flex size-7 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
-      aria-label="Start over"
+      title="Wipe the canvas and start a new workflow"
+      className="inline-flex items-center gap-1.5 rounded-md bg-overlay px-3 py-1.5 text-sm font-medium text-fg-2 ring-1 ring-line-strong transition-colors hover:bg-overlay-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
     >
-      <TrashIcon className="size-3.5" />
+      <ArrowPathIcon className="size-4" />
+      Start over
     </button>
   );
 }
