@@ -51,8 +51,6 @@ pub use fabro_api::types::{
 };
 use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 use fabro_automation::AutomationStore;
-#[cfg(test)]
-use fabro_config::RunSettingsBuilder;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{RunLayer, Storage, WorkflowSettingsBuilder};
 use fabro_environment::EnvironmentStore;
@@ -1131,6 +1129,7 @@ impl AppState {
             credentials,
             self.github_api_base_url.clone(),
             self.http_client.clone(),
+            (*self.environment_store.catalog_layer()).clone(),
         )
         .materialize(input)
         .await
@@ -2138,14 +2137,6 @@ fn build_prune_plan(
         rows,
         total_size_bytes,
     })
-}
-
-#[cfg(test)]
-fn resolve_manifest_run_settings(
-    manifest_run_defaults: &RunLayer,
-) -> std::result::Result<RunNamespace, SharedError> {
-    RunSettingsBuilder::from_run_layer(manifest_run_defaults)
-        .map_err(|err| SharedError::new(anyhow::Error::new(err)))
 }
 
 fn resolve_manifest_run_settings_with_catalog(

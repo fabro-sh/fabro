@@ -5,8 +5,19 @@
 
 use std::path::PathBuf;
 
+use fabro_config::{EnvironmentLayer, MergeMap};
 use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_types::ManifestPath;
+
+fn test_environment_defaults() -> MergeMap<EnvironmentLayer> {
+    MergeMap::from(std::collections::HashMap::from([(
+        "default".to_string(),
+        EnvironmentLayer {
+            provider: Some("local".to_string()),
+            ..EnvironmentLayer::default()
+        },
+    )]))
+}
 
 #[test]
 fn cli_built_manifest_resolves_user_global_at_path() {
@@ -31,6 +42,7 @@ fn cli_built_manifest_resolves_user_global_at_path() {
     let built = build_run_manifest(ManifestBuildInput {
         workflow: workflow_dir.join("workflow.fabro"),
         cwd: project,
+        environment_defaults: test_environment_defaults(),
         ..Default::default()
     })
     .unwrap();

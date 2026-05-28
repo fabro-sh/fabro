@@ -7,6 +7,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_api::types::RunManifest;
 use fabro_automation::{AutomationId, AutomationTarget};
+use fabro_config::{EnvironmentLayer, MergeMap};
 use fabro_manifest::ManifestBuildInput;
 use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId};
 use fabro_util::error::collect_chain;
@@ -55,9 +56,10 @@ pub(crate) trait AutomationRunMaterializer: Send + Sync {
 
 #[derive(Clone)]
 pub(crate) struct ProductionAutomationRunMaterializer {
-    github_credentials:  Option<fabro_github::GitHubCredentials>,
-    github_api_base_url: String,
-    http_client:         Option<fabro_http::HttpClient>,
+    github_credentials:   Option<fabro_github::GitHubCredentials>,
+    github_api_base_url:  String,
+    http_client:          Option<fabro_http::HttpClient>,
+    environment_defaults: MergeMap<EnvironmentLayer>,
 }
 
 impl ProductionAutomationRunMaterializer {
@@ -65,11 +67,13 @@ impl ProductionAutomationRunMaterializer {
         github_credentials: Option<fabro_github::GitHubCredentials>,
         github_api_base_url: String,
         http_client: Option<fabro_http::HttpClient>,
+        environment_defaults: MergeMap<EnvironmentLayer>,
     ) -> Self {
         Self {
             github_credentials,
             github_api_base_url,
             http_client,
+            environment_defaults,
         }
     }
 }
@@ -131,6 +135,7 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
             checkout_dir,
             repo,
             checked_out_sha: Some(checked_out_sha),
+            environment_defaults: self.environment_defaults.clone(),
         };
         task::spawn_blocking(move || build_manifest_from_checkout(manifest_input))
             .await
@@ -441,10 +446,11 @@ fn render_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
 
 #[derive(Debug)]
 pub(crate) struct ManifestFromCheckoutInput {
-    input:           AutomationRunMaterializeInput,
-    checkout_dir:    PathBuf,
-    repo:            GithubRepository,
-    checked_out_sha: Option<String>,
+    input:                AutomationRunMaterializeInput,
+    checkout_dir:         PathBuf,
+    repo:                 GithubRepository,
+    checked_out_sha:      Option<String>,
+    environment_defaults: MergeMap<EnvironmentLayer>,
 }
 
 fn build_manifest_from_checkout(
@@ -455,12 +461,14 @@ fn build_manifest_from_checkout(
         checkout_dir,
         repo,
         checked_out_sha,
+        environment_defaults,
     } = args;
     let built = fabro_manifest::build_run_manifest(ManifestBuildInput {
         workflow: input.target.workflow.as_str().into(),
         cwd: checkout_dir,
         run_id: Some(input.run_id),
         user_settings_path: Some(input.user_settings_path),
+        environment_defaults,
         ..ManifestBuildInput::default()
     })
     .map_err(|err| manifest_build_error(&err))?;
@@ -571,6 +579,7 @@ mod tests {
         reason = "Materializer unit tests write small temporary workflow fixtures synchronously."
     )]
 
+    use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
 
@@ -586,6 +595,13 @@ mod tests {
             ref_selector: ref_selector.to_string(),
             workflow:     workflow.to_string(),
         }
+    }
+
+    fn test_environment_defaults() -> MergeMap<EnvironmentLayer> {
+        MergeMap::from(HashMap::from([("default".to_string(), EnvironmentLayer {
+            provider: Some("local".to_string()),
+            ..EnvironmentLayer::default()
+        })]))
     }
 
     #[test]
@@ -757,6 +773,7 @@ mod tests {
             checkout_dir: checkout.clone(),
             repo,
             checked_out_sha: Some(sha.clone()),
+            environment_defaults: test_environment_defaults(),
         })
         .expect("manifest should build from checkout");
 

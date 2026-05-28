@@ -11,8 +11,10 @@ use axum::body::Body;
 use axum::http::{Method, Request, header};
 use chrono::{Duration as ChronoDuration, Utc};
 use fabro_automation::{AutomationId, AutomationTarget};
-use fabro_config::ServerSettingsBuilder;
 use fabro_config::bind::Bind;
+use fabro_config::{
+    EnvironmentLayer, MergeMap, RunLayer, ServerSettingsBuilder, WorkflowSettingsBuilder,
+};
 use fabro_interview::{
     AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlDeliveryFrame,
     WorkerControlEnvelope, WorkerControlMessage,
@@ -1219,14 +1221,18 @@ id = "missing"
 
 #[test]
 fn system_sandbox_provider_uses_manifest_defaults() {
+    let temp = tempfile::tempdir().unwrap();
+    let environment_store = EnvironmentStore::load_or_seed(temp.path().join("environments"))
+        .expect("environment store should seed");
     let source = r#"
 _version = 1
 
 [run.environment]
 id = "daytona"
 "#;
-    let manifest_run_settings = resolve_manifest_run_settings(
+    let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
         &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
+        &environment_store,
     );
 
     assert_eq!(system_sandbox_provider(&manifest_run_settings), "daytona");
@@ -1234,14 +1240,18 @@ id = "daytona"
 
 #[test]
 fn system_sandbox_provider_defaults_when_manifest_run_settings_do_not_resolve() {
+    let temp = tempfile::tempdir().unwrap();
+    let environment_store = EnvironmentStore::load_or_seed(temp.path().join("environments"))
+        .expect("environment store should seed");
     let source = r#"
 _version = 1
 
 [run.environment]
 id = "missing"
 "#;
-    let manifest_run_settings = resolve_manifest_run_settings(
+    let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
         &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
+        &environment_store,
     );
 
     assert_eq!(
@@ -3984,13 +3994,21 @@ fn workflow_settings_with_run_notifications(
     run_toml: &str,
     workflow_name: Option<&str>,
 ) -> WorkflowSettings {
-    let mut settings = WorkflowSettings {
-        run: fabro_config::RunSettingsBuilder::from_toml(run_toml)
-            .expect("run notification settings should resolve"),
-        ..WorkflowSettings::default()
-    };
+    let mut settings = WorkflowSettingsBuilder::new()
+        .server_manifest_defaults(RunLayer::default(), test_environment_defaults())
+        .workflow_toml(run_toml)
+        .expect("run notification settings should parse")
+        .build()
+        .expect("run notification settings should resolve");
     settings.workflow.name = workflow_name.map(str::to_string);
     settings
+}
+
+fn test_environment_defaults() -> MergeMap<EnvironmentLayer> {
+    MergeMap::from(HashMap::from([("default".to_string(), EnvironmentLayer {
+        provider: Some("local".to_string()),
+        ..EnvironmentLayer::default()
+    })]))
 }
 
 async fn create_slack_notification_run(

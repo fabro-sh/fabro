@@ -1435,6 +1435,42 @@ mod tests {
         RunLayer::default()
     }
 
+    fn environment_defaults_fixture() -> MergeMap<EnvironmentLayer> {
+        MergeMap::from(HashMap::from([
+            ("default".to_string(), EnvironmentLayer {
+                provider: Some("local".to_string()),
+                ..EnvironmentLayer::default()
+            }),
+            ("local".to_string(), EnvironmentLayer {
+                provider: Some("local".to_string()),
+                ..EnvironmentLayer::default()
+            }),
+            ("daytona".to_string(), EnvironmentLayer {
+                provider: Some("daytona".to_string()),
+                ..EnvironmentLayer::default()
+            }),
+            ("selected".to_string(), EnvironmentLayer {
+                provider: Some("docker".to_string()),
+                ..EnvironmentLayer::default()
+            }),
+            ("cloud".to_string(), EnvironmentLayer {
+                provider: Some("daytona".to_string()),
+                ..EnvironmentLayer::default()
+            }),
+        ]))
+    }
+
+    fn prepare_manifest(
+        manifest_run_defaults: &RunLayer,
+        manifest: &types::RunManifest,
+    ) -> Result<PreparedManifest> {
+        super::prepare_manifest_with_environment_defaults(
+            manifest_run_defaults,
+            &environment_defaults_fixture(),
+            manifest,
+        )
+    }
+
     fn test_catalog() -> Arc<Catalog> {
         Arc::new(Catalog::from_builtin().unwrap())
     }
@@ -1485,18 +1521,21 @@ _version = 1
 [run.environment]
 id = "selected"
 
-[environments.selected]
-provider = "{provider}"
-
 [run.clone]
 enabled = {clone_enabled}
 "#
             )),
             type_:  types::ManifestConfigType::Project,
         });
+        let mut environment_defaults = environment_defaults_fixture();
+        environment_defaults.insert("selected".to_string(), EnvironmentLayer {
+            provider: Some(provider.to_string()),
+            ..EnvironmentLayer::default()
+        });
 
-        let prepared = prepare_manifest(
+        let prepared = super::prepare_manifest_with_environment_defaults(
             &manifest_run_defaults(Some(&default_settings_fixture())),
+            &environment_defaults,
             &manifest,
         )
         .unwrap();
@@ -1534,66 +1573,7 @@ enabled = {clone_enabled}
         assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
     }
     #[test]
-    fn prepare_manifest_inlines_project_config_daytona_dockerfile_from_bundle() {
-        let mut manifest = minimal_manifest();
-        manifest.configs.push(types::ManifestConfig {
-            path:   Some(".fabro/project.toml".to_string()),
-            source: Some(
-                r#"_version = 1
-
-[run.environment]
-id = "cloud"
-
-[environments.cloud]
-provider = "daytona"
-
-[environments.cloud.image]
-dockerfile = { path = "Dockerfile" }
-"#
-                .to_string(),
-            ),
-            type_:  types::ManifestConfigType::Project,
-        });
-        manifest
-            .workflows
-            .get_mut("workflow.fabro")
-            .unwrap()
-            .files
-            .insert(".fabro/Dockerfile".to_string(), types::ManifestFileEntry {
-                content: "FROM ubuntu:24.04\n".to_string(),
-                ref_:    types::ManifestFileRef {
-                    from:     Some(".fabro/project.toml".to_string()),
-                    original: "Dockerfile".to_string(),
-                    type_:    types::ManifestFileRefType::Dockerfile,
-                },
-            });
-
-        let prepared = prepare_manifest(
-            &manifest_run_defaults(Some(&default_settings_fixture())),
-            &manifest,
-        )
-        .unwrap();
-
-        let dockerfile = prepared
-            .settings
-            .run
-            .environment
-            .image
-            .dockerfile
-            .as_ref()
-            .expect("project Dockerfile should resolve");
-        match dockerfile {
-            fabro_types::settings::run::DockerfileSource::Inline(value) => {
-                assert_eq!(value, "FROM ubuntu:24.04\n");
-            }
-            fabro_types::settings::run::DockerfileSource::Path { path } => {
-                panic!("project Dockerfile should be inline, got path {path}")
-            }
-        }
-    }
-
-    #[test]
-    fn prepare_manifest_errors_when_project_config_dockerfile_bundle_is_missing() {
+    fn prepare_manifest_rejects_project_environment_catalog_definitions() {
         let mut manifest = minimal_manifest();
         manifest.configs.push(types::ManifestConfig {
             path:   Some(".fabro/project.toml".to_string()),
@@ -1618,12 +1598,12 @@ dockerfile = { path = "Dockerfile" }
             &manifest_run_defaults(Some(&default_settings_fixture())),
             &manifest,
         ) else {
-            panic!("missing bundled Dockerfile should fail");
+            panic!("project environment catalog should fail");
         };
         let message = format!("{err:#}");
         assert!(
-            message.contains("missing bundled dockerfile"),
-            "expected missing bundled dockerfile error, got: {message}"
+            message.contains("[environments.cloud] is now server-managed"),
+            "expected server-managed environment error, got: {message}"
         );
     }
 

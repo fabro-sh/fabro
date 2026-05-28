@@ -12,6 +12,7 @@ use fabro_types::settings::run::{
     EnvironmentSettings, EnvironmentVolumeSettings,
 };
 use serde::{Deserialize, Serialize};
+use tokio::fs;
 use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value, value};
 
 use crate::{
@@ -44,12 +45,12 @@ impl Environment {
         })
     }
 
-    pub(crate) fn from_settings(
+    pub(crate) async fn from_settings(
         id: EnvironmentId,
         settings: EnvironmentSettings,
         dockerfile_base_dir: &Path,
     ) -> Result<(Self, Vec<u8>), EnvironmentStoreError> {
-        let settings = inline_dense_dockerfile(settings, dockerfile_base_dir)?;
+        let settings = inline_dense_dockerfile(settings, dockerfile_base_dir).await?;
         let persisted = environment_settings_to_layer(&settings);
         let bytes = canonical_bytes(&persisted).into_bytes();
         let revision = EnvironmentRevision::from_bytes(&bytes);
@@ -141,11 +142,7 @@ fn inline_layer_dockerfile_paths(
     Ok(())
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Dockerfile inlining for API create/replace happens on a Tokio worker thread via spawn_blocking elsewhere; this function is only invoked from synchronous paths."
-)]
-fn inline_dense_dockerfile(
+async fn inline_dense_dockerfile(
     mut settings: EnvironmentSettings,
     base_dir: &Path,
 ) -> Result<EnvironmentSettings, EnvironmentValidationError> {
@@ -153,7 +150,7 @@ fn inline_dense_dockerfile(
         return Ok(settings);
     };
     let path = base_dir.join(path);
-    let content = std::fs::read_to_string(&path).map_err(|source| {
+    let content = fs::read_to_string(&path).await.map_err(|source| {
         EnvironmentValidationError::DockerfileRead {
             path: path.clone(),
             source,

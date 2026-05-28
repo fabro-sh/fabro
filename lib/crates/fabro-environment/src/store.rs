@@ -135,7 +135,7 @@ impl EnvironmentStore {
     ) -> Result<Environment, EnvironmentStoreError> {
         let EnvironmentDraft { id, settings } = draft;
         let (environment, bytes) =
-            Environment::from_settings(id.clone(), settings, &self.request_base_dir)?;
+            Environment::from_settings(id.clone(), settings, &self.request_base_dir).await?;
         let _mutation = self.mutations.lock().await;
         if self.read_state().environments.contains_key(&id) {
             return Err(EnvironmentStoreError::AlreadyExists { id });
@@ -159,7 +159,7 @@ impl EnvironmentStore {
         settings: EnvironmentSettings,
     ) -> Result<Environment, EnvironmentStoreError> {
         let (environment, bytes) =
-            Environment::from_settings(id.clone(), settings, &self.request_base_dir)?;
+            Environment::from_settings(id.clone(), settings, &self.request_base_dir).await?;
         let _mutation = self.mutations.lock().await;
         check_revision(&self.read_state().environments, id, expected)?;
 

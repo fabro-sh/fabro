@@ -12,9 +12,9 @@ use fabro_api::types;
 use fabro_config::project::{self, WorkflowLocation, discover_project_config};
 use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
 use fabro_config::{
-    CliLayer, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLifecycleLayer,
-    ReplaceMap, RunEnvironmentLayer, RunExecutionLayer, RunGoalLayer, RunLayer, RunModelLayer,
-    SettingsLayer, WorkflowSettingsBuilder,
+    CliLayer, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
+    EnvironmentLifecycleLayer, MergeMap, ReplaceMap, RunEnvironmentLayer, RunExecutionLayer,
+    RunGoalLayer, RunLayer, RunModelLayer, SettingsLayer, WorkflowSettingsBuilder,
 };
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
@@ -36,16 +36,17 @@ use fabro_workflow::static_reference::{
 
 #[derive(Debug, Default)]
 pub struct ManifestBuildInput {
-    pub workflow:           PathBuf,
-    pub cwd:                PathBuf,
-    pub run_overrides:      Option<RunLayer>,
-    pub cli_overrides:      Option<CliLayer>,
-    pub input_overrides:    HashMap<String, toml::Value>,
-    pub args:               Option<types::ManifestArgs>,
-    pub run_id:             Option<RunId>,
+    pub workflow:             PathBuf,
+    pub cwd:                  PathBuf,
+    pub run_overrides:        Option<RunLayer>,
+    pub cli_overrides:        Option<CliLayer>,
+    pub input_overrides:      HashMap<String, toml::Value>,
+    pub args:                 Option<types::ManifestArgs>,
+    pub run_id:               Option<RunId>,
+    pub environment_defaults: MergeMap<EnvironmentLayer>,
     /// Path to the user settings file (for inclusion in
     /// `RunManifest.configs`). `None` skips the user config entry.
-    pub user_settings_path: Option<PathBuf>,
+    pub user_settings_path:   Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -167,7 +168,8 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
         })
         .transpose()?;
 
-    let mut workflow_settings_builder = WorkflowSettingsBuilder::new();
+    let mut workflow_settings_builder = WorkflowSettingsBuilder::new()
+        .server_manifest_defaults(RunLayer::default(), input.environment_defaults.clone());
     if let Some(run) = input.run_overrides.clone() {
         workflow_settings_builder = workflow_settings_builder.run_overrides(run);
     }
@@ -885,6 +887,16 @@ pub fn manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
 mod tests {
     use super::*;
 
+    fn test_environment_defaults() -> MergeMap<EnvironmentLayer> {
+        MergeMap::from(std::collections::HashMap::from([(
+            "default".to_string(),
+            EnvironmentLayer {
+                provider: Some("local".to_string()),
+                ..EnvironmentLayer::default()
+            },
+        )]))
+    }
+
     #[test]
     fn build_run_overrides_sets_common_cli_and_mcp_layers() {
         let overrides = build_run_overrides(RunOverrideInput {
@@ -1004,6 +1016,7 @@ mod tests {
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap();
@@ -1080,6 +1093,7 @@ mod tests {
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap();
@@ -1140,6 +1154,7 @@ mod tests {
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap();
@@ -1187,6 +1202,7 @@ mod tests {
         let err = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap_err();
@@ -1198,7 +1214,7 @@ mod tests {
     }
 
     #[test]
-    fn build_manifest_bundles_project_config_daytona_dockerfile_relative_to_project_config() {
+    fn build_manifest_rejects_project_environment_catalog_definitions() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
         let workflow_dir = project.join(".fabro/workflows/demo");
@@ -1219,7 +1235,6 @@ dockerfile = { path = "Dockerfile" }
 "#,
         )
         .unwrap();
-        std::fs::write(project.join(".fabro/Dockerfile"), "FROM ubuntu:24.04\n").unwrap();
         std::fs::write(
             workflow_dir.join("workflow.toml"),
             "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
@@ -1231,22 +1246,19 @@ dockerfile = { path = "Dockerfile" }
         )
         .unwrap();
 
-        let built = build_run_manifest(ManifestBuildInput {
+        let err = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
-        .unwrap();
+        .unwrap_err();
 
-        let root = &built.manifest.workflows[".fabro/workflows/demo/workflow.fabro"];
-        let entry = root
-            .files
-            .get(".fabro/Dockerfile")
-            .expect("project Dockerfile should be bundled with target workflow");
-        assert_eq!(entry.content, "FROM ubuntu:24.04\n");
-        assert_eq!(entry.ref_.type_, types::ManifestFileRefType::Dockerfile);
-        assert_eq!(entry.ref_.original, "Dockerfile");
-        assert_eq!(entry.ref_.from.as_deref(), Some(".fabro/project.toml"));
+        assert!(
+            err.to_string()
+                .contains("[environments.daytona] is now server-managed"),
+            "unexpected error: {err:#}"
+        );
     }
 
     #[test]
@@ -1280,6 +1292,7 @@ dockerfile = { path = "Dockerfile" }
         let err = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap_err();
@@ -1321,6 +1334,7 @@ dockerfile = { path = "Dockerfile" }
                 "import_file".to_string(),
                 toml::Value::String("checks.fabro".to_string()),
             )]),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap_err();
@@ -1363,6 +1377,7 @@ dockerfile = { path = "Dockerfile" }
                 "child_workflow".to_string(),
                 toml::Value::String("child".to_string()),
             )]),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap_err();
@@ -1405,6 +1420,7 @@ dockerfile = { path = "Dockerfile" }
                 "goal_file".to_string(),
                 toml::Value::String("goal.md".to_string()),
             )]),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap_err();
@@ -1456,6 +1472,7 @@ file = "prompts/goal.md"
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap();
@@ -1505,6 +1522,7 @@ file = "prompts/goal.md"
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap();
@@ -1566,6 +1584,7 @@ working_dir = "repos/target"
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: workspace.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap();
@@ -1617,6 +1636,7 @@ repository = "target"
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd: workspace.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
             ..Default::default()
         })
         .unwrap();
@@ -1683,6 +1703,7 @@ exit 1
                 let built = build_run_manifest(ManifestBuildInput {
                     workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
                     cwd: workspace.clone(),
+                    environment_defaults: test_environment_defaults(),
                     ..Default::default()
                 })
                 .unwrap();
