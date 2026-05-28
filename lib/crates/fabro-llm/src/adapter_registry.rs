@@ -185,6 +185,32 @@ fn build_openai_compatible(config: AdapterConfig) -> Result<Arc<dyn ProviderAdap
     Ok(Arc::new(build_openai_compatible_adapter(config)?))
 }
 
+fn build_openrouter_adapter(
+    mut config: AdapterConfig,
+) -> Result<providers::OpenRouterAdapter, Error> {
+    let base_url = config.base_url.ok_or_else(|| Error::Configuration {
+        message: format!(
+            "provider '{}' uses openrouter adapter but does not configure base_url",
+            config.provider_id
+        ),
+        source:  None,
+    })?;
+    let api_key = apply_primary_auth_header(config.auth_header.take(), &mut config.extra_headers);
+    let mut adapter = providers::OpenRouterAdapter::new_optional_auth(api_key, base_url)
+        .with_name(config.provider_id);
+    if !config.extra_headers.is_empty() {
+        adapter = adapter.with_default_headers(config.extra_headers);
+    }
+    if let Some(catalog) = config.catalog {
+        adapter = adapter.with_catalog(catalog);
+    }
+    Ok(adapter)
+}
+
+fn build_openrouter(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+    Ok(Arc::new(build_openrouter_adapter(config)?))
+}
+
 /// Return the factory for a known adapter kind.
 #[must_use]
 pub fn factory_for(adapter_kind: AdapterKind) -> AdapterFactory {
@@ -193,6 +219,7 @@ pub fn factory_for(adapter_kind: AdapterKind) -> AdapterFactory {
         AdapterKind::OpenAi => build_openai,
         AdapterKind::Gemini => build_gemini,
         AdapterKind::OpenAiCompatible => build_openai_compatible,
+        AdapterKind::OpenRouter => build_openrouter,
     }
 }
 
@@ -339,6 +366,34 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("uses openai_compatible adapter but does not configure base_url")
+        );
+    }
+
+    #[test]
+    fn openrouter_factory_uses_provider_id_for_name() {
+        let config = AdapterConfig {
+            provider_id:   "openrouter".to_string(),
+            auth_header:   Some(ApiKeyHeader::Bearer("k".to_string())),
+            base_url:      Some("https://openrouter.ai/api/v1".to_string()),
+            extra_headers: HashMap::new(),
+            codex_mode:    false,
+            org_id:        None,
+            project_id:    None,
+            catalog:       None,
+        };
+        let adapter = factory_for(AdapterKind::OpenRouter)(config).unwrap();
+        assert_eq!(adapter.name(), "openrouter");
+    }
+
+    #[test]
+    fn openrouter_factory_errors_without_base_url() {
+        let config = AdapterConfig::new("openrouter", ApiKeyHeader::Bearer("k".to_string()));
+        let Err(err) = factory_for(AdapterKind::OpenRouter)(config) else {
+            panic!("expected missing base_url error");
+        };
+        assert!(
+            err.to_string()
+                .contains("uses openrouter adapter but does not configure base_url")
         );
     }
 }

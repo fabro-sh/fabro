@@ -1285,10 +1285,12 @@ fn adapter_defaults(adapter: AdapterKind) -> AdapterDefaults {
             agent_profile:  AgentProfileKind::Anthropic,
             billing_policy: BillingPolicy::Anthropic,
         },
-        AdapterKind::OpenAi | AdapterKind::OpenAiCompatible => AdapterDefaults {
-            agent_profile:  AgentProfileKind::OpenAi,
-            billing_policy: BillingPolicy::OpenAi,
-        },
+        AdapterKind::OpenAi | AdapterKind::OpenAiCompatible | AdapterKind::OpenRouter => {
+            AdapterDefaults {
+                agent_profile:  AgentProfileKind::OpenAi,
+                billing_policy: BillingPolicy::OpenAi,
+            }
+        }
         AdapterKind::Gemini => AdapterDefaults {
             agent_profile:  AgentProfileKind::Gemini,
             billing_policy: BillingPolicy::Gemini,
@@ -1836,7 +1838,7 @@ enabled = true
         let provider = catalog
             .provider(&openrouter)
             .expect("enabled OpenRouter provider should be present");
-        assert_eq!(provider.adapter, AdapterKind::OpenAiCompatible);
+        assert_eq!(provider.adapter, AdapterKind::OpenRouter);
         assert_eq!(
             provider.base_url.as_deref(),
             Some("https://openrouter.ai/api/v1")
@@ -1849,6 +1851,50 @@ enabled = true
             .default_for_provider(&openrouter)
             .expect("openrouter catalog should have a default model");
         assert_eq!(default.id, "anthropic/claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn openrouter_models_use_per_vendor_family_names() {
+        let openrouter = ProviderId::new("openrouter");
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.openrouter]
+enabled = true
+",
+        ))
+        .expect("enabled OpenRouter override should build from the built-in provider settings");
+
+        let allowed_families: &[&str] = &[
+            "claude-4",
+            "gpt-5",
+            "gemini-3",
+            "mimo-v2",
+            "minimax-m2",
+            "deepseek-v4",
+            "kimi-k2",
+            "qwen3",
+            "glm-4",
+            "nemotron-3",
+            "devstral",
+        ];
+
+        let models = catalog.list(Some(&openrouter));
+        assert_eq!(models.len(), 17);
+        for model in &models {
+            assert_ne!(
+                model.family.as_str(),
+                "openrouter",
+                "model {} still has family = openrouter",
+                model.id,
+            );
+            assert!(
+                allowed_families.contains(&model.family.as_str()),
+                "model {} has unexpected family {:?}; expected one of {:?}",
+                model.id,
+                model.family,
+                allowed_families,
+            );
+        }
     }
 
     #[test]

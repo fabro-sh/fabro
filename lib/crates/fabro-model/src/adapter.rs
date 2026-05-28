@@ -32,6 +32,9 @@ pub enum AdapterKind {
     #[serde(rename = "openai_compatible")]
     #[strum(to_string = "openai_compatible")]
     OpenAiCompatible,
+    #[serde(rename = "openrouter")]
+    #[strum(to_string = "openrouter")]
+    OpenRouter,
 }
 
 impl AdapterKind {
