@@ -224,6 +224,8 @@ impl ProviderAdapter for AuthenticatedFabroServerAdapter {
                 output_tokens: server_response.usage.output_tokens,
                 ..Default::default()
             },
+            cost_usd:      None,
+            cost_source:   None,
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,

@@ -1,10 +1,14 @@
 //! Streaming Chat Completions SSE parsing and finish-event assembly.
 
+use std::sync::Arc;
+
+use fabro_model::{Catalog, Speed};
 use futures::{StreamExt, stream};
 
 use super::hooks::ChatHooks;
 use super::translate::{map_finish_reason, parse_tool_arguments};
 use super::wire::{AccumulatedToolCall, StreamChunk};
+use crate::cost::estimate_cost_usd;
 use crate::error::{Error, error_from_status_code};
 use crate::provider::StreamEventStream;
 use crate::providers::common::{
@@ -50,6 +54,10 @@ pub(crate) struct StreamState {
     /// Names of tools on the request marked custom (freeform), used by
     /// [`parse_tool_arguments`] to preserve raw non-JSON arguments.
     pub(crate) custom_tool_names:     Vec<String>,
+    /// Optional catalog used to estimate `cost_usd` on the final Response.
+    pub(crate) catalog:               Option<Arc<Catalog>>,
+    /// Speed setting forwarded from the request, used by catalog pricing.
+    pub(crate) speed:                 Option<Speed>,
 }
 
 impl StreamState {
@@ -61,6 +69,8 @@ impl StreamState {
         stream_read_timeout: Option<std::time::Duration>,
         hooks: ChatHooks,
         custom_tool_names: Vec<String>,
+        catalog: Option<Arc<Catalog>>,
+        speed: Option<Speed>,
     ) -> Self {
         Self {
             line_reader: LineReader::new(response, stream_read_timeout),
@@ -80,6 +90,8 @@ impl StreamState {
             hooks,
             last_usage_raw: None,
             custom_tool_names,
+            catalog,
+            speed,
         }
     }
 
@@ -271,21 +283,31 @@ impl StreamState {
             self.response_model.clone()
         };
 
+        let (cost_usd, cost_source) = estimate_cost_usd(
+            self.catalog.as_deref(),
+            &self.provider_name,
+            &response_model,
+            &self.usage,
+            self.speed,
+        );
+
         let mut response = Response {
-            id:            self.response_id.clone(),
-            model:         response_model,
-            provider:      self.provider_name.clone(),
-            message:       Message {
+            id: self.response_id.clone(),
+            model: response_model,
+            provider: self.provider_name.clone(),
+            message: Message {
                 role:         Role::Assistant,
                 content:      content_parts,
                 name:         None,
                 tool_call_id: None,
             },
             finish_reason: self.finish_reason.clone(),
-            usage:         self.usage.clone(),
-            raw:           None,
-            warnings:      vec![],
-            rate_limit:    self.rate_limit.clone(),
+            usage: self.usage.clone(),
+            cost_usd,
+            cost_source,
+            raw: None,
+            warnings: vec![],
+            rate_limit: self.rate_limit.clone(),
         };
 
         if let Some(enrich) = self.hooks.enrich_response {
@@ -317,6 +339,8 @@ pub(crate) fn run_stream(
     stream_read_timeout: Option<std::time::Duration>,
     hooks: ChatHooks,
     custom_tool_names: Vec<String>,
+    catalog: Option<Arc<Catalog>>,
+    speed: Option<Speed>,
 ) -> StreamEventStream {
     let stream = stream::unfold(
         StreamState::new(
@@ -327,6 +351,8 @@ pub(crate) fn run_stream(
             stream_read_timeout,
             hooks,
             custom_tool_names,
+            catalog,
+            speed,
         ),
         |mut state| async move {
             loop {
@@ -430,6 +456,8 @@ pub(crate) async fn send_and_stream(
     stream_read_timeout: Option<std::time::Duration>,
     hooks: ChatHooks,
     custom_tool_names: Vec<String>,
+    catalog: Option<Arc<Catalog>>,
+    speed: Option<Speed>,
 ) -> Result<StreamEventStream, Error> {
     let http_resp = req
         .send()
@@ -464,6 +492,8 @@ pub(crate) async fn send_and_stream(
         stream_read_timeout,
         hooks,
         custom_tool_names,
+        catalog,
+        speed,
     ))
 }
 
@@ -548,6 +578,8 @@ mod tests {
             Some(std::time::Duration::from_secs(30)),
             ChatHooks::NONE,
             Vec::new(),
+            None,
+            None,
         );
 
         let raw: serde_json::Value = serde_json::from_str(
@@ -582,6 +614,8 @@ mod tests {
             Some(std::time::Duration::from_secs(30)),
             ChatHooks::NONE,
             Vec::new(),
+            None,
+            None,
         );
 
         // First text chunk should emit TextStart + TextDelta.
@@ -618,6 +652,8 @@ mod tests {
             Some(std::time::Duration::from_secs(30)),
             ChatHooks::NONE,
             Vec::new(),
+            None,
+            None,
         );
 
         // First tool call chunk (has id and name) -> ToolCallStart.
@@ -653,6 +689,8 @@ mod tests {
             Some(std::time::Duration::from_secs(30)),
             ChatHooks::NONE,
             Vec::new(),
+            None,
+            None,
         );
         state.response_id = "resp-1".into();
         state.response_model = "gpt-4".into();
@@ -698,6 +736,8 @@ mod tests {
             Some(std::time::Duration::from_secs(30)),
             ChatHooks::NONE,
             Vec::new(),
+            None,
+            None,
         );
         state.response_id = "resp-1".into();
         state.tool_calls.push(AccumulatedToolCall {
@@ -745,6 +785,8 @@ mod tests {
             Some(std::time::Duration::from_secs(30)),
             ChatHooks::NONE,
             Vec::new(),
+            None,
+            None,
         );
         // response_model is empty, so finish_events should use the request model.
         let events = state.finish_events();

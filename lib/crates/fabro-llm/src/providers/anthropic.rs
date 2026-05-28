@@ -5,6 +5,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_model::{Catalog, ReasoningEffortFeature};
 use futures::stream;
 
+use crate::cost::estimate_cost_usd;
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
@@ -747,10 +748,27 @@ struct StreamAccumulator {
     current_tool_args: String,
     /// Rate limit info parsed from the initial HTTP response headers.
     rate_limit:        Option<RateLimitInfo>,
+    /// Provider name to attribute to the final Response and to use for
+    /// catalog cost estimation.
+    provider_name:     String,
+    /// Optional catalog used to estimate `cost_usd` on the final Response.
+    catalog:           Option<Arc<Catalog>>,
+    /// Speed setting forwarded from the request, used by catalog pricing.
+    speed:             Option<fabro_model::Speed>,
 }
 
 impl StreamAccumulator {
+    #[cfg(test)]
     fn new(rate_limit: Option<RateLimitInfo>) -> Self {
+        Self::new_with_pricing(rate_limit, "anthropic".to_string(), None, None)
+    }
+
+    fn new_with_pricing(
+        rate_limit: Option<RateLimitInfo>,
+        provider_name: String,
+        catalog: Option<Arc<Catalog>>,
+        speed: Option<fabro_model::Speed>,
+    ) -> Self {
         Self {
             id: String::new(),
             model: String::new(),
@@ -762,6 +780,9 @@ impl StreamAccumulator {
             current_thinking: String::new(),
             current_tool_args: String::new(),
             rate_limit,
+            provider_name,
+            catalog,
+            speed,
         }
     }
 
@@ -769,21 +790,30 @@ impl StreamAccumulator {
     /// parts.
     fn take_response(&mut self) -> Response {
         let content_parts = std::mem::take(&mut self.content_parts);
+        let (cost_usd, cost_source) = estimate_cost_usd(
+            self.catalog.as_deref(),
+            &self.provider_name,
+            &self.model,
+            &self.usage,
+            self.speed,
+        );
         Response {
-            id:            self.id.clone(),
-            model:         self.model.clone(),
-            provider:      "anthropic".to_string(),
-            message:       Message {
+            id: self.id.clone(),
+            model: self.model.clone(),
+            provider: self.provider_name.clone(),
+            message: Message {
                 role:         Role::Assistant,
                 content:      content_parts,
                 name:         None,
                 tool_call_id: None,
             },
             finish_reason: self.finish_reason.clone(),
-            usage:         self.usage.clone(),
-            raw:           None,
-            warnings:      vec![],
-            rate_limit:    self.rate_limit.clone(),
+            usage: self.usage.clone(),
+            cost_usd,
+            cost_source,
+            raw: None,
+            warnings: vec![],
+            rate_limit: self.rate_limit.clone(),
         }
     }
 }
@@ -1111,10 +1141,17 @@ impl SseReaderState {
         json_schema_mode: bool,
         stream_read_timeout: Option<std::time::Duration>,
         provider_name: String,
+        catalog: Option<Arc<Catalog>>,
+        speed: Option<fabro_model::Speed>,
     ) -> Self {
         Self {
             line_reader: super::common::LineReader::new(http_resp, stream_read_timeout),
-            accumulator: StreamAccumulator::new(rate_limit),
+            accumulator: StreamAccumulator::new_with_pricing(
+                rate_limit,
+                provider_name.clone(),
+                catalog,
+                speed,
+            ),
             pending_events: std::collections::VecDeque::new(),
             json_schema_mode,
             provider_name,
@@ -1471,6 +1508,14 @@ impl ProviderAdapter for Adapter {
         } else {
             map_finish_reason(api_resp.stop_reason.as_deref())
         };
+        let usage = token_counts_from_api_usage(&api_resp.usage);
+        let (cost_usd, cost_source) = estimate_cost_usd(
+            self.catalog.as_deref(),
+            &self.provider_name,
+            &api_resp.model,
+            &usage,
+            request.speed,
+        );
         Ok(Response {
             id: api_resp.id,
             model: api_resp.model,
@@ -1482,7 +1527,9 @@ impl ProviderAdapter for Adapter {
                 tool_call_id: None,
             },
             finish_reason,
-            usage: token_counts_from_api_usage(&api_resp.usage),
+            usage,
+            cost_usd,
+            cost_source,
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],
             rate_limit: parse_rate_limit_headers(&headers),
@@ -1527,6 +1574,8 @@ impl ProviderAdapter for Adapter {
                 json_schema_mode,
                 stream_read_timeout,
                 self.provider_name.clone(),
+                self.catalog.clone(),
+                request.speed,
             ),
             |mut state| async move {
                 loop {
@@ -2430,6 +2479,8 @@ reasoning = true
             },
             finish_reason: FinishReason::ToolCalls,
             usage:         TokenCounts::default(),
+            cost_usd:      None,
+            cost_source:   None,
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,

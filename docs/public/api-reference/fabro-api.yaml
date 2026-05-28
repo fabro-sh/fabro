@@ -7410,6 +7410,22 @@ components:
           $ref: "#/components/schemas/CompletionUsage"
         output:
           description: Parsed structured output when schema was provided.
+        cost_usd:
+          type: number
+          format: double
+          nullable: true
+          description: |
+            Total USD cost for the completion. Populated when the provider
+            returns an authoritative billing figure (e.g. OpenRouter) or
+            when the model has catalog pricing.
+        cost_source:
+          type: string
+          enum: [authoritative, estimated]
+          nullable: true
+          description: |
+            Whether `cost_usd` came from the provider's billing data
+            (`authoritative`) or was computed from catalog prices
+            (`estimated`).
 
     PaginatedSavedQueryList:
       description: Paginated list of saved queries.

@@ -100,6 +100,33 @@ impl Message {
     }
 }
 
+// --- 3.7.1 CostSource ---
+
+/// Source of the `cost_usd` value on a [`Response`].
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum CostSource {
+    /// Provider returned an inline authoritative cost (e.g. OpenRouter
+    /// `usage.cost`). Use this when reconciling billing.
+    Authoritative,
+    /// Computed from `tokens × catalog_price`. Approximation; can drift if
+    /// catalog prices are stale or the provider applies surcharges/credits.
+    Estimated,
+}
+
 // --- 3.8 FinishReason ---
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,6 +338,10 @@ pub struct Response {
     pub message:       Message,
     pub finish_reason: FinishReason,
     pub usage:         TokenCounts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd:      Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_source:   Option<CostSource>,
     pub raw:           Option<serde_json::Value>,
     pub warnings:      Vec<Warning>,
     pub rate_limit:    Option<RateLimitInfo>,
@@ -782,6 +813,8 @@ mod tests {
             message:       Message::assistant("Hello world"),
             finish_reason: FinishReason::Stop,
             usage:         TokenCounts::default(),
+            cost_usd:      None,
+            cost_source:   None,
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
@@ -810,6 +843,8 @@ mod tests {
             },
             finish_reason: FinishReason::ToolCalls,
             usage:         TokenCounts::default(),
+            cost_usd:      None,
+            cost_source:   None,
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
@@ -841,6 +876,8 @@ mod tests {
             },
             finish_reason: FinishReason::Stop,
             usage:         TokenCounts::default(),
+            cost_usd:      None,
+            cost_source:   None,
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
@@ -858,6 +895,8 @@ mod tests {
             message:       Message::assistant("Hello"),
             finish_reason: FinishReason::Stop,
             usage:         TokenCounts::default(),
+            cost_usd:      None,
+            cost_source:   None,
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
@@ -1028,6 +1067,8 @@ mod tests {
                 output_tokens: 5,
                 ..Default::default()
             },
+            cost_usd:      None,
+            cost_source:   None,
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,

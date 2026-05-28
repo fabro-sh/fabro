@@ -1,5 +1,6 @@
 pub mod adapter_registry;
 pub mod client;
+pub mod cost;
 pub mod error;
 pub mod generate;
 pub mod middleware;

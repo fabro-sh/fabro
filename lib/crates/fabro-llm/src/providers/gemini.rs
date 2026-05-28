@@ -6,6 +6,7 @@ use fabro_http::HeaderMap;
 use fabro_model::Catalog;
 use futures::stream;
 
+use crate::cost::estimate_cost_usd;
 use crate::error::{
     Error, ProviderErrorDetail, ProviderErrorKind, error_from_grpc_status, error_from_status_code,
 };
@@ -642,9 +643,20 @@ fn process_sse_stream(
     model: String,
     rate_limit: Option<RateLimitInfo>,
     stream_read_timeout: Option<std::time::Duration>,
+    provider_name: String,
+    catalog: Option<Arc<Catalog>>,
+    speed: Option<fabro_model::Speed>,
 ) -> StreamEventStream {
     Box::pin(stream::unfold(
-        SseStreamState::new(http_resp, model, rate_limit, stream_read_timeout),
+        SseStreamState::new(
+            http_resp,
+            model,
+            rate_limit,
+            stream_read_timeout,
+            provider_name,
+            catalog,
+            speed,
+        ),
         |mut state| async move {
             // If we have buffered events, yield them first.
             if let Some(event) = state.pending_events.pop_front() {
@@ -750,6 +762,13 @@ struct SseStreamState {
     finished:               bool,
     /// Rate limit info parsed from HTTP response headers.
     rate_limit:             Option<RateLimitInfo>,
+    /// Provider name to attribute to the final Response and use for catalog
+    /// cost estimation.
+    provider_name:          String,
+    /// Optional catalog used to estimate `cost_usd` on the final Response.
+    catalog:                Option<Arc<Catalog>>,
+    /// Speed setting forwarded from the request, used by catalog pricing.
+    speed:                  Option<fabro_model::Speed>,
 }
 
 impl SseStreamState {
@@ -758,6 +777,9 @@ impl SseStreamState {
         model: String,
         rate_limit: Option<RateLimitInfo>,
         stream_read_timeout: Option<std::time::Duration>,
+        provider_name: String,
+        catalog: Option<Arc<Catalog>>,
+        speed: Option<fabro_model::Speed>,
     ) -> Self {
         Self {
             line_reader: super::common::LineReader::new(http_resp, stream_read_timeout),
@@ -774,6 +796,9 @@ impl SseStreamState {
             finish_reason_str: None,
             finished: false,
             rate_limit,
+            provider_name,
+            catalog,
+            speed,
         }
     }
 
@@ -906,21 +931,30 @@ impl SseStreamState {
             content_parts.push(ContentPart::ToolCall(tc.clone()));
         }
 
+        let (cost_usd, cost_source) = estimate_cost_usd(
+            self.catalog.as_deref(),
+            &self.provider_name,
+            &self.model,
+            &self.usage,
+            self.speed,
+        );
         let response = Response {
-            id:            uuid::Uuid::new_v4().to_string(),
-            model:         self.model.clone(),
-            provider:      "gemini".to_string(),
-            message:       Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            model: self.model.clone(),
+            provider: self.provider_name.clone(),
+            message: Message {
                 role:         Role::Assistant,
                 content:      content_parts,
                 name:         None,
                 tool_call_id: None,
             },
             finish_reason: finish_reason.clone(),
-            usage:         self.usage.clone(),
-            raw:           None,
-            warnings:      vec![],
-            rate_limit:    self.rate_limit.clone(),
+            usage: self.usage.clone(),
+            cost_usd,
+            cost_source,
+            raw: None,
+            warnings: vec![],
+            rate_limit: self.rate_limit.clone(),
         };
 
         StreamEvent::finish(finish_reason, self.usage.clone(), response)
@@ -1027,6 +1061,13 @@ impl ProviderAdapter for Adapter {
 
         let usage = parse_usage(api_resp.usage_metadata.as_ref());
 
+        let (cost_usd, cost_source) = estimate_cost_usd(
+            self.catalog.as_deref(),
+            &self.provider_name,
+            &request.model,
+            &usage,
+            request.speed,
+        );
         Ok(Response {
             id: uuid::Uuid::new_v4().to_string(),
             model: request.model.clone(),
@@ -1039,6 +1080,8 @@ impl ProviderAdapter for Adapter {
             },
             finish_reason,
             usage,
+            cost_usd,
+            cost_source,
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],
             rate_limit: parse_rate_limit_headers(&headers),
@@ -1070,6 +1113,9 @@ impl ProviderAdapter for Adapter {
             request.model.clone(),
             rate_limit,
             self.http.stream_read_timeout,
+            self.provider_name.clone(),
+            self.catalog.clone(),
+            request.speed,
         ))
     }
 }

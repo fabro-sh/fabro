@@ -208,6 +208,8 @@ mod tests {
             message:       Message::assistant(text),
             finish_reason: FinishReason::Stop,
             usage:         TokenCounts::default(),
+            cost_usd:      None,
+            cost_source:   None,
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,

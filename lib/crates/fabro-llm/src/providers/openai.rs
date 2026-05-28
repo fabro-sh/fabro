@@ -6,6 +6,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_model::Catalog;
 use futures::{StreamExt, stream};
 
+use crate::cost::estimate_cost_usd;
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
 use crate::provider::{
     ProviderAdapter, StreamEventStream, validate_standard_speed, validate_tool_choice,
@@ -794,6 +795,13 @@ struct SseStreamState {
     emitted_reasoning_start: bool,
     raw_response:            Option<serde_json::Value>,
     rate_limit:              Option<RateLimitInfo>,
+    /// Provider name to attribute to the final Response and to use for
+    /// catalog cost estimation.
+    provider_name:           String,
+    /// Optional catalog used to estimate `cost_usd` on the final Response.
+    catalog:                 Option<Arc<Catalog>>,
+    /// Speed setting forwarded from the request, used by catalog pricing.
+    speed:                   Option<fabro_model::Speed>,
 }
 
 /// Parse a single SSE message block into an (`event_type`, `data`) pair.
@@ -1208,6 +1216,13 @@ fn handle_response_completed(
         state.response_model.clone()
     };
 
+    let (cost_usd, cost_source) = estimate_cost_usd(
+        state.catalog.as_deref(),
+        &state.provider_name,
+        &model,
+        &state.usage,
+        state.speed,
+    );
     let response = Response {
         id: state.response_id.clone(),
         model,
@@ -1220,6 +1235,8 @@ fn handle_response_completed(
         },
         finish_reason: state.finish_reason.clone(),
         usage: state.usage.clone(),
+        cost_usd,
+        cost_source,
         raw: state.raw_response.clone(),
         warnings: vec![],
         rate_limit: state.rate_limit.clone(),
@@ -1323,9 +1340,17 @@ impl ProviderAdapter for Adapter {
 
         let usage = token_counts_from_api_usage(api_resp.usage.as_ref());
 
+        let resp_model = api_resp.model.unwrap_or_else(|| request.model.clone());
+        let (cost_usd, cost_source) = estimate_cost_usd(
+            self.catalog.as_deref(),
+            &self.provider_name,
+            &resp_model,
+            &usage,
+            request.speed,
+        );
         Ok(Response {
             id: api_resp.id,
-            model: api_resp.model.unwrap_or_else(|| request.model.clone()),
+            model: resp_model,
             provider: "openai".to_string(),
             message: Message {
                 role:         Role::Assistant,
@@ -1335,6 +1360,8 @@ impl ProviderAdapter for Adapter {
             },
             finish_reason,
             usage,
+            cost_usd,
+            cost_source,
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],
             rate_limit: parse_rate_limit_headers(&headers),
@@ -1397,6 +1424,9 @@ impl ProviderAdapter for Adapter {
             emitted_reasoning_start: false,
             raw_response: None,
             rate_limit,
+            provider_name: self.provider_name.clone(),
+            catalog: self.catalog.clone(),
+            speed: request.speed,
         };
 
         let stream = stream::unfold(state, |mut state| async move {
@@ -2342,6 +2372,9 @@ mod tests {
             emitted_reasoning_start: false,
             raw_response:            None,
             rate_limit:              None,
+            provider_name:           "openai".to_string(),
+            catalog:                 None,
+            speed:                   None,
         }
     }
 

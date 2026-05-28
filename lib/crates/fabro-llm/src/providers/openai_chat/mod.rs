@@ -12,6 +12,8 @@ pub(crate) mod stream;
 pub(crate) mod translate;
 pub(crate) mod wire;
 
+use std::sync::Arc;
+
 use fabro_model::Catalog;
 pub(crate) use hooks::ChatHooks;
 
@@ -45,14 +47,25 @@ pub(crate) async fn complete(
     }
     let (body, headers) = send_and_read_response(req, provider_name, "type").await?;
 
-    response::parse_chat_response(&body, &headers, provider_name, request, hooks)
+    response::parse_chat_response(
+        &body,
+        &headers,
+        provider_name,
+        request,
+        hooks,
+        catalog,
+        request.speed,
+    )
 }
 
 /// Run a streaming Chat Completions request through the shared pipeline.
+///
+/// `catalog` is taken by `Arc` (not borrow) because the streaming
+/// `StreamState` must own it for the lifetime of the spawned stream.
 pub(crate) async fn stream(
     http: &super::http_api::HttpApi,
     build_request: impl Fn(&str) -> fabro_http::RequestBuilder + Send,
-    catalog: Option<&Catalog>,
+    catalog: Option<Arc<Catalog>>,
     provider_name: &str,
     request: &Request,
     hooks: ChatHooks,
@@ -61,7 +74,7 @@ pub(crate) async fn stream(
         request,
         Some(true),
         provider_name,
-        catalog,
+        catalog.as_deref(),
         hooks,
     );
     let url = format!("{}/chat/completions", http.base_url);
@@ -76,6 +89,8 @@ pub(crate) async fn stream(
         http.stream_read_timeout,
         hooks,
         custom_tool_names,
+        catalog,
+        request.speed,
     )
     .await
 }

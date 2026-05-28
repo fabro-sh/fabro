@@ -148,6 +148,12 @@ impl ProviderAdapter for Adapter {
                 output_tokens: server_resp.usage.output_tokens,
                 ..Default::default()
             },
+            // The remote fabro-server has its own catalog and may report
+            // cost on its wire response. Until that wire format carries
+            // `cost_usd`/`cost_source`, leave these `None` rather than
+            // pretending to estimate locally.
+            cost_usd: None,
+            cost_source: None,
             raw: None,
             warnings: vec![],
             rate_limit: None,

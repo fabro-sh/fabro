@@ -30,4 +30,19 @@ export interface CompletionResponse {
     'stop_reason': string;
     'usage': CompletionUsage;
     'output'?: any;
+    /**
+     * Total USD cost for the completion. Populated when the provider returns an authoritative billing figure (e.g. OpenRouter) or when the model has catalog pricing.
+     */
+    'cost_usd'?: number;
+    /**
+     * Whether `cost_usd` came from the provider\'s billing data (`authoritative`) or was computed from catalog prices (`estimated`).
+     */
+    'cost_source'?: CompletionResponseCostSourceEnum;
 }
+
+export const CompletionResponseCostSourceEnum = {
+    AUTHORITATIVE: 'authoritative',
+    ESTIMATED: 'estimated'
+} as const;
+
+export type CompletionResponseCostSourceEnum = typeof CompletionResponseCostSourceEnum[keyof typeof CompletionResponseCostSourceEnum];

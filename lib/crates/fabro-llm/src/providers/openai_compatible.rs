@@ -111,7 +111,7 @@ impl ProviderAdapter for Adapter {
         openai_chat::stream(
             &self.http,
             |url| self.build_request(url),
-            self.catalog.as_deref(),
+            self.catalog.clone(),
             &self.provider_name,
             request,
             ChatHooks::NONE,

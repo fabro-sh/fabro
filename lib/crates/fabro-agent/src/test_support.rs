@@ -184,6 +184,8 @@ pub fn text_response(text: &str) -> Response {
             output_tokens: 5,
             ..Default::default()
         },
+        cost_usd:      None,
+        cost_source:   None,
         raw:           None,
         warnings:      vec![],
         rate_limit:    None,
@@ -260,6 +262,8 @@ pub fn tool_call_response(
             output_tokens: 5,
             ..Default::default()
         },
+        cost_usd:      None,
+        cost_source:   None,
         raw:           None,
         warnings:      vec![],
         rate_limit:    None,
@@ -387,6 +391,8 @@ pub fn multi_tool_call_response(calls: Vec<(&str, &str, serde_json::Value)>) -> 
             output_tokens: 5,
             ..Default::default()
         },
+        cost_usd:      None,
+        cost_source:   None,
         raw:           None,
         warnings:      vec![],
         rate_limit:    None,

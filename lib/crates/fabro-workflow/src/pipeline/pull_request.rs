@@ -729,6 +729,8 @@ mod tests {
                     output_tokens: 20,
                     ..Default::default()
                 },
+                cost_usd:      None,
+                cost_source:   None,
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
@@ -757,6 +759,8 @@ mod tests {
                             output_tokens: 20,
                             ..Default::default()
                         },
+                        cost_usd:      None,
+                        cost_source:   None,
                         raw:           None,
                         warnings:      vec![],
                         rate_limit:    None,

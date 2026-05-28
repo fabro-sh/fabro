@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
+use fabro_llm::types::CostSource;
+
 use super::super::{
     ApiError, AppState, CompletionContentPart, CompletionMessage, CompletionMessageRole,
-    CompletionResponse, CompletionToolChoiceMode, CompletionUsage, ContentPart,
-    CreateCompletionRequest, Duration, Event, FinishReason, GenerateParams, IntoResponse, Json,
-    KeepAlive, LlmMessage, LlmRequest, RequiredUser, Response, Role, Router, Sse, State,
-    StatusCode, ToolChoice, ToolDefinition, Ulid, error, generate_object, info, post, warn,
+    CompletionResponse, CompletionResponseCostSource, CompletionToolChoiceMode, CompletionUsage,
+    ContentPart, CreateCompletionRequest, Duration, Event, FinishReason, GenerateParams,
+    IntoResponse, Json, KeepAlive, LlmMessage, LlmRequest, RequiredUser, Response, Role, Router,
+    Sse, State, StatusCode, ToolChoice, ToolDefinition, Ulid, error, generate_object, info, post,
+    warn,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -20,6 +23,13 @@ fn finish_reason_to_api_stop_reason(reason: &FinishReason) -> String {
         FinishReason::ContentFilter => "content_filter".to_string(),
         FinishReason::Error => "error".to_string(),
         FinishReason::Other(s) => s.clone(),
+    }
+}
+
+fn cost_source_to_api(source: CostSource) -> CompletionResponseCostSource {
+    match source {
+        CostSource::Authoritative => CompletionResponseCostSource::Authoritative,
+        CostSource::Estimated => CompletionResponseCostSource::Estimated,
     }
 }
 
@@ -254,6 +264,8 @@ async fn create_completion(
                         output_tokens: result.usage.output_tokens,
                     },
                     output:      result.output,
+                    cost_usd:    result.response.cost_usd,
+                    cost_source: result.response.cost_source.map(cost_source_to_api),
                 })
                 .into_response(),
                 Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
@@ -271,6 +283,8 @@ async fn create_completion(
                         output_tokens: response.usage.output_tokens,
                     },
                     output:      None,
+                    cost_usd:    response.cost_usd,
+                    cost_source: response.cost_source.map(cost_source_to_api),
                 })
                 .into_response(),
                 Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))

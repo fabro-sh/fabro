@@ -2,10 +2,12 @@
 //! [`Response`](crate::types::Response).
 
 use fabro_http::HeaderMap;
+use fabro_model::{Catalog, Speed};
 
 use super::hooks::ChatHooks;
 use super::translate::{custom_tool_names, map_finish_reason, parse_tool_arguments};
 use super::wire::ApiResponse;
+use crate::cost::estimate_cost_usd;
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind};
 use crate::providers::common::parse_rate_limit_headers;
 use crate::types::{
@@ -21,6 +23,8 @@ pub(crate) fn parse_chat_response(
     provider_name: &str,
     request: &Request,
     hooks: ChatHooks,
+    catalog: Option<&Catalog>,
+    speed: Option<Speed>,
 ) -> Result<Response, Error> {
     let api_resp: ApiResponse = serde_json::from_str(body)
         .map_err(|e| Error::network(format!("failed to parse response: {e}"), e))?;
@@ -81,6 +85,9 @@ pub(crate) fn parse_chat_response(
 
     let raw: Option<serde_json::Value> = serde_json::from_str(body).ok();
 
+    let (cost_usd, cost_source) =
+        estimate_cost_usd(catalog, provider_name, &api_resp.model, &usage, speed);
+
     let mut response = Response {
         id: api_resp.id,
         model: api_resp.model,
@@ -93,6 +100,8 @@ pub(crate) fn parse_chat_response(
         },
         finish_reason,
         usage,
+        cost_usd,
+        cost_source,
         raw: raw.clone(),
         warnings: vec![],
         rate_limit: parse_rate_limit_headers(headers),

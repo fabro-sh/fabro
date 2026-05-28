@@ -352,6 +352,8 @@ mod tests {
                 message:       Message::assistant(self.response_text.clone()),
                 finish_reason: FinishReason::Stop,
                 usage:         TokenCounts::default(),
+                cost_usd:      None,
+                cost_source:   None,
                 raw:           None,
                 warnings:      Vec::new(),
                 rate_limit:    None,
