@@ -222,6 +222,121 @@ pub struct RateLimitInfo {
 // replacement types, and the LLM client share one enum.
 pub use fabro_model::ReasoningEffort;
 
+// --- 3.14 OpenRouterOptions ---
+
+/// Strongly typed OpenRouter-specific request options.
+///
+/// Populated by typed workflow attrs (`openrouter_provider_sort`,
+/// `openrouter_fallback_models`, etc.) in the workflow handler.
+/// Serializes into the nested `{provider: {...}, models: [...],
+/// transforms: [...]}` JSON shape that OpenRouter accepts as top-level
+/// request fields, and is merged into the body via the existing
+/// `provider_options.openrouter` plumbing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OpenRouterOptions {
+    pub provider_sort:   Option<OpenRouterProviderSort>,
+    pub allow_fallbacks: Option<bool>,
+    pub data_collection: Option<OpenRouterDataCollection>,
+    pub models:          Vec<String>,
+    pub transforms:      Vec<String>,
+}
+
+/// Provider routing sort order for OpenRouter.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum OpenRouterProviderSort {
+    Price,
+    Throughput,
+    Latency,
+}
+
+/// Provider data-collection policy for OpenRouter.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum OpenRouterDataCollection {
+    Allow,
+    Deny,
+}
+
+impl OpenRouterOptions {
+    /// True when no fields are set (all defaults). Used to skip emitting
+    /// `provider_options.openrouter = {}` when nothing was specified.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.provider_sort.is_none()
+            && self.allow_fallbacks.is_none()
+            && self.data_collection.is_none()
+            && self.models.is_empty()
+            && self.transforms.is_empty()
+    }
+
+    /// Serialize into the nested OpenRouter JSON shape suitable for
+    /// embedding under `provider_options.openrouter`.
+    ///
+    /// Produces:
+    /// ```json
+    /// {
+    ///   "provider": { "sort": "...", "allow_fallbacks": true, "data_collection": "..." },
+    ///   "models": [...],
+    ///   "transforms": [...]
+    /// }
+    /// ```
+    /// Fields that are unset are omitted.
+    #[must_use]
+    pub fn to_request_json(&self) -> serde_json::Value {
+        let mut provider = serde_json::Map::new();
+        if let Some(sort) = self.provider_sort {
+            provider.insert("sort".into(), serde_json::json!(<&str>::from(sort)));
+        }
+        if let Some(allow) = self.allow_fallbacks {
+            provider.insert("allow_fallbacks".into(), serde_json::json!(allow));
+        }
+        if let Some(dc) = self.data_collection {
+            provider.insert(
+                "data_collection".into(),
+                serde_json::json!(<&str>::from(dc)),
+            );
+        }
+        let mut out = serde_json::Map::new();
+        if !provider.is_empty() {
+            out.insert("provider".into(), serde_json::Value::Object(provider));
+        }
+        if !self.models.is_empty() {
+            out.insert("models".into(), serde_json::json!(self.models));
+        }
+        if !self.transforms.is_empty() {
+            out.insert("transforms".into(), serde_json::json!(self.transforms));
+        }
+        serde_json::Value::Object(out)
+    }
+}
+
 // --- 3.6 Request ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1125,5 +1240,73 @@ mod tests {
     #[test]
     fn tool_choice_mode_str_named() {
         assert_eq!(ToolChoice::named("get_weather").mode_str(), "named");
+    }
+
+    #[test]
+    fn openrouter_options_to_request_json_empty_yields_empty_object() {
+        let opts = OpenRouterOptions::default();
+        assert!(opts.is_empty());
+        let json = opts.to_request_json();
+        assert_eq!(json, serde_json::json!({}));
+    }
+
+    #[test]
+    fn openrouter_options_to_request_json_with_sort_nests_under_provider() {
+        let opts = OpenRouterOptions {
+            provider_sort: Some(OpenRouterProviderSort::Throughput),
+            ..OpenRouterOptions::default()
+        };
+        assert!(!opts.is_empty());
+        let json = opts.to_request_json();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "provider": { "sort": "throughput" }
+            })
+        );
+    }
+
+    #[test]
+    fn openrouter_options_to_request_json_with_models_and_transforms() {
+        let opts = OpenRouterOptions {
+            models: vec![
+                "openai/gpt-5.5".to_string(),
+                "google/gemini-3.1-pro-preview".to_string(),
+            ],
+            transforms: vec!["middle-out".to_string()],
+            ..OpenRouterOptions::default()
+        };
+        let json = opts.to_request_json();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "models": ["openai/gpt-5.5", "google/gemini-3.1-pro-preview"],
+                "transforms": ["middle-out"],
+            })
+        );
+    }
+
+    #[test]
+    fn openrouter_options_to_request_json_full_shape() {
+        let opts = OpenRouterOptions {
+            provider_sort:   Some(OpenRouterProviderSort::Latency),
+            allow_fallbacks: Some(false),
+            data_collection: Some(OpenRouterDataCollection::Deny),
+            models:          vec!["a".to_string(), "b".to_string()],
+            transforms:      vec!["middle-out".to_string()],
+        };
+        let json = opts.to_request_json();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "provider": {
+                    "sort": "latency",
+                    "allow_fallbacks": false,
+                    "data_collection": "deny",
+                },
+                "models": ["a", "b"],
+                "transforms": ["middle-out"],
+            })
+        );
     }
 }

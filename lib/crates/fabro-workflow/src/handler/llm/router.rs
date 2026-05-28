@@ -182,6 +182,7 @@ mod tests {
             Ok(EffectiveRequestControls {
                 reasoning_effort: Some(ReasoningEffort::High),
                 speed:            Some(Speed::Fast),
+                openrouter:       None,
             })
         }
     }

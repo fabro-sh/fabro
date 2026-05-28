@@ -361,6 +361,7 @@ mod tests {
                 Ok(crate::handler::llm::api::EffectiveRequestControls {
                     reasoning_effort: Some(ReasoningEffort::High),
                     speed:            Some(Speed::Fast),
+                    openrouter:       None,
                 })
             }
         }
@@ -555,6 +556,7 @@ mod tests {
                 Ok(crate::handler::llm::api::EffectiveRequestControls {
                     reasoning_effort: Some(ReasoningEffort::High),
                     speed:            Some(Speed::Fast),
+                    openrouter:       None,
                 })
             }
         }

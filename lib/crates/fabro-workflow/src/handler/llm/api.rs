@@ -14,8 +14,8 @@ use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_graphviz::graph::{AttrValue, Node};
 use fabro_llm::client::Client;
 use fabro_llm::types::{
-    Message, ReasoningEffort, Request, Response, Speed, TokenCounts,
-    ToolDefinition as LlmToolDefinition,
+    Message, OpenRouterDataCollection, OpenRouterOptions, OpenRouterProviderSort, ReasoningEffort,
+    Request, Response, Speed, TokenCounts, ToolDefinition as LlmToolDefinition,
 };
 use fabro_mcp::config::McpServerSettings;
 #[cfg(test)]
@@ -114,10 +114,13 @@ enum AgentApiErrorDisposition {
     Terminal(Error),
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectiveRequestControls {
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) speed:            Option<Speed>,
+    /// OpenRouter-specific options sourced from typed `openrouter_*` stage
+    /// attrs. `None` when no `openrouter_*` attr is set on the node.
+    pub(crate) openrouter:       Option<OpenRouterOptions>,
 }
 
 fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentApiErrorDisposition {
@@ -394,11 +397,86 @@ pub(crate) fn effective_request_controls(
         .or(run_model_controls.speed.as_deref())
         .map(|value| parse_speed(node, value))
         .transpose()?;
+    let openrouter = parse_openrouter_options(node)?;
 
     Ok(EffectiveRequestControls {
         reasoning_effort,
         speed,
+        openrouter,
     })
+}
+
+/// Parse the `openrouter_*` stage attrs into a typed [`OpenRouterOptions`].
+/// Returns `Ok(None)` when no `openrouter_*` attr is set on the node.
+fn parse_openrouter_options(node: &Node) -> Result<Option<OpenRouterOptions>, Error> {
+    let mut opts = OpenRouterOptions::default();
+    let mut any = false;
+
+    if let Some(value) = control_attr(node, "openrouter_provider_sort") {
+        any = true;
+        opts.provider_sort = Some(value.parse::<OpenRouterProviderSort>().map_err(|source| {
+            Error::handler_with_source(
+                format!(
+                    "Invalid openrouter_provider_sort \"{value}\" for node \"{}\"; expected one of: price, throughput, latency",
+                    node.id,
+                ),
+                source,
+            )
+        })?);
+    }
+
+    if let Some(value) = control_attr(node, "openrouter_data_collection") {
+        any = true;
+        opts.data_collection = Some(value.parse::<OpenRouterDataCollection>().map_err(|source| {
+            Error::handler_with_source(
+                format!(
+                    "Invalid openrouter_data_collection \"{value}\" for node \"{}\"; expected one of: allow, deny",
+                    node.id,
+                ),
+                source,
+            )
+        })?);
+    }
+
+    if let Some(value) = control_attr(node, "openrouter_allow_fallbacks") {
+        any = true;
+        opts.allow_fallbacks = Some(value.parse::<bool>().map_err(|source| {
+            Error::handler_with_source(
+                format!(
+                    "Invalid openrouter_allow_fallbacks \"{value}\" for node \"{}\"; expected true or false",
+                    node.id,
+                ),
+                source,
+            )
+        })?);
+    }
+
+    if let Some(value) = control_attr(node, "openrouter_fallback_models") {
+        let models = split_csv(value);
+        if !models.is_empty() {
+            any = true;
+            opts.models = models;
+        }
+    }
+
+    if let Some(value) = control_attr(node, "openrouter_transforms") {
+        let transforms = split_csv(value);
+        if !transforms.is_empty() {
+            any = true;
+            opts.transforms = transforms;
+        }
+    }
+
+    Ok(if any { Some(opts) } else { None })
+}
+
+fn split_csv(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 fn control_attr<'a>(node: &'a Node, key: &str) -> Option<&'a str> {
@@ -921,7 +999,7 @@ impl AgentApiBackend {
         emitter: &Arc<Emitter>,
         stage_scope: &StageScope,
         request: &Request,
-        controls: EffectiveRequestControls,
+        controls: &EffectiveRequestControls,
         fallback_chain: &[FallbackTarget],
     ) -> Result<OneShotCompletion, Error> {
         let result = client.complete(request).await;
@@ -1075,7 +1153,10 @@ impl CodergenBackend for AgentApiBackend {
                 max_tokens,
                 stop_sequences: None,
                 metadata: None,
-                provider_options: None,
+                provider_options: controls
+                    .openrouter
+                    .as_ref()
+                    .map(|or| serde_json::json!({ "openrouter": or.to_request_json() })),
             };
 
             let inference_start = Instant::now();
@@ -1086,7 +1167,7 @@ impl CodergenBackend for AgentApiBackend {
                     emitter,
                     stage_scope,
                     &request,
-                    controls,
+                    &controls,
                     fallback_chain,
                 )
                 .await;
@@ -2612,6 +2693,99 @@ reasoning = false
         let controls = backend.resolve_effective_request_controls(&node).unwrap();
 
         assert_eq!(controls.reasoning_effort, None);
+    }
+
+    #[test]
+    fn openrouter_attrs_absent_yields_none() {
+        let backend = AgentApiBackend::new_from_env(
+            "anthropic/claude-sonnet-4-6".to_string(),
+            ProviderId::new("openrouter"),
+            Vec::new(),
+            SteeringHub::for_tests(),
+        );
+        let node = Node::new("work");
+
+        let controls = backend.resolve_effective_request_controls(&node).unwrap();
+
+        assert!(controls.openrouter.is_none());
+    }
+
+    #[test]
+    fn openrouter_attrs_parse_into_provider_options() {
+        let backend = AgentApiBackend::new_from_env(
+            "anthropic/claude-sonnet-4-6".to_string(),
+            ProviderId::new("openrouter"),
+            Vec::new(),
+            SteeringHub::for_tests(),
+        );
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "openrouter_provider_sort".to_string(),
+            fabro_graphviz::graph::AttrValue::String("throughput".to_string()),
+        );
+        node.attrs.insert(
+            "openrouter_fallback_models".to_string(),
+            fabro_graphviz::graph::AttrValue::String(
+                "openai/gpt-5.5, google/gemini-3.1-pro-preview".to_string(),
+            ),
+        );
+        node.attrs.insert(
+            "openrouter_transforms".to_string(),
+            fabro_graphviz::graph::AttrValue::String("middle-out".to_string()),
+        );
+        node.attrs.insert(
+            "openrouter_allow_fallbacks".to_string(),
+            fabro_graphviz::graph::AttrValue::String("false".to_string()),
+        );
+        node.attrs.insert(
+            "openrouter_data_collection".to_string(),
+            fabro_graphviz::graph::AttrValue::String("deny".to_string()),
+        );
+
+        let controls = backend.resolve_effective_request_controls(&node).unwrap();
+        let or = controls
+            .openrouter
+            .as_ref()
+            .expect("openrouter options should be populated");
+
+        let provider_options = serde_json::json!({ "openrouter": or.to_request_json() });
+        assert_eq!(
+            provider_options,
+            serde_json::json!({
+                "openrouter": {
+                    "provider": {
+                        "sort": "throughput",
+                        "allow_fallbacks": false,
+                        "data_collection": "deny",
+                    },
+                    "models": ["openai/gpt-5.5", "google/gemini-3.1-pro-preview"],
+                    "transforms": ["middle-out"],
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn openrouter_provider_sort_invalid_value_errors() {
+        let backend = AgentApiBackend::new_from_env(
+            "anthropic/claude-sonnet-4-6".to_string(),
+            ProviderId::new("openrouter"),
+            Vec::new(),
+            SteeringHub::for_tests(),
+        );
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "openrouter_provider_sort".to_string(),
+            fabro_graphviz::graph::AttrValue::String("cheapest".to_string()),
+        );
+
+        let err = backend
+            .resolve_effective_request_controls(&node)
+            .expect_err("invalid sort value should error");
+        assert!(
+            err.to_string().contains("openrouter_provider_sort"),
+            "error should mention the offending attr: {err}",
+        );
     }
 
     #[tokio::test]
