@@ -1,0 +1,8 @@
+_version = 1
+
+[server.web]
+enabled = true
+url = "{{ env.FABRO_WEB_URL }}"
+
+[server.auth]
+methods = ["dev-token"]

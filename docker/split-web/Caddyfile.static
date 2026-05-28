@@ -1,0 +1,39 @@
+:80 {
+	root * /srv/web/dist
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Cross-Origin-Opener-Policy same-origin
+		Cross-Origin-Resource-Policy same-origin
+		Permissions-Policy "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://avatars.githubusercontent.com; connect-src 'self' ws: wss:; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+	}
+
+	@sourceMaps path *.map
+	handle @sourceMaps {
+		respond 404
+	}
+
+	@cacheAssets {
+		path /assets/*
+		not path *.map
+	}
+	header @cacheAssets Cache-Control "public, max-age=31536000, immutable"
+
+	@htmlNavigation {
+		header Accept *text/html*
+		not path /assets/*
+	}
+	handle @htmlNavigation {
+		try_files {path} /index.html
+		header Cache-Control "no-cache"
+		file_server
+	}
+
+	handle {
+		file_server
+	}
+}

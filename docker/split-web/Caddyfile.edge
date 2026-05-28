@@ -1,0 +1,14 @@
+:80 {
+	encode gzip zstd
+
+	@api path /api/* /auth/* /health
+	handle @api {
+		header X-Fabro-PoC-Upstream fabro-api
+		reverse_proxy fabro-api:32276
+	}
+
+	handle {
+		header X-Fabro-PoC-Upstream fabro-web
+		reverse_proxy fabro-web:80
+	}
+}

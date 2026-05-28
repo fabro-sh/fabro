@@ -1,0 +1,52 @@
+services:
+  fabro-api:
+    image: ${FABRO_IMAGE:-fabro-sh/fabro:split-web-poc}
+    restart: unless-stopped
+    expose:
+      - "32276"
+    command:
+      - sh
+      - -c
+      - >-
+        exec fabro server start --foreground
+        --bind 0.0.0.0:32276
+        --config /config/settings.toml
+    volumes:
+      - fabro-storage:/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/split-web/settings.toml:/config/settings.toml:ro
+    environment:
+      FABRO_WEB_URL: http://localhost:${SPLIT_WEB_PORT:-8080}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      FABRO_DEV_TOKEN: ${FABRO_DEV_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:32276/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  fabro-web:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    expose:
+      - "80"
+    volumes:
+      - ./apps/fabro-web:/srv/web:ro
+      - ./docker/split-web/Caddyfile.static:/etc/caddy/Caddyfile:ro
+
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${SPLIT_WEB_PORT:-8080}:80"
+    volumes:
+      - ./docker/split-web/Caddyfile.edge:/etc/caddy/Caddyfile:ro
+    depends_on:
+      fabro-api:
+        condition: service_healthy
+      fabro-web:
+        condition: service_started
+
+volumes:
+  fabro-storage:
