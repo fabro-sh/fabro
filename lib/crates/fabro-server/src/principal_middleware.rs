@@ -57,6 +57,7 @@ pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
 
 pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
 pub(crate) struct RequiredRunManagementActor(pub(crate) Principal);
+pub(crate) struct RequiredRunToolActor(pub(crate) Principal);
 pub(crate) struct RequireRunScoped(pub(crate) RunId);
 pub(crate) struct RequireRunManagementTarget(pub(crate) RunId, pub(crate) Principal);
 pub(crate) struct RequireRunBlob(pub(crate) RunId, pub(crate) RunBlobId);
@@ -225,6 +226,19 @@ impl<S: Send + Sync> FromRequestParts<S> for RequiredRunManagementActor {
             .cloned()
             .unwrap_or_else(AuthContextSlot::initial);
         require_run_management_actor(&slot).map(Self)
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for RequiredRunToolActor {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let slot = parts
+            .extensions
+            .get::<AuthContextSlot>()
+            .cloned()
+            .unwrap_or_else(AuthContextSlot::initial);
+        require_run_tool_actor(&slot).map(Self)
     }
 }
 
@@ -403,6 +417,10 @@ pub(crate) fn require_run_management_actor(slot: &AuthContextSlot) -> Result<Pri
         Principal::Worker { .. } => Err(ApiError::forbidden()),
         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
     }
+}
+
+pub(crate) fn require_run_tool_actor(slot: &AuthContextSlot) -> Result<Principal, ApiError> {
+    require_run_management_actor(slot)
 }
 
 fn require_worker_or_user_for_run(

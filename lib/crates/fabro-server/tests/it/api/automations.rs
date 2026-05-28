@@ -3,11 +3,16 @@ use std::path::PathBuf;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use fabro_server::server::build_router;
-use fabro_server::test_support::{TestAppStateBuilder, build_test_router, test_auth_mode};
+use fabro_server::test_support::{
+    TestAppStateBuilder, TestAutomationRunMaterializer, build_test_router, test_auth_mode,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use crate::helpers::{api, checked_response, response_json, response_status};
+use crate::helpers::{
+    MINIMAL_DOT, api, checked_response, minimal_manifest_json, response_json, response_status,
+    run_json,
+};
 
 fn automation_body(id: &str, name: &str) -> Value {
     json!({
@@ -66,6 +71,25 @@ fn automation_app() -> (axum::Router, tempfile::TempDir, PathBuf) {
     (build_test_router(state), temp_dir, automation_dir)
 }
 
+fn automation_app_with_fake_materializer() -> (axum::Router, tempfile::TempDir, PathBuf) {
+    let temp_dir = tempfile::tempdir().expect("automation test tempdir should be created");
+    let active_config_path = temp_dir.path().join("settings.toml");
+    let automation_dir = temp_dir.path().join("automations");
+    let materialized_manifest: fabro_api::types::RunManifest =
+        serde_json::from_value(minimal_manifest_json(MINIMAL_DOT))
+            .expect("minimal run manifest fixture should deserialize");
+    let submitted_manifest_bytes =
+        serde_json::to_vec(&materialized_manifest).expect("minimal run manifest should serialize");
+    let state = TestAppStateBuilder::new()
+        .active_config_path(active_config_path)
+        .automation_materializer(TestAutomationRunMaterializer::succeed(
+            materialized_manifest,
+            submitted_manifest_bytes,
+        ))
+        .build();
+    (build_test_router(state), temp_dir, automation_dir)
+}
+
 fn json_request(method: Method, path: &str, body: &Value) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -108,16 +132,46 @@ fn request_with_if_match(
 }
 
 async fn create_automation(app: &axum::Router, id: &str, name: &str) -> Value {
+    create_automation_with_body(app, &automation_body(id, name)).await
+}
+
+async fn create_automation_with_body(app: &axum::Router, body: &Value) -> Value {
     let response = app
         .clone()
-        .oneshot(json_request(
-            Method::POST,
-            "/automations",
-            &automation_body(id, name),
-        ))
+        .oneshot(json_request(Method::POST, "/automations", body))
         .await
         .expect("create automation should respond");
     response_json(response, StatusCode::CREATED, "POST /api/v1/automations").await
+}
+
+async fn create_automation_run(
+    app: &axum::Router,
+    automation_id: &str,
+    expected: StatusCode,
+) -> Value {
+    let response = app
+        .clone()
+        .oneshot(empty_request(
+            Method::POST,
+            &format!("/automations/{automation_id}/runs"),
+        ))
+        .await
+        .expect("create automation run should respond");
+    response_json(
+        response,
+        expected,
+        format!("POST /api/v1/automations/{automation_id}/runs"),
+    )
+    .await
+}
+
+async fn list_automation_runs(app: &axum::Router, path: &str) -> Value {
+    let response = app
+        .clone()
+        .oneshot(empty_request(Method::GET, path))
+        .await
+        .expect("list automation runs should respond");
+    response_json(response, StatusCode::OK, format!("GET /api/v1{path}")).await
 }
 
 fn revision_from(body: &Value) -> &str {
@@ -498,4 +552,144 @@ async fn automations_routes_require_authenticated_user() {
         "GET /api/v1/automations without auth",
     )
     .await;
+}
+
+#[tokio::test]
+async fn disabled_automation_run_endpoint_returns_conflict_code() {
+    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+    let mut body = automation_body("nightly", "Nightly");
+    body["enabled"] = json!(false);
+    create_automation_with_body(&app, &body).await;
+
+    let error = create_automation_run(&app, "nightly", StatusCode::CONFLICT).await;
+
+    assert_eq!(
+        error["errors"][0]["code"],
+        "automation_api_trigger_disabled"
+    );
+}
+
+#[tokio::test]
+async fn missing_automation_run_endpoint_returns_not_found() {
+    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+
+    create_automation_run(&app, "missing", StatusCode::NOT_FOUND).await;
+}
+
+#[tokio::test]
+async fn disabled_api_trigger_run_endpoint_returns_conflict_code() {
+    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+    let mut body = automation_body("nightly", "Nightly");
+    body["triggers"][0]["enabled"] = json!(false);
+    create_automation_with_body(&app, &body).await;
+
+    let error = create_automation_run(&app, "nightly", StatusCode::CONFLICT).await;
+
+    assert_eq!(
+        error["errors"][0]["code"],
+        "automation_api_trigger_disabled"
+    );
+}
+
+#[tokio::test]
+async fn missing_api_trigger_run_endpoint_returns_conflict_code() {
+    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+    let mut body = automation_body("nightly", "Nightly");
+    body["triggers"] = json!([
+        {
+            "type": "schedule",
+            "id": "nightly",
+            "enabled": true,
+            "expression": "0 3 * * *"
+        }
+    ]);
+    create_automation_with_body(&app, &body).await;
+
+    let error = create_automation_run(&app, "nightly", StatusCode::CONFLICT).await;
+
+    assert_eq!(
+        error["errors"][0]["code"],
+        "automation_api_trigger_disabled"
+    );
+}
+
+#[tokio::test]
+async fn successful_api_triggered_automation_run_persists_automation_metadata() {
+    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+    create_automation(&app, "nightly", "Nightly").await;
+
+    let created = create_automation_run(&app, "nightly", StatusCode::CREATED).await;
+
+    assert_eq!(created["automation"]["id"], "nightly");
+    assert_eq!(created["automation"]["name"], "Nightly");
+    assert_eq!(created["automation"]["trigger_id"], "manual");
+
+    let run_id = created["id"]
+        .as_str()
+        .expect("created automation run should include id");
+    let retrieved = run_json(&app, run_id).await;
+    assert_eq!(retrieved["id"], run_id);
+    assert_eq!(retrieved["automation"], created["automation"]);
+}
+
+#[tokio::test]
+async fn automation_run_listing_includes_only_runs_for_that_automation() {
+    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+    create_automation(&app, "nightly", "Nightly").await;
+    create_automation(&app, "weekly", "Weekly").await;
+    let nightly = create_automation_run(&app, "nightly", StatusCode::CREATED).await;
+    let weekly = create_automation_run(&app, "weekly", StatusCode::CREATED).await;
+
+    let body = list_automation_runs(&app, "/automations/nightly/runs").await;
+
+    assert_eq!(body["meta"]["total"], 1);
+    assert_eq!(body["meta"]["has_more"], false);
+    assert_eq!(
+        body["data"].as_array().expect("data should be array").len(),
+        1
+    );
+    assert_eq!(body["data"][0]["id"], nightly["id"]);
+    assert_ne!(body["data"][0]["id"], weekly["id"]);
+    assert_eq!(body["data"][0]["automation"]["id"], "nightly");
+}
+
+#[tokio::test]
+async fn missing_automation_run_listing_returns_not_found() {
+    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+
+    let response = app
+        .oneshot(empty_request(Method::GET, "/automations/missing/runs"))
+        .await
+        .expect("missing automation run listing should respond");
+
+    response_status(
+        response,
+        StatusCode::NOT_FOUND,
+        "GET /api/v1/automations/missing/runs",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn automation_run_listing_is_newest_first_and_paginates() {
+    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+    create_automation(&app, "nightly", "Nightly").await;
+    let oldest = create_automation_run(&app, "nightly", StatusCode::CREATED).await;
+    let middle = create_automation_run(&app, "nightly", StatusCode::CREATED).await;
+    let newest = create_automation_run(&app, "nightly", StatusCode::CREATED).await;
+
+    let first_page = list_automation_runs(&app, "/automations/nightly/runs?page[limit]=2").await;
+    assert_eq!(first_page["meta"]["total"], 3);
+    assert_eq!(first_page["meta"]["has_more"], true);
+    assert_eq!(first_page["data"][0]["id"], newest["id"]);
+    assert_eq!(first_page["data"][1]["id"], middle["id"]);
+
+    let second_page = list_automation_runs(
+        &app,
+        "/automations/nightly/runs?page[limit]=2&page[offset]=2",
+    )
+    .await;
+    assert_eq!(second_page["meta"]["total"], 3);
+    assert_eq!(second_page["meta"]["has_more"], false);
+    assert_eq!(second_page["data"][0]["id"], oldest["id"]);
 }

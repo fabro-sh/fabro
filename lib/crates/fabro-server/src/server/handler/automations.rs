@@ -1,16 +1,26 @@
 use std::sync::Arc;
 
 use axum::http::{HeaderMap, HeaderValue, header};
+use axum_extra::extract::Query as ExtraQuery;
 use fabro_automation::{
-    Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationRevision,
-    AutomationStoreError,
+    ApiTrigger, Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationRevision,
+    AutomationStoreError, AutomationTrigger,
 };
+use fabro_config::Storage;
+use fabro_types::{AutomationRef, RunId};
 use serde::Serialize;
 
 use super::super::{
-    ApiError, AppState, IntoResponse, Json, Path, RequiredUser, Response, Router, State,
-    StatusCode, get,
+    ApiError, AppState, IntoResponse, Json, PaginationParams, Path, RequiredUser, Response, Router,
+    State, StatusCode, get, paginate_items,
 };
+use super::runs;
+use crate::automation_materializer::{
+    AutomationRunMaterializeError, AutomationRunMaterializeInput,
+};
+use crate::principal_middleware::RequiredRunToolActor;
+
+const AUTOMATION_API_TRIGGER_DISABLED_CODE: &str = "automation_api_trigger_disabled";
 
 #[derive(Serialize)]
 struct AutomationListResponse {
@@ -28,6 +38,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/automations",
             get(list_automations).post(create_automation),
+        )
+        .route(
+            "/automations/{id}/runs",
+            get(list_automation_runs).post(create_automation_run),
         )
         .route(
             "/automations/{id}",
@@ -48,6 +62,116 @@ async fn list_automations(_auth: RequiredUser, State(state): State<Arc<AppState>
         }),
     )
         .into_response()
+}
+
+async fn list_automation_runs(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    ExtraQuery(pagination): ExtraQuery<PaginationParams>,
+) -> Response {
+    let id = match parse_path_id(id) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    if state.automation_store().get(&id).await.is_none() {
+        return ApiError::not_found(format!("automation not found: {id}")).into_response();
+    }
+
+    let entries = match state
+        .store
+        .list_cached_runs(&fabro_store::ListRunsQuery::default(), chrono::Utc::now())
+        .await
+    {
+        Ok(entries) => entries,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let mut runs: Vec<fabro_types::Run> = entries
+        .into_iter()
+        .map(|entry| entry.summary)
+        .filter(|run| {
+            run.automation
+                .as_ref()
+                .is_some_and(|automation| automation.id == id.as_str())
+        })
+        .collect();
+    runs.sort_by(|a, b| {
+        b.timestamps
+            .created_at
+            .cmp(&a.timestamps.created_at)
+            .then_with(|| b.id.cmp(&a.id))
+    });
+
+    let total = runs.len() as u64;
+    let decorated = state.decorate_run_summaries(runs).await;
+    let (data, has_more) = paginate_items(decorated, &pagination);
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "data": data,
+            "meta": { "has_more": has_more, "total": total }
+        })),
+    )
+        .into_response()
+}
+
+async fn create_automation_run(
+    RequiredRunToolActor(actor): RequiredRunToolActor,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_path_id(id) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    let Some(automation) = state.automation_store().get(&id).await else {
+        return ApiError::not_found(format!("automation not found: {id}")).into_response();
+    };
+    let Some(api_trigger) = enabled_api_trigger(&automation) else {
+        return automation_api_trigger_disabled_error().into_response();
+    };
+    let api_trigger_id = api_trigger.id.to_string();
+
+    let run_id = RunId::new();
+    let materialized = match state
+        .materialize_automation_run(AutomationRunMaterializeInput {
+            automation_id: automation.id.clone(),
+            target: automation.target.clone(),
+            run_id,
+            user_settings_path: state.active_config_path().to_path_buf(),
+            temp_root: automation_materialization_temp_root(state.as_ref()),
+        })
+        .await
+    {
+        Ok(materialized) => materialized,
+        Err(err) => return automation_materialize_error(&err).into_response(),
+    };
+    let explicit_title_supplied = materialized.manifest.title.is_some();
+    let automation_ref = AutomationRef {
+        id:         automation.id.to_string(),
+        name:       Some(automation.name.clone()),
+        trigger_id: Some(api_trigger_id),
+    };
+
+    Box::pin(runs::create_run_from_manifest(
+        state,
+        runs::CreateRunFromManifestRequest {
+            manifest: materialized.manifest,
+            submitted_manifest_bytes: materialized.submitted_manifest_bytes,
+            explicit_run_id: Some(run_id),
+            explicit_title_supplied,
+            actor,
+            headers,
+            automation: Some(automation_ref),
+        },
+    ))
+    .await
 }
 
 async fn create_automation(
@@ -128,6 +252,37 @@ fn unquote_etag(value: &str) -> &str {
         .strip_prefix('"')
         .and_then(|unquoted| unquoted.strip_suffix('"'))
         .unwrap_or(value)
+}
+
+fn enabled_api_trigger(automation: &Automation) -> Option<&ApiTrigger> {
+    if !automation.enabled {
+        return None;
+    }
+    automation
+        .triggers
+        .iter()
+        .find_map(|trigger| match trigger {
+            AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),
+            _ => None,
+        })
+}
+
+fn automation_api_trigger_disabled_error() -> ApiError {
+    ApiError::with_code(
+        StatusCode::CONFLICT,
+        "automation is disabled or has no enabled API trigger",
+        AUTOMATION_API_TRIGGER_DISABLED_CODE,
+    )
+}
+
+fn automation_materialization_temp_root(state: &AppState) -> std::path::PathBuf {
+    Storage::new(state.server_storage_dir())
+        .scratch_dir()
+        .join("automations")
+}
+
+fn automation_materialize_error(err: &AutomationRunMaterializeError) -> ApiError {
+    ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, err.to_string())
 }
 
 fn automation_with_etag_response(status: StatusCode, automation: Automation) -> Response {
