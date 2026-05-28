@@ -14,16 +14,14 @@ const MODEL: &str = "gpt-5.4-mini";
 
 #[expect(
     clippy::disallowed_methods,
-    reason = "e2e_openai! intentionally reads test credentials from the environment"
+    reason = "e2e_openai! expands live-mode environment lookups even for twin-only tests"
 )]
-#[fabro_macros::e2e_test(twin, live("OPENAI_API_KEY"))]
+#[fabro_macros::e2e_test(twin)]
 async fn openai_twin_compaction_preserves_tool_call_pairs() {
     let tmp = tempfile::tempdir().expect("failed to create tempdir");
     let (base_url, api_key) = fabro_test::e2e_openai!();
 
-    if fabro_test::TestMode::from_env().is_twin() {
-        load_compaction_scenarios(&api_key).await;
-    }
+    load_compaction_scenarios(&api_key).await;
 
     let mut session = make_openai_session(tmp.path(), base_url, api_key);
     session.initialize().await.unwrap();

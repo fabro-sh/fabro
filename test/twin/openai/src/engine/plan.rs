@@ -1,4 +1,50 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TokenUsage {
+    pub input_tokens:  u64,
+    pub output_tokens: u64,
+}
+
+impl TokenUsage {
+    #[must_use]
+    pub const fn new(input_tokens: u64, output_tokens: u64) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+        }
+    }
+
+    #[must_use]
+    pub const fn total_tokens(self) -> u64 {
+        self.input_tokens + self.output_tokens
+    }
+
+    #[must_use]
+    pub fn responses_json(self) -> Value {
+        json!({
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens(),
+        })
+    }
+
+    #[must_use]
+    pub fn chat_completions_json(self) -> Value {
+        json!({
+            "prompt_tokens": self.input_tokens,
+            "completion_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens(),
+        })
+    }
+}
+
+impl Default for TokenUsage {
+    fn default() -> Self {
+        Self::new(1, 5)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ResponsePlan {
@@ -9,8 +55,7 @@ pub struct ResponsePlan {
     pub structured_output: Option<Value>,
     pub reasoning:         Vec<String>,
     pub tool_calls:        Vec<ToolCallPlan>,
-    pub input_tokens:      u64,
-    pub output_tokens:     u64,
+    pub usage:             TokenUsage,
 }
 
 #[derive(Clone, Debug)]
@@ -77,11 +122,7 @@ impl ResponsePlan {
             "status": "completed",
             "reasoning": self.reasoning,
             "output": output,
-            "usage": {
-                "input_tokens": self.input_tokens,
-                "output_tokens": self.output_tokens,
-                "total_tokens": self.input_tokens + self.output_tokens,
-            }
+            "usage": self.usage.responses_json()
         })
     }
 
@@ -108,11 +149,7 @@ impl ResponsePlan {
                     })).collect::<Vec<_>>(),
                 }
             }],
-            "usage": {
-                "prompt_tokens": self.input_tokens,
-                "completion_tokens": self.output_tokens,
-                "total_tokens": self.input_tokens + self.output_tokens,
-            }
+            "usage": self.usage.chat_completions_json()
         })
     }
 }

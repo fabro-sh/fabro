@@ -2208,8 +2208,10 @@ impl TwinScenario {
     #[must_use]
     pub fn usage(mut self, input_tokens: u64, output_tokens: u64) -> Self {
         self.assert_script_kind("success", "usage");
-        self.script["input_tokens"] = Value::Number(input_tokens.into());
-        self.script["output_tokens"] = Value::Number(output_tokens.into());
+        self.script["usage"] = json!({
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        });
         self
     }
 

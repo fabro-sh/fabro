@@ -78,19 +78,22 @@ pub(crate) async fn compact_context(
     session_id: &str,
 ) -> Result<(), Error> {
     let original_turn_count = history.turns().len();
+    let preserve_start = history.compact_preserve_start(preserve_count);
 
-    // Determine turns to summarize. If there are not enough turns to compact,
-    // do not emit a started event without a matching completion.
-    if original_turn_count <= preserve_count {
+    // If preserving tool call/result pairs leaves no prefix to summarize, do
+    // not spend a summarization call or emit a started event without a
+    // matching completion.
+    if preserve_start == 0 {
         return Ok(());
     }
+    let preserved_turn_count = original_turn_count - preserve_start;
 
     emitter.emit(session_id.to_owned(), AgentEvent::CompactionStarted {
         estimated_tokens:    estimate.tokens,
         context_window_size: provider_profile.context_window_size(),
     });
 
-    let turns_to_summarize = &history.turns()[..original_turn_count - preserve_count];
+    let turns_to_summarize = &history.turns()[..preserve_start];
     let rendered = render_turns_for_summary(turns_to_summarize);
 
     // Build structured summarization prompt
@@ -157,11 +160,11 @@ Build on their progress — do not repeat completed steps.\n\n{summary_text}"
     );
     let summary_token_estimate = estimate_chars_local_tokens(summary_content.len());
 
-    history.compact(preserve_count, summary_content);
+    history.compact_from(preserve_start, summary_content);
 
     emitter.emit(session_id.to_owned(), AgentEvent::CompactionCompleted {
         original_turn_count,
-        preserved_turn_count: preserve_count,
+        preserved_turn_count,
         summary_token_estimate,
         tracked_file_count: file_tracker.file_count(),
     });

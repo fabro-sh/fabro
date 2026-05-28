@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::plan::ResponsePlan;
+use super::plan::{ResponsePlan, TokenUsage};
 use crate::openai::models::{ResponseFormat, ResponsesRequest, normalize_whitespace};
 
 pub fn build_default_response_plan(
@@ -35,8 +35,7 @@ pub fn build_default_response_plan(
         structured_output,
         reasoning,
         tool_calls: Vec::new(),
-        input_tokens,
-        output_tokens: 5,
+        usage: TokenUsage::new(input_tokens, 5),
     }
 }
 
@@ -74,8 +73,7 @@ pub fn build_default_chat_plan(
         structured_output,
         reasoning,
         tool_calls: Vec::new(),
-        input_tokens,
-        output_tokens: 5,
+        usage: TokenUsage::new(input_tokens, 5),
     }
 }
 
