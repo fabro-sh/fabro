@@ -58,6 +58,7 @@ mod tests {
     use fabro_types::settings::run::{HookType, McpHttpProtocol, McpTransport, TlsMode};
 
     use crate::SettingsLayer;
+    use crate::tests::workflow_settings_from_layer;
 
     #[test]
     fn resolve_preserves_source_templates_for_mcp_and_hook_strings() {
@@ -100,7 +101,7 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
         .parse::<SettingsLayer>()
         .expect("settings fixture should parse");
 
-        let resolved = crate::tests::workflow_settings_from_layer(settings)
+        let resolved = workflow_settings_from_layer(settings)
             .expect("run settings should resolve")
             .run;
         let mcps = &resolved.agent.mcps;

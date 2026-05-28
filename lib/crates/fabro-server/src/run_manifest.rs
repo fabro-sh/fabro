@@ -7,12 +7,12 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail};
 use fabro_api::types;
 use fabro_auth::auth_issue_message;
+use fabro_config::parse::{self, SettingsSource};
 use fabro_config::{
     CliLayer, CliOutputLayer, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
     MergeMap, RunLayer, SettingsLayer, WorkflowSettingsBuilder, parse_input_overrides,
     parse_labels,
 };
-use fabro_config::parse::{self, SettingsSource};
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
@@ -2534,6 +2534,7 @@ digraph Demo {
         //! unknown fields anywhere in the document trip
         //! `deny_unknown_fields`.
 
+        use fabro_config::parse::SettingsSource;
         use fabro_types::ManifestPath;
         use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig};
 
@@ -2566,6 +2567,7 @@ issues = "read"
                 &workflow.config.as_ref().unwrap().source,
                 &workflow.config.as_ref().unwrap().path,
                 &workflow.files,
+                SettingsSource::Workflow,
             )
             .expect("workflow.toml should parse");
             let run = layer.run.expect("run layer should be present");
@@ -2596,6 +2598,7 @@ issues = "read"
                 &workflow.config.as_ref().unwrap().source,
                 &workflow.config.as_ref().unwrap().path,
                 &workflow.files,
+                SettingsSource::Workflow,
             )
             .expect_err("stale [server.integrations.github.permissions] should be rejected");
             let message = format!("{err:#}");
@@ -2622,6 +2625,7 @@ contents = "read"
                 &workflow.config.as_ref().unwrap().source,
                 &workflow.config.as_ref().unwrap().path,
                 &workflow.files,
+                SettingsSource::Workflow,
             )
             .expect("workflow + run blocks should parse");
             let run = layer.run.expect("run layer should be present");

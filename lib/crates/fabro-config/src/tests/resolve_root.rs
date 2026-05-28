@@ -65,7 +65,7 @@ provider = "not-a-provider"
             .expect("bad environment catalog should parse")
             .environments,
         )
-            .expect_err("invalid run settings should fail")
+        .expect_err("invalid run settings should fail")
         {
             fabro_config::Error::Resolve { errors, .. } => errors,
             other => panic!("expected resolve error, got {other:#}"),
@@ -136,8 +136,7 @@ name = "gpt-5"
 #[test]
 fn workflow_settings_resolve_defaults_and_expose_fields() {
     let settings = SettingsLayer::default();
-    let resolved = super::workflow_settings_from_layer(settings)
-        .expect("defaults should resolve");
+    let resolved = super::workflow_settings_from_layer(settings).expect("defaults should resolve");
 
     let project_json =
         serde_json::to_value(&resolved.project).expect("project settings should serialize");

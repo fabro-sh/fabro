@@ -13,7 +13,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::{Router, middleware};
 use chrono::Duration as ChronoDuration;
-use fabro_config::{RunLayer, RunSettingsBuilder, ServerSettingsBuilder, envfile};
+use fabro_config::{RunLayer, ServerSettingsBuilder, envfile};
 use fabro_interview::Interviewer;
 use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
 use fabro_sandbox::SandboxProviderRegistry;
@@ -21,7 +21,6 @@ use fabro_static::EnvVars;
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{AuthMethod, IdpIdentity, ServerSettings};
-use fabro_util::error::SharedError;
 use fabro_vault::{SecretType, Vault};
 use fabro_workflow::handler::HandlerRegistry;
 use object_store::memory::InMemory as MemoryObjectStore;
@@ -336,10 +335,8 @@ pub(crate) fn resolved_runtime_settings_for_tests(
     llm_catalog_settings: LlmCatalogSettings,
 ) -> ResolvedAppStateSettings {
     ResolvedAppStateSettings {
-        manifest_run_settings: RunSettingsBuilder::from_run_layer(&manifest_run_defaults)
-            .map_err(|err| SharedError::new(anyhow::Error::new(err))),
-        manifest_run_defaults,
         server_settings,
+        manifest_run_defaults,
         llm_catalog_settings,
     }
 }

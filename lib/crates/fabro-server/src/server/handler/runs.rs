@@ -641,7 +641,7 @@ pub(crate) async fn create_run_from_manifest(
     let manifest_environment_defaults = state.environment_store().catalog_layer();
     let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
-        &manifest_environment_defaults,
+        manifest_environment_defaults.as_ref(),
         &manifest,
     ) {
         Ok(prepared) => prepared,
@@ -905,7 +905,7 @@ async fn run_preflight(
     let manifest_environment_defaults = state.environment_store().catalog_layer();
     let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
-        &manifest_environment_defaults,
+        manifest_environment_defaults.as_ref(),
         &req,
     ) {
         Ok(prepared) => prepared,
@@ -942,7 +942,7 @@ async fn validate_run_manifest(
     let manifest_environment_defaults = state.environment_store().catalog_layer();
     let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
-        &manifest_environment_defaults,
+        manifest_environment_defaults.as_ref(),
         &req,
     ) {
         Ok(prepared) => prepared,

@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fabro_config::{EnvironmentLayer, MergeMap};
+use fabro_types::settings::run::EnvironmentSettings;
 use tokio::fs;
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::Mutex;
 
 use crate::{
-    Environment, EnvironmentDraft, EnvironmentId, EnvironmentReplace, EnvironmentRevision,
-    EnvironmentStoreError,
+    Environment, EnvironmentDraft, EnvironmentId, EnvironmentRevision, EnvironmentStoreError,
 };
 
 const SEEDS: &[(&str, &str)] = &[
@@ -59,7 +60,37 @@ pub struct EnvironmentStore {
     dir:              PathBuf,
     request_base_dir: PathBuf,
     mutations:        Mutex<()>,
-    environments:     std::sync::RwLock<HashMap<EnvironmentId, Environment>>,
+    state:            std::sync::RwLock<CatalogState>,
+}
+
+#[derive(Debug, Clone)]
+struct CatalogState {
+    environments: HashMap<EnvironmentId, Environment>,
+    catalog:      Arc<MergeMap<EnvironmentLayer>>,
+}
+
+impl CatalogState {
+    fn new(environments: HashMap<EnvironmentId, Environment>) -> Self {
+        let catalog = Arc::new(build_catalog_layer(&environments));
+        Self {
+            environments,
+            catalog,
+        }
+    }
+
+    fn refresh_catalog(&mut self) {
+        self.catalog = Arc::new(build_catalog_layer(&self.environments));
+    }
+}
+
+fn build_catalog_layer(
+    environments: &HashMap<EnvironmentId, Environment>,
+) -> MergeMap<EnvironmentLayer> {
+    let catalog: HashMap<String, EnvironmentLayer> = environments
+        .iter()
+        .map(|(id, environment)| (id.to_string(), environment.to_layer()))
+        .collect();
+    MergeMap::from(catalog)
 }
 
 impl EnvironmentStore {
@@ -70,50 +101,43 @@ impl EnvironmentStore {
         let dir = dir.into();
         seed_missing_environments(&dir)?;
         let environments = load_environments(&dir)?;
-        let request_base_dir = dir
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
+        let request_base_dir = dir.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
         Ok(Self {
             dir,
             request_base_dir,
             mutations: Mutex::new(()),
-            environments: std::sync::RwLock::new(environments),
+            state: std::sync::RwLock::new(CatalogState::new(environments)),
         })
     }
 
-    pub async fn list(&self) -> Vec<Environment> {
-        let environments = self
-            .environments
-            .read()
-            .expect("environment store read lock poisoned");
-        let mut values = environments.values().cloned().collect::<Vec<_>>();
+    fn read_state(&self) -> std::sync::RwLockReadGuard<'_, CatalogState> {
+        self.state.read().expect("environment store lock poisoned")
+    }
+
+    fn write_state(&self) -> std::sync::RwLockWriteGuard<'_, CatalogState> {
+        self.state.write().expect("environment store lock poisoned")
+    }
+
+    pub fn list(&self) -> Vec<Environment> {
+        let state = self.read_state();
+        let mut values = state.environments.values().cloned().collect::<Vec<_>>();
         values.sort_by(|left, right| left.id.cmp(&right.id));
         values
     }
 
-    pub async fn get(&self, id: &EnvironmentId) -> Option<Environment> {
-        self.environments
-            .read()
-            .expect("environment store read lock poisoned")
-            .get(id)
-            .cloned()
+    pub fn get(&self, id: &EnvironmentId) -> Option<Environment> {
+        self.read_state().environments.get(id).cloned()
     }
 
     pub async fn create(
         &self,
         draft: EnvironmentDraft,
     ) -> Result<Environment, EnvironmentStoreError> {
-        let (id, replace) = draft.into();
+        let EnvironmentDraft { id, settings } = draft;
         let (environment, bytes) =
-            Environment::from_replace(id.clone(), replace, &self.request_base_dir)?;
+            Environment::from_settings(id.clone(), settings, &self.request_base_dir)?;
         let _mutation = self.mutations.lock().await;
-        if self
-            .environments
-            .read()
-            .expect("environment store read lock poisoned")
-            .contains_key(&id)
-        {
+        if self.read_state().environments.contains_key(&id) {
             return Err(EnvironmentStoreError::AlreadyExists { id });
         }
 
@@ -122,11 +146,9 @@ impl EnvironmentStore {
             .await
             .map_err(|err| create_error_for(id.clone(), err))?;
 
-        let mut environments = self
-            .environments
-            .write()
-            .expect("environment store write lock poisoned");
-        environments.insert(id, environment.clone());
+        let mut state = self.write_state();
+        state.environments.insert(id, environment.clone());
+        state.refresh_catalog();
         Ok(environment)
     }
 
@@ -134,34 +156,17 @@ impl EnvironmentStore {
         &self,
         id: &EnvironmentId,
         expected: &EnvironmentRevision,
-        draft: EnvironmentReplace,
+        settings: EnvironmentSettings,
     ) -> Result<Environment, EnvironmentStoreError> {
         let (environment, bytes) =
-            Environment::from_replace(id.clone(), draft, &self.request_base_dir)?;
+            Environment::from_settings(id.clone(), settings, &self.request_base_dir)?;
         let _mutation = self.mutations.lock().await;
-        {
-            let environments = self
-                .environments
-                .read()
-                .expect("environment store read lock poisoned");
-            let current = environments
-                .get(id)
-                .ok_or_else(|| EnvironmentStoreError::NotFound { id: id.clone() })?;
-            if &current.revision != expected {
-                return Err(EnvironmentStoreError::StaleRevision {
-                    id:       id.clone(),
-                    expected: expected.clone(),
-                    actual:   current.revision.clone(),
-                });
-            }
-        }
+        check_revision(&self.read_state().environments, id, expected)?;
 
         write_atomic(&self.dir, &environment_path(&self.dir, id), &bytes).await?;
-        let mut environments = self
-            .environments
-            .write()
-            .expect("environment store write lock poisoned");
-        environments.insert(id.clone(), environment.clone());
+        let mut state = self.write_state();
+        state.environments.insert(id.clone(), environment.clone());
+        state.refresh_catalog();
         Ok(environment)
     }
 
@@ -175,50 +180,44 @@ impl EnvironmentStore {
         }
 
         let _mutation = self.mutations.lock().await;
-        {
-            let environments = self
-                .environments
-                .read()
-                .expect("environment store read lock poisoned");
-            let current = environments
-                .get(id)
-                .ok_or_else(|| EnvironmentStoreError::NotFound { id: id.clone() })?;
-            if &current.revision != expected {
-                return Err(EnvironmentStoreError::StaleRevision {
-                    id:       id.clone(),
-                    expected: expected.clone(),
-                    actual:   current.revision.clone(),
-                });
-            }
-        }
+        check_revision(&self.read_state().environments, id, expected)?;
 
         let path = environment_path(&self.dir, id);
         fs::remove_file(&path)
             .await
             .map_err(|err| EnvironmentStoreError::io(path, err))?;
-        let mut environments = self
-            .environments
-            .write()
-            .expect("environment store write lock poisoned");
-        environments.remove(id);
+        let mut state = self.write_state();
+        state.environments.remove(id);
+        state.refresh_catalog();
         Ok(())
     }
 
-    pub fn catalog_layer(&self) -> MergeMap<EnvironmentLayer> {
-        let environments = self
-            .environments
-            .read()
-            .expect("environment store read lock poisoned");
-        let catalog: HashMap<String, EnvironmentLayer> = environments
-            .iter()
-            .map(|(id, environment)| (id.to_string(), environment.to_layer()))
-            .collect();
-        MergeMap::from(catalog)
+    pub fn catalog_layer(&self) -> Arc<MergeMap<EnvironmentLayer>> {
+        Arc::clone(&self.read_state().catalog)
     }
+}
+
+fn check_revision(
+    environments: &HashMap<EnvironmentId, Environment>,
+    id: &EnvironmentId,
+    expected: &EnvironmentRevision,
+) -> Result<(), EnvironmentStoreError> {
+    let current = environments
+        .get(id)
+        .ok_or_else(|| EnvironmentStoreError::NotFound { id: id.clone() })?;
+    if &current.revision != expected {
+        return Err(EnvironmentStoreError::StaleRevision {
+            id:       id.clone(),
+            expected: expected.clone(),
+            actual:   current.revision.clone(),
+        });
+    }
+    Ok(())
 }
 
 #[expect(
     clippy::disallowed_methods,
+    clippy::disallowed_types,
     reason = "Environment directory seeding runs synchronously during startup before request handling."
 )]
 fn seed_missing_environments(dir: &Path) -> Result<(), EnvironmentStoreError> {
@@ -337,29 +336,18 @@ async fn write_new(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), Environm
     fs::create_dir_all(dir)
         .await
         .map_err(|err| EnvironmentStoreError::io(dir, err))?;
-    let temp_path = temp_path_for(path);
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&temp_path)
+        .open(path)
         .await
-        .map_err(|err| EnvironmentStoreError::io(&temp_path, err))?;
-
-    if let Err(err) = file.write_all(bytes).await {
-        cleanup_temp(&temp_path).await;
-        return Err(EnvironmentStoreError::io(&temp_path, err));
-    }
-    if let Err(err) = file.sync_all().await {
-        cleanup_temp(&temp_path).await;
-        return Err(EnvironmentStoreError::io(&temp_path, err));
-    }
-    drop(file);
-
-    if let Err(err) = fs::hard_link(&temp_path, path).await {
-        cleanup_temp(&temp_path).await;
-        return Err(EnvironmentStoreError::io(path, err));
-    }
-    cleanup_temp(&temp_path).await;
+        .map_err(|err| EnvironmentStoreError::io(path, err))?;
+    file.write_all(bytes)
+        .await
+        .map_err(|err| EnvironmentStoreError::io(path, err))?;
+    file.sync_all()
+        .await
+        .map_err(|err| EnvironmentStoreError::io(path, err))?;
     Ok(())
 }
 
@@ -393,6 +381,10 @@ fn environment_path(dir: &Path, id: &EnvironmentId) -> PathBuf {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Unit tests for sync startup helpers use sync std::fs to set up fixtures."
+)]
 mod tests {
     use std::collections::HashMap;
 
@@ -405,8 +397,8 @@ mod tests {
     use tokio::fs;
 
     use crate::{
-        EnvironmentDraft, EnvironmentId, EnvironmentReplace, EnvironmentRevision,
-        EnvironmentStore, EnvironmentStoreError,
+        EnvironmentDraft, EnvironmentId, EnvironmentRevision, EnvironmentStore,
+        EnvironmentStoreError,
     };
 
     fn settings(provider: EnvironmentProvider) -> EnvironmentSettings {
@@ -422,22 +414,10 @@ mod tests {
         }
     }
 
-    fn replacement(provider: EnvironmentProvider) -> EnvironmentReplace {
-        EnvironmentReplace::from_settings(settings(provider))
-    }
-
     fn draft(id: &str, provider: EnvironmentProvider) -> EnvironmentDraft {
-        let settings = settings(provider);
         EnvironmentDraft {
-            id:        EnvironmentId::new(id).unwrap(),
-            provider:  settings.provider,
-            image:     settings.image,
-            resources: settings.resources,
-            network:   settings.network,
-            lifecycle: settings.lifecycle,
-            labels:    settings.labels,
-            volumes:   settings.volumes,
-            env:       settings.env,
+            id:       EnvironmentId::new(id).unwrap(),
+            settings: settings(provider),
         }
     }
 
@@ -447,7 +427,7 @@ mod tests {
         let environment_dir = dir.path().join("environments");
 
         let store = EnvironmentStore::load_or_seed(&environment_dir).unwrap();
-        let environments = store.list().await;
+        let environments = store.list();
 
         assert_eq!(
             environments
@@ -478,7 +458,6 @@ mod tests {
         assert_eq!(
             store
                 .list()
-                .await
                 .iter()
                 .map(|environment| environment.id.as_str())
                 .collect::<Vec<_>>(),
@@ -530,7 +509,10 @@ mode = "cidr_allow_list"
         let err = EnvironmentStore::load_or_seed(&environment_dir).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
-        assert!(err.to_string().contains("docker environments cannot enforce"));
+        assert!(
+            err.to_string()
+                .contains("docker environments cannot enforce")
+        );
     }
 
     #[test]
@@ -572,18 +554,11 @@ path = "Dockerfile"
     async fn replace_stale_revision_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
-        let current = store
-            .get(&EnvironmentId::new("local").unwrap())
-            .await
-            .unwrap();
+        let current = store.get(&EnvironmentId::new("local").unwrap()).unwrap();
         let stale = EnvironmentRevision::from_bytes(b"stale");
 
         let err = store
-            .replace(
-                &current.id,
-                &stale,
-                replacement(EnvironmentProvider::Docker),
-            )
+            .replace(&current.id, &stale, settings(EnvironmentProvider::Docker))
             .await
             .unwrap_err();
 
@@ -594,12 +569,12 @@ path = "Dockerfile"
     async fn default_delete_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
-        let default = store
-            .get(&EnvironmentId::new("default").unwrap())
-            .await
-            .unwrap();
+        let default = store.get(&EnvironmentId::new("default").unwrap()).unwrap();
 
-        let err = store.delete(&default.id, &default.revision).await.unwrap_err();
+        let err = store
+            .delete(&default.id, &default.revision)
+            .await
+            .unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::Protected { .. }));
     }
@@ -616,7 +591,7 @@ path = "Dockerfile"
 
         store.delete(&created.id, &created.revision).await.unwrap();
 
-        assert!(store.get(&created.id).await.is_none());
+        assert!(store.get(&created.id).is_none());
         assert!(!environment_dir.join("tmp.toml").exists());
     }
 
@@ -635,11 +610,7 @@ path = "Dockerfile"
         );
 
         let replaced = store
-            .replace(
-                &created.id,
-                &created.revision,
-                EnvironmentReplace::from_settings(next),
-            )
+            .replace(&created.id, &created.revision, next)
             .await
             .unwrap();
 
@@ -658,28 +629,18 @@ path = "Dockerfile"
             path: "Dockerfile".to_string(),
         });
         let draft = EnvironmentDraft {
-            id:        EnvironmentId::new("with-dockerfile").unwrap(),
-            provider:  settings.provider,
-            image:     settings.image,
-            resources: settings.resources,
-            network:   settings.network,
-            lifecycle: settings.lifecycle,
-            labels:    settings.labels,
-            volumes:   settings.volumes,
-            env:       settings.env,
+            id: EnvironmentId::new("with-dockerfile").unwrap(),
+            settings,
         };
 
         let created = store.create(draft).await.unwrap();
-        let persisted = fs::read_to_string(
-            dir.path()
-                .join("environments")
-                .join("with-dockerfile.toml"),
-        )
-        .await
-        .unwrap();
+        let persisted =
+            fs::read_to_string(dir.path().join("environments").join("with-dockerfile.toml"))
+                .await
+                .unwrap();
 
         assert_eq!(
-            created.image.dockerfile,
+            created.settings.image.dockerfile,
             Some(DockerfileSource::Inline("FROM alpine\n".to_string()))
         );
         assert!(persisted.contains("FROM alpine"));

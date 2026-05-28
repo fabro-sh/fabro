@@ -10,6 +10,7 @@ use fabro_static::EnvVars;
 
 use crate::home::Home;
 use crate::load::load_settings_path;
+use crate::parse::SettingsSource;
 use crate::{Result, SettingsLayer};
 
 pub const SETTINGS_CONFIG_FILENAME: &str = "settings.toml";
@@ -67,7 +68,7 @@ pub(crate) fn load_settings_config(path: Option<&Path>) -> Result<SettingsLayer>
 }
 
 fn load_v2_layer_from_path(path: &Path) -> Result<SettingsLayer> {
-    load_settings_path(path)
+    load_settings_path(path, SettingsSource::ActiveSettings)
 }
 
 #[cfg(test)]

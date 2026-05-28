@@ -126,9 +126,16 @@ pub enum SettingsSource {
 }
 
 impl SettingsSource {
+    /// `ActiveSettings` is the aggregated server-side settings file. Other
+    /// sources are leaf user configs that cannot define environment catalogs.
     #[must_use]
     pub(crate) fn runs_settings_migrations(self) -> bool {
         matches!(self, Self::ActiveSettings | Self::User)
+    }
+
+    #[must_use]
+    pub(crate) fn forbids_environment_catalog(self) -> bool {
+        !matches!(self, Self::ActiveSettings)
     }
 }
 
@@ -136,10 +143,7 @@ pub fn validate_settings_source(
     layer: &SettingsLayer,
     source: SettingsSource,
 ) -> Result<(), ParseError> {
-    if matches!(
-        source,
-        SettingsSource::Project | SettingsSource::Workflow | SettingsSource::DirectRun | SettingsSource::User
-    ) {
+    if source.forbids_environment_catalog() {
         if let Some(id) = layer.environments.keys().min() {
             return Err(ParseError::ServerManagedEnvironment {
                 path: format!("environments.{id}"),

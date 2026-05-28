@@ -1,197 +1,78 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fabro_config::{
-    EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
-    EnvironmentLifecycleLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer,
-    EnvironmentVolumeLayer, StickyMap,
+    EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer, EnvironmentLifecycleLayer,
+    EnvironmentNetworkLayer, EnvironmentResourcesLayer, EnvironmentVolumeLayer, StickyMap,
 };
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
-    EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentProvider,
-    EnvironmentResourcesSettings, EnvironmentSettings, EnvironmentVolumeSettings,
+    EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentResourcesSettings,
+    EnvironmentSettings, EnvironmentVolumeSettings,
 };
 use serde::{Deserialize, Serialize};
-use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
+use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value, value};
 
 use crate::{
     EnvironmentId, EnvironmentRevision, EnvironmentStoreError, EnvironmentValidationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Environment {
-    pub id:        EnvironmentId,
-    pub revision:  EnvironmentRevision,
-    pub provider:  EnvironmentProvider,
-    pub image:     EnvironmentImageSettings,
-    pub resources: EnvironmentResourcesSettings,
-    pub network:   EnvironmentNetworkSettings,
-    pub lifecycle: EnvironmentLifecycleSettings,
-    pub labels:    std::collections::HashMap<String, String>,
-    pub volumes:   Vec<EnvironmentVolumeSettings>,
-    pub env:       std::collections::HashMap<String, InterpString>,
+    pub id:       EnvironmentId,
+    pub revision: EnvironmentRevision,
+    #[serde(flatten)]
+    pub settings: EnvironmentSettings,
 }
 
 impl Environment {
-    pub fn from_toml_bytes(id: EnvironmentId, bytes: &[u8]) -> Result<Self, EnvironmentStoreError> {
-        let revision = EnvironmentRevision::from_bytes(bytes);
-        let persisted = parse_persisted(bytes, None)?;
-        Self::from_persisted(id, revision, persisted, None).map_err(EnvironmentStoreError::from)
-    }
-
     pub(crate) fn from_persisted_path(
         id: EnvironmentId,
         bytes: &[u8],
-        path: impl Into<PathBuf>,
+        path: &Path,
     ) -> Result<Self, EnvironmentStoreError> {
-        let path = path.into();
         let revision = EnvironmentRevision::from_bytes(bytes);
-        let persisted = parse_persisted(bytes, Some(path.clone()))?;
+        let mut persisted = parse_persisted(bytes, path)?;
         let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
-        Self::from_persisted(id, revision, persisted, Some(base_dir))
-            .map_err(EnvironmentStoreError::from)
+        inline_layer_dockerfile_paths(&mut persisted, base_dir)?;
+        let settings = resolve_environment(&persisted)?;
+        Ok(Self {
+            id,
+            revision,
+            settings,
+        })
     }
 
-    pub(crate) fn from_replace(
+    pub(crate) fn from_settings(
         id: EnvironmentId,
-        replacement: EnvironmentReplace,
+        settings: EnvironmentSettings,
         dockerfile_base_dir: &Path,
     ) -> Result<(Self, Vec<u8>), EnvironmentStoreError> {
-        let settings = replacement.into_settings();
         let settings = inline_dense_dockerfile(settings, dockerfile_base_dir)?;
         let persisted = environment_settings_to_layer(&settings);
         let bytes = canonical_bytes(&persisted).into_bytes();
         let revision = EnvironmentRevision::from_bytes(&bytes);
-        let environment = Self::from_validated_settings(id, revision, settings);
-        Ok((environment, bytes))
+        Ok((
+            Self {
+                id,
+                revision,
+                settings,
+            },
+            bytes,
+        ))
     }
 
     pub(crate) fn to_layer(&self) -> EnvironmentLayer {
-        environment_settings_to_layer(&self.settings())
-    }
-
-    #[must_use]
-    pub fn settings(&self) -> EnvironmentSettings {
-        EnvironmentSettings {
-            provider:  self.provider,
-            image:     self.image.clone(),
-            resources: self.resources.clone(),
-            network:   self.network.clone(),
-            lifecycle: self.lifecycle.clone(),
-            labels:    self.labels.clone(),
-            volumes:   self.volumes.clone(),
-            env:       self.env.clone(),
-        }
-    }
-
-    pub fn to_toml_string(&self) -> String {
-        canonical_bytes(&self.to_layer())
-    }
-
-    fn from_persisted(
-        id: EnvironmentId,
-        revision: EnvironmentRevision,
-        mut persisted: EnvironmentLayer,
-        dockerfile_base_dir: Option<&Path>,
-    ) -> Result<Self, EnvironmentValidationError> {
-        if let Some(base_dir) = dockerfile_base_dir {
-            inline_layer_dockerfile_paths(&mut persisted, base_dir)?;
-        }
-        let settings = resolve_environment(&persisted)?;
-        Ok(Self::from_validated_settings(id, revision, settings))
-    }
-
-    fn from_validated_settings(
-        id: EnvironmentId,
-        revision: EnvironmentRevision,
-        settings: EnvironmentSettings,
-    ) -> Self {
-        Self {
-            id,
-            revision,
-            provider: settings.provider,
-            image: settings.image,
-            resources: settings.resources,
-            network: settings.network,
-            lifecycle: settings.lifecycle,
-            labels: settings.labels,
-            volumes: settings.volumes,
-            env: settings.env,
-        }
+        environment_settings_to_layer(&self.settings)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct EnvironmentDraft {
-    pub id:        EnvironmentId,
-    pub provider:  EnvironmentProvider,
-    pub image:     EnvironmentImageSettings,
-    pub resources: EnvironmentResourcesSettings,
-    pub network:   EnvironmentNetworkSettings,
-    pub lifecycle: EnvironmentLifecycleSettings,
-    pub labels:    std::collections::HashMap<String, String>,
-    pub volumes:   Vec<EnvironmentVolumeSettings>,
-    pub env:       std::collections::HashMap<String, InterpString>,
-}
-
-impl From<EnvironmentDraft> for (EnvironmentId, EnvironmentReplace) {
-    fn from(value: EnvironmentDraft) -> Self {
-        (value.id, EnvironmentReplace {
-            provider:  value.provider,
-            image:     value.image,
-            resources: value.resources,
-            network:   value.network,
-            lifecycle: value.lifecycle,
-            labels:    value.labels,
-            volumes:   value.volumes,
-            env:       value.env,
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnvironmentReplace {
-    pub provider:  EnvironmentProvider,
-    pub image:     EnvironmentImageSettings,
-    pub resources: EnvironmentResourcesSettings,
-    pub network:   EnvironmentNetworkSettings,
-    pub lifecycle: EnvironmentLifecycleSettings,
-    pub labels:    std::collections::HashMap<String, String>,
-    pub volumes:   Vec<EnvironmentVolumeSettings>,
-    pub env:       std::collections::HashMap<String, InterpString>,
-}
-
-impl EnvironmentReplace {
-    #[must_use]
-    pub fn from_settings(settings: EnvironmentSettings) -> Self {
-        Self {
-            provider:  settings.provider,
-            image:     settings.image,
-            resources: settings.resources,
-            network:   settings.network,
-            lifecycle: settings.lifecycle,
-            labels:    settings.labels,
-            volumes:   settings.volumes,
-            env:       settings.env,
-        }
-    }
-
-    fn into_settings(self) -> EnvironmentSettings {
-        EnvironmentSettings {
-            provider:  self.provider,
-            image:     self.image,
-            resources: self.resources,
-            network:   self.network,
-            lifecycle: self.lifecycle,
-            labels:    self.labels,
-            volumes:   self.volumes,
-            env:       self.env,
-        }
-    }
+    pub id:       EnvironmentId,
+    #[serde(flatten)]
+    pub settings: EnvironmentSettings,
 }
 
 pub(crate) fn canonical_bytes(layer: &EnvironmentLayer) -> String {
@@ -219,18 +100,10 @@ pub(crate) fn canonical_bytes(layer: &EnvironmentLayer) -> String {
     doc.to_string()
 }
 
-fn parse_persisted(
-    bytes: &[u8],
-    path: Option<PathBuf>,
-) -> Result<EnvironmentLayer, EnvironmentStoreError> {
-    let content = std::str::from_utf8(bytes).map_err(|err| match &path {
-        Some(path) => EnvironmentStoreError::invalid_utf8(path.clone(), err),
-        None => EnvironmentStoreError::invalid_utf8("<memory>", err),
-    })?;
-    toml::from_str(content).map_err(|err| match path {
-        Some(path) => EnvironmentStoreError::parse(path, err),
-        None => EnvironmentStoreError::parse("<memory>", err),
-    })
+fn parse_persisted(bytes: &[u8], path: &Path) -> Result<EnvironmentLayer, EnvironmentStoreError> {
+    let content = std::str::from_utf8(bytes)
+        .map_err(|err| EnvironmentStoreError::invalid_utf8(path.to_path_buf(), err))?;
+    toml::from_str(content).map_err(|err| EnvironmentStoreError::parse(path.to_path_buf(), err))
 }
 
 fn resolve_environment(
@@ -243,6 +116,10 @@ fn resolve_environment(
     })
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Dockerfile inlining runs during synchronous startup load before request handling."
+)]
 fn inline_layer_dockerfile_paths(
     layer: &mut EnvironmentLayer,
     base_dir: &Path,
@@ -253,16 +130,21 @@ fn inline_layer_dockerfile_paths(
     let Some(EnvironmentDockerfileLayer::Path { path }) = image.dockerfile.as_ref() else {
         return Ok(());
     };
-    let path = resolve_path(base_dir, path);
-    let content =
-        std::fs::read_to_string(&path).map_err(|source| EnvironmentValidationError::DockerfileRead {
+    let path = base_dir.join(path);
+    let content = std::fs::read_to_string(&path).map_err(|source| {
+        EnvironmentValidationError::DockerfileRead {
             path: path.clone(),
             source,
-        })?;
+        }
+    })?;
     image.dockerfile = Some(EnvironmentDockerfileLayer::Inline(content));
     Ok(())
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Dockerfile inlining for API create/replace happens on a Tokio worker thread via spawn_blocking elsewhere; this function is only invoked from synchronous paths."
+)]
 fn inline_dense_dockerfile(
     mut settings: EnvironmentSettings,
     base_dir: &Path,
@@ -270,23 +152,15 @@ fn inline_dense_dockerfile(
     let Some(DockerfileSource::Path { path }) = settings.image.dockerfile.as_ref() else {
         return Ok(settings);
     };
-    let path = resolve_path(base_dir, path);
-    let content =
-        std::fs::read_to_string(&path).map_err(|source| EnvironmentValidationError::DockerfileRead {
+    let path = base_dir.join(path);
+    let content = std::fs::read_to_string(&path).map_err(|source| {
+        EnvironmentValidationError::DockerfileRead {
             path: path.clone(),
             source,
-        })?;
+        }
+    })?;
     settings.image.dockerfile = Some(DockerfileSource::Inline(content));
     Ok(settings)
-}
-
-fn resolve_path(base_dir: &Path, path: &str) -> PathBuf {
-    let path = Path::new(path);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        base_dir.join(path)
-    }
 }
 
 fn environment_settings_to_layer(settings: &EnvironmentSettings) -> EnvironmentLayer {
@@ -302,9 +176,7 @@ fn environment_settings_to_layer(settings: &EnvironmentSettings) -> EnvironmentL
     }
 }
 
-fn image_settings_to_layer(
-    settings: &EnvironmentImageSettings,
-) -> Option<EnvironmentImageLayer> {
+fn image_settings_to_layer(settings: &EnvironmentImageSettings) -> Option<EnvironmentImageLayer> {
     if settings.docker.is_none() && settings.dockerfile.is_none() {
         return None;
     }
@@ -435,8 +307,8 @@ fn append_string_map(root: &mut Table, name: &str, map: &StickyMap<String>) {
         return;
     }
     let table = ensure_table(root, &[name]);
-    for (key, value) in sorted_map(map) {
-        table[key] = self::value(value.as_str());
+    for (key, entry) in sorted_map(map) {
+        table[key] = value(entry.as_str());
     }
 }
 
@@ -445,8 +317,8 @@ fn append_interp_map(root: &mut Table, name: &str, map: &StickyMap<InterpString>
         return;
     }
     let table = ensure_table(root, &[name]);
-    for (key, value) in sorted_map(map) {
-        table[key] = self::value(value.as_source());
+    for (key, entry) in sorted_map(map) {
+        table[key] = value(entry.as_source());
     }
 }
 
@@ -470,7 +342,7 @@ fn append_volumes(root: &mut Table, volumes: &[EnvironmentVolumeLayer]) {
 fn ensure_table<'a>(root: &'a mut Table, path: &[&str]) -> &'a mut Table {
     let mut current = root;
     for key in path {
-        if !current.contains_key(*key) {
+        if !current.contains_key(key) {
             current[*key] = Item::Table(Table::new());
         }
         current = current[*key]
@@ -478,10 +350,6 @@ fn ensure_table<'a>(root: &'a mut Table, path: &[&str]) -> &'a mut Table {
             .expect("environment canonical table should be a table");
     }
     current
-}
-
-fn value(value: impl Into<Value>) -> Item {
-    Item::Value(value.into())
 }
 
 fn string_array(values: &[String]) -> Item {

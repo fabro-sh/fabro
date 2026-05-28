@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoal, RunNamespace};
 
-use crate::load::{load_settings_path_with_source, resolve_goal_file_path};
+use crate::load::{load_settings_path, resolve_goal_file_path};
 use crate::parse::{SettingsSource, validate_settings_source};
 use crate::{Result, RunGoalLayer, RunLayer, SettingsLayer};
 
@@ -23,7 +23,7 @@ use crate::{Result, RunGoalLayer, RunLayer, SettingsLayer};
 /// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
 pub(crate) fn load_run_config(path: &Path) -> Result<SettingsLayer> {
-    load_settings_path_with_source(path, SettingsSource::Workflow)
+    load_settings_path(path, SettingsSource::Workflow)
 }
 
 /// Parse a settings TOML source string and extract its `[run]` layer.

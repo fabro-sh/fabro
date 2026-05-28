@@ -1241,10 +1241,9 @@ pub(crate) struct AppStateConfig {
 
 #[derive(Clone)]
 pub(crate) struct ResolvedAppStateSettings {
-    pub(crate) server_settings:               ServerSettings,
-    pub(crate) manifest_run_defaults:         RunLayer,
-    pub(crate) manifest_run_settings:         std::result::Result<RunNamespace, SharedError>,
-    pub(crate) llm_catalog_settings:          LlmCatalogSettings,
+    pub(crate) server_settings:       ServerSettings,
+    pub(crate) manifest_run_defaults: RunLayer,
+    pub(crate) llm_catalog_settings:  LlmCatalogSettings,
 }
 
 fn accumulate_billing_rollup(
@@ -1535,7 +1534,6 @@ impl AppState {
         let ResolvedAppStateSettings {
             server_settings,
             manifest_run_defaults,
-            manifest_run_settings: _,
             llm_catalog_settings,
         } = resolved_settings;
         let server_settings = Arc::new(server_settings);
@@ -2157,7 +2155,7 @@ fn resolve_manifest_run_settings_with_catalog(
     WorkflowSettingsBuilder::new()
         .server_manifest_defaults(
             manifest_run_defaults.clone(),
-            environment_store.catalog_layer(),
+            (*environment_store.catalog_layer()).clone(),
         )
         .build()
         .map(|settings| settings.run)

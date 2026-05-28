@@ -608,8 +608,8 @@ mod run_integrations_github_permissions {
 
     use fabro_types::settings::InterpString;
 
-    use crate::layers::Combine;
     use crate::SettingsLayer;
+    use crate::layers::Combine;
 
     fn parse_settings(source: &str) -> SettingsLayer {
         source
@@ -778,8 +778,8 @@ issues = "{{ env.GH_PERM_LEVEL }}"
 }
 
 mod run_agent_fabro_tools {
-    use crate::layers::Combine;
     use crate::SettingsLayer;
+    use crate::layers::Combine;
 
     fn parse_settings(source: &str) -> SettingsLayer {
         source
@@ -857,8 +857,8 @@ fabro_tools = true
 mod run_checkpoint_skip_git_hooks {
     //! Layer + resolver tests for `[run.checkpoint] skip_git_hooks`.
 
-    use crate::layers::Combine;
     use crate::SettingsLayer;
+    use crate::layers::Combine;
 
     fn parse_settings(source: &str) -> SettingsLayer {
         source

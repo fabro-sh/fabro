@@ -13,7 +13,7 @@ pub enum EnvironmentValidationError {
     InvalidSettings { errors: Vec<String> },
     #[error("failed to read Dockerfile referenced by environment at {path:?}")]
     DockerfileRead {
-        path: PathBuf,
+        path:   PathBuf,
         #[source]
         source: std::io::Error,
     },
@@ -25,8 +25,6 @@ pub enum EnvironmentStoreError {
     NotFound { id: EnvironmentId },
     #[error("environment already exists: {id}")]
     AlreadyExists { id: EnvironmentId },
-    #[error("environment revision is missing: {id}")]
-    MissingRevision { id: EnvironmentId },
     #[error("environment revision is stale for {id}: expected {expected}, actual {actual}")]
     StaleRevision {
         id:       EnvironmentId,
@@ -94,7 +92,6 @@ impl EnvironmentStoreError {
         match self {
             Self::NotFound { .. } => "not_found",
             Self::AlreadyExists { .. } => "already_exists",
-            Self::MissingRevision { .. } => "missing_revision",
             Self::StaleRevision { .. } => "stale_revision",
             Self::Protected { .. } => "protected",
             Self::Validation { .. } => "validation",

@@ -1,28 +1,11 @@
-#![expect(
-    clippy::disallowed_methods,
-    clippy::disallowed_types,
-    reason = "temporary startup config migration uses synchronous file I/O before config is loaded"
-)]
-
 use std::fmt;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 
 use fabro_types::settings::run::EnvironmentProvider;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, Value};
 
-use crate::{Error, Result, SettingsLayer};
-
-pub(crate) const REMOVAL_NOTE: &str =
-    "This temporary compatibility migration will be removed before v1.0.";
-
-#[derive(Debug)]
-pub(crate) struct LegacySandboxMigrationReport {
-    pub(crate) warning: String,
-    #[cfg(test)]
-    backup_path:        PathBuf,
-}
+use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MigrationFailure {
@@ -41,45 +24,6 @@ impl fmt::Display for MigrationFailure {
             "Rename legacy sandbox configuration to [run.environment] and [environments.<slug>]. See docs/public/execution/environments.mdx."
         )
     }
-}
-
-pub(crate) fn migrate_settings_path(
-    path: &Path,
-    original_contents: &str,
-) -> Result<Option<LegacySandboxMigrationReport>> {
-    let Some(next_contents) = migrate_contents(original_contents, path)? else {
-        return Ok(None);
-    };
-
-    let layer = next_contents
-        .parse::<SettingsLayer>()
-        .map_err(|err| Error::parse_file("Migrated settings file is invalid", path, err))?;
-
-    let backup_path = write_next_backup(path, original_contents)?;
-    std::fs::write(path, &next_contents).map_err(|source| {
-        Error::other(format!(
-            "writing migrated settings file {}: {source}",
-            path.display()
-        ))
-    })?;
-
-    let environment_id = layer
-        .run
-        .as_ref()
-        .and_then(|run| run.environment.as_ref())
-        .and_then(|environment| environment.id.as_deref())
-        .unwrap_or("default");
-    let warning = format!(
-        "Migrated legacy [run.sandbox] settings in {} to [run.environment] and [environments.{environment_id}]. Backup written to {}. {REMOVAL_NOTE}",
-        path.display(),
-        backup_path.display()
-    );
-
-    Ok(Some(LegacySandboxMigrationReport {
-        warning,
-        #[cfg(test)]
-        backup_path,
-    }))
 }
 
 pub(crate) fn migrate_contents(original_contents: &str, path: &Path) -> Result<Option<String>> {
@@ -428,62 +372,11 @@ fn remove_run_sandbox(doc: &mut DocumentMut) {
 }
 
 #[cfg(test)]
-fn next_backup_path(path: &Path) -> PathBuf {
-    for index in 0u32.. {
-        let candidate = backup_path_for(path, index);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    unreachable!("unbounded backup suffix search should return")
-}
-
-fn write_next_backup(path: &Path, contents: &str) -> Result<PathBuf> {
-    for index in 0u32.. {
-        let backup_path = backup_path_for(path, index);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&backup_path)
-        {
-            Ok(mut file) => {
-                file.write_all(contents.as_bytes()).map_err(|source| {
-                    Error::other(format!(
-                        "writing legacy sandbox migration backup {}: {source}",
-                        backup_path.display()
-                    ))
-                })?;
-                return Ok(backup_path);
-            }
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(source) => {
-                return Err(Error::other(format!(
-                    "writing legacy sandbox migration backup {}: {source}",
-                    backup_path.display()
-                )));
-            }
-        }
-    }
-    unreachable!("unbounded backup suffix search should return")
-}
-
-fn backup_path_for(path: &Path, index: u32) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("settings.toml");
-    if index == 0 {
-        path.with_file_name(format!("{file_name}.legacy-sandbox-migration.bak"))
-    } else {
-        path.with_file_name(format!("{file_name}.legacy-sandbox-migration.{index}.bak"))
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use fabro_types::settings::InterpString;
 
     use super::*;
+    use crate::SettingsLayer;
 
     fn migrate(source: &str) -> String {
         migrate_contents(source, Path::new("settings.toml"))
@@ -657,47 +550,6 @@ skip_clone = true
             .run;
 
         assert!(!resolved.clone.enabled);
-    }
-
-    #[test]
-    fn migrate_settings_path_writes_backup_and_rewrites_original() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("settings.toml");
-        let original = r#"
-_version = 1
-
-[run.sandbox]
-provider = "daytona"
-"#;
-        std::fs::write(&path, original).expect("write fixture");
-
-        let report = migrate_settings_path(&path, original)
-            .expect("migration should succeed")
-            .expect("legacy config should migrate");
-
-        let rewritten = std::fs::read_to_string(&path).expect("read rewritten settings");
-        let backup = std::fs::read_to_string(&report.backup_path).expect("read backup");
-
-        assert_eq!(backup, original);
-        assert!(rewritten.contains("[run.environment]"));
-        assert!(rewritten.contains("[environments.daytona]"));
-        assert!(report.warning.contains("[environments.daytona]"));
-        assert!(report.warning.contains("temporary compatibility migration"));
-    }
-
-    #[test]
-    fn existing_backup_uses_numbered_suffix() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("settings.toml");
-        std::fs::write(
-            path.with_file_name("settings.toml.legacy-sandbox-migration.bak"),
-            "old",
-        )
-        .expect("write existing backup");
-
-        let next = next_backup_path(&path);
-
-        assert!(next.ends_with("settings.toml.legacy-sandbox-migration.1.bak"));
     }
 
     #[test]

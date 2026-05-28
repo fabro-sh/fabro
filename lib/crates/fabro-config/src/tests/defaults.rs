@@ -128,7 +128,8 @@ mode = "dry_run"
 "#,
     );
 
-    let settings = super::workflow_settings_from_layer(layer).expect("workflow settings should resolve");
+    let settings =
+        super::workflow_settings_from_layer(layer).expect("workflow settings should resolve");
 
     assert_eq!(settings.run.execution.mode, RunMode::DryRun);
     assert_eq!(settings.run.execution.approval, ApprovalMode::Prompt);

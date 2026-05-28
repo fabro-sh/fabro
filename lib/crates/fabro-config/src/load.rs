@@ -14,18 +14,7 @@ use crate::{Error, Result, RunGoalLayer, SettingsLayer, migrations};
     clippy::print_stderr,
     reason = "startup config auto-migration warning must be visible before caller logging is configured"
 )]
-pub(crate) fn load_settings_path(path: &Path) -> Result<SettingsLayer> {
-    load_settings_path_with_source(path, SettingsSource::ActiveSettings)
-}
-
-#[expect(
-    clippy::print_stderr,
-    reason = "startup config auto-migration warning must be visible before caller logging is configured"
-)]
-pub(crate) fn load_settings_path_with_source(
-    path: &Path,
-    source: SettingsSource,
-) -> Result<SettingsLayer> {
+pub(crate) fn load_settings_path(path: &Path, source: SettingsSource) -> Result<SettingsLayer> {
     let content = std::fs::read_to_string(path).map_err(|source| Error::read_file(path, source))?;
     let content = if source.runs_settings_migrations() {
         match migrations::run_migrations(path, &content)? {
@@ -42,9 +31,8 @@ pub(crate) fn load_settings_path_with_source(
     let mut layer = content
         .parse::<SettingsLayer>()
         .map_err(|err| Error::parse_file("Failed to parse settings file", path, err))?;
-    validate_settings_source(&layer, source).map_err(|err| {
-        Error::parse_file("Failed to parse settings file", path, err)
-    })?;
+    validate_settings_source(&layer, source)
+        .map_err(|err| Error::parse_file("Failed to parse settings file", path, err))?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
     resolve_goal_file_paths(&mut layer, base_dir);
     Ok(layer)
@@ -96,10 +84,12 @@ provider = "daytona"
         )
         .expect("write legacy settings");
 
-        let layer = load_settings_path(&path).expect("legacy settings should auto-migrate");
+        let layer = load_settings_path(&path, SettingsSource::ActiveSettings)
+            .expect("legacy settings should auto-migrate");
 
         assert_eq!(
-            layer.run
+            layer
+                .run
                 .as_ref()
                 .and_then(|run| run.environment.as_ref())
                 .and_then(|environment| environment.id.as_deref()),

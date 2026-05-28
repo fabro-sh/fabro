@@ -378,6 +378,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::tests::workflow_settings_from_toml;
 
     #[test]
     fn parse_minimal_config() {
@@ -402,7 +403,7 @@ directory = "custom/"
             Some("custom/".to_string())
         );
 
-        let project = crate::tests::workflow_settings_from_toml(
+        let project = workflow_settings_from_toml(
             r#"
 _version = 1
 
