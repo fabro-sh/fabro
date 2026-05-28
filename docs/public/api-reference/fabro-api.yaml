@@ -12280,7 +12280,6 @@ components:
         - api
         - web
         - auth
-        - ip_allowlist
         - sandbox
         - storage
         - artifacts
@@ -12297,8 +12296,6 @@ components:
           $ref: "#/components/schemas/ServerWebSettings"
         auth:
           $ref: "#/components/schemas/ServerAuthSettings"
-        ip_allowlist:
-          $ref: "#/components/schemas/ServerIpAllowlistSettings"
         sandbox:
           $ref: "#/components/schemas/ServerSandboxSettings"
         storage:
@@ -12378,44 +12375,6 @@ components:
           type: array
           items:
             type: string
-
-    ServerIpAllowlistSettings:
-      type: object
-      required: [entries, trusted_proxy_count]
-      properties:
-        entries:
-          type: array
-          items:
-            $ref: "#/components/schemas/IpAllowEntry"
-        trusted_proxy_count:
-          type: integer
-
-    ServerIpAllowlistOverrideSettings:
-      type: object
-      required: [entries, trusted_proxy_count]
-      properties:
-        entries:
-          type: ["array", "null"]
-          items:
-            $ref: "#/components/schemas/IpAllowEntry"
-        trusted_proxy_count:
-          type: ["integer", "null"]
-
-    IpAllowEntry:
-      oneOf:
-        - $ref: "#/components/schemas/LiteralIpAllowEntry"
-        - $ref: "#/components/schemas/GitHubMetaHooksEntry"
-
-    LiteralIpAllowEntry:
-      type: object
-      required: [Literal]
-      properties:
-        Literal:
-          type: string
-
-    GitHubMetaHooksEntry:
-      type: string
-      enum: [GitHubMetaHooks]
 
     ServerSandboxSettings:
       type: object
@@ -12571,15 +12530,11 @@ components:
 
     IntegrationWebhooksSettings:
       type: object
-      required: [strategy, ip_allowlist]
+      required: [strategy]
       properties:
         strategy:
           oneOf:
             - $ref: "#/components/schemas/WebhookStrategy"
-            - type: "null"
-        ip_allowlist:
-          oneOf:
-            - $ref: "#/components/schemas/ServerIpAllowlistOverrideSettings"
             - type: "null"
 
     WebhookStrategy:

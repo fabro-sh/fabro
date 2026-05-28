@@ -27,9 +27,6 @@ import type { ServerAuthSettings } from './server-auth-settings';
 import type { ServerIntegrationsSettings } from './server-integrations-settings';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ServerIpAllowlistSettings } from './server-ip-allowlist-settings';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { ServerListenSettings } from './server-listen-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -55,7 +52,6 @@ export interface ServerNamespace {
     'api': ServerApiSettings;
     'web': ServerWebSettings;
     'auth': ServerAuthSettings;
-    'ip_allowlist': ServerIpAllowlistSettings;
     'sandbox': ServerSandboxSettings;
     'storage': ServerStorageSettings;
     'artifacts': ServerArtifactsSettings;

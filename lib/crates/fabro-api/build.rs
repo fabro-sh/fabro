@@ -245,21 +245,6 @@ fn main() {
             &[],
         ),
         (
-            "ServerIpAllowlistSettings",
-            "fabro_types::settings::server::ServerIpAllowlistSettings",
-            &[],
-        ),
-        (
-            "ServerIpAllowlistOverrideSettings",
-            "fabro_types::settings::server::ServerIpAllowlistOverrideSettings",
-            &[],
-        ),
-        (
-            "IpAllowEntry",
-            "fabro_types::settings::server::IpAllowEntry",
-            &[],
-        ),
-        (
             "ServerSandboxSettings",
             "fabro_types::settings::server::ServerSandboxSettings",
             &[],

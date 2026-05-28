@@ -15,6 +15,7 @@ Fabro is single-tenant software designed for small, trusted teams. The following
 |---|---|
 | **Multi-tenancy** | Not supported. Fabro is single-tenant only — there is no organization or tenant isolation. |
 | **Roles or ACLs** | Not supported. All authenticated users have identical, full access to every run, workflow, and API endpoint. |
+| **Inbound source-IP allowlisting** | Not implemented in Fabro. Restrict source networks with a reverse proxy, firewall, VPN, Tailscale, platform ingress policy, or another deployment-layer control. |
 | **Rate limiting** | Not implemented. The API server does not throttle requests. |
 | **Custom security header policy** | Not configurable. Fabro emits default security headers, including enforced `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, and `Strict-Transport-Security` when HTTPS is detected. |
 
@@ -24,6 +25,7 @@ Fabro is single-tenant software designed for small, trusted teams. The following
 
 - **Deploy the web app on a private network.** Use a Tailscale tailnet, VPN, or internal network to keep the web UI off the public internet.
 - **Deploy the API on a private network.** Only allow access from expected hosts (the web app, CI runners, developer machines). The API binds to `127.0.0.1` by default — do not expose it with `--host 0.0.0.0` unless it is behind a firewall or private network.
+- **Enforce source-IP restrictions upstream.** Fabro does not provide inbound source-IP allowlisting. Use your reverse proxy, firewall, VPN, Tailscale ACLs, cloud load balancer, Kubernetes ingress, or platform policy to limit who can connect.
 - **Use Daytona sandboxes with network controls.** When running untrusted or generated code, use the Daytona sandbox provider with `network = "block"` or a CIDR-based allow list to restrict agent egress.
 
 ### Authentication

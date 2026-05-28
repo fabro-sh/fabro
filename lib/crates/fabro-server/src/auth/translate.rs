@@ -546,12 +546,7 @@ methods = ["dev-token"]
     #[tokio::test]
     async fn full_router_rejects_demo_cookie_without_credentials() {
         let state = test_state();
-        let app = server::build_router_with_options(
-            state,
-            &auth_mode(),
-            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
-            RouterOptions::default(),
-        );
+        let app = server::build_router_with_options(state, &auth_mode(), RouterOptions::default());
 
         let response = app
             .oneshot(
@@ -575,7 +570,6 @@ methods = ["dev-token"]
         let app = server::build_router_with_options(
             Arc::clone(&state),
             &auth_mode(),
-            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
             RouterOptions::default(),
         );
 
@@ -601,12 +595,7 @@ methods = ["dev-token"]
     #[tokio::test]
     async fn full_router_does_not_demo_dispatch_auth_routes() {
         let state = test_state();
-        let app = server::build_router_with_options(
-            state,
-            &auth_mode(),
-            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
-            RouterOptions::default(),
-        );
+        let app = server::build_router_with_options(state, &auth_mode(), RouterOptions::default());
 
         let response = app
             .oneshot(
@@ -630,18 +619,12 @@ methods = ["dev-token"]
     #[tokio::test]
     async fn full_router_accepts_dev_token_bearer_when_web_is_disabled() {
         let state = test_state();
-        let app = server::build_router_with_options(
-            state,
-            &auth_mode(),
-            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
-            RouterOptions {
-                web_enabled:                 false,
-                github_endpoints:            None,
-                github_webhook_ip_allowlist: None,
-                static_asset_root:           None,
-                watch_web:                   false,
-            },
-        );
+        let app = server::build_router_with_options(state, &auth_mode(), RouterOptions {
+            web_enabled:       false,
+            github_endpoints:  None,
+            static_asset_root: None,
+            watch_web:         false,
+        });
 
         let response = app
             .oneshot(

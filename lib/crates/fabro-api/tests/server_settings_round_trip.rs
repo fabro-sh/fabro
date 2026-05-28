@@ -64,6 +64,9 @@ strategy = "app"
 app_id = "12345"
 client_id = "Iv1.abcdef"
 slug = "fabro-dev"
+
+[server.integrations.github.webhooks]
+strategy = "tailscale_funnel"
 "#,
     )
     .expect("settings should resolve");
@@ -84,6 +87,16 @@ slug = "fabro-dev"
     assert_eq!(
         json["server"]["sandbox"]["providers"]["daytona"]["enabled"],
         false
+    );
+    assert!(
+        json["server"].get("ip_allowlist").is_none(),
+        "server settings API should not expose removed IP allowlist settings"
+    );
+    assert!(
+        json["server"]["integrations"]["github"]["webhooks"]
+            .get("ip_allowlist")
+            .is_none(),
+        "github webhook settings API should not expose removed IP allowlist settings"
     );
     assert!(json.get("features").is_none());
 

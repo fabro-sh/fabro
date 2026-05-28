@@ -1401,7 +1401,6 @@ client_id = "github-client-id"
         let app = server::build_router_with_options(
             state,
             &github_auth_mode(),
-            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
             server::RouterOptions::default(),
         );
 
@@ -1494,10 +1493,9 @@ client_id = "github-client-id"
         let app = crate::server::build_router_with_options(
             state,
             &github_auth_mode(),
-            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
             crate::server::RouterOptions {
-                web_enabled:                 true,
-                github_endpoints:            Some(Arc::new(GithubEndpoints::with_bases(
+                web_enabled:       true,
+                github_endpoints:  Some(Arc::new(GithubEndpoints::with_bases(
                     "http://127.0.0.1:12345/"
                         .parse()
                         .expect("oauth base should parse"),
@@ -1505,9 +1503,8 @@ client_id = "github-client-id"
                         .parse()
                         .expect("api base should parse"),
                 ))),
-                github_webhook_ip_allowlist: None,
-                static_asset_root:           None,
-                watch_web:                   false,
+                static_asset_root: None,
+                watch_web:         false,
             },
         );
 
@@ -1700,19 +1697,15 @@ client_id = "github-client-id"
                 None,
             )
             .unwrap();
-        let app = server::build_router_with_options(
-            state,
-            &github_auth_mode(),
-            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
-            server::RouterOptions {
+        let app =
+            server::build_router_with_options(state, &github_auth_mode(), server::RouterOptions {
                 web_enabled: true,
                 github_endpoints: Some(Arc::new(GithubEndpoints::with_bases(
                     github.url("/").parse().expect("oauth base should parse"),
                     github.url("/api/").parse().expect("api base should parse"),
                 ))),
                 ..server::RouterOptions::default()
-            },
-        );
+            });
         let key = test_cookie_key();
         let mut jar = cookie::CookieJar::new();
         super::add_oauth_state_cookie(

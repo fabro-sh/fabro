@@ -15,12 +15,8 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ServerIpAllowlistOverrideSettings } from './server-ip-allowlist-override-settings';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { WebhookStrategy } from './webhook-strategy';
 
 export interface IntegrationWebhooksSettings {
     'strategy': WebhookStrategy | null;
-    'ip_allowlist': ServerIpAllowlistOverrideSettings | null;
 }

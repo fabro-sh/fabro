@@ -26,9 +26,8 @@ pub mod types {
     pub use fabro_types::settings::ServerNamespace;
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
-        IpAllowEntry, LogDestination, ObjectStoreSettings, ServerApiSettings,
-        ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
-        ServerIntegrationsSettings, ServerIpAllowlistOverrideSettings, ServerIpAllowlistSettings,
+        LogDestination, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
+        ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
         ServerListenSettings, ServerLoggingSettings, ServerSandboxProviderSettings,
         ServerSandboxProvidersSettings, ServerSandboxSettings, ServerSchedulerSettings,
         ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,

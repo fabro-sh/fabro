@@ -5,7 +5,6 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use cookie::{Cookie, CookieJar, Key};
-use fabro_server::ip_allowlist::IpAllowlistConfig;
 use fabro_server::jwt_auth::resolve_auth_mode_with_lookup;
 use fabro_server::server::{RouterOptions, build_router_with_options};
 use fabro_server::test_support::{TEST_SESSION_SECRET, TestAppStateBuilder};
@@ -45,12 +44,7 @@ fn test_app(source: &str) -> (axum::Router, Arc<Database>) {
             TEST_SESSION_SECRET.to_string(),
         )]))
         .build();
-    let app = build_router_with_options(
-        state,
-        &auth_mode,
-        Arc::new(IpAllowlistConfig::default()),
-        RouterOptions::default(),
-    );
+    let app = build_router_with_options(state, &auth_mode, RouterOptions::default());
     (app, store)
 }
 

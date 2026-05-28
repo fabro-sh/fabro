@@ -4,7 +4,6 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::Engine;
-use fabro_server::ip_allowlist::IpAllowlistConfig;
 use fabro_server::jwt_auth::resolve_auth_mode_with_lookup;
 use fabro_server::server::{RouterOptions, build_router_with_options};
 use fabro_server::test_support::test_app_state_with_store_and_runtime_settings;
@@ -42,7 +41,6 @@ fn test_app(source: &str) -> (axum::Router, Arc<Database>) {
             artifact_store,
         ),
         &auth_mode,
-        Arc::new(IpAllowlistConfig::default()),
         RouterOptions::default(),
     );
     (app, store)

@@ -145,7 +145,6 @@ use crate::error::ApiError;
 use crate::github_webhooks::{
     WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, parse_event_metadata, verify_signature,
 };
-use crate::ip_allowlist::{IpAllowlistConfig, ip_allowlist_middleware};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunManagementTarget,
@@ -1589,35 +1588,28 @@ fn start_optional_slack_service(state: &Arc<AppState>) {
     reason = "Public router helper keeps the existing ergonomic API and forwards by reference."
 )]
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
-    build_router_with_options(
-        state,
-        &auth_mode,
-        Arc::new(IpAllowlistConfig::default()),
-        RouterOptions::default(),
-    )
+    build_router_with_options(state, &auth_mode, RouterOptions::default())
 }
 
 #[derive(Clone, Debug)]
 pub struct RouterOptions {
-    pub web_enabled:                 bool,
-    pub static_asset_root:           Option<PathBuf>,
-    pub github_endpoints:            Option<Arc<GithubEndpoints>>,
-    pub github_webhook_ip_allowlist: Option<Arc<IpAllowlistConfig>>,
+    pub web_enabled:       bool,
+    pub static_asset_root: Option<PathBuf>,
+    pub github_endpoints:  Option<Arc<GithubEndpoints>>,
     /// Set when serving with the `--watch-web` dev flag. The static-file
     /// handler then refuses to fall back to the embedded SPA snapshot and
     /// returns a 503 "build in progress" page on miss, so developers see
     /// their edits or a clear signal — never stale embedded bytes.
-    pub watch_web:                   bool,
+    pub watch_web:         bool,
 }
 
 impl Default for RouterOptions {
     fn default() -> Self {
         Self {
-            web_enabled:                 true,
-            static_asset_root:           None,
-            github_endpoints:            None,
-            github_webhook_ip_allowlist: None,
-            watch_web:                   false,
+            web_enabled:       true,
+            static_asset_root: None,
+            github_endpoints:  None,
+            watch_web:         false,
         }
     }
 }
@@ -1630,20 +1622,19 @@ fn removed_web_route(path: &str) -> bool {
 pub fn build_router_with_options(
     state: Arc<AppState>,
     auth_mode: &AuthMode,
-    ip_allowlist_config: Arc<IpAllowlistConfig>,
     options: RouterOptions,
 ) -> Router {
     start_optional_slack_service(&state);
-    let web_enabled = options.web_enabled;
-    let static_asset_root = options.static_asset_root.clone();
-    let watch_web = options.watch_web;
-    let webhook_ip_allowlist = options.github_webhook_ip_allowlist;
+    let RouterOptions {
+        web_enabled,
+        static_asset_root,
+        github_endpoints,
+        watch_web,
+    } = options;
     let translation_state = Arc::clone(&state);
     let state_for_canonical_host = Arc::clone(&state);
-    let github_endpoints = options
-        .github_endpoints
-        .clone()
-        .unwrap_or_else(|| Arc::new(GithubEndpoints::production_defaults()));
+    let github_endpoints =
+        github_endpoints.unwrap_or_else(|| Arc::new(GithubEndpoints::production_defaults()));
     let webhook_secret = state.vault_secret(WEBHOOK_SECRET_ENV);
     let principal_layer = middleware::from_fn_with_state(Arc::clone(&state), principal_middleware);
     let api_common = if web_enabled {
@@ -1726,10 +1717,6 @@ pub fn build_router_with_options(
         }));
 
     app_router = app_router.layer(middleware::from_fn_with_state(
-        Arc::clone(&ip_allowlist_config),
-        ip_allowlist_middleware,
-    ));
-    app_router = app_router.layer(middleware::from_fn_with_state(
         translation_state,
         auth_translation_middleware,
     ));
@@ -1738,9 +1725,8 @@ pub fn build_router_with_options(
 
     let mut router = app_router;
     if let Some(secret) = webhook_secret {
-        let allowlist = webhook_ip_allowlist.unwrap_or(ip_allowlist_config);
         let secret: Arc<[u8]> = Arc::from(secret.into_bytes().into_boxed_slice());
-        router = github_webhook_routes(secret, allowlist).merge(router);
+        router = github_webhook_routes(secret).merge(router);
     }
 
     router
@@ -1849,14 +1835,10 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
     response
 }
 
-fn github_webhook_routes(secret: Arc<[u8]>, ip_allowlist_config: Arc<IpAllowlistConfig>) -> Router {
+fn github_webhook_routes(secret: Arc<[u8]>) -> Router {
     Router::new()
         .route(WEBHOOK_ROUTE, post(github_webhook))
         .with_state(secret)
-        .layer(middleware::from_fn_with_state(
-            ip_allowlist_config,
-            ip_allowlist_middleware,
-        ))
 }
 
 async fn github_webhook(

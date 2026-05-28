@@ -21,7 +21,6 @@ use chrono::{Duration as ChronoDuration, Utc};
 use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, ServerTarget};
 use fabro_config::{RunLayer, ServerSettingsBuilder};
 use fabro_server::auth::GithubEndpoints;
-use fabro_server::ip_allowlist::IpAllowlistConfig;
 use fabro_server::jwt_auth::resolve_auth_mode_with_lookup;
 use fabro_server::server::{RouterOptions, build_router_with_options};
 use fabro_server::test_support::TestAppStateBuilder;
@@ -92,21 +91,15 @@ impl RealAuthHarness {
             .vault_entries([("GITHUB_APP_CLIENT_SECRET", github_client_secret.as_str())])
             .build();
         let github_base = github_base_url(&twin.base_url);
-        let router = build_router_with_options(
-            state,
-            &auth_mode,
-            Arc::new(IpAllowlistConfig::default()),
-            RouterOptions {
-                web_enabled:                 true,
-                github_endpoints:            Some(Arc::new(GithubEndpoints::with_bases(
-                    github_base.clone(),
-                    github_base,
-                ))),
-                github_webhook_ip_allowlist: None,
-                static_asset_root:           None,
-                watch_web:                   false,
-            },
-        );
+        let router = build_router_with_options(state, &auth_mode, RouterOptions {
+            web_enabled:       true,
+            github_endpoints:  Some(Arc::new(GithubEndpoints::with_bases(
+                github_base.clone(),
+                github_base,
+            ))),
+            static_asset_root: None,
+            watch_web:         false,
+        });
 
         let api_requests = ListenerRequestLog::default();
         let api_server = RunningHttpServer::start(api_listener, router, &api_requests);

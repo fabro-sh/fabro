@@ -56,6 +56,7 @@ models/auth-session-user.ts
 models/auth-session.ts
 models/auth-sessions-response.ts
 models/automation-api-trigger.ts
+models/automation-list-meta.ts
 models/automation-list-response.ts
 models/automation-ref.ts
 models/automation-schedule-trigger.ts
@@ -143,7 +144,6 @@ models/fork-response.ts
 models/fork-source-ref.ts
 models/git-author-settings.ts
 models/git-context.ts
-models/git-hub-meta-hooks-entry.ts
 models/github-integration-settings.ts
 models/github-integration-strategy.ts
 models/health-response.ts
@@ -184,9 +184,7 @@ models/integration-webhooks-settings.ts
 models/interview-option.ts
 models/interview-provider-settings.ts
 models/interview-question-record.ts
-models/ip-allow-entry.ts
 models/link-run-pull-request-request.ts
-models/literal-ip-allow-entry.ts
 models/log-destination.ts
 models/manifest-args.ts
 models/manifest-config.ts
@@ -417,8 +415,6 @@ models/server-auth-github-settings.ts
 models/server-auth-method.ts
 models/server-auth-settings.ts
 models/server-integrations-settings.ts
-models/server-ip-allowlist-override-settings.ts
-models/server-ip-allowlist-settings.ts
 models/server-listen-settings.ts
 models/server-listen-tcp-settings.ts
 models/server-listen-unix-settings.ts

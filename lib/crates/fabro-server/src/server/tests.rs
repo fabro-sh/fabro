@@ -82,14 +82,10 @@ fn resolved_runtime_settings_from_toml(source: &str) -> ResolvedAppStateSettings
 
 fn test_app_with() -> Router {
     let state = test_app_state();
-    crate::test_support::build_test_router_with_options(
-        state,
-        Arc::new(IpAllowlistConfig::default()),
-        RouterOptions {
-            static_asset_root: Some(spa_fixture_root()),
-            ..RouterOptions::default()
-        },
-    )
+    crate::test_support::build_test_router_with_options(state, RouterOptions {
+        static_asset_root: Some(spa_fixture_root()),
+        ..RouterOptions::default()
+    })
 }
 
 fn spa_fixture_root() -> PathBuf {
@@ -491,15 +487,10 @@ fn webhook_test_app(auth_mode: AuthMode) -> Router {
         .expect("test vault should not be locked")
         .set(WEBHOOK_SECRET_ENV, &secret, SecretType::Token, None)
         .unwrap();
-    build_router_with_options(
-        state,
-        &auth_mode,
-        Arc::new(IpAllowlistConfig::default()),
-        RouterOptions {
-            web_enabled: false,
-            ..RouterOptions::default()
-        },
-    )
+    build_router_with_options(state, &auth_mode, RouterOptions {
+        web_enabled: false,
+        ..RouterOptions::default()
+    })
 }
 
 fn webhook_request(
@@ -711,11 +702,7 @@ fn canonical_host_test_app() -> Router {
         RunLayer::default(),
         5,
     );
-    crate::test_support::build_test_router_with_options(
-        state,
-        Arc::new(IpAllowlistConfig::default()),
-        RouterOptions::default(),
-    )
+    crate::test_support::build_test_router_with_options(state, RouterOptions::default())
 }
 
 #[tokio::test]

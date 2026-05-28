@@ -2388,7 +2388,6 @@ dependencies = [
  "hmac",
  "http-body-util",
  "httpmock",
- "ipnet",
  "jsonwebtoken",
  "mime_guess",
  "multer",
@@ -2590,7 +2589,6 @@ dependencies = [
  "fabro-model",
  "fabro-util",
  "hex",
- "ipnet",
  "serde",
  "serde_json",
  "sha2",
@@ -3854,9 +3852,6 @@ name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "iri-string"

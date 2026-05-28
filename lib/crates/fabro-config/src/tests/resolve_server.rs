@@ -5,7 +5,7 @@
 
 use fabro_types::settings::InterpString;
 use fabro_types::settings::server::{
-    GithubIntegrationStrategy, IpAllowEntry, LogDestination, ObjectStoreSettings, ServerAuthMethod,
+    GithubIntegrationStrategy, LogDestination, ObjectStoreSettings, ServerAuthMethod,
     ServerListenSettings, ServerNamespace,
 };
 use fabro_util::Home;
@@ -427,92 +427,37 @@ disk_cache = true
 }
 
 #[test]
-fn resolves_empty_ip_allowlist_by_default() {
-    let settings = resolve_server(&empty_settings_with_auth_methods());
-
-    assert!(settings.ip_allowlist.entries.is_empty());
-    assert_eq!(settings.ip_allowlist.trusted_proxy_count, 0);
-}
-
-#[test]
-fn resolves_global_ip_allowlist_entries_and_proxy_count() {
-    let file = parse(
-        r#"
-_version = 1
-
-[server.ip_allowlist]
-entries = ["10.0.0.0/8", "2001:db8::/32", "192.0.2.42"]
-trusted_proxy_count = 2
-"#,
-    );
-
-    let settings = resolve_server(&file);
-
-    assert_eq!(settings.ip_allowlist.entries, vec![
-        IpAllowEntry::parse_literal("10.0.0.0/8").unwrap(),
-        IpAllowEntry::parse_literal("2001:db8::/32").unwrap(),
-        IpAllowEntry::parse_literal("192.0.2.42").unwrap(),
-    ]);
-    assert_eq!(settings.ip_allowlist.trusted_proxy_count, 2);
-}
-
-#[test]
-fn resolves_github_webhook_ip_allowlist_overlay_with_inheritance() {
-    let file = parse(
-        r#"
+fn parsing_rejects_removed_server_ip_allowlist() {
+    let err = r#"
 _version = 1
 
 [server.ip_allowlist]
 entries = ["10.0.0.0/8"]
-trusted_proxy_count = 2
+"#
+    .parse::<SettingsLayer>()
+    .expect_err("removed server IP allowlist setting should be rejected");
+
+    assert!(
+        err.to_string().contains("ip_allowlist"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn parsing_rejects_removed_github_webhook_ip_allowlist() {
+    let err = r#"
+_version = 1
 
 [server.integrations.github.webhooks.ip_allowlist]
 entries = ["github_meta_hooks"]
-"#,
+"#
+    .parse::<SettingsLayer>()
+    .expect_err("removed github webhook IP allowlist setting should be rejected");
+
+    assert!(
+        err.to_string().contains("ip_allowlist"),
+        "unexpected error: {err}"
     );
-
-    let settings = resolve_server(&file);
-    let webhook_allowlist = settings
-        .integrations
-        .github
-        .webhooks
-        .expect("github webhooks settings should resolve")
-        .ip_allowlist
-        .expect("github webhook ip allowlist overlay should resolve");
-
-    assert_eq!(
-        webhook_allowlist.entries,
-        Some(vec![IpAllowEntry::GitHubMetaHooks])
-    );
-    assert_eq!(webhook_allowlist.trusted_proxy_count, None);
-}
-
-#[test]
-fn resolves_github_webhook_ip_allowlist_override_proxy_count() {
-    let file = parse(
-        r#"
-_version = 1
-
-[server.ip_allowlist]
-entries = ["10.0.0.0/8"]
-trusted_proxy_count = 2
-
-[server.integrations.github.webhooks.ip_allowlist]
-trusted_proxy_count = 3
-"#,
-    );
-
-    let settings = resolve_server(&file);
-    let webhook_allowlist = settings
-        .integrations
-        .github
-        .webhooks
-        .expect("github webhooks settings should resolve")
-        .ip_allowlist
-        .expect("github webhook ip allowlist overlay should resolve");
-
-    assert_eq!(webhook_allowlist.entries, None);
-    assert_eq!(webhook_allowlist.trusted_proxy_count, Some(3));
 }
 
 #[test]
@@ -556,91 +501,6 @@ strategy = "tailscale_funnel"
     ));
 
     assert!(rendered.contains("server.integrations.github.app_id"));
-}
-
-#[test]
-fn rejects_invalid_ip_allowlist_entry() {
-    let file = parse(
-        r#"
-_version = 1
-
-[server.ip_allowlist]
-entries = ["10.0.0.0/33"]
-"#,
-    );
-
-    let rendered = render_resolve_error_lines(
-        ServerSettingsBuilder::from_layer(&file).expect_err("invalid CIDR should fail"),
-    );
-
-    assert!(rendered.contains("server.ip_allowlist.entries[0]"));
-}
-
-#[test]
-fn rejects_github_meta_hooks_in_global_scope() {
-    let file = parse(
-        r#"
-_version = 1
-
-[server.ip_allowlist]
-entries = ["github_meta_hooks"]
-"#,
-    );
-
-    let rendered = render_resolve_error_lines(
-        ServerSettingsBuilder::from_layer(&file)
-            .expect_err("github_meta_hooks should be rejected outside github webhooks"),
-    );
-
-    assert!(rendered.contains("server.ip_allowlist.entries[0]"));
-}
-
-#[test]
-fn rejects_unix_socket_allowlist_without_trusted_proxy() {
-    let file = parse(
-        r#"
-_version = 1
-
-[server.listen]
-type = "unix"
-path = "/tmp/fabro.sock"
-
-[server.ip_allowlist]
-entries = ["10.0.0.0/8"]
-"#,
-    );
-
-    let rendered = render_resolve_error_lines(
-        ServerSettingsBuilder::from_layer(&file)
-            .expect_err("unix allowlist without trusted proxies should fail"),
-    );
-
-    assert!(rendered.contains("server.ip_allowlist.trusted_proxy_count"));
-}
-
-#[test]
-fn rejects_unix_socket_github_webhook_allowlist_without_trusted_proxy() {
-    let file = parse(
-        r#"
-_version = 1
-
-[server.listen]
-type = "unix"
-path = "/tmp/fabro.sock"
-
-[server.integrations.github.webhooks.ip_allowlist]
-entries = ["github_meta_hooks"]
-"#,
-    );
-
-    let rendered = render_resolve_error_lines(
-        ServerSettingsBuilder::from_layer(&file)
-            .expect_err("unix github webhook allowlist without trusted proxies should fail"),
-    );
-
-    assert!(
-        rendered.contains("server.integrations.github.webhooks.ip_allowlist.trusted_proxy_count")
-    );
 }
 
 #[test]

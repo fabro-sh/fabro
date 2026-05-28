@@ -5,13 +5,11 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::StatusCode;
 use fabro_config::bind::Bind;
 use fabro_config::{RuntimeDirectory, ServerSettingsBuilder};
-use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
 use fabro_server::serve::{ServeArgs, serve_command};
 use fabro_server::server::{RouterOptions, build_router_with_options};
@@ -24,7 +22,7 @@ use tokio::time::sleep;
 
 use crate::helpers::{api, reqwest_status};
 
-async fn start_tcp_server(auth_mode: AuthMode, ip_allowlist: Arc<IpAllowlistConfig>) -> SocketAddr {
+async fn start_tcp_server(auth_mode: AuthMode) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("test TCP listener should bind");
@@ -33,15 +31,10 @@ async fn start_tcp_server(auth_mode: AuthMode, ip_allowlist: Arc<IpAllowlistConf
         .expect("test TCP listener should have a local address");
 
     let state = test_app_state();
-    let router =
-        build_router_with_options(state, &auth_mode, ip_allowlist, RouterOptions::default());
+    let router = build_router_with_options(state, &auth_mode, RouterOptions::default());
 
     tokio::spawn(async move {
-        let _ = axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await;
+        let _ = axum::serve(listener, router).await;
     });
 
     addr
@@ -177,7 +170,7 @@ methods = ["dev-token"]
         _ => None,
     })
     .expect("auth mode should resolve");
-    let addr = start_tcp_server(auth_mode, Arc::new(IpAllowlistConfig::default())).await;
+    let addr = start_tcp_server(auth_mode).await;
     let client = fabro_http::test_http_client().unwrap();
     let url = format!("http://127.0.0.1:{}{}", addr.port(), api("/runs"));
 
@@ -228,25 +221,4 @@ methods = ["dev-token"]
 
     reqwest_status(response, StatusCode::OK, "GET /api/v1/runs").await;
     handle.abort();
-}
-
-#[tokio::test]
-async fn tcp_ip_allowlist_uses_connect_info() {
-    let addr = start_tcp_server(
-        fabro_server::test_support::test_auth_mode(),
-        Arc::new(IpAllowlistConfig {
-            allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
-            trusted_proxy_count: 0,
-        }),
-    )
-    .await;
-    let client = fabro_http::test_http_client().unwrap();
-
-    let response = client
-        .get(format!("http://127.0.0.1:{}{}", addr.port(), api("/runs")))
-        .send()
-        .await
-        .unwrap();
-
-    reqwest_status(response, StatusCode::FORBIDDEN, "GET /api/v1/runs").await;
 }

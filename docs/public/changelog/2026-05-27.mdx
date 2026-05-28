@@ -1,0 +1,23 @@
+---
+title: "Inbound IP allowlisting removed"
+date: "2026-05-27"
+---
+
+## Inbound IP allowlisting removed
+
+Fabro no longer includes an in-process inbound source-IP allowlist for the web UI, API, static assets, or GitHub webhook routes. The former `[server.ip_allowlist]` setting and GitHub webhook overlay at `[server.integrations.github.webhooks.ip_allowlist]` have been removed from server configuration and the settings API.
+
+This is a hard removal: existing `settings.toml` files that still contain those keys now fail as unknown fields. Move any source-IP restrictions to deployment-layer controls such as a reverse proxy, firewall, VPN, Tailscale ACLs, Kubernetes ingress policy, cloud load balancer, or platform ingress.
+
+GitHub webhook HMAC signature verification is unchanged. GitHub username allowlists and sandbox egress CIDR allow lists are also unchanged.
+
+## More
+
+<Accordion title="Breaking changes">
+- Removed `server.ip_allowlist` and GitHub webhook `ip_allowlist` from `GET /api/v1/settings` responses and generated API clients
+- Removed server config support for `[server.ip_allowlist]` and `[server.integrations.github.webhooks.ip_allowlist]`
+</Accordion>
+
+<Accordion title="Security">
+- Fabro no longer performs runtime source-IP filtering; enforce inbound network restrictions upstream
+</Accordion>

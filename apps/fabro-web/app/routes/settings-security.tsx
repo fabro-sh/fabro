@@ -2,7 +2,6 @@ import type { ServerSettings } from "@qltysh/fabro-api-client";
 import { useServerSettings } from "../lib/queries";
 import {
   Badge,
-  Count,
   Muted,
   Panel,
   PanelSkeleton,
@@ -10,7 +9,6 @@ import {
   SettingsPageIntro,
   UsernameList,
 } from "../components/settings-panel";
-import { plural } from "../lib/plural";
 
 export function meta() {
   return [{ title: "Security — Fabro" }];
@@ -18,7 +16,7 @@ export function meta() {
 
 const DESCRIPTION = (
   <>
-    Authentication methods and network allowlist. Edit via{" "}
+    Authentication methods and permitted GitHub usernames. Edit via{" "}
     <code className="font-mono text-fg-2">settings.toml</code>; changes take
     effect on the next server restart.
   </>
@@ -37,7 +35,7 @@ export default function SettingsSecurity() {
 }
 
 function SecurityPanel({ settings }: { settings: ServerSettings }) {
-  const { auth, ip_allowlist } = settings.server;
+  const { auth } = settings.server;
   const githubUsers = auth.github.allowed_usernames;
   return (
     <Panel title="Security">
@@ -61,18 +59,6 @@ function SecurityPanel({ settings }: { settings: ServerSettings }) {
         ) : (
           <UsernameList names={githubUsers} />
         )}
-      </Row>
-      <Row title="IP allowlist" help="Network sources permitted to reach the API.">
-        <Count
-          n={ip_allowlist.entries.length}
-          singular="entry"
-          plural="entries"
-          suffix={
-            ip_allowlist.trusted_proxy_count > 0
-              ? `· ${ip_allowlist.trusted_proxy_count} trusted ${plural(ip_allowlist.trusted_proxy_count, "proxy", "proxies")}`
-              : undefined
-          }
-        />
       </Row>
     </Panel>
   );

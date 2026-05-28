@@ -28,7 +28,12 @@ methods = ["dev-token", "github"]
 allowed_usernames = ["alice"]
 
 [server.integrations.github]
+strategy = "app"
+app_id = "12345"
 client_id = "Iv1.abcdef"
+
+[server.integrations.github.webhooks]
+strategy = "tailscale_funnel"
 "#,
     );
     let app = fabro_server::test_support::build_test_router(
@@ -65,6 +70,16 @@ client_id = "Iv1.abcdef"
     assert_eq!(
         body["server"]["integrations"]["github"]["client_id"],
         "Iv1.abcdef"
+    );
+    assert!(
+        body["server"].get("ip_allowlist").is_none(),
+        "settings response should not expose removed server IP allowlist"
+    );
+    assert!(
+        body["server"]["integrations"]["github"]["webhooks"]
+            .get("ip_allowlist")
+            .is_none(),
+        "settings response should not expose removed GitHub webhook IP allowlist"
     );
     assert!(body.get("features").is_none());
     assert!(body.get("cli").is_none());

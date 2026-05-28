@@ -63,7 +63,7 @@ export const navSections: NavSection[] = [
         name: "Security",
         href: "/settings/security",
         icon: ShieldCheckIcon,
-        description: "Authentication and network allowlist.",
+        description: "Authentication methods and access.",
         match: (p) => p.startsWith("/settings/security"),
       },
       {

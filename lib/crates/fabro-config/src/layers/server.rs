@@ -21,8 +21,6 @@ pub struct ServerLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth:         Option<ServerAuthLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ip_allowlist: Option<ServerIpAllowlistLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox:      Option<ServerSandboxLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage:      Option<ServerStorageLayer>,
@@ -91,24 +89,6 @@ pub struct ServerAuthLayer {
 pub struct ServerAuthGithubLayer {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_usernames: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct ServerIpAllowlistLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entries:             Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trusted_proxy_count: Option<u32>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct ServerIpAllowlistOverrideLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entries:             Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trusted_proxy_count: Option<u32>,
 }
 
 /// `[server.sandbox]` — server-owned sandbox provider policy.
@@ -261,7 +241,5 @@ pub struct SlackIntegrationLayer {
 #[serde(deny_unknown_fields)]
 pub struct IntegrationWebhooksLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strategy:     Option<WebhookStrategy>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ip_allowlist: Option<ServerIpAllowlistOverrideLayer>,
+    pub strategy: Option<WebhookStrategy>,
 }

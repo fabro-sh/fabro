@@ -1,12 +1,8 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::ConnectInfo;
 use axum::http::{Method, Request, StatusCode};
 use fabro_config::ServerSettingsBuilder;
-use fabro_server::ip_allowlist::{IpAllowlist, IpAllowlistConfig};
 use fabro_server::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
 use fabro_server::server::RouterOptions;
 use fabro_server::test_support::{
@@ -63,7 +59,6 @@ async fn old_unversioned_routes_return_404() {
 async fn root_and_health_stay_at_root() {
     let app = fabro_server::test_support::build_test_router_with_options(
         test_app_state(),
-        Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             static_asset_root: Some(spa_fixture_root()),
             ..RouterOptions::default()
@@ -163,7 +158,6 @@ async fn web_enabled_serves_web_only_routes() {
     let app = fabro_server::server::build_router_with_options(
         test_app_state(),
         &auth_mode,
-        Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             static_asset_root: Some(spa_fixture_root()),
             ..RouterOptions::default()
@@ -256,7 +250,6 @@ async fn web_enabled_serves_web_only_routes() {
 async fn security_headers_are_applied_to_all_responses() {
     let app = fabro_server::test_support::build_test_router_with_options(
         test_app_state(),
-        Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             static_asset_root: Some(spa_fixture_root()),
             ..RouterOptions::default()
@@ -404,7 +397,6 @@ enabled = false
             settings.manifest_run_defaults,
             5,
         ),
-        Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             web_enabled: false,
             ..RouterOptions::default()
@@ -463,7 +455,6 @@ enabled = false
             settings.manifest_run_defaults,
             5,
         ),
-        Arc::new(IpAllowlistConfig::default()),
         RouterOptions {
             web_enabled: false,
             ..RouterOptions::default()
@@ -480,61 +471,4 @@ enabled = false
 
     let response = app.oneshot(request).await.unwrap();
     response_status(response, StatusCode::NOT_FOUND, "GET /api/v1/runs/{id}").await;
-}
-
-#[tokio::test]
-async fn allowlist_blocks_non_allowlisted_api_requests() {
-    let app = fabro_server::test_support::build_test_router_with_options(
-        test_app_state(),
-        Arc::new(IpAllowlistConfig {
-            allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
-            trusted_proxy_count: 0,
-        }),
-        RouterOptions::default(),
-    );
-
-    let response = app
-        .oneshot(request_with_connect_info(
-            "/api/v1/runs",
-            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
-        ))
-        .await
-        .unwrap();
-
-    response_status(response, StatusCode::FORBIDDEN, "GET /api/v1/runs").await;
-}
-
-#[tokio::test]
-async fn allowlist_exempts_health_checks() {
-    let app = fabro_server::test_support::build_test_router_with_options(
-        test_app_state(),
-        Arc::new(IpAllowlistConfig {
-            allowlist:           IpAllowlist::new(vec!["10.0.0.0/8".parse().unwrap()]),
-            trusted_proxy_count: 0,
-        }),
-        RouterOptions::default(),
-    );
-
-    let response = app
-        .oneshot(request_with_connect_info(
-            "/health",
-            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
-        ))
-        .await
-        .unwrap();
-
-    response_status(response, StatusCode::OK, "GET /health").await;
-}
-
-fn request_with_connect_info(path: &str, ip: IpAddr) -> Request<Body> {
-    let request = Request::builder()
-        .method("GET")
-        .uri(path)
-        .body(Body::empty())
-        .expect("routing test request should build");
-    let mut request = request;
-    request
-        .extensions_mut()
-        .insert(ConnectInfo(SocketAddr::new(ip, 8080)));
-    request
 }

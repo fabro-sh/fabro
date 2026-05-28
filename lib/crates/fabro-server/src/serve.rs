@@ -1,5 +1,4 @@
 use std::future::{Future, IntoFuture};
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -34,7 +33,6 @@ use tracing::{error, info, warn};
 
 use crate::canonical_origin::resolve_canonical_origin;
 use crate::github_webhooks::{TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV};
-use crate::ip_allowlist::{GitHubMetaResolver, IpAllowlistConfig, resolve_ip_allowlist_config};
 use crate::server::{
     AppState, AppStateConfig, ResolvedAppStateSettings, RouterOptions, build_app_state,
     build_router_with_options, reconcile_incomplete_runs_on_startup, shutdown_active_workers,
@@ -249,40 +247,6 @@ fn serve_overrides(args: &ServeArgs) -> (Option<RunLayer>, Option<ServerLayer>) 
         (run != RunLayer::default()).then_some(run),
         (server != ServerLayer::default()).then_some(server),
     )
-}
-
-async fn resolve_github_webhook_ip_allowlist(
-    resolved_server_settings: &ServerNamespace,
-    github_meta_resolver: &GitHubMetaResolver,
-) -> anyhow::Result<Arc<IpAllowlistConfig>> {
-    let config = resolve_ip_allowlist_config(
-        &resolved_server_settings.ip_allowlist,
-        resolved_server_settings
-            .integrations
-            .github
-            .webhooks
-            .as_ref()
-            .and_then(|webhooks| webhooks.ip_allowlist.as_ref()),
-        github_meta_resolver,
-    )
-    .await
-    .context("resolving GitHub webhook IP allowlist")?;
-
-    Ok(Arc::new(config))
-}
-
-async fn resolve_startup_github_webhook_ip_allowlist(
-    resolved_server_settings: &ServerNamespace,
-    github_meta_resolver: &GitHubMetaResolver,
-    webhook_secret_present: bool,
-) -> anyhow::Result<Option<Arc<IpAllowlistConfig>>> {
-    if !webhook_secret_present {
-        return Ok(None);
-    }
-
-    resolve_github_webhook_ip_allowlist(resolved_server_settings, github_meta_resolver)
-        .await
-        .map(Some)
 }
 
 enum WebhookPreconditions {
@@ -769,8 +733,6 @@ where
     } else {
         false
     };
-    let github_meta_resolver = GitHubMetaResolver::from_cache_dir(&storage.cache_dir())?;
-
     let (object_store, slatedb_prefix, flush_interval, disk_cache) =
         build_slatedb_store_with_server_secrets(&resolved_server_settings, &server_secrets)?;
     let cache_path = if disk_cache {
@@ -823,33 +785,12 @@ where
         );
     }
     spawn_scheduler(Arc::clone(&state));
-    let default_ip_allowlist = Arc::new(
-        resolve_ip_allowlist_config(
-            &resolved_server_settings.ip_allowlist,
-            None,
-            &github_meta_resolver,
-        )
-        .await
-        .context("resolving server IP allowlist")?,
-    );
-    let github_webhook_ip_allowlist = resolve_startup_github_webhook_ip_allowlist(
-        &resolved_server_settings,
-        &github_meta_resolver,
-        webhook_secret_present,
-    )
-    .await?;
-    let router = build_router_with_options(
-        Arc::clone(&state),
-        &auth_mode,
-        Arc::clone(&default_ip_allowlist),
-        RouterOptions {
-            web_enabled,
-            github_webhook_ip_allowlist,
-            #[cfg(debug_assertions)]
-            watch_web,
-            ..RouterOptions::default()
-        },
-    );
+    let router = build_router_with_options(Arc::clone(&state), &auth_mode, RouterOptions {
+        web_enabled,
+        #[cfg(debug_assertions)]
+        watch_web,
+        ..RouterOptions::default()
+    });
     let bound_listener = bind_listener(&bind_request).await?;
     let bind_addr = bound_listener.bind.clone();
 
@@ -993,11 +934,7 @@ where
         BoundListener::Tcp(listener) => {
             announce_server_ready(&bind_addr, styles);
             serve_until_shutdown(
-                axum::serve(
-                    listener,
-                    router.into_make_service_with_connect_info::<SocketAddr>(),
-                )
-                .with_graceful_shutdown({
+                axum::serve(listener, router).with_graceful_shutdown({
                     let token = shutdown.clone();
                     async move { token.cancelled().await }
                 }),
@@ -1247,13 +1184,12 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        GitHubMetaResolver, SHUTDOWN_GRACE_PERIOD, ServeArgs, ServerTitlePhase,
-        apply_effective_log_destination, bind_tcp_host_with_fallback,
-        build_local_object_store_with_preference, build_object_store_from_settings_with_lookup,
-        build_slatedb_store, force_exit_after_shutdown, resolve_bind_request_from_server_settings,
-        resolve_github_webhook_ip_allowlist, resolve_interp,
-        resolve_startup_github_webhook_ip_allowlist, serve_overrides, serve_until_shutdown,
-        server_bind_title, server_title, spawn_shutdown_orchestrator_inner,
+        SHUTDOWN_GRACE_PERIOD, ServeArgs, ServerTitlePhase, apply_effective_log_destination,
+        bind_tcp_host_with_fallback, build_local_object_store_with_preference,
+        build_object_store_from_settings_with_lookup, build_slatedb_store,
+        force_exit_after_shutdown, resolve_bind_request_from_server_settings, resolve_interp,
+        serve_overrides, serve_until_shutdown, server_bind_title, server_title,
+        spawn_shutdown_orchestrator_inner,
     };
     use crate::server::ResolvedAppStateSettings;
 
@@ -1815,79 +1751,5 @@ disk_cache = true
 
         assert_ne!(resolved.port(), occupied_port);
         assert!(bound.used_random_port_fallback);
-    }
-
-    #[tokio::test]
-    async fn resolve_github_webhook_ip_allowlist_propagates_resolution_errors() {
-        let settings = server_settings(
-            r#"
-_version = 1
-
-[server.listen]
-type = "tcp"
-address = "127.0.0.1:0"
-
-[server.integrations.github]
-strategy = "app"
-app_id = "123"
-
-[server.integrations.github.webhooks.ip_allowlist]
-entries = ["github_meta_hooks"]
-"#,
-        )
-        .server;
-
-        let cache_dir = tempfile::tempdir().unwrap();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let resolver = GitHubMetaResolver::new(
-            fabro_http::test_http_client().unwrap(),
-            format!("http://127.0.0.1:{port}/meta"),
-            cache_dir.path().join("github-meta.json"),
-        );
-
-        let error = resolve_github_webhook_ip_allowlist(&settings, &resolver)
-            .await
-            .expect_err("github webhook allowlist resolution should fail closed");
-
-        assert!(error.to_string().contains("GitHub webhook IP allowlist"));
-    }
-
-    #[tokio::test]
-    async fn resolve_startup_github_webhook_ip_allowlist_skips_resolution_without_webhook_secret() {
-        let settings = server_settings(
-            r#"
-_version = 1
-
-[server.listen]
-type = "tcp"
-address = "127.0.0.1:0"
-
-[server.integrations.github]
-strategy = "app"
-app_id = "123"
-
-[server.integrations.github.webhooks.ip_allowlist]
-entries = ["github_meta_hooks"]
-"#,
-        )
-        .server;
-
-        let cache_dir = tempfile::tempdir().unwrap();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let resolver = GitHubMetaResolver::new(
-            fabro_http::test_http_client().unwrap(),
-            format!("http://127.0.0.1:{port}/meta"),
-            cache_dir.path().join("github-meta.json"),
-        );
-
-        let allowlist = resolve_startup_github_webhook_ip_allowlist(&settings, &resolver, false)
-            .await
-            .expect("inactive webhook route should skip GitHub meta resolution");
-
-        assert!(allowlist.is_none());
     }
 }
