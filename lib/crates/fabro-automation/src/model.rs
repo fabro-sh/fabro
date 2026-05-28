@@ -64,6 +64,20 @@ impl Automation {
         toml::to_string_pretty(&self.to_persisted()).map_err(AutomationStoreError::from)
     }
 
+    /// Returns the enabled API trigger if the automation itself is enabled and
+    /// has one. Returns `None` when the automation is disabled or has no
+    /// enabled API trigger.
+    #[must_use]
+    pub fn enabled_api_trigger(&self) -> Option<&ApiTrigger> {
+        if !self.enabled {
+            return None;
+        }
+        self.triggers.iter().find_map(|trigger| match trigger {
+            AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),
+            _ => None,
+        })
+    }
+
     fn from_persisted(
         id: AutomationId,
         revision: AutomationRevision,

@@ -1056,10 +1056,6 @@ impl AppState {
         &self.automation_store
     }
 
-    #[allow(
-        dead_code,
-        reason = "Automation scheduler wiring will call this after issue #398's materialization core."
-    )]
     pub(crate) async fn materialize_automation_run(
         &self,
         input: AutomationRunMaterializeInput,

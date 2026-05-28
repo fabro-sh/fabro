@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum_extra::extract::Query as ExtraQuery;
+use chrono::Utc;
 use fabro_automation::{
-    ApiTrigger, Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationRevision,
-    AutomationStoreError, AutomationTrigger,
+    Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationRevision,
+    AutomationStoreError,
 };
 use fabro_config::Storage;
 use fabro_types::{AutomationRef, RunId};
@@ -15,12 +16,8 @@ use super::super::{
     State, StatusCode, get, paginate_items,
 };
 use super::runs;
-use crate::automation_materializer::{
-    AutomationRunMaterializeError, AutomationRunMaterializeInput,
-};
+use crate::automation_materializer::AutomationRunMaterializeInput;
 use crate::principal_middleware::RequiredRunToolActor;
-
-const AUTOMATION_API_TRIGGER_DISABLED_CODE: &str = "automation_api_trigger_disabled";
 
 #[derive(Serialize)]
 struct AutomationListResponse {
@@ -80,7 +77,7 @@ async fn list_automation_runs(
 
     let entries = match state
         .store
-        .list_cached_runs(&fabro_store::ListRunsQuery::default(), chrono::Utc::now())
+        .list_cached_runs(&fabro_store::ListRunsQuery::default(), Utc::now())
         .await
     {
         Ok(entries) => entries,
@@ -107,8 +104,8 @@ async fn list_automation_runs(
     });
 
     let total = runs.len() as u64;
-    let decorated = state.decorate_run_summaries(runs).await;
-    let (data, has_more) = paginate_items(decorated, &pagination);
+    let (page, has_more) = paginate_items(runs, &pagination);
+    let data = state.decorate_run_summaries(page).await;
 
     (
         StatusCode::OK,
@@ -133,24 +130,35 @@ async fn create_automation_run(
     let Some(automation) = state.automation_store().get(&id).await else {
         return ApiError::not_found(format!("automation not found: {id}")).into_response();
     };
-    let Some(api_trigger) = enabled_api_trigger(&automation) else {
-        return automation_api_trigger_disabled_error().into_response();
+    let Some(api_trigger) = automation.enabled_api_trigger() else {
+        return ApiError::with_code(
+            StatusCode::CONFLICT,
+            "automation is disabled or has no enabled API trigger",
+            "automation_api_trigger_disabled",
+        )
+        .into_response();
     };
     let api_trigger_id = api_trigger.id.to_string();
 
     let run_id = RunId::new();
+    let temp_root = Storage::new(state.server_storage_dir())
+        .scratch_dir()
+        .join("automations");
     let materialized = match state
         .materialize_automation_run(AutomationRunMaterializeInput {
             automation_id: automation.id.clone(),
             target: automation.target.clone(),
             run_id,
             user_settings_path: state.active_config_path().to_path_buf(),
-            temp_root: automation_materialization_temp_root(state.as_ref()),
+            temp_root,
         })
         .await
     {
         Ok(materialized) => materialized,
-        Err(err) => return automation_materialize_error(&err).into_response(),
+        Err(err) => {
+            return ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, err.to_string())
+                .into_response();
+        }
     };
     let explicit_title_supplied = materialized.manifest.title.is_some();
     let automation_ref = AutomationRef {
@@ -252,37 +260,6 @@ fn unquote_etag(value: &str) -> &str {
         .strip_prefix('"')
         .and_then(|unquoted| unquoted.strip_suffix('"'))
         .unwrap_or(value)
-}
-
-fn enabled_api_trigger(automation: &Automation) -> Option<&ApiTrigger> {
-    if !automation.enabled {
-        return None;
-    }
-    automation
-        .triggers
-        .iter()
-        .find_map(|trigger| match trigger {
-            AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),
-            _ => None,
-        })
-}
-
-fn automation_api_trigger_disabled_error() -> ApiError {
-    ApiError::with_code(
-        StatusCode::CONFLICT,
-        "automation is disabled or has no enabled API trigger",
-        AUTOMATION_API_TRIGGER_DISABLED_CODE,
-    )
-}
-
-fn automation_materialization_temp_root(state: &AppState) -> std::path::PathBuf {
-    Storage::new(state.server_storage_dir())
-        .scratch_dir()
-        .join("automations")
-}
-
-fn automation_materialize_error(err: &AutomationRunMaterializeError) -> ApiError {
-    ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, err.to_string())
 }
 
 fn automation_with_etag_response(status: StatusCode, automation: Automation) -> Response {

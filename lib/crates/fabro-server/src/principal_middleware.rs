@@ -238,7 +238,7 @@ impl<S: Send + Sync> FromRequestParts<S> for RequiredRunToolActor {
             .get::<AuthContextSlot>()
             .cloned()
             .unwrap_or_else(AuthContextSlot::initial);
-        require_run_tool_actor(&slot).map(Self)
+        require_run_management_actor(&slot).map(Self)
     }
 }
 
@@ -417,10 +417,6 @@ pub(crate) fn require_run_management_actor(slot: &AuthContextSlot) -> Result<Pri
         Principal::Worker { .. } => Err(ApiError::forbidden()),
         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
     }
-}
-
-pub(crate) fn require_run_tool_actor(slot: &AuthContextSlot) -> Result<Principal, ApiError> {
-    require_run_management_actor(slot)
 }
 
 fn require_worker_or_user_for_run(
