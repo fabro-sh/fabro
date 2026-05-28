@@ -15,7 +15,7 @@ mod lifecycle;
 mod models;
 mod pair;
 mod pull_requests;
-mod runs;
+pub(in crate::server) mod runs;
 mod sandbox;
 mod sandboxes;
 mod secrets;

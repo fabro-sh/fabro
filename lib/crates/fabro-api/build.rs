@@ -632,6 +632,7 @@ fn main() {
         ("SandboxTimestamps", "fabro_types::SandboxTimestamps", &[]),
         ("AskFabro", "fabro_types::AskFabro", &[]),
         ("Automation", "fabro_automation::Automation", &[]),
+        ("AutomationRef", "fabro_types::AutomationRef", &[]),
         ("AutomationTarget", "fabro_automation::AutomationTarget", &[
         ]),
         (

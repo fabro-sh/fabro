@@ -816,6 +816,8 @@ where
         shutdown: shutdown.clone(),
         #[cfg(test)]
         worker_control_bus: None,
+        #[cfg(any(test, feature = "test-support"))]
+        automation_materializer_override: None,
     })?;
     let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;
     if reconciled > 0 {
