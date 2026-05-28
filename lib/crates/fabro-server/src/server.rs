@@ -4152,12 +4152,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         if let Some(managed_run) = runs.get_mut(&run_id) {
             managed_run.worker_ref = Some(worker_ref.clone());
             managed_run.run_dir = Some(run_dir.clone());
-        }
-    }
-
-    {
-        let mut runs = state.runs.lock().expect("runs lock poisoned");
-        if let Some(managed_run) = runs.get_mut(&run_id) {
             managed_run.answer_transport = Some(RunAnswerTransport::Worker {
                 run_id,
                 bus: Arc::clone(&state.worker_control_bus),

@@ -112,13 +112,15 @@ impl WorkerRuntime for LocalWorkerRuntime {
             .spawn()
             .context("spawning run worker process")?;
 
-        let pid = child.id().context("worker process did not report a PID")?;
-        let stderr: Pin<Box<dyn AsyncRead + Send + 'static>> = Box::pin(
-            child
-                .stderr
-                .take()
-                .context("worker child stderr should be piped")?,
-        );
+        let Some(pid) = child.id() else {
+            let _ = child.start_kill();
+            anyhow::bail!("worker process did not report a PID");
+        };
+        let Some(stderr) = child.stderr.take() else {
+            let _ = child.start_kill();
+            anyhow::bail!("worker child stderr should be piped");
+        };
+        let stderr: Pin<Box<dyn AsyncRead + Send + 'static>> = Box::pin(stderr);
         let wait: BoxFuture<'static, Result<WorkerExit>> = Box::pin(async move {
             let status = child.wait().await.context("worker wait failed")?;
             Ok(WorkerExit {
@@ -137,7 +139,7 @@ impl WorkerRuntime for LocalWorkerRuntime {
     async fn request_stop(&self, worker_ref: &WorkerRef) {
         let WorkerRef::Local { pid } = worker_ref;
         #[cfg(unix)]
-        fabro_proc::sigterm(*pid);
+        fabro_proc::sigterm_process_group(*pid);
         #[cfg(not(unix))]
         let _ = pid;
     }
