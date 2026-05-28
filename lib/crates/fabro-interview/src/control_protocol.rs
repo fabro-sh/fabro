@@ -1,9 +1,30 @@
+use std::time::Duration;
+
 use fabro_types::{PairId, PairMessageId, PairTarget, Principal, RunId};
 use serde::{Deserialize, Serialize};
 
 use crate::{Answer, AnswerSubmission, AnswerValue};
 
 pub const WORKER_CONTROL_PROTOCOL_VERSION: u8 = 1;
+
+/// Interval between worker-control WebSocket ping frames.
+///
+/// Server and worker both initiate pings at this cadence; either side that
+/// fails to observe inbound traffic for [`WORKER_CONTROL_WS_LIVENESS_TIMEOUT`]
+/// closes the WebSocket.
+pub const WORKER_CONTROL_WS_PING_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Maximum quiet time allowed on a worker-control WebSocket before either side
+/// declares the connection dead.
+pub const WORKER_CONTROL_WS_LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// WebSocket close-frame reason used when the server can no longer prove
+/// replay correctness for the requested cursor. Workers must treat this as
+/// fatal control-channel loss.
+pub const WORKER_CONTROL_INVALID_CURSOR_REASON: &str = "invalid_cursor";
+
+/// WebSocket close-frame reason used when the ping/pong watchdog fires.
+pub const WORKER_CONTROL_PONG_TIMEOUT_REASON: &str = "pong_timeout";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerControlEnvelope {
@@ -30,6 +51,22 @@ impl WorkerControlEnvelope {
         Self {
             v:       WORKER_CONTROL_PROTOCOL_VERSION,
             message: WorkerControlMessage::RunCancel,
+        }
+    }
+
+    #[must_use]
+    pub fn pause_run() -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::RunPause,
+        }
+    }
+
+    #[must_use]
+    pub fn unpause_run() -> Self {
+        Self {
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::RunUnpause,
         }
     }
 
@@ -121,6 +158,10 @@ pub enum WorkerControlMessage {
     },
     #[serde(rename = "run.cancel")]
     RunCancel,
+    #[serde(rename = "run.pause")]
+    RunPause,
+    #[serde(rename = "run.unpause")]
+    RunUnpause,
     #[serde(rename = "run.steer")]
     Steer { text: String, actor: Principal },
     #[serde(rename = "run.interrupt")]
@@ -145,6 +186,12 @@ pub enum WorkerControlMessage {
     },
     #[serde(rename = "pair.end")]
     PairEnd { pair_id: PairId, actor: Principal },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerControlDeliveryFrame {
+    pub id:       String,
+    pub envelope: WorkerControlEnvelope,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +271,26 @@ mod tests {
         let envelope = WorkerControlEnvelope::cancel_run();
         let json = serde_json::to_string(&envelope).unwrap();
         assert_eq!(json, r#"{"v":1,"type":"run.cancel"}"#);
+
+        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn pause_run_round_trips_through_json() {
+        let envelope = WorkerControlEnvelope::pause_run();
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(json, r#"{"v":1,"type":"run.pause"}"#);
+
+        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn unpause_run_round_trips_through_json() {
+        let envelope = WorkerControlEnvelope::unpause_run();
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(json, r#"{"v":1,"type":"run.unpause"}"#);
 
         let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, envelope);
@@ -325,5 +392,21 @@ mod tests {
         let parsed: WorkerControlEnvelope =
             serde_json::from_str(&serde_json::to_string(&end).unwrap()).unwrap();
         assert_eq!(parsed, end);
+    }
+
+    #[test]
+    fn delivery_frame_round_trips_through_json() {
+        let frame = WorkerControlDeliveryFrame {
+            id:       "local:42".to_string(),
+            envelope: WorkerControlEnvelope::cancel_run(),
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert_eq!(
+            json,
+            r#"{"id":"local:42","envelope":{"v":1,"type":"run.cancel"}}"#
+        );
+
+        let parsed: WorkerControlDeliveryFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, frame);
     }
 }

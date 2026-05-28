@@ -387,10 +387,6 @@ async fn cancel_run(
                 | RunStatus::Running
                 | RunStatus::Blocked { .. }
                 | RunStatus::Paused { .. } => {
-                    let use_cancel_signal = !matches!(
-                        managed_run.answer_transport,
-                        Some(RunAnswerTransport::InProcess { .. })
-                    );
                     let persist_cancelled_status = matches!(
                         managed_run.status,
                         RunStatus::Submitted | RunStatus::Pending { .. } | RunStatus::Runnable
@@ -404,9 +400,7 @@ async fn cancel_run(
                         persist_cancelled_status,
                         managed_run.answer_transport.clone(),
                         managed_run.cancel_token.clone(),
-                        use_cancel_signal
-                            .then(|| managed_run.cancel_tx.take())
-                            .flatten(),
+                        managed_run.cancel_tx.take(),
                         managed_run.worker_pid,
                     ))
                 }
@@ -436,22 +430,29 @@ async fn cancel_run(
     if let Some(token) = &cancel_token {
         token.cancel();
     }
-    let sent_cancel_signal = if let Some(cancel_tx) = cancel_tx {
+    let sent_in_process_cancel = if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
         true
     } else {
         false
     };
-    if let Some(answer_transport) = answer_transport {
-        if !(sent_cancel_signal && matches!(answer_transport, RunAnswerTransport::InProcess { .. }))
+    let delivered_control = if let Some(answer_transport) = answer_transport {
+        if sent_in_process_cancel
+            && matches!(answer_transport, RunAnswerTransport::InProcess { .. })
         {
-            let _ = answer_transport.cancel_run().await;
+            true
+        } else {
+            answer_transport.cancel_run().await.is_ok()
         }
-    }
-    if let Some(worker_pid) = worker_pid {
-        #[cfg(unix)]
-        fabro_proc::sigterm(worker_pid);
-        schedule_worker_kill(Arc::clone(&state), id, worker_pid);
+    } else {
+        false
+    };
+    if !delivered_control {
+        if let Some(worker_pid) = worker_pid {
+            #[cfg(unix)]
+            fabro_proc::sigterm(worker_pid);
+            schedule_worker_kill(Arc::clone(&state), id, worker_pid);
+        }
     }
 
     if persist_cancelled_status {
@@ -504,9 +505,9 @@ async fn unmanaged_cancel_response(
 /// How `pause_run` should enact the transition, chosen from the current run
 /// status.
 enum PauseMode {
-    /// Worker is running; ask it to pause via SIGUSR1. Status flips to
-    /// `Paused` once the worker acknowledges.
-    Signal { worker_pid: u32 },
+    /// Worker is running; ask it to pause via the worker control bus. Status
+    /// flips to `Paused` once the worker acknowledges.
+    Transport { transport: RunAnswerTransport },
     /// Worker is blocked on a human gate; flip to `Paused` directly by
     /// appending `RunPaused` ourselves.
     AppendEvent,
@@ -514,8 +515,9 @@ enum PauseMode {
 
 /// How `unpause_run` should enact the transition.
 enum UnpauseMode {
-    /// No outstanding block; ask the worker to resume via SIGUSR2.
-    Signal { worker_pid: u32 },
+    /// No outstanding block; ask the worker to resume via the worker control
+    /// bus.
+    Transport { transport: RunAnswerTransport },
     /// Was paused while blocked; append `RunUnpaused` and let the reducer
     /// restore the underlying blocked state from `Paused { prior_block }`.
     AppendEvent,
@@ -544,11 +546,11 @@ async fn pause_run(
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
             Some(managed_run) if managed_run.status == RunStatus::Running => {
-                let Some(worker_pid) = managed_run.worker_pid else {
+                let Some(transport) = managed_run.answer_transport.clone() else {
                     return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
                         .into_response();
                 };
-                PauseMode::Signal { worker_pid }
+                PauseMode::Transport { transport }
             }
             Some(managed_run) if matches!(managed_run.status, RunStatus::Blocked { .. }) => {
                 PauseMode::AppendEvent
@@ -578,11 +580,14 @@ async fn pause_run(
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
     match mode {
-        PauseMode::Signal { worker_pid } => {
-            #[cfg(unix)]
-            fabro_proc::sigusr1(worker_pid);
-            #[cfg(not(unix))]
-            let _ = worker_pid;
+        PauseMode::Transport { transport } => {
+            if transport.pause_run().await.is_err() {
+                return ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Failed to deliver pause request to the active run.",
+                )
+                .into_response();
+            }
         }
         PauseMode::AppendEvent => {
             if let Some(response) = synchronous_transition(state.as_ref(), id, |events| {
@@ -625,11 +630,11 @@ async fn unpause_run(
                     prior_block: Some(_),
                 } => UnpauseMode::AppendEvent,
                 RunStatus::Paused { prior_block: None } => {
-                    let Some(worker_pid) = managed_run.worker_pid else {
+                    let Some(transport) = managed_run.answer_transport.clone() else {
                         return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
                             .into_response();
                     };
-                    UnpauseMode::Signal { worker_pid }
+                    UnpauseMode::Transport { transport }
                 }
                 _ => {
                     return ApiError::new(StatusCode::CONFLICT, "Run is not paused.")
@@ -658,11 +663,14 @@ async fn unpause_run(
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
     match mode {
-        UnpauseMode::Signal { worker_pid } => {
-            #[cfg(unix)]
-            fabro_proc::sigusr2(worker_pid);
-            #[cfg(not(unix))]
-            let _ = worker_pid;
+        UnpauseMode::Transport { transport } => {
+            if transport.unpause_run().await.is_err() {
+                return ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Failed to deliver unpause request to the active run.",
+                )
+                .into_response();
+            }
         }
         UnpauseMode::AppendEvent => {
             if let Some(response) = synchronous_transition(state.as_ref(), id, |events| {

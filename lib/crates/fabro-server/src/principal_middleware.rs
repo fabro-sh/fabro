@@ -58,6 +58,7 @@ pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
 pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
 pub(crate) struct RequiredRunManagementActor(pub(crate) Principal);
 pub(crate) struct RequireRunScoped(pub(crate) RunId);
+pub(crate) struct RequireWorkerRunScoped(pub(crate) RunId);
 pub(crate) struct RequireRunManagementTarget(pub(crate) RunId, pub(crate) Principal);
 pub(crate) struct RequireRunBlob(pub(crate) RunId, pub(crate) RunBlobId);
 pub(crate) struct RequireRunStageScoped(pub(crate) RunId, pub(crate) String);
@@ -245,6 +246,23 @@ impl FromRequestParts<Arc<AppState>> for RequireRunScoped {
     }
 }
 
+impl FromRequestParts<Arc<AppState>> for RequireWorkerRunScoped {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &Arc<AppState>,
+    ) -> Result<Self, Self::Rejection> {
+        let Path(id): Path<String> = Path::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        let run_id = parse_run_id_path(&id)?;
+        require_worker_for_run(&auth_slot_from_parts(parts), &run_id)
+            .map_err(IntoResponse::into_response)?;
+        Ok(Self(run_id))
+    }
+}
+
 impl FromRequestParts<Arc<AppState>> for RequireRunManagementTarget {
     type Rejection = Response;
 
@@ -414,6 +432,15 @@ fn require_worker_or_user_for_run(
         Principal::User(_) => Ok(()),
         Principal::Worker { run_id } if run_id == route_run_id => Ok(()),
         Principal::Worker { .. } => Err(ApiError::forbidden()),
+        _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
+    }
+}
+
+fn require_worker_for_run(slot: &AuthContextSlot, route_run_id: &RunId) -> Result<(), ApiError> {
+    let context = slot.0.lock().expect("auth context lock poisoned");
+    match &context.principal {
+        Principal::Worker { run_id } if run_id == route_run_id => Ok(()),
+        Principal::Worker { .. } | Principal::User(_) => Err(ApiError::forbidden()),
         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
     }
 }

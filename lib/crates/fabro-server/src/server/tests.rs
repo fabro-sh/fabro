@@ -9,10 +9,12 @@ use std::sync::{Arc as StdArc, Mutex as StdMutex};
 use axum::body::Body;
 use axum::http::{Method, Request, header};
 use chrono::{Duration as ChronoDuration, Utc};
+use fabro_automation::{AutomationId, AutomationTarget};
 use fabro_config::ServerSettingsBuilder;
 use fabro_config::bind::Bind;
 use fabro_interview::{
-    AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlMessage,
+    AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlDeliveryFrame,
+    WorkerControlEnvelope, WorkerControlMessage,
 };
 use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest, TokenCounts};
 use fabro_model::catalog::LlmCatalogSettings;
@@ -32,6 +34,8 @@ use httpmock::Method::{GET, POST};
 use httpmock::MockServer;
 use serde_json::json;
 use tokio_stream::StreamExt as _;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::protocol::Message as WebSocketMessage;
 use tower::ServiceExt;
 use tracing::field::{Field, Visit};
 use tracing::{Event as TracingEvent, Subscriber, subscriber};
@@ -40,9 +44,13 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{Layer, Registry};
 
 use super::*;
+use crate::automation_materializer::AutomationRunMaterializeInput;
 use crate::github_webhooks::compute_signature;
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 use crate::test_support::*;
+use crate::worker_control::{
+    LocalWorkerControlBus, WorkerControlBus, WorkerControlCursor, WorkerControlReceiver,
+};
 
 const MINIMAL_DOT: &str = r#"digraph Test {
     graph [goal="Test"]
@@ -656,6 +664,292 @@ fn bearer_request(method: Method, path: &str, bearer: &str, body: Body) -> Reque
         .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
         .body(body)
         .unwrap()
+}
+
+struct WorkerControlWsTestServer {
+    base_url: String,
+    task:     tokio::task::JoinHandle<()>,
+}
+
+impl WorkerControlWsTestServer {
+    async fn spawn(app: Router) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test WebSocket listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test WebSocket listener should have a local address");
+        let task = tokio::spawn(async move {
+            let result = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await;
+            if let Err(err) = result {
+                tracing::debug!(error = %err, "test WebSocket server stopped");
+            }
+        });
+        Self {
+            base_url: format!("ws://{addr}"),
+            task,
+        }
+    }
+
+    fn worker_control_url(&self, run_id: RunId, after: Option<&str>) -> String {
+        let mut url = format!(
+            "{}/api/v1/runs/{run_id}/worker/control-stream",
+            self.base_url
+        );
+        if let Some(after) = after {
+            url.push_str("?after=");
+            url.push_str(after);
+        }
+        url
+    }
+}
+
+impl Drop for WorkerControlWsTestServer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+fn worker_control_ws_request(
+    server: &WorkerControlWsTestServer,
+    run_id: RunId,
+    bearer: Option<&str>,
+    after: Option<&str>,
+) -> Request<()> {
+    let mut request = server
+        .worker_control_url(run_id, after)
+        .into_client_request()
+        .expect("test worker-control WebSocket request should build");
+    if let Some(bearer) = bearer {
+        request.headers_mut().insert(
+            header::AUTHORIZATION,
+            format!("Bearer {bearer}")
+                .parse()
+                .expect("test bearer header should parse"),
+        );
+    }
+    request
+}
+
+async fn connect_worker_control_ws(
+    server: &WorkerControlWsTestServer,
+    run_id: RunId,
+    bearer: &str,
+    after: Option<&str>,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    let request = worker_control_ws_request(server, run_id, Some(bearer), after);
+    let (socket, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("worker-control WebSocket should connect");
+    socket
+}
+
+async fn assert_worker_control_ws_rejected(
+    server: &WorkerControlWsTestServer,
+    run_id: RunId,
+    bearer: Option<&str>,
+    after: Option<&str>,
+    expected: StatusCode,
+) {
+    let request = worker_control_ws_request(server, run_id, bearer, after);
+    let error = tokio_tungstenite::connect_async(request)
+        .await
+        .expect_err("worker-control WebSocket should be rejected");
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), expected);
+        }
+        other => panic!("expected HTTP rejection {expected}, got {other:#}"),
+    }
+}
+
+async fn next_worker_control_frame(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> WorkerControlDeliveryFrame {
+    let message = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let message = futures_util::StreamExt::next(socket)
+                .await
+                .expect("worker-control WebSocket should remain open")
+                .expect("worker-control WebSocket frame should be ok");
+            match message {
+                WebSocketMessage::Text(text) => return text,
+                WebSocketMessage::Ping(payload) => {
+                    futures_util::SinkExt::send(socket, WebSocketMessage::Pong(payload))
+                        .await
+                        .expect("test worker-control pong should send");
+                }
+                WebSocketMessage::Pong(_)
+                | WebSocketMessage::Binary(_)
+                | WebSocketMessage::Frame(_) => {}
+                WebSocketMessage::Close(frame) => {
+                    panic!("worker-control WebSocket closed before text frame: {frame:?}");
+                }
+            }
+        }
+    })
+    .await
+    .expect("worker-control frame should arrive");
+    serde_json::from_str(message.as_str()).expect("worker-control delivery frame should parse")
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn worker_control_stream_rejects_missing_user_and_cross_run_auth() {
+    let (_state, app) = jwt_auth_app();
+    let user_bearer = issue_test_user_jwt();
+    let run_id = create_run_with_bearer(&app, &user_bearer).await;
+    let worker_bearer = issue_test_worker_token(&run_id);
+    let other_run_id = create_run_with_bearer(&app, &user_bearer).await;
+    let other_worker_bearer = issue_test_worker_token(&other_run_id);
+    let server = WorkerControlWsTestServer::spawn(app).await;
+
+    assert_worker_control_ws_rejected(&server, run_id, None, None, StatusCode::UNAUTHORIZED).await;
+    assert_worker_control_ws_rejected(
+        &server,
+        run_id,
+        Some(&user_bearer),
+        None,
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+    assert_worker_control_ws_rejected(
+        &server,
+        run_id,
+        Some(&other_worker_bearer),
+        None,
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+
+    let mut socket = connect_worker_control_ws(&server, run_id, &worker_bearer, None).await;
+    futures_util::SinkExt::send(&mut socket, WebSocketMessage::Close(None))
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn worker_control_stream_start_subscription_delivers_frames() {
+    let (state, app) = jwt_auth_app();
+    let user_bearer = issue_test_user_jwt();
+    let run_id = create_run_with_bearer(&app, &user_bearer).await;
+    let worker_bearer = issue_test_worker_token(&run_id);
+    let server = WorkerControlWsTestServer::spawn(app).await;
+    let mut socket = connect_worker_control_ws(&server, run_id, &worker_bearer, None).await;
+
+    let expected = WorkerControlEnvelope::cancel_run();
+    let id = state
+        .worker_control_bus
+        .publish(run_id, expected.clone())
+        .await
+        .unwrap();
+    let frame = next_worker_control_frame(&mut socket).await;
+
+    assert_eq!(frame.id, id.to_string());
+    assert_eq!(frame.envelope, expected);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn worker_control_stream_after_subscription_delivers_only_later_frames() {
+    let (state, app) = jwt_auth_app();
+    let user_bearer = issue_test_user_jwt();
+    let run_id = create_run_with_bearer(&app, &user_bearer).await;
+    let worker_bearer = issue_test_worker_token(&run_id);
+    let first = state
+        .worker_control_bus
+        .publish(run_id, WorkerControlEnvelope::cancel_run())
+        .await
+        .unwrap();
+    let expected = WorkerControlEnvelope::pause_run();
+    let second = state
+        .worker_control_bus
+        .publish(run_id, expected.clone())
+        .await
+        .unwrap();
+    let server = WorkerControlWsTestServer::spawn(app).await;
+
+    let mut socket =
+        connect_worker_control_ws(&server, run_id, &worker_bearer, Some(first.as_str())).await;
+    let frame = next_worker_control_frame(&mut socket).await;
+
+    assert_eq!(frame.id, second.to_string());
+    assert_eq!(frame.envelope, expected);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn worker_control_stream_invalid_cursor_is_http_gone_before_upgrade() {
+    let (_state, app) = jwt_auth_app();
+    let user_bearer = issue_test_user_jwt();
+    let run_id = create_run_with_bearer(&app, &user_bearer).await;
+    let worker_bearer = issue_test_worker_token(&run_id);
+    let server = WorkerControlWsTestServer::spawn(app).await;
+
+    assert_worker_control_ws_rejected(
+        &server,
+        run_id,
+        Some(&worker_bearer),
+        Some("local:999"),
+        StatusCode::GONE,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn worker_control_stream_rejects_missing_terminal_and_archived_runs() {
+    let (state, app) = jwt_auth_app();
+    let user_bearer = issue_test_user_jwt();
+    let missing_run_id = RunId::new();
+    let missing_worker_bearer = issue_test_worker_token(&missing_run_id);
+    let terminal_run_id = RunId::new();
+    create_succeeded_run(&state, terminal_run_id).await;
+    let terminal_worker_bearer = issue_test_worker_token(&terminal_run_id);
+    let archived_run_id = RunId::new();
+    create_succeeded_run(&state, archived_run_id).await;
+    let archived_worker_bearer = issue_test_worker_token(&archived_run_id);
+    let archive_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{archived_run_id}/archive")))
+                .header(header::AUTHORIZATION, format!("Bearer {user_bearer}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response_json!(archive_response, StatusCode::OK).await;
+    let server = WorkerControlWsTestServer::spawn(app).await;
+
+    assert_worker_control_ws_rejected(
+        &server,
+        missing_run_id,
+        Some(&missing_worker_bearer),
+        None,
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_worker_control_ws_rejected(
+        &server,
+        terminal_run_id,
+        Some(&terminal_worker_bearer),
+        None,
+        StatusCode::CONFLICT,
+    )
+    .await;
+    assert_worker_control_ws_rejected(
+        &server,
+        archived_run_id,
+        Some(&archived_worker_bearer),
+        None,
+        StatusCode::CONFLICT,
+    )
+    .await;
 }
 
 fn json_bearer_request(
@@ -1649,6 +1943,8 @@ fn slack_app_state_with_secret_sources(
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        worker_control_bus: None,
+        automation_materializer_override: None,
     })
     .expect("slack test app state should build")
 }
@@ -1748,10 +2044,29 @@ fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        worker_control_bus: None,
+        automation_materializer_override: None,
     })
     .expect("slack disabled test app state should build");
 
     assert!(state.slack_service.is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn worker_command_uses_null_stdin_and_token_env() {
+    let storage_dir = tempfile::tempdir().unwrap();
+    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+    let cmd = worker_command(
+        state.as_ref(),
+        RunId::new(),
+        RunExecutionMode::Start,
+        storage_dir.path(),
+        false,
+    )
+    .unwrap();
+
+    assert_worker_command_passes_token_only_by_env(&cmd);
 }
 
 #[cfg(unix)]
@@ -2052,6 +2367,8 @@ methods = ["dev-token"]
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        worker_control_bus: None,
+        automation_materializer_override: None,
     }) else {
         panic!("build_app_state should require SESSION_SECRET")
     };
@@ -2179,6 +2496,8 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        worker_control_bus: None,
+        automation_materializer_override: None,
     })
 }
 
@@ -2358,23 +2677,47 @@ fn worker_token_claims(cmd: &Command, state: &AppState) -> crate::worker_token::
     .claims
 }
 
+async fn worker_transport_with_receiver(
+    run_id: RunId,
+) -> (RunAnswerTransport, WorkerControlReceiver) {
+    let bus = StdArc::new(LocalWorkerControlBus::new());
+    let receiver = bus
+        .subscribe(run_id, WorkerControlCursor::Start)
+        .await
+        .expect("test worker bus should subscribe");
+    // Ensure the subscription task is waiting before the test publishes.
+    tokio::task::yield_now().await;
+    let bus: StdArc<dyn WorkerControlBus> = bus;
+    let transport = RunAnswerTransport::Worker { run_id, bus };
+    (transport, receiver)
+}
+
+async fn recv_worker_control_envelope(
+    receiver: &mut WorkerControlReceiver,
+) -> WorkerControlEnvelope {
+    receiver
+        .recv()
+        .await
+        .expect("test worker control receiver should stay open")
+        .expect("test worker control delivery should succeed")
+        .envelope
+}
+
 #[tokio::test]
-async fn subprocess_answer_transport_cancel_run_enqueues_cancel_message() {
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
-    let transport = RunAnswerTransport::Subprocess { control_tx };
+async fn worker_answer_transport_cancel_run_publishes_cancel_message() {
+    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
 
     transport.cancel_run().await.unwrap();
 
     assert_eq!(
-        control_rx.recv().await,
-        Some(WorkerControlEnvelope::cancel_run())
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::cancel_run()
     );
 }
 
 #[tokio::test]
-async fn subprocess_answer_transport_steer_enqueues_plain_steer_message() {
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
-    let transport = RunAnswerTransport::Subprocess { control_tx };
+async fn worker_answer_transport_steer_publishes_plain_steer_message() {
+    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
     let actor = Principal::System {
         system_kind: SystemActorKind::Engine,
     };
@@ -2385,15 +2728,14 @@ async fn subprocess_answer_transport_steer_enqueues_plain_steer_message() {
         .unwrap();
 
     assert_eq!(
-        control_rx.recv().await,
-        Some(WorkerControlEnvelope::steer("try again", actor))
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::steer("try again", actor)
     );
 }
 
 #[tokio::test]
-async fn subprocess_answer_transport_interrupt_enqueues_interrupt_message() {
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
-    let transport = RunAnswerTransport::Subprocess { control_tx };
+async fn worker_answer_transport_interrupt_publishes_interrupt_message() {
+    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
     let actor = Principal::System {
         system_kind: SystemActorKind::Engine,
     };
@@ -2401,15 +2743,14 @@ async fn subprocess_answer_transport_interrupt_enqueues_interrupt_message() {
     transport.interrupt(actor.clone()).await.unwrap();
 
     assert_eq!(
-        control_rx.recv().await,
-        Some(WorkerControlEnvelope::interrupt(actor))
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::interrupt(actor)
     );
 }
 
 #[tokio::test]
-async fn subprocess_answer_transport_interrupt_then_steer_enqueues_single_combined_message() {
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
-    let transport = RunAnswerTransport::Subprocess { control_tx };
+async fn worker_answer_transport_interrupt_then_steer_publishes_single_combined_message() {
+    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
     let actor = Principal::System {
         system_kind: SystemActorKind::Engine,
     };
@@ -2420,19 +2761,15 @@ async fn subprocess_answer_transport_interrupt_then_steer_enqueues_single_combin
         .unwrap();
 
     assert_eq!(
-        control_rx.recv().await,
-        Some(WorkerControlEnvelope::interrupt_then_steer(
-            "try again",
-            actor
-        ))
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::interrupt_then_steer("try again", actor)
     );
 }
 
 #[tokio::test]
-async fn subprocess_answer_transport_pair_commands_enqueue_control_messages() {
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(3);
-    let transport = RunAnswerTransport::Subprocess { control_tx };
+async fn worker_answer_transport_pair_commands_publish_control_messages() {
     let run_id = fixtures::RUN_1;
+    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
     let pair_id = "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap();
     let message_id = "01HZX6M4D7Y1QW0Q0P6V8Z4DR5".parse().unwrap();
     let actor = Principal::System {
@@ -2457,27 +2794,39 @@ async fn subprocess_answer_transport_pair_commands_enqueue_control_messages() {
     transport.end_pair(pair_id, actor.clone()).await.unwrap();
 
     assert_eq!(
-        control_rx.recv().await,
-        Some(WorkerControlEnvelope::start_pair(
-            run_id,
-            pair_id,
-            target,
-            actor.clone()
-        ))
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::start_pair(run_id, pair_id, target, actor.clone())
     );
     assert_eq!(
-        control_rx.recv().await,
-        Some(WorkerControlEnvelope::pair_message(
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::pair_message(
             pair_id,
             message_id,
             "inspect this",
             Some("client-1".to_string()),
             actor.clone()
-        ))
+        )
     );
     assert_eq!(
-        control_rx.recv().await,
-        Some(WorkerControlEnvelope::end_pair(pair_id, actor))
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::end_pair(pair_id, actor)
+    );
+}
+
+#[tokio::test]
+async fn worker_answer_transport_pause_and_unpause_publish_control_messages() {
+    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
+
+    transport.pause_run().await.unwrap();
+    transport.unpause_run().await.unwrap();
+
+    assert_eq!(
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::pause_run()
+    );
+    assert_eq!(
+        recv_worker_control_envelope(&mut control_rx).await,
+        WorkerControlEnvelope::unpause_run()
     );
 }
 
@@ -2852,6 +3201,155 @@ async fn post_run_manifest(app: &Router, manifest: serde_json::Value) -> serde_j
         .await
         .unwrap();
     response_json!(response, StatusCode::CREATED).await
+}
+
+#[tokio::test]
+async fn post_runs_create_regression_keeps_api_behavior_without_automation_metadata() {
+    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let mut manifest = minimal_manifest_json(MINIMAL_DOT);
+    manifest["title"] = json!("API title");
+
+    let body = post_run_manifest(&app, manifest).await;
+    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
+
+    assert_eq!(body["title"], "API title");
+    assert!(body["automation"].is_null());
+    assert_eq!(body["lifecycle"]["status"]["kind"], "submitted");
+    let summary = state
+        .store
+        .get_cached_summary(&run_id, Utc::now())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(summary.automation.is_none());
+}
+
+#[tokio::test]
+async fn create_run_from_manifest_helper_persists_without_automation_metadata() {
+    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
+    let manifest: RunManifest = serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
+    let submitted_manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+    let run_id = RunId::new();
+
+    let response = Box::pin(handler::runs::create_run_from_manifest(
+        Arc::clone(&state),
+        handler::runs::CreateRunFromManifestRequest {
+            manifest,
+            submitted_manifest_bytes,
+            explicit_run_id: Some(run_id),
+            explicit_title_supplied: false,
+            actor: Principal::System {
+                system_kind: SystemActorKind::Engine,
+            },
+            headers: HeaderMap::new(),
+            automation: None,
+        },
+    ))
+    .await;
+
+    let body = response_json!(response, StatusCode::CREATED).await;
+    assert_eq!(body["id"], run_id.to_string());
+    assert!(body["automation"].is_null());
+    let summary = state
+        .store
+        .get_cached_summary(&run_id, Utc::now())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(summary.automation.is_none());
+}
+
+#[tokio::test]
+async fn create_run_from_manifest_helper_persists_automation_metadata() {
+    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
+    let manifest: RunManifest = serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
+    let submitted_manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+    let run_id = RunId::new();
+    let automation = fabro_types::AutomationRef {
+        id:         "nightly".to_string(),
+        name:       Some("Nightly".to_string()),
+        trigger_id: Some("schedule".to_string()),
+    };
+
+    let response = Box::pin(handler::runs::create_run_from_manifest(
+        Arc::clone(&state),
+        handler::runs::CreateRunFromManifestRequest {
+            manifest,
+            submitted_manifest_bytes,
+            explicit_run_id: Some(run_id),
+            explicit_title_supplied: false,
+            actor: Principal::System {
+                system_kind: SystemActorKind::Engine,
+            },
+            headers: HeaderMap::new(),
+            automation: Some(automation.clone()),
+        },
+    ))
+    .await;
+
+    let body = response_json!(response, StatusCode::CREATED).await;
+    assert_eq!(body["automation"]["id"], automation.id);
+    assert_eq!(
+        body["automation"]["name"],
+        automation.name.as_deref().unwrap()
+    );
+    assert_eq!(
+        body["automation"]["trigger_id"],
+        automation.trigger_id.as_deref().unwrap()
+    );
+    let summary = state
+        .store
+        .get_cached_summary(&run_id, Utc::now())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(summary.automation, Some(automation));
+}
+
+#[tokio::test]
+async fn fake_automation_materializer_injection_captures_input_and_returns_manifest() {
+    let materialized_manifest: RunManifest =
+        serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
+    let fake = TestAutomationRunMaterializer::succeed(
+        materialized_manifest.clone(),
+        b"{\"fake\":true}".to_vec(),
+    );
+    let state = TestAppStateBuilder::new()
+        .automation_materializer(fake.clone())
+        .build();
+    let run_id = RunId::new();
+    let user_settings_path = PathBuf::from("/tmp/fabro/settings.toml");
+    let temp_root = PathBuf::from("/tmp/fabro/automation");
+    let target = AutomationTarget {
+        repository:   "fabro-sh/fabro".to_string(),
+        ref_selector: "main".to_string(),
+        workflow:     "demo".to_string(),
+    };
+
+    let output = state
+        .materialize_automation_run(AutomationRunMaterializeInput {
+            automation_id: AutomationId::new("nightly").unwrap(),
+            target: target.clone(),
+            run_id,
+            user_settings_path: user_settings_path.clone(),
+            temp_root: temp_root.clone(),
+        })
+        .await
+        .expect("fake materializer should succeed");
+
+    assert_eq!(
+        serde_json::to_value(&output.manifest).unwrap(),
+        serde_json::to_value(&materialized_manifest).unwrap()
+    );
+    assert_eq!(output.submitted_manifest_bytes, b"{\"fake\":true}".to_vec());
+    let captured = fake.captured_inputs();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].automation_id.as_str(), "nightly");
+    assert_eq!(captured[0].target, target);
+    assert_eq!(captured[0].run_id, run_id);
+    assert_eq!(captured[0].user_settings_path, user_settings_path);
+    assert_eq!(captured[0].temp_root, temp_root);
 }
 
 async fn mock_openai_title_response<'a>(
@@ -5276,6 +5774,8 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
+        worker_control_bus: None,
+        automation_materializer_override: None,
     };
     let state = build_app_state(config).expect("test app state should build");
     if let Some(token) = token {
@@ -10678,12 +11178,8 @@ async fn steer_without_active_steerable_session_forwards_plain_steer_for_bufferi
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
-    let _temp_dir = insert_running_control_run(
-        &state,
-        run_id,
-        Some(RunAnswerTransport::Subprocess { control_tx }),
-    );
+    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
+    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
 
     let req = Request::builder()
         .method("POST")
@@ -10694,7 +11190,7 @@ async fn steer_without_active_steerable_session_forwards_plain_steer_for_bufferi
 
     let response = app.oneshot(req).await.unwrap();
     assert_status!(response, StatusCode::ACCEPTED).await;
-    let envelope = control_rx.recv().await.unwrap();
+    let envelope = recv_worker_control_envelope(&mut control_rx).await;
     assert!(matches!(
         envelope.message,
         WorkerControlMessage::Steer { ref text, .. } if text == "try again"
@@ -10707,12 +11203,8 @@ async fn steer_with_active_non_steerable_session_returns_conflict() {
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
     let stage_id = StageId::new("agent", 1);
-    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
-    let _temp_dir = insert_running_control_run(
-        &state,
-        run_id,
-        Some(RunAnswerTransport::Subprocess { control_tx }),
-    );
+    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
+    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.get_mut(&run_id)
@@ -10739,12 +11231,8 @@ async fn steer_interrupt_without_active_steerable_session_returns_conflict() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
-    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
-    let _temp_dir = insert_running_control_run(
-        &state,
-        run_id,
-        Some(RunAnswerTransport::Subprocess { control_tx }),
-    );
+    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
+    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
 
     let req = Request::builder()
         .method("POST")
@@ -10765,12 +11253,8 @@ async fn interrupt_with_active_steerable_session_forwards_interrupt() {
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
     let stage_id = StageId::new("agent", 1);
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
-    let _temp_dir = insert_running_control_run(
-        &state,
-        run_id,
-        Some(RunAnswerTransport::Subprocess { control_tx }),
-    );
+    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
+    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.get_mut(&run_id)
@@ -10787,7 +11271,7 @@ async fn interrupt_with_active_steerable_session_forwards_interrupt() {
 
     let response = app.oneshot(req).await.unwrap();
     assert_status!(response, StatusCode::ACCEPTED).await;
-    let envelope = control_rx.recv().await.unwrap();
+    let envelope = recv_worker_control_envelope(&mut control_rx).await;
     assert!(matches!(
         envelope.message,
         WorkerControlMessage::Interrupt {
@@ -10802,12 +11286,8 @@ async fn steer_interrupt_with_active_steerable_session_forwards_combined_control
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
     let stage_id = StageId::new("agent", 1);
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
-    let _temp_dir = insert_running_control_run(
-        &state,
-        run_id,
-        Some(RunAnswerTransport::Subprocess { control_tx }),
-    );
+    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
+    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.get_mut(&run_id)
@@ -10825,7 +11305,7 @@ async fn steer_interrupt_with_active_steerable_session_forwards_combined_control
 
     let response = app.oneshot(req).await.unwrap();
     assert_status!(response, StatusCode::ACCEPTED).await;
-    let envelope = control_rx.recv().await.unwrap();
+    let envelope = recv_worker_control_envelope(&mut control_rx).await;
     assert!(matches!(
         envelope.message,
         WorkerControlMessage::InterruptThenSteer { ref text, .. } if text == "try again"
@@ -10991,12 +11471,8 @@ async fn steer_with_active_acp_session_forwards_to_worker() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = fixtures::RUN_1;
-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
-    let _temp_dir = insert_running_control_run(
-        &state,
-        run_id,
-        Some(RunAnswerTransport::Subprocess { control_tx }),
-    );
+    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
+    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
 
     let started = acp_event_for_stage(&run_id, &workflow_event::Event::AgentAcpStarted {
         node_id:     "agent".to_string(),
@@ -11029,7 +11505,7 @@ async fn steer_with_active_acp_session_forwards_to_worker() {
 
     let response = app.oneshot(req).await.unwrap();
     assert_status!(response, StatusCode::ACCEPTED).await;
-    let envelope = control_rx.recv().await.unwrap();
+    let envelope = recv_worker_control_envelope(&mut control_rx).await;
     assert!(matches!(
         envelope.message,
         WorkerControlMessage::Steer { ref text, .. } if text == "try again"
@@ -11096,12 +11572,8 @@ async fn active_acp_steerable_marker_clears_on_terminal_paths() {
         let state = test_app_state();
         let app = crate::test_support::build_test_router(Arc::clone(&state));
         let run_id = fixtures::RUN_1;
-        let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
-        let _temp_dir = insert_running_control_run(
-            &state,
-            run_id,
-            Some(RunAnswerTransport::Subprocess { control_tx }),
-        );
+        let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
+        let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
         let started = acp_event_for_stage(&run_id, &workflow_event::Event::AgentAcpStarted {
             node_id:     "agent".to_string(),
             visit:       1,
@@ -13031,11 +13503,13 @@ async fn pause_run_sets_pending_control_on_board_response() {
     let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
     let run_id = run_id_str.parse::<RunId>().unwrap();
 
+    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get_mut(&run_id).expect("run should exist");
         managed_run.status = RunStatus::Running;
         managed_run.worker_pid = Some(u32::MAX);
+        managed_run.answer_transport = Some(transport);
     }
 
     let req = Request::builder()
@@ -13151,11 +13625,13 @@ async fn unpause_run_sets_pending_control() {
     let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
     let run_id = run_id_str.parse::<RunId>().unwrap();
 
+    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get_mut(&run_id).expect("run should exist");
         managed_run.status = RunStatus::Paused { prior_block: None };
         managed_run.worker_pid = Some(u32::MAX);
+        managed_run.answer_transport = Some(transport);
     }
 
     let req = Request::builder()

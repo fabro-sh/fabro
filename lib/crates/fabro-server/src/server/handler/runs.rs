@@ -21,9 +21,10 @@ use fabro_interview::AnswerSubmission;
 use fabro_llm::client::Client as LlmClient;
 use fabro_types::settings::ResolveEnvError;
 use fabro_types::{
-    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, StageContextWindow,
-    StageContextWindowStaleness, StageContextWindowUnavailableReason, StageHandler,
-    StageModelUsage, StageProjection, SystemActorKind, WorkflowSettings, parse_blob_ref,
+    AutomationRef, Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance,
+    StageContextWindow, StageContextWindowStaleness, StageContextWindowUnavailableReason,
+    StageHandler, StageModelUsage, StageProjection, SystemActorKind, WorkflowSettings,
+    parse_blob_ref,
 };
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
@@ -598,12 +599,50 @@ async fn create_run(
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
     let explicit_title_supplied = req.title.is_some();
+    Box::pin(create_run_from_manifest(
+        state,
+        CreateRunFromManifestRequest {
+            manifest: req,
+            submitted_manifest_bytes: body.to_vec(),
+            explicit_run_id: None,
+            explicit_title_supplied,
+            actor,
+            headers,
+            automation: None,
+        },
+    ))
+    .await
+}
+
+pub(crate) struct CreateRunFromManifestRequest {
+    pub(crate) manifest:                 RunManifest,
+    pub(crate) submitted_manifest_bytes: Vec<u8>,
+    pub(crate) explicit_run_id:          Option<RunId>,
+    pub(crate) explicit_title_supplied:  bool,
+    pub(crate) actor:                    Principal,
+    pub(crate) headers:                  HeaderMap,
+    pub(crate) automation:               Option<AutomationRef>,
+}
+
+pub(crate) async fn create_run_from_manifest(
+    state: Arc<AppState>,
+    request: CreateRunFromManifestRequest,
+) -> Response {
+    let CreateRunFromManifestRequest {
+        manifest,
+        submitted_manifest_bytes,
+        explicit_run_id,
+        explicit_title_supplied,
+        actor,
+        headers,
+        automation,
+    } = request;
     let manifest_run_defaults = state.manifest_run_defaults();
     let manifest_environment_defaults = state.manifest_environment_defaults();
     let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
         manifest_environment_defaults.as_ref(),
-        &req,
+        &manifest,
     ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
@@ -612,7 +651,9 @@ async fn create_run(
         return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
             .into_response();
     }
-    let run_id = prepared.run_id.unwrap_or_else(RunId::new);
+    let run_id = explicit_run_id
+        .or(prepared.run_id)
+        .unwrap_or_else(RunId::new);
     let provider = run_manifest::effective_sandbox_provider(&prepared.settings.run);
     if let Some(error) =
         run_manifest::sandbox_provider_policy_error(&state.server_settings(), provider)
@@ -653,7 +694,8 @@ async fn create_run(
     );
     create_input.run_id = Some(run_id);
     create_input.provenance = Some(run_provenance(&headers, &actor));
-    create_input.submitted_manifest_bytes = Some(body.to_vec());
+    create_input.submitted_manifest_bytes = Some(submitted_manifest_bytes);
+    create_input.automation = automation;
 
     let storage_root = match resolve_interp_string(&state.server_settings().server.storage.root) {
         Ok(path) => PathBuf::from(path),

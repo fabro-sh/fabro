@@ -794,6 +794,66 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
     )));
 }
 
+#[test]
+fn detached_run_cancel_reaches_worker_over_control_websocket() {
+    let context = auth_context();
+    let run_id = unique_run_id();
+    let workflow_path = context.temp_dir.join("cancel-over-control-websocket.fabro");
+    let _gate = write_gated_workflow(
+        &workflow_path,
+        "cancel_over_control_websocket",
+        "Wait for cancellation",
+    );
+
+    let output = context
+        .command()
+        .args([
+            "run",
+            "--detach",
+            "--run-id",
+            run_id.as_str(),
+            "--environment",
+            "local",
+            workflow_path.to_str().unwrap(),
+        ])
+        .timeout(SHARED_DAEMON_TIMEOUT)
+        .output()
+        .expect("detached run should execute");
+    assert!(
+        output.status.success(),
+        "detached run failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let run_dir = context.find_run_dir(&run_id);
+    wait_for_event_names(&run_dir, &["run.running"]);
+    tokio::runtime::Runtime::new()
+        .expect("test runtime should build")
+        .block_on(async {
+            let (client, base_url) =
+                server_endpoint(&context.storage_dir).expect("server endpoint should exist");
+            let response = client
+                .post(format!("{base_url}/api/v1/runs/{run_id}/cancel"))
+                .send()
+                .await
+                .expect("cancel request should succeed");
+            assert_reqwest_status(
+                response,
+                fabro_http::StatusCode::OK,
+                format!("POST /api/v1/runs/{run_id}/cancel"),
+            )
+            .await;
+        });
+
+    wait_for_status(&run_dir, &["failed"]);
+    let events = stored_worker_events(&run_dir);
+    assert!(events.iter().any(|event| matches!(
+        &event.body,
+        EventBody::RunFailed(props) if props.failure.reason == FailureReason::Cancelled
+    )));
+}
+
 #[cfg(unix)]
 #[test]
 fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
