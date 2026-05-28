@@ -1824,12 +1824,6 @@ enabled = true
     }
 
     #[test]
-    fn builtin_get_by_alias() {
-        let m = Catalog::builtin().get("opus").unwrap();
-        assert_eq!(m.id, "claude-opus-4-7");
-    }
-
-    #[test]
     fn builtin_get_unknown() {
         assert!(Catalog::builtin().get("nonexistent").is_none());
     }

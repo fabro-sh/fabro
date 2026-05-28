@@ -9,6 +9,40 @@ priority = 100
 credentials = ["env:ANTHROPIC_API_KEY", "vault:ANTHROPIC_API_KEY"]
 header = { custom = "x-api-key" }
 
+[models."claude-opus-4-8"]
+provider = "anthropic"
+api_id = "claude-opus-4-8"
+display_name = "Claude Opus 4.8"
+family = "claude-4"
+training = "2026-01-01"
+knowledge_cutoff = "Jan 2026"
+estimated_output_tps = 25
+aliases = ["opus", "claude-opus"]
+
+[models."claude-opus-4-8".limits]
+context_window = 1000000
+max_output = 128000
+
+[models."claude-opus-4-8".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[models."claude-opus-4-8".controls]
+speed = ["fast"]
+
+[models."claude-opus-4-8".costs]
+input_cost_per_mtok = 5.0
+output_cost_per_mtok = 25.0
+cache_input_cost_per_mtok = 0.5
+
+[models."claude-opus-4-8".costs.speed.fast]
+input_cost_per_mtok = 10.0
+output_cost_per_mtok = 50.0
+cache_input_cost_per_mtok = 1.0
+
 [models."claude-opus-4-7"]
 provider = "anthropic"
 api_id = "claude-opus-4-7"
@@ -17,7 +51,6 @@ family = "claude-4"
 training = "2025-08-01"
 knowledge_cutoff = "May 2025"
 estimated_output_tps = 25
-aliases = ["opus", "claude-opus"]
 
 [models."claude-opus-4-7".limits]
 context_window = 1000000

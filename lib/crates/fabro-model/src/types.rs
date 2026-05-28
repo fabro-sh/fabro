@@ -160,30 +160,60 @@ impl Model {
 
 #[cfg(test)]
 mod tests {
-    use crate::catalog::Catalog;
+    use super::*;
     use crate::ids::ProviderId;
 
     #[test]
     fn inherent_methods_return_correct_values() {
-        let info = Catalog::builtin().get("claude-opus-4-7").unwrap();
-        assert_eq!(info.id(), "claude-opus-4-7");
-        assert_eq!(info.provider(), &ProviderId::anthropic());
-        assert_eq!(info.family(), "claude-4");
-        assert_eq!(info.display_name(), "Claude Opus 4.7");
-        assert_eq!(info.context_window(), 1_000_000);
-        assert_eq!(info.max_output(), Some(128_000));
+        let info = Model {
+            id:                   "model-id".to_string(),
+            provider:             ProviderId::new("provider-id"),
+            family:               "family".to_string(),
+            display_name:         "Display Name".to_string(),
+            limits:               ModelLimits {
+                context_window: 123_456,
+                max_output:     Some(7_890),
+            },
+            training:             Some("training".to_string()),
+            knowledge_cutoff:     Some("knowledge-cutoff".to_string()),
+            features:             ModelFeatures {
+                tools:            true,
+                vision:           true,
+                reasoning:        true,
+                reasoning_effort: ReasoningEffortFeature::Levels,
+                prompt_cache:     true,
+            },
+            costs:                ModelCosts {
+                input_cost_per_mtok:       Some(1.0),
+                output_cost_per_mtok:      Some(2.0),
+                cache_input_cost_per_mtok: Some(0.1),
+            },
+            estimated_output_tps: Some(42.0),
+            aliases:              vec!["alias".to_string()],
+            default:              true,
+            small_default:        true,
+            configured:           false,
+        };
+
+        assert_eq!(info.id(), "model-id");
+        assert_eq!(info.provider(), &ProviderId::new("provider-id"));
+        assert_eq!(info.family(), "family");
+        assert_eq!(info.display_name(), "Display Name");
+        assert_eq!(info.context_window(), 123_456);
+        assert_eq!(info.max_output(), Some(7_890));
         assert!(info.supports_tools());
         assert!(info.supports_vision());
         assert!(info.supports_reasoning());
         assert!(info.supports_reasoning_effort());
-        assert_eq!(info.training(), Some("2025-08-01"));
-        assert_eq!(info.knowledge_cutoff(), Some("May 2025"));
-        assert_eq!(info.input_cost_per_mtok(), Some(5.0));
-        assert_eq!(info.output_cost_per_mtok(), Some(25.0));
-        assert_eq!(info.cache_input_cost_per_mtok(), Some(0.5));
-        assert_eq!(info.estimated_output_tps(), Some(25.0));
-        assert!(!info.aliases().is_empty());
-        assert!(!info.is_default());
-        assert!(!info.is_small_default());
+        assert!(info.supports_prompt_cache());
+        assert_eq!(info.training(), Some("training"));
+        assert_eq!(info.knowledge_cutoff(), Some("knowledge-cutoff"));
+        assert_eq!(info.input_cost_per_mtok(), Some(1.0));
+        assert_eq!(info.output_cost_per_mtok(), Some(2.0));
+        assert_eq!(info.cache_input_cost_per_mtok(), Some(0.1));
+        assert_eq!(info.estimated_output_tps(), Some(42.0));
+        assert_eq!(info.aliases(), &["alias".to_string()]);
+        assert!(info.is_default());
+        assert!(info.is_small_default());
     }
 }
