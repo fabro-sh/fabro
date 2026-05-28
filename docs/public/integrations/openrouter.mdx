@@ -25,7 +25,7 @@ That's the entire configuration — Fabro ships the model catalog, base URL, and
 
 ## Data handling
 
-Requests sent through OpenRouter pass through their infrastructure before reaching the underlying model. Prompt content, completions, and metadata are subject to OpenRouter's logging, moderation, and data-retention policies — review them at [openrouter.ai/docs/features/privacy-and-logging](https://openrouter.ai/docs/features/privacy-and-logging) before sending sensitive prompts. You can also use OpenRouter's per-request privacy controls (`provider.data_collection` and provider routing filters) via the `provider_options.openrouter` field described below.
+Requests sent through OpenRouter pass through their infrastructure before reaching the underlying model. Prompt content, completions, and metadata are subject to OpenRouter's logging, moderation, and data-retention policies — review them at [openrouter.ai/docs/features/privacy-and-logging](https://openrouter.ai/docs/features/privacy-and-logging) before sending sensitive prompts. You can also use OpenRouter's per-request privacy controls (`provider.data_collection` and provider routing filters) via the `provider_options.openrouter` field described below, or via the `openrouter_data_collection` stage attribute in workflows.
 
 ## Attribution (optional, opt-in)
 
@@ -109,6 +109,39 @@ digraph Example {
 }
 ```
 
+## Cost telemetry
+
+Every OpenRouter response includes an inline `usage.cost` field with authoritative USD billing. Fabro surfaces this as `Response.cost_usd` with `cost_source = "authoritative"`. For non-OpenRouter adapters, `cost_usd` is computed from catalog prices and `cost_source = "estimated"`. Hardcoded OpenRouter catalog prices are best-effort — OpenRouter's inline `usage.cost` is the source of truth, and authoritative cost takes precedence in any aggregation.
+
+## Provider routing in workflows
+
+Workflow stages can set OpenRouter routing options via typed `openrouter_*` stage attributes. These are translated into OpenRouter's nested `{provider: {...}, models: [...], transforms: [...]}` request shape under the hood.
+
+```dot title="workflow.fabro"
+digraph Example {
+    graph [model_stylesheet="* { model: deepseek/deepseek-v4-flash; }"]
+
+    start [shape=Mdiamond, label="Start"]
+    fast  [
+      label = "Fast tier"
+      prompt = "Answer concisely."
+      openrouter_provider_sort = "throughput"
+      openrouter_fallback_models = "qwen/qwen3.6-flash,minimax/minimax-m2.7"
+    ]
+    exit [shape=Msquare, label="Exit"]
+
+    start -> fast -> exit
+}
+```
+
+| Attribute | Type | Maps to |
+| --- | --- | --- |
+| `openrouter_provider_sort` | `"price"`, `"throughput"`, or `"latency"` | `provider.sort` |
+| `openrouter_fallback_models` | comma-separated list of model IDs | `models` |
+| `openrouter_transforms` | comma-separated list (e.g. `"middle-out"`) | `transforms` |
+| `openrouter_allow_fallbacks` | `"true"` or `"false"` | `provider.allow_fallbacks` |
+| `openrouter_data_collection` | `"allow"` or `"deny"` | `provider.data_collection` |
+
 ## Provider routing (via API or SDK)
 
 OpenRouter accepts top-level request fields that aren't part of the OpenAI Chat Completions schema — `provider` (routing preferences), `models` (fallback list), `transforms`, `plugins`. Fabro forwards these through the `provider_options.openrouter` field on the request body when calling `POST /api/v1/completions` directly or constructing a `Request` via the Rust/TypeScript SDK:
@@ -130,7 +163,7 @@ OpenRouter accepts top-level request fields that aren't part of the OpenAI Chat 
 See [OpenRouter's provider routing documentation](https://openrouter.ai/docs/features/provider-routing) for the full set of supported fields.
 
 <Note>
-Workflow files (`workflow.fabro`, `workflow.toml`) don't currently expose `provider_options` — stage attributes can set `model`, `provider`, and `reasoning_effort`, but not provider-specific request fields. Use the API or SDK directly when you need OpenRouter routing controls per call.
+For routing controls in `.fabro` workflow files, use the typed `openrouter_*` stage attributes documented above instead of `provider_options.openrouter`. The JSON shape is reserved for direct API/SDK callers.
 </Note>
 
 ## Troubleshooting

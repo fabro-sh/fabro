@@ -7,10 +7,8 @@ use std::sync::Arc;
 
 use fabro_llm::error::ProviderErrorKind;
 use fabro_llm::provider::ProviderAdapter;
-use fabro_llm::providers::{
-    AnthropicAdapter, GeminiAdapter, OpenAiAdapter, OpenAiCompatibleAdapter,
-};
-use fabro_llm::types::{FinishReason, Message, Request};
+use fabro_llm::providers::{AnthropicAdapter, GeminiAdapter, OpenAiAdapter, OpenRouterAdapter};
+use fabro_llm::types::{CostSource, FinishReason, Message, Request};
 use fabro_model::Catalog;
 use fabro_static::EnvVars;
 
@@ -180,8 +178,8 @@ async fn gemini_complete() {
 async fn openrouter_complete() {
     let api_key =
         std::env::var(EnvVars::OPENROUTER_API_KEY).expect("OPENROUTER_API_KEY must be set");
-    let adapter = OpenAiCompatibleAdapter::new(api_key, "https://openrouter.ai/api/v1")
-        .with_name("openrouter");
+    let adapter =
+        OpenRouterAdapter::new(api_key, "https://openrouter.ai/api/v1").with_name("openrouter");
     let request = make_request("deepseek/deepseek-v4-flash");
     let response = adapter.complete(&request).await.unwrap();
 
@@ -192,6 +190,11 @@ async fn openrouter_complete() {
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "openrouter");
+    assert!(
+        response.cost_usd.is_some(),
+        "OpenRouter responses should carry an authoritative usage.cost",
+    );
+    assert_eq!(response.cost_source, Some(CostSource::Authoritative));
 }
 
 async fn run_multi_turn_cache_test(
