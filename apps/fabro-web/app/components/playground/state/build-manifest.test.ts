@@ -50,7 +50,7 @@ describe("buildRunManifest", () => {
       ".fabro/workflows/release_notes/workflow.fabro",
     );
     expect(manifest.title).toBe("Generate release notes.");
-    expect(manifest.cwd).toContain("release_notes");
+    expect(manifest.cwd).toBe("/tmp/fabro-playground");
   });
 
   test("title falls back when goal is empty", () => {

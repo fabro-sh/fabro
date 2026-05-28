@@ -16,6 +16,14 @@ import {
 } from "./draft";
 
 /**
+ * `cwd` placeholder. Playground manifests carry no GitHub origin, so the
+ * sandbox provider creates an empty workspace inside the container and
+ * never touches this path on the host. We pin it to a fixed string so
+ * nothing the LLM emits influences a filesystem-looking field.
+ */
+const PLAYGROUND_CWD = "/tmp/fabro-playground";
+
+/**
  * Minimal subset of `RunManifest` the playground needs to send. The
  * generated `RunManifest` type from `@qltysh/fabro-api-client` accepts
  * the same shape; we keep this lightweight so the playground subtree
@@ -57,7 +65,7 @@ export function buildRunManifest(draft: WorkflowDraft): PlaygroundRunManifest {
   const workflowPath = `.fabro/workflows/${name}/workflow.fabro`;
   return {
     version: 1,
-    cwd:     `/tmp/fabro-playground-${name}`,
+    cwd:     PLAYGROUND_CWD,
     title:   draft.goal && draft.goal.length > 0 ? draft.goal : `Playground: ${name}`,
     target:  {
       identifier: name,
