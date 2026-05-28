@@ -164,9 +164,11 @@ export default function PlaygroundCanvas({
       const drag = dragState.current;
       dragState.current = null;
       if (!onSelectNode || !drag || drag.moved) return;
-      // A click without drag — translate the hit into a node selection.
-      const target = event.target as Element | null;
-      const group = target?.closest("g.node");
+      // `event.target` is the pointer-capture target (the container div),
+      // not the element under the cursor. `elementFromPoint` does a fresh
+      // hit-test that ignores capture.
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      const group = hit?.closest("g.node");
       if (group) {
         const id = nodeIdFromGroup(group);
         if (id) onSelectNode(id);
