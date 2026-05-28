@@ -19,6 +19,47 @@ use super::super::{
     State, StatusCode, ToolChoice, ToolDefinition, error, info, post, warn,
 };
 
+/// Sanity caps on a playground chat request. Axum's default 2 MB body
+/// limit already catches gigabyte payloads at the framework layer; these
+/// add cheap, descriptive 400s before we touch the LLM so a misbehaving
+/// or malicious client can't drag a multi-megabyte transcript through
+/// streaming + token-billing.
+const MAX_MESSAGES_PER_TURN: usize = 50;
+const MAX_WORKFLOW_NODES: usize = 100;
+const MAX_WORKFLOW_EDGES: usize = 200;
+
+fn validate_request(req: &CreatePlaygroundChatRequest) -> Result<(), ApiError> {
+    if req.messages.len() > MAX_MESSAGES_PER_TURN {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Conversation too long: {} messages (limit {MAX_MESSAGES_PER_TURN}). \
+                 Start a new playground session.",
+                req.messages.len(),
+            ),
+        ));
+    }
+    if req.workflow.nodes.len() > MAX_WORKFLOW_NODES {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Workflow too large: {} nodes (limit {MAX_WORKFLOW_NODES}).",
+                req.workflow.nodes.len(),
+            ),
+        ));
+    }
+    if req.workflow.edges.len() > MAX_WORKFLOW_EDGES {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Workflow too large: {} edges (limit {MAX_WORKFLOW_EDGES}).",
+                req.workflow.edges.len(),
+            ),
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/playground/chat", post(create_playground_chat))
 }
@@ -209,6 +250,10 @@ async fn create_playground_chat(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreatePlaygroundChatRequest>,
 ) -> Response {
+    if let Err(e) = validate_request(&req) {
+        return e.into_response();
+    }
+
     let catalog = state.catalog();
     let model_id = req
         .model
@@ -377,6 +422,67 @@ mod tests {
         assert!(prompt.contains("goal: Generate release notes"));
         assert!(prompt.contains("plan [shape=box"));
         assert!(prompt.contains("start -> plan"));
+    }
+
+    fn make_request(
+        messages_len: usize,
+        nodes_len: usize,
+        edges_len: usize,
+    ) -> CreatePlaygroundChatRequest {
+        use fabro_api::types::{CompletionMessage, CompletionMessageRole};
+        let messages = (0..messages_len)
+            .map(|_| CompletionMessage {
+                role:         CompletionMessageRole::User,
+                content:      Vec::new(),
+                name:         None,
+                tool_call_id: None,
+            })
+            .collect();
+        let mut workflow = empty_draft();
+        while workflow.nodes.len() < nodes_len {
+            let i = workflow.nodes.len();
+            workflow.nodes.push(PlaygroundWorkflowNode {
+                id:     format!("n{i}"),
+                label:  format!("N{i}"),
+                shape:  "box".into(),
+                prompt: None,
+                attrs:  serde_json::Map::new(),
+            });
+        }
+        while workflow.edges.len() < edges_len {
+            workflow.edges.push(PlaygroundWorkflowEdge {
+                from:      "start".into(),
+                to:        "exit".into(),
+                label:     None,
+                condition: None,
+                attrs:     serde_json::Map::new(),
+            });
+        }
+        CreatePlaygroundChatRequest {
+            messages,
+            workflow,
+            model: None,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_oversize_message_history() {
+        let req = make_request(MAX_MESSAGES_PER_TURN + 1, 2, 1);
+        let err = validate_request(&req).expect_err("expected too-many-messages error");
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn validate_rejects_oversize_workflow() {
+        let req = make_request(1, MAX_WORKFLOW_NODES + 1, 1);
+        let err = validate_request(&req).expect_err("expected too-many-nodes error");
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn validate_accepts_normal_sized_requests() {
+        let req = make_request(10, 8, 12);
+        assert!(validate_request(&req).is_ok());
     }
 
     #[test]
