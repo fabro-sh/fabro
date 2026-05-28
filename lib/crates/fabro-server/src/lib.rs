@@ -50,6 +50,7 @@ pub mod static_files;
 pub mod test_support;
 pub mod web_auth;
 mod worker_control;
+mod worker_runtime;
 mod worker_token;
 
 pub use error::{ApiError, Error, Result};

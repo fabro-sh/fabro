@@ -123,8 +123,8 @@ use futures_util::future::join_all;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{ChildStderr, Command};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+use tokio::process::Command;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{
     Mutex as AsyncMutex, Notify, OwnedMutexGuard, RwLock as AsyncRwLock, Semaphore, broadcast,
@@ -159,9 +159,12 @@ use crate::principal_middleware::{
 use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, new_files_in_flight};
 use crate::server_secrets::{LlmClientResult, ServerSecrets};
-use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
+use crate::spawn_env::apply_render_graph_env;
 use crate::startup::load_startup_vault;
 use crate::worker_control::{LocalWorkerControlBus, WorkerControlBus, WorkerControlBusError};
+use crate::worker_runtime::{
+    LocalWorkerRuntime, WorkerExit, WorkerLaunchSpec, WorkerRef, WorkerRuntime, WorkerStdout,
+};
 use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
 use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
@@ -254,8 +257,7 @@ struct ManagedRun {
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<oneshot::Sender<()>>,
     cancel_token: Option<CancellationToken>,
-    worker_pid: Option<u32>,
-    worker_pgid: Option<u32>,
+    worker_ref: Option<WorkerRef>,
     run_dir: Option<std::path::PathBuf>,
     execution_mode: RunExecutionMode,
 }
@@ -1069,6 +1071,7 @@ pub struct AppState {
     resource_sampler: resource_sampler::ResourceSampler,
     max_concurrent_runs: usize,
     pub(crate) worker_control_bus: Arc<dyn WorkerControlBus>,
+    pub(crate) worker_runtime: Arc<dyn WorkerRuntime>,
     scheduler_notify: Notify,
     global_event_tx: broadcast::Sender<EventEnvelope>,
     /// Per-run coalescing registry for `GET /runs/{id}/files`. Concurrent
@@ -1230,6 +1233,8 @@ pub(crate) struct AppStateConfig {
     pub(crate) shutdown: CancellationToken,
     #[cfg(test)]
     pub(crate) worker_control_bus: Option<Arc<dyn WorkerControlBus>>,
+    #[cfg(test)]
+    pub(crate) worker_runtime: Option<Arc<dyn WorkerRuntime>>,
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
 }
@@ -2284,6 +2289,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         shutdown,
         #[cfg(test)]
         worker_control_bus,
+        #[cfg(test)]
+        worker_runtime,
         #[cfg(any(test, feature = "test-support"))]
         automation_materializer_override,
     } = config;
@@ -2379,6 +2386,16 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             Arc::new(LocalWorkerControlBus::new())
         }
     };
+    let worker_runtime: Arc<dyn WorkerRuntime> = {
+        #[cfg(test)]
+        {
+            worker_runtime.unwrap_or_else(|| Arc::new(LocalWorkerRuntime::new()))
+        }
+        #[cfg(not(test))]
+        {
+            Arc::new(LocalWorkerRuntime::new())
+        }
+    };
     Ok(Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_billing: Mutex::new(BillingAccumulator::default()),
@@ -2393,6 +2410,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         resource_sampler: resource_sampler::ResourceSampler::new(),
         max_concurrent_runs,
         worker_control_bus,
+        worker_runtime,
         scheduler_notify: Notify::new(),
         global_event_tx,
         files_in_flight: new_files_in_flight(),
@@ -2471,7 +2489,7 @@ async fn delete_run_internal(
                 let _ = cancel_tx.send(());
             }
         }
-        // Terminal runs can still carry a stale worker PID briefly after their
+        // Terminal runs can still carry a stale worker ref briefly after their
         // completion events land, so avoid paying the full cancellation grace.
         let delete_grace = if should_signal_cancel && managed_run.status.requires_force_to_delete()
         {
@@ -2480,8 +2498,8 @@ async fn delete_run_internal(
             TERMINAL_DELETE_WORKER_GRACE
         };
         terminate_worker_for_deletion(
-            managed_run.worker_pid,
-            managed_run.worker_pgid,
+            &state.worker_runtime,
+            managed_run.worker_ref.clone(),
             delete_grace,
         )
         .await;
@@ -2662,47 +2680,26 @@ fn active_run_delete_message(run_id: RunId, status: impl std::fmt::Display) -> S
 }
 
 async fn terminate_worker_for_deletion(
-    worker_pid: Option<u32>,
-    worker_pgid: Option<u32>,
+    worker_runtime: &Arc<dyn WorkerRuntime>,
+    worker_ref: Option<WorkerRef>,
     grace: Duration,
 ) {
-    #[cfg(unix)]
-    if let Some(process_group_id) = worker_pgid.or(worker_pid) {
-        fabro_proc::sigterm_process_group(process_group_id);
+    let Some(worker_ref) = worker_ref else {
+        return;
+    };
 
-        let deadline = Instant::now() + grace;
-        while Instant::now() < deadline && fabro_proc::process_group_alive(process_group_id) {
-            sleep(Duration::from_millis(50)).await;
-        }
+    let _ = worker_runtime.request_stop(&worker_ref).await;
 
-        if fabro_proc::process_group_alive(process_group_id) {
-            fabro_proc::sigkill_process_group(process_group_id);
-
-            let kill_deadline = Instant::now() + Duration::from_secs(1);
-            while Instant::now() < kill_deadline
-                && fabro_proc::process_group_alive(process_group_id)
-            {
-                sleep(Duration::from_millis(50)).await;
-            }
-        }
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline && worker_runtime.is_alive(&worker_ref).await {
+        sleep(Duration::from_millis(50)).await;
     }
 
-    #[cfg(not(unix))]
-    if let Some(worker_pid) = worker_pid {
-        fabro_proc::sigterm(worker_pid);
-
-        let deadline = Instant::now() + grace;
-        while Instant::now() < deadline && fabro_proc::process_running(worker_pid) {
+    if worker_runtime.is_alive(&worker_ref).await {
+        let _ = worker_runtime.force_stop(&worker_ref).await;
+        let kill_deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < kill_deadline && worker_runtime.is_alive(&worker_ref).await {
             sleep(Duration::from_millis(50)).await;
-        }
-
-        if fabro_proc::process_running(worker_pid) {
-            fabro_proc::sigkill(worker_pid);
-
-            let kill_deadline = Instant::now() + Duration::from_secs(1);
-            while Instant::now() < kill_deadline && fabro_proc::process_running(worker_pid) {
-                sleep(Duration::from_millis(50)).await;
-            }
         }
     }
 }
@@ -2837,8 +2834,7 @@ fn clear_live_run_state(run: &mut ManagedRun) {
     run.event_tx = None;
     run.cancel_tx = None;
     run.cancel_token = None;
-    run.worker_pid = None;
-    run.worker_pgid = None;
+    run.worker_ref = None;
 }
 
 fn cleanup_worker_control_bus_for_run(state: &AppState, run_id: RunId) {
@@ -2892,10 +2888,10 @@ fn release_run_answer_claim(state: &AppState, run_id: RunId, qid: &str) {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct LiveWorkerProcess {
-    run_id:           RunId,
-    process_group_id: u32,
+    run_id:     RunId,
+    worker_ref: WorkerRef,
 }
 
 fn failure_for_incomplete_run(
@@ -2963,11 +2959,11 @@ fn live_worker_processes(state: &AppState) -> Vec<LiveWorkerProcess> {
     runs.iter()
         .filter_map(|(run_id, managed_run)| {
             managed_run
-                .worker_pgid
-                .or(managed_run.worker_pid)
-                .map(|process_group_id| LiveWorkerProcess {
+                .worker_ref
+                .clone()
+                .map(|worker_ref| LiveWorkerProcess {
                     run_id: *run_id,
-                    process_group_id,
+                    worker_ref,
                 })
         })
         .collect()
@@ -3020,47 +3016,36 @@ async fn shutdown_active_workers_with_grace(
     state.begin_shutdown();
     let workers = live_worker_processes(state.as_ref());
 
-    #[cfg(unix)]
-    {
-        let process_groups = workers
-            .iter()
-            .map(|worker| worker.process_group_id)
-            .collect::<HashSet<_>>();
+    for worker in &workers {
+        let _ = state.worker_runtime.request_stop(&worker.worker_ref).await;
+    }
 
-        for process_group_id in &process_groups {
-            fabro_proc::sigterm_process_group(*process_group_id);
-        }
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline && any_workers_alive(state.as_ref(), &workers).await {
+        sleep(poll_interval).await;
+    }
 
-        let deadline = Instant::now() + grace;
-        while Instant::now() < deadline
-            && process_groups
-                .iter()
-                .any(|process_group_id| fabro_proc::process_group_alive(*process_group_id))
-        {
-            sleep(poll_interval).await;
+    let mut survivors = Vec::new();
+    for worker in &workers {
+        if state.worker_runtime.is_alive(&worker.worker_ref).await {
+            survivors.push(worker.worker_ref.clone());
         }
-
-        let survivors = process_groups
-            .into_iter()
-            .filter(|process_group_id| fabro_proc::process_group_alive(*process_group_id))
-            .collect::<Vec<_>>();
-        for process_group_id in &survivors {
-            fabro_proc::sigkill_process_group(*process_group_id);
-        }
-        if !survivors.is_empty() {
-            let kill_deadline = Instant::now() + Duration::from_secs(1);
-            while Instant::now() < kill_deadline
-                && survivors
-                    .iter()
-                    .any(|process_group_id| fabro_proc::process_group_alive(*process_group_id))
-            {
-                sleep(poll_interval).await;
-            }
-        }
+    }
+    for worker_ref in survivors {
+        let _ = state.worker_runtime.force_stop(&worker_ref).await;
     }
 
     persist_shutdown_run_failures(state, &workers).await?;
     Ok(workers.len())
+}
+
+async fn any_workers_alive(state: &AppState, workers: &[LiveWorkerProcess]) -> bool {
+    for worker in workers {
+        if state.worker_runtime.is_alive(&worker.worker_ref).await {
+            return true;
+        }
+    }
+    false
 }
 
 async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
@@ -3189,8 +3174,7 @@ fn managed_run(
         checkpoint: None,
         cancel_tx: None,
         cancel_token: None,
-        worker_pid: None,
-        worker_pgid: None,
+        worker_ref: None,
         run_dir: Some(run_dir),
         execution_mode,
     }
@@ -3395,7 +3379,10 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
     }
 }
 
-async fn drain_worker_stderr(run_id: RunId, stderr: ChildStderr) -> anyhow::Result<()> {
+async fn drain_worker_stderr(
+    run_id: RunId,
+    stderr: std::pin::Pin<Box<dyn AsyncRead + Send + 'static>>,
+) -> anyhow::Result<()> {
     let mut lines = BufReader::new(stderr).lines();
 
     while let Some(line) = lines.next_line().await? {
@@ -3408,7 +3395,7 @@ async fn drain_worker_stderr(run_id: RunId, stderr: ChildStderr) -> anyhow::Resu
 async fn append_worker_exit_failure(
     run_store: &fabro_store::RunDatabase,
     run_id: RunId,
-    wait_status: &std::process::ExitStatus,
+    worker_exit: &WorkerExit,
 ) {
     let state = match run_store.state().await {
         Ok(state) => state,
@@ -3425,7 +3412,10 @@ async fn append_worker_exit_failure(
 
     let (error, reason) = failure_for_incomplete_run(
         state.pending_control,
-        format!("Worker exited before emitting a terminal run event: {wait_status}"),
+        format!(
+            "Worker exited before emitting a terminal run event: {}",
+            worker_exit.detail
+        ),
     );
     let failure_event = workflow_event::Event::workflow_run_failed_from_error(
         &error,
@@ -3446,15 +3436,16 @@ async fn append_worker_exit_failure(
     clippy::disallowed_methods,
     reason = "Worker subprocess startup resolves Cargo's test binary env override when present."
 )]
-fn worker_command(
+fn worker_launch_spec(
     state: &AppState,
     run_id: RunId,
     mode: RunExecutionMode,
     run_dir: &std::path::Path,
     agent_fabro_tools_enabled: bool,
-) -> anyhow::Result<Command> {
+) -> anyhow::Result<WorkerLaunchSpec> {
     let current_exe = std::env::current_exe().context("reading current executable path")?;
-    let exe = std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).map_or(current_exe, PathBuf::from);
+    let executable =
+        std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).map_or(current_exe, PathBuf::from);
     let storage_dir = state.server_storage_dir();
     let runtime_directory = Storage::new(&storage_dir).runtime_directory();
     let daemon = ServerDaemon::read(&runtime_directory)?.with_context(|| {
@@ -3463,7 +3454,6 @@ fn worker_command(
             runtime_directory.record_path().display()
         )
     })?;
-    let server_target = daemon.bind.to_target();
     let scopes = if agent_fabro_tools_enabled {
         WorkerScopeSet::run_worker_with_agent_run_tools()
     } else {
@@ -3472,45 +3462,31 @@ fn worker_command(
     let worker_token = issue_worker_token_with_scopes(state.worker_token_keys(), &run_id, scopes)
         .map_err(|_| anyhow::anyhow!("failed to sign worker token"))?;
     let server_destination = resolved_log_destination(state)?;
-    let worker_stdout = match server_destination {
-        LogDestination::Stdout => Stdio::inherit(),
-        LogDestination::File => Stdio::null(),
+    let stdout = match server_destination {
+        LogDestination::Stdout => WorkerStdout::Inherit,
+        LogDestination::File => WorkerStdout::Null,
     };
-    let mut cmd = Command::new(exe);
-    cmd.arg("__run-worker")
-        .arg("--server")
-        .arg(server_target)
-        .arg("--storage-dir")
-        .arg(&storage_dir)
-        .arg("--run-dir")
-        .arg(run_dir)
-        .arg("--run-id")
-        .arg(run_id.to_string())
-        .arg("--mode")
-        .arg(worker_mode_arg(mode))
-        .stdin(Stdio::null())
-        .stdout(worker_stdout)
-        .stderr(Stdio::piped());
+    let fabro_log = if (state.env_lookup)(EnvVars::FABRO_LOG).is_none() {
+        state.server_settings().server.logging.level.clone()
+    } else {
+        None
+    };
+    let fabro_log_destination: &'static str = server_destination.into();
 
-    apply_worker_env(&mut cmd);
-    if (state.env_lookup)(EnvVars::FABRO_LOG).is_none() {
-        if let Some(level) = state.server_settings().server.logging.level.as_deref() {
-            cmd.env(EnvVars::FABRO_LOG, level);
-        }
-    }
-    let value: &'static str = server_destination.into();
-    cmd.env(EnvVars::FABRO_LOG_DESTINATION, value);
-    cmd.env(EnvVars::FABRO_CONFIG, state.active_config_path());
-    cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
-    cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
-    if let Some(pem) = state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
-        cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
-    }
-
-    #[cfg(unix)]
-    fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
-
-    Ok(cmd)
+    Ok(WorkerLaunchSpec {
+        executable,
+        server_target: daemon.bind.to_target(),
+        storage_dir,
+        run_dir: run_dir.to_path_buf(),
+        run_id,
+        mode: worker_mode_arg(mode),
+        worker_token,
+        stdout,
+        fabro_log,
+        fabro_log_destination,
+        active_config_path: state.active_config_path().to_path_buf(),
+        github_app_private_key: state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY),
+    })
 }
 
 fn resolved_log_destination(state: &AppState) -> anyhow::Result<LogDestination> {
@@ -4103,8 +4079,8 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
 
     let state_for_build = Arc::clone(&state);
     let run_dir_for_build = run_dir.clone();
-    let build_cmd_result = spawn_blocking(move || {
-        worker_command(
+    let start_result = spawn_blocking(move || {
+        worker_launch_spec(
             state_for_build.as_ref(),
             run_id,
             execution_mode,
@@ -4112,14 +4088,12 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             agent_fabro_tools_enabled,
         )
     })
-    .await;
+    .await
+    .context("worker_launch_spec task failed")
+    .and_then(|inner| inner);
 
-    let mut child = match build_cmd_result
-        .context("worker_command task failed")
-        .and_then(|inner| inner)
-        .and_then(|mut cmd| cmd.spawn().context("spawning run worker process"))
-    {
-        Ok(child) => child,
+    let worker_launch_spec = match start_result {
+        Ok(spec) => spec,
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed to spawn worker");
             let message = format!("Failed to spawn worker: {err}");
@@ -4139,52 +4113,35 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
 
-    let Some(worker_pid) = child.id() else {
-        let message = "Worker process did not report a PID".to_string();
-        tracing::error!(run_id = %run_id, "{message}");
-        let _ = child.start_kill();
-        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &WorkflowError::engine(message.clone()),
-            fabro_types::RunTiming::default(),
-            FailureReason::LaunchFailed,
-            None,
-            None,
-            None,
-            None,
-        );
-        let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
-        fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
-        state.scheduler_notify.notify_one();
-        return;
+    let started_worker = match state.worker_runtime.start(worker_launch_spec).await {
+        Ok(worker) => worker,
+        Err(err) => {
+            tracing::error!(run_id = %run_id, error = %err, "Failed to spawn worker");
+            let message = format!("Failed to spawn worker: {err}");
+            let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+                &WorkflowError::engine_with_anyhow("Failed to spawn worker", err),
+                fabro_types::RunTiming::default(),
+                FailureReason::LaunchFailed,
+                None,
+                None,
+                None,
+                None,
+            );
+            let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
+            fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
+            state.scheduler_notify.notify_one();
+            return;
+        }
     };
+    let worker_ref = started_worker.worker_ref.clone();
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         if let Some(managed_run) = runs.get_mut(&run_id) {
-            managed_run.worker_pid = Some(worker_pid);
-            managed_run.worker_pgid = Some(worker_pid);
+            managed_run.worker_ref = Some(worker_ref.clone());
             managed_run.run_dir = Some(run_dir.clone());
         }
     }
-
-    let Some(stderr) = child.stderr.take() else {
-        let message = "Worker stderr pipe was unavailable".to_string();
-        tracing::error!(run_id = %run_id, "{message}");
-        let _ = child.start_kill();
-        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &WorkflowError::engine(message.clone()),
-            fabro_types::RunTiming::default(),
-            FailureReason::LaunchFailed,
-            None,
-            None,
-            None,
-            None,
-        );
-        let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
-        fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
-        state.scheduler_notify.notify_one();
-        return;
-    };
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -4196,14 +4153,16 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     }
 
-    let stderr_task = tokio::spawn(drain_worker_stderr(run_id, stderr));
+    let stderr_task = started_worker
+        .stderr
+        .map(|stderr| tokio::spawn(drain_worker_stderr(run_id, stderr)));
 
-    let wait_status = match child.wait().await {
-        Ok(status) => status,
+    let worker_exit = match started_worker.wait.await {
+        Ok(exit) => exit,
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed while waiting on worker");
             let message = format!("Worker wait failed: {err}");
-            let _ = child.start_kill();
+            let _ = state.worker_runtime.force_stop(&worker_ref).await;
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine_with_source("Worker wait failed", err),
                 fabro_types::RunTiming::default(),
@@ -4220,31 +4179,33 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
 
-    match stderr_task.await {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            tracing::warn!(run_id = %run_id, error = %err, "Worker stderr drain failed");
-        }
-        Err(err) => {
-            tracing::warn!(run_id = %run_id, error = %err, "Worker stderr task panicked");
+    if let Some(stderr_task) = stderr_task {
+        match stderr_task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                tracing::warn!(run_id = %run_id, error = %err, "Worker stderr drain failed");
+            }
+            Err(err) => {
+                tracing::warn!(run_id = %run_id, error = %err, "Worker stderr task panicked");
+            }
         }
     }
 
     let superseded = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         runs.get(&run_id)
-            .is_some_and(|managed_run| managed_run.worker_pid != Some(worker_pid))
+            .is_some_and(|managed_run| managed_run.worker_ref.as_ref() != Some(&worker_ref))
     };
     if superseded {
         tracing::info!(
             run_id = %run_id,
-            worker_pid,
+            worker_ref = ?worker_ref,
             "Skipping stale worker cleanup for superseded run execution"
         );
         return;
     }
 
-    append_worker_exit_failure(&run_store, run_id, &wait_status).await;
+    append_worker_exit_failure(&run_store, run_id, &worker_exit).await;
 
     let final_state = match run_store.state().await {
         Ok(state) => state,
@@ -4276,7 +4237,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     if let Some(managed_run) = runs.get_mut(&run_id) {
         if final_state.status != managed_run.status {
             managed_run.status = final_state.status;
-        } else if !wait_status.success() {
+        } else if !worker_exit.success {
             managed_run.status = RunStatus::Failed {
                 reason: FailureReason::Terminated,
             };

@@ -18,6 +18,7 @@ use super::super::{
     reject_if_archived, sleep, update_live_run_from_event, workflow_event,
 };
 use super::runs::run_provenance;
+use crate::worker_runtime::WorkerRef;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -348,16 +349,17 @@ async fn deny_run(
     run_response(state.as_ref(), id, StatusCode::OK).await
 }
 
-fn schedule_worker_kill(state: Arc<AppState>, run_id: RunId, worker_pid: u32) {
+fn schedule_worker_force_stop(state: Arc<AppState>, run_id: RunId, worker_ref: WorkerRef) {
     tokio::spawn(async move {
         sleep(WORKER_CANCEL_GRACE).await;
-        let current_pid = {
+        let current_ref = {
             let runs = state.runs.lock().expect("runs lock poisoned");
-            runs.get(&run_id).and_then(|run| run.worker_pid)
+            runs.get(&run_id).and_then(|run| run.worker_ref.clone())
         };
-        if current_pid == Some(worker_pid) && fabro_proc::process_group_alive(worker_pid) {
-            #[cfg(unix)]
-            fabro_proc::sigkill_process_group(worker_pid);
+        if current_ref.as_ref() == Some(&worker_ref)
+            && state.worker_runtime.is_alive(&worker_ref).await
+        {
+            let _ = state.worker_runtime.force_stop(&worker_ref).await;
         }
     });
 }
@@ -401,7 +403,7 @@ async fn cancel_run(
                         managed_run.answer_transport.clone(),
                         managed_run.cancel_token.clone(),
                         managed_run.cancel_tx.take(),
-                        managed_run.worker_pid,
+                        managed_run.worker_ref.clone(),
                     ))
                 }
                 _ => {
@@ -412,7 +414,7 @@ async fn cancel_run(
             None => None,
         }
     };
-    let Some((persist_cancelled_status, answer_transport, cancel_token, cancel_tx, worker_pid)) =
+    let Some((persist_cancelled_status, answer_transport, cancel_token, cancel_tx, worker_ref)) =
         cancel_target
     else {
         return unmanaged_cancel_response(state.as_ref(), id, actor, pending_control).await;
@@ -448,10 +450,9 @@ async fn cancel_run(
         false
     };
     if !delivered_control {
-        if let Some(worker_pid) = worker_pid {
-            #[cfg(unix)]
-            fabro_proc::sigterm(worker_pid);
-            schedule_worker_kill(Arc::clone(&state), id, worker_pid);
+        if let Some(worker_ref) = worker_ref {
+            let _ = state.worker_runtime.request_stop(&worker_ref).await;
+            schedule_worker_force_stop(Arc::clone(&state), id, worker_ref);
         }
     }
 

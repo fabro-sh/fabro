@@ -4,6 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
 use axum::body::Body;
@@ -50,6 +51,9 @@ use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 use crate::test_support::*;
 use crate::worker_control::{
     LocalWorkerControlBus, WorkerControlBus, WorkerControlCursor, WorkerControlReceiver,
+};
+use crate::worker_runtime::{
+    LocalWorkerRuntime, StartedWorker, WorkerLaunchSpec, WorkerRef, WorkerRuntime,
 };
 
 const MINIMAL_DOT: &str = r#"digraph Test {
@@ -1957,6 +1961,7 @@ fn slack_app_state_with_secret_sources(
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
         worker_control_bus: None,
+        worker_runtime: None,
         automation_materializer_override: None,
     })
     .expect("slack test app state should build")
@@ -2058,6 +2063,7 @@ fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
         worker_control_bus: None,
+        worker_runtime: None,
         automation_materializer_override: None,
     })
     .expect("slack disabled test app state should build");
@@ -2080,6 +2086,43 @@ fn worker_command_uses_null_stdin_and_token_env() {
     .unwrap();
 
     assert_worker_command_passes_token_only_by_env(&cmd);
+}
+
+#[cfg(unix)]
+#[test]
+fn worker_command_sets_worker_args() {
+    let storage_dir = tempfile::tempdir().unwrap();
+    let run_dir = storage_dir.path().join("run-scratch");
+    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+    let run_id = RunId::new();
+
+    let cmd = worker_command(
+        state.as_ref(),
+        run_id,
+        RunExecutionMode::Resume,
+        &run_dir,
+        false,
+    )
+    .unwrap();
+
+    let args = cmd
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(args, vec![
+        "__run-worker".to_string(),
+        "--server".to_string(),
+        "http://127.0.0.1:32276".to_string(),
+        "--storage-dir".to_string(),
+        storage_dir.path().display().to_string(),
+        "--run-dir".to_string(),
+        run_dir.display().to_string(),
+        "--run-id".to_string(),
+        run_id.to_string(),
+        "--mode".to_string(),
+        "resume".to_string(),
+    ]);
 }
 
 #[cfg(unix)]
@@ -2381,6 +2424,7 @@ methods = ["dev-token"]
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
         worker_control_bus: None,
+        worker_runtime: None,
         automation_materializer_override: None,
     }) else {
         panic!("build_app_state should require SESSION_SECRET")
@@ -2510,8 +2554,28 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
         worker_control_bus: None,
+        worker_runtime: None,
         automation_materializer_override: None,
     })
+}
+
+fn test_worker_ref(pid: u32) -> WorkerRef {
+    WorkerRef::Local {
+        pid,
+        process_group_id: Some(pid),
+    }
+}
+
+#[cfg(unix)]
+fn worker_command(
+    state: &AppState,
+    run_id: RunId,
+    mode: RunExecutionMode,
+    run_dir: &Path,
+    agent_fabro_tools_enabled: bool,
+) -> anyhow::Result<Command> {
+    let spec = worker_launch_spec(state, run_id, mode, run_dir, agent_fabro_tools_enabled)?;
+    Ok(LocalWorkerRuntime::command_for_spec(&spec))
 }
 
 fn worker_command_test_state(
@@ -2688,6 +2752,58 @@ fn worker_token_claims(cmd: &Command, state: &AppState) -> crate::worker_token::
     )
     .expect("worker token should decode")
     .claims
+}
+
+#[derive(Default)]
+struct RecordingWorkerRuntime {
+    requested: StdMutex<Vec<WorkerRef>>,
+    forced:    StdMutex<Vec<WorkerRef>>,
+    alive:     AtomicBool,
+}
+
+impl RecordingWorkerRuntime {
+    fn requested_refs(&self) -> Vec<WorkerRef> {
+        self.requested
+            .lock()
+            .expect("requested lock poisoned")
+            .clone()
+    }
+
+    fn forced_refs(&self) -> Vec<WorkerRef> {
+        self.forced.lock().expect("forced lock poisoned").clone()
+    }
+
+    fn set_alive(&self, alive: bool) {
+        self.alive.store(alive, Ordering::Relaxed);
+    }
+}
+
+#[async_trait::async_trait]
+impl WorkerRuntime for RecordingWorkerRuntime {
+    async fn start(&self, _spec: WorkerLaunchSpec) -> anyhow::Result<StartedWorker> {
+        anyhow::bail!("recording runtime does not start workers")
+    }
+
+    async fn request_stop(&self, worker_ref: &WorkerRef) -> anyhow::Result<()> {
+        self.requested
+            .lock()
+            .expect("requested lock poisoned")
+            .push(worker_ref.clone());
+        Ok(())
+    }
+
+    async fn force_stop(&self, worker_ref: &WorkerRef) -> anyhow::Result<()> {
+        self.forced
+            .lock()
+            .expect("forced lock poisoned")
+            .push(worker_ref.clone());
+        self.alive.store(false, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn is_alive(&self, _worker_ref: &WorkerRef) -> bool {
+        self.alive.load(Ordering::Relaxed)
+    }
 }
 
 async fn worker_transport_with_receiver(
@@ -5788,6 +5904,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
         worker_control_bus: None,
+        worker_runtime: None,
         automation_materializer_override: None,
     };
     let state = build_app_state(config).expect("test app state should build");
@@ -13455,7 +13572,7 @@ async fn cancel_run_overwrites_pending_pause_request() {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get_mut(&run_id).expect("run should exist");
         managed_run.status = RunStatus::Running;
-        managed_run.worker_pid = Some(u32::MAX);
+        managed_run.worker_ref = Some(test_worker_ref(u32::MAX));
     }
     append_control_request(state.as_ref(), run_id, RunControlAction::Pause, None)
         .await
@@ -13478,6 +13595,38 @@ async fn cancel_run_overwrites_pending_pause_request() {
 }
 
 #[tokio::test]
+async fn cancel_run_requests_worker_runtime_stop_when_control_unavailable() {
+    let runtime = StdArc::new(RecordingWorkerRuntime::default());
+    let state = TestAppStateBuilder::new()
+        .worker_runtime(runtime.clone())
+        .build();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = create_and_start_run(&app, MINIMAL_DOT)
+        .await
+        .parse::<RunId>()
+        .unwrap();
+    let worker_ref = test_worker_ref(u32::MAX);
+
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        let managed_run = runs.get_mut(&run_id).expect("run should exist");
+        managed_run.status = RunStatus::Running;
+        managed_run.answer_transport = None;
+        managed_run.worker_ref = Some(worker_ref.clone());
+    }
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/cancel")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    assert_eq!(runtime.requested_refs(), vec![worker_ref]);
+}
+
+#[tokio::test]
 async fn pause_run_rejects_when_control_is_already_pending() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
@@ -13488,7 +13637,7 @@ async fn pause_run_rejects_when_control_is_already_pending() {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get_mut(&run_id).expect("run should exist");
         managed_run.status = RunStatus::Running;
-        managed_run.worker_pid = Some(u32::MAX);
+        managed_run.worker_ref = Some(test_worker_ref(u32::MAX));
     }
     append_control_request(state.as_ref(), run_id, RunControlAction::Cancel, None)
         .await
@@ -13521,7 +13670,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get_mut(&run_id).expect("run should exist");
         managed_run.status = RunStatus::Running;
-        managed_run.worker_pid = Some(u32::MAX);
+        managed_run.worker_ref = Some(test_worker_ref(u32::MAX));
         managed_run.answer_transport = Some(transport);
     }
 
@@ -13607,7 +13756,7 @@ async fn pause_run_immediately_pauses_blocked_run() {
         managed_run.status = RunStatus::Blocked {
             blocked_reason: BlockedReason::HumanInputRequired,
         };
-        managed_run.worker_pid = Some(u32::MAX);
+        managed_run.worker_ref = Some(test_worker_ref(u32::MAX));
     }
 
     let req = Request::builder()
@@ -13643,7 +13792,7 @@ async fn unpause_run_sets_pending_control() {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = runs.get_mut(&run_id).expect("run should exist");
         managed_run.status = RunStatus::Paused { prior_block: None };
-        managed_run.worker_pid = Some(u32::MAX);
+        managed_run.worker_ref = Some(test_worker_ref(u32::MAX));
         managed_run.answer_transport = Some(transport);
     }
 
@@ -13718,7 +13867,7 @@ async fn unpause_run_returns_blocked_when_human_gate_is_still_unresolved() {
         managed_run.status = RunStatus::Paused {
             prior_block: Some(BlockedReason::HumanInputRequired),
         };
-        managed_run.worker_pid = Some(u32::MAX);
+        managed_run.worker_ref = Some(test_worker_ref(u32::MAX));
     }
 
     let req = Request::builder()
@@ -13812,6 +13961,55 @@ async fn startup_reconciliation_marks_inflight_runs_terminal() {
     assert_eq!(run_3.pending_control, None);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_active_workers_uses_worker_runtime_for_live_refs() {
+    let runtime = StdArc::new(RecordingWorkerRuntime::default());
+    runtime.set_alive(true);
+    let state = TestAppStateBuilder::new()
+        .worker_runtime(runtime.clone())
+        .build();
+    let worker_refs = [test_worker_ref(u32::MAX - 1), test_worker_ref(u32::MAX)];
+    let run_ids = [RunId::new(), RunId::new()];
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    for (run_id, worker_ref) in run_ids.iter().zip(worker_refs.iter()) {
+        create_durable_run_with_events(&state, *run_id, &[
+            workflow_event::Event::RunSubmitted {
+                definition_blob: None,
+            },
+            workflow_event::Event::RunStarting,
+            workflow_event::Event::RunRunning,
+        ])
+        .await;
+
+        let mut run = managed_run(
+            String::new(),
+            RunStatus::Running,
+            chrono::Utc::now(),
+            temp_dir.path().join(run_id.to_string()),
+            RunExecutionMode::Start,
+        );
+        run.worker_ref = Some(worker_ref.clone());
+        state
+            .runs
+            .lock()
+            .expect("runs lock poisoned")
+            .insert(*run_id, run);
+    }
+
+    let terminated = shutdown_active_workers_with_grace(
+        &state,
+        Duration::from_millis(0),
+        Duration::from_millis(1),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(terminated, 2);
+    assert_eq!(runtime.requested_refs().len(), 2);
+    assert_eq!(runtime.forced_refs().len(), 2);
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_active_workers_terminates_process_groups() {
@@ -13837,7 +14035,7 @@ async fn shutdown_active_workers_terminates_process_groups() {
         .stderr(Stdio::null());
     fabro_proc::pre_exec_setpgid(child.as_std_mut());
     let mut child = child.spawn().unwrap();
-    let worker_pid = child.id().expect("worker pid should be available");
+    let worker_process_id = child.id().expect("worker pid should be available");
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -13848,8 +14046,7 @@ async fn shutdown_active_workers_terminates_process_groups() {
             temp_dir.path().join(run_id.to_string()),
             RunExecutionMode::Start,
         );
-        run.worker_pid = Some(worker_pid);
-        run.worker_pgid = Some(worker_pid);
+        run.worker_ref = Some(test_worker_ref(worker_process_id));
         runs.insert(run_id, run);
     }
 
@@ -13867,7 +14064,7 @@ async fn shutdown_active_workers_terminates_process_groups() {
         .expect("worker should exit after shutdown")
         .expect("wait should succeed");
     assert!(!exit_status.success());
-    assert!(!fabro_proc::process_group_alive(worker_pid));
+    assert!(!fabro_proc::process_group_alive(worker_process_id));
 
     let run_state = state
         .store

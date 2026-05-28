@@ -40,6 +40,8 @@ use crate::server::{
     RouterOptions, build_app_state, process_env_var,
 };
 use crate::server_secrets::ServerSecrets;
+#[cfg(test)]
+use crate::worker_runtime::WorkerRuntime;
 
 pub const TEST_DEV_TOKEN: &str =
     "fabro_dev_abababababababababababababababababababababababababababababababab";
@@ -74,25 +76,29 @@ pub struct TestAppStateBuilder {
     env_lookup:                EnvLookup,
     llm_catalog_settings:      LlmCatalogSettings,
     automation_materializer:   Option<Arc<dyn AutomationRunMaterializer>>,
+    #[cfg(test)]
+    worker_runtime:            Option<Arc<dyn WorkerRuntime>>,
 }
 
 impl Default for TestAppStateBuilder {
     fn default() -> Self {
         Self {
-            server_settings:           default_test_server_settings(),
-            manifest_run_defaults:     RunLayer::default(),
-            max_concurrent_runs:       5,
-            registry_factory_override: None,
-            sandbox_provider_registry: None,
-            store_bundle:              None,
-            vault_path:                None,
-            vault_entries:             Vec::new(),
-            server_env_path:           None,
-            active_config_path:        None,
-            server_secret_env:         HashMap::new(),
-            env_lookup:                default_env_lookup(),
-            llm_catalog_settings:      LlmCatalogSettings::default(),
-            automation_materializer:   None,
+            server_settings:             default_test_server_settings(),
+            manifest_run_defaults:       RunLayer::default(),
+            max_concurrent_runs:         5,
+            registry_factory_override:   None,
+            sandbox_provider_registry:   None,
+            store_bundle:                None,
+            vault_path:                  None,
+            vault_entries:               Vec::new(),
+            server_env_path:             None,
+            active_config_path:          None,
+            server_secret_env:           HashMap::new(),
+            env_lookup:                  default_env_lookup(),
+            llm_catalog_settings:        LlmCatalogSettings::default(),
+            automation_materializer:     None,
+            #[cfg(test)]
+            worker_runtime:              None,
         }
     }
 }
@@ -151,6 +157,12 @@ impl TestAppStateBuilder {
 
     pub fn automation_materializer(mut self, materializer: TestAutomationRunMaterializer) -> Self {
         self.automation_materializer = Some(materializer.into_materializer());
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn worker_runtime(mut self, worker_runtime: Arc<dyn WorkerRuntime>) -> Self {
+        self.worker_runtime = Some(worker_runtime);
         self
     }
 
@@ -251,6 +263,8 @@ impl TestAppStateBuilder {
             shutdown: CancellationToken::new(),
             #[cfg(test)]
             worker_control_bus: None,
+            #[cfg(test)]
+            worker_runtime: self.worker_runtime,
             automation_materializer_override: self.automation_materializer,
         })
     }
