@@ -112,6 +112,7 @@ httpmock = "0.8"
 serde_yaml = "0.9"
 tracing-subscriber.workspace = true
 tokio-util.workspace = true
+tokio-tungstenite.workspace = true
 fabro-macros = { path = "../fabro-macros" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
 fabro-test = { workspace = true }

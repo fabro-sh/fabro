@@ -222,8 +222,10 @@ pub use callback::CallbackInterviewer;
 pub use console::ConsoleInterviewer;
 pub use control::{ControlInterviewer, SubmitError};
 pub use control_protocol::{
-    WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
-    WorkerControlMessage,
+    WORKER_CONTROL_INVALID_CURSOR_REASON, WORKER_CONTROL_PONG_TIMEOUT_REASON,
+    WORKER_CONTROL_PROTOCOL_VERSION, WORKER_CONTROL_WS_LIVENESS_TIMEOUT,
+    WORKER_CONTROL_WS_PING_INTERVAL, WorkerControlAnswer, WorkerControlDeliveryFrame,
+    WorkerControlEnvelope, WorkerControlMessage,
 };
 pub use queue::QueueInterviewer;
 pub use recording::RecordingInterviewer;

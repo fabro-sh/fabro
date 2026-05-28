@@ -249,6 +249,8 @@ impl TestAppStateBuilder {
             ),
             sandbox_provider_registry: self.sandbox_provider_registry,
             shutdown: CancellationToken::new(),
+            #[cfg(test)]
+            worker_control_bus: None,
             automation_materializer_override: self.automation_materializer,
         })
     }

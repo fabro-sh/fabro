@@ -1,10 +1,4 @@
-#![expect(
-    clippy::disallowed_types,
-    reason = "sync CLI `run` subprocess wrapper: reads server subprocess stdout line-by-line via \
-              std::io::BufReader; not on a Tokio path"
-)]
-
-use std::io::{BufRead as StdBufRead, BufReader as StdBufReader};
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,10 +6,14 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use fabro_api::types::RunManifest;
+use fabro_client::ServerTarget;
 use fabro_config::user::active_settings_path;
 use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
 use fabro_interview::{
-    AnswerSubmission, ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage,
+    AnswerSubmission, ControlInterviewer, WORKER_CONTROL_INVALID_CURSOR_REASON,
+    WORKER_CONTROL_PONG_TIMEOUT_REASON, WORKER_CONTROL_WS_LIVENESS_TIMEOUT,
+    WORKER_CONTROL_WS_PING_INTERVAL, WorkerControlDeliveryFrame, WorkerControlEnvelope,
+    WorkerControlMessage,
 };
 use fabro_model::Catalog;
 use fabro_server::run_tool_manifest;
@@ -34,11 +32,23 @@ use fabro_workflow::operations::{self, StartServices};
 use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
 use fabro_workflow::services::FabroRunToolServices;
+use futures::{SinkExt, StreamExt};
 use jsonwebtoken::dangerous::insecure_decode;
+#[cfg(test)]
+use tokio::io::DuplexStream;
+use tokio::net::TcpStream;
+#[cfg(unix)]
+use tokio::net::UnixStream;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::{Mutex, RwLock as AsyncRwLock, mpsc};
-use tokio::time::sleep;
+use tokio::sync::{Mutex, RwLock as AsyncRwLock, oneshot};
+use tokio::task::JoinHandle;
+use tokio::time::{self, Instant, MissedTickBehavior};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::{HeaderValue, Request as WebSocketRequest, header};
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::{self, Message as WebSocketMessage};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite};
 use tokio_util::sync::CancellationToken;
 
 use crate::args::RunWorkerMode;
@@ -75,7 +85,7 @@ pub(crate) async fn execute(
     let _ = fabro_proc::title_init();
     set_worker_title(&run_id, initial_worker_title_phase(mode));
 
-    let target = server.parse::<fabro_client::ServerTarget>()?;
+    let target = server.parse::<ServerTarget>()?;
     let client = server_client::connect_server_target_with_bearer(&target, worker_token).await?;
     let run_store = HttpRunStore::connect(run_id, client.clone_for_reuse()).await?;
     let run_state = run_store
@@ -110,13 +120,24 @@ pub(crate) async fn execute(
     let cancel_token = CancellationToken::new();
     let emitter = Arc::new(Emitter::new(run_id));
     let steering_hub = Arc::new(fabro_workflow::SteeringHub::new(Arc::clone(&emitter)));
-    spawn_worker_control_stream(
-        Arc::clone(&interviewer),
-        cancel_token.clone(),
-        Arc::clone(&steering_hub),
-    )?;
     let run_control = RunControlState::new();
     install_signal_handlers(Arc::clone(&run_control), cancel_token.clone())?;
+    let mut control_manager = if run_state.status.is_terminal() {
+        None
+    } else {
+        Some(spawn_worker_control_manager(
+            target.clone(),
+            run_id,
+            worker_token.to_owned(),
+            Arc::clone(&interviewer),
+            cancel_token.clone(),
+            Arc::clone(&steering_hub),
+            Arc::clone(&run_control),
+        ))
+    };
+    if let Some(control_manager) = &mut control_manager {
+        control_manager.wait_for_first_connection().await?;
+    }
     let vault = load_worker_vault(storage_dir.as_deref())?;
     let github_app = {
         let vault_guard = match &vault {
@@ -158,13 +179,26 @@ pub(crate) async fn execute(
         fabro_run_tools,
     };
 
-    match mode {
-        RunWorkerMode::Start => {
-            operations::start(&run_dir, services).await?;
+    let execution = async {
+        match mode {
+            RunWorkerMode::Start => operations::start(&run_dir, services).await,
+            RunWorkerMode::Resume => operations::resume(&run_dir, services).await,
         }
-        RunWorkerMode::Resume => {
-            operations::resume(&run_dir, services).await?;
+    };
+
+    if let Some(mut control_manager) = control_manager {
+        tokio::select! {
+            result = execution => {
+                control_manager.finish();
+                result?;
+            }
+            fatal = control_manager.fatal_control_loss() => {
+                control_manager.finish();
+                return Err(fatal);
+            }
         }
+    } else {
+        execution.await?;
     }
 
     Ok(())
@@ -254,96 +288,510 @@ fn load_worker_vault(storage_dir: Option<&Path>) -> Result<Option<Arc<AsyncRwLoc
     Ok(Some(Arc::new(AsyncRwLock::new(vault))))
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum WorkerControlStreamEvent {
-    Line(String),
-    Eof,
+const WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
+const WORKER_CONTROL_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(5);
+const WORKER_CONTROL_APPLIED_ID_DEDUPE_CAPACITY: usize = 2048;
+
+#[derive(Default)]
+struct AppliedWorkerControlDeliveryIds {
+    last:   Option<String>,
+    order:  VecDeque<String>,
+    recent: HashSet<String>,
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Worker control reads blocking stdin on a dedicated OS thread and forwards lines into Tokio."
-)]
-fn spawn_worker_control_stream(
+impl AppliedWorkerControlDeliveryIds {
+    fn last_applied_id(&self) -> Option<&str> {
+        self.last.as_deref()
+    }
+
+    fn contains(&self, id: &str) -> bool {
+        self.recent.contains(id)
+    }
+
+    fn record(&mut self, id: String) {
+        if !self.recent.insert(id.clone()) {
+            self.last = Some(id);
+            return;
+        }
+        self.order.push_back(id.clone());
+        self.last = Some(id);
+        while self.order.len() > WORKER_CONTROL_APPLIED_ID_DEDUPE_CAPACITY {
+            if let Some(evicted) = self.order.pop_front() {
+                self.recent.remove(&evicted);
+            }
+        }
+    }
+}
+
+struct WorkerControlManagerHandle {
+    first_connection: Option<oneshot::Receiver<Result<()>>>,
+    fatal:            Option<oneshot::Receiver<anyhow::Error>>,
+    done:             CancellationToken,
+    task:             JoinHandle<()>,
+}
+
+impl WorkerControlManagerHandle {
+    async fn wait_for_first_connection(&mut self) -> Result<()> {
+        let receiver = self
+            .first_connection
+            .take()
+            .context("worker control first-connection receiver missing")?;
+        receiver
+            .await
+            .context("worker control manager stopped before first connection")?
+    }
+
+    async fn fatal_control_loss(&mut self) -> anyhow::Error {
+        let Some(receiver) = self.fatal.take() else {
+            return anyhow!("worker control fatal receiver missing");
+        };
+        receiver
+            .await
+            .unwrap_or_else(|_| anyhow!("worker control manager stopped before workflow completed"))
+    }
+
+    fn finish(&self) {
+        self.done.cancel();
+        self.task.abort();
+    }
+}
+
+#[derive(Debug)]
+struct WorkerControlStreamConnectRequest {
+    request:          WebSocketRequest<()>,
+    unix_socket_path: Option<PathBuf>,
+}
+
+impl WorkerControlStreamConnectRequest {
+    fn request_for_tungstenite(&self) -> WebSocketRequest<()> {
+        self.request.clone()
+    }
+
+    #[cfg(test)]
+    fn uri(&self) -> String {
+        self.request.uri().to_string()
+    }
+
+    #[cfg(test)]
+    fn authorization(&self) -> Option<&str> {
+        self.request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+    }
+}
+
+enum WorkerControlSocket {
+    Tcp(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
+    #[cfg(unix)]
+    Unix(Box<WebSocketStream<UnixStream>>),
+    #[cfg(test)]
+    Test(Box<WebSocketStream<DuplexStream>>),
+}
+
+impl WorkerControlSocket {
+    async fn send(&mut self, message: WebSocketMessage) -> Result<(), tungstenite::Error> {
+        match self {
+            Self::Tcp(socket) => socket.send(message).await,
+            #[cfg(unix)]
+            Self::Unix(socket) => socket.send(message).await,
+            #[cfg(test)]
+            Self::Test(socket) => socket.send(message).await,
+        }
+    }
+
+    async fn next(&mut self) -> Option<Result<WebSocketMessage, tungstenite::Error>> {
+        match self {
+            Self::Tcp(socket) => socket.next().await,
+            #[cfg(unix)]
+            Self::Unix(socket) => socket.next().await,
+            #[cfg(test)]
+            Self::Test(socket) => socket.next().await,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum WorkerControlConnectError {
+    InvalidCursor,
+    Other(anyhow::Error),
+}
+
+fn spawn_worker_control_manager(
+    target: ServerTarget,
+    run_id: RunId,
+    worker_token: String,
     interviewer: Arc<ControlInterviewer>,
     cancel_token: CancellationToken,
     steering_hub: Arc<fabro_workflow::SteeringHub>,
-) -> Result<()> {
-    let (event_tx, event_rx) = mpsc::unbounded_channel();
-    tokio::spawn(handle_worker_control_stream_events(
-        interviewer,
-        cancel_token,
-        steering_hub,
-        event_rx,
-    ));
-    std::thread::Builder::new()
-        .name("fabro-worker-control".to_string())
-        .spawn(move || {
-            read_worker_control_stream_blocking(StdBufReader::new(std::io::stdin()), &event_tx);
-        })
-        .context("failed to spawn worker control reader thread")?;
-    Ok(())
+    run_control: Arc<RunControlState>,
+) -> WorkerControlManagerHandle {
+    let (first_tx, first_rx) = oneshot::channel();
+    let (fatal_tx, fatal_rx) = oneshot::channel();
+    let done = CancellationToken::new();
+    let task_done = done.clone();
+    let task = tokio::spawn(async move {
+        run_worker_control_manager(
+            target,
+            run_id,
+            worker_token,
+            interviewer,
+            cancel_token,
+            steering_hub,
+            run_control,
+            task_done,
+            first_tx,
+            fatal_tx,
+        )
+        .await;
+    });
+    WorkerControlManagerHandle {
+        first_connection: Some(first_rx),
+        fatal: Some(fatal_rx),
+        done,
+        task,
+    }
 }
 
-fn read_worker_control_stream_blocking<R>(
-    mut reader: R,
-    event_tx: &mpsc::UnboundedSender<WorkerControlStreamEvent>,
-) where
-    R: StdBufRead,
-{
-    let mut line = String::new();
-    loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) | Err(_) => {
-                let _ = event_tx.send(WorkerControlStreamEvent::Eof);
-                break;
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Worker control manager owns the worker-side control dependencies."
+)]
+async fn run_worker_control_manager(
+    target: ServerTarget,
+    run_id: RunId,
+    worker_token: String,
+    interviewer: Arc<ControlInterviewer>,
+    cancel_token: CancellationToken,
+    steering_hub: Arc<fabro_workflow::SteeringHub>,
+    run_control: Arc<RunControlState>,
+    done: CancellationToken,
+    first_tx: oneshot::Sender<Result<()>>,
+    fatal_tx: oneshot::Sender<anyhow::Error>,
+) {
+    let mut first_tx = Some(first_tx);
+    let mut fatal_tx = Some(fatal_tx);
+    let mut backoff = WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF;
+    let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
+
+    while !done.is_cancelled() {
+        let request = match build_worker_control_stream_request(
+            &target,
+            &run_id,
+            &worker_token,
+            applied_ids.last_applied_id(),
+        ) {
+            Ok(request) => request,
+            Err(err) => {
+                report_fatal_control_loss(
+                    &interviewer,
+                    &cancel_token,
+                    &mut first_tx,
+                    &mut fatal_tx,
+                    format!("failed to build worker control stream request: {err:#}"),
+                )
+                .await;
+                return;
             }
-            Ok(_) => {
-                let line = line.trim_end_matches(['\r', '\n']).to_string();
-                if event_tx.send(WorkerControlStreamEvent::Line(line)).is_err() {
-                    break;
+        };
+
+        match connect_worker_control_stream(request).await {
+            Ok(mut socket) => {
+                if let Some(first_tx) = first_tx.take() {
+                    let _ = first_tx.send(Ok(()));
+                }
+                backoff = WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF;
+                match handle_worker_control_socket(
+                    &mut socket,
+                    &interviewer,
+                    &cancel_token,
+                    &steering_hub,
+                    &run_control,
+                    &mut applied_ids,
+                    &done,
+                )
+                .await
+                {
+                    Ok(()) => {}
+                    Err(WorkerControlConnectError::InvalidCursor) => {
+                        report_fatal_control_loss(
+                            &interviewer,
+                            &cancel_token,
+                            &mut first_tx,
+                            &mut fatal_tx,
+                            "worker control stream replay cursor is invalid".to_string(),
+                        )
+                        .await;
+                        return;
+                    }
+                    Err(WorkerControlConnectError::Other(err)) => {
+                        tracing::debug!(error = %err, "Worker control stream disconnected");
+                    }
+                }
+            }
+            Err(WorkerControlConnectError::InvalidCursor) => {
+                report_fatal_control_loss(
+                    &interviewer,
+                    &cancel_token,
+                    &mut first_tx,
+                    &mut fatal_tx,
+                    "worker control stream replay cursor is invalid".to_string(),
+                )
+                .await;
+                return;
+            }
+            Err(WorkerControlConnectError::Other(err)) => {
+                tracing::debug!(error = %err, "Worker control stream connection failed");
+            }
+        }
+
+        sleep_or_done(&done, backoff).await;
+        backoff = next_worker_control_reconnect_backoff(backoff);
+    }
+}
+
+async fn report_fatal_control_loss(
+    interviewer: &ControlInterviewer,
+    cancel_token: &CancellationToken,
+    first_tx: &mut Option<oneshot::Sender<Result<()>>>,
+    fatal_tx: &mut Option<oneshot::Sender<anyhow::Error>>,
+    detail: String,
+) {
+    let message = format!("worker control channel lost: {detail}");
+    interviewer.interrupt_all().await;
+    if let Some(first_tx) = first_tx.take() {
+        let _ = first_tx.send(Err(anyhow!(message.clone())));
+    }
+    if let Some(fatal_tx) = fatal_tx.take() {
+        let _ = fatal_tx.send(anyhow!(message));
+    }
+    cancel_token.cancel();
+}
+
+async fn sleep_or_done(done: &CancellationToken, delay: Duration) {
+    tokio::select! {
+        () = done.cancelled() => {}
+        () = time::sleep(delay) => {}
+    }
+}
+
+fn next_worker_control_reconnect_backoff(current: Duration) -> Duration {
+    current
+        .saturating_mul(2)
+        .min(WORKER_CONTROL_RECONNECT_MAX_BACKOFF)
+}
+
+fn build_worker_control_stream_request(
+    target: &ServerTarget,
+    run_id: &RunId,
+    worker_token: &str,
+    after: Option<&str>,
+) -> Result<WorkerControlStreamConnectRequest> {
+    let (url, unix_socket_path) = match target {
+        ServerTarget::HttpUrl(_) => {
+            let base = target
+                .as_http_url()
+                .context("HTTP server target missing URL")?;
+            let websocket_base = if let Some(rest) = base.strip_prefix("http://") {
+                format!("ws://{rest}")
+            } else if let Some(rest) = base.strip_prefix("https://") {
+                format!("wss://{rest}")
+            } else {
+                anyhow::bail!("unsupported server URL scheme");
+            };
+            (
+                worker_control_stream_url(&websocket_base, run_id, after),
+                None,
+            )
+        }
+        ServerTarget::UnixSocket(path) => {
+            let url = worker_control_stream_url("ws://fabro", run_id, after);
+            (url, Some(path.as_path().to_path_buf()))
+        }
+    };
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .context("failed to build worker control stream request")?;
+    request.headers_mut().insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {worker_token}"))
+            .context("failed to build worker control stream authorization header")?,
+    );
+    Ok(WorkerControlStreamConnectRequest {
+        request,
+        unix_socket_path,
+    })
+}
+
+fn worker_control_stream_url(base: &str, run_id: &RunId, after: Option<&str>) -> String {
+    let mut url = format!("{base}/api/v1/runs/{run_id}/worker/control-stream");
+    if let Some(after) = after {
+        url.push_str("?after=");
+        url.push_str(after);
+    }
+    url
+}
+
+async fn connect_worker_control_stream(
+    request: WorkerControlStreamConnectRequest,
+) -> Result<WorkerControlSocket, WorkerControlConnectError> {
+    if let Some(path) = request.unix_socket_path.as_ref() {
+        #[cfg(unix)]
+        {
+            let ws_request = request.request_for_tungstenite();
+            let stream = UnixStream::connect(path)
+                .await
+                .map_err(|err| WorkerControlConnectError::Other(anyhow::Error::new(err)))?;
+            let (socket, _) = tokio_tungstenite::client_async(ws_request, stream)
+                .await
+                .map_err(classify_tungstenite_error)?;
+            Ok(WorkerControlSocket::Unix(Box::new(socket)))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Err(WorkerControlConnectError::Other(anyhow!(
+                "Unix-socket worker control stream is not supported on this platform"
+            )))
+        }
+    } else {
+        let (socket, _) = connect_async(request.request)
+            .await
+            .map_err(classify_tungstenite_error)?;
+        Ok(WorkerControlSocket::Tcp(Box::new(socket)))
+    }
+}
+
+fn classify_tungstenite_error(error: tungstenite::Error) -> WorkerControlConnectError {
+    if let tungstenite::Error::Http(response) = &error {
+        if response.status().as_u16() == 410 {
+            return WorkerControlConnectError::InvalidCursor;
+        }
+    }
+    WorkerControlConnectError::Other(anyhow::Error::new(error))
+}
+
+async fn handle_worker_control_socket(
+    socket: &mut WorkerControlSocket,
+    interviewer: &ControlInterviewer,
+    cancel_token: &CancellationToken,
+    steering_hub: &fabro_workflow::SteeringHub,
+    run_control: &RunControlState,
+    applied_ids: &mut AppliedWorkerControlDeliveryIds,
+    done: &CancellationToken,
+) -> Result<(), WorkerControlConnectError> {
+    let mut ping_interval = time::interval(WORKER_CONTROL_WS_PING_INTERVAL);
+    ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut last_liveness = Instant::now();
+    let liveness_timeout = time::sleep_until(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
+    tokio::pin!(liveness_timeout);
+
+    loop {
+        liveness_timeout
+            .as_mut()
+            .reset(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
+
+        tokio::select! {
+            () = done.cancelled() => return Ok(()),
+            _ = ping_interval.tick() => {
+                socket
+                    .send(WebSocketMessage::Ping(Vec::new().into()))
+                    .await
+                    .map_err(|err| WorkerControlConnectError::Other(anyhow::Error::new(err)))?;
+            }
+            () = &mut liveness_timeout => {
+                let _ = socket
+                    .send(WebSocketMessage::Close(Some(protocol::CloseFrame {
+                        code: CloseCode::Away,
+                        reason: WORKER_CONTROL_PONG_TIMEOUT_REASON.into(),
+                    })))
+                    .await;
+                return Err(WorkerControlConnectError::Other(anyhow!(
+                    "worker control WebSocket liveness timed out"
+                )));
+            }
+            message = socket.next() => {
+                let Some(message) = message else {
+                    return Ok(());
+                };
+                match message {
+                    Ok(WebSocketMessage::Text(text)) => {
+                        last_liveness = Instant::now();
+                        let frame = serde_json::from_str::<WorkerControlDeliveryFrame>(text.as_str())
+                            .map_err(|err| WorkerControlConnectError::Other(anyhow::Error::new(err)))?;
+                        apply_worker_control_delivery_frame(
+                            interviewer,
+                            cancel_token,
+                            steering_hub,
+                            run_control,
+                            applied_ids,
+                            frame,
+                        )
+                        .await;
+                    }
+                    Ok(WebSocketMessage::Ping(payload)) => {
+                        last_liveness = Instant::now();
+                        socket
+                            .send(WebSocketMessage::Pong(payload))
+                            .await
+                            .map_err(|err| WorkerControlConnectError::Other(anyhow::Error::new(err)))?;
+                    }
+                    Ok(WebSocketMessage::Pong(_) | WebSocketMessage::Binary(_)) => {
+                        last_liveness = Instant::now();
+                    }
+                    Ok(WebSocketMessage::Close(frame)) => {
+                        if frame.as_ref().is_some_and(|frame| {
+                            frame.reason.as_str() == WORKER_CONTROL_INVALID_CURSOR_REASON
+                        }) {
+                            return Err(WorkerControlConnectError::InvalidCursor);
+                        }
+                        return Ok(());
+                    }
+                    Ok(WebSocketMessage::Frame(_)) => {}
+                    Err(err) => {
+                        return Err(WorkerControlConnectError::Other(anyhow::Error::new(err)));
+                    }
                 }
             }
         }
     }
 }
 
-async fn handle_worker_control_stream_events(
-    interviewer: Arc<ControlInterviewer>,
-    cancel_token: CancellationToken,
-    steering_hub: Arc<fabro_workflow::SteeringHub>,
-    mut event_rx: mpsc::UnboundedReceiver<WorkerControlStreamEvent>,
-) {
-    while let Some(event) = event_rx.recv().await {
-        match event {
-            WorkerControlStreamEvent::Line(line) => {
-                apply_worker_control_line(&interviewer, &cancel_token, &steering_hub, &line).await;
-            }
-            WorkerControlStreamEvent::Eof => {
-                interviewer.interrupt_all().await;
-                return;
-            }
-        }
-    }
-
-    interviewer.interrupt_all().await;
-}
-
-async fn apply_worker_control_line(
+async fn apply_worker_control_delivery_frame(
     interviewer: &ControlInterviewer,
     cancel_token: &CancellationToken,
     steering_hub: &fabro_workflow::SteeringHub,
-    line: &str,
-) {
-    if line.trim().is_empty() {
-        return;
+    run_control: &RunControlState,
+    applied_ids: &mut AppliedWorkerControlDeliveryIds,
+    frame: WorkerControlDeliveryFrame,
+) -> bool {
+    // Duplicate ids cannot reach us under normal operation: the server replays
+    // strictly after the last applied id. Guard against a server-side bug or
+    // reconnect race by ignoring recently-applied delivery ids.
+    if applied_ids.contains(&frame.id) {
+        return false;
     }
+    let frame_id = frame.id;
+    apply_worker_control_message(
+        interviewer,
+        cancel_token,
+        steering_hub,
+        run_control,
+        frame.envelope,
+    )
+    .await;
+    applied_ids.record(frame_id);
+    true
+}
 
-    let Ok(message) = serde_json::from_str::<WorkerControlEnvelope>(line) else {
-        return;
-    };
-
+async fn apply_worker_control_message(
+    interviewer: &ControlInterviewer,
+    cancel_token: &CancellationToken,
+    steering_hub: &fabro_workflow::SteeringHub,
+    run_control: &RunControlState,
+    message: WorkerControlEnvelope,
+) {
     match message.message {
         WorkerControlMessage::InterviewAnswer { qid, answer, actor } => {
             let _ = interviewer
@@ -353,6 +801,12 @@ async fn apply_worker_control_line(
         WorkerControlMessage::RunCancel => {
             cancel_token.cancel();
             interviewer.interrupt_all().await;
+        }
+        WorkerControlMessage::RunPause => {
+            run_control.request_pause();
+        }
+        WorkerControlMessage::RunUnpause => {
+            run_control.request_unpause();
         }
         WorkerControlMessage::Steer { text, actor } => {
             steering_hub.deliver_steer(text, Some(actor));
@@ -485,7 +939,7 @@ impl HttpRunStore {
                 Err(err) => last_error = Some(err),
             }
             if let Some(delay) = RUN_STORE_RETRY_DELAYS.get(attempt) {
-                sleep(*delay).await;
+                time::sleep(*delay).await;
             }
         }
         Err(last_error
@@ -757,10 +1211,14 @@ fn install_signal_handlers(
 )]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use chrono::Utc;
+    use fabro_client::ServerTarget;
     use fabro_config::Storage;
-    use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question};
+    use fabro_interview::{
+        AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
+    };
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
         RunFailedProps, RunStatusTransitionProps,
@@ -771,12 +1229,17 @@ mod tests {
     };
     use fabro_vault::{SecretType, Vault};
     use fabro_workflow::event::RunEventSink;
+    use fabro_workflow::run_control::RunControlState;
+    use tokio::time;
+    use tokio_tungstenite::tungstenite::protocol::{Message as TestWebSocketMessage, Role};
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        WorkerControlStreamEvent, WorkerTitlePhase, apply_worker_control_line,
-        handle_worker_control_stream_events, initial_worker_title_phase, load_worker_vault,
-        read_worker_control_stream_blocking, stamp_system_worker, worker_title,
+        AppliedWorkerControlDeliveryIds, WorkerControlConnectError, WorkerControlSocket,
+        WorkerTitlePhase, apply_worker_control_delivery_frame, apply_worker_control_message,
+        build_worker_control_stream_request, connect_worker_control_stream,
+        handle_worker_control_socket, initial_worker_title_phase, load_worker_vault,
+        next_worker_control_reconnect_backoff, stamp_system_worker, worker_title,
         worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
@@ -1018,20 +1481,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_control_line_routes_answer_by_question_id() {
+    async fn worker_control_routes_answer_by_question_id() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = CancellationToken::new();
+        let run_control = RunControlState::new();
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
         let ask_interviewer = Arc::clone(&interviewer);
         let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
 
         let hub = test_steering_hub();
-        apply_worker_control_line(
+        apply_worker_control_message(
             &interviewer,
             &cancel_token,
             &hub,
-            r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"},"actor":{"kind":"system","system_kind":"engine"}}"#,
+            &run_control,
+            WorkerControlEnvelope::interview_answer(
+                "q-1",
+                fabro_interview::AnswerSubmission::system(
+                    fabro_interview::Answer::yes(),
+                    fabro_types::SystemActorKind::Engine,
+                ),
+            ),
         )
         .await;
 
@@ -1041,9 +1512,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_control_line_cancel_sets_cancel_token_and_interrupts_pending_interviews() {
+    async fn worker_control_cancel_sets_cancel_token_and_interrupts_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = CancellationToken::new();
+        let run_control = RunControlState::new();
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
         let ask_interviewer = Arc::clone(&interviewer);
@@ -1051,11 +1523,12 @@ mod tests {
         tokio::task::yield_now().await;
 
         let hub = test_steering_hub();
-        apply_worker_control_line(
+        apply_worker_control_message(
             &interviewer,
             &cancel_token,
             &hub,
-            r#"{"v":1,"type":"run.cancel"}"#,
+            &run_control,
+            WorkerControlEnvelope::cancel_run(),
         )
         .await;
 
@@ -1065,57 +1538,206 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn blocking_worker_control_stream_emits_lines_and_eof() {
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    async fn worker_control_pause_and_unpause_route_to_run_control() {
+        let interviewer = Arc::new(ControlInterviewer::new());
+        let cancel_token = CancellationToken::new();
+        let run_control = RunControlState::new();
+        let hub = test_steering_hub();
 
-        read_worker_control_stream_blocking(
-            std::io::Cursor::new(
-                b"{\"v\":1,\"type\":\"run.cancel\"}\n{\"v\":1,\"type\":\"interview.answer\",\"qid\":\"q-1\",\"answer\":{\"kind\":\"yes\"},\"actor\":{\"kind\":\"system\",\"system_kind\":\"engine\"}}\n",
-            ),
-            &event_tx,
-        );
+        apply_worker_control_message(
+            &interviewer,
+            &cancel_token,
+            &hub,
+            &run_control,
+            WorkerControlEnvelope::pause_run(),
+        )
+        .await;
+        assert!(run_control.pause_requested());
 
-        assert_eq!(
-            event_rx.try_recv(),
-            Ok(WorkerControlStreamEvent::Line(
-                r#"{"v":1,"type":"run.cancel"}"#.to_string()
-            ))
-        );
-        assert_eq!(
-            event_rx.try_recv(),
-            Ok(WorkerControlStreamEvent::Line(
-                r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"},"actor":{"kind":"system","system_kind":"engine"}}"#
-                    .to_string()
-            ))
-        );
-        assert_eq!(event_rx.try_recv(), Ok(WorkerControlStreamEvent::Eof));
+        apply_worker_control_message(
+            &interviewer,
+            &cancel_token,
+            &hub,
+            &run_control,
+            WorkerControlEnvelope::unpause_run(),
+        )
+        .await;
+        assert!(!run_control.pause_requested());
     }
 
     #[tokio::test]
-    async fn worker_control_event_loop_eof_interrupts_pending_interviews() {
+    async fn duplicate_delivery_ids_are_not_applied_twice() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = CancellationToken::new();
-        let mut question = Question::new("Approve?", QuestionType::YesNo);
-        question.id = "q-1".to_string();
-        let ask_interviewer = Arc::clone(&interviewer);
-        let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
-        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        event_tx.send(WorkerControlStreamEvent::Eof).unwrap();
-        drop(event_tx);
-
+        let run_control = RunControlState::new();
         let hub = test_steering_hub();
-        handle_worker_control_stream_events(
-            Arc::clone(&interviewer),
-            cancel_token.clone(),
-            hub,
-            event_rx,
-        )
-        .await;
+        let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
+        let frame = fabro_interview::WorkerControlDeliveryFrame {
+            id:       "local:1".to_string(),
+            envelope: WorkerControlEnvelope::pause_run(),
+        };
 
-        let answer = answer_task.await.unwrap().answer;
-        assert_eq!(answer.value, AnswerValue::Interrupted);
-        assert!(!cancel_token.is_cancelled());
+        assert!(
+            apply_worker_control_delivery_frame(
+                &interviewer,
+                &cancel_token,
+                &hub,
+                &run_control,
+                &mut applied_ids,
+                frame.clone(),
+            )
+            .await
+        );
+        assert!(
+            !apply_worker_control_delivery_frame(
+                &interviewer,
+                &cancel_token,
+                &hub,
+                &run_control,
+                &mut applied_ids,
+                frame,
+            )
+            .await
+        );
+
+        assert_eq!(applied_ids.last_applied_id(), Some("local:1"));
+    }
+
+    #[test]
+    fn worker_control_request_construction_for_http_targets() {
+        let run_id = fixtures::RUN_1;
+        let request = build_worker_control_stream_request(
+            &ServerTarget::http_url("http://example.com:3000").unwrap(),
+            &run_id,
+            "worker-token",
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            request.uri(),
+            format!("ws://example.com:3000/api/v1/runs/{run_id}/worker/control-stream")
+        );
+        assert_eq!(request.authorization(), Some("Bearer worker-token"));
+
+        let reconnect = build_worker_control_stream_request(
+            &ServerTarget::http_url("https://example.com").unwrap(),
+            &run_id,
+            "worker-token",
+            Some("local:42"),
+        )
+        .unwrap();
+        assert_eq!(
+            reconnect.uri(),
+            format!("wss://example.com/api/v1/runs/{run_id}/worker/control-stream?after=local:42")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_control_request_construction_for_unix_socket_targets() {
+        let run_id = fixtures::RUN_1;
+        let request = build_worker_control_stream_request(
+            &ServerTarget::unix_socket_path("/tmp/fabro.sock").unwrap(),
+            &run_id,
+            "worker-token",
+            Some("local:42"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            request.uri(),
+            format!("ws://fabro/api/v1/runs/{run_id}/worker/control-stream?after=local:42")
+        );
+        assert_eq!(
+            request.unix_socket_path.as_deref(),
+            Some(std::path::Path::new("/tmp/fabro.sock"))
+        );
+    }
+
+    #[test]
+    fn worker_control_reconnect_backoff_is_bounded() {
+        assert_eq!(
+            next_worker_control_reconnect_backoff(Duration::from_millis(100)),
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            next_worker_control_reconnect_backoff(Duration::from_secs(4)),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            next_worker_control_reconnect_backoff(Duration::from_secs(5)),
+            Duration::from_secs(5)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn worker_control_socket_times_out_without_liveness() {
+        let (worker_io, _server_io) = tokio::io::duplex(1024);
+        let worker_ws =
+            tokio_tungstenite::WebSocketStream::from_raw_socket(worker_io, Role::Client, None)
+                .await;
+        let mut socket = WorkerControlSocket::Test(Box::new(worker_ws));
+        let interviewer = Arc::new(ControlInterviewer::new());
+        let cancel_token = CancellationToken::new();
+        let hub = test_steering_hub();
+        let run_control = RunControlState::new();
+        let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
+        let done = CancellationToken::new();
+
+        let task = tokio::spawn(async move {
+            handle_worker_control_socket(
+                &mut socket,
+                &interviewer,
+                &cancel_token,
+                &hub,
+                &run_control,
+                &mut applied_ids,
+                &done,
+            )
+            .await
+        });
+
+        tokio::task::yield_now().await;
+        time::advance(Duration::from_secs(46)).await;
+        let result = task.await.unwrap();
+        assert!(matches!(result, Err(WorkerControlConnectError::Other(_))));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn worker_control_unix_socket_handshake_completes() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket_path = temp.path().join("fabro.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(message) = futures::StreamExt::next(&mut socket).await {
+                match message.unwrap() {
+                    TestWebSocketMessage::Close(_) => break,
+                    TestWebSocketMessage::Ping(payload) => {
+                        futures::SinkExt::send(&mut socket, TestWebSocketMessage::Pong(payload))
+                            .await
+                            .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let request = build_worker_control_stream_request(
+            &ServerTarget::unix_socket_path(&socket_path).unwrap(),
+            &fixtures::RUN_1,
+            "worker-token",
+            None,
+        )
+        .unwrap();
+
+        let mut socket = connect_worker_control_stream(request).await.unwrap();
+        socket
+            .send(TestWebSocketMessage::Close(None))
+            .await
+            .unwrap();
+        server.await.unwrap();
     }
 
     #[tokio::test]

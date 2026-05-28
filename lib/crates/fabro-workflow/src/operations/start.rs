@@ -26,6 +26,7 @@ use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
+use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 use crate::artifact_upload::ArtifactSink;
@@ -987,6 +988,24 @@ impl Drop for DetachedRunBootstrapGuard {
 
 const POSTRUN_INTERRUPTED_MESSAGE: &str = "Run interrupted before post-run finalization completed.";
 const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
+const DETACHED_COMPLETION_GUARD_TERMINAL_GRACE: Duration = Duration::from_millis(25);
+
+async fn run_store_reaches_terminal(run_store: &RunStoreHandle, timeout: Duration) -> bool {
+    let start = Instant::now();
+    loop {
+        if run_store
+            .state()
+            .await
+            .is_ok_and(|state| state.status.is_terminal())
+        {
+            return true;
+        }
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        time::sleep(Duration::from_millis(10)).await;
+    }
+}
 
 struct DetachedRunCompletionGuard {
     event_sink:   RunEventSink,
@@ -1044,6 +1063,11 @@ impl Drop for DetachedRunCompletionGuard {
         let run_store = self.run_store.clone();
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
+                if run_store_reaches_terminal(&run_store, DETACHED_COMPLETION_GUARD_TERMINAL_GRACE)
+                    .await
+                {
+                    return;
+                }
                 emit_workflow_run_failed(
                     run_id,
                     &run_store,
