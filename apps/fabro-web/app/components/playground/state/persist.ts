@@ -8,7 +8,7 @@
  * hydrates from `localStorage` rather than hitting any API.
  */
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 
 import { applyToolCall, type ToolCall } from "./reducer";
 import { createInitialDraft, type WorkflowDraft } from "./draft";
@@ -83,15 +83,7 @@ function loadInitial(): WorkflowDraft {
 export function usePlaygroundDraft(): PlaygroundDraftHandle {
   const [draft, dispatch] = useReducer(reducer, undefined, loadInitial);
 
-  // Mirror state into localStorage. Skip the initial mount so we don't
-  // immediately overwrite stored state with the freshly-hydrated copy on the
-  // first render (no-op in practice but keeps the storage write history clean).
-  const isFirstRender = useRef(true);
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
     if (typeof window === "undefined") return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));

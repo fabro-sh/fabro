@@ -1,28 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { MinusIcon, PlusIcon } from "@heroicons/react/20/solid";
 
 import type { WorkflowDraft } from "../state/draft";
 import { renderCanvasDot } from "./render-canvas";
 import type { SimulationState } from "./simulation";
+import { useCanvasRender } from "./use-canvas-render";
 
 const ZOOM_STEPS = [25, 50, 75, 100, 150, 200];
 const DEFAULT_ZOOM_INDEX = 3; // 100%
-
-/**
- * Strip Graphviz's auto-inserted `<title>` element from the rendered SVG so
- * it doesn't show up as a browser tooltip on every node/edge hover.
- */
-function stripGraphTitle(svg: SVGSVGElement) {
-  const title = svg.querySelector(".graph > title");
-  if (!title) return;
-  let sibling = title.nextElementSibling;
-  while (sibling && sibling.tagName === "text") {
-    const next = sibling.nextElementSibling;
-    sibling.remove();
-    sibling = next;
-  }
-  title.remove();
-}
 
 /**
  * Read a node's id from its SVG `<title>` element. Graphviz writes the
@@ -89,9 +74,7 @@ export default function PlaygroundCanvas({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
-  const svgRef = useRef<SVGSVGElement | null>(null);
 
-  const [error, setError] = useState<string | null>(null);
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragState = useRef<{
@@ -103,32 +86,12 @@ export default function PlaygroundCanvas({
   } | null>(null);
   const zoom = ZOOM_STEPS[zoomIndex]!;
 
-  useEffect(() => {
-    let cancelled = false;
-    async function render() {
-      try {
-        const { instance } = await import("@viz-js/viz");
-        const viz = await instance();
-        if (cancelled) return;
-        const svg = viz.renderSVGElement(dot);
-        stripGraphTitle(svg);
-        svgRef.current = svg;
-        if (innerRef.current) {
-          innerRef.current.replaceChildren(svg);
-        }
-        applySelectionHighlight(svg, selectedNodeId ?? null);
-        setError(null);
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to render canvas");
-        }
-      }
-    }
-    render();
-    return () => {
-      cancelled = true;
-    };
-  }, [dot, selectedNodeId]);
+  const { svgRef, error } = useCanvasRender(
+    innerRef,
+    dot,
+    selectedNodeId ?? null,
+    applySelectionHighlight,
+  );
 
   const onPointerDown = useCallback(
     (event: React.PointerEvent) => {

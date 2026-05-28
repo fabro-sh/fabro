@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   CommandLineIcon,
   ExclamationTriangleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 
+import { useDocumentEvent } from "../../../hooks/effects";
 import { buildRunManifest } from "../state/build-manifest";
 import type { WorkflowDraft } from "../state/draft";
 
@@ -25,14 +26,9 @@ export default function RunForRealModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Esc closes the modal.
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !submitting) onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose, submitting]);
+  useDocumentEvent("keydown", (event) => {
+    if (event.key === "Escape" && !submitting) onClose();
+  });
 
   const launch = async () => {
     setSubmitting(true);
