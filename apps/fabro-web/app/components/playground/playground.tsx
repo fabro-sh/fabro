@@ -129,7 +129,7 @@ export default function Playground({
         </header>
 
         <div className="grid min-h-0 flex-1 grid-rows-[3fr_2fr] gap-3">
-          <div className="grid min-h-0 grid-cols-[1fr_220px] gap-3">
+          <div className="grid min-h-0 grid-cols-[1fr_320px] gap-3">
             <PlaygroundCanvas
               draft={draft}
               simulation={sim.state}
