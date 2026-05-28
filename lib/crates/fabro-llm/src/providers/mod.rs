@@ -4,6 +4,7 @@ pub mod fabro_server;
 pub mod gemini;
 pub mod http_api;
 pub mod openai;
+pub(crate) mod openai_chat;
 pub mod openai_compatible;
 
 pub use anthropic::Adapter as AnthropicAdapter;
