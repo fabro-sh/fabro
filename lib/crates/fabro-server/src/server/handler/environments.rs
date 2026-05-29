@@ -11,6 +11,7 @@ use fabro_types::settings::run::{
     EnvironmentNetworkSettings, EnvironmentProvider, EnvironmentResourcesSettings,
     EnvironmentSettings, EnvironmentVolumeSettings,
 };
+use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 
 use super::super::{
@@ -56,17 +57,6 @@ struct ReplaceEnvironmentRequest {
     env:       HashMap<String, InterpString>,
 }
 
-struct ApiEnvironmentSettings {
-    provider:  EnvironmentProvider,
-    image:     ApiEnvironmentImageSettings,
-    resources: EnvironmentResourcesSettings,
-    network:   EnvironmentNetworkSettings,
-    lifecycle: EnvironmentLifecycleSettings,
-    labels:    HashMap<String, String>,
-    volumes:   Vec<EnvironmentVolumeSettings>,
-    env:       HashMap<String, InterpString>,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ApiEnvironmentImageSettings {
@@ -77,51 +67,34 @@ struct ApiEnvironmentImageSettings {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ApiDockerfileSource {
-    Inline {
-        value: String,
-    },
+    Inline { value: String },
+    // Recognized so the handler can return a 422 with bespoke guidance.
+    // The `path` payload is parsed and discarded — never read from disk.
     Path {
         #[serde(rename = "path")]
-        _path: String,
+        _path: IgnoredAny,
     },
 }
 
 impl CreateEnvironmentRequest {
     fn into_draft(self) -> Result<EnvironmentDraft, ApiError> {
-        let settings = ApiEnvironmentSettings {
-            provider:  self.provider,
-            image:     self.image,
-            resources: self.resources,
-            network:   self.network,
-            lifecycle: self.lifecycle,
-            labels:    self.labels,
-            volumes:   self.volumes,
-            env:       self.env,
-        };
         Ok(EnvironmentDraft {
             id:       self.id,
-            settings: settings.into_settings()?,
+            settings: EnvironmentSettings {
+                provider:  self.provider,
+                image:     self.image.into_settings()?,
+                resources: self.resources,
+                network:   self.network,
+                lifecycle: self.lifecycle,
+                labels:    self.labels,
+                volumes:   self.volumes,
+                env:       self.env,
+            },
         })
     }
 }
 
 impl ReplaceEnvironmentRequest {
-    fn into_settings(self) -> Result<EnvironmentSettings, ApiError> {
-        ApiEnvironmentSettings {
-            provider:  self.provider,
-            image:     self.image,
-            resources: self.resources,
-            network:   self.network,
-            lifecycle: self.lifecycle,
-            labels:    self.labels,
-            volumes:   self.volumes,
-            env:       self.env,
-        }
-        .into_settings()
-    }
-}
-
-impl ApiEnvironmentSettings {
     fn into_settings(self) -> Result<EnvironmentSettings, ApiError> {
         Ok(EnvironmentSettings {
             provider:  self.provider,
