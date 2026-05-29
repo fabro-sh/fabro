@@ -188,14 +188,21 @@ type RunDetailActionResult = import("./run-detail/lifecycle-toasts").RunDetailAc
 
 const h = createElement;
 
-function makeRunSummary(
+function makeRunSummary({
   status = "succeeded",
-  diffSummary: any = null,
-  pullRequest: any = null,
+  diffSummary = null as any,
+  pullRequest = null as any,
   title = "Run 1",
-  askFabro: any = null,
-  automation: any = null,
-) {
+  askFabro = null as any,
+  automation = null as any,
+}: {
+  status?: string;
+  diffSummary?: any;
+  pullRequest?: any;
+  title?: string;
+  askFabro?: any;
+  automation?: any;
+} = {}) {
   const apiStatus =
     status === "succeeded"
       ? { kind: "succeeded", reason: "completed" }
@@ -285,7 +292,7 @@ async function renderRunDetailHarness({
   askFabro?: any;
   automation?: any;
 }) {
-  currentRunSummary = makeRunSummary(status, diffSummary, pullRequest, title, askFabro, automation);
+  currentRunSummary = makeRunSummary({ status, diffSummary, pullRequest, title, askFabro, automation });
   currentQuestions = questions;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -379,15 +386,6 @@ function textFromTestNode(node: TestRenderer.ReactTestInstance): string {
   }).join("");
 }
 
-function findButtonByText(
-  renderer: TestRenderer.ReactTestRenderer,
-  text: string,
-) {
-  return renderer.root.findAll(
-    (node) => node.type === "button" && textFromTestNode(node).includes(text),
-  )[0];
-}
-
 function findButtonsByText(
   renderer: TestRenderer.ReactTestRenderer,
   text: string,
@@ -395,6 +393,13 @@ function findButtonsByText(
   return renderer.root.findAll(
     (node) => node.type === "button" && textFromTestNode(node).includes(text),
   );
+}
+
+function findButtonByText(
+  renderer: TestRenderer.ReactTestRenderer,
+  text: string,
+) {
+  return findButtonsByText(renderer, text)[0];
 }
 
 function deferred<T>() {
@@ -498,7 +503,7 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "cancel",
       ok: true,
-      run: makeRunSummary("failed"),
+      run: makeRunSummary({ status: "failed" }),
     };
     result.run.lifecycle.status = { kind: "failed", reason: "cancelled" };
 
@@ -519,7 +524,7 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "cancel",
       ok: true,
-      run: makeRunSummary("running"),
+      run: makeRunSummary({ status: "running" }),
     };
 
     handleLifecycleToastResult("cancel", result, initialState, api);
@@ -532,7 +537,7 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "archive",
       ok: true,
-      run: makeRunSummary("archived"),
+      run: makeRunSummary({ status: "archived" }),
     };
 
     const firstState = handleLifecycleToastResult("archive", result, initialState, api);
@@ -552,7 +557,7 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "unarchive",
       ok: true,
-      run: makeRunSummary("succeeded"),
+      run: makeRunSummary({ status: "succeeded" }),
     };
     const stateWithActiveToast: LifecycleToastState = {
       activeArchiveToastId: "toast-9",
@@ -638,7 +643,7 @@ describe("RunDetail full-height child routes", () => {
       intent: "retry",
       ok:     true,
       run:    {
-        ...makeRunSummary("runnable"),
+        ...makeRunSummary({ status: "runnable" }),
         id:           "run_retry",
         retried_from: "run_1",
       },

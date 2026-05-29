@@ -42,7 +42,11 @@ export default function AutomationsNew() {
     );
   }
 
-  if (runQuery.isLoading && !runQuery.data) {
+  // Wait for both queries to settle before mounting the form, so the user's
+  // edits aren't blown away when settings arrive after the run.
+  const runPending = runQuery.isLoading && !runQuery.data;
+  const settingsPending = settingsQuery.isLoading && !settingsQuery.data;
+  if (runPending || settingsPending) {
     return (
       <div className="space-y-6">
         <PageHeader />
@@ -70,7 +74,7 @@ export default function AutomationsNew() {
 
   return (
     <AutomationCreateForm
-      key={sourceFormKey(fromRunId, initialValues, Boolean(settingsQuery.data))}
+      key={`from-run:${fromRunId}`}
       initialValues={initialValues}
     />
   );
@@ -142,22 +146,6 @@ function AutomationCreateForm({
       />
     </form>
   );
-}
-
-function sourceFormKey(
-  fromRunId: string,
-  initialValues: AutomationFormValues,
-  hasSettings: boolean,
-) {
-  return [
-    "from-run",
-    fromRunId,
-    hasSettings ? "settings" : "run",
-    initialValues.name,
-    initialValues.repository,
-    initialValues.ref,
-    initialValues.workflow,
-  ].join(":");
 }
 
 function PageHeader() {

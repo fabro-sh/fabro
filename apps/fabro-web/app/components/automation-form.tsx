@@ -77,21 +77,18 @@ export function automationFormValuesFromRun(
     run.workflow.graph_name,
     name,
   );
+  const repository = githubRepositoryFromSettings(settings)
+    ?? githubRepositoryName(run.repository?.name)
+    ?? githubRepositoryFromOriginUrl(run.repository?.origin_url)
+    ?? "";
+  const cloneBranch = sandboxRuntime(run.sandbox)?.clone_branch;
   return {
     ...EMPTY_AUTOMATION_FORM,
-    id:              kebabify(name),
+    id:         kebabify(name),
     name,
-    description:     "",
-    enabled:         true,
-    repository:      githubRepositoryFromSettings(settings)
-      ?? githubRepositoryName(run.repository?.name)
-      ?? githubRepositoryFromOriginUrl(run.repository?.origin_url)
-      ?? "",
-    ref:             sandboxRuntime(run.sandbox)?.clone_branch ?? EMPTY_AUTOMATION_FORM.ref,
-    workflow:        run.workflow.slug?.trim() || snakeify(workflowName),
-    manualEnabled:   true,
-    scheduleEnabled: false,
-    cron:            EMPTY_AUTOMATION_FORM.cron,
+    repository,
+    ref:        cloneBranch ?? EMPTY_AUTOMATION_FORM.ref,
+    workflow:   run.workflow.slug?.trim() || snakeify(workflowName),
   };
 }
 
