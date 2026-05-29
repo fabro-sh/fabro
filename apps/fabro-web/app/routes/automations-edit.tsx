@@ -85,7 +85,6 @@ function EditAutomationForm({ automation }: { automation: Automation }) {
         automationsApi.replaceAutomation(automation.id, automation.revision, {
           name:        trimmedName,
           description: values.description.trim() || null,
-          enabled:     values.enabled,
           target:      {
             repository: values.repository.trim(),
             ref:        values.ref.trim(),

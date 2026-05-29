@@ -19,7 +19,6 @@ fn automation_body(id: &str, name: &str) -> Value {
         "id": id,
         "name": name,
         "description": "Runs on a schedule.",
-        "enabled": true,
         "target": {
             "repository": "fabro-sh/fabro",
             "ref": "main",
@@ -45,7 +44,6 @@ fn replacement_body(name: &str) -> Value {
     json!({
         "name": name,
         "description": null,
-        "enabled": false,
         "target": {
             "repository": "fabro-sh/fabro",
             "ref": "main",
@@ -289,6 +287,7 @@ async fn schedule_trigger_round_trips_through_create_list_get_and_toml() {
     assert_persisted_schedule_trigger(&persisted, "0 3 * * *", true);
     assert!(persisted.get("id").is_none());
     assert!(persisted.get("revision").is_none());
+    assert!(persisted.get("enabled").is_none());
 }
 
 #[tokio::test]
@@ -690,21 +689,6 @@ async fn automations_routes_require_authenticated_user() {
         "GET /api/v1/automations without auth",
     )
     .await;
-}
-
-#[tokio::test]
-async fn disabled_automation_run_endpoint_returns_conflict_code() {
-    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
-    let mut body = automation_body("nightly", "Nightly");
-    body["enabled"] = json!(false);
-    create_automation_with_body(&app, &body).await;
-
-    let error = create_automation_run(&app, "nightly", StatusCode::CONFLICT).await;
-
-    assert_eq!(
-        error["errors"][0]["code"],
-        "automation_api_trigger_disabled"
-    );
 }
 
 #[tokio::test]

@@ -290,7 +290,6 @@ mod tests {
             id:          AutomationId::new(id).unwrap(),
             name:        name.to_string(),
             description: None,
-            enabled:     true,
             target:      target(),
             triggers:    vec![
                 AutomationTrigger::Api(ApiTrigger {
@@ -310,7 +309,6 @@ mod tests {
         AutomationReplace {
             name:        name.to_string(),
             description: Some("updated".to_string()),
-            enabled:     false,
             target:      target(),
             triggers:    vec![AutomationTrigger::Api(ApiTrigger {
                 id:      AutomationTriggerId::new("manual").unwrap(),

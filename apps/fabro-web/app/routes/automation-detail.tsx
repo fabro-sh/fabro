@@ -92,7 +92,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
 
   const scheduleTrigger = automation.triggers.find((t) => t.type === "schedule");
   const apiTrigger = automation.triggers.find((t) => t.type === "api");
-  const canRun = apiTrigger?.enabled === true && automation.enabled;
+  const canRun = apiTrigger?.enabled === true;
 
   async function onRun() {
     if (!canRun || running) return;
@@ -137,7 +137,6 @@ function AutomationHeader({ automation }: { automation: Automation }) {
             <span className="font-mono text-xs text-fg-muted">{automation.id}</span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-            <StatusChip enabled={automation.enabled} />
             <Chip icon={FolderIcon}>
               {automation.target.repository}
               <span className="text-fg-muted/70"> · {automation.target.ref}</span>
@@ -165,13 +164,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
             type="button"
             onClick={onRun}
             disabled={!canRun || running}
-            title={
-              !automation.enabled
-                ? "Enable the automation to run it"
-                : !apiTrigger?.enabled
-                  ? "Enable the API trigger to run it"
-                  : undefined
-            }
+            title={!apiTrigger?.enabled ? "Enable the API trigger to run it" : undefined}
             className={PRIMARY_BUTTON_CLASS}
           >
             <PlayIcon className="size-4" aria-hidden="true" />
@@ -180,19 +173,6 @@ function AutomationHeader({ automation }: { automation: Automation }) {
         </div>
       </div>
     </>
-  );
-}
-
-function StatusChip({ enabled }: { enabled: boolean }) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <span
-        className={`size-2 rounded-full ${enabled ? "bg-teal-500" : "bg-fg-muted"}`}
-      />
-      <span className={`font-medium ${enabled ? "text-teal-500" : "text-fg-muted"}`}>
-        {enabled ? "Enabled" : "Disabled"}
-      </span>
-    </span>
   );
 }
 

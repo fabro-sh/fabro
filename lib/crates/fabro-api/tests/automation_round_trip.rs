@@ -26,7 +26,6 @@ fn automation_response_round_trips_public_json_shape() {
         "revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "name": "Nightly dependency update",
         "description": null,
-        "enabled": true,
         "target": {
             "repository": "fabro-sh/fabro",
             "ref": "main",
@@ -57,7 +56,6 @@ fn create_automation_request_round_trips_public_json_shape() {
         "id": "nightly-deps",
         "name": "Nightly dependency update",
         "description": "Keep dependencies fresh",
-        "enabled": true,
         "target": {
             "repository": "fabro-sh/fabro",
             "ref": "main",
@@ -81,7 +79,6 @@ fn replace_automation_request_round_trips_public_json_shape() {
     let value = json!({
         "name": "Nightly dependency update",
         "description": "Keep dependencies fresh",
-        "enabled": true,
         "target": {
             "repository": "fabro-sh/fabro",
             "ref": "main",

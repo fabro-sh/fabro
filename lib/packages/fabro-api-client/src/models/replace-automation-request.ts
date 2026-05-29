@@ -26,7 +26,6 @@ import type { AutomationTrigger } from './automation-trigger';
 export interface ReplaceAutomationRequest {
     'name': string;
     'description'?: string | null;
-    'enabled': boolean;
     'target': AutomationTarget;
     'triggers': Array<AutomationTrigger>;
 }

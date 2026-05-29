@@ -133,7 +133,7 @@ async fn create_automation_run(
     let Some(api_trigger) = automation.enabled_api_trigger() else {
         return ApiError::with_code(
             StatusCode::CONFLICT,
-            "automation is disabled or has no enabled API trigger",
+            "automation has no enabled API trigger",
             "automation_api_trigger_disabled",
         )
         .into_response();

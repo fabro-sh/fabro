@@ -48,6 +48,7 @@ interface AutomationRow {
   workflow: string;
   repository: string;
   schedule?: string;
+  apiEnabled: boolean;
   icon: ComponentType<{ className?: string }>;
   color: string;
 }
@@ -81,6 +82,10 @@ function scheduleFor(automation: Automation): string | undefined {
   return schedule?.expression;
 }
 
+function hasEnabledApiTrigger(automation: Automation): boolean {
+  return automation.triggers.some((t) => t.type === "api" && t.enabled);
+}
+
 function mapAutomations(result: AutomationListResponse | undefined): AutomationRow[] {
   const automations = result?.data ?? [];
   return automations.map((a) => ({
@@ -90,6 +95,7 @@ function mapAutomations(result: AutomationListResponse | undefined): AutomationR
     workflow:   a.target.workflow,
     repository: a.target.repository,
     schedule:   scheduleFor(a),
+    apiEnabled: hasEnabledApiTrigger(a),
     icon:       slugIconMap[a.target.workflow] ?? CodeBracketIcon,
     color:      slugColorMap[a.target.workflow] ?? "var(--color-teal-500)",
   }));
@@ -106,12 +112,14 @@ function PlayIcon({ className }: { className?: string }) {
 function AutomationCard({
   automation,
   disabled,
+  menuDisabled,
   running,
   onRun,
   onDelete,
 }: {
   automation: AutomationRow;
   disabled: boolean;
+  menuDisabled: boolean;
   running: boolean;
   onRun: () => void;
   onDelete: () => void;
@@ -156,7 +164,13 @@ function AutomationCard({
           onClick={onRun}
           disabled={running || disabled}
           aria-label={running ? "Starting run…" : "Run automation"}
-          title={running ? "Starting run…" : "Run automation"}
+          title={
+            running
+              ? "Starting run..."
+              : automation.apiEnabled
+                ? "Run automation"
+                : "Enable the API trigger to run it"
+          }
           className="flex size-8 shrink-0 items-center justify-center rounded-full border border-mint/20 text-mint transition-colors hover:border-mint/50 hover:bg-mint/10 hover:text-fg disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-mint"
         >
           {running ? (
@@ -167,7 +181,7 @@ function AutomationCard({
         </button>
       )}
 
-      <RowMenu automation={automation} disabled={disabled} onDelete={onDelete} />
+      <RowMenu automation={automation} disabled={menuDisabled} onDelete={onDelete} />
     </div>
   );
 }
@@ -242,7 +256,7 @@ export default function Automations() {
   const [runningId, setRunningId] = useState<string | null>(null);
 
   async function runAutomation(automation: AutomationRow) {
-    if (runningId) return;
+    if (runningId || !automation.apiEnabled) return;
     setRunningId(automation.id);
     try {
       const run = await apiData(() => automationsApi.createAutomationRun(automation.id));
@@ -322,7 +336,12 @@ export default function Automations() {
           <AutomationCard
             key={automation.id}
             automation={automation}
-            disabled={deleting || (runningId !== null && runningId !== automation.id)}
+            disabled={
+              deleting ||
+              !automation.apiEnabled ||
+              (runningId !== null && runningId !== automation.id)
+            }
+            menuDisabled={deleting || (runningId !== null && runningId !== automation.id)}
             running={runningId === automation.id}
             onRun={() => runAutomation(automation)}
             onDelete={() => setPendingDelete(automation)}

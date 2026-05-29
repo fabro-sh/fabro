@@ -31,7 +31,6 @@ export interface Automation {
     'revision': string;
     'name': string;
     'description': string | null;
-    'enabled': boolean;
     'target': AutomationTarget;
     'triggers': Array<AutomationTrigger>;
 }

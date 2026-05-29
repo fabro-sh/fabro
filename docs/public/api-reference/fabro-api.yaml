@@ -4206,7 +4206,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Automation is disabled or has no enabled API trigger
+          description: Automation has no enabled API trigger
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -5841,7 +5841,6 @@ components:
         - revision
         - name
         - description
-        - enabled
         - target
         - triggers
       properties:
@@ -5860,9 +5859,6 @@ components:
         description:
           type: ["string", "null"]
           example: Keeps dependencies fresh.
-        enabled:
-          type: boolean
-          example: true
         target:
           $ref: "#/components/schemas/AutomationTarget"
         triggers:
@@ -5970,9 +5966,6 @@ components:
         description:
           type: ["string", "null"]
           example: Keeps dependencies fresh.
-        enabled:
-          type: boolean
-          default: true
         target:
           $ref: "#/components/schemas/AutomationTarget"
         triggers:
@@ -5986,7 +5979,6 @@ components:
       additionalProperties: false
       required:
         - name
-        - enabled
         - target
         - triggers
       properties:
@@ -5996,8 +5988,6 @@ components:
         description:
           type: ["string", "null"]
           example: Keeps dependencies fresh.
-        enabled:
-          type: boolean
         target:
           $ref: "#/components/schemas/AutomationTarget"
         triggers:

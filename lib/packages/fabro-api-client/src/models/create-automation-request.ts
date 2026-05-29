@@ -27,7 +27,6 @@ export interface CreateAutomationRequest {
     'id': string;
     'name': string;
     'description'?: string | null;
-    'enabled'?: boolean;
     'target': AutomationTarget;
     'triggers': Array<AutomationTrigger>;
 }

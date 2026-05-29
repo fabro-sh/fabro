@@ -47,7 +47,6 @@ export default function AutomationsNew() {
           id:          values.id.trim(),
           name:        trimmedName,
           description: values.description.trim() || null,
-          enabled:     values.enabled,
           target:      {
             repository: values.repository.trim(),
             ref:        values.ref.trim(),
