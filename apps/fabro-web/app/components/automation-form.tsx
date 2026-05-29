@@ -1,9 +1,15 @@
 import { useRef, type ReactNode } from "react";
 import { Switch } from "@headlessui/react";
-import type { Automation, AutomationTrigger } from "@qltysh/fabro-api-client";
+import type {
+  Automation,
+  AutomationTrigger,
+  Run,
+  WorkflowSettings,
+} from "@qltysh/fabro-api-client";
 
 import { Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
+import { sandboxRuntime } from "../lib/run-sandbox-lifecycle";
 
 export interface AutomationFormValues {
   id: string;
@@ -55,6 +61,40 @@ export function automationToFormValues(automation: Automation): AutomationFormVa
   };
 }
 
+export function automationFormValuesFromRun(
+  run: Run,
+  settings?: WorkflowSettings | null,
+): AutomationFormValues {
+  const name = firstPresentString(
+    run.title,
+    run.workflow.name,
+    run.workflow.graph_name,
+    run.workflow.slug,
+    "New automation",
+  );
+  const workflowName = firstPresentString(
+    run.workflow.name,
+    run.workflow.graph_name,
+    name,
+  );
+  return {
+    ...EMPTY_AUTOMATION_FORM,
+    id:              kebabify(name),
+    name,
+    description:     "",
+    enabled:         true,
+    repository:      githubRepositoryFromSettings(settings)
+      ?? githubRepositoryName(run.repository?.name)
+      ?? githubRepositoryFromOriginUrl(run.repository?.origin_url)
+      ?? "",
+    ref:             sandboxRuntime(run.sandbox)?.clone_branch ?? EMPTY_AUTOMATION_FORM.ref,
+    workflow:        run.workflow.slug?.trim() || snakeify(workflowName),
+    manualEnabled:   true,
+    scheduleEnabled: false,
+    cron:            EMPTY_AUTOMATION_FORM.cron,
+  };
+}
+
 export function triggersFromFormValues(values: AutomationFormValues): AutomationTrigger[] {
   const triggers: AutomationTrigger[] = [];
   if (values.manualEnabled) {
@@ -96,6 +136,54 @@ export function snakeify(value: string): string {
     .replace(/[^a-z0-9_]+/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "");
+}
+
+function firstPresentString(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+function githubRepositoryFromSettings(
+  settings?: WorkflowSettings | null,
+): string | null {
+  const owner = settings?.run?.scm?.owner;
+  const repository = settings?.run?.scm?.repository;
+  if (!owner || !repository) return null;
+  return githubRepositoryName(`${owner}/${repository}`);
+}
+
+function githubRepositoryName(value: string | null | undefined): string | null {
+  const trimmed = value?.trim().replace(/\.git$/i, "");
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)$/);
+  if (!match) return null;
+  return `${match[1]}/${match[2]}`;
+}
+
+function githubRepositoryFromOriginUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const scpLikeMatch = trimmed.match(
+    /^git@github\.com:([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+?)(?:\.git)?$/i,
+  );
+  if (scpLikeMatch) {
+    return githubRepositoryName(`${scpLikeMatch[1]}/${scpLikeMatch[2]}`);
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname.toLowerCase() !== "github.com") return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length !== 2) return null;
+    return githubRepositoryName(`${parts[0]}/${parts[1]}`);
+  } catch {
+    return null;
+  }
 }
 
 function describeCron(expression: string): string {

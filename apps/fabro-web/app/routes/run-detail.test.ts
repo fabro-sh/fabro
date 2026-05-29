@@ -50,6 +50,10 @@ mock.module("../lib/queries", () => ({
     data:      currentRunSummary,
     isLoading: false,
   }),
+  useRunSettings: () => ({
+    data:      null,
+    isLoading: false,
+  }),
   useRunQuestions: () => ({
     data: currentQuestions,
   }),
@@ -190,6 +194,7 @@ function makeRunSummary(
   pullRequest: any = null,
   title = "Run 1",
   askFabro: any = null,
+  automation: any = null,
 ) {
   const apiStatus =
     status === "succeeded"
@@ -207,7 +212,7 @@ function makeRunSummary(
     goal:             "Run 1",
     title,
     workflow:         { slug: "default", name: "Default", graph_name: null, node_count: 0, edge_count: 0 },
-    automation:       null,
+    automation,
     repository:       { name: "fabro", origin_url: null, provider: "unknown" },
     created_by:       null,
     origin:           { kind: "api" },
@@ -269,6 +274,7 @@ async function renderRunDetailHarness({
   pullRequest = null,
   title,
   askFabro = null,
+  automation = null,
 }: {
   initialEntry: string;
   status?: string;
@@ -277,8 +283,9 @@ async function renderRunDetailHarness({
   pullRequest?: any;
   title?: string;
   askFabro?: any;
+  automation?: any;
 }) {
-  currentRunSummary = makeRunSummary(status, diffSummary, pullRequest, title, askFabro);
+  currentRunSummary = makeRunSummary(status, diffSummary, pullRequest, title, askFabro, automation);
   currentQuestions = questions;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -302,6 +309,14 @@ async function renderRunDetailHarness({
             element: h("div", { "data-child-route": "files" }, "Files"),
           },
         ],
+      },
+      {
+        path:    "/automations/new",
+        element: h("div", { "data-route": "automations-new" }, "New automation"),
+      },
+      {
+        path:    "/automations/:automationId",
+        element: h("div", { "data-route": "automation-detail" }, "Automation detail"),
       },
     ],
     { initialEntries: [initialEntry] },
@@ -371,6 +386,15 @@ function findButtonByText(
   return renderer.root.findAll(
     (node) => node.type === "button" && textFromTestNode(node).includes(text),
   )[0];
+}
+
+function findButtonsByText(
+  renderer: TestRenderer.ReactTestRenderer,
+  text: string,
+) {
+  return renderer.root.findAll(
+    (node) => node.type === "button" && textFromTestNode(node).includes(text),
+  );
 }
 
 function deferred<T>() {
@@ -780,6 +804,38 @@ describe("RunDetail full-height child routes", () => {
     });
 
     expect(tabCountBadges(renderer)).toHaveLength(0);
+  });
+
+  test("ordinary runs can navigate to create an automation from the run", async () => {
+    const { renderer, router } = await renderRunDetailHarness({
+      initialEntry: "/runs/run_1",
+    });
+
+    expect(findButtonsByText(renderer, "Create automation from run")).toHaveLength(1);
+    expect(findButtonsByText(renderer, "View automation")).toHaveLength(0);
+
+    await act(async () => {
+      findButtonByText(renderer, "Create automation from run")!.props.onClick();
+    });
+
+    expect(router.state.location.pathname).toBe("/automations/new");
+    expect(router.state.location.search).toBe("?from_run=run_1");
+  });
+
+  test("automation-created runs navigate to the existing automation instead of duplicate creation", async () => {
+    const { renderer, router } = await renderRunDetailHarness({
+      initialEntry: "/runs/run_1",
+      automation:   { id: "fix build", name: "Fix Build", trigger_id: "manual" },
+    });
+
+    expect(findButtonsByText(renderer, "View automation")).toHaveLength(1);
+    expect(findButtonsByText(renderer, "Create automation from run")).toHaveLength(0);
+
+    await act(async () => {
+      findButtonByText(renderer, "View automation")!.props.onClick();
+    });
+
+    expect(router.state.location.pathname).toBe("/automations/fix%20build");
   });
 
   test("confirms deleting an archived run and navigates back to runs", async () => {

@@ -200,6 +200,18 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     }
   };
   const hasPendingQuestions = isBlocked && pendingQuestions.length > 0;
+  const automationId = summary.automation?.id ?? null;
+  const automationAction = automationId
+    ? {
+      key:      "view-automation",
+      label:    "View automation",
+      onSelect: () => navigate(`/automations/${encodeURIComponent(automationId)}`),
+    }
+    : {
+      key:      "create-automation",
+      label:    "Create automation from run",
+      onSelect: () => navigate(`/automations/new?from_run=${encodeURIComponent(params.id)}`),
+    };
   const actionGroups: ActionGroups = {
     operations: [
       ...(hasSandbox
@@ -211,6 +223,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           onSelect:     () => void handlePreview(),
         }]
         : []),
+      automationAction,
       {
         key:          "interrupt",
         label:        "Send interrupt",
