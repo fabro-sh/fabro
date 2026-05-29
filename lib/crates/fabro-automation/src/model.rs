@@ -63,6 +63,7 @@ impl Automation {
     }
 
     /// Returns the enabled API trigger if the automation has one.
+    /// Returns `None` when the automation has no enabled API trigger.
     #[must_use]
     pub fn enabled_api_trigger(&self) -> Option<&ApiTrigger> {
         self.triggers.iter().find_map(|trigger| match trigger {
@@ -440,7 +441,7 @@ expression = "0 0 * * *"
     }
 
     #[test]
-    fn persisted_toml_rejects_unknown_top_level_fields() {
+    fn persisted_toml_rejects_legacy_top_level_enabled() {
         let bytes = br#"
 name = "Legacy"
 enabled = false
