@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use axum::http::{HeaderMap, HeaderValue, header};
+use axum::http::HeaderMap;
 use axum_extra::extract::Query as ExtraQuery;
 use chrono::Utc;
 use fabro_automation::{
-    Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationRevision,
-    AutomationStoreError,
+    Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationStoreError,
 };
 use fabro_config::Storage;
 use fabro_types::{AutomationRef, RunId};
@@ -15,7 +14,7 @@ use super::super::{
     ApiError, AppState, IntoResponse, Json, PaginationParams, Path, RequiredUser, Response, Router,
     State, StatusCode, get, paginate_items,
 };
-use super::{lifecycle, runs};
+use super::{json_with_etag_response, lifecycle, parse_required_if_match, runs};
 use crate::automation_materializer::AutomationRunMaterializeInput;
 use crate::principal_middleware::RequiredRunToolActor;
 
@@ -227,7 +226,7 @@ async fn replace_automation(
     Json(replacement): Json<AutomationReplace>,
 ) -> Result<Response, ApiError> {
     let id = parse_path_id(id)?;
-    let expected = parse_required_if_match(&headers, &id)?;
+    let expected = parse_required_if_match(&headers, "automation", &id)?;
     let automation = state
         .automation_store()
         .replace(&id, &expected, replacement)
@@ -242,7 +241,7 @@ async fn delete_automation(
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let id = parse_path_id(id)?;
-    let expected = parse_required_if_match(&headers, &id)?;
+    let expected = parse_required_if_match(&headers, "automation", &id)?;
     state.automation_store().delete(&id, &expected).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -252,38 +251,9 @@ fn parse_path_id(id: String) -> Result<AutomationId, ApiError> {
         .map_err(|err| ApiError::bad_request(format!("invalid automation id: {err}")))
 }
 
-fn parse_required_if_match(
-    headers: &HeaderMap,
-    id: &AutomationId,
-) -> Result<AutomationRevision, ApiError> {
-    let Some(value) = headers.get(header::IF_MATCH) else {
-        return Err(ApiError::new(
-            StatusCode::PRECONDITION_REQUIRED,
-            format!("If-Match header is required for automation: {id}"),
-        ));
-    };
-    let value = value
-        .to_str()
-        .map_err(|_| ApiError::bad_request("If-Match header must be visible ASCII"))?;
-    let value = unquote_etag(value.trim());
-    value.parse::<AutomationRevision>().map_err(|err| {
-        ApiError::bad_request(format!("invalid If-Match automation revision: {err}"))
-    })
-}
-
-fn unquote_etag(value: &str) -> &str {
-    value
-        .strip_prefix('"')
-        .and_then(|unquoted| unquoted.strip_suffix('"'))
-        .unwrap_or(value)
-}
-
 fn automation_with_etag_response(status: StatusCode, automation: Automation) -> Response {
-    let etag = HeaderValue::from_str(&format!("\"{}\"", automation.revision))
-        .expect("automation revisions are valid ETag header values");
-    let mut response = (status, Json(automation)).into_response();
-    response.headers_mut().insert(header::ETAG, etag);
-    response
+    let revision = automation.revision.clone();
+    json_with_etag_response(status, "automation", &revision, automation)
 }
 
 impl From<AutomationStoreError> for ApiError {

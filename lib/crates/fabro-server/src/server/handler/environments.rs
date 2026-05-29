@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::http::{HeaderMap, HeaderValue, header};
-use fabro_environment::{
-    Environment, EnvironmentDraft, EnvironmentId, EnvironmentRevision, EnvironmentStoreError,
-};
+use axum::http::HeaderMap;
+use fabro_environment::{Environment, EnvironmentDraft, EnvironmentId, EnvironmentStoreError};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
@@ -18,6 +16,7 @@ use super::super::{
     ApiError, AppState, IntoResponse, Json, Path, RequiredUser, Response, Router, State,
     StatusCode, get,
 };
+use super::{json_with_etag_response, parse_required_if_match};
 
 #[derive(Serialize)]
 struct EnvironmentListResponse {
@@ -67,7 +66,9 @@ struct ApiEnvironmentImageSettings {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ApiDockerfileSource {
-    Inline { value: String },
+    Inline {
+        value: String,
+    },
     // Recognized so the handler can return a 422 with bespoke guidance.
     // The `path` payload is parsed and discarded — never read from disk.
     Path {
@@ -193,7 +194,7 @@ async fn replace_environment(
     Json(request): Json<ReplaceEnvironmentRequest>,
 ) -> Result<Response, ApiError> {
     let id = parse_path_id(id)?;
-    let expected = parse_required_if_match(&headers, &id)?;
+    let expected = parse_required_if_match(&headers, "environment", &id)?;
     let environment = state
         .environment_store()
         .replace(&id, &expected, request.into_settings()?)
@@ -209,7 +210,7 @@ async fn delete_environment(
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let id = parse_path_id(id)?;
-    let expected = parse_required_if_match(&headers, &id)?;
+    let expected = parse_required_if_match(&headers, "environment", &id)?;
     state.environment_store().delete(&id, &expected).await?;
     state.refresh_manifest_run_settings_from_environment_catalog();
     Ok(StatusCode::NO_CONTENT.into_response())
@@ -220,38 +221,9 @@ fn parse_path_id(id: String) -> Result<EnvironmentId, ApiError> {
         .map_err(|err| ApiError::bad_request(format!("invalid environment id: {err}")))
 }
 
-fn parse_required_if_match(
-    headers: &HeaderMap,
-    id: &EnvironmentId,
-) -> Result<EnvironmentRevision, ApiError> {
-    let Some(value) = headers.get(header::IF_MATCH) else {
-        return Err(ApiError::new(
-            StatusCode::PRECONDITION_REQUIRED,
-            format!("If-Match header is required for environment: {id}"),
-        ));
-    };
-    let value = value
-        .to_str()
-        .map_err(|_| ApiError::bad_request("If-Match header must be visible ASCII"))?;
-    let value = unquote_etag(value.trim());
-    value.parse::<EnvironmentRevision>().map_err(|err| {
-        ApiError::bad_request(format!("invalid If-Match environment revision: {err}"))
-    })
-}
-
-fn unquote_etag(value: &str) -> &str {
-    value
-        .strip_prefix('"')
-        .and_then(|unquoted| unquoted.strip_suffix('"'))
-        .unwrap_or(value)
-}
-
 fn environment_with_etag_response(status: StatusCode, environment: Environment) -> Response {
-    let etag = HeaderValue::from_str(&format!("\"{}\"", environment.revision))
-        .expect("environment revisions are valid ETag header values");
-    let mut response = (status, Json(environment)).into_response();
-    response.headers_mut().insert(header::ETAG, etag);
-    response
+    let revision = environment.revision.clone();
+    json_with_etag_response(status, "environment", &revision, environment)
 }
 
 impl From<EnvironmentStoreError> for ApiError {
