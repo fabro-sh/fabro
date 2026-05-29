@@ -2,6 +2,7 @@ mod auth_sessions;
 mod automations;
 mod cli_auth_token;
 mod docs;
+mod environments;
 mod events;
 mod install;
 mod install_openai_compatible;

@@ -1726,6 +1726,7 @@ dependencies = [
  "chrono",
  "fabro-automation",
  "fabro-config",
+ "fabro-environment",
  "fabro-model",
  "fabro-types",
  "openapiv3",

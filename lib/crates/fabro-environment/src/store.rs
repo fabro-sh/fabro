@@ -404,8 +404,8 @@ mod tests {
     use fabro_types::settings::InterpString;
     use fabro_types::settings::run::{
         DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
-        EnvironmentNetworkSettings, EnvironmentProvider, EnvironmentResourcesSettings,
-        EnvironmentSettings,
+        EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentProvider,
+        EnvironmentResourcesSettings, EnvironmentSettings,
     };
     use tokio::fs;
 
@@ -570,6 +570,28 @@ path = "Dockerfile"
             .unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::AlreadyExists { .. }));
+    }
+
+    #[tokio::test]
+    async fn create_invalid_settings_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
+        let mut settings = settings(EnvironmentProvider::Local);
+        settings.network.mode = EnvironmentNetworkMode::Block;
+
+        let err = store
+            .create(EnvironmentDraft {
+                id: EnvironmentId::new("invalid").unwrap(),
+                settings,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
+        assert!(
+            err.to_string()
+                .contains("local environments cannot enforce")
+        );
     }
 
     #[tokio::test]

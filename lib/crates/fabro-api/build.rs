@@ -635,6 +635,7 @@ fn main() {
             "fabro_automation::AutomationReplace",
             &[],
         ),
+        ("Environment", "fabro_environment::Environment", &[]),
         ("SessionId", "fabro_types::SessionId", &[]),
         ("TurnId", "fabro_types::TurnId", &[]),
         ("SessionStatus", "fabro_types::SessionStatus", &[]),

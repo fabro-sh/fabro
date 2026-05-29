@@ -18,6 +18,7 @@ pub mod types {
         Automation, AutomationDraft as CreateAutomationRequest,
         AutomationReplace as ReplaceAutomationRequest, AutomationTarget, AutomationTrigger,
     };
+    pub use fabro_environment::Environment;
     pub use fabro_model::{
         Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
         Provider, ReasoningEffort, ReasoningEffortFeature, Speed as BillingSpeed,

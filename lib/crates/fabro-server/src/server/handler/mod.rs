@@ -9,6 +9,7 @@ mod artifacts;
 mod automations;
 mod billing;
 mod completions;
+mod environments;
 pub(in crate::server) mod events;
 pub(in crate::server) mod graph;
 mod lifecycle;
@@ -158,6 +159,7 @@ pub(super) fn real_routes() -> Router<Arc<AppState>> {
         .merge(pull_requests::routes())
         .merge(artifacts::routes())
         .merge(automations::routes())
+        .merge(environments::routes())
         .merge(sandbox::routes())
         .merge(sandboxes::routes())
         .merge(lifecycle::routes())

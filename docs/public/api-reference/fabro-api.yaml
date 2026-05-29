@@ -17,6 +17,8 @@ tags:
     description: Run management operations
   - name: Automations
     description: Server-managed automation definitions and automation-triggered runs
+  - name: Environments
+    description: Server-managed execution environment catalog
   - name: Sandboxes
     description: Provider-backed sandbox inventory
   - name: Sessions
@@ -4224,6 +4226,272 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── Environments ─────────────────────────────────────────────────────
+
+  /api/v1/environments:
+    get:
+      operationId: listEnvironments
+      tags: [Environments]
+      summary: List environments
+      description: Returns all server-managed environment definitions, sorted by id.
+      responses:
+        "200":
+          description: Environment definitions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentListResponse"
+        "500":
+          description: Environment store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createEnvironment
+      tags: [Environments]
+      summary: Create environment
+      description: |
+        Creates a server-owned environment definition in the environment catalog.
+        REST environment requests only accept inline Dockerfile content; local
+        Dockerfile paths are supported by workflow/settings files but rejected
+        by this API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEnvironmentRequest"
+      responses:
+        "201":
+          description: Environment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "400":
+          description: Malformed JSON request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Environment id already exists
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Environment failed domain validation
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Environment store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/environments/{id}:
+    get:
+      operationId: retrieveEnvironment
+      tags: [Environments]
+      summary: Retrieve environment
+      description: Returns one server-managed environment definition by id.
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+      responses:
+        "200":
+          description: Environment definition
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "400":
+          description: Invalid environment id
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Environment not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Environment store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: replaceEnvironment
+      tags: [Environments]
+      summary: Replace environment
+      description: |
+        Replaces an environment definition when `If-Match` matches the current
+        environment revision. The path id is authoritative; the request body
+        omits `id`.
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceEnvironmentRequest"
+      responses:
+        "200":
+          description: Environment replaced
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "400":
+          description: Malformed JSON request body, invalid environment id, or invalid revision header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Environment not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Environment revision mismatch or protected environment conflict
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Environment failed domain validation
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing required `If-Match` header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Environment store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteEnvironment
+      tags: [Environments]
+      summary: Delete environment
+      description: Deletes a non-default environment definition when `If-Match` matches the current environment revision.
+      parameters:
+        - $ref: "#/components/parameters/EnvironmentId"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "204":
+          description: Environment deleted
+        "400":
+          description: Invalid environment id or revision header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Environment not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Environment revision mismatch or protected environment conflict
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing required `If-Match` header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Environment store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Workflows ────────────────────────────────────────────────────────
 
   /api/v1/workflows:
@@ -5103,6 +5371,16 @@ components:
         type: string
         pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
       example: nightly-deps
+
+    EnvironmentId:
+      name: id
+      in: path
+      required: true
+      description: Unique environment identifier.
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+      example: docker
 
     IfMatch:
       name: If-Match
@@ -6032,6 +6310,181 @@ components:
           format: int64
           minimum: 0
           description: Total number of configured automation definitions.
+
+    # ── Environments ─────────────────────────────────────────────────────
+
+    Environment:
+      description: Public server-managed environment definition.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - revision
+        - provider
+        - image
+        - resources
+        - network
+        - lifecycle
+        - labels
+        - volumes
+        - env
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+          example: docker
+        revision:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: Stable revision used with `If-Match` for optimistic concurrency.
+          example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        provider:
+          $ref: "#/components/schemas/EnvironmentProvider"
+        image:
+          $ref: "#/components/schemas/EnvironmentApiImageSettings"
+        resources:
+          $ref: "#/components/schemas/EnvironmentResourcesSettings"
+        network:
+          $ref: "#/components/schemas/EnvironmentNetworkSettings"
+        lifecycle:
+          $ref: "#/components/schemas/EnvironmentLifecycleSettings"
+        labels:
+          $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
+        env:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/InterpString"
+
+    CreateEnvironmentRequest:
+      description: Request body for creating a server-managed environment.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - provider
+        - image
+        - resources
+        - network
+        - lifecycle
+        - labels
+        - volumes
+        - env
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+          example: docker
+        provider:
+          $ref: "#/components/schemas/EnvironmentProvider"
+        image:
+          $ref: "#/components/schemas/EnvironmentApiImageSettings"
+        resources:
+          $ref: "#/components/schemas/EnvironmentResourcesSettings"
+        network:
+          $ref: "#/components/schemas/EnvironmentNetworkSettings"
+        lifecycle:
+          $ref: "#/components/schemas/EnvironmentLifecycleSettings"
+        labels:
+          $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
+        env:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/InterpString"
+
+    ReplaceEnvironmentRequest:
+      description: Request body for replacing a server-managed environment. The path id is authoritative.
+      type: object
+      additionalProperties: false
+      required:
+        - provider
+        - image
+        - resources
+        - network
+        - lifecycle
+        - labels
+        - volumes
+        - env
+      properties:
+        provider:
+          $ref: "#/components/schemas/EnvironmentProvider"
+        image:
+          $ref: "#/components/schemas/EnvironmentApiImageSettings"
+        resources:
+          $ref: "#/components/schemas/EnvironmentResourcesSettings"
+        network:
+          $ref: "#/components/schemas/EnvironmentNetworkSettings"
+        lifecycle:
+          $ref: "#/components/schemas/EnvironmentLifecycleSettings"
+        labels:
+          $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
+        env:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/InterpString"
+
+    EnvironmentApiImageSettings:
+      description: REST-safe environment image settings. Dockerfile sources are inline-only; local paths are rejected by the REST API.
+      type: object
+      additionalProperties: false
+      required: [docker, dockerfile]
+      properties:
+        docker:
+          type: ["string", "null"]
+        dockerfile:
+          oneOf:
+            - $ref: "#/components/schemas/EnvironmentApiDockerfileSourceInline"
+            - type: "null"
+
+    EnvironmentApiDockerfileSourceInline:
+      type: object
+      additionalProperties: false
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [inline]
+        value:
+          type: string
+
+    EnvironmentListResponse:
+      description: List envelope for environment definitions.
+      type: object
+      additionalProperties: false
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Environment"
+        meta:
+          $ref: "#/components/schemas/EnvironmentListMeta"
+
+    EnvironmentListMeta:
+      description: Metadata for environment list responses.
+      type: object
+      additionalProperties: false
+      required:
+        - total
+      properties:
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total number of server-managed environment definitions.
 
     # ── Pagination ───────────────────────────────────────────────────────
 

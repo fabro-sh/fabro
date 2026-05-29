@@ -4,6 +4,7 @@ api/automations-api.ts
 api/billing-api.ts
 api/completions-api.ts
 api/discovery-api.ts
+api/environments-api.ts
 api/human-in-the-loop-api.ts
 api/insights-api.ts
 api/install-api.ts
@@ -94,6 +95,7 @@ models/completion-usage.ts
 models/conclusion.ts
 models/create-automation-request.ts
 models/create-completion-request.ts
+models/create-environment-request.ts
 models/create-run-pull-request-request.ts
 models/create-run-session-request.ts
 models/create-secret-request.ts
@@ -118,14 +120,19 @@ models/disk-usage-summary-row.ts
 models/dockerfile-source-inline.ts
 models/dockerfile-source-path.ts
 models/dockerfile-source.ts
+models/environment-api-dockerfile-source-inline.ts
+models/environment-api-image-settings.ts
 models/environment-image-settings.ts
 models/environment-lifecycle-settings.ts
+models/environment-list-meta.ts
+models/environment-list-response.ts
 models/environment-network-mode.ts
 models/environment-network-settings.ts
 models/environment-provider.ts
 models/environment-resources-settings.ts
 models/environment-settings.ts
 models/environment-volume-settings.ts
+models/environment.ts
 models/error-response-entry.ts
 models/error-response.ts
 models/event-envelope.ts
@@ -300,6 +307,7 @@ models/render-workflow-graph-direction.ts
 models/render-workflow-graph-format.ts
 models/render-workflow-graph-request.ts
 models/replace-automation-request.ts
+models/replace-environment-request.ts
 models/repo-check-response-permissions.ts
 models/repo-check-response.ts
 models/repository-ref.ts

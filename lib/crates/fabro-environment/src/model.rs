@@ -52,6 +52,7 @@ impl Environment {
     ) -> Result<(Self, Vec<u8>), EnvironmentStoreError> {
         let settings = inline_dense_dockerfile(settings, dockerfile_base_dir).await?;
         let persisted = environment_settings_to_layer(&settings);
+        let settings = resolve_environment(&persisted)?;
         let bytes = canonical_bytes(&persisted).into_bytes();
         let revision = EnvironmentRevision::from_bytes(&bytes);
         Ok((

@@ -1,0 +1,315 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use axum::http::{HeaderMap, HeaderValue, header};
+use fabro_environment::{
+    Environment, EnvironmentDraft, EnvironmentId, EnvironmentRevision, EnvironmentStoreError,
+};
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::{
+    DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
+    EnvironmentNetworkSettings, EnvironmentProvider, EnvironmentResourcesSettings,
+    EnvironmentSettings, EnvironmentVolumeSettings,
+};
+use serde::{Deserialize, Serialize};
+
+use super::super::{
+    ApiError, AppState, IntoResponse, Json, Path, RequiredUser, Response, Router, State,
+    StatusCode, get,
+};
+
+#[derive(Serialize)]
+struct EnvironmentListResponse {
+    data: Vec<Environment>,
+    meta: EnvironmentListMeta,
+}
+
+#[derive(Serialize)]
+struct EnvironmentListMeta {
+    total: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateEnvironmentRequest {
+    id:        EnvironmentId,
+    provider:  EnvironmentProvider,
+    image:     ApiEnvironmentImageSettings,
+    resources: EnvironmentResourcesSettings,
+    network:   EnvironmentNetworkSettings,
+    lifecycle: EnvironmentLifecycleSettings,
+    labels:    HashMap<String, String>,
+    volumes:   Vec<EnvironmentVolumeSettings>,
+    env:       HashMap<String, InterpString>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplaceEnvironmentRequest {
+    provider:  EnvironmentProvider,
+    image:     ApiEnvironmentImageSettings,
+    resources: EnvironmentResourcesSettings,
+    network:   EnvironmentNetworkSettings,
+    lifecycle: EnvironmentLifecycleSettings,
+    labels:    HashMap<String, String>,
+    volumes:   Vec<EnvironmentVolumeSettings>,
+    env:       HashMap<String, InterpString>,
+}
+
+struct ApiEnvironmentSettings {
+    provider:  EnvironmentProvider,
+    image:     ApiEnvironmentImageSettings,
+    resources: EnvironmentResourcesSettings,
+    network:   EnvironmentNetworkSettings,
+    lifecycle: EnvironmentLifecycleSettings,
+    labels:    HashMap<String, String>,
+    volumes:   Vec<EnvironmentVolumeSettings>,
+    env:       HashMap<String, InterpString>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApiEnvironmentImageSettings {
+    docker:     Option<String>,
+    dockerfile: Option<ApiDockerfileSource>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum ApiDockerfileSource {
+    Inline {
+        value: String,
+    },
+    Path {
+        #[serde(rename = "path")]
+        _path: String,
+    },
+}
+
+impl CreateEnvironmentRequest {
+    fn into_draft(self) -> Result<EnvironmentDraft, ApiError> {
+        let settings = ApiEnvironmentSettings {
+            provider:  self.provider,
+            image:     self.image,
+            resources: self.resources,
+            network:   self.network,
+            lifecycle: self.lifecycle,
+            labels:    self.labels,
+            volumes:   self.volumes,
+            env:       self.env,
+        };
+        Ok(EnvironmentDraft {
+            id:       self.id,
+            settings: settings.into_settings()?,
+        })
+    }
+}
+
+impl ReplaceEnvironmentRequest {
+    fn into_settings(self) -> Result<EnvironmentSettings, ApiError> {
+        ApiEnvironmentSettings {
+            provider:  self.provider,
+            image:     self.image,
+            resources: self.resources,
+            network:   self.network,
+            lifecycle: self.lifecycle,
+            labels:    self.labels,
+            volumes:   self.volumes,
+            env:       self.env,
+        }
+        .into_settings()
+    }
+}
+
+impl ApiEnvironmentSettings {
+    fn into_settings(self) -> Result<EnvironmentSettings, ApiError> {
+        Ok(EnvironmentSettings {
+            provider:  self.provider,
+            image:     self.image.into_settings()?,
+            resources: self.resources,
+            network:   self.network,
+            lifecycle: self.lifecycle,
+            labels:    self.labels,
+            volumes:   self.volumes,
+            env:       self.env,
+        })
+    }
+}
+
+impl ApiEnvironmentImageSettings {
+    fn into_settings(self) -> Result<EnvironmentImageSettings, ApiError> {
+        Ok(EnvironmentImageSettings {
+            docker:     self.docker,
+            dockerfile: self
+                .dockerfile
+                .map(ApiDockerfileSource::into_settings)
+                .transpose()?,
+        })
+    }
+}
+
+impl ApiDockerfileSource {
+    fn into_settings(self) -> Result<DockerfileSource, ApiError> {
+        match self {
+            Self::Inline { value } => Ok(DockerfileSource::Inline(value)),
+            Self::Path { .. } => Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Dockerfile path sources are not supported by the environments REST API; use inline Dockerfile content",
+            )),
+        }
+    }
+}
+
+pub(super) fn routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route(
+            "/environments",
+            get(list_environments).post(create_environment),
+        )
+        .route(
+            "/environments/{id}",
+            get(get_environment)
+                .put(replace_environment)
+                .delete(delete_environment),
+        )
+}
+
+async fn list_environments(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
+    let data = state.environment_store().list();
+    let total = data.len();
+    (
+        StatusCode::OK,
+        Json(EnvironmentListResponse {
+            data,
+            meta: EnvironmentListMeta { total },
+        }),
+    )
+        .into_response()
+}
+
+async fn create_environment(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<CreateEnvironmentRequest>,
+) -> Result<Response, ApiError> {
+    let environment = state
+        .environment_store()
+        .create(request.into_draft()?)
+        .await?;
+    state.refresh_manifest_run_settings_from_environment_catalog();
+    Ok((StatusCode::CREATED, Json(environment)).into_response())
+}
+
+async fn get_environment(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let id = parse_path_id(id)?;
+    match state.environment_store().get(&id) {
+        Some(environment) => Ok(environment_with_etag_response(StatusCode::OK, environment)),
+        None => Err(ApiError::not_found(format!("environment not found: {id}"))),
+    }
+}
+
+async fn replace_environment(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<ReplaceEnvironmentRequest>,
+) -> Result<Response, ApiError> {
+    let id = parse_path_id(id)?;
+    let expected = parse_required_if_match(&headers, &id)?;
+    let environment = state
+        .environment_store()
+        .replace(&id, &expected, request.into_settings()?)
+        .await?;
+    state.refresh_manifest_run_settings_from_environment_catalog();
+    Ok(environment_with_etag_response(StatusCode::OK, environment))
+}
+
+async fn delete_environment(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let id = parse_path_id(id)?;
+    let expected = parse_required_if_match(&headers, &id)?;
+    state.environment_store().delete(&id, &expected).await?;
+    state.refresh_manifest_run_settings_from_environment_catalog();
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+fn parse_path_id(id: String) -> Result<EnvironmentId, ApiError> {
+    EnvironmentId::new(id)
+        .map_err(|err| ApiError::bad_request(format!("invalid environment id: {err}")))
+}
+
+fn parse_required_if_match(
+    headers: &HeaderMap,
+    id: &EnvironmentId,
+) -> Result<EnvironmentRevision, ApiError> {
+    let Some(value) = headers.get(header::IF_MATCH) else {
+        return Err(ApiError::new(
+            StatusCode::PRECONDITION_REQUIRED,
+            format!("If-Match header is required for environment: {id}"),
+        ));
+    };
+    let value = value
+        .to_str()
+        .map_err(|_| ApiError::bad_request("If-Match header must be visible ASCII"))?;
+    let value = unquote_etag(value.trim());
+    value.parse::<EnvironmentRevision>().map_err(|err| {
+        ApiError::bad_request(format!("invalid If-Match environment revision: {err}"))
+    })
+}
+
+fn unquote_etag(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|unquoted| unquoted.strip_suffix('"'))
+        .unwrap_or(value)
+}
+
+fn environment_with_etag_response(status: StatusCode, environment: Environment) -> Response {
+    let etag = HeaderValue::from_str(&format!("\"{}\"", environment.revision))
+        .expect("environment revisions are valid ETag header values");
+    let mut response = (status, Json(environment)).into_response();
+    response.headers_mut().insert(header::ETAG, etag);
+    response
+}
+
+impl From<EnvironmentStoreError> for ApiError {
+    fn from(err: EnvironmentStoreError) -> Self {
+        match err {
+            EnvironmentStoreError::NotFound { id } => {
+                Self::not_found(format!("environment not found: {id}"))
+            }
+            EnvironmentStoreError::AlreadyExists { id } => Self::new(
+                StatusCode::CONFLICT,
+                format!("environment already exists: {id}"),
+            ),
+            EnvironmentStoreError::StaleRevision { id, .. } => Self::new(
+                StatusCode::CONFLICT,
+                format!("environment revision is stale: {id}"),
+            ),
+            EnvironmentStoreError::Protected { id } => Self::new(
+                StatusCode::CONFLICT,
+                format!("environment is protected and cannot be deleted: {id}"),
+            ),
+            EnvironmentStoreError::Validation { source } => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, source.to_string())
+            }
+            EnvironmentStoreError::InvalidFilename { .. }
+            | EnvironmentStoreError::Parse { .. }
+            | EnvironmentStoreError::InvalidUtf8 { .. }
+            | EnvironmentStoreError::Serialize { .. }
+            | EnvironmentStoreError::Io { .. } => Self::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "environment store operation failed",
+            ),
+        }
+    }
+}

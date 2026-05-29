@@ -1317,6 +1317,18 @@ impl AppState {
             .clone()
     }
 
+    pub(crate) fn refresh_manifest_run_settings_from_environment_catalog(&self) {
+        let manifest_run_defaults = self.manifest_run_defaults();
+        let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
+            manifest_run_defaults.as_ref(),
+            &self.environment_store,
+        );
+        *self
+            .manifest_run_settings
+            .write()
+            .expect("manifest run settings lock poisoned") = manifest_run_settings;
+    }
+
     fn http_client(&self) -> Result<fabro_http::HttpClient, fabro_http::HttpClientBuildError> {
         match &self.http_client {
             Some(client) => Ok(client.clone()),

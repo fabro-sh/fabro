@@ -141,6 +141,54 @@ fn github_webhook_spec_and_sdk_describe_a_json_body() {
     );
 }
 
+#[test]
+fn environment_spec_and_sdk_expose_crud_without_dockerfile_paths() {
+    let spec = load_spec();
+    let paths = spec
+        .get("paths")
+        .and_then(Value::as_mapping)
+        .expect("spec is missing `paths`");
+    for path in ["/api/v1/environments", "/api/v1/environments/{id}"] {
+        assert!(
+            paths.contains_key(Value::String(path.to_string())),
+            "OpenAPI spec should expose {path}"
+        );
+    }
+
+    let generated_api = read_repo_file("lib/packages/fabro-api-client/src/api/environments-api.ts");
+    assert!(
+        generated_api.contains("export class EnvironmentsApi"),
+        "generated TypeScript client should expose EnvironmentsApi"
+    );
+    for operation in [
+        "createEnvironment",
+        "deleteEnvironment",
+        "listEnvironments",
+        "replaceEnvironment",
+        "retrieveEnvironment",
+    ] {
+        assert!(
+            generated_api.contains(operation),
+            "generated EnvironmentsApi should expose {operation}"
+        );
+    }
+
+    let generated_image = read_repo_file(
+        "lib/packages/fabro-api-client/src/models/environment-api-image-settings.ts",
+    );
+    assert!(
+        !generated_image.contains("DockerfileSourcePath") && !generated_image.contains("'path'"),
+        "generated REST environment image model should not expose Dockerfile path sources"
+    );
+
+    let workflow_dockerfile =
+        read_repo_file("lib/packages/fabro-api-client/src/models/dockerfile-source.ts");
+    assert!(
+        workflow_dockerfile.contains("DockerfileSourcePath"),
+        "workflow/settings Dockerfile schema should keep exposing path sources"
+    );
+}
+
 #[tokio::test]
 async fn github_webhook_spec_route_is_routable_when_webhook_secret_is_present() {
     let secret = "test-webhook-secret";
