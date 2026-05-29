@@ -2,6 +2,7 @@ import { useRef, type ReactNode } from "react";
 import { Switch } from "@headlessui/react";
 import type { Automation, AutomationTrigger } from "@qltysh/fabro-api-client";
 
+import { findApiTrigger, findScheduleTrigger } from "../lib/automation";
 import { Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
 
@@ -37,8 +38,8 @@ const CRON_PRESETS: ReadonlyArray<{ label: string; value: string }> = [
 ];
 
 export function automationToFormValues(automation: Automation): AutomationFormValues {
-  const apiTrigger = automation.triggers.find((t) => t.type === "api");
-  const scheduleTrigger = automation.triggers.find((t) => t.type === "schedule");
+  const apiTrigger = findApiTrigger(automation);
+  const scheduleTrigger = findScheduleTrigger(automation);
   return {
     id:              automation.id,
     name:            automation.name,

@@ -18,6 +18,7 @@ import type {
 
 import { toRunWithStatus } from "../data/runs";
 import { ApiError, apiData, automationsApi } from "../lib/api-client";
+import { findApiTrigger, findScheduleTrigger } from "../lib/automation";
 import { useAutomation, useAutomationRuns } from "../lib/queries";
 import { queryKeys } from "../lib/query-keys";
 import { useDataUpdatedAt } from "../hooks/use-data-updated-at";
@@ -90,8 +91,8 @@ function AutomationHeader({ automation }: { automation: Automation }) {
   const toast = useToast();
   const [running, setRunning] = useState(false);
 
-  const scheduleTrigger = automation.triggers.find((t) => t.type === "schedule");
-  const apiTrigger = automation.triggers.find((t) => t.type === "api");
+  const scheduleTrigger = findScheduleTrigger(automation);
+  const apiTrigger = findApiTrigger(automation);
   const canRun = apiTrigger?.enabled === true;
 
   async function onRun() {
@@ -164,7 +165,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
             type="button"
             onClick={onRun}
             disabled={!canRun || running}
-            title={!apiTrigger?.enabled ? "Enable the API trigger to run it" : undefined}
+            title={canRun ? undefined : "Enable the API trigger to run it"}
             className={PRIMARY_BUTTON_CLASS}
           >
             <PlayIcon className="size-4" aria-hidden="true" />

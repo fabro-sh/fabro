@@ -18,6 +18,7 @@ import { FilterButton } from "../components/runs-list/filter-button";
 import type { Automation, AutomationListResponse } from "@qltysh/fabro-api-client";
 import { Link, useNavigate } from "react-router";
 import { ApiError, apiData, automationsApi } from "../lib/api-client";
+import { findScheduleTrigger, hasEnabledApiTrigger } from "../lib/automation";
 import { useAutomations } from "../lib/queries";
 import { queryKeys } from "../lib/query-keys";
 import { ConfirmDialog } from "../components/ui";
@@ -77,15 +78,6 @@ const MENU_ITEM_CLASS =
 const MENU_ITEM_DANGER_CLASS =
   "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-coral transition-colors data-focus:bg-coral/10 data-focus:text-coral data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
 
-function scheduleFor(automation: Automation): string | undefined {
-  const schedule = automation.triggers.find((t) => t.type === "schedule");
-  return schedule?.expression;
-}
-
-function hasEnabledApiTrigger(automation: Automation): boolean {
-  return automation.triggers.some((t) => t.type === "api" && t.enabled);
-}
-
 function mapAutomations(result: AutomationListResponse | undefined): AutomationRow[] {
   const automations = result?.data ?? [];
   return automations.map((a) => ({
@@ -94,7 +86,7 @@ function mapAutomations(result: AutomationListResponse | undefined): AutomationR
     name:       a.name,
     workflow:   a.target.workflow,
     repository: a.target.repository,
-    schedule:   scheduleFor(a),
+    schedule:   findScheduleTrigger(a)?.expression,
     apiEnabled: hasEnabledApiTrigger(a),
     icon:       slugIconMap[a.target.workflow] ?? CodeBracketIcon,
     color:      slugColorMap[a.target.workflow] ?? "var(--color-teal-500)",
@@ -111,20 +103,19 @@ function PlayIcon({ className }: { className?: string }) {
 
 function AutomationCard({
   automation,
-  disabled,
-  menuDisabled,
+  busy,
   running,
   onRun,
   onDelete,
 }: {
   automation: AutomationRow;
-  disabled: boolean;
-  menuDisabled: boolean;
+  busy: boolean;
   running: boolean;
   onRun: () => void;
   onDelete: () => void;
 }) {
   const Icon = automation.icon;
+  const runDisabled = busy || !automation.apiEnabled;
   return (
     <div className="group flex items-center gap-4 rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
       <Link to={`/automations/${automation.id}`} className="flex min-w-0 flex-1 items-center gap-4">
@@ -162,7 +153,7 @@ function AutomationCard({
         <button
           type="button"
           onClick={onRun}
-          disabled={running || disabled}
+          disabled={running || runDisabled}
           aria-label={running ? "Starting run…" : "Run automation"}
           title={
             running
@@ -181,7 +172,7 @@ function AutomationCard({
         </button>
       )}
 
-      <RowMenu automation={automation} disabled={menuDisabled} onDelete={onDelete} />
+      <RowMenu automation={automation} disabled={busy} onDelete={onDelete} />
     </div>
   );
 }
@@ -256,7 +247,7 @@ export default function Automations() {
   const [runningId, setRunningId] = useState<string | null>(null);
 
   async function runAutomation(automation: AutomationRow) {
-    if (runningId || !automation.apiEnabled) return;
+    if (runningId) return;
     setRunningId(automation.id);
     try {
       const run = await apiData(() => automationsApi.createAutomationRun(automation.id));
@@ -274,14 +265,15 @@ export default function Automations() {
     }
   }
 
+  const lowerQuery = query.toLowerCase();
   const filtered = automations.filter(
     (a) =>
       (triggerFilter === "all" ||
         (triggerFilter === "scheduled" && a.schedule != null) ||
         (triggerFilter === "manual" && a.schedule == null)) &&
-      (a.name.toLowerCase().includes(query.toLowerCase()) ||
-        a.workflow.toLowerCase().includes(query.toLowerCase()) ||
-        a.repository.toLowerCase().includes(query.toLowerCase())),
+      (a.name.toLowerCase().includes(lowerQuery) ||
+        a.workflow.toLowerCase().includes(lowerQuery) ||
+        a.repository.toLowerCase().includes(lowerQuery)),
   );
 
   async function confirmDelete() {
@@ -336,12 +328,7 @@ export default function Automations() {
           <AutomationCard
             key={automation.id}
             automation={automation}
-            disabled={
-              deleting ||
-              !automation.apiEnabled ||
-              (runningId !== null && runningId !== automation.id)
-            }
-            menuDisabled={deleting || (runningId !== null && runningId !== automation.id)}
+            busy={deleting || (runningId !== null && runningId !== automation.id)}
             running={runningId === automation.id}
             onRun={() => runAutomation(automation)}
             onDelete={() => setPendingDelete(automation)}
