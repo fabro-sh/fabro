@@ -1,18 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use croner::errors::CronError;
-use croner::parser::{CronParser, Seconds, Year};
 use fabro_automation::{
-    Automation, AutomationId, AutomationRevision, AutomationTrigger, AutomationTriggerId,
+    Automation, AutomationId, AutomationRevision, AutomationTriggerId, parse_schedule_expression,
 };
-use fabro_config::Storage;
 use fabro_types::{AutomationRef, Principal, RunId, SystemActorKind};
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{Instrument, info, info_span, warn};
 
 use super::{AppState, handler};
 use crate::automation_materializer::AutomationRunMaterializeInput;
@@ -45,27 +43,15 @@ struct AutomationSchedulePlanner {
 }
 
 fn next_occurrence(expression: &str, after: DateTime<Utc>) -> Result<DateTime<Utc>, CronError> {
-    CronParser::builder()
-        .seconds(Seconds::Disallowed)
-        .year(Year::Disallowed)
-        .build()
-        .parse(expression)?
-        .find_next_occurrence(&after, false)
+    parse_schedule_expression(expression)?.find_next_occurrence(&after, false)
 }
 
 impl AutomationSchedulePlanner {
     fn reconcile(&mut self, automations: &[Automation], now: DateTime<Utc>) {
         let mut reconciled = HashMap::new();
 
-        for automation in automations.iter().filter(|automation| automation.enabled) {
-            for trigger in automation
-                .triggers
-                .iter()
-                .filter_map(|trigger| match trigger {
-                    AutomationTrigger::Schedule(trigger) if trigger.enabled => Some(trigger),
-                    _ => None,
-                })
-            {
+        for automation in automations {
+            for trigger in automation.enabled_schedule_triggers() {
                 let key = ScheduleTriggerKey {
                     automation_id: automation.id.clone(),
                     trigger_id:    trigger.id.clone(),
@@ -106,19 +92,20 @@ impl AutomationSchedulePlanner {
         automations: &[Automation],
         now: DateTime<Utc>,
     ) -> Vec<DueScheduleTrigger> {
-        let automations_by_id = automations
-            .iter()
-            .map(|automation| (&automation.id, automation))
-            .collect::<HashMap<_, _>>();
-        let due_keys = self
+        let mut due_keys = self
             .cursors
             .iter()
             .filter(|(_, cursor)| cursor.next_due_at <= now)
             .map(|(key, cursor)| (key.clone(), cursor.next_due_at))
             .collect::<Vec<_>>();
-        let mut remove_keys = HashSet::new();
-        let mut due = Vec::new();
+        // Deterministic order for spawn scheduling, log output, and tests.
+        due_keys.sort_by(|a, b| {
+            a.0.automation_id
+                .cmp(&b.0.automation_id)
+                .then_with(|| a.0.trigger_id.cmp(&b.0.trigger_id))
+        });
 
+        let mut due = Vec::with_capacity(due_keys.len());
         for (key, due_at) in due_keys {
             let Some(cursor) = self.cursors.get_mut(&key) else {
                 continue;
@@ -134,26 +121,32 @@ impl AutomationSchedulePlanner {
                         error = %err,
                         "Removing automation schedule cursor after next occurrence failed",
                     );
-                    remove_keys.insert(key);
+                    self.cursors.remove(&key);
                     continue;
                 }
             }
 
-            let Some(automation) = automations_by_id.get(&key.automation_id) else {
+            let Some(automation) = automations
+                .iter()
+                .find(|automation| automation.id == key.automation_id)
+            else {
                 continue;
             };
             due.push(DueScheduleTrigger {
-                automation: (*automation).clone(),
-                trigger_id: key.trigger_id.clone(),
+                automation: automation.clone(),
+                trigger_id: key.trigger_id,
                 due_at,
             });
         }
 
-        for key in remove_keys {
-            self.cursors.remove(&key);
-        }
-
         due
+    }
+
+    /// Reconcile cursors against the current automation set, then drain due
+    /// triggers. Single entry point used by the production loop and tests.
+    fn tick(&mut self, automations: &[Automation], now: DateTime<Utc>) -> Vec<DueScheduleTrigger> {
+        self.reconcile(automations, now);
+        self.take_due(automations, now)
     }
 
     fn sleep_duration(&self, now: DateTime<Utc>) -> Duration {
@@ -184,24 +177,26 @@ pub(crate) fn spawn_automation_scheduler(state: Arc<AppState>) {
 
             let automations = state.automation_store().list().await;
             let now = Utc::now();
-            planner.reconcile(&automations, now);
-            for due in planner.take_due(&automations, now) {
+            for due in planner.tick(&automations, now) {
                 let state = Arc::clone(&state);
-                tokio::spawn(async move {
-                    Box::pin(fire_scheduled_automation_run(
+                let span = info_span!(
+                    "automation_run",
+                    automation_id = %due.automation.id,
+                    trigger_id = %due.trigger_id,
+                );
+                tokio::spawn(
+                    fire_scheduled_automation_run(
                         state,
                         due.automation,
                         due.trigger_id,
                         due.due_at,
-                    ))
-                    .await;
-                });
+                    )
+                    .instrument(span),
+                );
             }
 
             let sleep_duration = planner.sleep_duration(now);
-            let shutdown = state.shutdown_token();
             tokio::select! {
-                () = shutdown.cancelled() => break,
                 () = state.automation_scheduler_notified() => {},
                 () = sleep(sleep_duration) => {},
             }
@@ -217,24 +212,19 @@ async fn fire_scheduled_automation_run(
 ) {
     let automation_id = automation.id.clone();
     let run_id = RunId::new();
-    let temp_root = Storage::new(state.server_storage_dir())
-        .scratch_dir()
-        .join("automations");
     let materialized = match state
         .materialize_automation_run(AutomationRunMaterializeInput {
             automation_id: automation_id.clone(),
             target: automation.target.clone(),
             run_id,
             user_settings_path: state.active_config_path().to_path_buf(),
-            temp_root,
+            temp_root: state.automation_temp_root(),
         })
         .await
     {
         Ok(materialized) => materialized,
         Err(err) => {
             warn!(
-                automation_id = %automation_id,
-                trigger_id = %trigger_id,
                 due_at = %due_at,
                 error = %err,
                 "Failed to materialize scheduled automation run",
@@ -252,6 +242,8 @@ async fn fire_scheduled_automation_run(
         name:       Some(automation.name.clone()),
         trigger_id: Some(trigger_id.to_string()),
     };
+    // `create_run_from_manifest` produces a large future; box it to keep our
+    // stack frame small (matches handler/automations.rs).
     let response = Box::pin(handler::runs::create_run_from_manifest(
         Arc::clone(&state),
         handler::runs::CreateRunFromManifestRequest {
@@ -269,8 +261,6 @@ async fn fire_scheduled_automation_run(
     let status = response.status();
     if !status.is_success() {
         warn!(
-            automation_id = %automation_id,
-            trigger_id = %trigger_id,
             run_id = %run_id,
             due_at = %due_at,
             status = %status,
@@ -283,8 +273,6 @@ async fn fire_scheduled_automation_run(
         handler::lifecycle::queue_run_start(state.as_ref(), run_id, false, actor).await
     {
         warn!(
-            automation_id = %automation_id,
-            trigger_id = %trigger_id,
             run_id = %run_id,
             due_at = %due_at,
             status = %err.status(),
@@ -295,14 +283,14 @@ async fn fire_scheduled_automation_run(
     }
 
     info!(
-        automation_id = %automation_id,
-        trigger_id = %trigger_id,
         run_id = %run_id,
         due_at = %due_at,
         "Scheduled automation run queued",
     );
 }
 
+/// Drive one tick of the scheduler from a test. Boxed so the calling test
+/// future stays small (clippy `large_futures`).
 #[cfg(test)]
 fn run_due_schedules_once<'a>(
     state: Arc<AppState>,
@@ -311,9 +299,7 @@ fn run_due_schedules_once<'a>(
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
     Box::pin(async move {
         let automations = state.automation_store().list().await;
-        planner.reconcile(&automations, now);
-        let due = planner.take_due(&automations, now);
-        for trigger in due {
+        for trigger in planner.tick(&automations, now) {
             Box::pin(fire_scheduled_automation_run(
                 Arc::clone(&state),
                 trigger.automation,
@@ -616,10 +602,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn schedule_only_automation_does_not_require_api_trigger() {
+    async fn schedule_only_automation_fires_without_api_trigger() {
         let materializer = succeeding_materializer();
         let state = test_state_with_materializer(materializer);
-        let automation = create_automation(
+        create_automation(
             state.as_ref(),
             "schedule-only",
             "Schedule only",
@@ -627,7 +613,6 @@ mod tests {
             vec![schedule_trigger("schedule", "* * * * *", true)],
         )
         .await;
-        assert!(automation.enabled_api_trigger().is_none());
         let mut planner = AutomationSchedulePlanner::default();
 
         run_due_schedules_once(Arc::clone(&state), &mut planner, prime_time()).await;

@@ -1,5 +1,8 @@
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
+use croner::Cron;
+use croner::errors::CronError;
 use croner::parser::{CronParser, Seconds, Year};
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +10,23 @@ use crate::{
     AutomationId, AutomationRevision, AutomationStoreError, AutomationTriggerId,
     AutomationValidationError,
 };
+
+/// Shared cron parser used to validate and evaluate automation schedule trigger
+/// expressions. Schedule triggers use the same five-field UTC cron grammar as
+/// validation, so both sites must share configuration.
+static SCHEDULE_CRON_PARSER: LazyLock<CronParser> = LazyLock::new(|| {
+    CronParser::builder()
+        .seconds(Seconds::Disallowed)
+        .year(Year::Disallowed)
+        .build()
+});
+
+/// Parse an automation schedule trigger expression with the canonical
+/// configuration (no seconds, no year). Returned `Cron` instances can be cached
+/// and used to find next occurrences.
+pub fn parse_schedule_expression(expression: &str) -> Result<Cron, CronError> {
+    SCHEDULE_CRON_PARSER.parse(expression)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -76,6 +96,18 @@ impl Automation {
             AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),
             _ => None,
         })
+    }
+
+    /// Iterate the enabled schedule triggers. Yields nothing when the
+    /// automation itself is disabled.
+    pub fn enabled_schedule_triggers(&self) -> impl Iterator<Item = &ScheduleTrigger> {
+        let enabled = self.enabled;
+        self.triggers
+            .iter()
+            .filter_map(move |trigger| match trigger {
+                AutomationTrigger::Schedule(trigger) if enabled && trigger.enabled => Some(trigger),
+                _ => None,
+            })
     }
 
     fn from_persisted(
@@ -352,10 +384,6 @@ fn has_lock_suffix(value: &str) -> bool {
 fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationValidationError> {
     let mut seen = HashSet::new();
     let mut has_api_trigger = false;
-    let cron_parser = CronParser::builder()
-        .seconds(Seconds::Disallowed)
-        .year(Year::Disallowed)
-        .build();
 
     for trigger in triggers {
         let id = trigger.id().as_str();
@@ -376,7 +404,7 @@ fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationVal
                         expression: trigger.expression.clone(),
                     });
                 }
-                cron_parser.parse(&trigger.expression).map_err(|source| {
+                parse_schedule_expression(&trigger.expression).map_err(|source| {
                     AutomationValidationError::InvalidCronExpression {
                         trigger_id: id.to_string(),
                         expression: trigger.expression.clone(),

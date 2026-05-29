@@ -7,6 +7,6 @@ pub use error::{AutomationStoreError, AutomationValidationError};
 pub use id::{AutomationId, AutomationRevision, AutomationRevisionParseError, AutomationTriggerId};
 pub use model::{
     ApiTrigger, Automation, AutomationDraft, AutomationReplace, AutomationTarget,
-    AutomationTrigger, ScheduleTrigger,
+    AutomationTrigger, ScheduleTrigger, parse_schedule_expression,
 };
 pub use store::AutomationStore;

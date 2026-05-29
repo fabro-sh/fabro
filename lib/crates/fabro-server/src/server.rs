@@ -1344,6 +1344,14 @@ impl AppState {
         )
     }
 
+    /// Scratch directory used by the automation materializer when staging
+    /// per-run manifests. Shared by API-triggered and scheduled fires.
+    pub(crate) fn automation_temp_root(&self) -> PathBuf {
+        Storage::new(self.server_storage_dir())
+            .scratch_dir()
+            .join("automations")
+    }
+
     /// Snapshotted at create-time so attach replays surface the same link
     /// even if `server.web.url` is later changed. `None` when the UI is
     /// turned off or `server.web.url` is unset/invalid.

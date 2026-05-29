@@ -7,7 +7,6 @@ use fabro_automation::{
     Automation, AutomationDraft, AutomationId, AutomationReplace, AutomationRevision,
     AutomationStoreError,
 };
-use fabro_config::Storage;
 use fabro_types::{AutomationRef, RunId};
 use serde::Serialize;
 
@@ -141,16 +140,13 @@ async fn create_automation_run(
     let api_trigger_id = api_trigger.id.to_string();
 
     let run_id = RunId::new();
-    let temp_root = Storage::new(state.server_storage_dir())
-        .scratch_dir()
-        .join("automations");
     let materialized = match state
         .materialize_automation_run(AutomationRunMaterializeInput {
             automation_id: automation.id.clone(),
             target: automation.target.clone(),
             run_id,
             user_settings_path: state.active_config_path().to_path_buf(),
-            temp_root,
+            temp_root: state.automation_temp_root(),
         })
         .await
     {
