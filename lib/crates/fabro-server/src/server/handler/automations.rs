@@ -204,6 +204,7 @@ async fn create_automation(
     Json(draft): Json<AutomationDraft>,
 ) -> Result<Response, ApiError> {
     let automation = state.automation_store().create(draft).await?;
+    state.notify_automation_scheduler();
     Ok((StatusCode::CREATED, Json(automation)).into_response())
 }
 
@@ -232,6 +233,7 @@ async fn replace_automation(
         .automation_store()
         .replace(&id, &expected, replacement)
         .await?;
+    state.notify_automation_scheduler();
     Ok(automation_with_etag_response(StatusCode::OK, automation))
 }
 
@@ -244,6 +246,7 @@ async fn delete_automation(
     let id = parse_path_id(id)?;
     let expected = parse_required_if_match(&headers, &id)?;
     state.automation_store().delete(&id, &expected).await?;
+    state.notify_automation_scheduler();
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

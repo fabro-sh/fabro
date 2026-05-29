@@ -52,6 +52,7 @@ fabro-http.workspace = true
 fabro-redact.workspace = true
 fabro-static.workspace = true
 chrono.workspace = true
+croner.workspace = true
 futures-util.workspace = true
 axum = { workspace = true, features = ["ws"] }
 axum-extra.workspace = true

@@ -67,7 +67,7 @@ async fn start_run(
     }
 }
 
-pub(super) async fn queue_run_start(
+pub(in crate::server) async fn queue_run_start(
     state: &AppState,
     id: RunId,
     resume: bool,

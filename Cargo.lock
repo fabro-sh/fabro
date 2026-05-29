@@ -2366,6 +2366,7 @@ dependencies = [
  "chrono",
  "clap",
  "cookie",
+ "croner",
  "dirs",
  "fabro-agent",
  "fabro-api",

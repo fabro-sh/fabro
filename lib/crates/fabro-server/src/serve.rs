@@ -36,7 +36,7 @@ use crate::github_webhooks::{TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECR
 use crate::server::{
     AppState, AppStateConfig, ResolvedAppStateSettings, RouterOptions, build_app_state,
     build_router_with_options, reconcile_incomplete_runs_on_startup, shutdown_active_workers,
-    spawn_scheduler,
+    spawn_automation_scheduler, spawn_scheduler,
 };
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::startup::{prepare_startup_vault, resolve_startup, validate_startup_configuration};
@@ -789,6 +789,7 @@ where
         );
     }
     spawn_scheduler(Arc::clone(&state));
+    spawn_automation_scheduler(Arc::clone(&state));
     let router = build_router_with_options(Arc::clone(&state), &auth_mode, RouterOptions {
         web_enabled,
         #[cfg(debug_assertions)]

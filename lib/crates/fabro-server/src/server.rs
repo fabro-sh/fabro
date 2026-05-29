@@ -168,10 +168,12 @@ use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
 };
 
+mod automation_scheduler;
 mod handler;
 mod resource_sampler;
 mod session_runtime;
 
+pub(crate) use automation_scheduler::spawn_automation_scheduler;
 pub(crate) use handler::events::EventListParams;
 #[cfg(test)]
 pub(in crate::server) use handler::events::filtered_global_events;
@@ -1073,6 +1075,7 @@ pub struct AppState {
     pub(crate) worker_control_bus: Arc<dyn WorkerControlBus>,
     pub(crate) worker_runtime: Arc<dyn WorkerRuntime>,
     scheduler_notify: Notify,
+    automation_scheduler_notify: Notify,
     global_event_tx: broadcast::Sender<EventEnvelope>,
     /// Per-run coalescing registry for `GET /runs/{id}/files`. Concurrent
     /// callers for the same run share one materialization; different runs
@@ -1135,6 +1138,16 @@ impl AppState {
         )
         .materialize(input)
         .await
+    }
+
+    pub(crate) fn notify_automation_scheduler(&self) {
+        self.automation_scheduler_notify.notify_one();
+    }
+
+    pub(crate) fn automation_scheduler_notified(
+        &self,
+    ) -> impl std::future::Future<Output = ()> + '_ {
+        self.automation_scheduler_notify.notified()
     }
 }
 
@@ -1518,6 +1531,7 @@ impl AppState {
     fn begin_shutdown(&self) {
         self.shutting_down.store(true, Ordering::Relaxed);
         self.scheduler_notify.notify_waiters();
+        self.automation_scheduler_notify.notify_waiters();
     }
 
     pub(crate) fn shutdown_token(&self) -> CancellationToken {
@@ -2413,6 +2427,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         worker_control_bus,
         worker_runtime,
         scheduler_notify: Notify::new(),
+        automation_scheduler_notify: Notify::new(),
         global_event_tx,
         files_in_flight: new_files_in_flight(),
         pull_request_create_locks: Arc::new(Mutex::new(HashMap::new())),
