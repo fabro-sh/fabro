@@ -104,6 +104,13 @@ impl AutomationSchedulePlanner {
                 .cmp(&b.0.automation_id)
                 .then_with(|| a.0.trigger_id.cmp(&b.0.trigger_id))
         });
+        if due_keys.is_empty() {
+            return Vec::new();
+        }
+        let automations_by_id = automations
+            .iter()
+            .map(|automation| (&automation.id, automation))
+            .collect::<HashMap<_, _>>();
 
         let mut due = Vec::with_capacity(due_keys.len());
         for (key, due_at) in due_keys {
@@ -126,14 +133,11 @@ impl AutomationSchedulePlanner {
                 }
             }
 
-            let Some(automation) = automations
-                .iter()
-                .find(|automation| automation.id == key.automation_id)
-            else {
+            let Some(automation) = automations_by_id.get(&key.automation_id) else {
                 continue;
             };
             due.push(DueScheduleTrigger {
-                automation: automation.clone(),
+                automation: (*automation).clone(),
                 trigger_id: key.trigger_id,
                 due_at,
             });
@@ -169,6 +173,7 @@ impl AutomationSchedulePlanner {
 pub(crate) fn spawn_automation_scheduler(state: Arc<AppState>) {
     tokio::spawn(async move {
         let mut planner = AutomationSchedulePlanner::default();
+        let shutdown = state.shutdown_token();
 
         loop {
             if state.is_shutting_down() {
@@ -197,6 +202,7 @@ pub(crate) fn spawn_automation_scheduler(state: Arc<AppState>) {
 
             let sleep_duration = planner.sleep_duration(now);
             tokio::select! {
+                () = shutdown.cancelled() => break,
                 () = state.automation_scheduler_notified() => {},
                 () = sleep(sleep_duration) => {},
             }
