@@ -96,7 +96,7 @@ fn dry_run_computes_stable_version_from_date() {
         "dry-run should compute base version from date:\n{stdout}"
     );
     assert!(
-        stdout.contains("cargo dev spa refresh"),
+        stdout.contains("cargo --locked dev spa refresh"),
         "dry-run should print one SPA refresh command:\n{stdout}"
     );
     assert!(
@@ -109,7 +109,7 @@ fn dry_run_computes_stable_version_from_date() {
     );
     assert!(
         stdout.contains(
-            "unset GH_TOKEN GITHUB_TOKEN && SEGMENT_WRITE_KEY=fake-for-local-smoke cargo nextest run"
+            "unset GH_TOKEN GITHUB_TOKEN && SEGMENT_WRITE_KEY=fake-for-local-smoke cargo nextest run --locked"
         ),
         "dry-run should show release tests without inherited GitHub tokens:\n{stdout}"
     );

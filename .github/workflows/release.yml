@@ -84,7 +84,7 @@ jobs:
       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
 
       - name: Refresh embedded SPA
-        run: cargo dev spa refresh
+        run: cargo --locked dev spa refresh
 
       - name: Test (x86_64-musl)
         # nextest still shells through cargo test for this target, so
@@ -93,22 +93,22 @@ jobs:
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-        run: cargo nextest run --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
+        run: cargo nextest run --locked --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
 
       - name: Test
         # aarch64-musl test runs have not been validated on the compile
         # runner yet; shipping binary is exercised via Docker smoke tests.
         # Re-enable after verifying the workspace passes on this target.
         if: matrix.target != 'aarch64-unknown-linux-musl' && matrix.target != 'x86_64-unknown-linux-musl'
-        run: cargo nextest run --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
+        run: cargo nextest run --locked --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
 
       - name: Build (musl via cargo-zigbuild)
         if: matrix.musl
-        run: cargo zigbuild --target ${{ matrix.target }} --release -p fabro-cli
+        run: cargo zigbuild --locked --target ${{ matrix.target }} --release -p fabro-cli
 
       - name: Build
         if: ${{ !matrix.musl }}
-        run: cargo build --target ${{ matrix.target }} --release -p fabro-cli
+        run: cargo build --locked --target ${{ matrix.target }} --release -p fabro-cli
 
       - name: Package
         run: |

@@ -237,6 +237,7 @@ impl ReleasePlan {
 
     fn spa_refresh_command() -> PlannedCommand {
         PlannedCommand::new("cargo")
+            .arg("--locked")
             .arg("dev")
             .arg("spa")
             .arg("refresh")
@@ -249,6 +250,7 @@ impl ReleasePlan {
             .env("SEGMENT_WRITE_KEY", RELEASE_TEST_SEGMENT_WRITE_KEY)
             .arg("nextest")
             .arg("run")
+            .arg("--locked")
             .arg("--workspace")
             .arg("--release")
             .arg("--profile")

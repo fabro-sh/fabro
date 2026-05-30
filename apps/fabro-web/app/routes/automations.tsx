@@ -115,7 +115,7 @@ function AutomationCard({
   onDelete: () => void;
 }) {
   const Icon = automation.icon;
-  const runDisabled = busy || !automation.apiEnabled;
+  const runDisabled = busy || running || !automation.apiEnabled;
   return (
     <div className="group flex items-center gap-4 rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
       <Link to={`/automations/${automation.id}`} className="flex min-w-0 flex-1 items-center gap-4">
@@ -153,7 +153,7 @@ function AutomationCard({
         <button
           type="button"
           onClick={onRun}
-          disabled={running || runDisabled}
+          disabled={runDisabled}
           aria-label={running ? "Starting run…" : "Run automation"}
           title={
             running
