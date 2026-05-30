@@ -6,22 +6,8 @@ use fabro_types::run_event::run::{RunCreatedProps, RunParentLinkedProps, RunPare
 use fabro_types::run_event::{RunSessionTurnFailedCode, RunSessionTurnFailedProps};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
-use fabro_types::{
-    AuthMethod, AutomationRef, EventBody, IdpIdentity, Principal, RunProvenance, TurnId,
-    WorkflowSettings, fixtures,
-};
-
-fn test_run_provenance() -> RunProvenance {
-    RunProvenance {
-        server:  None,
-        client:  None,
-        subject: Principal::user(
-            IdpIdentity::new("fabro:test", "test-user").expect("test identity should be valid"),
-            "test".to_string(),
-            AuthMethod::DevToken,
-        ),
-    }
-}
+use fabro_types::test_support::test_run_provenance;
+use fabro_types::{AutomationRef, EventBody, TurnId, WorkflowSettings, fixtures};
 
 fn templated_settings() -> WorkflowSettings {
     let mut settings = WorkflowSettings::default();

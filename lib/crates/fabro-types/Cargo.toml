@@ -33,4 +33,5 @@ ulid.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+fabro-types = { path = ".", features = ["test-support"] }
 tempfile = "3"

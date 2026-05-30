@@ -12,8 +12,9 @@ pub struct UserPrincipal {
     pub avatar_url:  Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Principal {
     User(UserPrincipal),
     Worker {
@@ -89,14 +90,7 @@ impl Principal {
 
     #[must_use]
     pub fn kind(&self) -> &'static str {
-        match self {
-            Self::User(_) => "user",
-            Self::Worker { .. } => "worker",
-            Self::Webhook { .. } => "webhook",
-            Self::Slack { .. } => "slack",
-            Self::Agent { .. } => "agent",
-            Self::System { .. } => "system",
-        }
+        self.into()
     }
 
     #[must_use]

@@ -4,21 +4,8 @@ use fabro_types::graph::Graph;
 use fabro_types::run::{DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome, RunSpec};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
-use fabro_types::{
-    AuthMethod, AutomationRef, IdpIdentity, Principal, RunProvenance, WorkflowSettings, fixtures,
-};
-
-fn test_run_provenance() -> RunProvenance {
-    RunProvenance {
-        server:  None,
-        client:  None,
-        subject: Principal::user(
-            IdpIdentity::new("fabro:test", "test-user").expect("test identity should be valid"),
-            "test".to_string(),
-            AuthMethod::DevToken,
-        ),
-    }
-}
+use fabro_types::test_support::test_run_provenance;
+use fabro_types::{AutomationRef, WorkflowSettings, fixtures};
 
 fn templated_settings() -> WorkflowSettings {
     let mut settings = WorkflowSettings::default();

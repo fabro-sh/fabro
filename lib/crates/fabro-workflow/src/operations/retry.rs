@@ -122,7 +122,7 @@ mod tests {
     use fabro_types::{
         AuthMethod, DirtyStatus, FailureReason, ForkSourceRef, GitContext, Graph, IdpIdentity,
         PreRunPushOutcome, Principal, PullRequestLink, RunBlobId, RunRunnableSource,
-        RunServerProvenance, RunTiming, UserPrincipal, WorkflowSettings, fixtures,
+        RunServerProvenance, RunTiming, WorkflowSettings, fixtures,
     };
     use object_store::memory::InMemory;
 
@@ -138,12 +138,11 @@ mod tests {
     }
 
     fn actor(login: &str) -> Principal {
-        Principal::User(UserPrincipal {
-            identity:    IdpIdentity::new("github", format!("user:{login}")).unwrap(),
-            login:       login.to_string(),
-            auth_method: AuthMethod::DevToken,
-            avatar_url:  None,
-        })
+        Principal::user(
+            IdpIdentity::new("github", format!("user:{login}")).unwrap(),
+            login.to_string(),
+            AuthMethod::DevToken,
+        )
     }
 
     fn provenance(login: &str) -> RunProvenance {

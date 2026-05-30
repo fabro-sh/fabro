@@ -21,6 +21,7 @@ use fabro_config::daemon::ServerDaemon;
 use fabro_config::{Storage, envfile};
 use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, expect_reqwest_status};
+use fabro_types::test_support::test_principal;
 use fabro_types::{RunId, StageId};
 use httpmock::{Mock, MockServer};
 use serde_json::Value;
@@ -177,15 +178,8 @@ pub(crate) fn remote_run_summary_json(
             "origin_url": null,
             "provider": "unknown"
         },
-        "created_by": {
-            "kind": "user",
-            "identity": {
-                "issuer": "fabro:test",
-                "subject": "test-user"
-            },
-            "login": "test",
-            "auth_method": "dev_token"
-        },
+        "created_by": serde_json::to_value(test_principal())
+            .expect("test principal should serialize"),
         "origin": {
             "kind": "api"
         },
