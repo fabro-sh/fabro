@@ -165,7 +165,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
             type="button"
             onClick={onRun}
             disabled={!canRun || running}
-            title={canRun ? undefined : "Enable the API trigger to run it"}
+            title={!apiTrigger?.enabled ? "Enable the API trigger to run it" : undefined}
             className={PRIMARY_BUTTON_CLASS}
           >
             <PlayIcon className="size-4" aria-hidden="true" />
