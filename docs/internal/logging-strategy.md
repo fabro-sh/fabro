@@ -118,11 +118,11 @@ Fields are key-value pairs that make events queryable. Include enough context th
 | `error` | Error value on failure |
 | `path` | File system path |
 | `duration_ms` | Elapsed time in milliseconds |
-| `principal_kind` | HTTP caller category (`user`, `worker`, `webhook`, `anonymous`, etc.) |
+| `principal_kind` | HTTP caller category (`user`, `worker`, `webhook`, `none`, etc.) |
 | `auth_status` | HTTP authentication result (`missing`, `invalid`, `expired`, `authenticated`) |
 | `idp_issuer`, `idp_subject` | Canonical user identity for authenticated user requests |
 
-For HTTP request logs, use the request `Principal` projection rather than hand-assembled auth strings. User identity fields are present only for `Principal::User`; worker and webhook requests use their variant-specific fields (`run_id`, `delivery_id`).
+For HTTP request logs, use the request `Principal` projection rather than hand-assembled auth strings. User identity fields are present only for `Principal::User`; worker and webhook requests use their variant-specific fields (`run_id`, `delivery_id`). Requests without a principal use `principal_kind="none"`; `auth_status` distinguishes missing, invalid, expired, and authenticated auth state.
 
 Server auth intentionally exposes a mutable `RequestAuth` context slot for public auth routes and guard extractors such as `RequiredUser` / `RequireRunScoped` for protected routes. There is no loose `RequestPrincipal` extractor; route-facing extractors should enforce the route's auth contract while the slot supplies the final HTTP log fields.
 | `input_tokens` | Token count for LLM input |

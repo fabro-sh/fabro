@@ -252,7 +252,7 @@ describe("RunSummaryPanelView", () => {
   });
 
   test("renders non-user actor with kind label", () => {
-    for (const kind of ["agent", "system", "slack", "webhook", "worker", "anonymous"]) {
+    for (const kind of ["agent", "system", "slack", "webhook", "worker"]) {
       const tree = render({ run: makeRun({ created_by: { kind } as any }) });
       expect(instanceText(cellAfterLabel(tree, "Created by"))).toContain(kind);
     }

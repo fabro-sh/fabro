@@ -118,7 +118,6 @@ fn principal_round_trips_every_variant_through_api_type() {
         Principal::System {
             system_kind: SystemActorKind::Watchdog,
         },
-        Principal::Anonymous,
     ];
 
     for principal in variants {

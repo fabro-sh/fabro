@@ -271,7 +271,6 @@ models/preflight-workflow-summary.ts
 models/preview-url-request.ts
 models/preview-url-response.ts
 models/principal-agent.ts
-models/principal-anonymous.ts
 models/principal-slack.ts
 models/principal-system.ts
 models/principal-user.ts

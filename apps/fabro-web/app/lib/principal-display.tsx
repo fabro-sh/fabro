@@ -4,7 +4,6 @@ import {
   ChatBubbleLeftEllipsisIcon,
   Cog6ToothIcon,
   CpuChipIcon,
-  QuestionMarkCircleIcon,
   ServerIcon,
 } from "@heroicons/react/20/solid";
 import type { Principal } from "@qltysh/fabro-api-client";
@@ -57,10 +56,5 @@ export function principalDisplay(actor: Principal): PrincipalDisplay {
       return { glyph: principalIconGlyph(<BoltIcon className="size-3" />), label: "webhook" };
     case "worker":
       return { glyph: principalIconGlyph(<ServerIcon className="size-3" />), label: "worker" };
-    case "anonymous":
-      return {
-        glyph: principalIconGlyph(<QuestionMarkCircleIcon className="size-3" />),
-        label: "anonymous",
-      };
   }
 }

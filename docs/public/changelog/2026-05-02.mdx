@@ -11,7 +11,7 @@ The dock listens to interview events and refreshes as questions arrive, so a par
 
 ## Principal attribution and auth routing
 
-Run events and run creation now carry clearer principal information for users, workers, systems, Slack interactions, webhooks, agents, and anonymous actors. API clients get explicit provenance objects instead of older actor-shaped fields that could lose where a run came from.
+Run events and run creation now carry clearer principal information for users, workers, systems, Slack interactions, webhooks, and agents. API clients get explicit provenance objects instead of older actor-shaped fields that could lose where a run came from.
 
 This also closes attribution gaps across web, CLI, worker-token, Slack, and human-interview paths. Runs created or advanced through different surfaces now preserve who or what took the action more consistently.
 
@@ -19,7 +19,7 @@ This also closes attribution gaps across web, CLI, worker-token, Slack, and huma
 
 <Accordion title="API">
 - Run specs now include client and server provenance shapes
-- Run events use unified principal shapes for user, worker, system, Slack, webhook, agent, and anonymous subjects
+- Run events use unified principal shapes for user, worker, system, Slack, webhook, and agent subjects
 </Accordion>
 
 <Accordion title="CLI">

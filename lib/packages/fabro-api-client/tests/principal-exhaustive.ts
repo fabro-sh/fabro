@@ -12,8 +12,6 @@ export function principalKind(principal: Principal): string {
   switch (principal.kind) {
     case "agent":
       return "agent";
-    case "anonymous":
-      return "anonymous";
     case "slack":
       return "slack";
     case "system":

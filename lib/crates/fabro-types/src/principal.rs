@@ -39,7 +39,6 @@ pub enum Principal {
     System {
         system_kind: SystemActorKind,
     },
-    Anonymous,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
@@ -97,7 +96,6 @@ impl Principal {
             Self::Slack { .. } => "slack",
             Self::Agent { .. } => "agent",
             Self::System { .. } => "system",
-            Self::Anonymous => "anonymous",
         }
     }
 
@@ -123,7 +121,6 @@ impl Principal {
             } => session_id.clone(),
             Self::Agent { .. } => "agent".to_string(),
             Self::System { system_kind } => format!("system:{system_kind}"),
-            Self::Anonymous => "anonymous".to_string(),
         }
     }
 }
@@ -289,11 +286,6 @@ mod tests {
         assert_round_trip(&Principal::System {
             system_kind: SystemActorKind::Engine,
         });
-    }
-
-    #[test]
-    fn round_trips_anonymous_variant() {
-        assert_round_trip(&Principal::Anonymous);
     }
 
     #[test]

@@ -244,7 +244,6 @@ export * from './preview-url-request';
 export * from './preview-url-response';
 export * from './principal';
 export * from './principal-agent';
-export * from './principal-anonymous';
 export * from './principal-slack';
 export * from './principal-system';
 export * from './principal-user';

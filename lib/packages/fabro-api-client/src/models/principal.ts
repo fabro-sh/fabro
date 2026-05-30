@@ -24,9 +24,6 @@ import type { IdpIdentity } from './idp-identity';
 import type { PrincipalAgent } from './principal-agent';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PrincipalAnonymous } from './principal-anonymous';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { PrincipalSlack } from './principal-slack';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -47,4 +44,4 @@ import type { SystemActorKind } from './system-actor-kind';
 /**
  * @type Principal
  */
-export type Principal = { kind: 'agent' } & PrincipalAgent | { kind: 'anonymous' } & PrincipalAnonymous | { kind: 'slack' } & PrincipalSlack | { kind: 'system' } & PrincipalSystem | { kind: 'user' } & PrincipalUser | { kind: 'webhook' } & PrincipalWebhook | { kind: 'worker' } & PrincipalWorker;
+export type Principal = { kind: 'agent' } & PrincipalAgent | { kind: 'slack' } & PrincipalSlack | { kind: 'system' } & PrincipalSystem | { kind: 'user' } & PrincipalUser | { kind: 'webhook' } & PrincipalWebhook | { kind: 'worker' } & PrincipalWorker;
