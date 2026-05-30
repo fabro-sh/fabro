@@ -1081,7 +1081,7 @@ fn ts(s: &str) -> DateTime<Utc> {
 
 mod runs {
     use std::collections::HashMap;
-    use std::sync::OnceLock;
+    use std::sync::{LazyLock, OnceLock};
     use std::time::Duration;
 
     use fabro_api::types::*;
@@ -1092,12 +1092,21 @@ mod runs {
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
     use fabro_types::{
-        PendingReason, RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin,
-        RunSize, RunTimestamps, StageId, WorkflowRef, WorkflowSettings,
+        AuthMethod, IdpIdentity, PendingReason, Principal, RepositoryRef, RunBillingSummary, RunId,
+        RunLifecycle, RunLinks, RunOrigin, RunSize, RunTimestamps, StageId, WorkflowRef,
+        WorkflowSettings,
     };
 
     use super::ts;
     use crate::server::run_stage_from_stage_id;
+
+    static DEMO_PRINCIPAL: LazyLock<Principal> = LazyLock::new(|| {
+        Principal::user(
+            IdpIdentity::new("fabro:demo", "demo").expect("demo identity should be valid"),
+            "demo".to_string(),
+            AuthMethod::DevToken,
+        )
+    });
 
     fn labels(entries: &[(&str, &str)]) -> HashMap<String, String> {
         entries
@@ -1171,7 +1180,7 @@ mod runs {
                 repo_origin_url,
                 source_directory.as_deref(),
             )),
-            created_by: None,
+            created_by: DEMO_PRINCIPAL.clone(),
             origin: RunOrigin::default(),
             labels: labels(entries),
             lifecycle: RunLifecycle {

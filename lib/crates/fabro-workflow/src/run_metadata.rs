@@ -537,7 +537,9 @@ mod tests {
     use std::sync::Arc;
 
     use fabro_store::RunProjection;
-    use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunSpec, WorkflowSettings};
+    use fabro_types::{
+        DirtyStatus, GitContext, PreRunPushOutcome, RunSpec, WorkflowSettings, test_support,
+    };
     use git2::{ErrorClass, ErrorCode};
 
     use super::*;
@@ -639,7 +641,7 @@ mod tests {
                     push_outcome: PreRunPushOutcome::NotAttempted,
                 }),
                 labels:           HashMap::new(),
-                provenance:       None,
+                provenance:       test_support::test_run_provenance(),
                 manifest_blob:    None,
                 definition_blob:  None,
                 fork_source_ref:  None,

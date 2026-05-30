@@ -18,7 +18,9 @@ use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::Database;
 use fabro_types::settings::run::RunModelControls;
-use fabro_types::{Principal, RunId, SystemActorKind, WorkflowSettings, fixtures, format_blob_ref};
+use fabro_types::{
+    Principal, RunId, SystemActorKind, WorkflowSettings, fixtures, format_blob_ref, test_support,
+};
 use object_store::memory::InMemory;
 
 use super::*;
@@ -165,7 +167,7 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
             }),
             labels: HashMap::new(),
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             definition_blob: None,
             fork_source_ref: None,
@@ -208,7 +210,7 @@ async fn seed_created_and_starting(
         workflow_slug:    run_options.workflow_slug.clone(),
         automation:       None,
         db_prefix:        None,
-        provenance:       None,
+        provenance:       test_support::test_run_provenance(),
         manifest_blob:    None,
         git:              run_options.pre_run_git.clone(),
         fork_source_ref:  run_options.fork_source_ref.clone(),

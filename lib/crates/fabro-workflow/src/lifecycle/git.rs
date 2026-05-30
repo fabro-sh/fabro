@@ -598,7 +598,7 @@ mod tests {
     use fabro_model::Catalog;
     use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
     use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
-    use fabro_types::{EventBody, RunBlobId, RunEvent, WorkflowSettings, fixtures};
+    use fabro_types::{EventBody, RunBlobId, RunEvent, WorkflowSettings, fixtures, test_support};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -736,7 +736,7 @@ mod tests {
             workflow_slug: Some("metadata".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,

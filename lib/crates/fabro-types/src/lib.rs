@@ -44,6 +44,8 @@ pub mod start;
 pub mod status;
 pub mod steering;
 pub mod system_integrations;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub mod timing;
 pub mod todo;
 pub mod transcript;

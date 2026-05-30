@@ -535,7 +535,7 @@ mod stage_events_tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode, header};
     use fabro_store::EventPayload;
-    use fabro_types::{Graph, RunId, WorkflowSettings};
+    use fabro_types::{Graph, RunId, WorkflowSettings, test_support};
     use fabro_workflow::event as workflow_event;
     use http_body_util::BodyExt;
     use serde_json::json;
@@ -570,7 +570,7 @@ mod stage_events_tests {
             workflow_slug:    None,
             automation:       None,
             db_prefix:        None,
-            provenance:       None,
+            provenance:       test_support::test_run_provenance(),
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,

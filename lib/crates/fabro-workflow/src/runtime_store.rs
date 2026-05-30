@@ -120,7 +120,7 @@ mod tests {
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
     use fabro_types::run_event::RunSubmittedProps;
-    use fabro_types::{EventBody, RunEvent, WorkflowSettings, fixtures};
+    use fabro_types::{EventBody, RunEvent, WorkflowSettings, fixtures, test_support};
     use object_store::memory::InMemory;
 
     use super::RunStoreHandle;
@@ -148,7 +148,7 @@ mod tests {
             source_directory: Some("/tmp/test".to_string()),
             git:              None,
             labels:           HashMap::new(),
-            provenance:       None,
+            provenance:       test_support::test_run_provenance(),
             manifest_blob:    None,
             definition_blob:  None,
             fork_source_ref:  None,
@@ -170,7 +170,7 @@ mod tests {
             workflow_slug:    Some("test".to_string()),
             automation:       None,
             db_prefix:        None,
-            provenance:       None,
+            provenance:       test_support::test_run_provenance(),
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,

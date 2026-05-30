@@ -6,6 +6,7 @@ import {
   RunSummaryPanelView,
   type RunSummaryPanelViewProps,
 } from "./run-summary-panel";
+import { TEST_PRINCIPAL } from "../lib/test-fixtures";
 
 function instanceText(instance: TestRenderer.ReactTestInstance): string {
   const parts: string[] = [];
@@ -53,7 +54,7 @@ function cellAfterLabel(
 function makeRun(overrides: Record<string, any> = {}) {
   return {
     id:         "run_1",
-    created_by: null,
+    created_by: TEST_PRINCIPAL,
     diff:       null,
     billing:    null,
     ...overrides,
@@ -71,9 +72,9 @@ describe("RunSummaryPanelView", () => {
     }
   });
 
-  test("shows unavailable copy for missing run fields after load", () => {
+  test("shows creator and unavailable copy for optional missing run fields after load", () => {
     const tree = render({ run: makeRun() });
-    expect(instanceText(cellAfterLabel(tree, "Created by"))).toBe(EMPTY_VALUE);
+    expect(instanceText(cellAfterLabel(tree, "Created by"))).toBe("Ttest");
     expect(instanceText(cellAfterLabel(tree, "Changes"))).toBe(EMPTY_VALUE);
     expect(instanceText(cellAfterLabel(tree, "Cost"))).toBe(EMPTY_VALUE);
   });
@@ -226,7 +227,7 @@ describe("RunSummaryPanelView", () => {
           kind:        "user",
           identity:    { issuer: "github", subject: "1" },
           login:       "brynary",
-          auth_method: "oauth",
+          auth_method: "github",
         },
       }),
     });
@@ -240,7 +241,7 @@ describe("RunSummaryPanelView", () => {
           kind:        "user",
           identity:    { issuer: "github", subject: "1" },
           login:       "brynary",
-          auth_method: "oauth",
+          auth_method: "github",
           avatar_url:  "https://example.com/brynary.png",
         },
       }),

@@ -29,7 +29,7 @@ use fabro_types::{
     SandboxProviderKind, StageContextWindowBreakdownItem, StageContextWindowCategory,
     StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
     StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
-    WorkflowSettings, fixtures,
+    WorkflowSettings, fixtures, test_support,
 };
 use fabro_util::check_report::CheckStatus;
 use fabro_workflow::records::CheckpointExt;
@@ -3978,7 +3978,7 @@ async fn append_default_run_created(run_store: &fabro_store::RunDatabase, run_id
         workflow_slug: None,
         automation: None,
         db_prefix: None,
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
@@ -4032,7 +4032,7 @@ async fn create_slack_notification_run(
         workflow_slug: workflow_slug.map(str::to_string),
         automation: None,
         db_prefix: None,
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
@@ -5039,7 +5039,7 @@ async fn list_run_stages_distinguishes_visits() {
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
@@ -6096,7 +6096,7 @@ async fn create_completed_run_ready_for_pull_request(
         source_directory: Some("/tmp/project".to_string()),
         git: git.clone(),
         labels: HashMap::new(),
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         definition_blob: None,
         fork_source_ref: None,
@@ -9899,15 +9899,10 @@ async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
         .unwrap()
         .expect("created run should be cached");
     assert_eq!(
-        cached
-            .projection
-            .spec
-            .provenance
-            .as_ref()
-            .and_then(|provenance| provenance.subject.as_ref()),
-        Some(&Principal::Worker {
+        cached.projection.spec.provenance.subject,
+        Principal::Worker {
             run_id: parent_run_id,
-        }),
+        },
     );
 
     let response = app
@@ -12266,7 +12261,7 @@ async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
@@ -13018,7 +13013,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,

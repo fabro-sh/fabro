@@ -1506,6 +1506,7 @@ mod tests {
     use fabro_agent::config::ToolAccess;
     use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, ToolSource};
     use fabro_llm::types::{ToolCall, ToolDefinition};
+    use fabro_types::test_support;
 
     use super::*;
 
@@ -1700,7 +1701,7 @@ mod tests {
             automation: None,
             source_directory: None,
             labels: HashMap::default(),
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             definition_blob: None,
             git: None,

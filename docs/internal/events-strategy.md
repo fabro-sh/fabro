@@ -80,7 +80,10 @@ Important rules:
 
 - Optional envelope fields are omitted, not serialized as `null`.
 - Event-specific fields do not get flattened into the top level.
-- Actor identity lives only in top-level `actor: Principal`; never duplicate it in event-specific properties.
+- Actor identity normally lives only in top-level `actor: Principal`; do not duplicate it in
+  event-specific properties. The exception is `run.created`, whose
+  `properties.provenance.subject` is the durable run creator stored in `RunSpec`; its envelope
+  `actor` is derived from the same principal.
 - User actors must carry canonical IdP identity through `Principal::User { identity, login, auth_method }`, not a login-only string.
 - `EventPayload` validation requires `id`, `ts`, `run_id`, and `event`.
 

@@ -41,7 +41,7 @@ export interface RunItem {
   sandboxWorkingDirectory?: string;
   sourceDirectory?: string;
   createdAt?: string;
-  createdBy?: Principal | null;
+  createdBy: Principal;
   lastEventAt?: string;
   size?: RunSize;
 }

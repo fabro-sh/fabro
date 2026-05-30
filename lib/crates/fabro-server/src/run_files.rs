@@ -1717,7 +1717,7 @@ fn count_flags(data: &[FileDiff]) -> (u64, u64, u64, u64) {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use fabro_types::{CommandTermination, RunId};
+    use fabro_types::{CommandTermination, RunId, test_support};
     use tokio::time::{Duration, sleep};
 
     use super::*;
@@ -2389,7 +2389,7 @@ index 1111111..2222222 160000
                 automation:       None,
                 source_directory: None,
                 labels:           HashMap::default(),
-                provenance:       None,
+                provenance:       test_support::test_run_provenance(),
                 manifest_blob:    None,
                 definition_blob:  None,
                 git:              None,

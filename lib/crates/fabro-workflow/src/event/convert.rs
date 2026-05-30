@@ -2339,7 +2339,7 @@ mod tests {
         let provenance = RunProvenance {
             server:  None,
             client:  None,
-            subject: Some(user_principal("alice")),
+            subject: user_principal("alice"),
         };
         let automation = AutomationRef {
             id:         "nightly".to_string(),
@@ -2348,25 +2348,25 @@ mod tests {
         };
 
         let stored = to_run_event(&fixtures::RUN_1, &Event::RunCreated {
-            run_id:           fixtures::RUN_1,
-            title:            None,
-            settings:         serde_json::to_value(WorkflowSettings::default()).unwrap(),
-            graph:            serde_json::to_value(Graph::new("test")).unwrap(),
-            workflow_source:  None,
-            workflow_config:  None,
-            labels:           BTreeMap::default(),
-            run_dir:          "/tmp/run".to_string(),
+            run_id: fixtures::RUN_1,
+            title: None,
+            settings: serde_json::to_value(WorkflowSettings::default()).unwrap(),
+            graph: serde_json::to_value(Graph::new("test")).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: BTreeMap::default(),
+            run_dir: "/tmp/run".to_string(),
             source_directory: Some("/tmp/run".to_string()),
-            workflow_slug:    None,
-            automation:       Some(automation.clone()),
-            db_prefix:        None,
-            provenance:       Some(provenance),
-            manifest_blob:    None,
-            git:              None,
-            fork_source_ref:  None,
-            retried_from:     None,
-            parent_id:        None,
-            web_url:          None,
+            workflow_slug: None,
+            automation: Some(automation.clone()),
+            db_prefix: None,
+            provenance,
+            manifest_blob: None,
+            git: None,
+            fork_source_ref: None,
+            retried_from: None,
+            parent_id: None,
+            web_url: None,
         });
         let actor = stored.actor.as_ref().expect("actor set");
         assert_eq!(actor, &user_principal("alice"));

@@ -1879,8 +1879,7 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
     let principal_kind = auth_context
         .principal
         .as_ref()
-        .map(Principal::kind)
-        .unwrap_or("none");
+        .map_or("none", Principal::kind);
     let auth_status = auth_context.auth_status.as_str();
 
     macro_rules! emit_http_log {

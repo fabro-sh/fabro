@@ -453,7 +453,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_types::{
         EventEnvelope, FailureReason, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunProjection,
-        RunStatus, RunTimestamps, WorkflowRef,
+        RunStatus, RunTimestamps, WorkflowRef, test_support,
     };
     use serde_json::json;
 
@@ -690,7 +690,7 @@ mod tests {
             },
             automation:       None,
             repository:       None,
-            created_by:       None,
+            created_by:       test_support::test_principal(),
             origin:           RunOrigin::default(),
             labels:           HashMap::new(),
             lifecycle:        RunLifecycle {

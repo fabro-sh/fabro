@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { toast as sonnerToast } from "sonner";
 
 import { ToastProvider } from "../components/toast";
+import { TEST_PRINCIPAL } from "../lib/test-fixtures";
 
 let currentFilesPayload: any = null;
 let currentCommitsPayload: any = null;
@@ -51,7 +52,7 @@ mock.module("../lib/queries", () => ({
       workflow:         { slug: "default", name: "Default", graph_name: null, node_count: 0, edge_count: 0 },
       automation:       null,
       repository:       { name: "fabro", origin_url: null, provider: "unknown" },
-      created_by:       null,
+      created_by:       TEST_PRINCIPAL,
       origin:           { kind: "api" },
       labels:           {},
       lifecycle:        {

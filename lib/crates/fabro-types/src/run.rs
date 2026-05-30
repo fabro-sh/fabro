@@ -24,14 +24,13 @@ pub struct RunClientProvenance {
     pub version:    Option<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunProvenance {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server:  Option<RunServerProvenance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client:  Option<RunClientProvenance>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subject: Option<Principal>,
+    pub subject: Principal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,8 +92,7 @@ pub struct RunSpec {
     pub source_directory: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub labels:           HashMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provenance:       Option<RunProvenance>,
+    pub provenance:       RunProvenance,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_blob:    Option<RunBlobId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

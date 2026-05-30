@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type {
+  Principal,
   Run,
   SandboxResources,
   SandboxState,
@@ -46,6 +47,16 @@ function Cell({ label, children }: { label: string; children: ReactNode }) {
     <div>
       <div className={LABEL_CLASS}>{label}</div>
       <div className={VALUE_WRAPPER_CLASS}>{children}</div>
+    </div>
+  );
+}
+
+function CreatedByValue({ actor }: { actor: Principal }) {
+  const created = principalDisplay(actor);
+  return (
+    <div className="flex items-center gap-2">
+      {created.glyph}
+      <span className={VALUE_CLASS}>{created.label}</span>
     </div>
   );
 }
@@ -116,7 +127,6 @@ export function RunSummaryPanelView({
   artifactsCount,
   artifactsLoading,
 }: RunSummaryPanelViewProps) {
-  const created = run?.created_by ? principalDisplay(run.created_by) : null;
   const diff = run?.diff ?? null;
   const cost = formatUsdMicros(run?.billing?.total_usd_micros);
   const sandboxKind = sandboxLifecycleKind(run?.sandbox);
@@ -127,11 +137,8 @@ export function RunSummaryPanelView({
         <Cell label="Created by">
           {runLoading ? (
             <Skeleton widthClass="w-20" />
-          ) : created ? (
-            <div className="flex items-center gap-2">
-              {created.glyph}
-              <span className={VALUE_CLASS}>{created.label}</span>
-            </div>
+          ) : run ? (
+            <CreatedByValue actor={run.created_by} />
           ) : (
           <EmptyValue />
           )}

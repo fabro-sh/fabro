@@ -648,7 +648,7 @@ mod tests {
     use fabro_sandbox::SandboxSpec;
     use fabro_store::Database;
     use fabro_types::settings::run::RunModelControls;
-    use fabro_types::{EventBody, RunEvent, RunId, WorkflowSettings, fixtures};
+    use fabro_types::{EventBody, RunEvent, RunId, WorkflowSettings, fixtures, test_support};
     use fabro_vault::{SecretType, Vault};
     use object_store::memory::InMemory;
     use tokio::fs::{create_dir_all, write};
@@ -773,7 +773,7 @@ mod tests {
                     push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
                 }),
                 labels: HashMap::new(),
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 manifest_blob: None,
                 definition_blob: None,
                 fork_source_ref: None,

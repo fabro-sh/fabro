@@ -12,7 +12,7 @@ use fabro_types::{
     AskFabro, AskFabroUnavailableReason, AutomationRef, DiffSummary, PullRequestLink,
     RepositoryProvider, RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary,
     RunId, RunLifecycle, RunLinks, RunOrigin, RunRunnableSource, RunSize, RunTimestamps, RunTiming,
-    WorkflowRef, fixtures,
+    WorkflowRef, fixtures, test_support,
 };
 use serde_json::json;
 
@@ -88,7 +88,7 @@ fn run_summary_json_matches_openapi_shape() {
             origin_url: None,
             provider:   RepositoryProvider::Unknown,
         }),
-        created_by:       None,
+        created_by:       test_support::test_principal(),
         origin:           RunOrigin::default(),
         labels:           HashMap::from([("team".to_string(), "core".to_string())]),
         lifecycle:        RunLifecycle {
@@ -161,7 +161,15 @@ fn run_summary_json_matches_openapi_shape() {
                 "origin_url": null,
                 "provider": "unknown"
             },
-            "created_by": null,
+            "created_by": {
+                "kind": "user",
+                "identity": {
+                    "issuer": "fabro:test",
+                    "subject": "test-user"
+                },
+                "login": "test",
+                "auth_method": "dev_token"
+            },
             "origin": {
                 "kind": "api"
             },
@@ -253,6 +261,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
             "origin_url": null,
             "provider": "unknown"
         },
+        "created_by": test_support::test_principal(),
         "models": [],
         "timestamps": {
             "created_at": "2026-04-20T12:00:00Z",
@@ -275,6 +284,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     assert_eq!(summary.workflow.edge_count, 0);
     assert_eq!(summary.goal, "ship it");
     assert_eq!(summary.title, "ship it");
+    assert_eq!(summary.created_by, test_support::test_principal());
     assert_eq!(summary.labels, HashMap::new());
     assert_eq!(summary.source_directory, None);
     assert_eq!(

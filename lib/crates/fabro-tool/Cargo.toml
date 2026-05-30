@@ -29,4 +29,5 @@ tokio.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+fabro-types = { path = "../fabro-types", features = ["test-support"] }
 tempfile = "3"

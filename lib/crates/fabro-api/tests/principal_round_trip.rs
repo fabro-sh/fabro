@@ -139,9 +139,9 @@ fn run_provenance_subject_round_trips_as_principal() {
             name:       Some("fabro-cli".to_string()),
             version:    Some("0.1.0".to_string()),
         }),
-        subject: Some(Principal::Worker {
+        subject: Principal::Worker {
             run_id: fixtures::RUN_1,
-        }),
+        },
     };
     let json = serde_json::to_value(&provenance).unwrap();
 

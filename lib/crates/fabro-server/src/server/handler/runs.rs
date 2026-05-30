@@ -687,13 +687,14 @@ pub(crate) async fn create_run_from_manifest(
         .as_ref()
         .map(LlmClientResult::provider_ids)
         .unwrap_or_default();
+    let provenance = run_provenance(&headers, &actor);
     let mut create_input = run_manifest::create_run_input(
         prepared.clone(),
         ready_provider_ids.clone(),
+        provenance,
         web_url.clone(),
     );
     create_input.run_id = Some(run_id);
-    create_input.provenance = Some(run_provenance(&headers, &actor));
     create_input.submitted_manifest_bytes = Some(submitted_manifest_bytes);
     create_input.automation = automation;
 
@@ -864,7 +865,7 @@ pub(super) fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunPro
             version: FABRO_VERSION.to_string(),
         }),
         client:  run_client_provenance(headers),
-        subject: Some(subject.clone()),
+        subject: subject.clone(),
     }
 }
 

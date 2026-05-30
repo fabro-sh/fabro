@@ -4,6 +4,7 @@ import TestRenderer, { act } from "react-test-renderer";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
 import { ToastProvider } from "../components/toast";
+import { TEST_PRINCIPAL } from "../lib/test-fixtures";
 import { setupReactTestEnv } from "../lib/test-utils";
 
 let currentRun: any = null;
@@ -120,7 +121,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
       origin_url: "https://github.com/fallback/repo.git",
       provider:   "github",
     },
-    created_by:       null,
+    created_by:       TEST_PRINCIPAL,
     origin:           { kind: "api" },
     labels:           {},
     lifecycle:        {

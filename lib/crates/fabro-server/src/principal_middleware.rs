@@ -172,14 +172,14 @@ impl AuthContextSlot {
     pub(crate) fn log_snapshot(&self) -> RequestAuthLogContext {
         let context = self.0.lock().expect("auth context lock poisoned");
         RequestAuthLogContext {
-            principal:       principal_without_log_unused_fields(&context.principal),
+            principal:       principal_without_log_unused_fields(context.principal.as_ref()),
             auth_status:     context.auth_status,
             auth_error_code: context.auth_error_code,
         }
     }
 }
 
-fn principal_without_log_unused_fields(principal: &Option<Principal>) -> Option<Principal> {
+fn principal_without_log_unused_fields(principal: Option<&Principal>) -> Option<Principal> {
     match principal {
         Some(Principal::User(user)) => Some(Principal::User(UserPrincipal {
             identity:    user.identity.clone(),
@@ -187,7 +187,8 @@ fn principal_without_log_unused_fields(principal: &Option<Principal>) -> Option<
             auth_method: user.auth_method,
             avatar_url:  None,
         })),
-        principal => principal.clone(),
+        Some(principal) => Some(principal.clone()),
+        None => None,
     }
 }
 

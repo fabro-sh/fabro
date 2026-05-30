@@ -204,6 +204,7 @@ mod tests {
     use chrono::Utc;
     use fabro_types::{
         Checkpoint, CheckpointRecord, Graph, RunDiff, RunSpec, WorkflowSettings, fixtures,
+        test_support,
     };
 
     use super::*;
@@ -248,7 +249,7 @@ mod tests {
                 automation:       None,
                 source_directory: None,
                 labels:           HashMap::new(),
-                provenance:       None,
+                provenance:       test_support::test_run_provenance(),
                 manifest_blob:    None,
                 definition_blob:  None,
                 git:              None,

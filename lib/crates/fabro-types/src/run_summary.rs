@@ -52,8 +52,7 @@ pub struct Run {
     pub automation:       Option<AutomationRef>,
     #[serde(default)]
     pub repository:       Option<RepositoryRef>,
-    #[serde(default)]
-    pub created_by:       Option<Principal>,
+    pub created_by:       Principal,
     pub origin:           RunOrigin,
     pub labels:           HashMap<String, String>,
     pub lifecycle:        RunLifecycle,

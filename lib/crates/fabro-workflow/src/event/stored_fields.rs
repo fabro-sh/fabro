@@ -57,7 +57,7 @@ pub(super) fn stored_event_fields(event: &Event, scope: Option<&StageScope>) -> 
 fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
     match event {
         Event::RunCreated { provenance, .. } => StoredEventFields {
-            actor: provenance.as_ref().and_then(|p| p.subject.clone()),
+            actor: Some(provenance.subject.clone()),
             ..StoredEventFields::default()
         },
         Event::RunCancelRequested { actor }

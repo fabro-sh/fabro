@@ -45,7 +45,7 @@ pub struct CreateRunInput {
     pub git: Option<GitContext>,
     pub fork_source_ref: Option<ForkSourceRef>,
     pub parent_id: Option<RunId>,
-    pub provenance: Option<RunProvenance>,
+    pub provenance: RunProvenance,
     pub configured_providers: Vec<ProviderId>,
     /// Public URL where this run can be viewed in the web UI, when the server
     /// has the web UI enabled. Recorded on the `run.created` event so attach
@@ -72,7 +72,7 @@ struct PersistCreateOptions {
     automation:           Option<AutomationRef>,
     git:                  Option<GitContext>,
     fork_source_ref:      Option<ForkSourceRef>,
-    provenance:           Option<RunProvenance>,
+    provenance:           RunProvenance,
     configured_providers: Vec<ProviderId>,
     catalog:              Arc<Catalog>,
 }
@@ -422,7 +422,7 @@ mod tests {
     use fabro_store::Database;
     use fabro_types::settings::InterpString;
     use fabro_types::settings::run::RunMode;
-    use fabro_types::{WorkflowSettings, fixtures};
+    use fabro_types::{WorkflowSettings, fixtures, test_support};
     use fabro_util::error::collect_chain;
     use fabro_validate::Severity;
     use object_store::local::LocalFileSystem;
@@ -1115,7 +1115,7 @@ mod tests {
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },
@@ -1183,7 +1183,7 @@ mod tests {
                 }),
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },
@@ -1295,7 +1295,7 @@ mod tests {
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },
@@ -1341,7 +1341,7 @@ mod tests {
                 }),
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },
@@ -1414,7 +1414,7 @@ mod tests {
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },
@@ -1467,7 +1467,7 @@ mod tests {
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: Some(fabro_types::RunProvenance {
+                provenance: fabro_types::RunProvenance {
                     server:  Some(fabro_types::RunServerProvenance {
                         version: "0.9.0".to_string(),
                     }),
@@ -1476,12 +1476,12 @@ mod tests {
                         name:       Some("fabro-cli".to_string()),
                         version:    Some("0.9.0".to_string()),
                     }),
-                    subject: Some(fabro_types::Principal::user(
+                    subject: fabro_types::Principal::user(
                         fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
                         "octocat".to_string(),
                         fabro_types::AuthMethod::Github,
-                    )),
-                }),
+                    ),
+                },
                 configured_providers: Vec::new(),
                 web_url: None,
             },
@@ -1494,7 +1494,7 @@ mod tests {
         let run_store = store.open_run_reader(&created.run_id).await.unwrap();
         let state = run_store.state().await.unwrap();
         let run = state.spec;
-        let provenance = run.provenance.expect("provenance should be projected");
+        let provenance = run.provenance;
 
         assert_eq!(provenance.server.unwrap().version, "0.9.0");
         assert_eq!(
@@ -1502,7 +1502,7 @@ mod tests {
             Some("fabro-cli")
         );
         assert_eq!(
-            provenance.subject.unwrap(),
+            provenance.subject,
             fabro_types::Principal::user(
                 fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
                 "octocat".to_string(),

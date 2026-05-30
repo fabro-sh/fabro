@@ -1,7 +1,7 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::RunEvent as ApiRunEvent;
-use fabro_types::{Graph, RunEvent, WorkflowSettings, fixtures};
+use fabro_types::{Graph, RunEvent, WorkflowSettings, fixtures, test_support};
 use serde_json::{Value, json};
 
 #[test]
@@ -20,7 +20,8 @@ fn run_event_round_trips_run_created() {
             "settings": WorkflowSettings::default(),
             "graph": Graph::new("test"),
             "run_dir": "/tmp/fabro/run-1",
-            "source_directory": "/tmp/fabro/run-1"
+            "source_directory": "/tmp/fabro/run-1",
+            "provenance": test_support::test_run_provenance()
         }
     });
 
@@ -39,7 +40,8 @@ fn run_event_round_trips_run_created_with_web_url() {
             "graph": Graph::new("test"),
             "run_dir": "/tmp/fabro/run-1",
             "source_directory": "/tmp/fabro/run-1",
-            "web_url": format!("http://localhost:3000/runs/{}", fixtures::RUN_1)
+            "web_url": format!("http://localhost:3000/runs/{}", fixtures::RUN_1),
+            "provenance": test_support::test_run_provenance()
         }
     });
 

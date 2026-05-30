@@ -1671,11 +1671,11 @@ client_id = "github-client-id"
         let [first, second, third] = <[RequestAuthContext; 3]>::try_from(contexts)
             .expect("expected three captured auth contexts");
         assert_eq!(first.auth_status, AuthStatus::Authenticated);
-        assert_eq!(first.principal.display(), "octocat");
+        assert_eq!(first.principal.expect("principal").display(), "octocat");
         assert_eq!(second.auth_status, AuthStatus::Authenticated);
-        assert_eq!(second.principal.display(), "octocat");
+        assert_eq!(second.principal.expect("principal").display(), "octocat");
         assert_eq!(third.auth_status, AuthStatus::Authenticated);
-        assert_eq!(third.principal.display(), "octocat");
+        assert_eq!(third.principal.expect("principal").display(), "octocat");
     }
 
     #[tokio::test]
@@ -2080,7 +2080,10 @@ client_id = "github-client-id"
 
         let contexts = captured.lock().expect("captured auth contexts").clone();
         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
-        assert_eq!(contexts[0].principal.display(), "octocat");
+        assert_eq!(
+            contexts[0].principal.as_ref().expect("principal").display(),
+            "octocat"
+        );
         assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
         assert_eq!(
             contexts[1].auth_error_code,
@@ -2273,8 +2276,11 @@ client_id = "github-client-id"
 
         let contexts = captured.lock().expect("captured auth contexts").clone();
         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
-        assert_eq!(contexts[0].principal.display(), "octocat");
-        let Principal::User(user) = &contexts[0].principal else {
+        assert_eq!(
+            contexts[0].principal.as_ref().expect("principal").display(),
+            "octocat"
+        );
+        let Some(Principal::User(user)) = &contexts[0].principal else {
             panic!("expected user principal");
         };
         assert_eq!(

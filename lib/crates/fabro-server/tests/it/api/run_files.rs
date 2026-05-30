@@ -14,7 +14,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::test_support::test_app_state_with_store;
 use fabro_store::{ArtifactStore, Database};
-use fabro_types::{Graph, RunId, SandboxProviderKind, WorkflowSettings};
+use fabro_types::{Graph, RunId, SandboxProviderKind, WorkflowSettings, test_support};
 use fabro_workflow::event as workflow_event;
 use fabro_workflow::run_status::SuccessReason;
 use object_store::memory::InMemory as MemoryObjectStore;
@@ -69,7 +69,7 @@ async fn append_completed_run_with_final_patch(
         workflow_slug:    None,
         automation:       None,
         db_prefix:        None,
-        provenance:       None,
+        provenance:       test_support::test_run_provenance(),
         manifest_blob:    None,
         git:              None,
         fork_source_ref:  None,

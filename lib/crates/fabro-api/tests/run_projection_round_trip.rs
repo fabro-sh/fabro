@@ -1,9 +1,8 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::RunProjection as ApiRunProjection;
-use fabro_types::{Graph, RunProjection, RunSpec, WorkflowSettings};
+use fabro_types::{Graph, RunProjection, RunSpec, WorkflowSettings, test_support};
 use serde_json::json;
-
 #[test]
 fn run_projection_reuses_canonical_type() {
     assert_same_type::<ApiRunProjection, RunProjection>();
@@ -137,7 +136,7 @@ fn run_spec_json() -> serde_json::Value {
         automation:       None,
         source_directory: None,
         labels:           std::collections::HashMap::new(),
-        provenance:       None,
+        provenance:       test_support::test_run_provenance(),
         manifest_blob:    None,
         definition_blob:  None,
         git:              None,

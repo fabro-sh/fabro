@@ -1129,7 +1129,9 @@ mod tests {
     use fabro_store::Database;
     use fabro_types::settings::run::RunMode;
     use fabro_types::settings::{InterpString, ModelRef};
-    use fabro_types::{BilledModelUsage, ManifestPath, StageTiming, WorkflowSettings, fixtures};
+    use fabro_types::{
+        BilledModelUsage, ManifestPath, StageTiming, WorkflowSettings, fixtures, test_support,
+    };
     use object_store::memory::InMemory;
 
     use super::*;
@@ -1438,7 +1440,7 @@ reasoning = false
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },
@@ -1860,7 +1862,7 @@ reasoning = false
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },

@@ -58,7 +58,18 @@ Emitted when the run record is created.
       }
     },
     "fork_source_ref": null,
-    "in_place": false
+    "in_place": false,
+    "provenance": {
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "12345"
+        },
+        "login": "octocat",
+        "auth_method": "github"
+      }
+    }
   }
 }
 ```
@@ -76,7 +87,7 @@ Emitted when the run record is created.
 | `base_branch` | string? | Submitter-side base branch |
 | `workflow_slug` | string? | Workflow slug |
 | `db_prefix` | string? | Store prefix used for the run |
-| `provenance` | object? | Actor and request provenance |
+| `provenance` | object | Actor and request provenance |
 | `manifest_blob` | string? | Blob id for the submitted manifest |
 | `pre_run_git` | object? | Submitter-side pre-run git context and push outcome |
 | `fork_source_ref` | object? | Source run/checkpoint reference when this run was forked |

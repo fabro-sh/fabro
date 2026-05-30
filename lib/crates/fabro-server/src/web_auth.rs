@@ -1365,7 +1365,7 @@ client_id = "github-client-id"
 
         let contexts = captured.lock().expect("captured auth contexts").clone();
         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
-        assert!(matches!(contexts[0].principal, Principal::User(_)));
+        assert!(matches!(contexts[0].principal, Some(Principal::User(_))));
         assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
         assert_eq!(
             contexts[1].auth_error_code,

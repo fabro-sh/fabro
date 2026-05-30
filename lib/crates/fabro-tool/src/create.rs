@@ -508,7 +508,7 @@ mod tests {
     use fabro_api::types;
     use fabro_types::{
         EventEnvelope, Run, RunLifecycle, RunLinks, RunOrigin, RunProjection, RunStatus,
-        RunTimestamps, WorkflowRef,
+        RunTimestamps, WorkflowRef, test_support,
     };
     use schemars::SchemaGenerator;
     use serde_json::json;
@@ -902,7 +902,7 @@ mod tests {
             },
             automation: None,
             repository: None,
-            created_by: None,
+            created_by: test_support::test_principal(),
             origin: RunOrigin::default(),
             labels: HashMap::new(),
             lifecycle: RunLifecycle {

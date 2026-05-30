@@ -41,7 +41,7 @@ export interface RunSpec {
     'automation'?: AutomationRef | null;
     'source_directory'?: string | null;
     'labels'?: { [key: string]: string; };
-    'provenance'?: RunProvenance | null;
+    'provenance': RunProvenance;
     'manifest_blob'?: string | null;
     'definition_blob'?: string | null;
     'git'?: GitContext | null;

@@ -119,6 +119,7 @@ assert_cmd = "2"
 fabro-acp = { path = "../fabro-acp", features = ["test-support"] }
 fabro-build-support = { path = "../build-support" }
 fabro-server = { path = "../fabro-server", features = ["test-support"] }
+fabro-types = { path = "../fabro-types", features = ["clap", "test-support"] }
 insta = { workspace = true, features = ["filters"] }
 paste = "1"
 predicates = "3"

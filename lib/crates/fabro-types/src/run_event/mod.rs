@@ -933,7 +933,7 @@ mod tests {
     use super::*;
     use crate::{
         AuthMethod, Edge, Graph, IdpIdentity, Node, PendingReason, RunBlobId, WorkflowSettings,
-        fixtures,
+        fixtures, test_support,
     };
 
     fn user_principal(login: &str) -> Principal {
@@ -1017,7 +1017,8 @@ mod tests {
                 "graph": graph,
                 "labels": {},
                 "run_dir": "/tmp/run",
-                "source_directory": "/tmp/run"
+                "source_directory": "/tmp/run",
+                "provenance": test_support::test_run_provenance()
             }
         });
 
@@ -1038,6 +1039,7 @@ mod tests {
                 "labels": {},
                 "run_dir": "/tmp/run",
                 "source_directory": "/tmp/run",
+                "provenance": test_support::test_run_provenance(),
                 "manifest_blob": RunBlobId::new(br#"{"version":1}"#).to_string()
             }
         });

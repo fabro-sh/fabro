@@ -34,3 +34,6 @@ serde_json = "1"
 serde_yaml = "0.9"
 prettyplease = "0.2"
 syn = "2"
+
+[dev-dependencies]
+fabro-types = { path = "../fabro-types", features = ["test-support"] }

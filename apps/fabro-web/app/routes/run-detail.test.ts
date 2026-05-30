@@ -13,6 +13,7 @@ import {
 
 import { ToastProvider } from "../components/toast";
 import { DemoModeProvider } from "../lib/demo-mode";
+import { TEST_PRINCIPAL } from "../lib/test-fixtures";
 
 let currentRunSummary: any = null;
 let currentRunState: any = null;
@@ -221,7 +222,7 @@ function makeRunSummary({
     workflow:         { slug: "default", name: "Default", graph_name: null, node_count: 0, edge_count: 0 },
     automation,
     repository:       { name: "fabro", origin_url: null, provider: "unknown" },
-    created_by:       null,
+    created_by:       TEST_PRINCIPAL,
     origin:           { kind: "api" },
     labels:           {},
     lifecycle:        {

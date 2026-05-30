@@ -83,7 +83,7 @@ export interface Run {
     'workflow': WorkflowRef;
     'automation': AutomationRef | null;
     'repository': RepositoryRef | null;
-    'created_by': Principal | null;
+    'created_by': Principal;
     'origin': RunOrigin;
     'labels': { [key: string]: string; };
     'lifecycle': RunLifecycle;

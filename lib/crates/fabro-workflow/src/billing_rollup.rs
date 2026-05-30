@@ -165,7 +165,7 @@ mod tests {
     use fabro_model::{Catalog, ModelRef, ProviderId};
     use fabro_types::{
         AttrValue, BilledTokenCounts, Graph, Node, RunProjection, RunSpec, StageCompletion,
-        StageOutcome, WorkflowSettings, first_event_seq, fixtures,
+        StageOutcome, WorkflowSettings, first_event_seq, fixtures, test_support,
     };
 
     use super::billing_rollup_from_projection;
@@ -353,7 +353,7 @@ mod tests {
             automation: None,
             source_directory: None,
             labels: HashMap::new(),
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             definition_blob: None,
             git: None,

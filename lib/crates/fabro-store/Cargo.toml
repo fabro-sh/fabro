@@ -32,6 +32,7 @@ futures.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+fabro-types = { path = "../fabro-types", features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = "3"
 ulid.workspace = true

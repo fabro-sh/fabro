@@ -26,5 +26,5 @@ import type { RunServerProvenance } from './run-server-provenance';
 export interface RunProvenance {
     'server'?: RunServerProvenance | null;
     'client'?: RunClientProvenance | null;
-    'subject'?: Principal | null;
+    'subject': Principal;
 }

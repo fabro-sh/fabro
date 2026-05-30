@@ -59,7 +59,7 @@ mod tests {
 
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_store::{Database, RunDatabase};
-    use fabro_types::fixtures;
+    use fabro_types::{fixtures, test_support};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -148,7 +148,7 @@ mod tests {
                 ("env".to_string(), "test".to_string()),
                 ("team".to_string(), "workflow".to_string()),
             ]),
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             definition_blob: None,
             fork_source_ref: None,

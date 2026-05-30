@@ -8,7 +8,7 @@ use fabro_types::{
     BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
     QuestionType, RunDiff, RunSandbox, RunSandboxInstance, RunSandboxPlan, RunSandboxRuntime,
     RunStatus, SandboxProviderKind, StageCompletion, StageModelUsage, StageOutcome, StartRecord,
-    WorkflowSettings, first_event_seq, fixtures,
+    WorkflowSettings, first_event_seq, fixtures, test_support,
 };
 use serde_json::json;
 
@@ -22,7 +22,7 @@ fn sample_run_spec() -> RunSpec {
         automation:       None,
         source_directory: Some("/tmp/project".to_string()),
         labels:           HashMap::from([("team".to_string(), "platform".to_string())]),
-        provenance:       None,
+        provenance:       test_support::test_run_provenance(),
         manifest_blob:    None,
         definition_blob:  None,
         git:              Some(fabro_types::GitContext {
