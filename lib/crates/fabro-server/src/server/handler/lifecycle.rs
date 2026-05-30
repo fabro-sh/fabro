@@ -371,46 +371,67 @@ async fn cancel_run(
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
-    let pending_control = match load_pending_control(state.as_ref(), id).await {
-        Ok(pending_control) => pending_control,
+    let durable_summary = match state.store.runs().find(&id).await {
+        Ok(summary) => summary,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
         }
     };
+    let pending_control = durable_summary
+        .as_ref()
+        .and_then(|summary| summary.lifecycle.pending_control);
+    let durable_status = durable_summary
+        .as_ref()
+        .map(|summary| summary.lifecycle.status);
     let cancel_target = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get_mut(&id) {
-            Some(managed_run) => match managed_run.status {
-                RunStatus::Submitted
-                | RunStatus::Pending { .. }
-                | RunStatus::Runnable
-                | RunStatus::Starting
-                | RunStatus::Running
-                | RunStatus::Blocked { .. }
-                | RunStatus::Paused { .. } => {
-                    let persist_cancelled_status = matches!(
-                        managed_run.status,
-                        RunStatus::Submitted | RunStatus::Pending { .. } | RunStatus::Runnable
-                    );
-                    if persist_cancelled_status {
-                        managed_run.status = RunStatus::Failed {
-                            reason: FailureReason::Cancelled,
+            Some(managed_run) => {
+                let managed_status = managed_run.status;
+                match managed_status {
+                    RunStatus::Submitted
+                    | RunStatus::Pending { .. }
+                    | RunStatus::Runnable
+                    | RunStatus::Starting
+                    | RunStatus::Running
+                    | RunStatus::Blocked { .. }
+                    | RunStatus::Paused { .. } => {
+                        let answer_transport = managed_run.answer_transport.clone();
+                        let should_cancel_pending_interview =
+                            matches!(
+                                &answer_transport,
+                                Some(RunAnswerTransport::InProcess { .. })
+                            ) && (matches!(managed_status, RunStatus::Blocked { .. })
+                                || matches!(durable_status, Some(RunStatus::Blocked { .. })));
+                        let persist_cancelled_status = matches!(
+                            managed_status,
+                            RunStatus::Submitted | RunStatus::Pending { .. } | RunStatus::Runnable
+                        ) && !should_cancel_pending_interview;
+                        if persist_cancelled_status {
+                            managed_run.status = RunStatus::Failed {
+                                reason: FailureReason::Cancelled,
+                            };
+                        }
+                        let cancel_tx = if should_cancel_pending_interview {
+                            None
+                        } else {
+                            managed_run.cancel_tx.take()
                         };
+                        Some((
+                            persist_cancelled_status,
+                            answer_transport,
+                            managed_run.cancel_token.clone(),
+                            cancel_tx,
+                            managed_run.worker_ref.clone(),
+                        ))
                     }
-                    Some((
-                        persist_cancelled_status,
-                        managed_run.answer_transport.clone(),
-                        managed_run.cancel_token.clone(),
-                        managed_run.cancel_tx.take(),
-                        managed_run.worker_ref.clone(),
-                    ))
+                    _ => {
+                        return ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.")
+                            .into_response();
+                    }
                 }
-                _ => {
-                    return ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.")
-                        .into_response();
-                }
-            },
+            }
             None => None,
         }
     };

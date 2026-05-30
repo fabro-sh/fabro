@@ -13627,6 +13627,72 @@ async fn cancel_run_requests_worker_runtime_stop_when_control_unavailable() {
 }
 
 #[tokio::test]
+async fn cancel_durably_blocked_in_process_run_cancels_pending_interview_without_abort_signal() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::RunBlocked {
+            blocked_reason: BlockedReason::HumanInputRequired,
+        },
+    ])
+    .await;
+
+    let interviewer = Arc::new(ControlInterviewer::new());
+    let mut question = Question::new("approve?", QuestionType::YesNo);
+    question.id = "q-1".to_string();
+    let ask_interviewer = Arc::clone(&interviewer);
+    let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
+    tokio::task::yield_now().await;
+
+    let (cancel_tx, mut cancel_rx) = oneshot::channel();
+    let cancel_token = CancellationToken::new();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut run = managed_run(
+        MINIMAL_DOT.to_string(),
+        RunStatus::Running,
+        Utc::now(),
+        temp_dir.path().join(run_id.to_string()),
+        RunExecutionMode::Start,
+    );
+    run.answer_transport = Some(RunAnswerTransport::InProcess {
+        interviewer,
+        steering_hub: Arc::new(fabro_workflow::SteeringHub::new(Arc::new(
+            fabro_workflow::event::Emitter::new(run_id),
+        ))),
+    });
+    run.cancel_token = Some(cancel_token);
+    run.cancel_tx = Some(cancel_tx);
+    state
+        .runs
+        .lock()
+        .expect("runs lock poisoned")
+        .insert(run_id, run);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/cancel")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let submission = tokio::time::timeout(std::time::Duration::from_millis(100), ask)
+        .await
+        .expect("cancel should resolve the pending in-process interview")
+        .expect("interview task should not panic");
+    assert_eq!(submission.answer.value, AnswerValue::Cancelled);
+    assert!(
+        matches!(
+            cancel_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ),
+        "blocked in-process cancellation should let the workflow unwind instead of aborting it"
+    );
+}
+
+#[tokio::test]
 async fn pause_run_rejects_when_control_is_already_pending() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
