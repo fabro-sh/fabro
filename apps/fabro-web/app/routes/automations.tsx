@@ -104,19 +104,18 @@ function PlayIcon({ className }: { className?: string }) {
 function AutomationCard({
   automation,
   busy,
-  disabled,
   running,
   onRun,
   onDelete,
 }: {
   automation: AutomationRow;
   busy: boolean;
-  disabled: boolean;
   running: boolean;
   onRun: () => void;
   onDelete: () => void;
 }) {
   const Icon = automation.icon;
+  const runDisabled = busy || running || !automation.apiEnabled;
   return (
     <div className="group flex items-center gap-4 rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
       <Link to={`/automations/${automation.id}`} className="flex min-w-0 flex-1 items-center gap-4">
@@ -154,7 +153,7 @@ function AutomationCard({
         <button
           type="button"
           onClick={onRun}
-          disabled={disabled}
+          disabled={runDisabled}
           aria-label={running ? "Starting run…" : "Run automation"}
           title={
             running
@@ -330,11 +329,6 @@ export default function Automations() {
             key={automation.id}
             automation={automation}
             busy={deleting || (runningId !== null && runningId !== automation.id)}
-            disabled={
-              deleting ||
-              !automation.apiEnabled ||
-              (runningId !== null && runningId !== automation.id)
-            }
             running={runningId === automation.id}
             onRun={() => runAutomation(automation)}
             onDelete={() => setPendingDelete(automation)}
