@@ -53,7 +53,7 @@ fn dry_run_prints_equivalent_build_commands() {
     let stdout = output_text(&output.stdout);
 
     assert!(
-        stdout.contains("cargo dev spa refresh"),
+        stdout.contains("cargo --locked dev spa refresh"),
         "dry-run should print SPA refresh command:\n{stdout}"
     );
     assert!(
@@ -61,7 +61,9 @@ fn dry_run_prints_equivalent_build_commands() {
         "dry-run should print builder docker run:\n{stdout}"
     );
     assert!(
-        stdout.contains("cargo zigbuild --release -p fabro-cli --target x86_64-unknown-linux-musl"),
+        stdout.contains(
+            "cargo zigbuild --locked --release -p fabro-cli --target x86_64-unknown-linux-musl"
+        ),
         "dry-run should print cargo-zigbuild target:\n{stdout}"
     );
     assert!(

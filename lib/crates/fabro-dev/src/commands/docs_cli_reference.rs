@@ -44,6 +44,7 @@ pub(crate) fn docs_cli_reference_root(root: &Path, check: bool) -> Result<()> {
 fn render_cli_reference() -> Result<String> {
     let command = PlannedCommand::new("cargo")
         .arg("run")
+        .arg("--locked")
         .arg("-p")
         .arg("fabro-cli")
         .arg("--")

@@ -148,6 +148,7 @@ impl DockerBuildPlan {
 
     fn spa_refresh_command() -> PlannedCommand {
         PlannedCommand::new("cargo")
+            .arg("--locked")
             .arg("dev")
             .arg("spa")
             .arg("refresh")
@@ -235,6 +236,6 @@ fn build_script(target: &str, zig_arch: &str) -> String {
          cargo install --locked --root /opt/cargo-tools cargo-zigbuild; \
          fi; \
          rustup target add {target}; \
-         cargo zigbuild --release -p fabro-cli --target {target}"
+         cargo zigbuild --locked --release -p fabro-cli --target {target}"
     )
 }
