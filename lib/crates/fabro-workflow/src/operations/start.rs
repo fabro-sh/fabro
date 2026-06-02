@@ -344,14 +344,28 @@ async fn persist_terminal_engine_failure(
     .await;
 }
 
+/// Choose the working directory for the `local` sandbox.
+///
+/// When the client's `source_directory` exists on this (server) host, use it —
+/// the same-host CLI case, where the agent operates directly on the user's
+/// project tree. When it is absent or does not exist here (e.g. a remote CLI
+/// driving an in-pod `local` sandbox, where the client's cwd is meaningless on
+/// the server), fall back to a server-writable workspace under the run's scratch
+/// dir. Without this the sandbox would `create_dir_all` the client's path
+/// (e.g. `/Users/alice/project`) on the server and fail with a permission error.
+fn local_working_directory(source_directory: Option<&str>, run_dir: &Path) -> PathBuf {
+    match source_directory {
+        Some(dir) if Path::new(dir).is_dir() => PathBuf::from(dir),
+        _ => run_dir.join("workspace"),
+    }
+}
+
 impl RunSession {
     async fn new(persisted: &Persisted, services: StartServices) -> Result<Self, Error> {
         let record = persisted.run_spec();
         let settings = &record.settings;
-        let working_directory = record
-            .source_directory
-            .as_deref()
-            .map_or_else(|| PathBuf::from("."), PathBuf::from);
+        let working_directory =
+            local_working_directory(record.source_directory.as_deref(), persisted.run_dir());
         let state = services
             .run_store
             .state()
@@ -1230,6 +1244,44 @@ mod tests {
 
     fn test_catalog() -> Arc<Catalog> {
         Arc::new(Catalog::from_builtin().expect("default catalog should build"))
+    }
+
+    #[test]
+    fn local_working_directory_uses_existing_source_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let src = temp.path().join("project");
+        std::fs::create_dir_all(&src).unwrap();
+        let run_dir = temp.path().join("run");
+        assert_eq!(
+            local_working_directory(src.to_str(), &run_dir),
+            src,
+            "an existing source_directory (same-host CLI) should be used as-is"
+        );
+    }
+
+    #[test]
+    fn local_working_directory_falls_back_when_absent() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        assert_eq!(
+            local_working_directory(None, &run_dir),
+            run_dir.join("workspace"),
+            "no source_directory should fall back to the run workspace dir"
+        );
+    }
+
+    #[test]
+    fn local_working_directory_falls_back_when_source_dir_missing_on_server() {
+        // A remote CLI sends its own cwd, which need not exist on the server
+        // (e.g. an in-pod local sandbox). The sandbox must not try to create it.
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let missing = temp.path().join("does-not-exist/alice/project");
+        assert_eq!(
+            local_working_directory(missing.to_str(), &run_dir),
+            run_dir.join("workspace"),
+            "a source_directory absent on the server should fall back to the run workspace dir"
+        );
     }
 
     #[test]
