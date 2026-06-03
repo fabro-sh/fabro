@@ -11,3 +11,6 @@
 //! are the only behavior net for those extractions.
 
 mod anthropic;
+mod gemini;
+mod openai_compatible;
+mod openai_responses;
