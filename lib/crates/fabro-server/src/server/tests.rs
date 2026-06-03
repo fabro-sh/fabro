@@ -1090,6 +1090,10 @@ url = "{{ env.FABRO_WEB_URL }}"
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test asserts the raw template source"
+)]
 #[test]
 fn replace_settings_updates_layer_and_typed_server_settings() {
     let state = test_app_state_with_options(
@@ -13433,6 +13437,10 @@ async fn post_runs_returns_submitted_status() {
     assert_eq!(run_json_status(&body)["kind"], "submitted");
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test asserts the raw template source"
+)]
 #[tokio::test]
 async fn start_run_persists_full_settings_snapshot() {
     let source = r#"

@@ -114,6 +114,10 @@ async fn load_questions(app: &axum::Router, run_id: &str) -> serde_json::Value {
     .await
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test asserts the raw template source"
+)]
 #[tokio::test]
 async fn get_system_info_returns_runtime_fields() {
     let (_temp, settings, expected_storage_dir) = temp_storage_settings();

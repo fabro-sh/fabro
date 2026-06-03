@@ -16,8 +16,7 @@ use fabro_static::EnvVars;
 use fabro_types::ServerSettings;
 use fabro_types::settings::server::{GithubIntegrationStrategy, LogDestination, WebhookStrategy};
 use fabro_types::settings::{
-    GithubIntegrationSettings, InterpString, ObjectStoreSettings, ServerListenSettings,
-    ServerNamespace,
+    GithubIntegrationSettings, ObjectStoreSettings, ServerListenSettings, ServerNamespace,
 };
 use fabro_util::terminal::Styles;
 use object_store::aws::{AmazonS3Builder, AmazonS3ConfigKey};
@@ -33,6 +32,7 @@ use tracing::{error, info, warn};
 
 use crate::canonical_origin::resolve_canonical_origin;
 use crate::github_webhooks::{TailscaleFunnelManager, WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV};
+use crate::interp::{process_env_var, resolve_interp, resolve_interp_path};
 use crate::server::{
     AppState, AppStateConfig, ResolvedAppStateSettings, RouterOptions, build_app_state,
     build_router_with_options, reconcile_incomplete_runs_on_startup, shutdown_active_workers,
@@ -555,25 +555,6 @@ fn resolved_bind_request(
         ServerListenSettings::Unix { path } => Ok(BindRequest::Unix(resolve_interp_path(path)?)),
         ServerListenSettings::Tcp { address, .. } => Ok(BindRequest::Tcp(*address)),
     }
-}
-
-fn resolve_interp(value: &InterpString) -> anyhow::Result<String> {
-    value
-        .resolve(process_env_var)
-        .map(|resolved| resolved.value)
-        .with_context(|| format!("failed to resolve {}", value.as_source()))
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Server settings interpolation owns a process-env lookup facade for {{ env.* }} values."
-)]
-fn process_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
-fn resolve_interp_path(value: &InterpString) -> anyhow::Result<PathBuf> {
-    Ok(PathBuf::from(resolve_interp(value)?))
 }
 
 fn absolute_path(path: PathBuf) -> anyhow::Result<PathBuf> {
@@ -1167,6 +1148,10 @@ fn server_bind_title(bind: &Bind) -> String {
     clippy::disallowed_types,
     reason = "tests reserve/probe ports via sync std::net::TcpListener; the async server under \
               test uses tokio::net::TcpListener separately"
+)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests assert the raw template source"
 )]
 mod tests {
     use std::io;

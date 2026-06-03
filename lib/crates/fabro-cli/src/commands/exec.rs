@@ -276,6 +276,11 @@ impl ProviderAdapter for AuthenticatedFabroServerAdapter {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source is today's behavior; cli.exec.model.* is slated for demotion to plain String in the \
+              interpolation unification (D2)"
+)]
 pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResult<()> {
     use fabro_agent::cli::PermissionLevel as AgentPermissionLevel;
     use fabro_types::settings::run::AgentPermissions;

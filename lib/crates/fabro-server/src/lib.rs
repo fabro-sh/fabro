@@ -27,6 +27,7 @@ pub mod diagnostics;
 pub mod error;
 pub mod github_webhooks;
 pub mod install;
+mod interp;
 pub mod jwt_auth;
 pub mod manifest_validation;
 mod migrations;

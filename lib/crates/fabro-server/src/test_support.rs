@@ -30,12 +30,13 @@ use ulid::Ulid;
 use crate::auth;
 use crate::automation_materializer::AutomationRunMaterializer;
 pub use crate::automation_materializer::TestAutomationRunMaterializer;
+use crate::interp::process_env_var;
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 #[cfg(test)]
 use crate::principal_middleware::{AuthContextSlot, RequestAuthContext};
 use crate::server::{
     self, AppState, AppStateConfig, EnvLookup, RegistryFactoryOverride, ResolvedAppStateSettings,
-    RouterOptions, build_app_state, process_env_var,
+    RouterOptions, build_app_state,
 };
 use crate::server_secrets::ServerSecrets;
 #[cfg(test)]

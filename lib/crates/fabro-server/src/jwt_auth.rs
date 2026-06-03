@@ -15,6 +15,7 @@ use tracing::info;
 use crate::auth::REFRESH_TOKEN_PREFIX;
 use crate::auth::{self, AuthErrorCode, JwtError, JwtSigningKey, KeyDeriveError};
 use crate::error::ApiError;
+use crate::interp::process_env_var;
 
 type HmacSha256 = Hmac<Sha256>;
 const DEV_TOKEN_COMPARE_KEY: &[u8] = b"fabro-dev-token-compare-key";
@@ -56,14 +57,6 @@ pub enum AuthMode {
 
 pub fn resolve_auth_mode(settings: &ServerNamespace) -> Result<AuthMode> {
     resolve_auth_mode_with_lookup(settings, process_env_var)
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Server auth startup validation intentionally reads process env for server secrets."
-)]
-fn process_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
 }
 
 pub fn resolve_auth_mode_with_lookup<F>(settings: &ServerNamespace, lookup: F) -> Result<AuthMode>

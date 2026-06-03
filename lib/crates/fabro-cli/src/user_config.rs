@@ -222,6 +222,12 @@ fn value_at_path<'a>(document: &'a toml::Value, path: &[&str]) -> Option<&'a tom
 
 /// Pull the resolved CLI target configuration out of `[cli.target]`.
 /// Returns either an http(s) URL or a unix socket path.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "known leak: cli.target.* is a url/connection field that should resolve {{ env.* }} \
+              tokens but consumes them raw today; strict resolution scheduled in the \
+              interpolation unification (Phase 2 keep-rows)"
+)]
 fn cli_target_from_settings(settings: &CliNamespace) -> Option<String> {
     let target = settings.target.as_ref()?;
     match target {

@@ -140,6 +140,11 @@ fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "goal text intentionally passes through in source form; goals become importable \
+              templates in the interpolation unification (Phase 3)"
+)]
 fn resolve_layer_goal(
     goal: &RunGoalLayer,
     base_dir: &Path,
@@ -153,6 +158,11 @@ fn resolve_layer_goal(
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "goal text intentionally passes through in source form; goals become importable \
+              templates in the interpolation unification (Phase 3)"
+)]
 fn resolve_goal(
     goal: &RunGoal,
     base_dir: &Path,
@@ -167,6 +177,10 @@ fn resolve_goal(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests assert the raw template source"
+)]
 mod tests {
     use fabro_types::settings::run::RunGoal;
 

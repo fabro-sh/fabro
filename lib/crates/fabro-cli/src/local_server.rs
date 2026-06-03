@@ -86,6 +86,10 @@ fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source shown in the error message when resolution fails"
+)]
 fn storage_dir_from_toml_with_lookup(
     source: &str,
     lookup: &dyn Fn(&str) -> Option<String>,

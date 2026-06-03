@@ -1108,6 +1108,11 @@ fn stamp_system_worker(mut event: RunEvent) -> RunEvent {
     event
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "known leak: GitHub App id/slug passes unresolved; strict resolution scheduled in the \
+              interpolation unification (Phase 2)"
+)]
 fn maybe_build_github_credentials(
     settings: &WorkflowSettings,
     vault: Option<&fabro_vault::Vault>,

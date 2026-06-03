@@ -1,6 +1,6 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "sync test fixture setup; not on a Tokio path"
+    reason = "sync test fixture setup and raw template source assertions; not on a Tokio path"
 )]
 
 use fabro_types::settings::InterpString;

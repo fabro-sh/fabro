@@ -131,6 +131,10 @@ mod tests {
         assert_eq!(args.input, vec![r"count=3", r#"decision="approve""#]);
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test asserts the raw template source"
+    )]
     #[test]
     fn run_overrides_preserve_goal_file_as_file_goal() {
         let spec = ValidatedCreateRunSpec::try_from(CreateRunSpec {

@@ -310,6 +310,11 @@ fn append_string_map(root: &mut Table, name: &str, map: &StickyMap<String>) {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "serializing the InterpString map back to its TOML source form; tokens must \
+              round-trip unresolved (resolution happens at consumption, not serialization)"
+)]
 fn append_interp_map(root: &mut Table, name: &str, map: &StickyMap<InterpString>) {
     if map.is_empty() {
         return;

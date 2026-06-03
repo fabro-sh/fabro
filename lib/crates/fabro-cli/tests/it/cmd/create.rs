@@ -347,6 +347,10 @@ digraph FooWorkflow {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test asserts the raw template source"
+)]
 #[test]
 fn create_persists_requested_overrides_into_store() {
     let context = test_context!();

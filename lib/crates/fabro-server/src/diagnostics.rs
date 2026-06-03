@@ -327,6 +327,11 @@ fn short_error_line(rendered: &str) -> String {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "known leak: GitHub App id/slug passes unresolved; strict resolution scheduled in the \
+              interpolation unification (Phase 2)"
+)]
 async fn check_github_app(state: &AppState) -> CheckResult {
     let settings = state.server_settings();
     if settings.server.integrations.github.strategy == GithubIntegrationStrategy::Token {

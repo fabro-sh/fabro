@@ -19,7 +19,7 @@ use fabro_api::types::{
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
 use fabro_llm::client::Client as LlmClient;
-use fabro_types::settings::ResolveEnvError;
+use fabro_types::settings::ResolveError;
 use fabro_types::{
     AutomationRef, Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance,
     StageContextWindow, StageContextWindowStaleness, StageContextWindowUnavailableReason,
@@ -37,10 +37,10 @@ use super::super::{
     AppState, DeleteRunOutcome, ListResponse, PaginationParams, RunExecutionMode,
     answer_from_request, api_question_from_pending_interview, default_page_limit,
     delete_run_internal, load_pending_interview, managed_run, paginate_items, parse_run_id_path,
-    parse_stage_id_path, reject_if_archived, resolve_interp_string,
-    submit_pending_interview_answer, workflow_event,
+    parse_stage_id_path, reject_if_archived, submit_pending_interview_answer, workflow_event,
 };
 use crate::error::ApiError;
+use crate::interp::resolve_interp;
 use crate::principal_middleware::{
     RequireCommandLog, RequireRunManagementTarget, RequireRunScoped, RequireRunStageScoped,
     RequiredRunManagementActor, RequiredUser,
@@ -697,7 +697,7 @@ pub(crate) async fn create_run_from_manifest(
     create_input.submitted_manifest_bytes = Some(submitted_manifest_bytes);
     create_input.automation = automation;
 
-    let storage_root = match resolve_interp_string(&state.server_settings().server.storage.root) {
+    let storage_root = match resolve_interp(&state.server_settings().server.storage.root) {
         Ok(path) => PathBuf::from(path),
         Err(err) => {
             return ApiError::new(
@@ -969,7 +969,7 @@ async fn validate_run_manifest(
 async fn substitute_run_variables(
     state: &AppState,
     settings: &mut WorkflowSettings,
-) -> Result<(), ResolveEnvError> {
+) -> Result<(), ResolveError> {
     let variables = state.variables.read().await;
     settings
         .run

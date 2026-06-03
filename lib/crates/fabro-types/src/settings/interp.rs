@@ -1,10 +1,19 @@
-//! Env var and run variable interpolation for config strings.
+//! Interpolation for config strings.
 //!
-//! Any string field may use `{{ env.NAME }}` tokens, either as a whole value or
-//! as one or more substrings inside a larger string. Run-scoped settings may
-//! additionally use non-sensitive `{{ vars.NAME }}` tokens. Resolution happens
-//! only when the field is consumed, and provenance tracking lets outward-facing
-//! renderers redact env-sourced values uniformly.
+//! An [`InterpString`] field may contain narrow `{{ <namespace>.NAME }}`
+//! tokens — no template logic — drawn from the four [`Namespace`]s: `env`,
+//! `vars`, `secrets`, and `inputs`. Which namespaces actually resolve is
+//! scope-determined by the caller through [`ResolveCtx`]: server-scope
+//! settings provide `env` (and eventually `secrets`), run-scope settings
+//! additionally provide `vars` and `inputs`. A token whose namespace is not
+//! available in the resolution context fails loudly instead of passing
+//! through as literal text.
+//!
+//! Resolution timing is split: `vars`/`inputs` substitute early (server-side,
+//! at run creation) via [`InterpString::substitute_with`], while
+//! `env`/`secrets` resolve late, at consumption time in the process that owns
+//! the value, via [`InterpString::resolve_with`]. Provenance tracking lets
+//! outward-facing renderers redact env- and secret-sourced values uniformly.
 
 use std::fmt;
 
@@ -13,8 +22,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::variable::is_env_style_name;
 
-/// A config string that may contain `{{ env.NAME }}` or `{{ vars.NAME }}`
-/// tokens.
+/// A config string that may contain `{{ env.NAME }}`, `{{ vars.NAME }}`,
+/// `{{ secrets.NAME }}`, or `{{ inputs.NAME }}` tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpString {
     segments: Vec<Segment>,
@@ -23,8 +32,130 @@ pub struct InterpString {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Segment {
     Literal(String),
-    EnvVar(String),
-    Variable(String),
+    Token {
+        namespace: Namespace,
+        name:      String,
+    },
+}
+
+/// The interpolation namespaces recognized inside `{{ ... }}` tokens.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display, strum::EnumString, strum::IntoStaticStr,
+)]
+#[strum(serialize_all = "lowercase")]
+pub enum Namespace {
+    /// `{{ env.NAME }}` — process environment, resolved at consumption time.
+    Env,
+    /// `{{ vars.NAME }}` — non-sensitive run variables, substituted early.
+    Vars,
+    /// `{{ secrets.NAME }}` — vault secrets, resolved at consumption time.
+    Secrets,
+    /// `{{ inputs.NAME }}` — workflow run inputs, substituted early.
+    Inputs,
+}
+
+impl Namespace {
+    /// The noun used for this namespace in error messages.
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Env => "environment variable",
+            Self::Vars => "variable",
+            Self::Secrets => "secret",
+            Self::Inputs => "input",
+        }
+    }
+
+    /// Parse a trimmed `{{ ... }}` token body into a namespace + name, or
+    /// `None` when the body is not a recognized token (it then stays literal).
+    fn parse_token(token: &str) -> Option<(Self, String)> {
+        let trimmed = token.trim();
+        let (prefix, name) = trimmed.split_once('.')?;
+        let namespace = prefix.parse::<Self>().ok()?;
+        namespace
+            .is_valid_name(name)
+            .then(|| (namespace, name.to_owned()))
+    }
+
+    fn is_valid_name(self, name: &str) -> bool {
+        match self {
+            // Preserves the original env token grammar: any non-empty run of
+            // ASCII alphanumerics/underscores (leading digits allowed).
+            Self::Env => {
+                !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            }
+            Self::Vars | Self::Secrets => is_env_style_name(name),
+            // Input keys are TOML bare keys; additionally allow interior
+            // hyphens.
+            Self::Inputs => {
+                let mut chars = name.chars();
+                match chars.next() {
+                    Some(first) if first.is_ascii_alphanumeric() || first == '_' => {}
+                    _ => return false,
+                }
+                chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+            }
+        }
+    }
+}
+
+/// The namespace lookups available when resolving or substituting an
+/// [`InterpString`].
+///
+/// Which namespaces are populated is scope-determined by the caller: a token
+/// in a namespace with no lookup is a [`ResolveErrorKind::Unavailable`] error
+/// under [`InterpString::resolve_with`], and passes through unchanged under
+/// [`InterpString::substitute_with`].
+#[derive(Default)]
+pub struct ResolveCtx<'a> {
+    env:     Option<LookupFn<'a>>,
+    vars:    Option<LookupFn<'a>>,
+    secrets: Option<LookupFn<'a>>,
+    inputs:  Option<LookupFn<'a>>,
+}
+
+type LookupFn<'a> = Box<dyn FnMut(&str) -> Option<String> + 'a>;
+
+impl<'a> ResolveCtx<'a> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn with_env(mut self, lookup: impl FnMut(&str) -> Option<String> + 'a) -> Self {
+        self.env = Some(Box::new(lookup));
+        self
+    }
+
+    #[must_use]
+    pub fn with_vars(mut self, lookup: impl FnMut(&str) -> Option<String> + 'a) -> Self {
+        self.vars = Some(Box::new(lookup));
+        self
+    }
+
+    #[must_use]
+    pub fn with_secrets(mut self, lookup: impl FnMut(&str) -> Option<String> + 'a) -> Self {
+        self.secrets = Some(Box::new(lookup));
+        self
+    }
+
+    #[must_use]
+    pub fn with_inputs(mut self, lookup: impl FnMut(&str) -> Option<String> + 'a) -> Self {
+        self.inputs = Some(Box::new(lookup));
+        self
+    }
+
+    fn lookup_for(&mut self, namespace: Namespace) -> Option<&mut LookupFn<'a>> {
+        match namespace {
+            Namespace::Env => self.env.as_mut(),
+            Namespace::Vars => self.vars.as_mut(),
+            Namespace::Secrets => self.secrets.as_mut(),
+            Namespace::Inputs => self.inputs.as_mut(),
+        }
+    }
 }
 
 impl InterpString {
@@ -35,41 +166,21 @@ impl InterpString {
 
         match segments.last_mut() {
             Some(Segment::Literal(existing)) => existing.push_str(text),
-            Some(Segment::EnvVar(_) | Segment::Variable(_)) | None => {
+            Some(Segment::Token { .. }) | None => {
                 segments.push(Segment::Literal(text.to_owned()));
             }
         }
     }
 
-    fn parse_env_token(token: &str) -> Option<String> {
-        let trimmed = token.trim();
-        let name = trimmed.strip_prefix("env.")?;
-        if name.is_empty()
-            || !name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-        {
-            return None;
-        }
-        Some(name.to_owned())
-    }
-
-    fn parse_vars_token(token: &str) -> Option<String> {
-        let trimmed = token.trim();
-        let name = trimmed.strip_prefix("vars.")?;
-        if is_env_style_name(name) {
-            Some(name.to_owned())
-        } else {
-            None
-        }
-    }
-
-    /// Parse a raw string into its literal/env-var segments.
+    /// Parse a raw string into its literal/token segments.
     ///
     /// The [`From<String>`] and [`From<&str>`] impls delegate here.
     ///
-    /// Parsing is infallible: the token grammar is intentionally permissive so
-    /// that validation happens at consumption time along with env lookup.
+    /// Parsing is infallible and intentionally permissive: only
+    /// `{{ <known-namespace>.NAME }}` shaped tokens are claimed; any other
+    /// `{{ ... }}` text (jq programs, Go templates, unterminated braces)
+    /// stays literal. This is a documented known limitation — validation of
+    /// claimed tokens happens at substitution/resolution time.
     #[must_use]
     pub fn parse(input: &str) -> Self {
         let mut segments: Vec<Segment> = Vec::new();
@@ -81,10 +192,8 @@ impl InterpString {
             let after_open = &rest[start + 2..];
             if let Some(close) = after_open.find("}}") {
                 let token = &after_open[..close];
-                if let Some(name) = Self::parse_env_token(token) {
-                    segments.push(Segment::EnvVar(name));
-                } else if let Some(name) = Self::parse_vars_token(token) {
-                    segments.push(Segment::Variable(name));
+                if let Some((namespace, name)) = Namespace::parse_token(token) {
+                    segments.push(Segment::Token { namespace, name });
                 } else {
                     Self::push_literal(&mut segments, &rest[start..start + 2 + close + 2]);
                 }
@@ -116,60 +225,48 @@ impl InterpString {
             .all(|seg| matches!(seg, Segment::Literal(_)))
     }
 
-    /// True when this string contains at least one env var token.
+    /// True when this string contains at least one token in `namespace`.
     #[must_use]
-    pub fn references_env(&self) -> bool {
+    pub fn references(&self, namespace: Namespace) -> bool {
         self.segments
             .iter()
-            .any(|seg| matches!(seg, Segment::EnvVar(_)))
+            .any(|seg| matches!(seg, Segment::Token { namespace: ns, .. } if *ns == namespace))
     }
 
-    /// True when this string contains at least one run variable token.
+    /// The names referenced in `namespace` by this string, in source order.
     #[must_use]
-    pub fn references_vars(&self) -> bool {
-        self.segments
-            .iter()
-            .any(|seg| matches!(seg, Segment::Variable(_)))
-    }
-
-    /// The env var names referenced by this string, in source order.
-    #[must_use]
-    pub fn env_var_names(&self) -> Vec<&str> {
+    pub fn names(&self, namespace: Namespace) -> Vec<&str> {
         self.segments
             .iter()
             .filter_map(|seg| match seg {
-                Segment::EnvVar(name) => Some(name.as_str()),
-                Segment::Literal(_) | Segment::Variable(_) => None,
+                Segment::Token {
+                    namespace: ns,
+                    name,
+                } if *ns == namespace => Some(name.as_str()),
+                Segment::Literal(_) | Segment::Token { .. } => None,
             })
             .collect()
     }
 
-    /// The run variable names referenced by this string, in source order.
-    #[must_use]
-    pub fn var_names(&self) -> Vec<&str> {
-        self.segments
-            .iter()
-            .filter_map(|seg| match seg {
-                Segment::Variable(name) => Some(name.as_str()),
-                Segment::Literal(_) | Segment::EnvVar(_) => None,
-            })
-            .collect()
-    }
-
-    /// The raw source string.
+    /// The raw, unresolved template source.
+    ///
+    /// This is a footgun for consumers: passing the raw source downstream
+    /// leaks `{{ ... }}` tokens as literal text. Resolve via
+    /// [`InterpString::resolve`] / [`InterpString::resolve_with`] (or
+    /// substitute via [`InterpString::substitute_with`]) instead. Intentional
+    /// uses — serialization, error messages, deliberate source preservation —
+    /// must document themselves with
+    /// `#[expect(clippy::disallowed_methods, reason = "...")]`.
     #[must_use]
     pub fn as_source(&self) -> String {
         let mut out = String::new();
         for seg in &self.segments {
             match seg {
                 Segment::Literal(text) => out.push_str(text),
-                Segment::EnvVar(name) => {
-                    out.push_str("{{ env.");
-                    out.push_str(name);
-                    out.push_str(" }}");
-                }
-                Segment::Variable(name) => {
-                    out.push_str("{{ vars.");
+                Segment::Token { namespace, name } => {
+                    out.push_str("{{ ");
+                    out.push_str(namespace.into());
+                    out.push('.');
                     out.push_str(name);
                     out.push_str(" }}");
                 }
@@ -178,107 +275,132 @@ impl InterpString {
         out
     }
 
-    /// Resolve this string using `lookup`, which should return the current
-    /// value for a given env var name (or `None` if unset).
+    /// Fully resolve every token using the lookups in `ctx`.
     ///
-    /// On success the caller gets the final string plus provenance describing
-    /// whether any env var contributed to the value. On failure the caller
-    /// learns which env var was unresolved.
-    pub fn resolve<F>(&self, mut lookup: F) -> Result<Resolved, ResolveEnvError>
-    where
-        F: FnMut(&str) -> Option<String>,
-    {
+    /// Tokens in a namespace `ctx` has no lookup for fail with
+    /// [`ResolveErrorKind::Unavailable`]: namespace availability is
+    /// scope-determined, and a token outside its scope must fail loudly
+    /// rather than pass through as literal text. A lookup miss fails with
+    /// [`ResolveErrorKind::Missing`] — there is no fallback to the raw
+    /// source.
+    pub fn resolve_with(&self, ctx: &mut ResolveCtx<'_>) -> Result<Resolved, ResolveError> {
         let mut value = String::new();
-        let mut used = Vec::new();
+        let mut env_names = Vec::new();
+        let mut secret_names = Vec::new();
         for seg in &self.segments {
             match seg {
                 Segment::Literal(text) => value.push_str(text),
-                Segment::EnvVar(name) => {
+                Segment::Token { namespace, name } => {
+                    let Some(lookup) = ctx.lookup_for(*namespace) else {
+                        return Err(ResolveError::unavailable(*namespace, name));
+                    };
                     let Some(resolved) = lookup(name) else {
-                        return Err(ResolveEnvError::missing_env(name));
+                        return Err(ResolveError::missing(*namespace, name));
                     };
                     value.push_str(&resolved);
-                    used.push(name.clone());
-                }
-                Segment::Variable(name) => {
-                    return Err(ResolveEnvError::unsupported_variable(name));
+                    match namespace {
+                        Namespace::Env => env_names.push(name.clone()),
+                        Namespace::Secrets => secret_names.push(name.clone()),
+                        Namespace::Vars | Namespace::Inputs => {}
+                    }
                 }
             }
         }
 
-        let provenance = if used.is_empty() {
-            Provenance::Literal
-        } else {
-            Provenance::EnvSourced { names: used }
-        };
-        Ok(Resolved { value, provenance })
+        Ok(Resolved {
+            value,
+            provenance: Provenance::from_names(env_names, secret_names),
+        })
     }
 
-    /// Resolve env and run variable tokens with separate lookup functions.
+    /// Substitute tokens for the namespaces `ctx` provides, preserving tokens
+    /// for the namespaces it does not — their resolution happens later,
+    /// possibly in a different process.
     ///
-    /// Variables are non-sensitive, so variable-only interpolation does not
-    /// mark the value as env-sourced for redaction.
-    pub fn resolve_with_variables<F, G>(
-        &self,
-        mut env_lookup: F,
-        mut variable_lookup: G,
-    ) -> Result<Resolved, ResolveEnvError>
-    where
-        F: FnMut(&str) -> Option<String>,
-        G: FnMut(&str) -> Option<String>,
-    {
-        let mut value = String::new();
-        let mut used_env = Vec::new();
-        for seg in &self.segments {
-            match seg {
-                Segment::Literal(text) => value.push_str(text),
-                Segment::EnvVar(name) => {
-                    let Some(resolved) = env_lookup(name) else {
-                        return Err(ResolveEnvError::missing_env(name));
-                    };
-                    value.push_str(&resolved);
-                    used_env.push(name.clone());
-                }
-                Segment::Variable(name) => {
-                    let Some(resolved) = variable_lookup(name) else {
-                        return Err(ResolveEnvError::missing_variable(name));
-                    };
-                    value.push_str(&resolved);
-                }
-            }
-        }
-
-        let provenance = if used_env.is_empty() {
-            Provenance::Literal
-        } else {
-            Provenance::EnvSourced { names: used_env }
-        };
-        Ok(Resolved { value, provenance })
-    }
-
-    /// Substitute only `{{ vars.* }}` tokens while preserving `{{ env.* }}`
-    /// tokens for their existing consumption-time env lookup.
-    pub fn substitute_variables<F>(&self, mut lookup: F) -> Result<Self, ResolveEnvError>
-    where
-        F: FnMut(&str) -> Option<String>,
-    {
+    /// This is the early, server-side pass (`vars`/`inputs`); late-bound
+    /// namespaces (`env`/`secrets`) survive in token form for their
+    /// consumption-time [`InterpString::resolve_with`].
+    pub fn substitute_with(&self, ctx: &mut ResolveCtx<'_>) -> Result<Self, ResolveError> {
         let mut segments = Vec::new();
         for seg in &self.segments {
             match seg {
                 Segment::Literal(text) => Self::push_literal(&mut segments, text),
-                Segment::EnvVar(name) => segments.push(Segment::EnvVar(name.clone())),
-                Segment::Variable(name) => {
-                    let Some(resolved) = lookup(name) else {
-                        return Err(ResolveEnvError::missing_variable(name));
-                    };
-                    Self::push_literal(&mut segments, &resolved);
-                }
+                Segment::Token { namespace, name } => match ctx.lookup_for(*namespace) {
+                    Some(lookup) => {
+                        let Some(resolved) = lookup(name) else {
+                            return Err(ResolveError::missing(*namespace, name));
+                        };
+                        Self::push_literal(&mut segments, &resolved);
+                    }
+                    None => segments.push(seg.clone()),
+                },
             }
         }
         if segments.is_empty() {
             segments.push(Segment::Literal(String::new()));
         }
         Ok(Self { segments })
+    }
+
+    /// Resolve in an env-only context, e.g. server-scope settings.
+    ///
+    /// `lookup` should return the current value for a given env var name (or
+    /// `None` if unset). Tokens in any other namespace fail with
+    /// [`ResolveErrorKind::Unavailable`].
+    pub fn resolve<F>(&self, lookup: F) -> Result<Resolved, ResolveError>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        self.resolve_with(&mut ResolveCtx::new().with_env(lookup))
+    }
+
+    /// Resolve in an env-only context, falling back to the raw template
+    /// source when resolution fails so a missing env var surfaces as a
+    /// recognizable diagnostic instead of a silently dropped value.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "intentional raw-source fallback so a missing env var surfaces as a \
+                  recognizable diagnostic; slated for hard-error semantics in the \
+                  interpolation unification (D3)"
+    )]
+    #[must_use]
+    pub fn resolve_or_source<F>(&self, lookup: F) -> String
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        self.resolve(lookup)
+            .map_or_else(|_| self.as_source(), |resolved| resolved.value)
+    }
+
+    /// Substitute only `{{ vars.* }}` tokens while preserving all other
+    /// namespaces for their consumption-time resolution.
+    pub fn substitute_variables<F>(&self, lookup: F) -> Result<Self, ResolveError>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        self.substitute_with(&mut ResolveCtx::new().with_vars(lookup))
+    }
+
+    /// Substitute `{{ vars.* }}` tokens inside a plain string, returning the
+    /// result in source form with all other tokens preserved.
+    ///
+    /// This is the string-typed counterpart of
+    /// [`InterpString::substitute_variables`] for settings fields stored as
+    /// `String`; it keeps the raw-source round-trip in one audited place.
+    pub fn substitute_variables_in_str<F>(value: &str, lookup: F) -> Result<String, ResolveError>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        let parsed = Self::parse(value);
+        if !parsed.references(Namespace::Vars) {
+            return Ok(value.to_owned());
+        }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canonical raw-source round-trip for String-typed settings fields whose \
+                      remaining tokens resolve downstream"
+        )]
+        Ok(parsed.substitute_variables(lookup)?.as_source())
     }
 }
 
@@ -294,7 +416,7 @@ impl From<&str> for InterpString {
     }
 }
 
-/// The outcome of a successful env interpolation resolution.
+/// The outcome of a successful interpolation resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
     pub value:      String,
@@ -304,66 +426,78 @@ pub struct Resolved {
 /// Provenance metadata for resolved config values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Provenance {
-    /// No env var contributed to this value.
+    /// No env var or secret contributed to this value.
     Literal,
-    /// One or more env vars contributed to this value. Used by outward-facing
-    /// renderers to redact env-sourced values uniformly.
-    EnvSourced { names: Vec<String> },
+    /// One or more env vars and/or secrets contributed to this value. Used by
+    /// outward-facing renderers to redact sensitive-sourced values uniformly.
+    /// `vars`/`inputs` are non-sensitive and do not mark a value as sourced.
+    Sourced {
+        env_names:    Vec<String>,
+        secret_names: Vec<String>,
+    },
 }
 
-/// An error returned when an env var referenced in a config string is not set.
+impl Provenance {
+    fn from_names(env_names: Vec<String>, secret_names: Vec<String>) -> Self {
+        if env_names.is_empty() && secret_names.is_empty() {
+            Self::Literal
+        } else {
+            Self::Sourced {
+                env_names,
+                secret_names,
+            }
+        }
+    }
+}
+
+/// An error from resolving or substituting interpolation tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolveEnvError {
-    pub name: String,
-    pub kind: ResolveEnvErrorKind,
+pub struct ResolveError {
+    pub namespace: Namespace,
+    pub name:      String,
+    pub kind:      ResolveErrorKind,
 }
 
-impl ResolveEnvError {
-    fn missing_env(name: &str) -> Self {
+impl ResolveError {
+    fn missing(namespace: Namespace, name: &str) -> Self {
         Self {
+            namespace,
             name: name.to_string(),
-            kind: ResolveEnvErrorKind::MissingEnv,
+            kind: ResolveErrorKind::Missing,
         }
     }
 
-    fn missing_variable(name: &str) -> Self {
+    fn unavailable(namespace: Namespace, name: &str) -> Self {
         Self {
+            namespace,
             name: name.to_string(),
-            kind: ResolveEnvErrorKind::MissingVariable,
-        }
-    }
-
-    fn unsupported_variable(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            kind: ResolveEnvErrorKind::UnsupportedVariable,
+            kind: ResolveErrorKind::Unavailable,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResolveEnvErrorKind {
-    MissingEnv,
-    MissingVariable,
-    UnsupportedVariable,
+pub enum ResolveErrorKind {
+    /// The namespace is available in this context but has no value for the
+    /// referenced name.
+    Missing,
+    /// The namespace is not available in this resolution context.
+    Unavailable,
 }
 
-impl fmt::Display for ResolveEnvError {
+impl fmt::Display for ResolveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let noun = self.namespace.noun();
+        let namespace = self.namespace;
         match self.kind {
-            ResolveEnvErrorKind::MissingEnv => write!(
+            ResolveErrorKind::Missing => write!(
                 f,
-                "environment variable {:?} referenced by {{{{ env.{} }}}} is not set",
+                "{noun} {:?} referenced by {{{{ {namespace}.{} }}}} is not set",
                 self.name, self.name
             ),
-            ResolveEnvErrorKind::MissingVariable => write!(
+            ResolveErrorKind::Unavailable => write!(
                 f,
-                "variable {:?} referenced by {{{{ vars.{} }}}} is not set",
-                self.name, self.name
-            ),
-            ResolveEnvErrorKind::UnsupportedVariable => write!(
-                f,
-                "variable {:?} referenced by {{{{ vars.{} }}}} is not supported in this \
+                "{noun} {:?} referenced by {{{{ {namespace}.{} }}}} is not supported in this \
                  interpolation context",
                 self.name, self.name
             ),
@@ -371,10 +505,14 @@ impl fmt::Display for ResolveEnvError {
     }
 }
 
-impl std::error::Error for ResolveEnvError {}
+impl std::error::Error for ResolveError {}
 
 impl Serialize for InterpString {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "serialization round-trips the unresolved template source by design"
+        )]
         serializer.serialize_str(&self.as_source())
     }
 }
@@ -387,7 +525,10 @@ impl<'de> Deserialize<'de> for InterpString {
             type Value = InterpString;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a string, optionally containing {{ env.NAME }} interpolation tokens")
+                f.write_str(
+                    "a string, optionally containing {{ env.NAME }}, {{ vars.NAME }}, \
+                     {{ secrets.NAME }}, or {{ inputs.NAME }} interpolation tokens",
+                )
             }
 
             fn visit_str<E: de::Error>(self, value: &str) -> Result<InterpString, E> {
@@ -404,6 +545,10 @@ impl<'de> Deserialize<'de> for InterpString {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests assert raw template source round-trips"
+)]
 mod tests {
     use std::collections::HashMap;
 
@@ -418,31 +563,31 @@ mod tests {
     }
 
     #[test]
-    fn literal_string_has_no_env_refs() {
+    fn literal_string_has_no_refs() {
         let s = InterpString::parse("hello world");
         assert!(s.is_literal());
-        assert!(!s.references_env());
-        assert_eq!(s.env_var_names(), Vec::<&str>::new());
+        assert!(!s.references(Namespace::Env));
+        assert_eq!(s.names(Namespace::Env), Vec::<&str>::new());
     }
 
     #[test]
     fn whole_value_env_reference() {
         let s = InterpString::parse("{{ env.API_KEY }}");
         assert!(!s.is_literal());
-        assert_eq!(s.env_var_names(), vec!["API_KEY"]);
+        assert_eq!(s.names(Namespace::Env), vec!["API_KEY"]);
         assert_eq!(s.as_source(), "{{ env.API_KEY }}");
     }
 
     #[test]
     fn substring_env_reference() {
         let s = InterpString::parse("Bearer {{ env.TOKEN }}");
-        assert_eq!(s.env_var_names(), vec!["TOKEN"]);
+        assert_eq!(s.names(Namespace::Env), vec!["TOKEN"]);
     }
 
     #[test]
     fn multi_token_env_reference() {
         let s = InterpString::parse("{{ env.USER }}@{{ env.HOST }}:{{env.PORT}}");
-        assert_eq!(s.env_var_names(), vec!["USER", "HOST", "PORT"]);
+        assert_eq!(s.names(Namespace::Env), vec!["USER", "HOST", "PORT"]);
     }
 
     #[test]
@@ -460,8 +605,9 @@ mod tests {
             .resolve(lookup_from(&[("API_KEY", "secret-123")]))
             .unwrap();
         assert_eq!(resolved.value, "secret-123");
-        assert_eq!(resolved.provenance, Provenance::EnvSourced {
-            names: vec!["API_KEY".into()],
+        assert_eq!(resolved.provenance, Provenance::Sourced {
+            env_names:    vec!["API_KEY".into()],
+            secret_names: vec![],
         });
     }
 
@@ -479,8 +625,9 @@ mod tests {
             .resolve(lookup_from(&[("USER", "root"), ("HOST", "example.com")]))
             .unwrap();
         assert_eq!(resolved.value, "root@example.com");
-        assert_eq!(resolved.provenance, Provenance::EnvSourced {
-            names: vec!["USER".into(), "HOST".into()],
+        assert_eq!(resolved.provenance, Provenance::Sourced {
+            env_names:    vec!["USER".into(), "HOST".into()],
+            secret_names: vec![],
         });
     }
 
@@ -489,6 +636,12 @@ mod tests {
         let s = InterpString::parse("{{ env.MISSING }}");
         let err = s.resolve(lookup_from(&[])).unwrap_err();
         assert_eq!(err.name, "MISSING");
+        assert_eq!(err.namespace, Namespace::Env);
+        assert_eq!(err.kind, ResolveErrorKind::Missing);
+        assert_eq!(
+            err.to_string(),
+            "environment variable \"MISSING\" referenced by {{ env.MISSING }} is not set"
+        );
     }
 
     #[test]
@@ -497,6 +650,23 @@ mod tests {
         let resolved = s.resolve(lookup_from(&[])).unwrap();
         assert_eq!(resolved.value, "{{ env.OPEN");
         assert_eq!(resolved.provenance, Provenance::Literal);
+    }
+
+    #[test]
+    fn unknown_namespace_token_stays_literal() {
+        for raw in [
+            "{{ unknown.NAME }}",
+            "{{ .leading }}",
+            "{{ env. }}",
+            "{{ no_dot }}",
+            "{{ secrets.bad-name }}",
+            "{{ if .Values.foo }}",
+        ] {
+            let s = InterpString::parse(raw);
+            assert!(s.is_literal(), "{raw} should stay literal");
+            let resolved = s.resolve(lookup_from(&[])).unwrap();
+            assert_eq!(resolved.value, raw);
+        }
     }
 
     #[test]
@@ -514,40 +684,64 @@ mod tests {
     }
 
     #[test]
+    fn serde_round_trip_preserves_all_namespaces() {
+        #[derive(Debug, serde::Deserialize, serde::Serialize, PartialEq)]
+        struct Wrap {
+            s: InterpString,
+        }
+
+        let input = r#"{"s":"{{ env.A }}/{{ vars.B }}/{{ secrets.C }}/{{ inputs.d-key }}"}"#;
+        let parsed: Wrap = serde_json::from_str(input).unwrap();
+        let rendered = serde_json::to_string(&parsed).unwrap();
+        assert_eq!(rendered, input);
+    }
+
+    #[test]
     fn vars_reference_round_trips_source() {
         let s = InterpString::parse("{{ vars.RUNTIME_TOKEN }}");
 
-        assert_eq!(s.var_names(), vec!["RUNTIME_TOKEN"]);
+        assert_eq!(s.names(Namespace::Vars), vec!["RUNTIME_TOKEN"]);
         assert_eq!(s.as_source(), "{{ vars.RUNTIME_TOKEN }}");
     }
 
     #[test]
-    fn resolve_with_variables_substitutes_env_and_var_tokens() {
+    fn resolve_with_substitutes_env_and_var_tokens() {
         let s = InterpString::parse("https://{{ env.REGION }}.{{ vars.DOMAIN }}");
 
         let resolved = s
-            .resolve_with_variables(
-                lookup_from(&[("REGION", "us-east-1")]),
-                lookup_from(&[("DOMAIN", "example.com")]),
+            .resolve_with(
+                &mut ResolveCtx::new()
+                    .with_env(lookup_from(&[("REGION", "us-east-1")]))
+                    .with_vars(lookup_from(&[("DOMAIN", "example.com")])),
             )
             .unwrap();
 
         assert_eq!(resolved.value, "https://us-east-1.example.com");
-        assert_eq!(resolved.provenance, Provenance::EnvSourced {
-            names: vec!["REGION".into()],
+        assert_eq!(resolved.provenance, Provenance::Sourced {
+            env_names:    vec!["REGION".into()],
+            secret_names: vec![],
         });
     }
 
     #[test]
-    fn resolve_with_variables_reports_missing_variable() {
+    fn resolve_with_reports_missing_variable() {
         let s = InterpString::parse("{{ vars.MISSING }}");
 
         let err = s
-            .resolve_with_variables(lookup_from(&[]), lookup_from(&[]))
+            .resolve_with(
+                &mut ResolveCtx::new()
+                    .with_env(lookup_from(&[]))
+                    .with_vars(lookup_from(&[])),
+            )
             .unwrap_err();
 
         assert_eq!(err.name, "MISSING");
-        assert_eq!(err.kind, ResolveEnvErrorKind::MissingVariable);
+        assert_eq!(err.namespace, Namespace::Vars);
+        assert_eq!(err.kind, ResolveErrorKind::Missing);
+        assert_eq!(
+            err.to_string(),
+            "variable \"MISSING\" referenced by {{ vars.MISSING }} is not set"
+        );
     }
 
     #[test]
@@ -557,6 +751,114 @@ mod tests {
         let err = s.resolve(lookup_from(&[])).unwrap_err();
 
         assert_eq!(err.name, "RUNTIME_TOKEN");
-        assert_eq!(err.kind, ResolveEnvErrorKind::UnsupportedVariable);
+        assert_eq!(err.namespace, Namespace::Vars);
+        assert_eq!(err.kind, ResolveErrorKind::Unavailable);
+        assert_eq!(
+            err.to_string(),
+            "variable \"RUNTIME_TOKEN\" referenced by {{ vars.RUNTIME_TOKEN }} is not supported \
+             in this interpolation context"
+        );
+    }
+
+    #[test]
+    fn env_only_resolution_rejects_secrets_reference() {
+        let s = InterpString::parse("{{ secrets.API_KEY }}");
+
+        let err = s.resolve(lookup_from(&[])).unwrap_err();
+
+        assert_eq!(err.namespace, Namespace::Secrets);
+        assert_eq!(err.kind, ResolveErrorKind::Unavailable);
+        assert_eq!(
+            err.to_string(),
+            "secret \"API_KEY\" referenced by {{ secrets.API_KEY }} is not supported in this \
+             interpolation context"
+        );
+    }
+
+    #[test]
+    fn resolve_with_secrets_tracks_provenance() {
+        let s = InterpString::parse("Bearer {{ secrets.API_KEY }} via {{ env.PROXY }}");
+
+        let resolved = s
+            .resolve_with(
+                &mut ResolveCtx::new()
+                    .with_env(lookup_from(&[("PROXY", "proxy.internal")]))
+                    .with_secrets(lookup_from(&[("API_KEY", "vault-value")])),
+            )
+            .unwrap();
+
+        assert_eq!(resolved.value, "Bearer vault-value via proxy.internal");
+        assert_eq!(resolved.provenance, Provenance::Sourced {
+            env_names:    vec!["PROXY".into()],
+            secret_names: vec!["API_KEY".into()],
+        });
+    }
+
+    #[test]
+    fn resolve_with_inputs_substitutes_without_provenance() {
+        let s = InterpString::parse("run-{{ inputs.ticket-id }}");
+
+        let resolved = s
+            .resolve_with(&mut ResolveCtx::new().with_inputs(lookup_from(&[("ticket-id", "1234")])))
+            .unwrap();
+
+        assert_eq!(resolved.value, "run-1234");
+        assert_eq!(resolved.provenance, Provenance::Literal);
+    }
+
+    #[test]
+    fn substitute_variables_preserves_late_bound_tokens() {
+        let s =
+            InterpString::parse("{{ vars.NAME }}:{{ env.HOME }}:{{ secrets.KEY }}:{{ inputs.id }}");
+
+        let substituted = s
+            .substitute_variables(lookup_from(&[("NAME", "fabro")]))
+            .unwrap();
+
+        assert_eq!(
+            substituted.as_source(),
+            "fabro:{{ env.HOME }}:{{ secrets.KEY }}:{{ inputs.id }}"
+        );
+    }
+
+    #[test]
+    fn substitute_variables_reports_missing_variable() {
+        let s = InterpString::parse("{{ vars.MISSING }}");
+
+        let err = s.substitute_variables(lookup_from(&[])).unwrap_err();
+
+        assert_eq!(err.namespace, Namespace::Vars);
+        assert_eq!(err.kind, ResolveErrorKind::Missing);
+    }
+
+    #[test]
+    fn substitute_with_merges_adjacent_literals() {
+        let s = InterpString::parse("a{{ vars.B }}c");
+
+        let substituted = s
+            .substitute_with(&mut ResolveCtx::new().with_vars(lookup_from(&[("B", "b")])))
+            .unwrap();
+
+        assert!(substituted.is_literal());
+        assert_eq!(substituted.as_source(), "abc");
+    }
+
+    #[test]
+    fn substitute_variables_in_str_round_trips_source() {
+        let out = InterpString::substitute_variables_in_str(
+            "{{ vars.NAME }} at {{ env.HOME }}",
+            lookup_from(&[("NAME", "fabro")]),
+        )
+        .unwrap();
+
+        assert_eq!(out, "fabro at {{ env.HOME }}");
+    }
+
+    #[test]
+    fn namespace_displays_lowercase() {
+        assert_eq!(Namespace::Env.to_string(), "env");
+        assert_eq!(Namespace::Vars.to_string(), "vars");
+        assert_eq!(Namespace::Secrets.to_string(), "secrets");
+        assert_eq!(Namespace::Inputs.to_string(), "inputs");
     }
 }

@@ -305,6 +305,11 @@ fn resolve_object_store(
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "derives sibling default paths in source form; the result is re-parsed as an \
+              InterpString and resolves at consumption"
+)]
 fn object_store_default_root(storage_root: &InterpString, domain: &str) -> InterpString {
     let root = storage_root.as_source();
     let root = root.trim_end_matches('/');

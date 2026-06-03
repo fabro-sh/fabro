@@ -11,7 +11,7 @@ use fabro_config::parse::{self, SettingsSource};
 use fabro_config::{
     CliLayer, CliOutputLayer, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
     MergeMap, RunLayer, SettingsLayer, WorkflowSettingsBuilder, parse_input_overrides,
-    parse_labels,
+    parse_labels, project,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
@@ -40,6 +40,7 @@ use tokio::process::Command;
 use tokio::time;
 use tracing::warn;
 
+use crate::interp::process_env_var;
 use crate::server::AppState;
 use crate::server_secrets::LlmClientResult;
 
@@ -173,7 +174,7 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
         target_path,
         workflow_bundle,
         workflow_input,
-        source_directory: resolve_working_directory(&settings, &cwd),
+        source_directory: project::resolve_working_directory_from_run(&settings.run, &cwd),
     })
 }
 
@@ -372,31 +373,6 @@ fn manifest_args_overrides(
         cli,
         input_overrides: parse_input_overrides(&args.input)?,
     })
-}
-
-fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> PathBuf {
-    let Some(work_dir) = settings
-        .run
-        .working_dir
-        .as_ref()
-        .map(InterpString::as_source)
-    else {
-        return caller_cwd.to_path_buf();
-    };
-    let path = PathBuf::from(&work_dir);
-    if path.is_absolute() {
-        path
-    } else {
-        caller_cwd.join(path)
-    }
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Manifest preflight interpolation owns a process-env lookup facade for {{ env.* }} values."
-)]
-fn process_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
 }
 
 fn resolve_manifest_dockerfiles(
@@ -1166,6 +1142,11 @@ fn canonical_provider_id(catalog: &Catalog, provider_name: &str) -> ProviderId {
         .map_or(provider_id, |provider| provider.id.clone())
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source is today's behavior; run.model.name/provider are slated for demotion to plain String in the \
+              interpolation unification (D2)"
+)]
 fn resolve_model_provider(
     settings: &RunNamespace,
     _graph: &Graph,

@@ -4,6 +4,11 @@ use fabro_types::WorkflowSettings;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source is today's behavior; run.model.name/provider are slated for demotion to plain String in the \
+              interpolation unification (D2)"
+)]
 pub fn materialize_run(
     mut settings: WorkflowSettings,
     graph: &Graph,
