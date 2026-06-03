@@ -250,7 +250,7 @@ fn map_finish_reason(status: Option<&str>, has_tool_calls: bool) -> FinishReason
     }
 }
 
-fn provider_error_from_openai_error_json(error: &serde_json::Value) -> Error {
+fn provider_error_from_openai_error_json(error: &serde_json::Value, provider: &str) -> Error {
     let classifier = error
         .get("code")
         .and_then(serde_json::Value::as_str)
@@ -301,7 +301,7 @@ fn provider_error_from_openai_error_json(error: &serde_json::Value) -> Error {
         kind,
         detail: Box::new(ProviderErrorDetail {
             message,
-            provider: "openai".to_string(),
+            provider: provider.to_string(),
             status_code: None,
             error_code: classifier.map(str::to_string),
             retry_after: None,
@@ -779,6 +779,8 @@ fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
 struct SseStreamState {
     line_reader:             super::common::LineReader,
     model:                   String,
+    /// Configured provider name stamped into responses and error details.
+    provider:                String,
     response_id:             String,
     response_model:          String,
     accumulated_text:        String,
@@ -878,7 +880,10 @@ fn process_sse_event(
     match resolved_type.as_str() {
         "error" => {
             let error = json.get("error").unwrap_or(&json);
-            return Err(provider_error_from_openai_error_json(error));
+            return Err(provider_error_from_openai_error_json(
+                error,
+                &state.provider,
+            ));
         }
         "response.created" => handle_response_created(state, &json),
         "response.output_text.delta" => handle_text_delta(state, &json, &mut events),
@@ -897,7 +902,10 @@ fn process_sse_event(
                 .get("response")
                 .and_then(|response| response.get("error"))
                 .unwrap_or(&json);
-            return Err(provider_error_from_openai_error_json(error));
+            return Err(provider_error_from_openai_error_json(
+                error,
+                &state.provider,
+            ));
         }
         "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
             if let Some(delta) = json.get("delta").and_then(serde_json::Value::as_str) {
@@ -1211,7 +1219,7 @@ fn handle_response_completed(
     let response = Response {
         id: state.response_id.clone(),
         model,
-        provider: "openai".to_string(),
+        provider: state.provider.clone(),
         message: Message {
             role:         Role::Assistant,
             content:      content_parts,
@@ -1313,7 +1321,7 @@ impl ProviderAdapter for Adapter {
         if let Some(t) = self.http.request_timeout {
             req = req.timeout(t);
         }
-        let (body, headers) = send_and_read_response(req, "openai", "type").await?;
+        let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
 
         let api_resp: ApiResponse = serde_json::from_str(&body)
             .map_err(|e| Error::network(format!("failed to parse OpenAI response: {e}"), e))?;
@@ -1326,7 +1334,7 @@ impl ProviderAdapter for Adapter {
         Ok(Response {
             id: api_resp.id,
             model: api_resp.model.unwrap_or_else(|| request.model.clone()),
-            provider: "openai".to_string(),
+            provider: self.provider_name.clone(),
             message: Message {
                 role:         Role::Assistant,
                 content:      content_parts,
@@ -1370,7 +1378,7 @@ impl ProviderAdapter for Adapter {
             return Err(error_from_status_code(
                 status.as_u16(),
                 msg,
-                "openai".to_string(),
+                self.provider_name.clone(),
                 code,
                 raw,
                 retry_after,
@@ -1384,6 +1392,7 @@ impl ProviderAdapter for Adapter {
         let state = SseStreamState {
             line_reader: super::common::LineReader::new(http_resp, stream_read_timeout),
             model,
+            provider: self.provider_name.clone(),
             response_id: String::new(),
             response_model: String::new(),
             accumulated_text: String::new(),
@@ -2329,6 +2338,7 @@ mod tests {
         SseStreamState {
             line_reader:             LineReader::new(response, None),
             model:                   String::new(),
+            provider:                "openai".to_string(),
             response_id:             String::new(),
             response_model:          String::new(),
             accumulated_text:        String::new(),

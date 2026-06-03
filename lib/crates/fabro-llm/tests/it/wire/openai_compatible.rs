@@ -437,3 +437,22 @@ async fn stream_without_done_or_content_synthesizes_nothing() {
     let (_capture, events) = stream_capture(&base_request(MODEL), &sse).await;
     fabro_test::fabro_json_snapshot!(events);
 }
+
+// ---------------------------------------------------------------------------
+// Custom-named route identity
+// ---------------------------------------------------------------------------
+
+/// The compat adapter already stamped the configured name; pinned here to
+/// complete the per-dialect identity matrix.
+#[tokio::test]
+async fn custom_named_complete_identity() {
+    let server = MockServer::start();
+    let (mock, _slot) = mount_capture(&server, "/chat/completions", minimal_body());
+    let adapter = adapter(&server).with_name("kimi");
+    let response = adapter
+        .complete(&base_request(MODEL))
+        .await
+        .expect("complete should succeed");
+    mock.assert();
+    assert_eq!(response.provider, "kimi");
+}

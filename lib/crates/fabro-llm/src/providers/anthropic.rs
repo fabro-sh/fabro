@@ -734,6 +734,8 @@ enum ContentBlockKind {
 struct StreamAccumulator {
     id:                String,
     model:             String,
+    /// Configured provider name stamped into the final `Response.provider`.
+    provider:          String,
     content_parts:     Vec<ContentPart>,
     usage:             TokenCounts,
     finish_reason:     FinishReason,
@@ -750,10 +752,11 @@ struct StreamAccumulator {
 }
 
 impl StreamAccumulator {
-    fn new(rate_limit: Option<RateLimitInfo>) -> Self {
+    fn new(rate_limit: Option<RateLimitInfo>, provider: String) -> Self {
         Self {
             id: String::new(),
             model: String::new(),
+            provider,
             content_parts: Vec::new(),
             usage: TokenCounts::default(),
             finish_reason: FinishReason::Stop,
@@ -772,7 +775,7 @@ impl StreamAccumulator {
         Response {
             id:            self.id.clone(),
             model:         self.model.clone(),
-            provider:      "anthropic".to_string(),
+            provider:      self.provider.clone(),
             message:       Message {
                 role:         Role::Assistant,
                 content:      content_parts,
@@ -1114,7 +1117,7 @@ impl SseReaderState {
     ) -> Self {
         Self {
             line_reader: super::common::LineReader::new(http_resp, stream_read_timeout),
-            accumulator: StreamAccumulator::new(rate_limit),
+            accumulator: StreamAccumulator::new(rate_limit, provider_name.clone()),
             pending_events: std::collections::VecDeque::new(),
             json_schema_mode,
             provider_name,
@@ -1713,7 +1716,7 @@ mod tests {
 
     #[test]
     fn stream_token_counts_leaves_reasoning_zero_and_output_full() {
-        let mut acc = StreamAccumulator::new(None);
+        let mut acc = StreamAccumulator::new(None, "anthropic".to_string());
         acc.content_parts.push(ContentPart::Thinking(ThinkingData {
             text:      "summary text".to_string(),
             signature: Some(String::new()),
@@ -1747,7 +1750,7 @@ mod tests {
 
     #[test]
     fn stream_error_event_overloaded_becomes_retryable_server_error() {
-        let mut acc = StreamAccumulator::new(None);
+        let mut acc = StreamAccumulator::new(None, "anthropic".to_string());
         let data = serde_json::json!({
             "type": "error",
             "error": {
@@ -1774,7 +1777,7 @@ mod tests {
 
     #[test]
     fn stream_error_event_invalid_request_remains_non_retryable() {
-        let mut acc = StreamAccumulator::new(None);
+        let mut acc = StreamAccumulator::new(None, "anthropic".to_string());
         let data = serde_json::json!({
             "type": "error",
             "error": {
@@ -1798,7 +1801,7 @@ mod tests {
 
     #[test]
     fn unknown_sse_events_remain_ignored() {
-        let mut acc = StreamAccumulator::new(None);
+        let mut acc = StreamAccumulator::new(None, "anthropic".to_string());
         let data = serde_json::json!({
             "type": "content_block_delta",
             "delta": { "type": "text_delta", "text": "ignored" }

@@ -561,3 +561,41 @@ async fn stream_incomplete_maps_to_length() {
     let (_capture, events) = stream_capture(adapter(), &base_request(MODEL), &sse).await;
     fabro_test::fabro_json_snapshot!(events);
 }
+
+// ---------------------------------------------------------------------------
+// Custom-named route identity
+// ---------------------------------------------------------------------------
+
+/// Non-stream responses stamp the configured provider name (previously
+/// hardcoded "openai").
+#[tokio::test]
+async fn custom_named_complete_identity() {
+    let server = MockServer::start();
+    let (mock, _slot) = mount_capture(&server, "/responses", minimal_body());
+    let adapter = OpenAiAdapter::new("test-key")
+        .with_name("openai-proxy")
+        .with_base_url(server.base_url());
+    let response = adapter
+        .complete(&base_request(MODEL))
+        .await
+        .expect("complete should succeed");
+    mock.assert();
+    assert_eq!(response.provider, "openai-proxy");
+}
+
+/// Stream failure events carry the configured name in the error detail
+/// (normalize-both decision).
+#[tokio::test]
+async fn custom_named_stream_failed_event_identity() {
+    let sse = support::sse_data_transcript(&[
+        r#"{"type":"response.created","response":{"id":"resp_stream","model":"gpt-test"}}"#,
+        r#"{"type":"response.failed","response":{"id":"resp_stream","error":{"code":"server_error","message":"boom"}}}"#,
+    ]);
+    let (_capture, events) = stream_capture(
+        adapter().with_name("openai-proxy"),
+        &base_request(MODEL),
+        &sse,
+    )
+    .await;
+    fabro_test::fabro_json_snapshot!(events);
+}

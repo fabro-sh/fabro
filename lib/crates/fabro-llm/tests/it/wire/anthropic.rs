@@ -591,3 +591,80 @@ async fn stream_without_message_stop_emits_no_finish() {
     let (_capture, events) = stream_capture(adapter(), &base_request(MODEL), &sse).await;
     fabro_test::fabro_json_snapshot!(events);
 }
+
+// ---------------------------------------------------------------------------
+// Custom-named route (the Kimi-over-anthropic shape)
+// ---------------------------------------------------------------------------
+
+/// Shared setup for a custom-named anthropic-dialect (Kimi) stream route; the
+/// request and event halves are pinned by separate tests.
+async fn custom_named_stream_capture() -> (WireCapture, Vec<serde_json::Value>) {
+    let sse = support::sse_transcript(&[
+        (
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"msg_kimi","type":"message","role":"assistant","model":"kimi-test","content":[],"usage":{"input_tokens":5,"output_tokens":0}}}"#,
+        ),
+        (
+            "content_block_start",
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+        ),
+        (
+            "content_block_delta",
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}"#,
+        ),
+        (
+            "content_block_stop",
+            r#"{"type":"content_block_stop","index":0}"#,
+        ),
+        (
+            "message_delta",
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}"#,
+        ),
+        ("message_stop", r#"{"type":"message_stop"}"#),
+    ]);
+    stream_capture(
+        adapter().with_name("kimi"),
+        &base_request("kimi-test"),
+        &sse,
+    )
+    .await
+}
+
+/// A custom-named (Kimi) route authenticates with a bearer token and sends no
+/// `anthropic-version` header. This pins that route shape on the wire.
+#[tokio::test]
+async fn custom_named_stream_route() {
+    let (capture, _) = custom_named_stream_capture().await;
+    fabro_test::fabro_json_snapshot!(capture);
+}
+
+/// Since provider-identity normalization, the streamed `Response.provider`
+/// carries the configured name.
+#[tokio::test]
+async fn custom_named_stream_identity() {
+    let (_, events) = custom_named_stream_capture().await;
+    fabro_test::fabro_json_snapshot!(events);
+}
+
+/// Error events on a custom-named route carry the configured name in the
+/// error detail (normalize-both decision).
+#[tokio::test]
+async fn custom_named_stream_error_identity() {
+    let sse = support::sse_transcript(&[
+        (
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"msg_kimi_err","type":"message","role":"assistant","model":"kimi-test","content":[],"usage":{"input_tokens":5,"output_tokens":0}}}"#,
+        ),
+        (
+            "error",
+            r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+        ),
+    ]);
+    let (_capture, events) = stream_capture(
+        adapter().with_name("kimi"),
+        &base_request("kimi-test"),
+        &sse,
+    )
+    .await;
+    fabro_test::fabro_json_snapshot!(events);
+}

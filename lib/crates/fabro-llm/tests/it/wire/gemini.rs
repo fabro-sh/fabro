@@ -485,3 +485,51 @@ async fn stream_end_synthesizes_finish_without_finish_reason() {
     let (_capture, events) = stream_capture(adapter(), &base_request(MODEL), &sse).await;
     fabro_test::fabro_json_snapshot!(events);
 }
+
+// ---------------------------------------------------------------------------
+// Custom-named route identity
+// ---------------------------------------------------------------------------
+
+/// Streamed responses stamp the configured provider name (previously
+/// hardcoded "gemini").
+#[tokio::test]
+async fn custom_named_stream_identity() {
+    let sse = support::sse_data_transcript(&[
+        r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2}}"#,
+    ]);
+    let (_capture, events) = stream_capture(
+        adapter().with_name("gemini-proxy"),
+        &base_request(MODEL),
+        &sse,
+    )
+    .await;
+    fabro_test::fabro_json_snapshot!(events);
+}
+
+/// HTTP-level errors carry the configured name in the error detail
+/// (normalize-both decision).
+#[tokio::test]
+async fn custom_named_http_error_identity() {
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path(COMPLETE_PATH);
+        then.status(500)
+            .header("content-type", "application/json")
+            .json_body(serde_json::json!({
+                "error": {"message": "backend exploded", "status": "INTERNAL", "code": 500}
+            }));
+    });
+    let adapter = adapter()
+        .with_name("gemini-proxy")
+        .with_base_url(server.base_url());
+    let error = adapter
+        .complete(&base_request(MODEL))
+        .await
+        .expect_err("complete should fail");
+    mock.assert();
+    fabro_test::fabro_json_snapshot!(serde_json::json!({
+        "error": error.to_string(),
+        "retryable": error.retryable(),
+        "failover_eligible": error.failover_eligible(),
+    }));
+}

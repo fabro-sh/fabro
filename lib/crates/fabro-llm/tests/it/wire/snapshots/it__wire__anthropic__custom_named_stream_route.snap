@@ -1,0 +1,47 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "method": "POST",
+  "path": "/messages",
+  "headers": [
+    [
+      "accept",
+      "*/*"
+    ],
+    [
+      "authorization",
+      "Bearer test-key"
+    ],
+    [
+      "content-length",
+      "144"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "host",
+      "[host]"
+    ]
+  ],
+  "body": {
+    "model": "kimi-test",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Hello"
+          }
+        ]
+      }
+    ],
+    "max_tokens": 128,
+    "stop_sequences": [],
+    "stream": true
+  }
+}

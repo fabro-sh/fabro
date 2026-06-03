@@ -555,6 +555,7 @@ fn parse_usage(metadata: Option<&UsageMetadata>) -> TokenCounts {
 /// available.
 async fn send_gemini_response(
     request: fabro_http::RequestBuilder,
+    provider: &str,
 ) -> Result<(String, HeaderMap), Error> {
     let http_resp = request.send().await.map_err(|e| {
         if e.is_timeout() {
@@ -574,7 +575,14 @@ async fn send_gemini_response(
 
     if !status.is_success() {
         let (msg, code, raw) = parse_error_body(&body, "status");
-        return Err(gemini_error(status.as_u16(), msg, code, raw, retry_after));
+        return Err(gemini_error(
+            status.as_u16(),
+            msg,
+            provider,
+            code,
+            raw,
+            retry_after,
+        ));
     }
 
     Ok((body, headers))
@@ -585,6 +593,7 @@ async fn send_gemini_response(
 fn gemini_error(
     status_code: u16,
     msg: String,
+    provider: &str,
     grpc_status: Option<String>,
     raw: Option<serde_json::Value>,
     retry_after: Option<f64>,
@@ -593,7 +602,7 @@ fn gemini_error(
         Some(grpc_code) => error_from_grpc_status(
             &grpc_code,
             msg,
-            "gemini".to_string(),
+            provider.to_string(),
             Some(grpc_code.clone()),
             raw,
             retry_after,
@@ -601,7 +610,7 @@ fn gemini_error(
         None => error_from_status_code(
             status_code,
             msg,
-            "gemini".to_string(),
+            provider.to_string(),
             None,
             raw,
             retry_after,
@@ -615,6 +624,7 @@ fn gemini_error(
 /// maps it to `Error` using gRPC status code mapping when available.
 async fn send_streaming_request(
     request: fabro_http::RequestBuilder,
+    provider: &str,
 ) -> Result<fabro_http::Response, Error> {
     let http_resp = request
         .send()
@@ -629,7 +639,14 @@ async fn send_streaming_request(
             .await
             .map_err(|e| Error::network(e.to_string(), e))?;
         let (msg, code, raw) = parse_error_body(&body, "status");
-        return Err(gemini_error(status.as_u16(), msg, code, raw, retry_after));
+        return Err(gemini_error(
+            status.as_u16(),
+            msg,
+            provider,
+            code,
+            raw,
+            retry_after,
+        ));
     }
 
     Ok(http_resp)
@@ -640,11 +657,12 @@ async fn send_streaming_request(
 fn process_sse_stream(
     http_resp: fabro_http::Response,
     model: String,
+    provider: String,
     rate_limit: Option<RateLimitInfo>,
     stream_read_timeout: Option<std::time::Duration>,
 ) -> StreamEventStream {
     Box::pin(stream::unfold(
-        SseStreamState::new(http_resp, model, rate_limit, stream_read_timeout),
+        SseStreamState::new(http_resp, model, provider, rate_limit, stream_read_timeout),
         |mut state| async move {
             // If we have buffered events, yield them first.
             if let Some(event) = state.pending_events.pop_front() {
@@ -726,6 +744,8 @@ fn process_sse_stream(
 struct SseStreamState {
     line_reader:            super::common::LineReader,
     model:                  String,
+    /// Configured provider name stamped into the final `Response.provider`.
+    provider:               String,
     /// Events extracted from a chunk but not yet yielded.
     pending_events:         std::collections::VecDeque<StreamEvent>,
     /// Whether we have emitted a `StreamStart` event.
@@ -756,12 +776,14 @@ impl SseStreamState {
     fn new(
         http_resp: fabro_http::Response,
         model: String,
+        provider: String,
         rate_limit: Option<RateLimitInfo>,
         stream_read_timeout: Option<std::time::Duration>,
     ) -> Self {
         Self {
             line_reader: super::common::LineReader::new(http_resp, stream_read_timeout),
             model,
+            provider,
             pending_events: std::collections::VecDeque::new(),
             stream_started: false,
             text_started: false,
@@ -909,7 +931,7 @@ impl SseStreamState {
         let response = Response {
             id:            uuid::Uuid::new_v4().to_string(),
             model:         self.model.clone(),
-            provider:      "gemini".to_string(),
+            provider:      self.provider.clone(),
             message:       Message {
                 role:         Role::Assistant,
                 content:      content_parts,
@@ -961,7 +983,7 @@ impl ProviderAdapter for Adapter {
         if let Some(t) = self.http.request_timeout {
             req = req.timeout(t);
         }
-        let (body, _headers) = send_gemini_response(req).await?;
+        let (body, _headers) = send_gemini_response(req, &self.provider_name).await?;
         let response: CountTokensResponse =
             serde_json::from_str(&body).map_err(|e| Error::Configuration {
                 message: format!("failed to parse Gemini token count: {e}"),
@@ -998,7 +1020,7 @@ impl ProviderAdapter for Adapter {
         if let Some(t) = self.http.request_timeout {
             gemini_req = gemini_req.timeout(t);
         }
-        let (body, headers) = send_gemini_response(gemini_req).await?;
+        let (body, headers) = send_gemini_response(gemini_req, &self.provider_name).await?;
 
         let api_resp: ApiResponse = serde_json::from_str(&body)
             .map_err(|e| Error::network(format!("failed to parse Gemini response: {e}"), e))?;
@@ -1011,7 +1033,7 @@ impl ProviderAdapter for Adapter {
                 kind:   ProviderErrorKind::Server,
                 detail: Box::new(ProviderErrorDetail::new(
                     "no candidates in Gemini response",
-                    "gemini",
+                    self.provider_name.as_str(),
                 )),
             })?;
 
@@ -1062,12 +1084,13 @@ impl ProviderAdapter for Adapter {
         for (key, value) in &self.http.default_headers {
             req = req.header(key, value);
         }
-        let http_resp = send_streaming_request(req.json(&api_body)).await?;
+        let http_resp = send_streaming_request(req.json(&api_body), &self.provider_name).await?;
 
         let rate_limit = parse_rate_limit_headers(http_resp.headers());
         Ok(process_sse_stream(
             http_resp,
             request.model.clone(),
+            self.provider_name.clone(),
             rate_limit,
             self.http.stream_read_timeout,
         ))
@@ -1372,6 +1395,7 @@ mod tests {
         let err = gemini_error(
             400,
             "model not found".into(),
+            "gemini",
             Some("NOT_FOUND".into()),
             None,
             None,
@@ -1384,6 +1408,7 @@ mod tests {
         let err = gemini_error(
             400,
             "bad args".into(),
+            "gemini",
             Some("INVALID_ARGUMENT".into()),
             None,
             None,
@@ -1396,6 +1421,7 @@ mod tests {
         let err = gemini_error(
             429,
             "rate limited".into(),
+            "gemini",
             Some("RESOURCE_EXHAUSTED".into()),
             None,
             None,
@@ -1408,6 +1434,7 @@ mod tests {
         let err = gemini_error(
             401,
             "bad key".into(),
+            "gemini",
             Some("UNAUTHENTICATED".into()),
             None,
             None,
@@ -1420,6 +1447,7 @@ mod tests {
         let err = gemini_error(
             403,
             "denied".into(),
+            "gemini",
             Some("PERMISSION_DENIED".into()),
             None,
             None,
@@ -1432,6 +1460,7 @@ mod tests {
         let err = gemini_error(
             504,
             "timeout".into(),
+            "gemini",
             Some("DEADLINE_EXCEEDED".into()),
             None,
             None,
@@ -1443,13 +1472,13 @@ mod tests {
     fn gemini_error_falls_back_to_http_status_without_grpc() {
         use crate::error::ProviderErrorKind;
 
-        let err = gemini_error(429, "rate limited".into(), None, None, None);
+        let err = gemini_error(429, "rate limited".into(), "gemini", None, None, None);
         assert!(matches!(err, Error::Provider {
             kind: ProviderErrorKind::RateLimit,
             ..
         }));
 
-        let err = gemini_error(500, "internal".into(), None, None, None);
+        let err = gemini_error(500, "internal".into(), "gemini", None, None, None);
         assert!(matches!(err, Error::Provider {
             kind: ProviderErrorKind::Server,
             ..
