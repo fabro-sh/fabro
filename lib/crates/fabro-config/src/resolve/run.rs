@@ -296,8 +296,9 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
 
 #[expect(
     clippy::disallowed_methods,
-    reason = "known leak: MCP transport templates collapse to raw source unresolved; strict \
-              resolution scheduled in the interpolation unification (Phase 2, supersedes PR #370)"
+    reason = "intentional source preservation: MCP transport strings are carried in source form \
+              so `fabro validate` stays portable; their {{ env.* }} tokens resolve at the run \
+              boundary in fabro_workflow::operations::start::runtime_mcp_server"
 )]
 pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
     let transport = match entry {
@@ -377,8 +378,9 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
 
 #[expect(
     clippy::disallowed_methods,
-    reason = "known leak: MCP transport templates collapse to raw source unresolved; strict \
-              resolution scheduled in the interpolation unification (Phase 2, supersedes PR #370)"
+    reason = "intentional source preservation: MCP transport strings are carried in source form \
+              so `fabro validate` stays portable; their {{ env.* }} tokens resolve at the run \
+              boundary in fabro_workflow::operations::start::runtime_mcp_server"
 )]
 fn resolve_mcp_command(
     script: Option<&InterpString>,
