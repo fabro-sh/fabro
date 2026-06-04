@@ -8,6 +8,7 @@
 //! browser parses the emitted `workflow.fabro` content, diffs it against
 //! its current draft, and animates the resulting changes into the canvas.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -85,12 +86,13 @@ fn summarize_workflow(workflow: &PlaygroundWorkflowDraft) -> String {
             .as_deref()
             .map(|p| format!(" prompt={p:?}"))
             .unwrap_or_default();
-        out.push_str(&format!(
-            "  {id} [shape={shape} label={label:?}{prompt}]\n",
+        let _ = writeln!(
+            out,
+            "  {id} [shape={shape} label={label:?}{prompt}]",
             id = node.id,
             shape = node.shape,
             label = node.label,
-        ));
+        );
     }
     out.push('\n');
     for edge in &workflow.edges {
@@ -104,11 +106,12 @@ fn summarize_workflow(workflow: &PlaygroundWorkflowDraft) -> String {
             .as_deref()
             .map(|c| format!(" condition={c:?}"))
             .unwrap_or_default();
-        out.push_str(&format!(
-            "  {from} -> {to}{label}{cond}\n",
+        let _ = writeln!(
+            out,
+            "  {from} -> {to}{label}{cond}",
             from = edge.from,
             to = edge.to,
-        ));
+        );
     }
     out
 }
