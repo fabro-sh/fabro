@@ -15,6 +15,7 @@ mod environments;
 pub(in crate::server) mod events;
 pub(in crate::server) mod graph;
 pub(in crate::server) mod lifecycle;
+mod llm_sse;
 mod models;
 mod pair;
 mod playground;

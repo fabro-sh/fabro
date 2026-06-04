@@ -15,10 +15,11 @@ use serde_json::json;
 
 use super::super::{
     ApiError, AppState, CompletionContentPart, CompletionMessage, CompletionMessageRole,
-    ContentPart, CreatePlaygroundChatRequest, Duration, Event, IntoResponse, Json, KeepAlive,
-    LlmMessage, LlmRequest, PlaygroundWorkflowDraft, RequiredUser, Response, Role, Router, Sse,
-    State, StatusCode, ToolChoice, ToolDefinition, error, info, post, warn,
+    ContentPart, CreatePlaygroundChatRequest, IntoResponse, Json, LlmMessage, LlmRequest,
+    PlaygroundWorkflowDraft, RequiredUser, Response, Role, Router, State, StatusCode, ToolChoice,
+    ToolDefinition, error, info, post, warn,
 };
+use super::llm_sse;
 
 /// Sanity caps on a playground chat request. Axum's default 2 MB body
 /// limit already catches gigabyte payloads at the framework layer; these
@@ -316,44 +317,7 @@ async fn create_playground_chat(
     // adapter listens for the `tool_call_end` event carrying the
     // `write_workflow_file` arguments, parses the DOT, diffs it against
     // its current draft, and animates the diff into the canvas.
-    let sse_stream = tokio_stream::StreamExt::filter_map(stream_result, |event| match event {
-        Ok(ref evt) => match serde_json::to_string(evt) {
-            Ok(json) => Some(Ok::<_, std::convert::Infallible>(
-                Event::default().event("stream_event").data(json),
-            )),
-            Err(e) => Some(Ok(Event::default().event("stream_event").data(
-                json!({
-                    "type": "error",
-                    "error": {"Stream": {"message": format!("failed to serialize event: {e}")}},
-                    "raw": null
-                })
-                .to_string(),
-            ))),
-        },
-        Err(e) => {
-            error!(error = %e, "playground: stream event error");
-            Some(Ok(Event::default().event("stream_event").data(
-                json!({
-                    "type": "error",
-                    "error": {"Stream": {"message": e.to_string()}},
-                    "raw": null
-                })
-                .to_string(),
-            )))
-        }
-    });
-    let sse_stream =
-        futures_util::StreamExt::take_until(sse_stream, state.shutdown_token().cancelled_owned());
-
-    Sse::new(sse_stream)
-        .keep_alive(
-            KeepAlive::new().interval(Duration::from_secs(15)).event(
-                Event::default()
-                    .event("ping")
-                    .data(json!({"type": "ping"}).to_string()),
-            ),
-        )
-        .into_response()
+    llm_sse::stream_response(stream_result, state.shutdown_token())
 }
 
 #[cfg(test)]

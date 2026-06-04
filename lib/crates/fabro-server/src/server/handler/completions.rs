@@ -3,10 +3,11 @@ use std::sync::Arc;
 use super::super::{
     ApiError, AppState, CompletionContentPart, CompletionMessage, CompletionMessageRole,
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, ContentPart,
-    CreateCompletionRequest, Duration, Event, FinishReason, GenerateParams, IntoResponse, Json,
-    KeepAlive, LlmMessage, LlmRequest, RequiredUser, Response, Role, Router, Sse, State,
-    StatusCode, ToolChoice, ToolDefinition, Ulid, error, generate_object, info, post, warn,
+    CreateCompletionRequest, FinishReason, GenerateParams, IntoResponse, Json, LlmMessage,
+    LlmRequest, RequiredUser, Response, Role, Router, State, StatusCode, ToolChoice,
+    ToolDefinition, Ulid, error, generate_object, info, post, warn,
 };
+use super::llm_sse;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/completions", post(create_completion))
@@ -185,43 +186,7 @@ async fn create_completion(
             }
         };
 
-        let sse_stream = tokio_stream::StreamExt::filter_map(stream_result, |event| match event {
-            Ok(ref evt) => match serde_json::to_string(evt) {
-                Ok(json) => Some(Ok::<_, std::convert::Infallible>(
-                    Event::default().event("stream_event").data(json),
-                )),
-                Err(e) => Some(Ok(Event::default().event("stream_event").data(
-                    serde_json::json!({
-                        "type": "error",
-                        "error": {"Stream": {"message": format!("failed to serialize event: {e}")}},
-                        "raw": null
-                    })
-                    .to_string(),
-                ))),
-            },
-            Err(e) => Some(Ok(Event::default().event("stream_event").data(
-                serde_json::json!({
-                    "type": "error",
-                    "error": {"Stream": {"message": e.to_string()}},
-                    "raw": null
-                })
-                .to_string(),
-            ))),
-        });
-        let sse_stream = futures_util::StreamExt::take_until(
-            sse_stream,
-            state.shutdown_token().cancelled_owned(),
-        );
-
-        Sse::new(sse_stream)
-            .keep_alive(
-                KeepAlive::new().interval(Duration::from_secs(15)).event(
-                    Event::default()
-                        .event("ping")
-                        .data(serde_json::json!({"type": "ping"}).to_string()),
-                ),
-            )
-            .into_response()
+        llm_sse::stream_response(stream_result, state.shutdown_token())
     } else {
         // Non-streaming path
         let msg_id = Ulid::new().to_string();
