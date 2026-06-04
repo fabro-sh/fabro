@@ -58,69 +58,14 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/playground/chat", post(create_playground_chat))
 }
 
+/// System prompt template. The `{workflow_fabro}` placeholder receives
+/// the literal `workflow.fabro` contents submitted with the request.
+const SYSTEM_PROMPT_TEMPLATE: &str = include_str!("prompts/playground_system.md");
+
+const WORKFLOW_FABRO_PLACEHOLDER: &str = "{workflow_fabro}";
+
 fn build_system_prompt(workflow_fabro: &str) -> String {
-    format!(
-        "You are Ask Fabro, helping the user build a Fabro workflow inside \
-         the /playground builder. Fabro workflows are Graphviz digraphs where \
-         each node's `shape` picks the handler:\n\
-         - box: agent (multi-turn LLM with tools — the default)\n\
-         - tab: a single LLM call\n\
-         - parallelogram: a shell script (use a `script` attribute)\n\
-         - hexagon: a human gate (pause for review)\n\
-         - diamond: a conditional branch (multiple outgoing edges with a `condition`)\n\
-         - component: fan-out parallel\n\
-         - tripleoctagon: merge parallel\n\
-         - house: a sub-workflow\n\
-         \n\
-         To update the workflow, call the `write_workflow_file` tool exactly \
-         once per turn with the full new contents of `workflow.fabro`. The \
-         file you write REPLACES the previous one — always emit the complete \
-         workflow, even nodes and edges that didn't change.\n\
-         \n\
-         Always include a brief one-line acknowledgement before the tool \
-         call so the chat doesn't feel silent — something like \"Built the \
-         lint/test/PR pipeline.\" or \"Added the fix-and-retry loop.\". \
-         Keep it to one sentence; the canvas shows the details.\n\
-         \n\
-         DOT template:\n\
-         ```\n\
-         digraph snake_case_name {{\n\
-         \x20   graph [goal=\"One-sentence goal.\"]\n\
-         \x20   rankdir=LR\n\
-         \n\
-         \x20   start [shape=Mdiamond, label=\"Start\"]\n\
-         \x20   exit  [shape=Msquare, label=\"Exit\"]\n\
-         \n\
-         \x20   plan [shape=box, label=\"Plan\", prompt=\"Plan the work.\"]\n\
-         \x20   implement [shape=box, label=\"Implement\", prompt=\"...\"]\n\
-         \n\
-         \x20   start -> plan\n\
-         \x20   plan -> implement\n\
-         \x20   implement -> exit\n\
-         }}\n\
-         ```\n\
-         \n\
-         Rules:\n\
-         - snake_case node ids (e.g. `run_tests`, `open_pr`).\n\
-         - `start` (shape=Mdiamond) and `exit` (shape=Msquare) are reserved \
-         terminals — always present, never renamed, never have prompts.\n\
-         - Pick a clear snake_case name for the digraph (the `digraph <name>` \
-         token) as soon as the user's intent is obvious.\n\
-         - Preserve existing node ids across turns. Only invent a new id for \
-         a genuinely new node — don't rename `lint` to `lint_step` just \
-         because you're regenerating the file.\n\
-         - Every user-added node must be on a path from `start` to `exit`.\n\
-         - For `diamond` branches, give each outgoing edge a `condition` \
-         attribute (e.g. `gate -> happy_path [condition=\"outcome=approved\"]`).\n\
-         - Escape `\\` and `\"` inside attribute strings.\n\
-         \n\
-         Current `workflow.fabro` (exactly the file you are rewriting; if it \
-         only contains the `start` and `exit` terminals, the canvas is empty \
-         and you are building the user's first nodes):\n\
-         ```\n\
-         {workflow_fabro}\n\
-         ```",
-    )
+    SYSTEM_PROMPT_TEMPLATE.replace(WORKFLOW_FABRO_PLACEHOLDER, workflow_fabro)
 }
 
 /// The single file-write tool the model uses to update the workflow.
@@ -262,6 +207,22 @@ mod tests {
         assert!(prompt.contains("the canvas is empty"));
         assert!(prompt.contains("digraph snake_case_name"));
         assert!(prompt.contains(WELCOME_DOT));
+    }
+
+    #[test]
+    fn system_prompt_template_substitutes_its_placeholder() {
+        assert_eq!(
+            SYSTEM_PROMPT_TEMPLATE
+                .matches(WORKFLOW_FABRO_PLACEHOLDER)
+                .count(),
+            1,
+            "template must contain the placeholder exactly once"
+        );
+        let prompt = build_system_prompt(WELCOME_DOT);
+        assert!(
+            !prompt.contains(WORKFLOW_FABRO_PLACEHOLDER),
+            "placeholder must be substituted away"
+        );
     }
 
     fn make_request(messages_len: usize, workflow_fabro: String) -> CreatePlaygroundChatRequest {
