@@ -10,6 +10,7 @@ api/insights-api.ts
 api/install-api.ts
 api/integrations-api.ts
 api/models-api.ts
+api/playground-api.ts
 api/repos-api.ts
 api/run-internals-api.ts
 api/run-outputs-api.ts
@@ -96,6 +97,7 @@ models/conclusion.ts
 models/create-automation-request.ts
 models/create-completion-request.ts
 models/create-environment-request.ts
+models/create-playground-chat-request.ts
 models/create-run-pull-request-request.ts
 models/create-run-session-request.ts
 models/create-secret-request.ts
