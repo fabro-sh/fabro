@@ -2,21 +2,21 @@
 //!
 //! POST /api/v1/playground/chat drives a single turn of the chat-driven
 //! workflow builder at /playground in fabro-web. The server is stateless
-//! across turns: the browser owns the workflow draft and sends the full
-//! state with every request; the server runs the LLM with a single
-//! file-write tool surface and streams the result back over SSE. The
+//! across turns: the browser owns the workflow draft and submits it as
+//! the literal `workflow.fabro` contents with every request; the server
+//! embeds the file in the system prompt, runs the LLM with a single
+//! file-write tool surface, and streams the result back over SSE. The
 //! browser parses the emitted `workflow.fabro` content, diffs it against
 //! its current draft, and animates the resulting changes into the canvas.
 
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 use serde_json::json;
 
 use super::super::{
     ApiError, AppState, CreatePlaygroundChatRequest, IntoResponse, Json, LlmMessage, LlmRequest,
-    PlaygroundWorkflowDraft, RequiredUser, Response, Router, State, StatusCode, ToolChoice,
-    ToolDefinition, error, info, post, warn,
+    RequiredUser, Response, Router, State, StatusCode, ToolChoice, ToolDefinition, error, info,
+    post, warn,
 };
 use super::llm_sse;
 
@@ -26,8 +26,10 @@ use super::llm_sse;
 /// or malicious client can't drag a multi-megabyte transcript through
 /// streaming + token-billing.
 const MAX_MESSAGES_PER_TURN: usize = 50;
-const MAX_WORKFLOW_NODES: usize = 100;
-const MAX_WORKFLOW_EDGES: usize = 200;
+/// Generous ceiling for the submitted `workflow.fabro` text: the canvas
+/// caps out around a hundred nodes, which renders to roughly 12 KB of
+/// DOT.
+const MAX_WORKFLOW_FABRO_BYTES: usize = 32 * 1024;
 
 fn validate_request(req: &CreatePlaygroundChatRequest) -> Result<(), ApiError> {
     if req.messages.len() > MAX_MESSAGES_PER_TURN {
@@ -40,21 +42,12 @@ fn validate_request(req: &CreatePlaygroundChatRequest) -> Result<(), ApiError> {
             ),
         ));
     }
-    if req.workflow.nodes.len() > MAX_WORKFLOW_NODES {
+    if req.workflow_fabro.len() > MAX_WORKFLOW_FABRO_BYTES {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             format!(
-                "Workflow too large: {} nodes (limit {MAX_WORKFLOW_NODES}).",
-                req.workflow.nodes.len(),
-            ),
-        ));
-    }
-    if req.workflow.edges.len() > MAX_WORKFLOW_EDGES {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Workflow too large: {} edges (limit {MAX_WORKFLOW_EDGES}).",
-                req.workflow.edges.len(),
+                "Workflow file too large: {} bytes (limit {MAX_WORKFLOW_FABRO_BYTES}).",
+                req.workflow_fabro.len(),
             ),
         ));
     }
@@ -65,69 +58,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/playground/chat", post(create_playground_chat))
 }
 
-/// Renders the workflow draft as a compact DOT-style summary the model
-/// can read for current state. Same shape as the file the model writes
-/// back via `write_workflow_file`, minus theming/comments.
-fn summarize_workflow(workflow: &PlaygroundWorkflowDraft) -> String {
-    if workflow
-        .nodes
-        .iter()
-        .all(|n| n.id == "start" || n.id == "exit")
-    {
-        return "(empty — only `start` and `exit` exist; no user nodes yet)".to_string();
-    }
-    let mut out = String::new();
-    for node in &workflow.nodes {
-        if node.id == "start" || node.id == "exit" {
-            continue;
-        }
-        let prompt = node
-            .prompt
-            .as_deref()
-            .map(|p| format!(" prompt={p:?}"))
-            .unwrap_or_default();
-        let _ = writeln!(
-            out,
-            "  {id} [shape={shape} label={label:?}{prompt}]",
-            id = node.id,
-            shape = node.shape,
-            label = node.label,
-        );
-    }
-    out.push('\n');
-    for edge in &workflow.edges {
-        let label = edge
-            .label
-            .as_deref()
-            .map(|l| format!(" label={l:?}"))
-            .unwrap_or_default();
-        let cond = edge
-            .condition
-            .as_deref()
-            .map(|c| format!(" condition={c:?}"))
-            .unwrap_or_default();
-        let _ = writeln!(
-            out,
-            "  {from} -> {to}{label}{cond}",
-            from = edge.from,
-            to = edge.to,
-        );
-    }
-    out
-}
-
-fn build_system_prompt(workflow: &PlaygroundWorkflowDraft) -> String {
-    let name = if workflow.name.is_empty() || workflow.name == "untitled" {
-        "(unnamed)".to_string()
-    } else {
-        workflow.name.clone()
-    };
-    let goal = if workflow.goal.is_empty() {
-        "(not set yet)".to_string()
-    } else {
-        workflow.goal.clone()
-    };
-
+fn build_system_prompt(workflow_fabro: &str) -> String {
     format!(
         "You are Ask Fabro, helping the user build a Fabro workflow inside \
          the /playground builder. Fabro workflows are Graphviz digraphs where \
@@ -183,13 +114,12 @@ fn build_system_prompt(workflow: &PlaygroundWorkflowDraft) -> String {
          attribute (e.g. `gate -> happy_path [condition=\"outcome=approved\"]`).\n\
          - Escape `\\` and `\"` inside attribute strings.\n\
          \n\
-         Current draft\n\
-         -------------\n\
-         name: {name}\n\
-         goal: {goal}\n\
-         \n\
-         {summary}",
-        summary = summarize_workflow(workflow),
+         Current `workflow.fabro` (exactly the file you are rewriting; if it \
+         only contains the `start` and `exit` terminals, the canvas is empty \
+         and you are building the user's first nodes):\n\
+         ```\n\
+         {workflow_fabro}\n\
+         ```",
     )
 }
 
@@ -243,7 +173,7 @@ async fn create_playground_chat(
     // Request messages are already the canonical `fabro_types::Message` —
     // the API schema reuses it via build.rs `with_replacement`.
     let mut messages: Vec<LlmMessage> = Vec::new();
-    messages.push(LlmMessage::system(build_system_prompt(&req.workflow)));
+    messages.push(LlmMessage::system(build_system_prompt(&req.workflow_fabro)));
     messages.extend(req.messages);
 
     let request = LlmRequest {
@@ -297,80 +227,44 @@ async fn create_playground_chat(
 
 #[cfg(test)]
 mod tests {
-    use fabro_api::types::{PlaygroundWorkflowEdge, PlaygroundWorkflowNode};
-
     use super::*;
 
-    fn empty_draft() -> PlaygroundWorkflowDraft {
-        PlaygroundWorkflowDraft {
-            name:  "untitled".into(),
-            goal:  String::new(),
-            nodes: vec![
-                PlaygroundWorkflowNode {
-                    id:     "start".into(),
-                    label:  "Start".into(),
-                    shape:  "mdiamond".into(),
-                    prompt: None,
-                    attrs:  serde_json::Map::new(),
-                },
-                PlaygroundWorkflowNode {
-                    id:     "exit".into(),
-                    label:  "Exit".into(),
-                    shape:  "msquare".into(),
-                    prompt: None,
-                    attrs:  serde_json::Map::new(),
-                },
-            ],
-            edges: vec![PlaygroundWorkflowEdge {
-                from:      "start".into(),
-                to:        "exit".into(),
-                label:     None,
-                condition: None,
-                attrs:     serde_json::Map::new(),
-            }],
-        }
-    }
+    /// Welcome-state DOT, matching the client renderer's canonical style.
+    const WELCOME_DOT: &str = r#"digraph untitled {
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    start -> exit
+}
+"#;
 
     #[test]
-    fn system_prompt_calls_out_empty_state_for_welcome_draft() {
-        let prompt = build_system_prompt(&empty_draft());
-        assert!(prompt.contains("(empty —"));
-        assert!(prompt.contains("(unnamed)"));
+    fn system_prompt_embeds_workflow_file_verbatim() {
+        let dot = r#"digraph release_notes {
+    graph [goal="Generate release notes"]
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+    plan [shape=box, label="Plan", prompt="Plan it"]
+
+    start -> plan
+    plan -> exit
+}
+"#;
+        let prompt = build_system_prompt(dot);
+        assert!(prompt.contains(dot), "prompt should embed the DOT verbatim");
+        assert!(prompt.contains("digraph release_notes"));
         assert!(prompt.contains("write_workflow_file"));
-        assert!(prompt.contains("digraph snake_case_name"));
     }
 
     #[test]
-    fn system_prompt_includes_user_nodes_and_edges() {
-        let mut draft = empty_draft();
-        draft.name = "release_notes".into();
-        draft.goal = "Generate release notes".into();
-        draft.nodes.push(PlaygroundWorkflowNode {
-            id:     "plan".into(),
-            label:  "Plan".into(),
-            shape:  "box".into(),
-            prompt: Some("Plan it".into()),
-            attrs:  serde_json::Map::new(),
-        });
-        draft.edges.push(PlaygroundWorkflowEdge {
-            from:      "start".into(),
-            to:        "plan".into(),
-            label:     None,
-            condition: None,
-            attrs:     serde_json::Map::new(),
-        });
-        let prompt = build_system_prompt(&draft);
-        assert!(prompt.contains("name: release_notes"));
-        assert!(prompt.contains("goal: Generate release notes"));
-        assert!(prompt.contains("plan [shape=box"));
-        assert!(prompt.contains("start -> plan"));
+    fn system_prompt_explains_empty_canvas_convention() {
+        let prompt = build_system_prompt(WELCOME_DOT);
+        assert!(prompt.contains("the canvas is empty"));
+        assert!(prompt.contains("digraph snake_case_name"));
+        assert!(prompt.contains(WELCOME_DOT));
     }
 
-    fn make_request(
-        messages_len: usize,
-        nodes_len: usize,
-        edges_len: usize,
-    ) -> CreatePlaygroundChatRequest {
+    fn make_request(messages_len: usize, workflow_fabro: String) -> CreatePlaygroundChatRequest {
         let messages = (0..messages_len)
             .map(|_| fabro_types::Message {
                 role:         fabro_types::Role::User,
@@ -379,50 +273,30 @@ mod tests {
                 tool_call_id: None,
             })
             .collect();
-        let mut workflow = empty_draft();
-        while workflow.nodes.len() < nodes_len {
-            let i = workflow.nodes.len();
-            workflow.nodes.push(PlaygroundWorkflowNode {
-                id:     format!("n{i}"),
-                label:  format!("N{i}"),
-                shape:  "box".into(),
-                prompt: None,
-                attrs:  serde_json::Map::new(),
-            });
-        }
-        while workflow.edges.len() < edges_len {
-            workflow.edges.push(PlaygroundWorkflowEdge {
-                from:      "start".into(),
-                to:        "exit".into(),
-                label:     None,
-                condition: None,
-                attrs:     serde_json::Map::new(),
-            });
-        }
         CreatePlaygroundChatRequest {
             messages,
-            workflow,
+            workflow_fabro,
             model: None,
         }
     }
 
     #[test]
     fn validate_rejects_oversize_message_history() {
-        let req = make_request(MAX_MESSAGES_PER_TURN + 1, 2, 1);
+        let req = make_request(MAX_MESSAGES_PER_TURN + 1, WELCOME_DOT.to_string());
         let err = validate_request(&req).expect_err("expected too-many-messages error");
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
-    fn validate_rejects_oversize_workflow() {
-        let req = make_request(1, MAX_WORKFLOW_NODES + 1, 1);
-        let err = validate_request(&req).expect_err("expected too-many-nodes error");
+    fn validate_rejects_oversize_workflow_file() {
+        let req = make_request(1, "x".repeat(MAX_WORKFLOW_FABRO_BYTES + 1));
+        let err = validate_request(&req).expect_err("expected too-large-file error");
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
     fn validate_accepts_normal_sized_requests() {
-        let req = make_request(10, 8, 12);
+        let req = make_request(10, WELCOME_DOT.to_string());
         assert!(validate_request(&req).is_ok());
     }
 

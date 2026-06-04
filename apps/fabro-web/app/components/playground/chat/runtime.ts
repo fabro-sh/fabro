@@ -1,14 +1,15 @@
 /**
  * assistant-ui adapter for the playground chat.
  *
- * Posts the full draft alongside the message history to
- * `POST /api/v1/playground/chat` on each turn (the server is stateless),
- * then streams the resulting SSE: text deltas accumulate into the
- * assistant transcript, and the model's `write_workflow_file` tool call
- * carries the full new `workflow.fabro` content. We parse the content,
- * diff it against the current draft, and animate the resulting reducer
- * ops into the canvas so the user sees the new graph build in
- * node-by-node instead of replacing instantly.
+ * Posts the rendered `workflow.fabro` contents alongside the message
+ * history to `POST /api/v1/playground/chat` on each turn (the server is
+ * stateless and embeds the file verbatim in its system prompt), then
+ * streams the resulting SSE: text deltas accumulate into the assistant
+ * transcript, and the model's `write_workflow_file` tool call carries
+ * the full new `workflow.fabro` content. We parse the content, diff it
+ * against the current draft, and animate the resulting reducer ops into
+ * the canvas so the user sees the new graph build in node-by-node
+ * instead of replacing instantly.
  */
 
 import type {
@@ -18,6 +19,7 @@ import type {
 } from "@assistant-ui/react";
 
 import type { WorkflowDraft } from "../state/draft";
+import { renderFabro } from "../files/render-fabro";
 import { animateOps } from "../state/animate";
 import { diffDrafts } from "../state/diff";
 import { parseFabro } from "../state/parse-fabro";
@@ -45,7 +47,11 @@ interface WriteWorkflowFileArgs {
 
 export interface PlaygroundAdapterOptions {
   chatEndpoint: string;
-  /** Reads the latest draft. Called once per `write_workflow_file` to compute the diff. */
+  /**
+   * Reads the latest draft. Rendered to `workflow.fabro` text for the
+   * request body, and read again per `write_workflow_file` to compute
+   * the diff.
+   */
   getWorkflow: () => WorkflowDraft;
   /** Apply a single reducer op. Called repeatedly as the animation runs. */
   dispatch: (call: ToolCall) => void;
@@ -72,7 +78,7 @@ export function createPlaygroundAdapter(
     async *run({ messages, abortSignal }) {
       const body = {
         messages: serializeMessages(messages),
-        workflow: options.getWorkflow(),
+        workflow_fabro: renderFabro(options.getWorkflow()),
       };
 
       const response = await fetchImpl(options.chatEndpoint, {

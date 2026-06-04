@@ -7897,90 +7897,31 @@ components:
           description: Parsed structured output when schema was provided.
 
     # ── Playground ────────────────────────────────────────────────────────
-    # Types backing POST /api/v1/playground/chat — a chat-driven, structured
-    # workflow-building surface. Distinct from internal Fabro workflow types
-    # because this draft is intermediate state shared between the model and
-    # the browser, not a runnable graph.
-
-    PlaygroundWorkflowNode:
-      type: object
-      required: [id, label, shape]
-      properties:
-        id:
-          type: string
-          description: Unique within the draft; snake_case.
-        label:
-          type: string
-        shape:
-          type: string
-          description: >
-            Graphviz shape name. `mdiamond` / `msquare` are reserved for
-            the implicit `start` / `exit` terminals.
-        prompt:
-          type: string
-          description: Prose body for agent / tab / parallelogram nodes.
-        attrs:
-          type: object
-          additionalProperties: true
-          description: >
-            Free-form bag of Graphviz attributes (`max_visits`, `goal_gate`,
-            `script`, etc.).
-
-    PlaygroundWorkflowEdge:
-      type: object
-      required: [from, to]
-      properties:
-        from:
-          type: string
-        to:
-          type: string
-        condition:
-          type: string
-          description: For diamond branches (e.g. `outcome=succeeded`).
-        label:
-          type: string
-        attrs:
-          type: object
-          additionalProperties: true
-
-    PlaygroundWorkflowDraft:
-      description: >
-        The full in-flight workflow state submitted with each chat turn.
-        The server is stateless across turns; the browser owns the draft and
-        applies the streamed tool calls to it.
-      type: object
-      required: [name, goal, nodes, edges]
-      properties:
-        name:
-          type: string
-          description: snake_case workflow id (or `untitled` if unnamed).
-        goal:
-          type: string
-        nodes:
-          type: array
-          items:
-            $ref: "#/components/schemas/PlaygroundWorkflowNode"
-        edges:
-          type: array
-          items:
-            $ref: "#/components/schemas/PlaygroundWorkflowEdge"
 
     CreatePlaygroundChatRequest:
       description: >
-        Body of POST /api/v1/playground/chat. The server uses `workflow` as
-        context for the model's system prompt and exposes a single
+        Body of POST /api/v1/playground/chat. The server is stateless across
+        turns: the browser owns the draft and submits it as the literal
+        `workflow.fabro` contents with every turn. The server embeds the
+        file in the model's system prompt and exposes a single
         `write_workflow_file` tool that emits the full new contents of
-        `workflow.fabro` each turn.
+        `workflow.fabro`; the browser parses, diffs, and animates the
+        result.
       type: object
-      required: [messages, workflow]
+      required: [messages, workflow_fabro]
       properties:
         messages:
           type: array
           description: assistant-ui-style message history for the turn.
           items:
             $ref: "#/components/schemas/CompletionMessage"
-        workflow:
-          $ref: "#/components/schemas/PlaygroundWorkflowDraft"
+        workflow_fabro:
+          type: string
+          description: >
+            Full current `workflow.fabro` (Graphviz DOT) contents as
+            rendered by the client — a complete `digraph <name> { ... }`
+            block including the `start` / `exit` terminals. This is the
+            same format the model writes back via `write_workflow_file`.
         model:
           type: string
           description: Model id or alias. Server picks the default if omitted.
