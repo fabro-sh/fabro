@@ -1,104 +1,22 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// --- 3.1 / 3.2 / 3.5 Canonical chat + content data structures ---
+//
+// `Message`, `Role`, `ContentPart`, `ImageData`, `AudioData`,
+// `DocumentData`, `ThinkingData`, `ToolCall`, and `ToolResult` are the
+// canonical provider-neutral replay primitives. They live in `fabro-types`
+// so the event stream, API responses, and runtime history can share one
+// model. They are re-exported here so existing `fabro_llm::types::*`
+// imports keep working.
+pub use fabro_types::{
+    AudioData, ContentPart, DocumentData, ImageData, Message, Role, ThinkingData, ToolCall,
+    ToolResult,
+};
 use fabro_util::backoff::BackoffPolicy;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
-
-// --- 3.2 Role ---
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    System,
-    User,
-    Assistant,
-    Tool,
-    Developer,
-}
-
-// --- 3.5 Content Data Structures ---
-//
-// `ContentPart`, `ImageData`, `AudioData`, `DocumentData`, `ThinkingData`,
-// `ToolCall`, and `ToolResult` are the canonical provider-neutral replay
-// primitives. They live in `fabro-types` so the event stream, API responses,
-// and runtime history can share one model. They are re-exported here so
-// existing `fabro_llm::types::*` imports keep working.
-pub use fabro_types::{
-    AudioData, ContentPart, DocumentData, ImageData, ThinkingData, ToolCall, ToolResult,
-};
-
-// --- 3.1 Message ---
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Message {
-    pub role:         Role,
-    pub content:      Vec<ContentPart>,
-    pub name:         Option<String>,
-    pub tool_call_id: Option<String>,
-}
-
-impl Message {
-    pub fn system(text: impl Into<String>) -> Self {
-        Self {
-            role:         Role::System,
-            content:      vec![ContentPart::text(text)],
-            name:         None,
-            tool_call_id: None,
-        }
-    }
-
-    pub fn user(text: impl Into<String>) -> Self {
-        Self {
-            role:         Role::User,
-            content:      vec![ContentPart::text(text)],
-            name:         None,
-            tool_call_id: None,
-        }
-    }
-
-    pub fn assistant(text: impl Into<String>) -> Self {
-        Self {
-            role:         Role::Assistant,
-            content:      vec![ContentPart::text(text)],
-            name:         None,
-            tool_call_id: None,
-        }
-    }
-
-    pub fn tool_result(
-        tool_call_id: impl Into<String>,
-        content: serde_json::Value,
-        is_error: bool,
-    ) -> Self {
-        let id = tool_call_id.into();
-        Self {
-            role:         Role::Tool,
-            content:      vec![ContentPart::ToolResult(ToolResult {
-                tool_call_id: id.clone(),
-                content,
-                is_error,
-                image_data: None,
-                image_media_type: None,
-            })],
-            name:         None,
-            tool_call_id: Some(id),
-        }
-    }
-
-    /// Concatenates text from all text content parts.
-    #[must_use]
-    pub fn text(&self) -> String {
-        self.content
-            .iter()
-            .filter_map(|part| match part {
-                ContentPart::Text(text) => Some(text.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-}
 
 // --- 3.8 FinishReason ---
 

@@ -158,8 +158,8 @@ pub use system_integrations::{
 pub use timing::{RunTiming, StageTiming};
 pub use todo::{TodoListKind, TodoListProjection, TodoPatch, TodoProjection, TodoStatus};
 pub use transcript::{
-    AudioData, ContentPart, DocumentData, ImageData, MessageId, MessageKind, MessageSource,
-    PairMessageRef, ThinkingData, ToolCall, ToolResult, TranscriptMessage,
+    AudioData, ContentPart, DocumentData, ImageData, Message, MessageId, MessageKind,
+    MessageSource, PairMessageRef, Role, ThinkingData, ToolCall, ToolResult, TranscriptMessage,
 };
 pub use variable::{
     CreateVariableRequest, UpdateVariableRequest, Variable, VariableListResponse, is_env_style_name,

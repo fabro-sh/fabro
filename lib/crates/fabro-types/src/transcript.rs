@@ -253,6 +253,98 @@ impl ContentPart {
     }
 }
 
+// --- Role / Message
+// -----------------------------------------------------------
+
+/// Author role of a chat [`Message`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+    Tool,
+    Developer,
+}
+
+/// Provider-neutral chat message exchanged with an LLM.
+///
+/// This is the request/response message shape shared by `fabro-llm`
+/// requests and the completions API wire contract. The durable
+/// session-transcript record is [`TranscriptMessage`], which carries
+/// identity, provenance, and usage on top of the same [`ContentPart`]
+/// vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Message {
+    pub role:         Role,
+    pub content:      Vec<ContentPart>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name:         Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+impl Message {
+    pub fn system(text: impl Into<String>) -> Self {
+        Self {
+            role:         Role::System,
+            content:      vec![ContentPart::text(text)],
+            name:         None,
+            tool_call_id: None,
+        }
+    }
+
+    pub fn user(text: impl Into<String>) -> Self {
+        Self {
+            role:         Role::User,
+            content:      vec![ContentPart::text(text)],
+            name:         None,
+            tool_call_id: None,
+        }
+    }
+
+    pub fn assistant(text: impl Into<String>) -> Self {
+        Self {
+            role:         Role::Assistant,
+            content:      vec![ContentPart::text(text)],
+            name:         None,
+            tool_call_id: None,
+        }
+    }
+
+    pub fn tool_result(
+        tool_call_id: impl Into<String>,
+        content: serde_json::Value,
+        is_error: bool,
+    ) -> Self {
+        let id = tool_call_id.into();
+        Self {
+            role:         Role::Tool,
+            content:      vec![ContentPart::ToolResult(ToolResult {
+                tool_call_id: id.clone(),
+                content,
+                is_error,
+                image_data: None,
+                image_media_type: None,
+            })],
+            name:         None,
+            tool_call_id: Some(id),
+        }
+    }
+
+    /// Concatenates text from all text content parts.
+    #[must_use]
+    pub fn text(&self) -> String {
+        self.content
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
 // --- TranscriptMessage ------------------------------------------------------
 
 /// Provider/model-role semantics for a committed transcript message.

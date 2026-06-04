@@ -28,8 +28,7 @@ pub use fabro_api::types::{
     BatchDeleteRunsResultOutcome, BatchDeleteRunsSummary, BatchRunLifecycleRequest,
     BatchRunLifecycleResponse, BatchRunLifecycleResult, BatchRunLifecycleResultOutcome,
     BatchRunLifecycleSummary, BillingByModel, BillingStageRef, CloseRunPullRequestResponse,
-    CompletionContentPart, CompletionMessage, CompletionMessageRole, CompletionResponse,
-    CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
+    CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     CreatePlaygroundChatRequest, CreateRunPullRequestRequest, CreateSecretRequest,
     CreateVariableRequest, DeleteRunResponse, DeleteRunSandbox, DeleteSecretRequest,
     DenyRunRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ErrorResponseEntry,
@@ -62,8 +61,7 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::model_test::run_model_test;
 use fabro_llm::types::{
-    ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest, Role, ToolChoice,
-    ToolDefinition,
+    FinishReason, Message as LlmMessage, Request as LlmRequest, ToolChoice, ToolDefinition,
 };
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{BilledTokenCounts, Catalog, ModelRef, ModelTestMode, ProviderId};

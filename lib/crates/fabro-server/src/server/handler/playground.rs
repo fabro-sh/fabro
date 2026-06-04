@@ -14,9 +14,8 @@ use std::sync::Arc;
 use serde_json::json;
 
 use super::super::{
-    ApiError, AppState, CompletionContentPart, CompletionMessage, CompletionMessageRole,
-    ContentPart, CreatePlaygroundChatRequest, IntoResponse, Json, LlmMessage, LlmRequest,
-    PlaygroundWorkflowDraft, RequiredUser, Response, Role, Router, State, StatusCode, ToolChoice,
+    ApiError, AppState, CreatePlaygroundChatRequest, IntoResponse, Json, LlmMessage, LlmRequest,
+    PlaygroundWorkflowDraft, RequiredUser, Response, Router, State, StatusCode, ToolChoice,
     ToolDefinition, error, info, post, warn,
 };
 use super::llm_sse;
@@ -225,30 +224,6 @@ fn playground_tools() -> Vec<ToolDefinition> {
     }]
 }
 
-fn convert_api_message(msg: &CompletionMessage) -> LlmMessage {
-    let role = match msg.role {
-        CompletionMessageRole::System => Role::System,
-        CompletionMessageRole::User => Role::User,
-        CompletionMessageRole::Assistant => Role::Assistant,
-        CompletionMessageRole::Tool => Role::Tool,
-        CompletionMessageRole::Developer => Role::Developer,
-    };
-    let content: Vec<ContentPart> = msg
-        .content
-        .iter()
-        .filter_map(|part: &CompletionContentPart| {
-            let json = serde_json::to_value(part).ok()?;
-            serde_json::from_value(json).ok()
-        })
-        .collect();
-    LlmMessage {
-        role,
-        content,
-        name: msg.name.clone(),
-        tool_call_id: msg.tool_call_id.clone(),
-    }
-}
-
 async fn create_playground_chat(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -265,11 +240,11 @@ async fn create_playground_chat(
 
     info!(model = %model_id, "Playground chat turn");
 
+    // Request messages are already the canonical `fabro_types::Message` —
+    // the API schema reuses it via build.rs `with_replacement`.
     let mut messages: Vec<LlmMessage> = Vec::new();
     messages.push(LlmMessage::system(build_system_prompt(&req.workflow)));
-    for m in &req.messages {
-        messages.push(convert_api_message(m));
-    }
+    messages.extend(req.messages);
 
     let request = LlmRequest {
         model: model_id,
@@ -396,10 +371,9 @@ mod tests {
         nodes_len: usize,
         edges_len: usize,
     ) -> CreatePlaygroundChatRequest {
-        use fabro_api::types::{CompletionMessage, CompletionMessageRole};
         let messages = (0..messages_len)
-            .map(|_| CompletionMessage {
-                role:         CompletionMessageRole::User,
+            .map(|_| fabro_types::Message {
+                role:         fabro_types::Role::User,
                 content:      Vec::new(),
                 name:         None,
                 tool_call_id: None,
