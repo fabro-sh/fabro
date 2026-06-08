@@ -1,0 +1,78 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+[
+  {
+    "type": "stream_start"
+  },
+  {
+    "type": "reasoning_start"
+  },
+  {
+    "type": "reasoning_delta",
+    "delta": "Let me think"
+  },
+  {
+    "type": "reasoning_end"
+  },
+  {
+    "type": "text_start",
+    "text_id": "block_1"
+  },
+  {
+    "type": "text_delta",
+    "delta": "4.",
+    "text_id": "block_1"
+  },
+  {
+    "type": "text_end",
+    "text_id": "block_1"
+  },
+  {
+    "type": "finish",
+    "finish_reason": "stop",
+    "usage": {
+      "input_tokens": 15,
+      "output_tokens": 12,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0
+    },
+    "response": {
+      "id": "msg_stream_think",
+      "model": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "kind": "thinking",
+            "data": {
+              "text": "Let me think",
+              "signature": "sig_stream_xyz",
+              "redacted": false
+            }
+          },
+          {
+            "kind": "text",
+            "data": "4."
+          }
+        ],
+        "name": null,
+        "tool_call_id": null
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "input_tokens": 15,
+        "output_tokens": 12,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "raw": null,
+      "warnings": [],
+      "rate_limit": null
+    }
+  }
+]

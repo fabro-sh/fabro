@@ -1,0 +1,66 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/gemini.rs
+expression: rendered
+---
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Hello"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 128
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "search",
+          "description": "Search files",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        },
+        {
+          "name": "read_file",
+          "description": "Read a file by path",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "ANY",
+      "allowedFunctionNames": [
+        "search"
+      ]
+    }
+  },
+  "safety_settings": [
+    {
+      "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+      "threshold": "BLOCK_ONLY_HIGH"
+    }
+  ]
+}

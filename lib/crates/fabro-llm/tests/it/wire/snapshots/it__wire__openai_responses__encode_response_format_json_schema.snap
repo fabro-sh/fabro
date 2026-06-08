@@ -1,0 +1,42 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "model": "gpt-test",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Hello"
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 128,
+  "text": {
+    "format": {
+      "type": "json_schema",
+      "name": "response",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer"
+        ]
+      }
+    }
+  },
+  "store": false,
+  "include": [
+    "reasoning.encrypted_content"
+  ]
+}

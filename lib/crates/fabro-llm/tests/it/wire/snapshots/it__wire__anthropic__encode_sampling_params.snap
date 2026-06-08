@@ -1,0 +1,27 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "model": "claude-sonnet-4-20250514",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Hello"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 128,
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "stop_sequences": [
+    "END"
+  ],
+  "metadata": {
+    "trace_id": "trace-123"
+  }
+}

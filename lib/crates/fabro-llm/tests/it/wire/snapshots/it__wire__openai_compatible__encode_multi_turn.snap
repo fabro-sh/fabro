@@ -1,0 +1,26 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+{
+  "model": "test-model",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a terse assistant."
+    },
+    {
+      "role": "user",
+      "content": "What is the capital of France?"
+    },
+    {
+      "role": "assistant",
+      "content": "Paris."
+    },
+    {
+      "role": "user",
+      "content": "And of Spain?"
+    }
+  ],
+  "max_tokens": 128
+}

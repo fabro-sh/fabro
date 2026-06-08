@@ -1,0 +1,66 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "method": "POST",
+  "path": "/messages",
+  "headers": [
+    [
+      "accept",
+      "*/*"
+    ],
+    [
+      "anthropic-version",
+      "2023-06-01"
+    ],
+    [
+      "content-length",
+      "316"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "host",
+      "[host]"
+    ],
+    [
+      "x-api-key",
+      "test-key"
+    ]
+  ],
+  "body": {
+    "model": "claude-sonnet-4-20250514",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Hello"
+          }
+        ]
+      }
+    ],
+    "max_tokens": 128,
+    "system": "Be concise",
+    "temperature": 0.5,
+    "stop_sequences": [],
+    "tools": [
+      {
+        "name": "search",
+        "description": "Search files",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

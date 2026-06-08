@@ -1,0 +1,91 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "model": "claude-sonnet-4-20250514",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Find foo and read /tmp/x"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Let me check."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_1",
+          "name": "search",
+          "input": {
+            "query": "foo"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "call_2",
+          "name": "read_file",
+          "input": {
+            "path": "/tmp/x"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_1",
+          "content": "{\"matches\":2}",
+          "is_error": false
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_2",
+          "content": "file not found",
+          "is_error": true
+        }
+      ]
+    }
+  ],
+  "max_tokens": 128,
+  "stop_sequences": [],
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search files",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "read_file",
+      "description": "Read a file by path",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

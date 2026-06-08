@@ -1,0 +1,37 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/gemini.rs
+expression: rendered
+---
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Describe these attachments."
+        },
+        {
+          "fileData": {
+            "mimeType": "image/png",
+            "fileUri": "https://example.com/picture.png"
+          }
+        },
+        {
+          "fileData": {
+            "mimeType": "application/pdf",
+            "fileUri": "https://example.com/report.pdf"
+          }
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 128
+  },
+  "safety_settings": [
+    {
+      "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+      "threshold": "BLOCK_ONLY_HIGH"
+    }
+  ]
+}

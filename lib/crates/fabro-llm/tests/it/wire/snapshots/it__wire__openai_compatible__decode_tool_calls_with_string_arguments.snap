@@ -1,0 +1,69 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+{
+  "id": "chatcmpl_test",
+  "model": "test-model",
+  "provider": "openai-compatible",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "tool_call",
+        "data": {
+          "id": "call_abc",
+          "name": "search",
+          "type": "function",
+          "arguments": {
+            "query": "foo"
+          },
+          "raw_arguments": "{\"query\":\"foo\"}"
+        }
+      }
+    ],
+    "name": null,
+    "tool_call_id": null
+  },
+  "finish_reason": "tool_calls",
+  "usage": {
+    "input_tokens": 30,
+    "output_tokens": 12,
+    "reasoning_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "raw": {
+    "id": "chatcmpl_test",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "test-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_abc",
+              "type": "function",
+              "function": {
+                "name": "search",
+                "arguments": "{\"query\":\"foo\"}"
+              }
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 30,
+      "completion_tokens": 12,
+      "total_tokens": 42
+    }
+  },
+  "warnings": [],
+  "rate_limit": null
+}

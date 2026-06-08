@@ -1,0 +1,20 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "model": "claude-sonnet-4-20250514",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Describe these attachments."
+        }
+      ]
+    }
+  ],
+  "max_tokens": 128,
+  "stop_sequences": []
+}

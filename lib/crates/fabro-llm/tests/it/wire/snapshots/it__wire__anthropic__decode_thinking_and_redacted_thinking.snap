@@ -1,0 +1,73 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "id": "msg_test",
+  "model": "claude-sonnet-4-20250514",
+  "provider": "anthropic",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "thinking",
+        "data": {
+          "text": "Step one.",
+          "signature": "sig_decode_abc",
+          "redacted": false
+        }
+      },
+      {
+        "kind": "redacted_thinking",
+        "data": {
+          "text": "opaque-blob",
+          "signature": null,
+          "redacted": true
+        }
+      },
+      {
+        "kind": "text",
+        "data": "Done."
+      }
+    ],
+    "name": null,
+    "tool_call_id": null
+  },
+  "finish_reason": "stop",
+  "usage": {
+    "input_tokens": 25,
+    "output_tokens": 40,
+    "reasoning_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "raw": {
+    "id": "msg_test",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-20250514",
+    "content": [
+      {
+        "type": "thinking",
+        "thinking": "Step one.",
+        "signature": "sig_decode_abc"
+      },
+      {
+        "type": "redacted_thinking",
+        "data": "opaque-blob"
+      },
+      {
+        "type": "text",
+        "text": "Done."
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 25,
+      "output_tokens": 40
+    }
+  },
+  "warnings": [],
+  "rate_limit": null
+}

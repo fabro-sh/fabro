@@ -1,0 +1,57 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+{
+  "id": "chatcmpl_test",
+  "model": "test-model",
+  "provider": "openai-compatible",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "text",
+        "data": "ok"
+      }
+    ],
+    "name": null,
+    "tool_call_id": null
+  },
+  "finish_reason": "length",
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "reasoning_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "raw": {
+    "id": "chatcmpl_test",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "test-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "ok"
+        },
+        "finish_reason": "length"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 100,
+      "completion_tokens": 50,
+      "total_tokens": 150,
+      "prompt_tokens_details": {
+        "cached_tokens": 80
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 20
+      }
+    }
+  },
+  "warnings": [],
+  "rate_limit": null
+}

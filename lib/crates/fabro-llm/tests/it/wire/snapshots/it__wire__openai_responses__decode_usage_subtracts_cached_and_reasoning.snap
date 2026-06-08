@@ -1,0 +1,73 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "id": "resp_test",
+  "model": "gpt-test",
+  "provider": "openai",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "openai_message",
+        "data": {
+          "type": "message",
+          "role": "assistant",
+          "id": "msg_out",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "ok"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "text",
+        "data": "ok"
+      }
+    ],
+    "name": null,
+    "tool_call_id": null
+  },
+  "finish_reason": "stop",
+  "usage": {
+    "input_tokens": 20,
+    "output_tokens": 30,
+    "reasoning_tokens": 20,
+    "cache_read_tokens": 80,
+    "cache_write_tokens": 0
+  },
+  "raw": {
+    "id": "resp_test",
+    "object": "response",
+    "model": "gpt-test",
+    "status": "completed",
+    "output": [
+      {
+        "type": "message",
+        "role": "assistant",
+        "id": "msg_out",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "ok"
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "input_tokens": 100,
+      "output_tokens": 50,
+      "input_tokens_details": {
+        "cached_tokens": 80
+      },
+      "output_tokens_details": {
+        "reasoning_tokens": 20
+      }
+    }
+  },
+  "warnings": [],
+  "rate_limit": null
+}

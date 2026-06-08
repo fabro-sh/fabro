@@ -1,0 +1,24 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "model": "claude-sonnet-4-20250514",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Transcribe this."
+        },
+        {
+          "type": "text",
+          "text": "[Audio content not supported by this provider]"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 128,
+  "stop_sequences": []
+}

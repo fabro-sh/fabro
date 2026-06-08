@@ -1,0 +1,50 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "id": "msg_test",
+  "model": "claude-sonnet-4-20250514",
+  "provider": "anthropic",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "text",
+        "data": "Hello back"
+      }
+    ],
+    "name": null,
+    "tool_call_id": null
+  },
+  "finish_reason": "stop",
+  "usage": {
+    "input_tokens": 42,
+    "output_tokens": 7,
+    "reasoning_tokens": 0,
+    "cache_read_tokens": 10,
+    "cache_write_tokens": 3
+  },
+  "raw": {
+    "id": "msg_test",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-4-20250514",
+    "content": [
+      {
+        "type": "text",
+        "text": "Hello back"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 42,
+      "output_tokens": 7,
+      "cache_read_input_tokens": 10,
+      "cache_creation_input_tokens": 3
+    }
+  },
+  "warnings": [],
+  "rate_limit": null
+}

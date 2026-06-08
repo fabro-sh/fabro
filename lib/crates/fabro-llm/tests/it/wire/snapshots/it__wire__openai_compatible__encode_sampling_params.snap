@@ -1,0 +1,19 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+{
+  "model": "test-model",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello"
+    }
+  ],
+  "temperature": 0.7,
+  "max_tokens": 128,
+  "top_p": 0.9,
+  "stop": [
+    "END"
+  ]
+}

@@ -2004,6 +2004,32 @@ macro_rules! fabro_json_snapshot {
             insta::assert_snapshot!(rendered, @$snapshot);
         });
     }};
+    // External-snapshot forms (no inline `@"..."`): insta writes the snapshot
+    // to a `.snap` file under the test's `snapshots/` directory. Use these to
+    // keep large snapshots out of the `.rs` source.
+    ($filter_source:expr, $value:expr $(,)?) => {{
+        let filters =
+            $crate::json_snapshot_filters($crate::snapshot_filters_from(&$filter_source));
+        let filters: Vec<(&str, &str)> = filters
+            .iter()
+            .map(|(pattern, replacement)| (pattern.as_str(), replacement.as_str()))
+            .collect();
+        let rendered = serde_json::to_string_pretty(&$value).unwrap();
+        insta::with_settings!({ filters => filters }, {
+            insta::assert_snapshot!(rendered);
+        });
+    }};
+    ($value:expr $(,)?) => {{
+        let filters = $crate::json_snapshot_filters($crate::TestContext::default_filters());
+        let filters: Vec<(&str, &str)> = filters
+            .iter()
+            .map(|(pattern, replacement)| (pattern.as_str(), replacement.as_str()))
+            .collect();
+        let rendered = serde_json::to_string_pretty(&$value).unwrap();
+        insta::with_settings!({ filters => filters }, {
+            insta::assert_snapshot!(rendered);
+        });
+    }};
 }
 
 impl TestContext {

@@ -1,0 +1,23 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+{
+  "model": "test-model",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Think step by step: what is 2+2?"
+    },
+    {
+      "role": "assistant",
+      "content": "4.",
+      "reasoning_content": "The user wants 2+2, which is 4."
+    },
+    {
+      "role": "user",
+      "content": "Now 3+3?"
+    }
+  ],
+  "max_tokens": 128
+}

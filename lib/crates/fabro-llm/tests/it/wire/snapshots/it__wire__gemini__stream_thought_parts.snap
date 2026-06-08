@@ -1,0 +1,78 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/gemini.rs
+expression: rendered
+---
+[
+  {
+    "type": "stream_start"
+  },
+  {
+    "type": "reasoning_start"
+  },
+  {
+    "type": "reasoning_delta",
+    "delta": "Let me think"
+  },
+  {
+    "type": "reasoning_end"
+  },
+  {
+    "type": "text_start",
+    "text_id": "[UUID]"
+  },
+  {
+    "type": "text_delta",
+    "delta": "4.",
+    "text_id": "[UUID]"
+  },
+  {
+    "type": "text_end",
+    "text_id": "[UUID]"
+  },
+  {
+    "type": "finish",
+    "finish_reason": "stop",
+    "usage": {
+      "input_tokens": 15,
+      "output_tokens": 12,
+      "reasoning_tokens": 6,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0
+    },
+    "response": {
+      "id": "[UUID]",
+      "model": "gemini-test",
+      "provider": "gemini",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "kind": "thinking",
+            "data": {
+              "text": "Let me think",
+              "signature": null,
+              "redacted": false
+            }
+          },
+          {
+            "kind": "text",
+            "data": "4."
+          }
+        ],
+        "name": null,
+        "tool_call_id": null
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "input_tokens": 15,
+        "output_tokens": 12,
+        "reasoning_tokens": 6,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "raw": null,
+      "warnings": [],
+      "rate_limit": null
+    }
+  }
+]

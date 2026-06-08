@@ -9,6 +9,12 @@
 //!
 //! The anthropic/gemini dialects have no twin coverage, so these snapshots
 //! are the only behavior net for those extractions.
+//!
+//! Snapshots are stored externally under `snapshots/` (via
+//! `fabro_test::fabro_json_snapshot!(value)` with no inline literal) to keep
+//! these source files small. Review and accept with `cargo insta`
+//! (`pending-snapshots` then `accept`), per CLAUDE.md. A few tests assert two
+//! snapshots in one function; insta names the second `<test>-2.snap`.
 
 mod anthropic;
 mod gemini;

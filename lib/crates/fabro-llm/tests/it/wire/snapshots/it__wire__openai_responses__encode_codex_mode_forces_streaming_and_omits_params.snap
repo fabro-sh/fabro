@@ -1,0 +1,51 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "method": "POST",
+  "path": "/responses",
+  "headers": [
+    [
+      "accept",
+      "*/*"
+    ],
+    [
+      "authorization",
+      "Bearer test-key"
+    ],
+    [
+      "content-length",
+      "210"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "host",
+      "[host]"
+    ]
+  ],
+  "body": {
+    "model": "gpt-test",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Hello"
+          }
+        ]
+      }
+    ],
+    "instructions": "Be concise",
+    "store": false,
+    "include": [
+      "reasoning.encrypted_content"
+    ],
+    "stream": true
+  }
+}

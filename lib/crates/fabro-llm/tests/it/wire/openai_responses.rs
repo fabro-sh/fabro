@@ -71,8 +71,9 @@ async fn stream_capture(
 // Round trip (encode + decode)
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn system_and_tools_encode_decode() {
+/// Shared setup for the system+tools round trip; the encode and decode halves
+/// are pinned by separate tests.
+async fn system_and_tools_roundtrip() -> (WireCapture, fabro_llm::types::Response) {
     let server = MockServer::start();
     let (mock, slot) = mount_capture(
         &server,
@@ -109,145 +110,24 @@ async fn system_and_tools_encode_decode() {
         ..base_request(MODEL)
     };
 
-    let response = adapter.complete(&request).await.unwrap();
+    let response = adapter
+        .complete(&request)
+        .await
+        .expect("complete should succeed");
     mock.assert();
+    (take_capture(&slot), response)
+}
 
-    fabro_test::fabro_json_snapshot!(take_capture(&slot), @r#"
-    {
-      "method": "POST",
-      "path": "/responses",
-      "headers": [
-        [
-          "accept",
-          "*/*"
-        ],
-        [
-          "authorization",
-          "Bearer test-key"
-        ],
-        [
-          "content-length",
-          "385"
-        ],
-        [
-          "content-type",
-          "application/json"
-        ],
-        [
-          "host",
-          "[host]"
-        ]
-      ],
-      "body": {
-        "model": "gpt-test",
-        "input": [
-          {
-            "type": "message",
-            "role": "user",
-            "content": [
-              {
-                "type": "input_text",
-                "text": "Hello"
-              }
-            ]
-          }
-        ],
-        "instructions": "Be concise",
-        "temperature": 0.5,
-        "max_output_tokens": 128,
-        "tools": [
-          {
-            "type": "function",
-            "name": "search",
-            "description": "Search files",
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "query": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        ],
-        "store": false,
-        "include": [
-          "reasoning.encrypted_content"
-        ]
-      }
-    }
-    "#);
-    fabro_test::fabro_json_snapshot!(response, @r#"
-    {
-      "id": "resp_test",
-      "model": "gpt-test",
-      "provider": "openai",
-      "message": {
-        "role": "assistant",
-        "content": [
-          {
-            "kind": "openai_message",
-            "data": {
-              "type": "message",
-              "role": "assistant",
-              "id": "msg_out",
-              "content": [
-                {
-                  "type": "output_text",
-                  "text": "Hello back"
-                }
-              ]
-            }
-          },
-          {
-            "kind": "text",
-            "data": "Hello back"
-          }
-        ],
-        "name": null,
-        "tool_call_id": null
-      },
-      "finish_reason": "stop",
-      "usage": {
-        "input_tokens": 32,
-        "output_tokens": 4,
-        "reasoning_tokens": 3,
-        "cache_read_tokens": 10,
-        "cache_write_tokens": 0
-      },
-      "raw": {
-        "id": "resp_test",
-        "object": "response",
-        "model": "gpt-test",
-        "status": "completed",
-        "output": [
-          {
-            "type": "message",
-            "role": "assistant",
-            "id": "msg_out",
-            "content": [
-              {
-                "type": "output_text",
-                "text": "Hello back"
-              }
-            ]
-          }
-        ],
-        "usage": {
-          "input_tokens": 42,
-          "output_tokens": 7,
-          "input_tokens_details": {
-            "cached_tokens": 10
-          },
-          "output_tokens_details": {
-            "reasoning_tokens": 3
-          }
-        }
-      },
-      "warnings": [],
-      "rate_limit": null
-    }
-    "#);
+#[tokio::test]
+async fn system_and_tools_encode() {
+    let (capture, _) = system_and_tools_roundtrip().await;
+    fabro_test::fabro_json_snapshot!(capture);
+}
+
+#[tokio::test]
+async fn system_and_tools_decode() {
+    let (_, response) = system_and_tools_roundtrip().await;
+    fabro_test::fabro_json_snapshot!(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -257,167 +137,19 @@ async fn system_and_tools_encode_decode() {
 #[tokio::test]
 async fn encode_multi_turn() {
     let capture = encode_capture(adapter(), &corpus_multi_turn(MODEL)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "What is the capital of France?"
-            }
-          ]
-        },
-        {
-          "type": "message",
-          "role": "assistant",
-          "content": [
-            {
-              "type": "output_text",
-              "text": "Paris."
-            }
-          ]
-        },
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "And of Spain?"
-            }
-          ]
-        }
-      ],
-      "instructions": "You are a terse assistant.",
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_tool_choice_auto() {
     let capture = encode_capture(adapter(), &corpus_tools(MODEL, Some(ToolChoice::Auto))).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "tools": [
-        {
-          "type": "function",
-          "name": "search",
-          "description": "Search files",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "query"
-            ]
-          }
-        },
-        {
-          "type": "function",
-          "name": "read_file",
-          "description": "Read a file by path",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      ],
-      "tool_choice": "auto",
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_tool_choice_required() {
     let capture = encode_capture(adapter(), &corpus_tools(MODEL, Some(ToolChoice::Required))).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "tools": [
-        {
-          "type": "function",
-          "name": "search",
-          "description": "Search files",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "query"
-            ]
-          }
-        },
-        {
-          "type": "function",
-          "name": "read_file",
-          "description": "Read a file by path",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      ],
-      "tool_choice": "required",
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
@@ -427,215 +159,19 @@ async fn encode_tool_choice_named() {
         &corpus_tools(MODEL, Some(ToolChoice::named("search"))),
     )
     .await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "tools": [
-        {
-          "type": "function",
-          "name": "search",
-          "description": "Search files",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "query"
-            ]
-          }
-        },
-        {
-          "type": "function",
-          "name": "read_file",
-          "description": "Read a file by path",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      ],
-      "tool_choice": {
-        "type": "function",
-        "name": "search"
-      },
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_tool_choice_none() {
     let capture = encode_capture(adapter(), &corpus_tools(MODEL, Some(ToolChoice::None))).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "tools": [
-        {
-          "type": "function",
-          "name": "search",
-          "description": "Search files",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "query"
-            ]
-          }
-        },
-        {
-          "type": "function",
-          "name": "read_file",
-          "description": "Read a file by path",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      ],
-      "tool_choice": "none",
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_tool_round_trip() {
     let capture = encode_capture(adapter(), &corpus_tool_round_trip(MODEL)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Find foo and read /tmp/x"
-            }
-          ]
-        },
-        {
-          "type": "message",
-          "role": "assistant",
-          "content": [
-            {
-              "type": "output_text",
-              "text": "Let me check."
-            }
-          ]
-        },
-        {
-          "type": "function_call",
-          "id": "call_1",
-          "call_id": "call_1",
-          "name": "search",
-          "arguments": "{\"query\":\"foo\"}"
-        },
-        {
-          "type": "function_call",
-          "id": "call_2",
-          "call_id": "call_2",
-          "name": "read_file",
-          "arguments": "{\"path\":\"/tmp/x\"}"
-        },
-        {
-          "type": "function_call_output",
-          "call_id": "call_1",
-          "output": "{\"matches\":2}"
-        },
-        {
-          "type": "function_call_output",
-          "call_id": "call_2",
-          "output": "file not found",
-          "status": "incomplete"
-        }
-      ],
-      "max_output_tokens": 128,
-      "tools": [
-        {
-          "type": "function",
-          "name": "search",
-          "description": "Search files",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "query"
-            ]
-          }
-        },
-        {
-          "type": "function",
-          "name": "read_file",
-          "description": "Read a file by path",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      ],
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 /// A tool call that decoded with an item-level id (`fc_…`) in
@@ -660,71 +196,7 @@ async fn encode_dual_id_tool_round_trip() {
         ),
     ];
     let capture = encode_capture(adapter(), &request).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Find foo"
-            }
-          ]
-        },
-        {
-          "type": "function_call",
-          "id": "fc_123",
-          "call_id": "call_abc",
-          "name": "search",
-          "arguments": "{\"query\":\"foo\"}"
-        },
-        {
-          "type": "function_call_output",
-          "call_id": "call_abc",
-          "output": "2 matches"
-        }
-      ],
-      "max_output_tokens": 128,
-      "tools": [
-        {
-          "type": "function",
-          "name": "search",
-          "description": "Search files",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "query"
-            ]
-          }
-        },
-        {
-          "type": "function",
-          "name": "read_file",
-          "description": "Read a file by path",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      ],
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 /// Opaque OpenAI items (reasoning / message) round-trip verbatim into the
@@ -763,59 +235,7 @@ async fn encode_opaque_items_round_trip() {
         ..base_request(MODEL)
     };
     let capture = encode_capture(adapter(), &request).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Think about 2+2."
-            }
-          ]
-        },
-        {
-          "type": "reasoning",
-          "id": "rs_1",
-          "summary": [
-            {
-              "type": "summary_text",
-              "text": "Adding."
-            }
-          ]
-        },
-        {
-          "type": "message",
-          "role": "assistant",
-          "id": "msg_1",
-          "content": [
-            {
-              "type": "output_text",
-              "text": "4."
-            }
-          ]
-        },
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Now 3+3?"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 /// Canonical Thinking parts (anthropic-style) — distinct from the opaque
@@ -823,180 +243,31 @@ async fn encode_opaque_items_round_trip() {
 #[tokio::test]
 async fn encode_thinking_round_trip() {
     let capture = encode_capture(adapter(), &corpus_thinking_round_trip(MODEL)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Think step by step: what is 2+2?"
-            }
-          ]
-        },
-        {
-          "type": "message",
-          "role": "assistant",
-          "content": [
-            {
-              "type": "output_text",
-              "text": "4."
-            }
-          ]
-        },
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Now 3+3?"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_inline_attachments() {
     let capture = encode_capture(adapter(), &corpus_inline_attachments(MODEL)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Describe these attachments."
-            },
-            {
-              "type": "input_image",
-              "image_url": "data:image/png;base64,ZmFrZS1wbmctYnl0ZXM="
-            },
-            {
-              "type": "input_text",
-              "text": "[Document 'report.pdf': content type not supported by this provider]"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_url_attachments() {
     let capture = encode_capture(adapter(), &corpus_url_attachments(MODEL)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Describe these attachments."
-            },
-            {
-              "type": "input_image",
-              "image_url": "https://example.com/picture.png"
-            },
-            {
-              "type": "input_text",
-              "text": "[Document 'report.pdf': content type not supported by this provider]"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_bad_file_path_attachments_dropped() {
     let capture = encode_capture(adapter(), &corpus_bad_file_path_attachments(MODEL)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Describe these attachments."
-            },
-            {
-              "type": "input_text",
-              "text": "[Document 'missing.pdf': content type not supported by this provider]"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_audio_attachment() {
     let capture = encode_capture(adapter(), &corpus_audio_attachment(MODEL)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Transcribe this."
-            },
-            {
-              "type": "input_text",
-              "text": "[Audio content not supported by this provider]"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
@@ -1007,33 +278,7 @@ async fn encode_response_format_json_object() {
         strict:      false,
     };
     let capture = encode_capture(adapter(), &corpus_response_format(MODEL, format)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "text": {
-        "format": {
-          "type": "json_object"
-        }
-      },
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
@@ -1043,81 +288,13 @@ async fn encode_response_format_json_schema() {
         &corpus_response_format(MODEL, json_schema_format()),
     )
     .await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "text": {
-        "format": {
-          "type": "json_schema",
-          "name": "response",
-          "strict": true,
-          "schema": {
-            "type": "object",
-            "properties": {
-              "answer": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "answer"
-            ]
-          }
-        }
-      },
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
 async fn encode_sampling_params() {
     let capture = encode_capture(adapter(), &corpus_sampling_params(MODEL)).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "temperature": 0.7,
-      "max_output_tokens": 128,
-      "top_p": 0.9,
-      "stop": [
-        "END"
-      ],
-      "metadata": {
-        "trace_id": "trace-123"
-      },
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
@@ -1127,29 +304,7 @@ async fn encode_provider_options_openai_namespace() {
         &corpus_provider_options(MODEL, serde_json::json!({"openai": {"seed": 42}})),
     )
     .await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ],
-      "seed": 42
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 #[tokio::test]
@@ -1183,31 +338,7 @@ reasoning_effort = "levels"
         ..base_request("test-gpt")
     };
     let capture = encode_capture(adapter().with_catalog(catalog), &request).await;
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "test-gpt",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "reasoning": {
-        "effort": "high"
-      },
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ]
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(capture.body);
 }
 
 /// Codex mode forces streaming for `complete()` and omits sampling params
@@ -1232,55 +363,7 @@ async fn encode_codex_mode_forces_streaming_and_omits_params() {
     };
     adapter.complete(&request).await.unwrap();
     mock.assert();
-    fabro_test::fabro_json_snapshot!(take_capture(&slot), @r#"
-    {
-      "method": "POST",
-      "path": "/responses",
-      "headers": [
-        [
-          "accept",
-          "*/*"
-        ],
-        [
-          "authorization",
-          "Bearer test-key"
-        ],
-        [
-          "content-length",
-          "210"
-        ],
-        [
-          "content-type",
-          "application/json"
-        ],
-        [
-          "host",
-          "[host]"
-        ]
-      ],
-      "body": {
-        "model": "gpt-test",
-        "input": [
-          {
-            "type": "message",
-            "role": "user",
-            "content": [
-              {
-                "type": "input_text",
-                "text": "Hello"
-              }
-            ]
-          }
-        ],
-        "instructions": "Be concise",
-        "store": false,
-        "include": [
-          "reasoning.encrypted_content"
-        ],
-        "stream": true
-      }
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(take_capture(&slot));
 }
 
 #[tokio::test]
@@ -1304,81 +387,7 @@ async fn count_tokens_wire_shape() {
 
     mock.assert();
     assert_eq!(count.input_tokens, 123);
-    fabro_test::fabro_json_snapshot!(take_capture(&slot), @r#"
-    {
-      "method": "POST",
-      "path": "/responses/input_tokens",
-      "headers": [
-        [
-          "accept",
-          "*/*"
-        ],
-        [
-          "authorization",
-          "Bearer test-key"
-        ],
-        [
-          "content-length",
-          "454"
-        ],
-        [
-          "content-type",
-          "application/json"
-        ],
-        [
-          "host",
-          "[host]"
-        ]
-      ],
-      "body": {
-        "input": [
-          {
-            "type": "message",
-            "role": "user",
-            "content": [
-              {
-                "type": "input_text",
-                "text": "Hello"
-              }
-            ]
-          }
-        ],
-        "instructions": "Be concise",
-        "model": "gpt-test",
-        "tools": [
-          {
-            "type": "function",
-            "name": "search",
-            "description": "Search files",
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "query": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "query"
-              ]
-            }
-          },
-          {
-            "type": "function",
-            "name": "read_file",
-            "description": "Read a file by path",
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "path": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        ]
-      }
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(take_capture(&slot));
 }
 
 // ---------------------------------------------------------------------------
@@ -1420,77 +429,7 @@ async fn decode_usage_subtracts_cached_and_reasoning() {
         }
     }))
     .await;
-    fabro_test::fabro_json_snapshot!(response, @r#"
-    {
-      "id": "resp_test",
-      "model": "gpt-test",
-      "provider": "openai",
-      "message": {
-        "role": "assistant",
-        "content": [
-          {
-            "kind": "openai_message",
-            "data": {
-              "type": "message",
-              "role": "assistant",
-              "id": "msg_out",
-              "content": [
-                {
-                  "type": "output_text",
-                  "text": "ok"
-                }
-              ]
-            }
-          },
-          {
-            "kind": "text",
-            "data": "ok"
-          }
-        ],
-        "name": null,
-        "tool_call_id": null
-      },
-      "finish_reason": "stop",
-      "usage": {
-        "input_tokens": 20,
-        "output_tokens": 30,
-        "reasoning_tokens": 20,
-        "cache_read_tokens": 80,
-        "cache_write_tokens": 0
-      },
-      "raw": {
-        "id": "resp_test",
-        "object": "response",
-        "model": "gpt-test",
-        "status": "completed",
-        "output": [
-          {
-            "type": "message",
-            "role": "assistant",
-            "id": "msg_out",
-            "content": [
-              {
-                "type": "output_text",
-                "text": "ok"
-              }
-            ]
-          }
-        ],
-        "usage": {
-          "input_tokens": 100,
-          "output_tokens": 50,
-          "input_tokens_details": {
-            "cached_tokens": 80
-          },
-          "output_tokens_details": {
-            "reasoning_tokens": 20
-          }
-        }
-      },
-      "warnings": [],
-      "rate_limit": null
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(response);
 }
 
 /// Reasoning and function_call output items: reasoning becomes an opaque
@@ -1519,87 +458,7 @@ async fn decode_reasoning_and_function_call_items() {
         "usage": {"input_tokens": 30, "output_tokens": 12}
     }))
     .await;
-    fabro_test::fabro_json_snapshot!(response, @r#"
-    {
-      "id": "resp_test",
-      "model": "gpt-test",
-      "provider": "openai",
-      "message": {
-        "role": "assistant",
-        "content": [
-          {
-            "kind": "openai_reasoning",
-            "data": {
-              "type": "reasoning",
-              "id": "rs_1",
-              "summary": [
-                {
-                  "type": "summary_text",
-                  "text": "Searching."
-                }
-              ]
-            }
-          },
-          {
-            "kind": "tool_call",
-            "data": {
-              "id": "call_abc",
-              "name": "search",
-              "type": "function",
-              "arguments": {
-                "query": "foo"
-              },
-              "raw_arguments": "{\"query\":\"foo\"}",
-              "provider_metadata": {
-                "id": "fc_123"
-              }
-            }
-          }
-        ],
-        "name": null,
-        "tool_call_id": null
-      },
-      "finish_reason": "tool_calls",
-      "usage": {
-        "input_tokens": 30,
-        "output_tokens": 12,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0
-      },
-      "raw": {
-        "id": "resp_test",
-        "object": "response",
-        "model": "gpt-test",
-        "status": "completed",
-        "output": [
-          {
-            "type": "reasoning",
-            "id": "rs_1",
-            "summary": [
-              {
-                "type": "summary_text",
-                "text": "Searching."
-              }
-            ]
-          },
-          {
-            "type": "function_call",
-            "id": "fc_123",
-            "call_id": "call_abc",
-            "name": "search",
-            "arguments": "{\"query\":\"foo\"}"
-          }
-        ],
-        "usage": {
-          "input_tokens": 30,
-          "output_tokens": 12
-        }
-      },
-      "warnings": [],
-      "rate_limit": null
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(response);
 }
 
 #[tokio::test]
@@ -1618,184 +477,36 @@ async fn decode_incomplete_status_maps_to_length() {
         "usage": {"input_tokens": 10, "output_tokens": 128}
     }))
     .await;
-    fabro_test::fabro_json_snapshot!(response, @r#"
-    {
-      "id": "resp_test",
-      "model": "gpt-test",
-      "provider": "openai",
-      "message": {
-        "role": "assistant",
-        "content": [
-          {
-            "kind": "openai_message",
-            "data": {
-              "type": "message",
-              "role": "assistant",
-              "id": "msg_out",
-              "content": [
-                {
-                  "type": "output_text",
-                  "text": "Truncated"
-                }
-              ]
-            }
-          },
-          {
-            "kind": "text",
-            "data": "Truncated"
-          }
-        ],
-        "name": null,
-        "tool_call_id": null
-      },
-      "finish_reason": "length",
-      "usage": {
-        "input_tokens": 10,
-        "output_tokens": 128,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0
-      },
-      "raw": {
-        "id": "resp_test",
-        "object": "response",
-        "model": "gpt-test",
-        "status": "incomplete",
-        "output": [
-          {
-            "type": "message",
-            "role": "assistant",
-            "id": "msg_out",
-            "content": [
-              {
-                "type": "output_text",
-                "text": "Truncated"
-              }
-            ]
-          }
-        ],
-        "usage": {
-          "input_tokens": 10,
-          "output_tokens": 128
-        }
-      },
-      "warnings": [],
-      "rate_limit": null
-    }
-    "#);
+    fabro_test::fabro_json_snapshot!(response);
 }
 
 // ---------------------------------------------------------------------------
 // Stream
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn stream_text_happy_path() {
+/// Shared setup for the happy-path text stream; the request and event halves
+/// are pinned by separate tests.
+async fn stream_text_happy_path_capture() -> (WireCapture, Vec<serde_json::Value>) {
     let sse = support::sse_data_transcript(&[
         r#"{"type":"response.created","response":{"id":"resp_stream","model":"gpt-test"}}"#,
         r#"{"type":"response.output_text.delta","delta":"Hel"}"#,
         r#"{"type":"response.output_text.delta","delta":"lo"}"#,
         r#"{"type":"response.completed","response":{"id":"resp_stream","model":"gpt-test","status":"completed","output":[],"usage":{"input_tokens":11,"output_tokens":5,"input_tokens_details":{"cached_tokens":2},"output_tokens_details":{"reasoning_tokens":1}}}}"#,
     ]);
-    let (capture, events) = stream_capture(adapter(), &base_request(MODEL), &sse).await;
-    // The captured request pins the stream flag (and `include`) on the wire.
-    fabro_test::fabro_json_snapshot!(capture.body, @r#"
-    {
-      "model": "gpt-test",
-      "input": [
-        {
-          "type": "message",
-          "role": "user",
-          "content": [
-            {
-              "type": "input_text",
-              "text": "Hello"
-            }
-          ]
-        }
-      ],
-      "max_output_tokens": 128,
-      "store": false,
-      "include": [
-        "reasoning.encrypted_content"
-      ],
-      "stream": true
-    }
-    "#);
-    fabro_test::fabro_json_snapshot!(events, @r#"
-    [
-      {
-        "type": "stream_start"
-      },
-      {
-        "type": "text_start",
-        "text_id": null
-      },
-      {
-        "type": "text_delta",
-        "delta": "Hel",
-        "text_id": null
-      },
-      {
-        "type": "text_delta",
-        "delta": "lo",
-        "text_id": null
-      },
-      {
-        "type": "finish",
-        "finish_reason": "stop",
-        "usage": {
-          "input_tokens": 9,
-          "output_tokens": 4,
-          "reasoning_tokens": 1,
-          "cache_read_tokens": 2,
-          "cache_write_tokens": 0
-        },
-        "response": {
-          "id": "resp_stream",
-          "model": "gpt-test",
-          "provider": "openai",
-          "message": {
-            "role": "assistant",
-            "content": [
-              {
-                "kind": "text",
-                "data": "Hello"
-              }
-            ],
-            "name": null,
-            "tool_call_id": null
-          },
-          "finish_reason": "stop",
-          "usage": {
-            "input_tokens": 9,
-            "output_tokens": 4,
-            "reasoning_tokens": 1,
-            "cache_read_tokens": 2,
-            "cache_write_tokens": 0
-          },
-          "raw": {
-            "id": "resp_stream",
-            "model": "gpt-test",
-            "status": "completed",
-            "output": [],
-            "usage": {
-              "input_tokens": 11,
-              "output_tokens": 5,
-              "input_tokens_details": {
-                "cached_tokens": 2
-              },
-              "output_tokens_details": {
-                "reasoning_tokens": 1
-              }
-            }
-          },
-          "warnings": [],
-          "rate_limit": null
-        }
-      }
-    ]
-    "#);
+    stream_capture(adapter(), &base_request(MODEL), &sse).await
+}
+
+/// The captured request pins the stream flag (and `include`) on the wire.
+#[tokio::test]
+async fn stream_text_happy_path_request() {
+    let (capture, _) = stream_text_happy_path_capture().await;
+    fabro_test::fabro_json_snapshot!(capture.body);
+}
+
+#[tokio::test]
+async fn stream_text_happy_path_events() {
+    let (_, events) = stream_text_happy_path_capture().await;
+    fabro_test::fabro_json_snapshot!(events);
 }
 
 #[tokio::test]
@@ -1813,125 +524,7 @@ async fn stream_tool_call_deltas() {
         &sse,
     )
     .await;
-    fabro_test::fabro_json_snapshot!(events, @r#"
-    [
-      {
-        "type": "stream_start"
-      },
-      {
-        "type": "tool_call_start",
-        "tool_call": {
-          "id": "call_abc",
-          "name": "search",
-          "type": "function",
-          "arguments": {},
-          "raw_arguments": "{\"qu",
-          "provider_metadata": {
-            "id": "fc_123"
-          }
-        }
-      },
-      {
-        "type": "tool_call_delta",
-        "tool_call": {
-          "id": "call_abc",
-          "name": "search",
-          "type": "function",
-          "arguments": {},
-          "raw_arguments": "{\"qu",
-          "provider_metadata": {
-            "id": "fc_123"
-          }
-        }
-      },
-      {
-        "type": "tool_call_delta",
-        "tool_call": {
-          "id": "call_abc",
-          "name": "search",
-          "type": "function",
-          "arguments": {},
-          "raw_arguments": "ery\":\"foo\"}",
-          "provider_metadata": {
-            "id": "fc_123"
-          }
-        }
-      },
-      {
-        "type": "tool_call_end",
-        "tool_call": {
-          "id": "call_abc",
-          "name": "search",
-          "type": "function",
-          "arguments": {
-            "query": "foo"
-          },
-          "raw_arguments": "{\"query\":\"foo\"}",
-          "provider_metadata": {
-            "id": "fc_123"
-          }
-        }
-      },
-      {
-        "type": "finish",
-        "finish_reason": "tool_calls",
-        "usage": {
-          "input_tokens": 20,
-          "output_tokens": 9,
-          "reasoning_tokens": 0,
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0
-        },
-        "response": {
-          "id": "resp_stream",
-          "model": "gpt-test",
-          "provider": "openai",
-          "message": {
-            "role": "assistant",
-            "content": [
-              {
-                "kind": "tool_call",
-                "data": {
-                  "id": "call_abc",
-                  "name": "search",
-                  "type": "function",
-                  "arguments": {
-                    "query": "foo"
-                  },
-                  "raw_arguments": "{\"query\":\"foo\"}",
-                  "provider_metadata": {
-                    "id": "fc_123"
-                  }
-                }
-              }
-            ],
-            "name": null,
-            "tool_call_id": null
-          },
-          "finish_reason": "tool_calls",
-          "usage": {
-            "input_tokens": 20,
-            "output_tokens": 9,
-            "reasoning_tokens": 0,
-            "cache_read_tokens": 0,
-            "cache_write_tokens": 0
-          },
-          "raw": {
-            "id": "resp_stream",
-            "model": "gpt-test",
-            "status": "completed",
-            "output": [],
-            "usage": {
-              "input_tokens": 20,
-              "output_tokens": 9
-            }
-          },
-          "warnings": [],
-          "rate_limit": null
-        }
-      }
-    ]
-    "#);
+    fabro_test::fabro_json_snapshot!(events);
 }
 
 #[tokio::test]
@@ -1944,83 +537,7 @@ async fn stream_reasoning_summary_deltas() {
         r#"{"type":"response.completed","response":{"id":"resp_stream","model":"gpt-test","status":"completed","output":[],"usage":{"input_tokens":15,"output_tokens":12,"output_tokens_details":{"reasoning_tokens":8}}}}"#,
     ]);
     let (_capture, events) = stream_capture(adapter(), &base_request(MODEL), &sse).await;
-    fabro_test::fabro_json_snapshot!(events, @r#"
-    [
-      {
-        "type": "stream_start"
-      },
-      {
-        "type": "reasoning_start"
-      },
-      {
-        "type": "reasoning_delta",
-        "delta": "Let me "
-      },
-      {
-        "type": "reasoning_delta",
-        "delta": "think"
-      },
-      {
-        "type": "text_start",
-        "text_id": null
-      },
-      {
-        "type": "text_delta",
-        "delta": "4.",
-        "text_id": null
-      },
-      {
-        "type": "finish",
-        "finish_reason": "stop",
-        "usage": {
-          "input_tokens": 15,
-          "output_tokens": 4,
-          "reasoning_tokens": 8,
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0
-        },
-        "response": {
-          "id": "resp_stream",
-          "model": "gpt-test",
-          "provider": "openai",
-          "message": {
-            "role": "assistant",
-            "content": [
-              {
-                "kind": "text",
-                "data": "4."
-              }
-            ],
-            "name": null,
-            "tool_call_id": null
-          },
-          "finish_reason": "stop",
-          "usage": {
-            "input_tokens": 15,
-            "output_tokens": 4,
-            "reasoning_tokens": 8,
-            "cache_read_tokens": 0,
-            "cache_write_tokens": 0
-          },
-          "raw": {
-            "id": "resp_stream",
-            "model": "gpt-test",
-            "status": "completed",
-            "output": [],
-            "usage": {
-              "input_tokens": 15,
-              "output_tokens": 12,
-              "output_tokens_details": {
-                "reasoning_tokens": 8
-              }
-            }
-          },
-          "warnings": [],
-          "rate_limit": null
-        }
-      }
-    ]
-    "#);
+    fabro_test::fabro_json_snapshot!(events);
 }
 
 #[tokio::test]
@@ -2030,18 +547,7 @@ async fn stream_failed_event_maps_to_error() {
         r#"{"type":"response.failed","response":{"id":"resp_stream","error":{"code":"server_error","message":"boom"}}}"#,
     ]);
     let (_capture, events) = stream_capture(adapter(), &base_request(MODEL), &sse).await;
-    fabro_test::fabro_json_snapshot!(events, @r#"
-    [
-      {
-        "type": "stream_start"
-      },
-      {
-        "stream_item_error": "Server error from openai: boom",
-        "retryable": true,
-        "failover_eligible": true
-      }
-    ]
-    "#);
+    fabro_test::fabro_json_snapshot!(events);
 }
 
 /// `response.incomplete` finishes the stream with `Length`.
@@ -2053,67 +559,5 @@ async fn stream_incomplete_maps_to_length() {
         r#"{"type":"response.incomplete","response":{"id":"resp_stream","model":"gpt-test","status":"incomplete","output":[],"usage":{"input_tokens":10,"output_tokens":128}}}"#,
     ]);
     let (_capture, events) = stream_capture(adapter(), &base_request(MODEL), &sse).await;
-    fabro_test::fabro_json_snapshot!(events, @r#"
-    [
-      {
-        "type": "stream_start"
-      },
-      {
-        "type": "text_start",
-        "text_id": null
-      },
-      {
-        "type": "text_delta",
-        "delta": "Trunc",
-        "text_id": null
-      },
-      {
-        "type": "finish",
-        "finish_reason": "length",
-        "usage": {
-          "input_tokens": 10,
-          "output_tokens": 128,
-          "reasoning_tokens": 0,
-          "cache_read_tokens": 0,
-          "cache_write_tokens": 0
-        },
-        "response": {
-          "id": "resp_stream",
-          "model": "gpt-test",
-          "provider": "openai",
-          "message": {
-            "role": "assistant",
-            "content": [
-              {
-                "kind": "text",
-                "data": "Trunc"
-              }
-            ],
-            "name": null,
-            "tool_call_id": null
-          },
-          "finish_reason": "length",
-          "usage": {
-            "input_tokens": 10,
-            "output_tokens": 128,
-            "reasoning_tokens": 0,
-            "cache_read_tokens": 0,
-            "cache_write_tokens": 0
-          },
-          "raw": {
-            "id": "resp_stream",
-            "model": "gpt-test",
-            "status": "incomplete",
-            "output": [],
-            "usage": {
-              "input_tokens": 10,
-              "output_tokens": 128
-            }
-          },
-          "warnings": [],
-          "rate_limit": null
-        }
-      }
-    ]
-    "#);
+    fabro_test::fabro_json_snapshot!(events);
 }

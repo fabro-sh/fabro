@@ -1,0 +1,30 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/gemini.rs
+expression: rendered
+---
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Hello"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "temperature": 0.7,
+    "maxOutputTokens": 128,
+    "topP": 0.9,
+    "stopSequences": [
+      "END"
+    ]
+  },
+  "safety_settings": [
+    {
+      "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+      "threshold": "BLOCK_ONLY_HIGH"
+    }
+  ]
+}

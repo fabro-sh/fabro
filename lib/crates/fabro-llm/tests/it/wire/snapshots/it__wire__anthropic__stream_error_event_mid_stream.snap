@@ -1,0 +1,14 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+[
+  {
+    "type": "stream_start"
+  },
+  {
+    "stream_item_error": "Server error from anthropic: Overloaded",
+    "retryable": true,
+    "failover_eligible": true
+  }
+]

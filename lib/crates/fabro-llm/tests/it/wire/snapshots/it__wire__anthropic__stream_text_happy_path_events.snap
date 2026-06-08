@@ -1,0 +1,65 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+[
+  {
+    "type": "stream_start"
+  },
+  {
+    "type": "text_start",
+    "text_id": "block_0"
+  },
+  {
+    "type": "text_delta",
+    "delta": "Hel",
+    "text_id": "block_0"
+  },
+  {
+    "type": "text_delta",
+    "delta": "lo",
+    "text_id": "block_0"
+  },
+  {
+    "type": "text_end",
+    "text_id": "block_0"
+  },
+  {
+    "type": "finish",
+    "finish_reason": "stop",
+    "usage": {
+      "input_tokens": 11,
+      "output_tokens": 5,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 2,
+      "cache_write_tokens": 1
+    },
+    "response": {
+      "id": "msg_stream_test",
+      "model": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "kind": "text",
+            "data": "Hello"
+          }
+        ],
+        "name": null,
+        "tool_call_id": null
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "input_tokens": 11,
+        "output_tokens": 5,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 2,
+        "cache_write_tokens": 1
+      },
+      "raw": null,
+      "warnings": [],
+      "rate_limit": null
+    }
+  }
+]

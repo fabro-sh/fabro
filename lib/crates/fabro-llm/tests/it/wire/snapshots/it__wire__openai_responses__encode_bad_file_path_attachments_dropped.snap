@@ -1,0 +1,28 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "model": "gpt-test",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Describe these attachments."
+        },
+        {
+          "type": "input_text",
+          "text": "[Document 'missing.pdf': content type not supported by this provider]"
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 128,
+  "store": false,
+  "include": [
+    "reasoning.encrypted_content"
+  ]
+}

@@ -1,0 +1,77 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "method": "POST",
+  "path": "/responses/input_tokens",
+  "headers": [
+    [
+      "accept",
+      "*/*"
+    ],
+    [
+      "authorization",
+      "Bearer test-key"
+    ],
+    [
+      "content-length",
+      "454"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "host",
+      "[host]"
+    ]
+  ],
+  "body": {
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Hello"
+          }
+        ]
+      }
+    ],
+    "instructions": "Be concise",
+    "model": "gpt-test",
+    "tools": [
+      {
+        "type": "function",
+        "name": "search",
+        "description": "Search files",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "read_file",
+        "description": "Read a file by path",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

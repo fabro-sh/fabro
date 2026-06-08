@@ -1,0 +1,50 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/gemini.rs
+expression: rendered
+---
+{
+  "id": "[UUID]",
+  "model": "gemini-test",
+  "provider": "gemini",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "text",
+        "data": "Hello back"
+      }
+    ],
+    "name": null,
+    "tool_call_id": null
+  },
+  "finish_reason": "stop",
+  "usage": {
+    "input_tokens": 32,
+    "output_tokens": 7,
+    "reasoning_tokens": 0,
+    "cache_read_tokens": 10,
+    "cache_write_tokens": 0
+  },
+  "raw": {
+    "candidates": [
+      {
+        "content": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Hello back"
+            }
+          ]
+        },
+        "finishReason": "STOP"
+      }
+    ],
+    "usageMetadata": {
+      "promptTokenCount": 42,
+      "candidatesTokenCount": 7,
+      "cachedContentTokenCount": 10
+    }
+  },
+  "warnings": [],
+  "rate_limit": null
+}

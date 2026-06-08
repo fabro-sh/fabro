@@ -1,0 +1,73 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "id": "resp_test",
+  "model": "gpt-test",
+  "provider": "openai",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "openai_message",
+        "data": {
+          "type": "message",
+          "role": "assistant",
+          "id": "msg_out",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Hello back"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "text",
+        "data": "Hello back"
+      }
+    ],
+    "name": null,
+    "tool_call_id": null
+  },
+  "finish_reason": "stop",
+  "usage": {
+    "input_tokens": 32,
+    "output_tokens": 4,
+    "reasoning_tokens": 3,
+    "cache_read_tokens": 10,
+    "cache_write_tokens": 0
+  },
+  "raw": {
+    "id": "resp_test",
+    "object": "response",
+    "model": "gpt-test",
+    "status": "completed",
+    "output": [
+      {
+        "type": "message",
+        "role": "assistant",
+        "id": "msg_out",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Hello back"
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "input_tokens": 42,
+      "output_tokens": 7,
+      "input_tokens_details": {
+        "cached_tokens": 10
+      },
+      "output_tokens_details": {
+        "reasoning_tokens": 3
+      }
+    }
+  },
+  "warnings": [],
+  "rate_limit": null
+}

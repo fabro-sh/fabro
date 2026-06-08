@@ -1,0 +1,67 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "id": "resp_test",
+  "model": "gpt-test",
+  "provider": "openai",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "openai_message",
+        "data": {
+          "type": "message",
+          "role": "assistant",
+          "id": "msg_out",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Truncated"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "text",
+        "data": "Truncated"
+      }
+    ],
+    "name": null,
+    "tool_call_id": null
+  },
+  "finish_reason": "length",
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 128,
+    "reasoning_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "raw": {
+    "id": "resp_test",
+    "object": "response",
+    "model": "gpt-test",
+    "status": "incomplete",
+    "output": [
+      {
+        "type": "message",
+        "role": "assistant",
+        "id": "msg_out",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Truncated"
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 128
+    }
+  },
+  "warnings": [],
+  "rate_limit": null
+}
