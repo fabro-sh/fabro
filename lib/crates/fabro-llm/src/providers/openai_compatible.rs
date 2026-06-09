@@ -163,7 +163,7 @@ impl ProviderAdapter for Adapter {
 
         let codec = OpenAiCompatible;
         let deployment_id = self.deployment_id(request);
-        let params = CodecParams;
+        let params = CodecParams::default();
         let ctx = self.codec_ctx(request, &deployment_id, &params);
 
         let mut req = self.encoded_request(&codec, &ctx, false)?;
@@ -181,7 +181,7 @@ impl ProviderAdapter for Adapter {
 
         let codec = OpenAiCompatible;
         let deployment_id = self.deployment_id(request);
-        let params = CodecParams;
+        let params = CodecParams::default();
         let ctx = self.codec_ctx(request, &deployment_id, &params);
 
         let req = self.encoded_request(&codec, &ctx, true)?;

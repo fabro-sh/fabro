@@ -284,7 +284,7 @@ mod tests {
             metadata:         None,
             provider_options: None,
         };
-        let params = CodecParams;
+        let params = CodecParams::default();
         let ctx = CodecCtx {
             request:       &request,
             provider_name: provider,

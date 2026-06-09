@@ -107,7 +107,7 @@ mod tests {
     /// Encode `request` through the codec with `deployment_id == request.model`
     /// (the no-catalog case) and return the body.
     fn encode_body(request: &Request, provider_name: &str, stream: bool) -> serde_json::Value {
-        let params = CodecParams;
+        let params = CodecParams::default();
         let deployment_id = request.model.clone();
         let ctx = CodecCtx {
             request,
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn encode_uses_deployment_id_as_model() {
         let request = minimal_request();
-        let params = CodecParams;
+        let params = CodecParams::default();
         let deployment_id = "acme/model-large".to_string();
         let ctx = CodecCtx {
             request:       &request,

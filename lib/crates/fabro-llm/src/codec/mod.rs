@@ -22,6 +22,7 @@
               the capability context, SSE event type, and count-tokens routes."
 )]
 
+pub(crate) mod anthropic_messages;
 pub(crate) mod openai_compatible;
 
 use fabro_model::Model;
@@ -51,11 +52,30 @@ pub(crate) struct CodecCtx<'a> {
 }
 
 /// Per-route dialect knobs, expressed as data so one codec can serve several
-/// routes. Starts empty; grows by adding `#[serde(default)]` fields (a
-/// non-breaking change) — e.g. PR 3 adds version-placement, #459 adds
-/// model-placement for Bedrock.
+/// routes. The default is inert ("nothing special"); a route that needs a
+/// dialect quirk sets the relevant field. Grows as codecs need it — #459 adds
+/// `ModelPlacement` for Bedrock.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct CodecParams;
+pub(crate) struct CodecParams {
+    /// Where/whether to place the Anthropic API version. Direct Anthropic uses
+    /// `Header("2023-06-01")`; Kimi-over-anthropic uses `None`; the Bedrock
+    /// redo will add a body-field variant. Inert for non-anthropic codecs.
+    pub anthropic_version: AnthropicVersion,
+    /// Whether to emit Anthropic beta headers (prompt-caching / fast-mode /
+    /// 1M-context). True on the direct route, false for Kimi-over-anthropic.
+    pub anthropic_beta:    bool,
+}
+
+/// Placement of the Anthropic API version on the wire.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum AnthropicVersion {
+    /// No version sent (Kimi-over-anthropic; also the inert default).
+    #[default]
+    None,
+    /// `anthropic-version` request header (direct Anthropic).
+    Header(&'static str),
+    // BodyField(&'static str) arrives with the Bedrock redo (#459).
+}
 
 /// What [`Codec::encode`] produces. The transport applies `endpoint` +
 /// `headers` on top of the route's base URL and auth; the codec never touches
