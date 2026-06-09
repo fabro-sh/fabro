@@ -1,4 +1,5 @@
 pub mod adapter_registry;
+mod attachments;
 pub mod client;
 mod codec;
 pub mod error;

@@ -110,7 +110,7 @@ pub fn mime_from_extension(path: &str) -> &str {
     clippy::disallowed_methods,
     reason = "Attachment path expansion supports the conventional HOME env var."
 )]
-pub async fn load_file_as_base64(path: &str) -> Result<(String, String), std::io::Error> {
+pub async fn load_file_bytes(path: &str) -> Result<(Vec<u8>, String), std::io::Error> {
     let expanded = path.strip_prefix("~/").map_or_else(
         || path.to_string(),
         |rest| {
@@ -122,8 +122,17 @@ pub async fn load_file_as_base64(path: &str) -> Result<(String, String), std::io
         std::io::Error::new(err.kind(), format!("read attachment {expanded}: {err}"))
     })?;
     let mime = mime_from_extension(&expanded).to_string();
-    let b64 = BASE64_STANDARD.encode(&data);
-    Ok((b64, mime))
+    Ok((data, mime))
+}
+
+/// Read a file and return base64-encoded contents plus the inferred MIME type.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read.
+pub async fn load_file_as_base64(path: &str) -> Result<(String, String), std::io::Error> {
+    let (data, mime) = load_file_bytes(path).await?;
+    Ok((BASE64_STANDARD.encode(&data), mime))
 }
 
 /// Extract the `Retry-After` header value from an HTTP response as seconds.
