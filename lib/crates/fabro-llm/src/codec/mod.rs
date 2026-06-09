@@ -10,20 +10,32 @@
 //! defaults) so the per-dialect codecs that follow only ever *override*
 //! methods, never extend the contract.
 
+// The contract is defined in full now, but `openai_compatible` (the first
+// codec) is the simplest dialect and does not exercise every seam: the
+// `model`/`params` context, `RawEvent.event`, and the count/error methods are
+// consumed by the anthropic/openai/gemini codecs and the transport
+// consolidation in later PRs of this series. Scoped to this trait-definition
+// file; the codec impls below are fully used.
 #![allow(
     dead_code,
-    reason = "Codec seam introduced ahead of its first implementation; \
-              openai_compatible conforms in the next commit of PR 2."
+    reason = "Codec contract is defined in full ahead of the dialects (PRs 3-6) that exercise \
+              the capability context, SSE event type, and count/error routes."
 )]
+
+pub(crate) mod openai_compatible;
 
 use fabro_model::Model;
 
 use crate::error::{Error, error_from_status_code};
 use crate::providers::common::parse_error_body;
-use crate::types::{Request, Response, StreamEvent};
+use crate::types::{RateLimitInfo, Request, Response, StreamEvent};
 
 /// Per-request context. Borrowed — the codec reads what it needs and returns.
 pub(crate) struct CodecCtx<'a> {
+    /// The canonical request being translated. Decoders read it too
+    /// (e.g. tool-argument parsing keys off the request's tool definitions;
+    /// the stream model fallback uses `request.model`).
+    pub request:       &'a Request,
     /// Identity stamped into `Response.provider`, and the `provider_options`
     /// namespace key for the openai_compatible codec (kimi/zai/…).
     pub provider_name: &'a str,
@@ -73,33 +85,36 @@ pub(crate) struct RawEvent<'a> {
 
 /// Stateless translator for one wire dialect.
 pub(crate) trait Codec: Send + Sync {
-    /// Canonical `Request` → wire request. `stream` selects the streaming
-    /// shape (`stream: true` in the body, gemini's `:streamGenerateContent`
-    /// endpoint). Fallible: attachment/parameter encoding can reject.
-    fn encode(
-        &self,
-        req: &Request,
-        ctx: &CodecCtx<'_>,
-        stream: bool,
-    ) -> Result<EncodedRequest, Error>;
+    /// Canonical request (`ctx.request`) → wire request. `stream` selects the
+    /// streaming shape (`stream: true` in the body, gemini's
+    /// `:streamGenerateContent` endpoint). Fallible: attachment/parameter
+    /// encoding can reject.
+    fn encode(&self, ctx: &CodecCtx<'_>, stream: bool) -> Result<EncodedRequest, Error>;
 
     /// Wire response body → canonical `Response` (content parts, finish
     /// reason, usage). Each dialect's finish-reason map and usage arithmetic
-    /// live here. Stamps `ctx.provider_name` into `Response.provider`.
-    fn decode_response(&self, body: &str, ctx: &CodecCtx<'_>) -> Result<Response, Error>;
+    /// live here. Stamps `ctx.provider_name` into `Response.provider` and the
+    /// transport-parsed `rate_limit` into the response.
+    fn decode_response(
+        &self,
+        body: &str,
+        ctx: &CodecCtx<'_>,
+        rate_limit: Option<RateLimitInfo>,
+    ) -> Result<Response, Error>;
 
-    /// A fresh stateful decoder for one streaming response.
-    fn stream_decoder(&self, ctx: &CodecCtx<'_>) -> Box<dyn StreamDecoder>;
+    /// A fresh stateful decoder for one streaming response. `rate_limit` is the
+    /// transport-parsed header value to embed in the synthesized `Finish`.
+    fn stream_decoder(
+        &self,
+        ctx: &CodecCtx<'_>,
+        rate_limit: Option<RateLimitInfo>,
+    ) -> Box<dyn StreamDecoder>;
 
     /// The third route, if the dialect has one (`/messages/count_tokens`,
     /// `/responses/input_tokens`, `:countTokens`). `None` = the dialect has no
     /// such route. Whether a given *deployment* may use it is a separate
     /// route-level gate (Kimi-over-anthropic) decided before this is called.
-    fn encode_count_tokens(
-        &self,
-        _req: &Request,
-        _ctx: &CodecCtx<'_>,
-    ) -> Option<Result<EncodedRequest, Error>> {
+    fn encode_count_tokens(&self, _ctx: &CodecCtx<'_>) -> Option<Result<EncodedRequest, Error>> {
         None
     }
 
