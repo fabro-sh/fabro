@@ -4,29 +4,14 @@ use fabro_types::WorkflowSettings;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunGoal;
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "raw source is today's behavior; run.model.name/provider are slated for demotion to plain String in the \
-              interpolation unification (D2)"
-)]
 pub fn materialize_run(
     mut settings: WorkflowSettings,
     graph: &Graph,
     catalog: &Catalog,
     configured_providers: &[ProviderId],
 ) -> WorkflowSettings {
-    let configured_model = settings
-        .run
-        .model
-        .name
-        .as_ref()
-        .map(InterpString::as_source);
-    let configured_provider = settings
-        .run
-        .model
-        .provider
-        .as_ref()
-        .map(InterpString::as_source);
+    let configured_model = settings.run.model.name.clone();
+    let configured_provider = settings.run.model.provider.clone();
     let graph_provider = graph
         .attrs
         .get("default_provider")
@@ -57,8 +42,8 @@ pub fn materialize_run(
         None => (model, provider),
     };
 
-    settings.run.model.name = Some(InterpString::parse(&resolved_model));
-    settings.run.model.provider = resolved_provider.as_deref().map(InterpString::parse);
+    settings.run.model.name = Some(resolved_model);
+    settings.run.model.provider = resolved_provider;
 
     let goal = graph.goal().to_string();
     settings.run.goal = if goal.is_empty() {

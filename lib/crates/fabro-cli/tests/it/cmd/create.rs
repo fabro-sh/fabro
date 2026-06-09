@@ -411,8 +411,8 @@ fn create_persists_requested_overrides_into_store() {
             "dry_run": resolved_run.execution.mode == fabro_types::settings::run::RunMode::DryRun,
             "auto_approve": resolved_run.execution.approval == fabro_types::settings::run::ApprovalMode::Auto,
             "llm": {
-                "model": resolved_run.model.name.as_ref().map(fabro_types::settings::InterpString::as_source),
-                "provider": resolved_run.model.provider.as_ref().map(fabro_types::settings::InterpString::as_source),
+                "model": resolved_run.model.name.clone(),
+                "provider": resolved_run.model.provider.clone(),
             },
             "environment": {
                 "id": resolved_run.environment.id,

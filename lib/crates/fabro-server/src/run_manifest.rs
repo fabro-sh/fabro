@@ -1142,31 +1142,19 @@ fn canonical_provider_id(catalog: &Catalog, provider_name: &str) -> ProviderId {
         .map_or(provider_id, |provider| provider.id.clone())
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "raw source is today's behavior; run.model.name/provider are slated for demotion to plain String in the \
-              interpolation unification (D2)"
-)]
 fn resolve_model_provider(
     settings: &RunNamespace,
     _graph: &Graph,
     configured_providers: &[ProviderId],
     catalog: &Catalog,
 ) -> (String, Option<String>) {
-    let provider = settings
-        .model
-        .provider
-        .as_ref()
-        .map(InterpString::as_source);
-    let model = settings.model.name.as_ref().map_or_else(
-        || {
-            catalog
-                .default_for_configured_ids(configured_providers)
-                .id
-                .clone()
-        },
-        InterpString::as_source,
-    );
+    let provider = settings.model.provider.clone();
+    let model = settings.model.name.clone().unwrap_or_else(|| {
+        catalog
+            .default_for_configured_ids(configured_providers)
+            .id
+            .clone()
+    });
 
     match catalog.get(&model) {
         Some(info) => (

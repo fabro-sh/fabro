@@ -13534,12 +13534,7 @@ level = "debug"
         "run execution mode should inherit from server settings"
     );
     assert_eq!(
-        resolved_run
-            .model
-            .name
-            .as_ref()
-            .map(fabro_types::settings::InterpString::as_source)
-            .as_deref(),
+        resolved_run.model.name.as_deref(),
         Some("claude-sonnet-4-5"),
     );
 

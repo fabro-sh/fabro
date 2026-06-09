@@ -56,6 +56,22 @@ pub(crate) fn default_interp(path: impl AsRef<std::path::Path>) -> InterpString 
     InterpString::parse(&path.as_ref().to_string_lossy())
 }
 
+/// Warn when a field demoted out of the interpolation set (D2) still contains
+/// claimed template tokens. These fields are plain `String` now — `{{ vars.*
+/// }}` (which previously substituted via the run-scoped String pass, a
+/// now-removed accident) and `{{ env.* }}` are both treated as literal text.
+/// Only `InterpString` fields interpolate. Unclaimed `{{ ... }}` text (jq
+/// programs, Go templates) never interpolated and does not warn.
+pub(crate) fn warn_if_demoted_template(field: &str, value: Option<&str>) {
+    if value.is_some_and(|value| !InterpString::parse(value).is_literal()) {
+        tracing::warn!(
+            field = %field,
+            "this field no longer interpolates template tokens and uses the value literally; it \
+             was demoted to a plain string in the interpolation unification"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

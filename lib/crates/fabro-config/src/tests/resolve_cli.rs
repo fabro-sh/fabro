@@ -128,18 +128,8 @@ level = "debug"
     assert_eq!(url.as_source(), "https://config.example.com");
 
     assert!(cli.exec.prevent_idle_sleep);
-    assert_eq!(
-        cli.exec
-            .model
-            .provider
-            .as_ref()
-            .map(InterpString::as_source),
-        Some("openai".to_string())
-    );
-    assert_eq!(
-        cli.exec.model.name.as_ref().map(InterpString::as_source),
-        Some("gpt-5".to_string())
-    );
+    assert_eq!(cli.exec.model.provider.as_deref(), Some("openai"));
+    assert_eq!(cli.exec.model.name.as_deref(), Some("gpt-5"));
     assert_eq!(cli.exec.agent.permissions, Some(AgentPermissions::ReadOnly));
     assert_eq!(cli.exec.agent.mcps["fs"].name, "fs");
     assert_eq!(cli.output.format, OutputFormat::Json);

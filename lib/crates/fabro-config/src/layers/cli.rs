@@ -87,11 +87,11 @@ pub struct CliExecModelLayer {
     /// LLM provider for `fabro exec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(value_type = "string")]
-    pub provider: Option<InterpString>,
+    pub provider: Option<String>,
     /// Model name for `fabro exec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(value_type = "string")]
-    pub name:     Option<InterpString>,
+    pub name:     Option<String>,
 }
 
 #[derive(

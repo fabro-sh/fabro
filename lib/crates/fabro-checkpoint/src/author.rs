@@ -1,7 +1,6 @@
 use std::fmt::Write;
 
 use fabro_config::GitAuthorLayer;
-use fabro_types::settings::InterpString;
 use fabro_types::settings::run::GitAuthorSettings;
 
 /// Resolved git author identity for checkpoint commits.
@@ -51,30 +50,14 @@ impl GitAuthor {
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "raw source is today's behavior; run.git.author.* is slated for demotion to plain String in the \
-              interpolation unification (D2)"
-)]
 impl From<&GitAuthorLayer> for GitAuthor {
     fn from(value: &GitAuthorLayer) -> Self {
-        Self::from_options(
-            value.name.as_ref().map(InterpString::as_source),
-            value.email.as_ref().map(InterpString::as_source),
-        )
+        Self::from_options(value.name.clone(), value.email.clone())
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "raw source is today's behavior; run.git.author.* is slated for demotion to plain String in the \
-              interpolation unification (D2)"
-)]
 impl From<&GitAuthorSettings> for GitAuthor {
     fn from(value: &GitAuthorSettings) -> Self {
-        Self::from_options(
-            value.name.as_ref().map(InterpString::as_source),
-            value.email.as_ref().map(InterpString::as_source),
-        )
+        Self::from_options(value.name.clone(), value.email.clone())
     }
 }

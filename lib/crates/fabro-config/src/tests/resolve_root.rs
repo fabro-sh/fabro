@@ -1,4 +1,3 @@
-use fabro_types::settings::InterpString;
 use fabro_types::settings::run::RunMode;
 
 use crate::{ServerSettingsBuilder, SettingsLayer};
@@ -118,23 +117,10 @@ name = "gpt-5"
     assert_eq!(workflow_settings.workflow.graph, "graphs/workflow.dot");
     assert_eq!(server.server.storage.root.as_source(), "/srv/fabro");
     assert_eq!(
-        workflow_settings
-            .run
-            .model
-            .provider
-            .as_ref()
-            .map(InterpString::as_source),
-        Some("openai".to_string())
+        workflow_settings.run.model.provider.as_deref(),
+        Some("openai")
     );
-    assert_eq!(
-        workflow_settings
-            .run
-            .model
-            .name
-            .as_ref()
-            .map(InterpString::as_source),
-        Some("gpt-5".to_string())
-    );
+    assert_eq!(workflow_settings.run.model.name.as_deref(), Some("gpt-5"));
 }
 
 #[test]

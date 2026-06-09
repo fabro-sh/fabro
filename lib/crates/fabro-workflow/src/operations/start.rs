@@ -21,7 +21,7 @@ use fabro_types::settings::run::{
     RunModelSettings as ResolvedRunModelSettings, RunNamespace as ResolvedRunSettings,
     TlsMode as ResolvedTlsMode,
 };
-use fabro_types::settings::{InterpString, ModelRegistry, ResolvedModelRef};
+use fabro_types::settings::{ModelRegistry, ResolvedModelRef};
 use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
@@ -560,25 +560,20 @@ fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions
     docker_config_from_environment(&settings.environment, !settings.clone.enabled)
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "raw source is today's behavior; run.model.name/provider are slated for demotion to plain String in the \
-              interpolation unification (D2)"
-)]
 fn resolve_start_llm(
     catalog: &Catalog,
     configured: &[ProviderId],
     settings: &ResolvedRunSettings,
 ) -> Result<ResolvedStartLlm, Error> {
-    let model = settings.model.name.as_ref().map_or_else(
-        || catalog.default_for_configured_ids(configured).id.clone(),
-        InterpString::as_source,
-    );
+    let model = settings
+        .model
+        .name
+        .clone()
+        .unwrap_or_else(|| catalog.default_for_configured_ids(configured).id.clone());
     let provider = settings
         .model
         .provider
-        .as_ref()
-        .map(InterpString::as_source)
+        .clone()
         .filter(|value| !value.is_empty());
 
     let default_provider_id = catalog
@@ -1302,7 +1297,7 @@ reasoning = false
         .unwrap();
         let catalog = Catalog::from_builtin_with_overrides(&overrides).unwrap();
         let mut settings = ResolvedRunSettings::default();
-        settings.model.name = Some(InterpString::parse("ac"));
+        settings.model.name = Some("ac".to_string());
 
         let resolved = resolve_start_llm(&catalog, &[], &settings).unwrap();
 

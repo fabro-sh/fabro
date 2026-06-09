@@ -59,6 +59,16 @@ fn resolve_target(
 fn resolve_exec(exec: Option<&CliExecLayer>) -> CliExecSettings {
     let exec = exec.expect("defaults.toml should provide cli.exec defaults");
 
+    let model = exec.model.as_ref();
+    super::warn_if_demoted_template(
+        "cli.exec.model.provider",
+        model.and_then(|model| model.provider.as_deref()),
+    );
+    super::warn_if_demoted_template(
+        "cli.exec.model.name",
+        model.and_then(|model| model.name.as_deref()),
+    );
+
     CliExecSettings {
         prevent_idle_sleep: exec
             .prevent_idle_sleep

@@ -590,11 +590,8 @@ name = "sonnet"
         settings.working_dir,
         Some(InterpString::parse("{{ env.FABRO_WORKDIR }}"))
     );
-    assert_eq!(
-        settings.model.provider,
-        Some(InterpString::parse("anthropic"))
-    );
-    assert_eq!(settings.model.name, Some(InterpString::parse("sonnet")));
+    assert_eq!(settings.model.provider, Some("anthropic".to_string()));
+    assert_eq!(settings.model.name, Some("sonnet".to_string()));
 }
 
 mod run_integrations_github_permissions {

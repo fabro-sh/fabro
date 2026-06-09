@@ -651,7 +651,6 @@ fn finish_dense_result<T>(
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_types::settings::InterpString;
     use fabro_types::settings::cli::OutputVerbosity;
     use fabro_types::settings::run::{ApprovalMode, EnvironmentProvider, RunMode};
 
@@ -694,10 +693,6 @@ command = ["demo-mcp"]
         );
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "test asserts the raw template source"
-    )]
     #[test]
     fn workflow_builder_preserves_run_overrides_when_cli_overrides_are_added() {
         let settings = WorkflowSettingsBuilder::new()
@@ -705,8 +700,8 @@ command = ["demo-mcp"]
             .run_overrides(RunLayer {
                 metadata: ReplaceMap::from(HashMap::from([("env".to_string(), "cli".to_string())])),
                 model: Some(RunModelLayer {
-                    provider:  Some(InterpString::parse("openai")),
-                    name:      Some(InterpString::parse("gpt-5")),
+                    provider:  Some("openai".to_string()),
+                    name:      Some("gpt-5".to_string()),
                     fallbacks: Vec::new(),
                     controls:  None,
                 }),
@@ -730,24 +725,8 @@ command = ["demo-mcp"]
             settings.run.metadata.get("env").map(String::as_str),
             Some("cli")
         );
-        assert_eq!(
-            settings
-                .run
-                .model
-                .provider
-                .as_ref()
-                .map(InterpString::as_source),
-            Some("openai".to_string())
-        );
-        assert_eq!(
-            settings
-                .run
-                .model
-                .name
-                .as_ref()
-                .map(InterpString::as_source),
-            Some("gpt-5".to_string())
-        );
+        assert_eq!(settings.run.model.provider.as_deref(), Some("openai"));
+        assert_eq!(settings.run.model.name.as_deref(), Some("gpt-5"));
         assert_eq!(settings.run.execution.mode, RunMode::DryRun);
         assert_eq!(settings.run.execution.approval, ApprovalMode::Auto);
     }

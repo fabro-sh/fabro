@@ -222,7 +222,6 @@ pub struct ServeArgs {
 }
 
 fn serve_overrides(args: &ServeArgs) -> (Option<RunLayer>, Option<ServerLayer>) {
-    use fabro_types::settings::interp::InterpString;
     let mut run = RunLayer::default();
     let mut server = ServerLayer::default();
     if args.web || args.no_web {
@@ -231,11 +230,11 @@ fn serve_overrides(args: &ServeArgs) -> (Option<RunLayer>, Option<ServerLayer>) 
     }
     if let Some(ref model) = args.model {
         let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
-        model_layer.name = Some(InterpString::parse(model));
+        model_layer.name = Some(model.clone());
     }
     if let Some(ref provider) = args.provider {
         let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
-        model_layer.provider = Some(InterpString::parse(provider));
+        model_layer.provider = Some(provider.clone());
     }
     if let Some(environment) = args.environment.as_ref() {
         let environment_layer = run

@@ -44,8 +44,8 @@ pub struct CliExecSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CliExecModelSettings {
-    pub provider: Option<InterpString>,
-    pub name:     Option<InterpString>,
+    pub provider: Option<String>,
+    pub name:     Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

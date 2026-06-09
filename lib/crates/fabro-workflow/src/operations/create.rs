@@ -1156,7 +1156,7 @@ mod tests {
                         goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
                         metadata: ReplaceMap::from(metadata),
                         model: Some(RunModelLayer {
-                            name: Some(InterpString::parse("sonnet")),
+                            name: Some("sonnet".to_string()),
                             ..RunModelLayer::default()
                         }),
                         pull_request: Some(RunPullRequestLayer {
@@ -1207,8 +1207,6 @@ mod tests {
                 .run
                 .model
                 .name
-                .as_ref()
-                .map(fabro_types::settings::InterpString::as_source)
                 .as_deref(),
             Some("claude-sonnet-4-6")
         );
@@ -1220,8 +1218,6 @@ mod tests {
                 .run
                 .model
                 .provider
-                .as_ref()
-                .map(fabro_types::settings::InterpString::as_source)
                 .as_deref(),
             Some("anthropic")
         );

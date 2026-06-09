@@ -10,10 +10,6 @@ fn graph(source: &str) -> Graph {
     parser::parse(source).expect("graph should parse")
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "test asserts the raw template source"
-)]
 #[test]
 fn materialize_run_applies_graph_and_catalog_defaults() {
     let source = r#"digraph Test {
@@ -26,7 +22,7 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
     let settings = WorkflowSettings {
         run: RunNamespace {
             model: RunModelSettings {
-                name: Some(InterpString::parse("sonnet")),
+                name: Some("sonnet".to_string()),
                 ..RunModelSettings::default()
             },
             pull_request: Some(PullRequestSettings {
@@ -41,24 +37,8 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
     let materialized = materialize_run(settings, &graph(source), Catalog::builtin(), &[]);
     let resolved = &materialized.run;
 
-    assert_eq!(
-        resolved
-            .model
-            .name
-            .as_ref()
-            .map(InterpString::as_source)
-            .as_deref(),
-        Some("claude-sonnet-4-6")
-    );
-    assert_eq!(
-        resolved
-            .model
-            .provider
-            .as_ref()
-            .map(InterpString::as_source)
-            .as_deref(),
-        Some("anthropic")
-    );
+    assert_eq!(resolved.model.name.as_deref(), Some("claude-sonnet-4-6"));
+    assert_eq!(resolved.model.provider.as_deref(), Some("anthropic"));
     assert_eq!(
         materialized.run.goal.as_ref(),
         Some(&RunGoal::Inline(InterpString::parse("Build feature")))
@@ -66,10 +46,6 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
     assert!(resolved.pull_request.is_none());
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "test asserts the raw template source"
-)]
 #[test]
 fn materialize_run_uses_configured_provider_defaults() {
     let source = r#"digraph Test {
@@ -87,13 +63,5 @@ fn materialize_run_uses_configured_provider_defaults() {
     );
     let resolved = &materialized.run;
 
-    assert_eq!(
-        resolved
-            .model
-            .provider
-            .as_ref()
-            .map(InterpString::as_source)
-            .as_deref(),
-        Some("openai")
-    );
+    assert_eq!(resolved.model.provider.as_deref(), Some("openai"));
 }

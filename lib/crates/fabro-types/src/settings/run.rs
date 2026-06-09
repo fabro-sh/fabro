@@ -84,14 +84,11 @@ impl RunNamespace {
         substitute_goal(&mut self.goal, &mut lookup)?;
         substitute_option(&mut self.working_dir, &mut lookup)?;
         substitute_string_map(&mut self.metadata, &mut lookup)?;
-        substitute_option(&mut self.model.provider, &mut lookup)?;
-        substitute_option(&mut self.model.name, &mut lookup)?;
+        // run.model.provider/name and run.git.author.* are plain `String`,
+        // demoted out of the interpolation set (D2): NO variable substitution.
+        // Only InterpString fields access variables — these don't anymore.
         substitute_option_string(&mut self.model.controls.reasoning_effort, &mut lookup)?;
         substitute_option_string(&mut self.model.controls.speed, &mut lookup)?;
-        if let Some(author) = &mut self.git.author {
-            substitute_option(&mut author.name, &mut lookup)?;
-            substitute_option(&mut author.email, &mut lookup)?;
-        }
         substitute_string_vec(&mut self.checkpoint.exclude_globs, &mut lookup)?;
         substitute_environment(&mut self.environment, &mut lookup)?;
         substitute_map(&mut self.environment.env, &mut lookup)?;
@@ -107,8 +104,8 @@ impl RunNamespace {
             substitute_option(&mut slack.channel, &mut lookup)?;
         }
         substitute_map(&mut self.integrations.github.permissions, &mut lookup)?;
-        substitute_option(&mut self.scm.owner, &mut lookup)?;
-        substitute_option(&mut self.scm.repository, &mut lookup)?;
+        // run.scm.owner/repository are plain `String` (demoted, D2): no
+        // variable substitution.
         substitute_string_vec(&mut self.prepare.commands, &mut lookup)?;
         for mcp in self.agent.mcps.values_mut() {
             substitute_string(&mut mcp.name, &mut lookup)?;
@@ -182,9 +179,7 @@ where
     if !may_reference_variable(value) {
         return Ok(());
     }
-    if InterpString::parse(value).references(Namespace::Vars) {
-        *value = InterpString::substitute_variables_in_str(value, lookup)?;
-    }
+    *value = InterpString::substitute_variables_in_str(value, lookup)?;
     Ok(())
 }
 
@@ -413,6 +408,47 @@ mod run_namespace_variable_substitution_tests {
     }
 
     #[test]
+    fn demoted_fields_do_not_interpolate() {
+        // run.model.*, run.git.author.*, run.scm.owner/repository were demoted
+        // out of the interpolation set (D2) to plain `String`. They no longer
+        // access variables at all: `{{ vars.* }}` and `{{ env.* }}` are both
+        // left literal even when a value is available. Only InterpString fields
+        // interpolate — the old run-scoped String `vars` substitution on these
+        // fields was an incidental behavior that is now removed.
+        let mut run = RunNamespace {
+            model: super::RunModelSettings {
+                provider: Some("{{ vars.PROVIDER }}".to_string()),
+                name: Some("{{ vars.MODEL }}".to_string()),
+                ..super::RunModelSettings::default()
+            },
+            git: super::RunGitSettings {
+                author: Some(super::GitAuthorSettings {
+                    name:  Some("{{ vars.AUTHOR }}".to_string()),
+                    email: Some("{{ env.EMAIL }}".to_string()),
+                }),
+            },
+            scm: super::RunScmSettings {
+                owner: Some("{{ vars.OWNER }}".to_string()),
+                repository: Some("{{ env.REPO }}".to_string()),
+                ..super::RunScmSettings::default()
+            },
+            ..RunNamespace::default()
+        };
+
+        // Even with every variable available, demoted fields stay literal.
+        run.substitute_variables(|_| Some("SUBSTITUTED".to_string()))
+            .unwrap();
+
+        assert_eq!(run.model.provider.as_deref(), Some("{{ vars.PROVIDER }}"));
+        assert_eq!(run.model.name.as_deref(), Some("{{ vars.MODEL }}"));
+        let author = run.git.author.as_ref().unwrap();
+        assert_eq!(author.name.as_deref(), Some("{{ vars.AUTHOR }}"));
+        assert_eq!(author.email.as_deref(), Some("{{ env.EMAIL }}"));
+        assert_eq!(run.scm.owner.as_deref(), Some("{{ vars.OWNER }}"));
+        assert_eq!(run.scm.repository.as_deref(), Some("{{ env.REPO }}"));
+    }
+
+    #[test]
     fn substitutes_variables_in_string_backed_settings_families() {
         let mut run = RunNamespace {
             checkpoint: RunCheckpointSettings {
@@ -576,8 +612,8 @@ pub enum RunGoal {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunModelSettings {
-    pub provider:  Option<InterpString>,
-    pub name:      Option<InterpString>,
+    pub provider:  Option<String>,
+    pub name:      Option<String>,
     pub fallbacks: Vec<ModelRef>,
     /// Run-level default values for typed model controls
     /// (`reasoning_effort`, `speed`). Node and style attributes still win
@@ -599,8 +635,8 @@ pub struct RunGitSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct GitAuthorSettings {
-    pub name:  Option<InterpString>,
-    pub email: Option<InterpString>,
+    pub name:  Option<String>,
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1214,8 +1250,8 @@ impl HookDefinition {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunScmSettings {
     pub provider:   Option<String>,
-    pub owner:      Option<InterpString>,
-    pub repository: Option<InterpString>,
+    pub owner:      Option<String>,
+    pub repository: Option<String>,
     pub github:     Option<ScmGitHubSettings>,
 }
 

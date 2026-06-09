@@ -1787,8 +1787,8 @@ mod runs {
                 ))),
                 working_dir: Some(InterpString::parse("/workspace/api-server")),
                 model: RunModelSettings {
-                    provider: Some(InterpString::parse("anthropic")),
-                    name: Some(InterpString::parse("claude-opus-4-6")),
+                    provider: Some("anthropic".to_string()),
+                    name: Some("claude-opus-4-6".to_string()),
                     ..RunModelSettings::default()
                 },
                 prepare: RunPrepareSettings {

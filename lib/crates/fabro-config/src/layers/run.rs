@@ -142,11 +142,11 @@ pub struct RunModelLayer {
     /// Provider name for workflow model selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(value_type = "string")]
-    pub provider:  Option<InterpString>,
+    pub provider:  Option<String>,
     /// Model name for workflow runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(value_type = "string")]
-    pub name:      Option<InterpString>,
+    pub name:      Option<String>,
     /// Ordered list of fallback model references. Supports `...` splice marker
     /// at layering time — see [`super::splice_array`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -236,11 +236,11 @@ pub struct GitAuthorLayer {
     /// Git author name for checkpoint commits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(default = "\"fabro\"", value_type = "string")]
-    pub name:  Option<InterpString>,
+    pub name:  Option<String>,
     /// Git author email for checkpoint commits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(default = "\"fabro@local\"", value_type = "string")]
-    pub email: Option<InterpString>,
+    pub email: Option<String>,
 }
 
 /// `[run.prepare]` — ordered list of preparation steps. Whole list replaces
@@ -537,9 +537,9 @@ pub struct RunScmLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner:      Option<InterpString>,
+    pub owner:      Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<InterpString>,
+    pub repository: Option<String>,
     /// Provider-specific SCM leaves. First-pass providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github:     Option<ScmGitHubLayer>,
