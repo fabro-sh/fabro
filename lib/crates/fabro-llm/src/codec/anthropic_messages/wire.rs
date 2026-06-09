@@ -121,3 +121,32 @@ pub(super) struct ApiUsage {
 pub(super) struct CountTokensResponse {
     pub input_tokens: i64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_serialization_includes_cache_control() {
+        let tool = ApiToolDef {
+            name:          "test_tool".to_string(),
+            description:   "A test tool".to_string(),
+            input_schema:  serde_json::json!({"type": "object"}),
+            cache_control: Some(CacheControl::ephemeral()),
+        };
+        let json = serde_json::to_value(&tool).expect("should serialize");
+        assert_eq!(json["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn tool_serialization_omits_cache_control_when_none() {
+        let tool = ApiToolDef {
+            name:          "test_tool".to_string(),
+            description:   "A test tool".to_string(),
+            input_schema:  serde_json::json!({"type": "object"}),
+            cache_control: None,
+        };
+        let json = serde_json::to_value(&tool).expect("should serialize");
+        assert!(json.get("cache_control").is_none());
+    }
+}

@@ -416,3 +416,216 @@ impl StreamDecoder for SseAccumulator {
         Vec::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build an accumulator without threading a `CodecCtx`/`Request`: the test
+    /// module sees the private fields, so the few that matter are set directly.
+    fn new_accumulator(provider: &str, json_schema_mode: bool) -> SseAccumulator {
+        SseAccumulator {
+            id: String::new(),
+            model: String::new(),
+            provider: provider.to_string(),
+            json_schema_mode,
+            content_parts: Vec::new(),
+            usage: TokenCounts::default(),
+            finish_reason: FinishReason::Stop,
+            current_block: None,
+            current_text: String::new(),
+            current_thinking: String::new(),
+            current_tool_args: String::new(),
+            rate_limit: None,
+        }
+    }
+
+    #[test]
+    fn stream_token_counts_leaves_reasoning_zero_and_output_full() {
+        let mut acc = new_accumulator("anthropic", false);
+        acc.content_parts.push(ContentPart::Thinking(ThinkingData {
+            text:      "summary text".to_string(),
+            signature: Some(String::new()),
+            redacted:  false,
+        }));
+        acc.content_parts.push(ContentPart::text("answer"));
+        acc.usage = TokenCounts {
+            input_tokens:       50,
+            output_tokens:      1200,
+            reasoning_tokens:   0,
+            cache_read_tokens:  9000,
+            cache_write_tokens: 1000,
+        };
+
+        let events = acc.handle_message_stop();
+        let StreamEvent::Finish {
+            usage, response, ..
+        } = &events[0]
+        else {
+            panic!("expected finish event");
+        };
+
+        assert_eq!(usage.input_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 9000);
+        assert_eq!(usage.cache_write_tokens, 1000);
+        assert_eq!(usage.output_tokens, 1200);
+        assert_eq!(usage.reasoning_tokens, 0);
+        assert_eq!(usage.total_tokens(), 11_250);
+        assert_eq!(response.usage, *usage);
+    }
+
+    #[test]
+    fn stream_error_event_overloaded_becomes_retryable_server_error() {
+        let mut acc = new_accumulator("anthropic", false);
+        let data = serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "overloaded_error",
+                "message": "Overloaded"
+            }
+        });
+        let raw = data.to_string();
+
+        let err = acc
+            .on_event(RawEvent {
+                event: Some("error"),
+                data:  &raw,
+            })
+            .unwrap_err();
+
+        assert!(err.retryable());
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Server);
+                assert_eq!(detail.provider, "anthropic");
+                assert_eq!(detail.message, "Overloaded");
+                assert_eq!(detail.error_code.as_deref(), Some("overloaded_error"));
+                assert_eq!(detail.raw.as_ref(), Some(&data));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_error_event_invalid_request_remains_non_retryable() {
+        let mut acc = new_accumulator("anthropic", false);
+        let data = serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "max_tokens is required"
+            }
+        });
+        let raw = data.to_string();
+
+        let err = acc
+            .on_event(RawEvent {
+                event: Some("error"),
+                data:  &raw,
+            })
+            .unwrap_err();
+
+        assert!(!err.retryable());
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::InvalidRequest);
+                assert_eq!(detail.error_code.as_deref(), Some("invalid_request_error"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_sse_events_remain_ignored() {
+        let mut acc = new_accumulator("anthropic", false);
+        let data = serde_json::json!({
+            "type": "content_block_delta",
+            "delta": { "type": "text_delta", "text": "ignored" }
+        });
+        let raw = data.to_string();
+
+        let events = acc
+            .on_event(RawEvent {
+                event: Some("some_future_event"),
+                data:  &raw,
+            })
+            .unwrap();
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn convert_stream_event_converts_tool_start_for_synthetic() {
+        let event = StreamEvent::ToolCallStart {
+            tool_call: ToolCall::new("id1", SYNTHETIC_TOOL_NAME, serde_json::json!({})),
+        };
+        let result = convert_stream_event_for_json_schema(event);
+        assert!(matches!(result, StreamEvent::TextStart { .. }));
+    }
+
+    #[test]
+    fn convert_stream_event_preserves_real_tool_start() {
+        let event = StreamEvent::ToolCallStart {
+            tool_call: ToolCall::new("id1", "real_tool", serde_json::json!({})),
+        };
+        let result = convert_stream_event_for_json_schema(event);
+        assert!(matches!(result, StreamEvent::ToolCallStart { .. }));
+    }
+
+    #[test]
+    fn convert_stream_event_converts_tool_delta_for_synthetic() {
+        let event = StreamEvent::ToolCallDelta {
+            tool_call: ToolCall::new("id1", SYNTHETIC_TOOL_NAME, serde_json::json!("{\"name\"")),
+        };
+        let result = convert_stream_event_for_json_schema(event);
+        match result {
+            StreamEvent::TextDelta { delta, .. } => {
+                assert_eq!(delta, "{\"name\"");
+            }
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn convert_stream_event_converts_finish_reason() {
+        let response = Box::new(Response {
+            id:            "test".to_string(),
+            model:         "claude".to_string(),
+            provider:      "anthropic".to_string(),
+            message:       Message {
+                role:         Role::Assistant,
+                content:      vec![ContentPart::ToolCall(ToolCall::new(
+                    "id1",
+                    SYNTHETIC_TOOL_NAME,
+                    serde_json::json!({"data": "value"}),
+                ))],
+                name:         None,
+                tool_call_id: None,
+            },
+            finish_reason: FinishReason::ToolCalls,
+            usage:         TokenCounts::default(),
+            raw:           None,
+            warnings:      vec![],
+            rate_limit:    None,
+        });
+        let event = StreamEvent::Finish {
+            finish_reason: FinishReason::ToolCalls,
+            usage: TokenCounts::default(),
+            response,
+        };
+        let result = convert_stream_event_for_json_schema(event);
+        match result {
+            StreamEvent::Finish {
+                finish_reason,
+                response,
+                ..
+            } => {
+                assert_eq!(finish_reason, FinishReason::Stop);
+                assert_eq!(response.finish_reason, FinishReason::Stop);
+                // Content should be converted from tool call to text
+                assert!(matches!(&response.message.content[0], ContentPart::Text(_)));
+            }
+            other => panic!("expected Finish, got {other:?}"),
+        }
+    }
+}

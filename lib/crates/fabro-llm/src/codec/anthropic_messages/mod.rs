@@ -9,13 +9,6 @@
 //! standard `error_from_status_code` + `parse_error_body` path); streaming
 //! `error` events are mapped inside the decoder (`on_event` → `Err`).
 
-// TODO(gateway-refactor PR 3): remove once the anthropic adapter is rewired to
-// this codec in the next commit — until then the module is unused.
-#![allow(
-    dead_code,
-    reason = "Anthropic codec added ahead of the adapter rewire; wired in the next commit of PR 3."
-)]
-
 mod decode;
 mod encode;
 mod stream;

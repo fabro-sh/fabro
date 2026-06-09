@@ -6,18 +6,9 @@
 //! Loads that fail drop the part silently — the long-standing contract — and
 //! non-file URLs and already-inline data pass through untouched.
 //!
-//! Shared infra introduced ahead of its consumers: the per-dialect codecs
-//! (anthropic/openai_responses/gemini) each construct their own
-//! [`AttachmentPolicy`] and call [`resolve`] from their adapter shells when
-//! they are wired. Until the first of those lands, nothing here is reachable.
-
-// Each dialect adapter that wires this in removes the allow as part of its
-// rewire; harmless if it lingers when several land in parallel.
-#![allow(
-    dead_code,
-    reason = "Attachment-resolution infra added ahead of the dialect codecs (PRs 3-5) that \
-              construct an AttachmentPolicy and call resolve from their adapter shells."
-)]
+//! Shared infra for the per-dialect codecs (anthropic/openai_responses/gemini):
+//! each constructs its own [`AttachmentPolicy`] and calls [`resolve`] from its
+//! adapter shell.
 
 use crate::providers::common;
 use crate::types::{AudioData, ContentPart, DocumentData, ImageData, Request};

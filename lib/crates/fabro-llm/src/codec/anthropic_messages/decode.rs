@@ -145,3 +145,70 @@ pub(super) fn decode_count_tokens(body: &str) -> Result<i64, Error> {
         })?;
     Ok(response.input_tokens)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_token_counts_leaves_reasoning_zero_and_output_full() {
+        let body = serde_json::json!({
+            "id": "msg_test",
+            "model": "claude-sonnet-4-5",
+            "content": [
+                { "type": "thinking", "thinking": "summary text", "signature": "" },
+                { "type": "text", "text": "answer" }
+            ],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 50,
+                "output_tokens": 1200,
+                "cache_read_input_tokens": 9000,
+                "cache_creation_input_tokens": 1000
+            }
+        });
+        let api: ApiResponse = serde_json::from_value(body).unwrap();
+        let usage = token_counts_from_api_usage(&api.usage);
+
+        assert_eq!(usage.input_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 9000);
+        assert_eq!(usage.cache_write_tokens, 1000);
+        assert_eq!(usage.output_tokens, 1200);
+        assert_eq!(usage.reasoning_tokens, 0);
+        assert_eq!(usage.total_tokens(), 11_250);
+    }
+
+    #[test]
+    fn convert_synthetic_tool_to_text_replaces_synthetic_tool() {
+        let parts = vec![ContentPart::ToolCall(ToolCall::new(
+            "id1",
+            SYNTHETIC_TOOL_NAME,
+            serde_json::json!({"name": "Alice"}),
+        ))];
+        let result = convert_synthetic_tool_to_text(parts);
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            ContentPart::Text(text) => {
+                assert!(text.contains("Alice"));
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn convert_synthetic_tool_to_text_preserves_other_tool_calls() {
+        let parts = vec![ContentPart::ToolCall(ToolCall::new(
+            "id1",
+            "real_tool",
+            serde_json::json!({"key": "value"}),
+        ))];
+        let result = convert_synthetic_tool_to_text(parts);
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            ContentPart::ToolCall(tc) => {
+                assert_eq!(tc.name, "real_tool");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+}
