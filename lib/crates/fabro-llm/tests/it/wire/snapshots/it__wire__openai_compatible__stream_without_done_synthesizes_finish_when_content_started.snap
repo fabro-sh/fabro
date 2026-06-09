@@ -37,9 +37,7 @@ expression: rendered
             "kind": "text",
             "data": "Hello"
           }
-        ],
-        "name": null,
-        "tool_call_id": null
+        ]
       },
       "finish_reason": "stop",
       "usage": {

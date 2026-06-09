@@ -36,9 +36,7 @@ expression: rendered
             "kind": "text",
             "data": "Trunc"
           }
-        ],
-        "name": null,
-        "tool_call_id": null
+        ]
       },
       "finish_reason": "length",
       "usage": {

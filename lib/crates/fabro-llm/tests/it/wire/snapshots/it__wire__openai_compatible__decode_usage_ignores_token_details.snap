@@ -13,9 +13,7 @@ expression: rendered
         "kind": "text",
         "data": "ok"
       }
-    ],
-    "name": null,
-    "tool_call_id": null
+    ]
   },
   "finish_reason": "length",
   "usage": {

@@ -74,9 +74,7 @@ expression: rendered
               "raw_arguments": "{\"query\":\"foo\"}"
             }
           }
-        ],
-        "name": null,
-        "tool_call_id": null
+        ]
       },
       "finish_reason": "tool_calls",
       "usage": {

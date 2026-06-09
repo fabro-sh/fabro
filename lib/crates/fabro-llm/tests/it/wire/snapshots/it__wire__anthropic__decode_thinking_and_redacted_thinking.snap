@@ -29,9 +29,7 @@ expression: rendered
         "kind": "text",
         "data": "Done."
       }
-    ],
-    "name": null,
-    "tool_call_id": null
+    ]
   },
   "finish_reason": "stop",
   "usage": {

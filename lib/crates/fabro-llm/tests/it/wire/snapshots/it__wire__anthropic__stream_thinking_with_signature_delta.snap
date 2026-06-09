@@ -58,9 +58,7 @@ expression: rendered
             "kind": "text",
             "data": "4."
           }
-        ],
-        "name": null,
-        "tool_call_id": null
+        ]
       },
       "finish_reason": "stop",
       "usage": {
