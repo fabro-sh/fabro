@@ -599,7 +599,7 @@ pub enum CatalogBuildError {
     #[error("model '{model}' declares reasoning_effort feature but features.reasoning is false")]
     ReasoningEffortWithoutReasoning { model: String },
     #[error(
-        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels"
+        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels or adaptive"
     )]
     EmptyReasoningEffortControls { model: String },
     #[error("model '{model}' has invalid speed '{value}'")]
