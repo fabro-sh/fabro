@@ -262,25 +262,37 @@ impl StreamDecoder for StreamState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::CodecParams;
+    use crate::types::Request;
 
-    /// Build a decoder directly (the fields are module-private) for unit tests
-    /// that drive `process_chunk` / `finish_events`.
+    /// Build a decoder through `StreamState::new` (with a minimal request) for
+    /// unit tests that drive `process_chunk` / `finish_events`.
     fn test_state(provider: &str, model: &str) -> StreamState {
-        StreamState {
-            provider_name:         provider.to_string(),
-            model:                 model.to_string(),
-            response_id:           String::new(),
-            response_model:        String::new(),
-            accumulated_text:      String::new(),
-            accumulated_reasoning: String::new(),
-            tool_calls:            Vec::new(),
-            usage:                 TokenCounts::default(),
-            finish_reason:         FinishReason::Stop,
-            text_started:          false,
-            custom_tool_names:     Vec::new(),
-            finished:              false,
-            rate_limit:            None,
-        }
+        let request = Request {
+            model:            model.to_string(),
+            messages:         Vec::new(),
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
+            reasoning_effort: None,
+            speed:            None,
+            metadata:         None,
+            provider_options: None,
+        };
+        let params = CodecParams;
+        let ctx = CodecCtx {
+            request:       &request,
+            provider_name: provider,
+            deployment_id: model,
+            model:         None,
+            params:        &params,
+        };
+        StreamState::new(&ctx, None)
     }
 
     #[test]

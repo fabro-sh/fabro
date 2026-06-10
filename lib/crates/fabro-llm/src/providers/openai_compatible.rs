@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use fabro_model::Catalog;
@@ -5,13 +6,12 @@ use futures::stream;
 
 use crate::codec::openai_compatible::OpenAiCompatible;
 use crate::codec::{Codec, CodecCtx, CodecParams, RawEvent, StreamDecoder};
-use crate::error::{Error, error_from_status_code};
+use crate::error::Error;
 use crate::provider::{
     ProviderAdapter, StreamEventStream, validate_standard_speed, validate_tool_choice,
 };
 use crate::providers::common::{
-    api_model_id, parse_error_body, parse_rate_limit_headers, parse_retry_after,
-    send_and_read_response,
+    api_model_id, parse_rate_limit_headers, parse_retry_after, send_and_read_response,
 };
 use crate::types::{AdapterTimeout, Request, Response, StreamEvent};
 
@@ -93,6 +93,41 @@ impl Adapter {
     fn deployment_id(&self, request: &Request) -> String {
         api_model_id(self.catalog.as_deref(), &request.model)
     }
+
+    /// Build the borrowed codec context. `deployment_id` and `params` are
+    /// created by the caller so their borrows outlive the context.
+    fn codec_ctx<'a>(
+        &'a self,
+        request: &'a Request,
+        deployment_id: &'a str,
+        params: &'a CodecParams,
+    ) -> CodecCtx<'a> {
+        CodecCtx {
+            request,
+            provider_name: &self.provider_name,
+            deployment_id,
+            model: None,
+            params,
+        }
+    }
+
+    /// Encode `ctx.request` through the codec and assemble the HTTP request:
+    /// base URL + codec endpoint, default headers, auth, body, and dialect
+    /// headers.
+    fn encoded_request(
+        &self,
+        codec: &OpenAiCompatible,
+        ctx: &CodecCtx<'_>,
+        stream: bool,
+    ) -> Result<fabro_http::RequestBuilder, Error> {
+        let encoded = codec.encode(ctx, stream)?;
+        let url = format!("{}{}", self.http.base_url, encoded.endpoint);
+        let mut req = self.build_request(&url).json(&encoded.body);
+        for (key, value) in &encoded.headers {
+            req = req.header(key, value);
+        }
+        Ok(req)
+    }
 }
 
 /// State driving the streaming byte loop: the codec's decoder plus the line
@@ -101,9 +136,8 @@ impl Adapter {
 struct StreamLoop {
     decoder:          Box<dyn StreamDecoder>,
     line_reader:      super::common::LineReader,
-    /// Events decoded but not yet yielded, stored reversed so `pop` is in
-    /// order.
-    pending:          Vec<StreamEvent>,
+    /// Events decoded but not yet yielded.
+    pending:          VecDeque<StreamEvent>,
     /// Byte stream exhausted.
     done:             bool,
     /// `finish()` already drained.
@@ -130,20 +164,9 @@ impl ProviderAdapter for Adapter {
         let codec = OpenAiCompatible;
         let deployment_id = self.deployment_id(request);
         let params = CodecParams;
-        let ctx = CodecCtx {
-            request,
-            provider_name: &self.provider_name,
-            deployment_id: &deployment_id,
-            model: None,
-            params: &params,
-        };
+        let ctx = self.codec_ctx(request, &deployment_id, &params);
 
-        let encoded = codec.encode(&ctx, false)?;
-        let url = format!("{}{}", self.http.base_url, encoded.endpoint);
-        let mut req = self.build_request(&url).json(&encoded.body);
-        for (key, value) in &encoded.headers {
-            req = req.header(key, value);
-        }
+        let mut req = self.encoded_request(&codec, &ctx, false)?;
         if let Some(t) = self.http.request_timeout {
             req = req.timeout(t);
         }
@@ -159,21 +182,9 @@ impl ProviderAdapter for Adapter {
         let codec = OpenAiCompatible;
         let deployment_id = self.deployment_id(request);
         let params = CodecParams;
-        let ctx = CodecCtx {
-            request,
-            provider_name: &self.provider_name,
-            deployment_id: &deployment_id,
-            model: None,
-            params: &params,
-        };
+        let ctx = self.codec_ctx(request, &deployment_id, &params);
 
-        let encoded = codec.encode(&ctx, true)?;
-        let url = format!("{}{}", self.http.base_url, encoded.endpoint);
-        let mut req = self.build_request(&url).json(&encoded.body);
-        for (key, value) in &encoded.headers {
-            req = req.header(key, value);
-        }
-
+        let req = self.encoded_request(&codec, &ctx, true)?;
         let http_resp = req
             .send()
             .await
@@ -186,15 +197,7 @@ impl ProviderAdapter for Adapter {
                 .text()
                 .await
                 .map_err(|e| Error::network(e.to_string(), e))?;
-            let (msg, code, raw) = parse_error_body(&body, "type");
-            return Err(error_from_status_code(
-                status.as_u16(),
-                msg,
-                self.provider_name.clone(),
-                code,
-                raw,
-                retry_after,
-            ));
+            return Err(codec.decode_error(status.as_u16(), &body, &ctx, retry_after));
         }
 
         let rate_limit = parse_rate_limit_headers(http_resp.headers());
@@ -206,13 +209,13 @@ impl ProviderAdapter for Adapter {
             StreamLoop {
                 decoder,
                 line_reader,
-                pending: Vec::new(),
+                pending: VecDeque::new(),
                 done: false,
                 finished_emitted: false,
             },
             |mut state| async move {
                 loop {
-                    if let Some(event) = state.pending.pop() {
+                    if let Some(event) = state.pending.pop_front() {
                         return Some((Ok(event), state));
                     }
 
@@ -221,12 +224,10 @@ impl ProviderAdapter for Adapter {
                             return None;
                         }
                         state.finished_emitted = true;
-                        let mut events = state.decoder.finish();
-                        if events.is_empty() {
+                        state.pending = state.decoder.finish().into();
+                        if state.pending.is_empty() {
                             return None;
                         }
-                        events.reverse();
-                        state.pending = events;
                         continue;
                     }
 
@@ -240,13 +241,7 @@ impl ProviderAdapter for Adapter {
                                 continue;
                             };
                             match state.decoder.on_event(RawEvent { event: None, data }) {
-                                Ok(mut events) => {
-                                    if events.is_empty() {
-                                        continue;
-                                    }
-                                    events.reverse();
-                                    state.pending = events;
-                                }
+                                Ok(events) => state.pending = events.into(),
                                 Err(e) => return Some((Err(e), state)),
                             }
                         }
