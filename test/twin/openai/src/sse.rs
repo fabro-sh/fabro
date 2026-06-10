@@ -149,6 +149,9 @@ pub fn responses_sse_response(plan: &ResponsePlan, transport: TransportOptions) 
             ));
         }
 
+        // The completed item carries its full content, like the real API.
+        // Adapters round-trip this item verbatim into the next request's
+        // input, so omitting content here produces an invalid replay.
         events.push(sse_event(
             "response.output_item.done",
             &json!({
@@ -158,6 +161,10 @@ pub fn responses_sse_response(plan: &ResponsePlan, transport: TransportOptions) 
                     "type": "message",
                     "status": "completed",
                     "role": "assistant",
+                    "content": [{
+                        "type": "output_text",
+                        "text": message_text,
+                    }],
                 },
                 "output_index": next_output_index,
             }),

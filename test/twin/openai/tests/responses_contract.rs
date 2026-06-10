@@ -226,6 +226,66 @@ async fn responses_reject_malformed_image_input() {
 }
 
 #[tokio::test]
+async fn responses_stream_message_item_done_round_trips_as_input() {
+    let server = common::spawn_server().await.expect("server should start");
+
+    let (status, chunks) = server
+        .post_responses_stream(json!({
+            "model": "gpt-test",
+            "input": "stream this request",
+            "stream": true
+        }))
+        .await;
+    assert_eq!(status, 200);
+
+    let joined = chunks.join("");
+    let transcript = common::parse_sse_transcript(joined.as_bytes()).expect("valid sse");
+    let message_item = transcript
+        .events
+        .iter()
+        .filter(|event| event.event.as_deref() == Some("response.output_item.done"))
+        .filter_map(|event| serde_json::from_str::<serde_json::Value>(&event.data).ok())
+        .map(|payload| payload["item"].clone())
+        .find(|item| item["type"] == "message")
+        .expect("stream should emit a completed message item");
+
+    // The completed item carries its full content, like the real API.
+    let content = message_item["content"]
+        .as_array()
+        .expect("completed message item should include content");
+    assert_eq!(content.len(), 1);
+    assert_eq!(content[0]["type"], "output_text");
+    assert!(
+        content[0]["text"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())
+    );
+
+    // Adapters replay the completed item verbatim as assistant history on the
+    // next turn, so the twin must accept its own streamed output as input.
+    let response = server
+        .post_responses(json!({
+            "model": "gpt-test",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "stream this request"}]
+                },
+                message_item,
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "and again"}]
+                },
+            ],
+            "stream": false
+        }))
+        .await;
+    assert_eq!(response.status(), 200);
+}
+
+#[tokio::test]
 async fn responses_stream_emits_expected_sse_sequence() {
     let server = common::spawn_server().await.expect("server should start");
     let request = json!({
