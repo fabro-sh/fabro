@@ -91,8 +91,9 @@ pub(crate) struct EncodedRequest {
 
 /// One framed item off the byte stream, handed to a [`StreamDecoder`].
 pub(crate) struct RawEvent<'a> {
-    /// SSE `event:` type — `Some` for anthropic; `None` for the data-only
-    /// framing openai/gemini use.
+    /// SSE `event:` type — `Some` when the framing carries one (anthropic,
+    /// openai responses); `None` for the data-only framing
+    /// openai_compatible/gemini use.
     pub event: Option<&'a str>,
     /// The `data:` payload, or a bare JSON line. The sentinel `[DONE]` is
     /// passed through verbatim for the decoder to recognize.

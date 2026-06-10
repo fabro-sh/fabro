@@ -6,7 +6,9 @@
 //! `response.completed` / `response.incomplete`; byte-stream end synthesizes
 //! nothing, so `finish()` returns an empty list.
 
-use super::decode::{map_finish_reason, token_counts_from_api_usage};
+use serde::Deserialize;
+
+use super::decode::{map_finish_reason, token_counts_from_api_usage, tool_call_from_item};
 use super::wire::ApiUsage;
 use crate::codec::{CodecCtx, RawEvent, StreamDecoder};
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind};
@@ -17,10 +19,7 @@ use crate::types::{
 
 /// Map an OpenAI stream `error` / `response.failed` payload to a provider
 /// error, classifying on `code` falling back to `type`.
-pub(super) fn provider_error_from_openai_error_json(
-    error: &serde_json::Value,
-    provider: &str,
-) -> Error {
+fn provider_error_from_openai_error_json(error: &serde_json::Value, provider: &str) -> Error {
     let classifier = error
         .get("code")
         .and_then(serde_json::Value::as_str)
@@ -99,7 +98,6 @@ pub(super) struct SseAccumulator {
     emitted_start:           bool,
     emitted_text_start:      bool,
     emitted_reasoning_start: bool,
-    raw_response:            Option<serde_json::Value>,
     rate_limit:              Option<RateLimitInfo>,
 }
 
@@ -119,7 +117,6 @@ impl SseAccumulator {
             emitted_start: false,
             emitted_text_start: false,
             emitted_reasoning_start: false,
-            raw_response: None,
             rate_limit,
         }
     }
@@ -146,15 +143,10 @@ impl SseAccumulator {
         // Resolve event type from the `event:` SSE line or from the JSON `type`
         // field.
         let resolved_type = event_type
-            .map(str::to_string)
-            .or_else(|| {
-                json.get("type")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
-            })
+            .or_else(|| json.get("type").and_then(serde_json::Value::as_str))
             .unwrap_or_default();
 
-        match resolved_type.as_str() {
+        match resolved_type {
             "error" => {
                 let error = json.get("error").unwrap_or(&json);
                 return Err(provider_error_from_openai_error_json(error, &self.provider));
@@ -244,34 +236,31 @@ impl SseAccumulator {
         let call_id = json
             .get("call_id")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
+            .unwrap_or("");
         let item_id = json
             .get("item_id")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let lookup_id = if call_id.is_empty() {
-            &item_id
-        } else {
-            &call_id
-        };
+            .unwrap_or("");
+        let lookup_id = if call_id.is_empty() { item_id } else { call_id };
 
-        let tc_index = self.tool_calls.iter().position(|tc| tc.id == *lookup_id);
-
-        if let Some(idx) = tc_index {
-            if let Some(ref mut raw) = self.tool_calls[idx].raw_arguments {
+        let idx = if let Some(idx) = self.tool_calls.iter().position(|tc| tc.id == lookup_id) {
+            let tc = &mut self.tool_calls[idx];
+            if let Some(raw) = &mut tc.raw_arguments {
                 raw.push_str(delta);
-                if tool_type == "custom" {
-                    self.tool_calls[idx].arguments = serde_json::json!(raw.clone());
+            }
+            // Custom tool input is its raw string; keep `arguments` in sync as
+            // it accumulates.
+            if tool_type == "custom" {
+                if let serde_json::Value::String(args) = &mut tc.arguments {
+                    args.push_str(delta);
                 }
             }
+            idx
         } else {
             let name = json
                 .get("name")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string();
+                .unwrap_or("");
             let mut tc = ToolCall::new(
                 lookup_id,
                 name,
@@ -284,35 +273,33 @@ impl SseAccumulator {
             tc.tool_type = tool_type.to_string();
             tc.raw_arguments = Some(delta.to_string());
             // Preserve item-level ID (fc_xxx) for Responses API round-trip
-            if !item_id.is_empty() && item_id != *lookup_id {
+            if !item_id.is_empty() && item_id != lookup_id {
                 tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
             }
-            self.tool_calls.push(tc.clone());
-            events.push(StreamEvent::ToolCallStart { tool_call: tc });
-        }
+            events.push(StreamEvent::ToolCallStart {
+                tool_call: tc.clone(),
+            });
+            self.tool_calls.push(tc);
+            self.tool_calls.len() - 1
+        };
 
-        let current_tc = self
-            .tool_calls
-            .iter()
-            .find(|tc| tc.id == *lookup_id)
-            .cloned()
-            .unwrap_or_else(|| ToolCall::new("", "", serde_json::json!({})));
+        // The delta event carries the call identity, the arguments
+        // accumulated so far, and this chunk in `raw_arguments`.
+        let current = &self.tool_calls[idx];
+        let mut tool_call = ToolCall::new(&*current.id, &*current.name, current.arguments.clone());
+        tool_call.tool_type = tool_type.to_string();
+        tool_call.raw_arguments = Some(delta.to_string());
+        tool_call
+            .provider_metadata
+            .clone_from(&current.provider_metadata);
 
-        events.push(StreamEvent::ToolCallDelta {
-            tool_call: ToolCall {
-                tool_type: tool_type.to_string(),
-                raw_arguments: Some(delta.to_string()),
-                ..current_tc
-            },
-        });
+        events.push(StreamEvent::ToolCallDelta { tool_call });
     }
 
     /// Handle `response.output_item.done` for text and function call items.
     fn handle_output_item_done(&mut self, json: &serde_json::Value, events: &mut Vec<StreamEvent>) {
-        let item_type = json
-            .get("item")
-            .and_then(|i| i.get("type"))
-            .and_then(serde_json::Value::as_str);
+        let item = json.get("item").unwrap_or(json);
+        let item_type = item.get("type").and_then(serde_json::Value::as_str);
 
         match item_type {
             Some("reasoning") => {
@@ -320,7 +307,6 @@ impl SseAccumulator {
                     self.emitted_reasoning_start = false;
                     events.push(StreamEvent::ReasoningEnd);
                 }
-                let item = json.get("item").unwrap_or(json);
                 self.reasoning_items.push(item.clone());
             }
             Some("message") => {
@@ -328,81 +314,14 @@ impl SseAccumulator {
                     events.push(StreamEvent::TextEnd { text_id: None });
                     self.emitted_text_start = false;
                 }
-                let item = json.get("item").unwrap_or(json);
                 self.message_items.push(item.clone());
             }
-            Some("function_call") => {
-                let item = json.get("item").unwrap_or(json);
-                let item_id = item
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                let call_id = item
-                    .get("call_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(item_id)
-                    .to_string();
-                let name = item
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let args_str = item
-                    .get("arguments")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("{}");
-                let arguments =
-                    serde_json::from_str(args_str).unwrap_or_else(|_| serde_json::json!({}));
+            Some(t @ ("function_call" | "custom_tool_call")) => {
+                let tc = tool_call_from_item(item, t == "custom_tool_call");
 
-                let mut tc = ToolCall::new(&call_id, &name, arguments);
-                tc.raw_arguments = Some(args_str.to_string());
-                // Preserve item-level ID (fc_xxx) for Responses API round-trip
-                if !item_id.is_empty() {
-                    tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
-                }
-
-                if let Some(existing) = self.tool_calls.iter_mut().find(|t| t.id == call_id) {
-                    existing.name.clone_from(&name);
-                    existing.arguments = tc.arguments.clone();
-                    existing.raw_arguments.clone_from(&tc.raw_arguments);
-                    existing.provider_metadata.clone_from(&tc.provider_metadata);
-                } else {
-                    self.tool_calls.push(tc.clone());
-                }
-
-                events.push(StreamEvent::ToolCallEnd { tool_call: tc });
-            }
-            Some("custom_tool_call") => {
-                let item = json.get("item").unwrap_or(json);
-                let item_id = item
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                let call_id = item
-                    .get("call_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(item_id)
-                    .to_string();
-                let name = item
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let raw_input = item
-                    .get("input")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-
-                let mut tc = ToolCall::new(&call_id, &name, serde_json::json!(raw_input));
-                tc.tool_type = "custom".to_string();
-                tc.raw_arguments = Some(raw_input.to_string());
-                if !item_id.is_empty() {
-                    tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
-                }
-
-                if let Some(existing) = self.tool_calls.iter_mut().find(|t| t.id == call_id) {
-                    existing.name.clone_from(&name);
-                    existing.tool_type = "custom".to_string();
+                if let Some(existing) = self.tool_calls.iter_mut().find(|c| c.id == tc.id) {
+                    existing.name.clone_from(&tc.name);
+                    existing.tool_type.clone_from(&tc.tool_type);
                     existing.arguments = tc.arguments.clone();
                     existing.raw_arguments.clone_from(&tc.raw_arguments);
                     existing.provider_metadata.clone_from(&tc.provider_metadata);
@@ -426,7 +345,7 @@ impl SseAccumulator {
         let response_data = json.get("response").unwrap_or(json);
 
         if let Some(usage_data) = response_data.get("usage") {
-            if let Ok(u) = serde_json::from_value::<ApiUsage>(usage_data.clone()) {
+            if let Ok(u) = ApiUsage::deserialize(usage_data) {
                 self.usage = token_counts_from_api_usage(Some(&u));
             }
         }
@@ -447,8 +366,6 @@ impl SseAccumulator {
         let has_tool_calls = !self.tool_calls.is_empty();
         self.finish_reason = map_finish_reason(status, has_tool_calls);
 
-        self.raw_response = Some(response_data.clone());
-
         let mut content_parts = Vec::new();
         // Reasoning items must precede function calls for Responses API
         // round-trip
@@ -466,14 +383,16 @@ impl SseAccumulator {
             });
         }
         if !self.accumulated_text.is_empty() {
-            content_parts.push(ContentPart::text(&self.accumulated_text));
+            content_parts.push(ContentPart::text(std::mem::take(
+                &mut self.accumulated_text,
+            )));
         }
-        for tc in &self.tool_calls {
+        for tc in std::mem::take(&mut self.tool_calls) {
             // Skip tool calls with empty names (e.g. model-internal items)
             if tc.name.is_empty() {
                 continue;
             }
-            content_parts.push(ContentPart::ToolCall(tc.clone()));
+            content_parts.push(ContentPart::ToolCall(tc));
         }
 
         let model = if self.response_model.is_empty() {
@@ -494,7 +413,7 @@ impl SseAccumulator {
             },
             finish_reason: self.finish_reason.clone(),
             usage: self.usage.clone(),
-            raw: self.raw_response.clone(),
+            raw: Some(response_data.clone()),
             warnings: vec![],
             rate_limit: self.rate_limit.clone(),
         };
@@ -542,7 +461,6 @@ mod tests {
             emitted_start:           true,
             emitted_text_start:      false,
             emitted_reasoning_start: false,
-            raw_response:            None,
             rate_limit:              None,
         }
     }

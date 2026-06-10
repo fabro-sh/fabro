@@ -4,7 +4,7 @@
 //! `attachments::resolve` in the adapter *before* encode runs, so the content
 //! translation here never touches the filesystem.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -26,9 +26,8 @@ pub(super) fn encode(ctx: &CodecCtx<'_>, stream: bool) -> EncodedRequest {
 }
 
 pub(super) fn encode_count_tokens(ctx: &CodecCtx<'_>) -> EncodedRequest {
-    let body = build_body(ctx, false);
     EncodedRequest {
-        body:     filter_input_tokens_request_body(&body),
+        body:     filter_input_tokens_request_body(build_body(ctx, false)),
         endpoint: "/responses/input_tokens".to_string(),
         headers:  Vec::new(),
     }
@@ -113,7 +112,7 @@ fn build_api_request(ctx: &CodecCtx<'_>, stream: bool) -> ApiRequest {
 
 /// Project a full request body down to the fields the
 /// `/responses/input_tokens` endpoint accepts.
-fn filter_input_tokens_request_body(body: &serde_json::Value) -> serde_json::Value {
+fn filter_input_tokens_request_body(mut body: serde_json::Value) -> serde_json::Value {
     const ALLOWED_FIELDS: &[&str] = &[
         "conversation",
         "input",
@@ -128,17 +127,11 @@ fn filter_input_tokens_request_body(body: &serde_json::Value) -> serde_json::Val
         "truncation",
     ];
 
-    let Some(source) = body.as_object() else {
+    let Some(obj) = body.as_object_mut() else {
         return serde_json::json!({});
     };
-
-    let mut filtered = serde_json::Map::new();
-    for field in ALLOWED_FIELDS {
-        if let Some(value) = source.get(*field) {
-            filtered.insert((*field).to_string(), value.clone());
-        }
-    }
-    serde_json::Value::Object(filtered)
+    obj.retain(|key, _| ALLOWED_FIELDS.contains(&key.as_str()));
+    body
 }
 
 // --- Content / message / tool translation ------------------------------------
@@ -148,7 +141,7 @@ fn filter_input_tokens_request_body(body: &serde_json::Value) -> serde_json::Val
 pub(super) fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Value>) {
     let mut instructions_parts: Vec<String> = Vec::new();
     let mut input: Vec<serde_json::Value> = Vec::new();
-    let mut tool_call_types: HashMap<String, (String, String)> = HashMap::new();
+    let mut custom_call_ids: HashSet<String> = HashSet::new();
 
     for msg in messages {
         match msg.role {
@@ -225,9 +218,8 @@ pub(super) fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serd
                                 .and_then(|m| m.get("id"))
                                 .and_then(serde_json::Value::as_str)
                                 .unwrap_or(&tc.id);
-                            tool_call_types
-                                .insert(tc.id.clone(), (tc.tool_type.clone(), tc.name.clone()));
                             if tc.tool_type == "custom" {
+                                custom_call_ids.insert(tc.id.clone());
                                 let raw_input = tc.raw_arguments.as_ref().map_or_else(
                                     || {
                                         tc.arguments.as_str().map_or_else(
@@ -272,9 +264,7 @@ pub(super) fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serd
                             .content
                             .as_str()
                             .map_or_else(|| tr.content.to_string(), str::to_string);
-                        let is_custom = tool_call_types
-                            .get(&tr.tool_call_id)
-                            .is_some_and(|(tool_type, _)| tool_type == "custom")
+                        let is_custom = custom_call_ids.contains(&tr.tool_call_id)
                             || msg.name.as_deref() == Some("apply_patch");
                         let mut item = if is_custom {
                             serde_json::json!({
@@ -509,7 +499,7 @@ mod tests {
         request.metadata = Some(metadata);
 
         let body = encode_body(&request, true, false);
-        let filtered = filter_input_tokens_request_body(&body);
+        let filtered = filter_input_tokens_request_body(body);
 
         assert_eq!(
             filtered,
@@ -534,7 +524,7 @@ mod tests {
     #[test]
     fn filter_input_tokens_request_body_preserves_codex_serialization() {
         let body = encode_body(&minimal_request(), false, true);
-        let filtered = filter_input_tokens_request_body(&body);
+        let filtered = filter_input_tokens_request_body(body);
 
         assert_eq!(filtered["instructions"], "");
         assert!(filtered.get("input").is_some());

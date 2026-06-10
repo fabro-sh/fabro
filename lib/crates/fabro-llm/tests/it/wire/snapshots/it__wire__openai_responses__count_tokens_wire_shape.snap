@@ -28,6 +28,7 @@ expression: rendered
     ]
   ],
   "body": {
+    "model": "gpt-test",
     "input": [
       {
         "type": "message",
@@ -41,7 +42,6 @@ expression: rendered
       }
     ],
     "instructions": "Be concise",
-    "model": "gpt-test",
     "tools": [
       {
         "type": "function",

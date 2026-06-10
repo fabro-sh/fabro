@@ -1,5 +1,7 @@
 //! Response decoding: OpenAI Responses API body → canonical `Response`.
 
+use serde::Deserialize;
+
 use super::wire::{ApiResponse, ApiUsage, InputTokensResponse};
 use crate::codec::CodecCtx;
 use crate::error::Error;
@@ -42,22 +44,66 @@ pub(super) fn map_finish_reason(status: Option<&str>, has_tool_calls: bool) -> F
     }
 }
 
+/// Build a `ToolCall` from a `function_call` / `custom_tool_call` output item.
+/// The call-id/item-id round-trip rules live here, shared by the blocking and
+/// streaming decode paths.
+pub(super) fn tool_call_from_item(item: &serde_json::Value, custom: bool) -> ToolCall {
+    let item_id = item
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let call_id = item
+        .get("call_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(item_id);
+    let name = item
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+
+    let mut tc = if custom {
+        let raw_input = item
+            .get("input")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let mut tc = ToolCall::new(call_id, name, serde_json::json!(raw_input));
+        tc.tool_type = "custom".to_string();
+        tc.raw_arguments = Some(raw_input.to_string());
+        tc
+    } else {
+        let args_str = item
+            .get("arguments")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("{}");
+        let arguments = serde_json::from_str(args_str).unwrap_or_else(|_| serde_json::json!({}));
+        let mut tc = ToolCall::new(call_id, name, arguments);
+        tc.raw_arguments = Some(args_str.to_string());
+        tc
+    };
+    // Preserve item-level ID (fc_xxx) for Responses API round-trip
+    if !item_id.is_empty() {
+        tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
+    }
+    tc
+}
+
 /// Parse output items from the Responses API into content parts.
-pub(super) fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
+pub(super) fn parse_output(output: Vec<serde_json::Value>) -> (Vec<ContentPart>, bool) {
     let mut parts = Vec::new();
     let mut has_tool_calls = false;
 
     for item in output {
-        let item_type = item.get("type").and_then(serde_json::Value::as_str);
-        match item_type {
-            Some("message") => {
+        let item_type = item
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        match item_type.as_str() {
+            "message" => {
                 // Preserve the full message item for Responses API round-tripping.
                 // The item's `id` and `status` fields are required so that reasoning
                 // items preceding it can find their "required following item."
-                parts.push(ContentPart::Other {
-                    kind: ContentPart::OPENAI_MESSAGE.to_string(),
-                    data: item.clone(),
-                });
+                let mut texts = Vec::new();
                 if let Some(content) = item.get("content").and_then(|c| c.as_array()) {
                     for block in content {
                         if block.get("type").and_then(serde_json::Value::as_str)
@@ -66,81 +112,30 @@ pub(super) fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, b
                             if let Some(text) =
                                 block.get("text").and_then(serde_json::Value::as_str)
                             {
-                                parts.push(ContentPart::text(text));
+                                texts.push(ContentPart::text(text));
                             }
                         }
                     }
                 }
+                parts.push(ContentPart::Other {
+                    kind: ContentPart::OPENAI_MESSAGE.to_string(),
+                    data: item,
+                });
+                parts.extend(texts);
             }
-            Some("reasoning") => {
+            "reasoning" => {
                 parts.push(ContentPart::Other {
                     kind: ContentPart::OPENAI_REASONING.to_string(),
-                    data: item.clone(),
+                    data: item,
                 });
             }
-            Some("function_call") => {
-                let item_id = item
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                let call_id = item
-                    .get("call_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(item_id)
-                    .to_string();
-                let name = item
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                // Skip function calls with empty names (e.g. model-internal items)
-                if name.is_empty() {
+            "function_call" | "custom_tool_call" => {
+                let tc = tool_call_from_item(&item, item_type == "custom_tool_call");
+                // Skip tool calls with empty names (e.g. model-internal items)
+                if tc.name.is_empty() {
                     continue;
                 }
                 has_tool_calls = true;
-                let args_str = item
-                    .get("arguments")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("{}");
-                let arguments =
-                    serde_json::from_str(args_str).unwrap_or_else(|_| serde_json::json!({}));
-                let mut tc = ToolCall::new(call_id, name, arguments);
-                tc.raw_arguments = Some(args_str.to_string());
-                // Preserve item-level ID (fc_xxx) for Responses API round-trip
-                if !item_id.is_empty() {
-                    tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
-                }
-                parts.push(ContentPart::ToolCall(tc));
-            }
-            Some("custom_tool_call") => {
-                let item_id = item
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                let call_id = item
-                    .get("call_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(item_id)
-                    .to_string();
-                let name = item
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                if name.is_empty() {
-                    continue;
-                }
-                has_tool_calls = true;
-                let raw_input = item
-                    .get("input")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                let mut tc = ToolCall::new(call_id, name, serde_json::json!(raw_input));
-                tc.tool_type = "custom".to_string();
-                tc.raw_arguments = Some(raw_input.to_string());
-                if !item_id.is_empty() {
-                    tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
-                }
                 parts.push(ContentPart::ToolCall(tc));
             }
             _ => {}
@@ -155,10 +150,12 @@ pub(super) fn decode_response(
     ctx: &CodecCtx<'_>,
     rate_limit: Option<RateLimitInfo>,
 ) -> Result<Response, Error> {
-    let api_resp: ApiResponse = serde_json::from_str(body)
+    let raw: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| Error::network(format!("failed to parse OpenAI response: {e}"), e))?;
+    let api_resp = ApiResponse::deserialize(&raw)
         .map_err(|e| Error::network(format!("failed to parse OpenAI response: {e}"), e))?;
 
-    let (content_parts, has_tool_calls) = parse_output(&api_resp.output);
+    let (content_parts, has_tool_calls) = parse_output(api_resp.output);
     let finish_reason = map_finish_reason(api_resp.status.as_deref(), has_tool_calls);
 
     let usage = token_counts_from_api_usage(api_resp.usage.as_ref());
@@ -175,7 +172,7 @@ pub(super) fn decode_response(
         },
         finish_reason,
         usage,
-        raw: serde_json::from_str(body).ok(),
+        raw: Some(raw),
         warnings: vec![],
         rate_limit,
     })
@@ -215,7 +212,7 @@ mod tests {
             "name": "get_weather",
             "arguments": "{\"location\":\"NYC\"}"
         })];
-        let (parts, has_tool_calls) = parse_output(&output);
+        let (parts, has_tool_calls) = parse_output(output);
         assert!(has_tool_calls);
         assert_eq!(parts.len(), 1);
         match &parts[0] {
@@ -244,7 +241,7 @@ mod tests {
             "input": patch,
         })];
 
-        let (parts, has_tool_calls) = parse_output(&output);
+        let (parts, has_tool_calls) = parse_output(output);
 
         assert!(has_tool_calls);
         assert_eq!(parts.len(), 1);
@@ -281,7 +278,7 @@ mod tests {
                 "arguments": "{}"
             }),
         ];
-        let (parts, has_tool_calls) = parse_output(&output);
+        let (parts, has_tool_calls) = parse_output(output);
         assert!(has_tool_calls);
         assert_eq!(parts.len(), 2);
         // First part is the reasoning item
@@ -320,7 +317,7 @@ mod tests {
                 "arguments": "{}"
             }),
         ];
-        let (parts, has_tool_calls) = parse_output(&output);
+        let (parts, has_tool_calls) = parse_output(output);
         assert!(has_tool_calls);
         // reasoning + openai_message + text + function_call
         assert_eq!(parts.len(), 4);
@@ -344,7 +341,7 @@ mod tests {
             "name": "search",
             "arguments": "{\"q\":\"test\"}"
         })];
-        let (parts, _) = parse_output(&output);
+        let (parts, _) = parse_output(output);
 
         // Now translate back to input format
         let msg = Message {

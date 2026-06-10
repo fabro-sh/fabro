@@ -6,13 +6,13 @@ use futures::stream;
 use crate::attachments::{self, AttachmentPolicy};
 use crate::codec::openai_responses::OpenAiResponses;
 use crate::codec::{Codec, CodecCtx, CodecParams, EncodedRequest, RawEvent, StreamDecoder};
-use crate::error::{Error, error_from_status_code};
+use crate::error::Error;
 use crate::provider::{
     ProviderAdapter, StreamEventStream, validate_standard_speed, validate_tool_choice,
 };
 use crate::providers::common::{
-    self as common, parse_error_body, parse_rate_limit_headers, parse_retry_after,
-    send_and_read_response, send_and_read_response_with_operation,
+    self as common, parse_rate_limit_headers, parse_retry_after, send_and_read_response,
+    send_and_read_response_with_operation,
 };
 use crate::token_count::{InputTokenCount, InputTokenCountMethod};
 use crate::types::{AdapterTimeout, Request, Response, StreamEvent};
@@ -109,18 +109,32 @@ impl Adapter {
         }
     }
 
-    /// Resolve the route configuration for this adapter.
+    /// Per-route dialect knobs for the codec.
     ///
     /// OpenAI has a single auth scheme (bearer + org/project headers), so the
-    /// route only varies on codex mode: its encode-side half (param omission)
-    /// rides on `CodecParams`; its transport-side half forces blocking
-    /// requests through the streaming path.
-    fn route_config(&self) -> RouteConfig {
-        RouteConfig {
-            codec_params:    CodecParams {
-                openai_codex: self.codex_mode,
-            },
-            force_streaming: self.codex_mode,
+    /// only route variation is codex mode: its encode-side half (param
+    /// omission) rides on `CodecParams`; its transport-side half (forced
+    /// streaming) is checked directly off `codex_mode` in `complete`.
+    fn codec_params(&self) -> CodecParams {
+        CodecParams {
+            openai_codex: self.codex_mode,
+        }
+    }
+
+    /// Build the borrowed codec context. `deployment_id` and `params` are
+    /// created by the caller so their borrows outlive the context.
+    fn codec_ctx<'a>(
+        &'a self,
+        request: &'a Request,
+        deployment_id: &'a str,
+        params: &'a CodecParams,
+    ) -> CodecCtx<'a> {
+        CodecCtx {
+            request,
+            provider_name: &self.provider_name,
+            deployment_id,
+            model: common::catalog_model(self.catalog.as_deref(), &request.model),
+            params,
         }
     }
 
@@ -178,13 +192,6 @@ impl Adapter {
             source:  None,
         })
     }
-}
-
-/// Resolved per-request routing decisions. OpenAI's only route split is codex
-/// mode.
-struct RouteConfig {
-    codec_params:    CodecParams,
-    force_streaming: bool,
 }
 
 /// State driving the streaming byte loop: the codec's decoder plus the line
@@ -250,17 +257,11 @@ impl ProviderAdapter for Adapter {
     ) -> Result<Option<InputTokenCount>, Error> {
         self.validate_request(request)?;
 
-        let route = self.route_config();
         let resolved = self.resolve_request(request).await;
         let codec = OpenAiResponses;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let ctx = CodecCtx {
-            request:       &resolved,
-            provider_name: &self.provider_name,
-            deployment_id: &deployment_id,
-            model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-            params:        &route.codec_params,
-        };
+        let params = self.codec_params();
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
         let Some(encoded) = codec.encode_count_tokens(&ctx).transpose()? else {
             return Ok(None);
@@ -291,23 +292,17 @@ impl ProviderAdapter for Adapter {
     async fn complete(&self, request: &Request) -> Result<Response, Error> {
         self.validate_request(request)?;
 
-        let route = self.route_config();
         // Codex endpoint requires streaming; collect the stream into a
         // response.
-        if route.force_streaming {
+        if self.codex_mode {
             return self.complete_via_stream(request).await;
         }
 
         let resolved = self.resolve_request(request).await;
         let codec = OpenAiResponses;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let ctx = CodecCtx {
-            request:       &resolved,
-            provider_name: &self.provider_name,
-            deployment_id: &deployment_id,
-            model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-            params:        &route.codec_params,
-        };
+        let params = self.codec_params();
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
         let encoded = codec.encode(&ctx, false)?;
         let mut req = self.build_http_request(&encoded);
@@ -322,61 +317,32 @@ impl ProviderAdapter for Adapter {
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
         self.validate_request(request)?;
 
-        let route = self.route_config();
         let resolved = self.resolve_request(request).await;
         let codec = OpenAiResponses;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let stream_read_timeout = self.http.stream_read_timeout;
-        let rate_limit;
+        let params = self.codec_params();
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
-        let http_resp = {
-            let ctx = CodecCtx {
-                request:       &resolved,
-                provider_name: &self.provider_name,
-                deployment_id: &deployment_id,
-                model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-                params:        &route.codec_params,
-            };
-            let encoded = codec.encode(&ctx, true)?;
-            let resp = self
-                .build_http_request(&encoded)
-                .send()
+        let encoded = codec.encode(&ctx, true)?;
+        let http_resp = self
+            .build_http_request(&encoded)
+            .send()
+            .await
+            .map_err(|e| Error::network(e.to_string(), e))?;
+
+        let status = http_resp.status();
+        if !status.is_success() {
+            let retry_after = parse_retry_after(http_resp.headers());
+            let body = http_resp
+                .text()
                 .await
                 .map_err(|e| Error::network(e.to_string(), e))?;
+            return Err(codec.decode_error(status.as_u16(), &body, &ctx, retry_after));
+        }
 
-            let status = resp.status();
-            if !status.is_success() {
-                let retry_after = parse_retry_after(resp.headers());
-                let body = resp
-                    .text()
-                    .await
-                    .map_err(|e| Error::network(e.to_string(), e))?;
-                let (msg, code, raw) = parse_error_body(&body, "type");
-                return Err(error_from_status_code(
-                    status.as_u16(),
-                    msg,
-                    self.provider_name.clone(),
-                    code,
-                    raw,
-                    retry_after,
-                ));
-            }
-            rate_limit = parse_rate_limit_headers(resp.headers());
-            resp
-        };
-
-        // Build the decoder while the ctx is still in scope; it captures owned
-        // state and does not borrow ctx beyond construction.
-        let decoder = {
-            let ctx = CodecCtx {
-                request:       &resolved,
-                provider_name: &self.provider_name,
-                deployment_id: &deployment_id,
-                model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-                params:        &route.codec_params,
-            };
-            codec.stream_decoder(&ctx, rate_limit)
-        };
+        let rate_limit = parse_rate_limit_headers(http_resp.headers());
+        let stream_read_timeout = self.http.stream_read_timeout;
+        let decoder = codec.stream_decoder(&ctx, rate_limit);
 
         let out = stream::unfold(
             StreamLoop {
