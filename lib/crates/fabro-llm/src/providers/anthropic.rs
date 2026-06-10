@@ -1662,8 +1662,8 @@ impl ProviderAdapter for Adapter {
         }
 
         let model_info = common::catalog_model(self.catalog.as_deref(), &request.model);
-        if let Some(model) =
-            model_info.filter(|m| m.features.reasoning_effort == ReasoningEffortFeature::Adaptive)
+        if let Some(model) = model_info
+            .filter(|m| m.features.reasoning_effort == ReasoningEffortFeature::AlwaysAdaptive)
         {
             if let Some(kind @ ("enabled" | "disabled")) =
                 anthropic_thinking_type(request.provider_options.as_ref())

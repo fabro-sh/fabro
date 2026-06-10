@@ -7592,13 +7592,13 @@ components:
     ReasoningEffortFeature:
       description: >-
         Whether the model endpoint supports a native reasoning-effort
-        parameter. `levels` accepts discrete effort levels; `adaptive`
+        parameter. `levels` accepts discrete effort levels; `always_adaptive`
         accepts effort levels with natively always-on adaptive thinking;
         `none` has no native effort parameter.
       type: string
       enum:
         - levels
-        - adaptive
+        - always_adaptive
         - none
 
     ReasoningEffort:

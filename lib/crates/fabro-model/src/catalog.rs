@@ -601,7 +601,7 @@ pub enum CatalogBuildError {
     #[error("model '{model}' declares reasoning_effort feature but features.reasoning is false")]
     ReasoningEffortWithoutReasoning { model: String },
     #[error(
-        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels or adaptive"
+        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels or always_adaptive"
     )]
     EmptyReasoningEffortControls { model: String },
     #[error("model '{model}' has invalid speed '{value}'")]
@@ -3452,7 +3452,7 @@ reasoning_effort = ["low", "medium"]
     }
 
     #[test]
-    fn catalog_from_settings_accepts_reasoning_effort_feature_adaptive() {
+    fn catalog_from_settings_accepts_reasoning_effort_feature_always_adaptive() {
         let settings = minimal_settings(
             r#"
 [providers.test]
@@ -3473,7 +3473,7 @@ context_window = 1000
 tools = true
 vision = false
 reasoning = true
-reasoning_effort = "adaptive"
+reasoning_effort = "always_adaptive"
 prompt_cache = true
 "#,
         );
@@ -3482,10 +3482,11 @@ prompt_cache = true
         let model = catalog.get("model").unwrap();
         assert_eq!(
             model.features.reasoning_effort,
-            crate::ReasoningEffortFeature::Adaptive
+            crate::ReasoningEffortFeature::AlwaysAdaptive
         );
         assert!(model.supports_reasoning_effort());
-        // Adaptive models get the full default effort controls, same as Levels.
+        // Always-adaptive models get the full default effort controls, same as
+        // Levels.
         assert_eq!(
             catalog
                 .model_settings("model")
@@ -3609,7 +3610,7 @@ reasoning_effort = "levels"
     }
 
     #[test]
-    fn catalog_from_settings_rejects_adaptive_effort_without_reasoning() {
+    fn catalog_from_settings_rejects_always_adaptive_effort_without_reasoning() {
         let settings = minimal_settings(
             r#"
 [providers.test]
@@ -3630,7 +3631,7 @@ context_window = 1000
 tools = true
 vision = false
 reasoning = false
-reasoning_effort = "adaptive"
+reasoning_effort = "always_adaptive"
 "#,
         );
 

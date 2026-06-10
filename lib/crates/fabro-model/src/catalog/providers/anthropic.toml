@@ -24,7 +24,7 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-reasoning_effort = "adaptive"
+reasoning_effort = "always_adaptive"
 prompt_cache = true
 sampling_params = false
 

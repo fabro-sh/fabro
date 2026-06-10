@@ -17,13 +17,14 @@ use crate::ids::ProviderId;
     strum::EnumString,
     strum::IntoStaticStr,
 )]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum ReasoningEffortFeature {
     Levels,
-    /// Effort levels are supported and thinking is natively always-on /
-    /// adaptive; a manual thinking on/off toggle is not accepted.
-    Adaptive,
+    /// Effort levels are supported, and thinking is natively always-on
+    /// adaptive at the endpoint; a manual thinking on/off toggle is not
+    /// accepted.
+    AlwaysAdaptive,
     #[default]
     None,
 }
@@ -63,7 +64,7 @@ impl ModelFeatures {
     pub fn supports_reasoning_effort(&self) -> bool {
         matches!(
             self.reasoning_effort,
-            ReasoningEffortFeature::Levels | ReasoningEffortFeature::Adaptive
+            ReasoningEffortFeature::Levels | ReasoningEffortFeature::AlwaysAdaptive
         )
     }
 }
@@ -191,17 +192,17 @@ mod tests {
     use crate::ids::ProviderId;
 
     #[test]
-    fn reasoning_effort_feature_adaptive_round_trips() {
+    fn reasoning_effort_feature_always_adaptive_round_trips() {
         let parsed: ReasoningEffortFeature =
-            serde_json::from_value(serde_json::json!("adaptive")).unwrap();
-        assert_eq!(parsed, ReasoningEffortFeature::Adaptive);
+            serde_json::from_value(serde_json::json!("always_adaptive")).unwrap();
+        assert_eq!(parsed, ReasoningEffortFeature::AlwaysAdaptive);
         assert_eq!(
             serde_json::to_value(parsed).unwrap(),
-            serde_json::json!("adaptive")
+            serde_json::json!("always_adaptive")
         );
-        assert_eq!(parsed.to_string(), "adaptive");
+        assert_eq!(parsed.to_string(), "always_adaptive");
         assert_eq!(
-            "adaptive".parse::<ReasoningEffortFeature>().unwrap(),
+            "always_adaptive".parse::<ReasoningEffortFeature>().unwrap(),
             parsed
         );
     }
