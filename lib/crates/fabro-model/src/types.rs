@@ -21,6 +21,9 @@ use crate::ids::ProviderId;
 #[strum(serialize_all = "lowercase")]
 pub enum ReasoningEffortFeature {
     Levels,
+    /// Effort levels are supported and thinking is natively always-on /
+    /// adaptive; a manual thinking on/off toggle is not accepted.
+    Adaptive,
     #[default]
     None,
 }
@@ -43,6 +46,17 @@ pub struct ModelFeatures {
     /// Whether this model endpoint supports prompt caching annotations.
     #[serde(default)]
     pub prompt_cache:     bool,
+}
+
+impl ModelFeatures {
+    /// Whether the model endpoint accepts a native reasoning-effort level.
+    #[must_use]
+    pub fn supports_reasoning_effort(&self) -> bool {
+        matches!(
+            self.reasoning_effort,
+            ReasoningEffortFeature::Levels | ReasoningEffortFeature::Adaptive
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -114,7 +128,7 @@ impl Model {
     }
 
     pub fn supports_reasoning_effort(&self) -> bool {
-        self.features.reasoning_effort == ReasoningEffortFeature::Levels
+        self.features.supports_reasoning_effort()
     }
 
     pub fn supports_prompt_cache(&self) -> bool {
@@ -162,6 +176,22 @@ impl Model {
 mod tests {
     use super::*;
     use crate::ids::ProviderId;
+
+    #[test]
+    fn reasoning_effort_feature_adaptive_round_trips() {
+        let parsed: ReasoningEffortFeature =
+            serde_json::from_value(serde_json::json!("adaptive")).unwrap();
+        assert_eq!(parsed, ReasoningEffortFeature::Adaptive);
+        assert_eq!(
+            serde_json::to_value(parsed).unwrap(),
+            serde_json::json!("adaptive")
+        );
+        assert_eq!(parsed.to_string(), "adaptive");
+        assert_eq!(
+            "adaptive".parse::<ReasoningEffortFeature>().unwrap(),
+            parsed
+        );
+    }
 
     #[test]
     fn inherent_methods_return_correct_values() {

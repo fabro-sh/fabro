@@ -1427,7 +1427,7 @@ fn build_model_features(
             field: "features.reasoning",
         })?;
     let reasoning_effort = features.reasoning_effort.unwrap_or_default();
-    if !reasoning && reasoning_effort == ReasoningEffortFeature::Levels {
+    if !reasoning && reasoning_effort != ReasoningEffortFeature::None {
         return Err(CatalogBuildError::ReasoningEffortWithoutReasoning {
             model: model_id.to_string(),
         });
@@ -1496,8 +1496,7 @@ fn build_model_controls(
     features: &ModelFeatures,
     settings: &ModelCatalogSettings,
 ) -> Result<CatalogModelControls, CatalogBuildError> {
-    let supports_native_reasoning_effort =
-        features.reasoning_effort == ReasoningEffortFeature::Levels;
+    let supports_native_reasoning_effort = features.supports_reasoning_effort();
     let reasoning_effort = match settings
         .controls
         .as_ref()
@@ -3449,6 +3448,51 @@ reasoning_effort = ["low", "medium"]
     }
 
     #[test]
+    fn catalog_from_settings_accepts_reasoning_effort_feature_adaptive() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "adaptive"
+prompt_cache = true
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        let model = catalog.get("model").unwrap();
+        assert_eq!(
+            model.features.reasoning_effort,
+            crate::ReasoningEffortFeature::Adaptive
+        );
+        assert!(model.supports_reasoning_effort());
+        // Adaptive models get the full default effort controls, same as Levels.
+        assert_eq!(
+            catalog
+                .model_settings("model")
+                .unwrap()
+                .controls
+                .reasoning_effort,
+            ReasoningEffort::VARIANTS.to_vec()
+        );
+    }
+
+    #[test]
     fn catalog_from_settings_accepts_reasoning_effort_controls_without_native_effort_feature() {
         let settings = minimal_settings(
             r#"
@@ -3550,6 +3594,39 @@ tools = true
 vision = false
 reasoning = false
 reasoning_effort = "levels"
+"#,
+        );
+
+        assert!(matches!(
+            Catalog::from_settings(&settings).unwrap_err(),
+            CatalogBuildError::ReasoningEffortWithoutReasoning { model }
+                if model == "model"
+        ));
+    }
+
+    #[test]
+    fn catalog_from_settings_rejects_adaptive_effort_without_reasoning() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = false
+reasoning_effort = "adaptive"
 "#,
         );
 
