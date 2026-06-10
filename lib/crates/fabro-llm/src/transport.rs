@@ -38,7 +38,7 @@ use crate::types::{AdapterTimeout, RateLimitInfo, Response, StreamEvent};
 /// Holds the API key, base URL, reqwest client, default headers, and timeout
 /// configuration that every provider needs. Provider-specific fields live on
 /// the adapter struct itself.
-pub struct HttpTransport {
+pub(crate) struct HttpTransport {
     pub(crate) api_key:             Option<String>,
     pub(crate) base_url:            String,
     pub(crate) default_headers:     HashMap<String, String>,
@@ -56,12 +56,12 @@ impl HttpTransport {
     }
 
     #[must_use]
-    pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+    pub(crate) fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
         Self::new_optional(Some(api_key.into()), base_url)
     }
 
     #[must_use]
-    pub fn new_optional(api_key: Option<String>, base_url: impl Into<String>) -> Self {
+    pub(crate) fn new_optional(api_key: Option<String>, base_url: impl Into<String>) -> Self {
         let timeout = AdapterTimeout::default();
         let client = Self::build_client(timeout);
         Self {
@@ -75,7 +75,7 @@ impl HttpTransport {
     }
 
     #[must_use]
-    pub fn with_timeout(mut self, timeout: AdapterTimeout) -> Self {
+    pub(crate) fn with_timeout(mut self, timeout: AdapterTimeout) -> Self {
         self.client = Self::build_client(timeout);
         self.request_timeout = timeout.request.map(Duration::from_secs_f64);
         self.stream_read_timeout = timeout.stream_read.map(Duration::from_secs_f64);
@@ -83,7 +83,7 @@ impl HttpTransport {
     }
 
     #[must_use]
-    pub fn with_default_headers(mut self, headers: HashMap<String, String>) -> Self {
+    pub(crate) fn with_default_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.default_headers = headers;
         self
     }

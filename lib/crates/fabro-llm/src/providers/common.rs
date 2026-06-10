@@ -3,11 +3,11 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_http::HeaderMap;
 use fabro_model::{Catalog, Model};
 use fabro_static::EnvVars;
-use tokio::{fs, time};
+use tokio::fs;
 use tracing::warn;
 
 use crate::error::{Error, error_from_status_code};
-use crate::types::{Message, RateLimitInfo, Role};
+use crate::types::{Message, Role};
 
 #[must_use]
 pub fn catalog_model<'a>(catalog: Option<&'a Catalog>, model: &str) -> Option<&'a Model> {
