@@ -11,7 +11,7 @@ use crate::provider::{
 };
 use crate::providers::common::{self as common};
 use crate::token_count::{InputTokenCount, InputTokenCountMethod};
-use crate::transport::{self, SseFraming};
+use crate::transport::{self, HttpTransport, SseFraming};
 use crate::types::{AdapterTimeout, Request, Response};
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -24,7 +24,7 @@ const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta
 /// Gemini has no route variance (single auth scheme, count-tokens always
 /// available, no forced streaming), so there is no route config.
 pub struct Adapter {
-    pub(crate) http: crate::transport::HttpTransport,
+    pub(crate) http: HttpTransport,
     provider_name:   String,
     catalog:         Option<Arc<Catalog>>,
 }
@@ -38,7 +38,7 @@ impl Adapter {
     #[must_use]
     pub fn new_optional_auth(api_key: Option<String>) -> Self {
         Self {
-            http:          crate::transport::HttpTransport::new_optional(api_key, DEFAULT_BASE_URL),
+            http:          HttpTransport::new_optional(api_key, DEFAULT_BASE_URL),
             provider_name: "gemini".to_string(),
             catalog:       None,
         }

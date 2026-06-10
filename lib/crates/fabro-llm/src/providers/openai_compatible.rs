@@ -9,7 +9,7 @@ use crate::provider::{
     ProviderAdapter, StreamEventStream, validate_standard_speed, validate_tool_choice,
 };
 use crate::providers::common::api_model_id;
-use crate::transport::{self, SseFraming};
+use crate::transport::{self, HttpTransport, SseFraming};
 use crate::types::{AdapterTimeout, Request, Response};
 
 /// `OpenAI`-compatible Chat Completions adapter (Section 7.10).
@@ -24,7 +24,7 @@ use crate::types::{AdapterTimeout, Request, Response};
 /// auth, base URL, and the streaming byte loop, and delegates all wire
 /// translation to the codec.
 pub struct Adapter {
-    pub(crate) http: crate::transport::HttpTransport,
+    pub(crate) http: HttpTransport,
     provider_name:   String,
     catalog:         Option<Arc<Catalog>>,
 }
@@ -38,7 +38,7 @@ impl Adapter {
     #[must_use]
     pub fn new_optional_auth(api_key: Option<String>, base_url: impl Into<String>) -> Self {
         Self {
-            http:          crate::transport::HttpTransport::new_optional(api_key, base_url),
+            http:          HttpTransport::new_optional(api_key, base_url),
             provider_name: "openai-compatible".to_string(),
             catalog:       None,
         }

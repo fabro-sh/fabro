@@ -13,9 +13,8 @@ mod encode;
 mod stream;
 mod wire;
 
-use crate::codec::{Codec, CodecCtx, EncodedRequest, StreamDecoder};
+use crate::codec::{Codec, CodecCtx, EncodedRequest, StreamDecoder, parse_error_body};
 use crate::error::Error;
-use crate::providers::common::parse_error_body;
 use crate::types::{RateLimitInfo, Response};
 
 /// Codec for the Gemini `generateContent` wire dialect.

@@ -11,7 +11,7 @@ use crate::provider::{
 };
 use crate::providers::common::{self as common};
 use crate::token_count::{InputTokenCount, InputTokenCountMethod};
-use crate::transport::{self, SseFraming};
+use crate::transport::{self, HttpTransport, SseFraming};
 use crate::types::{AdapterTimeout, Request, Response, StreamEvent};
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -27,7 +27,7 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 /// Completions) to properly surface reasoning tokens, built-in tools, and
 /// server-side state.
 pub struct Adapter {
-    pub(crate) http: crate::transport::HttpTransport,
+    pub(crate) http: HttpTransport,
     org_id:          Option<String>,
     project_id:      Option<String>,
     provider_name:   String,
@@ -45,7 +45,7 @@ impl Adapter {
     #[must_use]
     pub fn new_optional_auth(api_key: Option<String>) -> Self {
         Self {
-            http:          crate::transport::HttpTransport::new_optional(api_key, DEFAULT_BASE_URL),
+            http:          HttpTransport::new_optional(api_key, DEFAULT_BASE_URL),
             org_id:        None,
             project_id:    None,
             provider_name: "openai".to_string(),

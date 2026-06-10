@@ -4,8 +4,6 @@ use fabro_model::{Catalog, Model};
 use fabro_static::EnvVars;
 use tokio::fs;
 
-use crate::types::{Message, Role};
-
 #[must_use]
 pub fn catalog_model<'a>(catalog: Option<&'a Catalog>, model: &str) -> Option<&'a Model> {
     catalog.and_then(|catalog| catalog.get(model))
@@ -16,63 +14,6 @@ pub fn api_model_id(catalog: Option<&Catalog>, model: &str) -> String {
     catalog
         .and_then(|catalog| catalog.model_settings(model))
         .map_or_else(|| model.to_string(), |settings| settings.api_id.clone())
-}
-
-/// Parse an error response body, extracting the message and error code.
-///
-/// `error_code_field` is the JSON field name for the error code (e.g. "type" or
-/// "status").
-#[must_use]
-pub fn parse_error_body(
-    body: &str,
-    error_code_field: &str,
-) -> (String, Option<String>, Option<serde_json::Value>) {
-    serde_json::from_str::<serde_json::Value>(body).map_or_else(
-        |_| (body.to_string(), None, None),
-        |v| {
-            let message = v
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(serde_json::Value::as_str)
-                // Codex endpoint returns {"detail": "..."} instead of {"error": {"message": "..."}}
-                .or_else(|| v.get("detail").and_then(serde_json::Value::as_str))
-                .unwrap_or("Unknown error")
-                .to_string();
-            let error_code = v
-                .get("error")
-                .and_then(|e| e.get(error_code_field))
-                .and_then(serde_json::Value::as_str)
-                .map(String::from);
-            (message, error_code, Some(v))
-        },
-    )
-}
-
-/// Extract system and developer messages from a message list.
-///
-/// Returns the joined system prompt and the remaining messages.
-/// Per spec, Developer role messages are merged with system messages
-/// for Anthropic and Gemini.
-#[must_use]
-pub fn extract_system_prompt(messages: &[Message]) -> (Option<String>, Vec<&Message>) {
-    let mut system_parts = Vec::new();
-    let mut other = Vec::new();
-    for msg in messages {
-        if msg.role == Role::System || msg.role == Role::Developer {
-            let text = msg.text();
-            if !text.trim().is_empty() {
-                system_parts.push(text);
-            }
-        } else {
-            other.push(msg);
-        }
-    }
-    let system = if system_parts.is_empty() {
-        None
-    } else {
-        Some(system_parts.join("\n"))
-    };
-    (system, other)
 }
 
 /// Check if a URL string looks like a local file path.
@@ -139,7 +80,6 @@ pub use crate::transport::{LineReader, parse_rate_limit_headers, parse_retry_aft
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ContentPart;
 
     #[test]
     fn is_file_path_absolute() {
@@ -180,118 +120,5 @@ mod tests {
     fn mime_from_extension_unknown() {
         assert_eq!(mime_from_extension("file.xyz"), "application/octet-stream");
         assert_eq!(mime_from_extension("noext"), "application/octet-stream");
-    }
-
-    // --- parse_error_body ---
-
-    #[test]
-    fn parse_error_body_valid_json() {
-        let body = r#"{"error":{"message":"rate limited","type":"rate_limit_error"}}"#;
-        let (msg, code, raw) = parse_error_body(body, "type");
-        assert_eq!(msg, "rate limited");
-        assert_eq!(code.as_deref(), Some("rate_limit_error"));
-        assert!(raw.is_some());
-    }
-
-    #[test]
-    fn parse_error_body_missing_error_field() {
-        let body = r#"{"status":"fail"}"#;
-        let (msg, code, raw) = parse_error_body(body, "type");
-        assert_eq!(msg, "Unknown error");
-        assert_eq!(code, None);
-        assert!(raw.is_some());
-    }
-
-    #[test]
-    fn parse_error_body_not_json() {
-        let body = "Internal Server Error";
-        let (msg, code, raw) = parse_error_body(body, "type");
-        assert_eq!(msg, "Internal Server Error");
-        assert_eq!(code, None);
-        assert!(raw.is_none());
-    }
-
-    #[test]
-    fn parse_error_body_different_code_field() {
-        let body = r#"{"error":{"message":"bad","status":"INVALID_ARGUMENT"}}"#;
-        let (msg, code, _) = parse_error_body(body, "status");
-        assert_eq!(msg, "bad");
-        assert_eq!(code.as_deref(), Some("INVALID_ARGUMENT"));
-    }
-
-    #[test]
-    fn parse_error_body_no_message() {
-        let body = r#"{"error":{"type":"server_error"}}"#;
-        let (msg, code, _) = parse_error_body(body, "type");
-        assert_eq!(msg, "Unknown error");
-        assert_eq!(code.as_deref(), Some("server_error"));
-    }
-
-    // --- extract_system_prompt ---
-
-    #[test]
-    fn extract_system_prompt_no_system() {
-        let msgs = vec![Message::user("hello")];
-        let (sys, other) = extract_system_prompt(&msgs);
-        assert_eq!(sys, None);
-        assert_eq!(other.len(), 1);
-    }
-
-    #[test]
-    fn extract_system_prompt_system_only() {
-        let msgs = vec![Message::system("Be helpful"), Message::user("hi")];
-        let (sys, other) = extract_system_prompt(&msgs);
-        assert_eq!(sys.as_deref(), Some("Be helpful"));
-        assert_eq!(other.len(), 1);
-        assert_eq!(other[0].role, Role::User);
-    }
-
-    #[test]
-    fn extract_system_prompt_multiple_system() {
-        let msgs = vec![
-            Message::system("Rule 1"),
-            Message::system("Rule 2"),
-            Message::user("hi"),
-        ];
-        let (sys, other) = extract_system_prompt(&msgs);
-        assert_eq!(sys.as_deref(), Some("Rule 1\nRule 2"));
-        assert_eq!(other.len(), 1);
-    }
-
-    #[test]
-    fn extract_system_prompt_developer_role() {
-        let dev = Message {
-            role:         Role::Developer,
-            content:      vec![ContentPart::text("dev instructions")],
-            name:         None,
-            tool_call_id: None,
-        };
-        let msgs = vec![dev, Message::user("hi")];
-        let (sys, other) = extract_system_prompt(&msgs);
-        assert_eq!(sys.as_deref(), Some("dev instructions"));
-        assert_eq!(other.len(), 1);
-    }
-
-    #[test]
-    fn extract_system_prompt_ignores_whitespace_system_and_developer() {
-        let dev = Message {
-            role:         Role::Developer,
-            content:      vec![ContentPart::text(" \n\t ")],
-            name:         None,
-            tool_call_id: None,
-        };
-        let msgs = vec![Message::system("   "), dev, Message::user("hi")];
-        let (sys, other) = extract_system_prompt(&msgs);
-        assert_eq!(sys, None);
-        assert_eq!(other.len(), 1);
-        assert_eq!(other[0].role, Role::User);
-    }
-
-    #[test]
-    fn extract_system_prompt_empty() {
-        let msgs: Vec<Message> = vec![];
-        let (sys, other) = extract_system_prompt(&msgs);
-        assert_eq!(sys, None);
-        assert!(other.is_empty());
     }
 }

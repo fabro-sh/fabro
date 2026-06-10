@@ -9,7 +9,7 @@ use crate::error::Error;
 use crate::provider::{self, ProviderAdapter, StreamEventStream};
 use crate::providers::common::{self as common};
 use crate::token_count::{InputTokenCount, InputTokenCountMethod};
-use crate::transport::{self, SseFraming};
+use crate::transport::{self, HttpTransport, SseFraming};
 use crate::types::{AdapterTimeout, Request, Response, StreamEvent};
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
@@ -21,7 +21,7 @@ const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
 /// between the direct-Anthropic and Kimi-over-anthropic behaviors. All wire
 /// translation lives in the codec.
 pub struct Adapter {
-    pub(crate) http: crate::transport::HttpTransport,
+    pub(crate) http: HttpTransport,
     provider_name:   String,
     catalog:         Option<Arc<Catalog>>,
 }
@@ -35,7 +35,7 @@ impl Adapter {
     #[must_use]
     pub fn new_optional_auth(api_key: Option<String>) -> Self {
         Self {
-            http:          crate::transport::HttpTransport::new_optional(api_key, DEFAULT_BASE_URL),
+            http:          HttpTransport::new_optional(api_key, DEFAULT_BASE_URL),
             provider_name: "anthropic".to_string(),
             catalog:       None,
         }

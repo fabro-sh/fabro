@@ -9,8 +9,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 
 use super::SYNTHETIC_TOOL_NAME;
 use super::wire::{ApiMessage, ApiRequest, ApiToolDef, CacheControl, CountTokensRequest};
-use crate::codec::{AnthropicVersion, CodecCtx, EncodedRequest};
-use crate::providers::common;
+use crate::codec::{AnthropicVersion, CodecCtx, EncodedRequest, extract_system_prompt};
 use crate::types::{
     ContentPart, Message, ReasoningEffort, ReasoningEffortFeature, Request, ResponseFormatType,
     Role, Speed, ThinkingData, ToolChoice, ToolDefinition,
@@ -71,7 +70,7 @@ fn build_headers(ctx: &CodecCtx<'_>) -> Vec<(String, String)> {
 
 fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> ApiRequest {
     let request = ctx.request;
-    let (system, other_messages) = common::extract_system_prompt(&request.messages);
+    let (system, other_messages) = extract_system_prompt(&request.messages);
     let mut api_messages = translate_messages(&other_messages);
 
     // `ToolChoice::None` omits the tools entirely instead of sending a choice.
@@ -544,6 +543,7 @@ mod tests {
 
     use super::*;
     use crate::codec::CodecParams;
+    use crate::providers::common;
     use crate::types::{AudioData, DocumentData, ResponseFormat};
 
     // --- Test helpers --------------------------------------------------------

@@ -11,8 +11,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use super::wire::{
     ApiRequest, Content, GeminiFunctionDecl, GeminiToolGroup, GenerationOptions, SystemInstruction,
 };
-use crate::codec::{CodecCtx, EncodedRequest};
-use crate::providers::common::extract_system_prompt;
+use crate::codec::{CodecCtx, EncodedRequest, extract_system_prompt};
 use crate::types::{
     ContentPart, Message, ResponseFormat, ResponseFormatType, Role, ToolChoice, ToolDefinition,
 };
