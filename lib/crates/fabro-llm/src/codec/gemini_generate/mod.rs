@@ -8,13 +8,6 @@
 //! Gemini keys `functionResponse` on the function *name*, recovered via an
 //! id→name map built from the request's assistant turns.
 
-// TODO(gateway-refactor PR 5): remove once the gemini adapter is rewired to
-// this codec in the next commit — until then the module is unused.
-#![allow(
-    dead_code,
-    reason = "Gemini codec added ahead of the adapter rewire; wired in the next commit of PR 5."
-)]
-
 mod decode;
 mod encode;
 mod stream;

@@ -317,3 +317,342 @@ fn apply_default_safety_settings(body: &mut serde_json::Value) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codec::CodecParams;
+    use crate::types::{AudioData, DocumentData, Request, ToolCall};
+
+    fn minimal_request() -> Request {
+        Request {
+            model:            "gemini-2.0-flash".to_string(),
+            messages:         vec![Message::user("Hello")],
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
+            reasoning_effort: None,
+            speed:            None,
+            metadata:         None,
+            provider_options: None,
+        }
+    }
+
+    /// Build the request body the way the adapter's encode path does (no
+    /// catalog: the wire model id is the request model).
+    fn body_for(request: &Request) -> serde_json::Value {
+        let params = CodecParams;
+        let ctx = CodecCtx {
+            request,
+            provider_name: "gemini",
+            deployment_id: &request.model,
+            model: None,
+            params: &params,
+        };
+        build_body(&ctx)
+    }
+
+    #[test]
+    fn provider_options_none_produces_standard_body() {
+        let request = minimal_request();
+        let body = body_for(&request);
+        assert!(body.get("safetySettings").is_none());
+        assert!(body.get("cachedContent").is_none());
+    }
+
+    #[test]
+    fn encode_endpoints_carry_model_and_streaming_variant() {
+        let request = minimal_request();
+        let params = CodecParams;
+        let ctx = CodecCtx {
+            request:       &request,
+            provider_name: "gemini",
+            deployment_id: &request.model,
+            model:         None,
+            params:        &params,
+        };
+
+        assert_eq!(
+            encode(&ctx, false).endpoint,
+            "/models/gemini-2.0-flash:generateContent"
+        );
+        assert_eq!(
+            encode(&ctx, true).endpoint,
+            "/models/gemini-2.0-flash:streamGenerateContent?alt=sse"
+        );
+        assert_eq!(
+            encode_count_tokens(&ctx).endpoint,
+            "/models/gemini-2.0-flash:countTokens"
+        );
+    }
+
+    #[test]
+    fn count_tokens_body_uses_only_generate_content_request_top_level() {
+        let mut request = minimal_request();
+        request.tools = Some(vec![ToolDefinition::function(
+            "search",
+            "Search files",
+            serde_json::json!({"type": "object"}),
+        )]);
+        let params = CodecParams;
+        let ctx = CodecCtx {
+            request:       &request,
+            provider_name: "gemini",
+            deployment_id: &request.model,
+            model:         None,
+            params:        &params,
+        };
+        let count_body = encode_count_tokens(&ctx).body;
+
+        assert!(count_body.get("generateContentRequest").is_some());
+        assert!(count_body.get("contents").is_none());
+        assert!(
+            count_body["generateContentRequest"]
+                .get("contents")
+                .is_some()
+        );
+        assert!(count_body["generateContentRequest"].get("tools").is_some());
+    }
+
+    #[test]
+    fn provider_options_gemini_safety_settings_merged() {
+        let mut request = minimal_request();
+        request.provider_options = Some(serde_json::json!({
+            "gemini": {
+                "safetySettings": [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}
+                ]
+            }
+        }));
+
+        let body = body_for(&request);
+        let safety = body
+            .get("safetySettings")
+            .expect("safetySettings should be present");
+        let arr = safety.as_array().expect("should be an array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["category"], "HARM_CATEGORY_HARASSMENT");
+    }
+
+    #[test]
+    fn provider_options_gemini_cached_content_merged() {
+        let mut request = minimal_request();
+        request.provider_options = Some(serde_json::json!({
+            "gemini": {
+                "cachedContent": "projects/my-project/cachedContents/abc123"
+            }
+        }));
+
+        let body = body_for(&request);
+        assert_eq!(
+            body.get("cachedContent")
+                .and_then(serde_json::Value::as_str),
+            Some("projects/my-project/cachedContents/abc123")
+        );
+    }
+
+    #[test]
+    fn provider_options_gemini_multiple_fields_merged() {
+        let mut request = minimal_request();
+        request.provider_options = Some(serde_json::json!({
+            "gemini": {
+                "safetySettings": [{"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_LOW_AND_ABOVE"}],
+                "cachedContent": "cache-id",
+                "customField": "custom-value"
+            }
+        }));
+
+        let body = body_for(&request);
+        assert!(body.get("safetySettings").is_some());
+        assert_eq!(
+            body.get("cachedContent")
+                .and_then(serde_json::Value::as_str),
+            Some("cache-id")
+        );
+        assert_eq!(
+            body.get("customField").and_then(serde_json::Value::as_str),
+            Some("custom-value")
+        );
+    }
+
+    #[test]
+    fn provider_options_other_provider_ignored() {
+        let mut request = minimal_request();
+        request.provider_options = Some(serde_json::json!({
+            "anthropic": {
+                "auto_cache": false
+            }
+        }));
+
+        let body = body_for(&request);
+        assert!(body.get("auto_cache").is_none());
+    }
+
+    #[test]
+    fn provider_options_gemini_preserves_standard_fields() {
+        let mut request = minimal_request();
+        request.temperature = Some(0.5);
+        request.max_tokens = Some(100);
+        request.provider_options = Some(serde_json::json!({
+            "gemini": {
+                "cachedContent": "cache-id"
+            }
+        }));
+
+        let body = body_for(&request);
+        let gen_config = body
+            .get("generationConfig")
+            .expect("generationConfig should exist");
+        assert_eq!(
+            gen_config
+                .get("temperature")
+                .and_then(serde_json::Value::as_f64),
+            Some(0.5)
+        );
+        assert_eq!(
+            gen_config
+                .get("maxOutputTokens")
+                .and_then(serde_json::Value::as_i64),
+            Some(100)
+        );
+        assert_eq!(
+            body.get("cachedContent")
+                .and_then(serde_json::Value::as_str),
+            Some("cache-id")
+        );
+    }
+
+    #[test]
+    fn merge_provider_options_with_non_object_gemini_value() {
+        let mut body = serde_json::json!({"contents": []});
+        let opts = serde_json::json!({"gemini": "not-an-object"});
+        merge_provider_options(&mut body, Some(&opts));
+        // Should not crash and body should be unchanged
+        assert!(body.get("contents").is_some());
+    }
+
+    #[test]
+    fn audio_url_translates_to_file_data() {
+        let msg = Message {
+            role:         Role::User,
+            content:      vec![ContentPart::Audio(AudioData {
+                url:        Some("https://example.com/audio.wav".to_string()),
+                data:       None,
+                media_type: Some("audio/wav".to_string()),
+            })],
+            name:         None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        assert_eq!(contents.len(), 1);
+        let part = &contents[0].parts[0];
+        assert_eq!(part["fileData"]["mimeType"], "audio/wav");
+        assert_eq!(part["fileData"]["fileUri"], "https://example.com/audio.wav");
+    }
+
+    #[test]
+    fn audio_base64_translates_to_inline_data() {
+        let msg = Message {
+            role:         Role::User,
+            content:      vec![ContentPart::Audio(AudioData {
+                url:        None,
+                data:       Some(vec![0xFF, 0xFB, 0x90]),
+                media_type: None,
+            })],
+            name:         None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        let part = &contents[0].parts[0];
+        assert_eq!(part["inlineData"]["mimeType"], "audio/wav");
+        assert!(part["inlineData"]["data"].as_str().is_some());
+    }
+
+    #[test]
+    fn document_url_translates_to_file_data() {
+        let msg = Message {
+            role:         Role::User,
+            content:      vec![ContentPart::Document(DocumentData {
+                url:        Some("https://example.com/doc.pdf".to_string()),
+                data:       None,
+                media_type: Some("application/pdf".to_string()),
+                file_name:  Some("doc.pdf".to_string()),
+            })],
+            name:         None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        let part = &contents[0].parts[0];
+        assert_eq!(part["fileData"]["mimeType"], "application/pdf");
+        assert_eq!(part["fileData"]["fileUri"], "https://example.com/doc.pdf");
+    }
+
+    #[test]
+    fn document_base64_translates_to_inline_data() {
+        let msg = Message {
+            role:         Role::User,
+            content:      vec![ContentPart::Document(DocumentData {
+                url:        None,
+                data:       Some(vec![0x25, 0x50, 0x44, 0x46]),
+                media_type: None,
+                file_name:  None,
+            })],
+            name:         None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        let part = &contents[0].parts[0];
+        assert_eq!(part["inlineData"]["mimeType"], "application/pdf");
+        assert!(part["inlineData"]["data"].as_str().is_some());
+    }
+
+    #[test]
+    fn translate_messages_function_call_includes_thought_signature() {
+        let mut tc = ToolCall::new(
+            "call-1",
+            "get_weather",
+            serde_json::json!({"location": "NYC"}),
+        );
+        tc.provider_metadata = Some(serde_json::json!({"thoughtSignature": "sig456"}));
+
+        let msg = Message {
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        assert_eq!(contents.len(), 1);
+
+        let part = &contents[0].parts[0];
+        assert!(part.get("functionCall").is_some());
+        assert_eq!(part["thoughtSignature"], "sig456");
+    }
+
+    #[test]
+    fn translate_messages_function_call_without_thought_signature() {
+        let tc = ToolCall::new(
+            "call-1",
+            "get_weather",
+            serde_json::json!({"location": "NYC"}),
+        );
+
+        let msg = Message {
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        assert_eq!(contents.len(), 1);
+
+        let part = &contents[0].parts[0];
+        assert!(part.get("functionCall").is_some());
+        assert!(part.get("thoughtSignature").is_none());
+    }
+}

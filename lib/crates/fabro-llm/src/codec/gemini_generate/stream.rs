@@ -244,3 +244,222 @@ impl StreamDecoder for SseAccumulator {
         vec![self.build_finish_event()]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::FinishReason;
+
+    /// Build an accumulator without threading a `CodecCtx`/`Request`: the test
+    /// module sees the private fields, so the few that matter are set
+    /// directly. `stream_started` is true so event assertions don't see the
+    /// initial `StreamStart`.
+    fn empty_accumulator() -> SseAccumulator {
+        SseAccumulator {
+            model:                  "gemini-2.0-flash".to_string(),
+            provider:               "gemini".to_string(),
+            stream_started:         true,
+            text_started:           false,
+            reasoning_started:      false,
+            accumulated_thinking:   String::new(),
+            accumulated_text:       String::new(),
+            accumulated_tool_calls: Vec::new(),
+            text_id:                "text-1".to_string(),
+            usage:                  TokenCounts::default(),
+            finish_reason_str:      None,
+            finished:               false,
+            rate_limit:             None,
+        }
+    }
+
+    fn on_data(acc: &mut SseAccumulator, data: &str) -> Result<Vec<StreamEvent>, Error> {
+        acc.on_event(RawEvent { event: None, data })
+    }
+
+    #[test]
+    fn first_chunk_emits_stream_start() {
+        let mut acc = empty_accumulator();
+        acc.stream_started = false;
+
+        let events = on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}"#,
+        )
+        .expect("chunk should parse");
+
+        assert!(matches!(events[0], StreamEvent::StreamStart));
+        assert!(matches!(events[1], StreamEvent::TextStart { .. }));
+    }
+
+    #[test]
+    fn text_deltas_accumulate_with_stable_text_id() {
+        let mut acc = empty_accumulator();
+
+        let first = on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}"#,
+        )
+        .expect("first chunk should parse");
+        let second = on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"text":"lo"}]}}]}"#,
+        )
+        .expect("second chunk should parse");
+
+        assert!(
+            matches!(&first[0], StreamEvent::TextStart { text_id: Some(id) } if id == "text-1")
+        );
+        assert!(
+            matches!(&first[1], StreamEvent::TextDelta { delta, text_id: Some(id) } if delta == "Hel" && id == "text-1")
+        );
+        // Second chunk: no duplicate TextStart.
+        assert_eq!(second.len(), 1);
+        assert!(matches!(&second[0], StreamEvent::TextDelta { delta, .. } if delta == "lo"));
+        assert_eq!(acc.accumulated_text, "Hello");
+    }
+
+    #[test]
+    fn thought_then_text_transitions_reasoning_to_text() {
+        let mut acc = empty_accumulator();
+
+        let thought = on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"text":"Pondering...","thought":true}]}}]}"#,
+        )
+        .expect("thought chunk should parse");
+        let text = on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"text":"Answer"}]}}]}"#,
+        )
+        .expect("text chunk should parse");
+
+        assert!(matches!(thought[0], StreamEvent::ReasoningStart));
+        assert!(
+            matches!(&thought[1], StreamEvent::ReasoningDelta { delta } if delta == "Pondering...")
+        );
+        // Transition closes the reasoning segment before text begins.
+        assert!(matches!(text[0], StreamEvent::ReasoningEnd));
+        assert!(matches!(text[1], StreamEvent::TextStart { .. }));
+        assert!(matches!(&text[2], StreamEvent::TextDelta { delta, .. } if delta == "Answer"));
+        assert_eq!(acc.accumulated_thinking, "Pondering...");
+    }
+
+    #[test]
+    fn function_call_emits_start_and_end_in_one_chunk() {
+        let mut acc = empty_accumulator();
+
+        let events = on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC"}},"thoughtSignature":"sig1"}]}}]}"#,
+        )
+        .expect("function call chunk should parse");
+
+        assert_eq!(events.len(), 2);
+        let (start_tc, end_tc) = match (&events[0], &events[1]) {
+            (
+                StreamEvent::ToolCallStart { tool_call: start },
+                StreamEvent::ToolCallEnd { tool_call: end },
+            ) => (start, end),
+            other => panic!("expected ToolCallStart + ToolCallEnd, got {other:?}"),
+        };
+        assert_eq!(start_tc.name, "get_weather");
+        assert_eq!(start_tc.id, end_tc.id);
+        assert_eq!(
+            start_tc.provider_metadata.as_ref().unwrap()["thoughtSignature"],
+            "sig1"
+        );
+        assert_eq!(acc.accumulated_tool_calls.len(), 1);
+    }
+
+    #[test]
+    fn finish_reason_chunk_emits_text_end_and_records_reason() {
+        let mut acc = empty_accumulator();
+        on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}"#,
+        )
+        .expect("text chunk should parse");
+
+        let events = on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}"#,
+        )
+        .expect("finish chunk should parse");
+
+        assert!(matches!(&events[0], StreamEvent::TextEnd { text_id: Some(id) } if id == "text-1"));
+        assert_eq!(acc.finish_reason_str.as_deref(), Some("STOP"));
+        assert_eq!(acc.usage.input_tokens, 10);
+        assert_eq!(acc.usage.output_tokens, 5);
+    }
+
+    #[test]
+    fn finish_synthesizes_final_response_exactly_once() {
+        let mut acc = empty_accumulator();
+        on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}]}"#,
+        )
+        .expect("chunk should parse");
+
+        let events = acc.finish();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            StreamEvent::Finish {
+                finish_reason,
+                response,
+                ..
+            } => {
+                assert_eq!(*finish_reason, FinishReason::Stop);
+                assert_eq!(response.text(), "Hello");
+                assert_eq!(response.provider, "gemini");
+                assert_eq!(response.model, "gemini-2.0-flash");
+            }
+            other => panic!("expected Finish, got {other:?}"),
+        }
+
+        // A second finish() (defensive) synthesizes nothing.
+        assert!(acc.finish().is_empty());
+    }
+
+    #[test]
+    fn finish_without_any_finish_reason_still_synthesizes() {
+        // Gemini has no terminal wire event; byte-stream end must produce a
+        // Finish even when no chunk carried a finishReason.
+        let mut acc = empty_accumulator();
+        on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}"#,
+        )
+        .expect("chunk should parse");
+
+        let events = acc.finish();
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], StreamEvent::Finish { finish_reason, .. }
+            if *finish_reason == FinishReason::Stop)
+        );
+    }
+
+    #[test]
+    fn finish_infers_tool_calls_finish_reason() {
+        let mut acc = empty_accumulator();
+        on_data(
+            &mut acc,
+            r#"{"candidates":[{"content":{"parts":[{"functionCall":{"name":"search","args":{}}}]},"finishReason":"STOP"}]}"#,
+        )
+        .expect("chunk should parse");
+
+        let events = acc.finish();
+        assert!(
+            matches!(&events[0], StreamEvent::Finish { finish_reason, .. }
+            if *finish_reason == FinishReason::ToolCalls)
+        );
+    }
+
+    #[test]
+    fn malformed_chunk_yields_stream_error() {
+        let mut acc = empty_accumulator();
+        let err = on_data(&mut acc, "not json").expect_err("bad chunk should error");
+        assert!(matches!(err, Error::Stream { .. }));
+    }
+}
