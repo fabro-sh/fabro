@@ -518,3 +518,433 @@ impl StreamDecoder for SseAccumulator {
         Vec::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build an accumulator without threading a `CodecCtx`/`Request`: the test
+    /// module sees the private fields, so the few that matter are set
+    /// directly. `emitted_start` is true so event assertions don't see the
+    /// initial `StreamStart`.
+    fn empty_accumulator() -> SseAccumulator {
+        SseAccumulator {
+            model:                   String::new(),
+            provider:                "openai".to_string(),
+            response_id:             String::new(),
+            response_model:          String::new(),
+            accumulated_text:        String::new(),
+            tool_calls:              Vec::new(),
+            reasoning_items:         Vec::new(),
+            message_items:           Vec::new(),
+            usage:                   TokenCounts::default(),
+            finish_reason:           FinishReason::Stop,
+            emitted_start:           true,
+            emitted_text_start:      false,
+            emitted_reasoning_start: false,
+            raw_response:            None,
+            rate_limit:              None,
+        }
+    }
+
+    fn on_event(
+        acc: &mut SseAccumulator,
+        event: Option<&str>,
+        data: &str,
+    ) -> Result<Vec<StreamEvent>, Error> {
+        acc.on_event(RawEvent { event, data })
+    }
+
+    #[test]
+    fn token_counts_disjoint_with_cache_and_reasoning() {
+        let mut acc = empty_accumulator();
+        let body = serde_json::json!({
+            "response": {
+                "id": "resp_test",
+                "model": "gpt-5",
+                "output": [],
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 200,
+                    "input_tokens_details": { "cached_tokens": 180 },
+                    "output_tokens": 500,
+                    "output_tokens_details": { "reasoning_tokens": 300 },
+                    "total_tokens": 700
+                }
+            }
+        });
+        let mut events = Vec::new();
+
+        acc.handle_response_completed(&body, &mut events);
+
+        assert_eq!(acc.usage.input_tokens, 20);
+        assert_eq!(acc.usage.cache_read_tokens, 180);
+        assert_eq!(acc.usage.output_tokens, 200);
+        assert_eq!(acc.usage.reasoning_tokens, 300);
+        assert_eq!(acc.usage.cache_write_tokens, 0);
+        assert_eq!(acc.usage.total_tokens(), 700);
+    }
+
+    #[test]
+    fn custom_tool_call_streaming_delta_accumulates_raw_input() {
+        let mut acc = empty_accumulator();
+        let first = r#"{
+            "type": "response.custom_tool_call_input.delta",
+            "item_id": "ctc_abc",
+            "call_id": "call_001",
+            "delta": "*** Begin"
+        }"#;
+        let second = r#"{
+            "type": "response.custom_tool_call_input.delta",
+            "item_id": "ctc_abc",
+            "call_id": "call_001",
+            "delta": " Patch\n"
+        }"#;
+
+        let first_events = on_event(
+            &mut acc,
+            Some("response.custom_tool_call_input.delta"),
+            first,
+        )
+        .expect("first custom delta should parse");
+        let second_events = on_event(
+            &mut acc,
+            Some("response.custom_tool_call_input.delta"),
+            second,
+        )
+        .expect("second custom delta should parse");
+
+        assert!(matches!(
+            first_events.iter().find(|event| matches!(event, StreamEvent::ToolCallStart { .. })),
+            Some(StreamEvent::ToolCallStart { tool_call })
+                if tool_call.id == "call_001" && tool_call.tool_type == "custom"
+        ));
+        assert!(matches!(
+            second_events.last(),
+            Some(StreamEvent::ToolCallDelta { tool_call })
+                if tool_call.raw_arguments.as_deref() == Some(" Patch\n")
+                    && tool_call.tool_type == "custom"
+        ));
+        assert_eq!(
+            acc.tool_calls[0].raw_arguments.as_deref(),
+            Some("*** Begin Patch\n")
+        );
+    }
+
+    #[test]
+    fn custom_tool_call_output_item_done_emits_tool_call_end() {
+        let mut acc = empty_accumulator();
+        let patch = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch\n";
+        let data = serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "custom_tool_call",
+                "id": "ctc_abc",
+                "call_id": "call_001",
+                "name": "apply_patch",
+                "input": patch,
+            }
+        });
+
+        let events = on_event(
+            &mut acc,
+            Some("response.output_item.done"),
+            &data.to_string(),
+        )
+        .expect("custom output item should parse");
+
+        assert!(matches!(
+            events.last(),
+            Some(StreamEvent::ToolCallEnd { tool_call })
+                if tool_call.id == "call_001"
+                    && tool_call.name == "apply_patch"
+                    && tool_call.tool_type == "custom"
+                    && tool_call.raw_arguments.as_deref() == Some(patch)
+        ));
+    }
+
+    #[test]
+    fn error_event_with_insufficient_quota_returns_provider_error() {
+        let mut acc = empty_accumulator();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "insufficient_quota",
+                "code": "insufficient_quota",
+                "message": "You exceeded your current quota.",
+                "param": null
+            }
+        }"#;
+
+        let err = on_event(&mut acc, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::QuotaExceeded);
+                assert!(detail.message.contains("exceeded your current quota"));
+                assert_eq!(detail.error_code.as_deref(), Some("insufficient_quota"));
+                assert!(detail.raw.is_some());
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_classifies_on_type_when_code_absent() {
+        let mut acc = empty_accumulator();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "insufficient_quota",
+                "message": "You exceeded your current quota."
+            }
+        }"#;
+
+        let err = on_event(&mut acc, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::QuotaExceeded);
+                assert_eq!(detail.error_code.as_deref(), Some("insufficient_quota"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn response_failed_event_with_server_error_returns_provider_error() {
+        let mut acc = empty_accumulator();
+        let data = r#"{
+            "type": "response.failed",
+            "response": {
+                "status": "failed",
+                "error": {
+                    "type": "server_error",
+                    "code": "server_error",
+                    "message": "The server had an error while processing your request."
+                }
+            }
+        }"#;
+
+        let err = on_event(&mut acc, Some("response.failed"), data)
+            .expect_err("response.failed should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Server);
+                assert!(detail.message.contains("server had an error"));
+                assert_eq!(detail.error_code.as_deref(), Some("server_error"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn response_incomplete_preserves_partial_text() {
+        let mut acc = empty_accumulator();
+
+        on_event(
+            &mut acc,
+            Some("response.created"),
+            r#"{"type":"response.created","response":{"id":"resp_123","model":"gpt-5.4"}}"#,
+        )
+        .expect("created event should parse");
+        on_event(
+            &mut acc,
+            Some("response.output_text.delta"),
+            r#"{"type":"response.output_text.delta","delta":"Hel"}"#,
+        )
+        .expect("first delta should parse");
+        on_event(
+            &mut acc,
+            Some("response.output_text.delta"),
+            r#"{"type":"response.output_text.delta","delta":"lo"}"#,
+        )
+        .expect("second delta should parse");
+
+        let events = on_event(
+            &mut acc,
+            Some("response.incomplete"),
+            r#"{
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_123",
+                    "model": "gpt-5.4",
+                    "status": "incomplete"
+                }
+            }"#,
+        )
+        .expect("incomplete response should finish normally");
+
+        let finish = events
+            .last()
+            .expect("incomplete response should emit finish");
+        match finish {
+            StreamEvent::Finish {
+                finish_reason,
+                response,
+                ..
+            } => {
+                assert_eq!(finish_reason.clone(), FinishReason::Length);
+                assert_eq!(response.text(), "Hello");
+            }
+            other => panic!("expected finish event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_with_invalid_api_key_returns_authentication_error() {
+        let mut acc = empty_accumulator();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "invalid_api_key",
+                "code": "invalid_api_key",
+                "message": "Incorrect API key provided."
+            }
+        }"#;
+
+        let err = on_event(&mut acc, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Authentication);
+                assert_eq!(detail.error_code.as_deref(), Some("invalid_api_key"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_with_rate_limit_error_returns_rate_limit() {
+        let mut acc = empty_accumulator();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "rate_limit_error",
+                "message": "Too many requests."
+            }
+        }"#;
+
+        let err = on_event(&mut acc, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::RateLimit);
+                assert_eq!(detail.error_code.as_deref(), Some("rate_limit_error"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_with_unknown_invalid_prefix_returns_invalid_request() {
+        let mut acc = empty_accumulator();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "invalid_prompt",
+                "code": "invalid_prompt",
+                "message": "Prompt is invalid."
+            }
+        }"#;
+
+        let err = on_event(&mut acc, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::InvalidRequest);
+                assert_eq!(detail.error_code.as_deref(), Some("invalid_prompt"));
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_event_with_unknown_code_falls_back_to_server_with_message() {
+        let mut acc = empty_accumulator();
+        let data = r#"{
+            "type": "error",
+            "error": {
+                "type": "unexpected_stream_failure",
+                "code": "unexpected_stream_failure",
+                "message": "Unexpected stream failure."
+            }
+        }"#;
+
+        let err = on_event(&mut acc, Some("error"), data)
+            .expect_err("error event should fail the stream");
+
+        match err {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Server);
+                assert_eq!(detail.message, "Unexpected stream failure.");
+                assert_eq!(
+                    detail.error_code.as_deref(),
+                    Some("unexpected_stream_failure")
+                );
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reasoning_summary_delta_emits_reasoning_events() {
+        let mut acc = empty_accumulator();
+        let data = r#"{"type":"response.reasoning_summary_text.delta","delta":"Let me think"}"#;
+        let events = on_event(
+            &mut acc,
+            Some("response.reasoning_summary_text.delta"),
+            data,
+        )
+        .expect("reasoning summary delta should parse");
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], StreamEvent::ReasoningStart));
+        assert!(
+            matches!(events[1], StreamEvent::ReasoningDelta { ref delta } if delta == "Let me think")
+        );
+    }
+
+    #[test]
+    fn reasoning_text_delta_emits_reasoning_events() {
+        let mut acc = empty_accumulator();
+
+        // First delta: should emit ReasoningStart + ReasoningDelta
+        let data1 = r#"{"type":"response.reasoning_text.delta","delta":"Step 1"}"#;
+        let events1 = on_event(&mut acc, Some("response.reasoning_text.delta"), data1)
+            .expect("first reasoning delta should parse");
+        assert_eq!(events1.len(), 2);
+        assert!(matches!(events1[0], StreamEvent::ReasoningStart));
+        assert!(
+            matches!(events1[1], StreamEvent::ReasoningDelta { ref delta } if delta == "Step 1")
+        );
+
+        // Second delta: should NOT emit duplicate ReasoningStart
+        let data2 = r#"{"type":"response.reasoning_text.delta","delta":"Step 2"}"#;
+        let events2 = on_event(&mut acc, Some("response.reasoning_text.delta"), data2)
+            .expect("second reasoning delta should parse");
+        assert_eq!(events2.len(), 1);
+        assert!(
+            matches!(events2[0], StreamEvent::ReasoningDelta { ref delta } if delta == "Step 2")
+        );
+    }
+
+    #[test]
+    fn reasoning_end_emitted_on_item_done() {
+        let mut acc = empty_accumulator();
+        acc.emitted_reasoning_start = true;
+
+        let data = r#"{"item":{"type":"reasoning","id":"rs_abc","summary":[]}}"#;
+        let events = on_event(&mut acc, Some("response.output_item.done"), data)
+            .expect("output item done should parse");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], StreamEvent::ReasoningEnd));
+        assert!(!acc.emitted_reasoning_start);
+        assert_eq!(acc.reasoning_items.len(), 1);
+    }
+}

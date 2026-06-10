@@ -11,14 +11,6 @@
 //! `error` / `response.failed` events are mapped inside the decoder
 //! (`on_event` → `Err`).
 
-// TODO(gateway-refactor PR 4): remove once the openai adapter is rewired to
-// this codec in the next commit — until then the module is unused.
-#![allow(
-    dead_code,
-    reason = "OpenAI Responses codec added ahead of the adapter rewire; wired in the next commit \
-              of PR 4."
-)]
-
 mod decode;
 mod encode;
 mod stream;

@@ -200,3 +200,164 @@ pub(super) fn decode_count_tokens(body: &str) -> Result<i64, Error> {
 
     Ok(response.input_tokens)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::encode;
+    use super::*;
+
+    #[test]
+    fn parse_output_preserves_both_ids_on_function_call() {
+        let output = vec![serde_json::json!({
+            "type": "function_call",
+            "id": "fc_abc123",
+            "call_id": "call_xyz789",
+            "name": "get_weather",
+            "arguments": "{\"location\":\"NYC\"}"
+        })];
+        let (parts, has_tool_calls) = parse_output(&output);
+        assert!(has_tool_calls);
+        assert_eq!(parts.len(), 1);
+        match &parts[0] {
+            ContentPart::ToolCall(tc) => {
+                // call_id is used as the ToolCall.id (links to tool results)
+                assert_eq!(tc.id, "call_xyz789");
+                // item-level id (fc_xxx) is preserved in provider_metadata
+                let meta = tc
+                    .provider_metadata
+                    .as_ref()
+                    .expect("provider_metadata should be set");
+                assert_eq!(meta["id"], "fc_abc123");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_output_preserves_custom_tool_call_raw_input() {
+        let patch = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch\n";
+        let output = vec![serde_json::json!({
+            "type": "custom_tool_call",
+            "id": "ctc_abc123",
+            "call_id": "call_xyz789",
+            "name": "apply_patch",
+            "input": patch,
+        })];
+
+        let (parts, has_tool_calls) = parse_output(&output);
+
+        assert!(has_tool_calls);
+        assert_eq!(parts.len(), 1);
+        match &parts[0] {
+            ContentPart::ToolCall(tc) => {
+                assert_eq!(tc.id, "call_xyz789");
+                assert_eq!(tc.name, "apply_patch");
+                assert_eq!(tc.tool_type, "custom");
+                assert_eq!(tc.arguments, serde_json::json!(patch));
+                assert_eq!(tc.raw_arguments.as_deref(), Some(patch));
+                let meta = tc
+                    .provider_metadata
+                    .as_ref()
+                    .expect("provider metadata should preserve item id");
+                assert_eq!(meta["id"], "ctc_abc123");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_output_preserves_reasoning_items() {
+        let output = vec![
+            serde_json::json!({
+                "type": "reasoning",
+                "id": "rs_abc123",
+                "summary": [{"type": "summary_text", "text": "Thinking..."}]
+            }),
+            serde_json::json!({
+                "type": "function_call",
+                "id": "fc_def456",
+                "call_id": "call_789",
+                "name": "search",
+                "arguments": "{}"
+            }),
+        ];
+        let (parts, has_tool_calls) = parse_output(&output);
+        assert!(has_tool_calls);
+        assert_eq!(parts.len(), 2);
+        // First part is the reasoning item
+        match &parts[0] {
+            ContentPart::Other { kind, data } => {
+                assert_eq!(kind, ContentPart::OPENAI_REASONING);
+                assert_eq!(data["type"], "reasoning");
+                assert_eq!(data["id"], "rs_abc123");
+            }
+            other => panic!("expected Other, got {other:?}"),
+        }
+        // Second part is the function call
+        assert!(matches!(&parts[1], ContentPart::ToolCall(_)));
+    }
+
+    #[test]
+    fn parse_output_preserves_message_items() {
+        let output = vec![
+            serde_json::json!({
+                "type": "reasoning",
+                "id": "rs_abc",
+                "summary": []
+            }),
+            serde_json::json!({
+                "type": "message",
+                "id": "msg_xyz",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Hello"}]
+            }),
+            serde_json::json!({
+                "type": "function_call",
+                "id": "fc_123",
+                "call_id": "call_456",
+                "name": "search",
+                "arguments": "{}"
+            }),
+        ];
+        let (parts, has_tool_calls) = parse_output(&output);
+        assert!(has_tool_calls);
+        // reasoning + openai_message + text + function_call
+        assert_eq!(parts.len(), 4);
+        assert!(
+            matches!(&parts[0], ContentPart::Other { kind, .. } if kind == ContentPart::OPENAI_REASONING)
+        );
+        assert!(
+            matches!(&parts[1], ContentPart::Other { kind, data } if kind == ContentPart::OPENAI_MESSAGE && data["id"] == "msg_xyz")
+        );
+        assert!(matches!(&parts[2], ContentPart::Text(t) if t == "Hello"));
+        assert!(matches!(&parts[3], ContentPart::ToolCall(_)));
+    }
+
+    #[test]
+    fn parse_output_round_trips_function_call_ids() {
+        // Simulate a response from the Responses API
+        let output = vec![serde_json::json!({
+            "type": "function_call",
+            "id": "fc_item1",
+            "call_id": "call_001",
+            "name": "search",
+            "arguments": "{\"q\":\"test\"}"
+        })];
+        let (parts, _) = parse_output(&output);
+
+        // Now translate back to input format
+        let msg = Message {
+            role:         Role::Assistant,
+            content:      parts,
+            name:         None,
+            tool_call_id: None,
+        };
+        let (_, input) = encode::translate_input(&[msg]);
+        let fc = &input[0];
+
+        // The round-tripped function call should have correct IDs
+        assert_eq!(fc["id"], "fc_item1");
+        assert_eq!(fc["call_id"], "call_001");
+    }
+}
