@@ -205,11 +205,13 @@ impl CacheControl {
 
 #[derive(serde::Deserialize)]
 struct ApiResponse {
-    id:          String,
-    model:       String,
-    content:     Vec<serde_json::Value>,
-    stop_reason: Option<String>,
-    usage:       ApiUsage,
+    id:           String,
+    model:        String,
+    content:      Vec<serde_json::Value>,
+    stop_reason:  Option<String>,
+    #[serde(default)]
+    stop_details: Option<serde_json::Value>,
+    usage:        ApiUsage,
 }
 
 #[derive(serde::Deserialize)]
@@ -586,6 +588,7 @@ fn convert_stream_event_for_json_schema(event: StreamEvent) -> StreamEvent {
 
 const CACHE_BETA_HEADER: &str = "prompt-caching-2024-07-31";
 const FAST_MODE_BETA_HEADER: &str = "fast-mode-2026-02-01";
+const CLAUDE_FABLE_5_MODEL: &str = "claude-fable-5";
 
 /// Check whether auto-caching is disabled via `provider_options`.
 ///
@@ -623,6 +626,14 @@ fn is_auto_cache_enabled(provider_options: Option<&serde_json::Value>) -> bool {
         .and_then(|anthropic| anthropic.get("auto_cache"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(true)
+}
+
+fn anthropic_thinking_type(provider_options: Option<&serde_json::Value>) -> Option<&str> {
+    provider_options
+        .and_then(|opts| opts.get("anthropic"))
+        .and_then(|anthropic| anthropic.get("thinking"))
+        .and_then(|thinking| thinking.get("type"))
+        .and_then(serde_json::Value::as_str)
 }
 
 /// Wrap a system prompt string as an array of content blocks with
@@ -1043,8 +1054,61 @@ fn process_sse_event_for_provider(
 ) -> Result<Vec<StreamEvent>, Error> {
     if event_type == "error" {
         Err(stream_error_event_to_provider_error(data, provider_name))
+    } else if event_type == "message_delta"
+        && data
+            .get("delta")
+            .and_then(|delta| delta.get("stop_reason"))
+            .and_then(serde_json::Value::as_str)
+            == Some("refusal")
+    {
+        let stop_details = data
+            .get("delta")
+            .and_then(|delta| delta.get("stop_details"));
+        Err(refusal_error(
+            provider_name,
+            refusal_stream_raw(data),
+            stop_details,
+        ))
     } else {
         Ok(process_sse_event(event_type, data, acc))
+    }
+}
+
+fn refusal_stream_raw(data: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "stop_reason": "refusal",
+        "stop_details": data
+            .get("delta")
+            .and_then(|delta| delta.get("stop_details"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        "stream_event": data,
+    })
+}
+
+fn refusal_error(
+    provider_name: &str,
+    raw: serde_json::Value,
+    stop_details: Option<&serde_json::Value>,
+) -> Error {
+    let message = stop_details
+        .and_then(|details| details.get("explanation"))
+        .and_then(serde_json::Value::as_str)
+        .map_or_else(
+            || "Claude Fable 5 refused the request".to_string(),
+            |explanation| format!("Claude Fable 5 refused the request: {explanation}"),
+        );
+
+    Error::Provider {
+        kind:   ProviderErrorKind::ContentFilter,
+        detail: Box::new(ProviderErrorDetail {
+            message,
+            provider: provider_name.to_string(),
+            status_code: None,
+            error_code: Some("refusal".to_string()),
+            retry_after: None,
+            raw: Some(raw),
+        }),
     }
 }
 
@@ -1223,6 +1287,8 @@ async fn build_api_request(
     };
 
     let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model);
+    let api_model = common::api_model_id(adapter.catalog.as_deref(), &request.model);
+    let is_fable = api_model == CLAUDE_FABLE_5_MODEL;
     let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
     let auto_cache =
         supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
@@ -1291,8 +1357,9 @@ async fn build_api_request(
         // Auto-set adaptive thinking for known effort-capable models when no
         // explicit thinking config or reasoning_effort is provided.
         let thinking = explicit_thinking.or_else(|| {
-            if model_info
-                .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
+            if !is_fable
+                && model_info
+                    .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
             {
                 Some(serde_json::json!({"type": "adaptive"}))
             } else {
@@ -1308,14 +1375,20 @@ async fn build_api_request(
     }
 
     let is_fast = request.speed == Some(Speed::Fast);
+    // Fable uses adaptive behavior and rejects legacy sampling knobs.
+    let (temperature, top_p) = if is_fable {
+        (None, None)
+    } else {
+        (request.temperature, request.top_p)
+    };
 
     let api_request = ApiRequest {
-        model: common::api_model_id(adapter.catalog.as_deref(), &request.model),
+        model: api_model,
         messages: api_messages,
         max_tokens: resolved_max_tokens,
         system: system_value,
-        temperature: request.temperature,
-        top_p: request.top_p,
+        temperature,
+        top_p,
         stop_sequences: Some(request.stop_sequences.clone().unwrap_or_default()),
         tools: api_tools,
         tool_choice: tool_choice_json,
@@ -1343,7 +1416,8 @@ async fn build_api_request(
         }
         req_builder = req_builder.header("anthropic-version", "2023-06-01");
 
-        let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
+        let include_1m_context =
+            !is_fable && model_info.is_some_and(|m| m.context_window() >= 1_000_000);
         if let Some(beta_str) = build_beta_header(
             request.provider_options.as_ref(),
             auto_cache,
@@ -1382,11 +1456,14 @@ impl ProviderAdapter for Adapter {
         let count_request = CountTokensRequest::from(api_request);
 
         let model_info = common::catalog_model(self.catalog.as_deref(), &request.model);
+        let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);
+        let is_fable = api_model == CLAUDE_FABLE_5_MODEL;
         let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
         let auto_cache =
             supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
         let is_fast = request.speed == Some(Speed::Fast);
-        let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
+        let include_1m_context =
+            !is_fable && model_info.is_some_and(|m| m.context_window() >= 1_000_000);
 
         let url = self.count_tokens_url();
         let mut req = self.http.client.post(&url);
@@ -1447,12 +1524,26 @@ impl ProviderAdapter for Adapter {
         }
         let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
 
-        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| {
+        let raw: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
             Error::network(
                 format!("failed to parse {} response: {e}", self.provider_name),
                 e,
             )
         })?;
+        let api_resp: ApiResponse = serde_json::from_value(raw.clone()).map_err(|e| {
+            Error::network(
+                format!("failed to parse {} response: {e}", self.provider_name),
+                e,
+            )
+        })?;
+
+        if api_resp.stop_reason.as_deref() == Some("refusal") {
+            return Err(refusal_error(
+                &self.provider_name,
+                raw,
+                api_resp.stop_details.as_ref(),
+            ));
+        }
 
         let content_parts: Vec<ContentPart> = api_resp
             .content
@@ -1486,7 +1577,7 @@ impl ProviderAdapter for Adapter {
             },
             finish_reason,
             usage: token_counts_from_api_usage(&api_resp.usage),
-            raw: serde_json::from_str(&body).ok(),
+            raw: Some(raw),
             warnings: vec![],
             rate_limit: parse_rate_limit_headers(&headers),
         })
@@ -1581,6 +1672,28 @@ impl ProviderAdapter for Adapter {
 
     fn supports_tool_choice(&self, mode: &str) -> bool {
         matches!(mode, "auto" | "none" | "required" | "named")
+    }
+
+    fn validate_request(&self, request: &Request) -> Result<(), Error> {
+        if let Some(tool_choice) = &request.tool_choice {
+            crate::provider::validate_tool_choice(self, tool_choice)?;
+        }
+
+        let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);
+        if api_model == CLAUDE_FABLE_5_MODEL {
+            if let Some(kind @ ("enabled" | "disabled")) =
+                anthropic_thinking_type(request.provider_options.as_ref())
+            {
+                return Err(Error::Configuration {
+                    message: format!(
+                        "Claude Fable 5 uses always-on adaptive thinking; provider_options.anthropic.thinking.type = \"{kind}\" is not supported. Omit thinking or set only display options."
+                    ),
+                    source:  None,
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 

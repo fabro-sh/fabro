@@ -13,6 +13,7 @@ No single model is best at everything. Fabro lets you assign the right model to 
 
 | Model | Provider | Aliases | Context | Cost (in/out per Mtok) | Speed |
 |---|---|---|---|---|---|
+| `claude-fable-5` | anthropic | `fable`, `claude-fable` | 1M | $10.00 / $50.00 | n/a |
 | `claude-opus-4-8` | anthropic | `opus`, `claude-opus` | 1M | $5.00 / $25.00 | 25 tok/s |
 | `claude-opus-4-7` | anthropic | | 1M | $5.00 / $25.00 | 25 tok/s |
 | `claude-opus-4-6` | anthropic | | 1M | $5.00 / $25.00 | 25 tok/s |
@@ -35,6 +36,8 @@ No single model is best at everything. Fabro lets you assign the right model to 
 | `mercury-2` | inception | `mercury` | 131K | $0.25 / $0.75 | 1000 tok/s |
 
 Each provider requires its own API key. Server-backed workflows read provider credentials from the server vault (for example `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` set with `fabro secret set` or `fabro provider login`). Standalone SDK/CLI flows can opt into env-backed credential sources explicitly. See the [Quick Start](/getting-started/quick-start) for setup.
+
+Claude Fable 5 is available as an explicit model but is not the default Anthropic model. If Fable refuses a request, Fabro reports the refusal as a content-filter LLM error and applies the configured `run.model.fallbacks` chain when one is present.
 
 ## Configuring providers and models
 

@@ -209,7 +209,7 @@ impl Error {
     /// same-provider retry) plus `QuotaExceeded` — a different provider won't
     /// share the same quota.
     #[must_use]
-    pub const fn failover_eligible(&self) -> bool {
+    pub fn failover_eligible(&self) -> bool {
         if self.retryable() {
             return true;
         }
@@ -219,6 +219,16 @@ impl Error {
                 kind: ProviderErrorKind::QuotaExceeded,
                 ..
             } | Self::RequestTimeout { .. }
+        ) || self.refusal_content_filter()
+    }
+
+    fn refusal_content_filter(&self) -> bool {
+        matches!(
+            self,
+            Self::Provider {
+                kind: ProviderErrorKind::ContentFilter,
+                detail,
+            } if detail.error_code.as_deref() == Some("refusal")
         )
     }
 
@@ -921,6 +931,35 @@ mod tests {
             !Error::Provider {
                 kind:   ProviderErrorKind::ContentFilter,
                 detail: detail(),
+            }
+            .failover_eligible()
+        );
+    }
+
+    #[test]
+    fn failover_eligible_for_refusal_content_filter_only() {
+        assert!(
+            Error::Provider {
+                kind:   ProviderErrorKind::ContentFilter,
+                detail: Box::new(ProviderErrorDetail {
+                    error_code: Some("refusal".to_string()),
+                    raw: Some(serde_json::json!({
+                        "stop_reason": "refusal",
+                        "stop_details": {"type": "refusal", "category": "cyber"}
+                    })),
+                    ..ProviderErrorDetail::new("declined", "anthropic")
+                }),
+            }
+            .failover_eligible()
+        );
+
+        assert!(
+            !Error::Provider {
+                kind:   ProviderErrorKind::ContentFilter,
+                detail: Box::new(ProviderErrorDetail {
+                    error_code: Some("safety".to_string()),
+                    ..ProviderErrorDetail::new("blocked", "anthropic")
+                }),
             }
             .failover_eligible()
         );

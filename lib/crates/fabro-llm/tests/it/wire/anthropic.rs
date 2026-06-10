@@ -1,10 +1,16 @@
 //! Wire snapshots for the Anthropic Messages dialect.
 
+use std::sync::Arc;
+
 use fabro_llm::provider::ProviderAdapter;
 use fabro_llm::providers::AnthropicAdapter;
 use fabro_llm::types::{
-    Message, Request, ResponseFormat, ResponseFormatType, ToolChoice, ToolDefinition,
+    Message, ReasoningEffort, Request, ResponseFormat, ResponseFormatType, StreamEvent, ToolChoice,
+    ToolDefinition,
 };
+use fabro_llm::{Error, ProviderErrorKind};
+use fabro_model::Catalog;
+use futures::StreamExt;
 use httpmock::prelude::*;
 
 use crate::support::{
@@ -62,6 +68,18 @@ async fn stream_capture(
 
 fn adapter() -> AnthropicAdapter {
     AnthropicAdapter::new("test-key")
+}
+
+fn builtin_catalog() -> Arc<Catalog> {
+    Arc::new(Catalog::from_builtin().expect("built-in catalog should build"))
+}
+
+fn header_value<'a>(capture: &'a WireCapture, name: &str) -> Option<&'a str> {
+    capture
+        .headers
+        .iter()
+        .find(|(header, _)| header == name)
+        .map(|(_, value)| value.as_str())
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +290,68 @@ prompt_cache = false
 }
 
 #[tokio::test]
+async fn encode_fable_uses_api_id_effort_and_omits_1m_beta() {
+    let request = Request {
+        reasoning_effort: Some(ReasoningEffort::XHigh),
+        temperature: Some(0.0),
+        top_p: Some(0.5),
+        ..base_request("fable")
+    };
+
+    let capture = encode_capture(adapter().with_catalog(builtin_catalog()), &request).await;
+
+    assert_eq!(capture.body["model"], "claude-fable-5");
+    assert_eq!(capture.body["output_config"]["effort"], "xhigh");
+    assert!(capture.body.get("thinking").is_none());
+    assert!(capture.body.get("temperature").is_none());
+    assert!(capture.body.get("top_p").is_none());
+    assert!(
+        !header_value(&capture, "anthropic-beta")
+            .unwrap_or("")
+            .contains("context-1m-2025-08-07"),
+        "Fable has 1M context by default and must not receive the legacy beta header"
+    );
+}
+
+#[tokio::test]
+async fn encode_fable_without_effort_omits_default_thinking() {
+    let capture = encode_capture(
+        adapter().with_catalog(builtin_catalog()),
+        &base_request("claude-fable-5"),
+    )
+    .await;
+
+    assert_eq!(capture.body["model"], "claude-fable-5");
+    assert!(capture.body.get("thinking").is_none());
+}
+
+#[test]
+fn fable_rejects_manual_enabled_or_disabled_thinking() {
+    let adapter = adapter().with_catalog(builtin_catalog());
+
+    for kind in ["enabled", "disabled"] {
+        let request = Request {
+            provider_options: Some(serde_json::json!({
+                "anthropic": {
+                    "thinking": {"type": kind, "budget_tokens": 1024}
+                }
+            })),
+            ..base_request("claude-fable-5")
+        };
+
+        let err = adapter
+            .validate_request(&request)
+            .expect_err("manual Fable thinking mode should be rejected locally");
+        assert!(
+            err.to_string().contains("Claude Fable 5")
+                && err.to_string().contains("thinking")
+                && err.to_string().contains(kind),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn encode_prompt_cache_with_catalog() {
     let catalog = support::catalog_from_toml(
         r#"
@@ -351,6 +431,16 @@ async fn decode_response(body: serde_json::Value) -> fabro_llm::types::Response 
     response
 }
 
+/// Runs `complete()` against a canned body and returns the adapter result.
+async fn complete_result(body: serde_json::Value) -> Result<fabro_llm::types::Response, Error> {
+    let server = MockServer::start();
+    let (mock, _slot) = mount_capture(&server, "/messages", body);
+    let adapter = adapter().with_base_url(server.base_url());
+    let result = adapter.complete(&base_request(MODEL)).await;
+    mock.assert();
+    result
+}
+
 #[tokio::test]
 async fn decode_tool_use_stop_reason() {
     let response = decode_response(serde_json::json!({
@@ -409,6 +499,41 @@ async fn decode_max_tokens_stop_reason() {
     }))
     .await;
     fabro_test::fabro_json_snapshot!(response);
+}
+
+#[tokio::test]
+async fn decode_refusal_returns_failover_eligible_content_filter_error() {
+    let err = complete_result(serde_json::json!({
+        "id": "msg_refusal",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-fable-5",
+        "content": [],
+        "stop_reason": "refusal",
+        "stop_details": {
+            "type": "refusal",
+            "category": "cyber",
+            "explanation": "This request was declined because it could enable cyber harm."
+        },
+        "usage": {"input_tokens": 412, "output_tokens": 0}
+    }))
+    .await
+    .expect_err("refusal should be returned as an LLM error");
+
+    assert!(err.failover_eligible());
+    match &err {
+        Error::Provider { kind, detail } => {
+            assert_eq!(*kind, ProviderErrorKind::ContentFilter);
+            assert_eq!(detail.provider, "anthropic");
+            assert_eq!(detail.error_code.as_deref(), Some("refusal"));
+            assert!(detail.message.contains("declined"));
+            assert_eq!(
+                detail.raw.as_ref().unwrap()["stop_details"]["category"],
+                "cyber"
+            );
+        }
+        other => panic!("expected provider content-filter error, got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -559,6 +684,57 @@ async fn stream_error_event_mid_stream() {
     ]);
     let (_capture, events) = stream_capture(adapter(), &base_request(MODEL), &sse).await;
     fabro_test::fabro_json_snapshot!(events);
+}
+
+#[tokio::test]
+async fn stream_refusal_returns_error_without_final_response() {
+    let sse = support::sse_transcript(&[
+        (
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"msg_stream_refusal","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":412,"output_tokens":0}}}"#,
+        ),
+        (
+            "message_delta",
+            r#"{"type":"message_delta","delta":{"stop_reason":"refusal","stop_sequence":null,"stop_details":{"type":"refusal","category":"cyber","explanation":"This request was declined."}},"usage":{"output_tokens":0}}"#,
+        ),
+        ("message_stop", r#"{"type":"message_stop"}"#),
+    ]);
+    let server = MockServer::start();
+    let (mock, _slot) = mount_capture_sse(&server, "/messages", &sse);
+    let adapter = adapter().with_base_url(server.base_url());
+    let mut stream = adapter
+        .stream(&base_request("claude-fable-5"))
+        .await
+        .expect("stream should start");
+
+    let mut saw_finish = false;
+    let mut refusal = None;
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(StreamEvent::Finish { .. }) => saw_finish = true,
+            Ok(_) => {}
+            Err(err) => {
+                refusal = Some(err);
+                break;
+            }
+        }
+    }
+    mock.assert();
+
+    assert!(!saw_finish, "refusal stream must not emit a final response");
+    let err = refusal.expect("stream should yield a refusal error");
+    assert!(err.failover_eligible());
+    match &err {
+        Error::Provider { kind, detail } => {
+            assert_eq!(*kind, ProviderErrorKind::ContentFilter);
+            assert_eq!(detail.error_code.as_deref(), Some("refusal"));
+            assert_eq!(
+                detail.raw.as_ref().unwrap()["stop_details"]["category"],
+                "cyber"
+            );
+        }
+        other => panic!("expected provider content-filter error, got {other:?}"),
+    }
 }
 
 /// The Anthropic decoder never synthesizes a `Finish` on byte-stream end:
