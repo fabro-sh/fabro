@@ -123,6 +123,8 @@ pub struct SettingsModelFeatures {
     pub reasoning_effort: Option<ReasoningEffortFeature>,
     #[serde(default)]
     pub prompt_cache:     Option<bool>,
+    #[serde(default)]
+    pub sampling_params:  Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -1189,6 +1191,7 @@ fn merge_model_features_settings(
         reasoning:        higher.reasoning.or(fallback.reasoning),
         reasoning_effort: higher.reasoning_effort.or(fallback.reasoning_effort),
         prompt_cache:     higher.prompt_cache.or(fallback.prompt_cache),
+        sampling_params:  higher.sampling_params.or(fallback.sampling_params),
     }
 }
 
@@ -1449,6 +1452,7 @@ fn build_model_features(
         reasoning,
         reasoning_effort,
         prompt_cache: features.prompt_cache.unwrap_or_default(),
+        sampling_params: features.sampling_params.unwrap_or(true),
     })
 }
 
@@ -3637,6 +3641,56 @@ reasoning_effort = "adaptive"
         ));
     }
 
+    #[test]
+    fn catalog_from_settings_sampling_params_defaults_true_and_accepts_false() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.with-sampling]
+provider = "test"
+display_name = "With"
+family = "test"
+default = true
+
+[models.with-sampling.limits]
+context_window = 1000
+
+[models.with-sampling.features]
+tools = true
+vision = false
+reasoning = false
+
+[models.no-sampling]
+provider = "test"
+display_name = "Without"
+family = "test"
+
+[models.no-sampling.limits]
+context_window = 1000
+
+[models.no-sampling.features]
+tools = true
+vision = false
+reasoning = false
+sampling_params = false
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        assert!(
+            catalog
+                .get("with-sampling")
+                .unwrap()
+                .features
+                .sampling_params
+        );
+        assert!(!catalog.get("no-sampling").unwrap().features.sampling_params);
+    }
+
     // ---- Provider / catalog data integrity tests ----
 
     #[test]
@@ -3714,6 +3768,7 @@ reasoning_effort = "adaptive"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: true,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3769,6 +3824,7 @@ reasoning_effort = "adaptive"
                 reasoning: false,
                 reasoning_effort: None,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3832,6 +3888,7 @@ reasoning_effort = "adaptive"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3887,6 +3944,7 @@ reasoning_effort = "adaptive"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(

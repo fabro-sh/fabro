@@ -34,6 +34,10 @@ pub struct ModelLimits {
     pub max_output:     Option<i64>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelFeatures {
     pub tools:            bool,
@@ -46,6 +50,11 @@ pub struct ModelFeatures {
     /// Whether this model endpoint supports prompt caching annotations.
     #[serde(default)]
     pub prompt_cache:     bool,
+    /// Whether the model endpoint accepts classic sampling parameters
+    /// (`temperature`, `top_p`). Models with always-on adaptive behavior
+    /// reject them.
+    #[serde(default = "default_true")]
+    pub sampling_params:  bool,
 }
 
 impl ModelFeatures {
@@ -135,6 +144,10 @@ impl Model {
         self.features.prompt_cache
     }
 
+    pub fn supports_sampling_params(&self) -> bool {
+        self.features.sampling_params
+    }
+
     pub fn training(&self) -> Option<&str> {
         self.training.as_deref()
     }
@@ -212,6 +225,7 @@ mod tests {
                 reasoning:        true,
                 reasoning_effort: ReasoningEffortFeature::Levels,
                 prompt_cache:     true,
+                sampling_params:  true,
             },
             costs:                ModelCosts {
                 input_cost_per_mtok:       Some(1.0),
@@ -236,6 +250,7 @@ mod tests {
         assert!(info.supports_reasoning());
         assert!(info.supports_reasoning_effort());
         assert!(info.supports_prompt_cache());
+        assert!(info.supports_sampling_params());
         assert_eq!(info.training(), Some("training"));
         assert_eq!(info.knowledge_cutoff(), Some("knowledge-cutoff"));
         assert_eq!(info.input_cost_per_mtok(), Some(1.0));

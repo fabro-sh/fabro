@@ -29,6 +29,7 @@ fn model_json_matches_openapi_shape() {
             reasoning:        true,
             reasoning_effort: ReasoningEffortFeature::Levels,
             prompt_cache:     true,
+            sampling_params:  true,
         },
         costs:                ModelCosts {
             input_cost_per_mtok:       Some(5.0),

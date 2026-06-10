@@ -161,6 +161,8 @@ pub struct ModelFeatures {
     pub reasoning_effort: Option<ReasoningEffortFeature>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_cache:     Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling_params:  Option<bool>,
 }
 
 /// User-facing allow-list for native control values Fabro accepts on this

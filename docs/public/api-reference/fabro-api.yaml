@@ -7620,6 +7620,7 @@ components:
         - reasoning
         - reasoning_effort
         - prompt_cache
+        - sampling_params
       properties:
         tools:
           type: boolean
@@ -7635,6 +7636,9 @@ components:
         prompt_cache:
           type: boolean
           description: Whether the model endpoint supports prompt caching.
+        sampling_params:
+          type: boolean
+          description: Whether the model accepts classic sampling parameters (temperature, top_p).
 
     ModelCosts:
       description: Pricing per million tokens in USD.

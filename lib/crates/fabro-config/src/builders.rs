@@ -397,6 +397,7 @@ fn model_features_to_catalog(features: &LlmModelFeatures) -> model_catalog::Sett
         reasoning:        features.reasoning,
         reasoning_effort: features.reasoning_effort,
         prompt_cache:     features.prompt_cache,
+        sampling_params:  features.sampling_params,
     }
 }
 
