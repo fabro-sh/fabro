@@ -135,58 +135,9 @@ pub async fn load_file_as_base64(path: &str) -> Result<(String, String), std::io
     Ok((BASE64_STANDARD.encode(&data), mime))
 }
 
-/// Extract the `Retry-After` header value from an HTTP response as seconds.
-#[must_use]
-pub fn parse_retry_after(headers: &HeaderMap) -> Option<f64> {
-    headers
-        .get("retry-after")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<f64>().ok())
-}
-
-/// Parse `x-ratelimit-*` headers into a `RateLimitInfo`.
-///
-/// Returns `None` if no rate limit headers are present.
-#[must_use]
-pub fn parse_rate_limit_headers(headers: &HeaderMap) -> Option<RateLimitInfo> {
-    fn header_i64(headers: &HeaderMap, name: &str) -> Option<i64> {
-        headers
-            .get(name)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<i64>().ok())
-    }
-
-    fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
-        headers
-            .get(name)
-            .and_then(|v| v.to_str().ok())
-            .map(String::from)
-    }
-
-    let requests_remaining = header_i64(headers, "x-ratelimit-remaining-requests");
-    let requests_limit = header_i64(headers, "x-ratelimit-limit-requests");
-    let tokens_remaining = header_i64(headers, "x-ratelimit-remaining-tokens");
-    let tokens_limit = header_i64(headers, "x-ratelimit-limit-tokens");
-    let reset_at = header_str(headers, "x-ratelimit-reset-requests")
-        .or_else(|| header_str(headers, "x-ratelimit-reset-tokens"));
-
-    if requests_remaining.is_none()
-        && requests_limit.is_none()
-        && tokens_remaining.is_none()
-        && tokens_limit.is_none()
-        && reset_at.is_none()
-    {
-        return None;
-    }
-
-    Some(RateLimitInfo {
-        requests_remaining,
-        requests_limit,
-        tokens_remaining,
-        tokens_limit,
-        reset_at,
-    })
-}
+// Transport pieces moved to `crate::transport`; re-exported here because
+// fabro-cli imports them from this path (frozen public surface).
+pub use crate::transport::{LineReader, parse_rate_limit_headers, parse_retry_after};
 
 /// Send an HTTP request, read the response body, and return it along with the
 /// response headers.
@@ -246,74 +197,6 @@ pub(crate) async fn send_and_read_response_with_operation(
     Ok((body, headers))
 }
 
-/// Shared line reader for SSE streams.
-///
-/// Buffers bytes from a `fabro_http::Response` and splits them by a
-/// configurable delimiter (e.g. `"\n"` for Gemini/OpenAI-compatible, `"\n\n"`
-/// for Anthropic/OpenAI SSE event blocks).
-pub struct LineReader {
-    response:            fabro_http::Response,
-    buffer:              String,
-    stream_read_timeout: Option<std::time::Duration>,
-}
-
-impl LineReader {
-    pub fn new(
-        response: fabro_http::Response,
-        stream_read_timeout: Option<std::time::Duration>,
-    ) -> Self {
-        Self {
-            response,
-            buffer: String::new(),
-            stream_read_timeout,
-        }
-    }
-
-    /// Read the next complete segment delimited by `delimiter`.
-    ///
-    /// Returns `Ok(Some(segment))` for each complete segment, `Ok(None)` when
-    /// the stream is exhausted, or `Err` on I/O or timeout errors.  When the
-    /// stream ends with data remaining in the buffer, the leftover is returned
-    /// as a final segment.
-    pub async fn read_next_chunk(&mut self, delimiter: &str) -> Result<Option<String>, Error> {
-        loop {
-            if let Some(pos) = self.buffer.find(delimiter) {
-                let segment = self.buffer[..pos].to_string();
-                self.buffer = self.buffer[pos + delimiter.len()..].to_string();
-                return Ok(Some(segment));
-            }
-
-            let chunk_result = match self.stream_read_timeout {
-                Some(timeout) => time::timeout(timeout, self.response.chunk()).await,
-                None => Ok(self.response.chunk().await),
-            };
-            match chunk_result {
-                Ok(Ok(Some(bytes))) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    self.buffer.push_str(&text);
-                }
-                Ok(Ok(None)) => {
-                    if self.buffer.is_empty() {
-                        return Ok(None);
-                    }
-                    let remaining = std::mem::take(&mut self.buffer);
-                    return Ok(Some(remaining));
-                }
-                Ok(Err(e)) => {
-                    return Err(Error::stream_error(e.to_string(), e));
-                }
-                Err(_) => {
-                    warn!("Stream read timed out waiting for next event");
-                    return Err(Error::Stream {
-                        message: "stream read timed out waiting for next event".to_string(),
-                        source:  None,
-                    });
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,73 +241,6 @@ mod tests {
     fn mime_from_extension_unknown() {
         assert_eq!(mime_from_extension("file.xyz"), "application/octet-stream");
         assert_eq!(mime_from_extension("noext"), "application/octet-stream");
-    }
-
-    #[test]
-    fn parse_rate_limit_headers_all_present() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-ratelimit-remaining-requests", "99".parse().unwrap());
-        headers.insert("x-ratelimit-limit-requests", "100".parse().unwrap());
-        headers.insert("x-ratelimit-remaining-tokens", "9000".parse().unwrap());
-        headers.insert("x-ratelimit-limit-tokens", "10000".parse().unwrap());
-        headers.insert(
-            "x-ratelimit-reset-requests",
-            "2024-01-01T00:00:00Z".parse().unwrap(),
-        );
-
-        let info = parse_rate_limit_headers(&headers).unwrap();
-        assert_eq!(info.requests_remaining, Some(99));
-        assert_eq!(info.requests_limit, Some(100));
-        assert_eq!(info.tokens_remaining, Some(9000));
-        assert_eq!(info.tokens_limit, Some(10000));
-        assert_eq!(info.reset_at.as_deref(), Some("2024-01-01T00:00:00Z"));
-    }
-
-    #[test]
-    fn parse_rate_limit_headers_none_present() {
-        let headers = HeaderMap::new();
-        assert!(parse_rate_limit_headers(&headers).is_none());
-    }
-
-    #[test]
-    fn parse_rate_limit_headers_partial() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-ratelimit-remaining-requests", "50".parse().unwrap());
-
-        let info = parse_rate_limit_headers(&headers).unwrap();
-        assert_eq!(info.requests_remaining, Some(50));
-        assert_eq!(info.requests_limit, None);
-        assert_eq!(info.tokens_remaining, None);
-        assert_eq!(info.tokens_limit, None);
-        assert_eq!(info.reset_at, None);
-    }
-
-    #[test]
-    fn parse_rate_limit_headers_reset_tokens_fallback() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-ratelimit-limit-tokens", "5000".parse().unwrap());
-        headers.insert(
-            "x-ratelimit-reset-tokens",
-            "2024-06-01T12:00:00Z".parse().unwrap(),
-        );
-
-        let info = parse_rate_limit_headers(&headers).unwrap();
-        assert_eq!(info.tokens_limit, Some(5000));
-        assert_eq!(info.reset_at.as_deref(), Some("2024-06-01T12:00:00Z"));
-    }
-
-    #[test]
-    fn parse_rate_limit_headers_invalid_values_ignored() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-ratelimit-remaining-requests",
-            "not-a-number".parse().unwrap(),
-        );
-        headers.insert("x-ratelimit-limit-tokens", "10000".parse().unwrap());
-
-        let info = parse_rate_limit_headers(&headers).unwrap();
-        assert_eq!(info.requests_remaining, None);
-        assert_eq!(info.tokens_limit, Some(10000));
     }
 
     // --- parse_error_body ---
@@ -538,34 +354,5 @@ mod tests {
         let (sys, other) = extract_system_prompt(&msgs);
         assert_eq!(sys, None);
         assert!(other.is_empty());
-    }
-
-    // --- parse_retry_after ---
-
-    #[test]
-    fn parse_retry_after_valid() {
-        let mut headers = HeaderMap::new();
-        headers.insert("retry-after", "2.5".parse().unwrap());
-        assert_eq!(parse_retry_after(&headers), Some(2.5));
-    }
-
-    #[test]
-    fn parse_retry_after_missing() {
-        let headers = HeaderMap::new();
-        assert_eq!(parse_retry_after(&headers), None);
-    }
-
-    #[test]
-    fn parse_retry_after_invalid() {
-        let mut headers = HeaderMap::new();
-        headers.insert("retry-after", "not-a-number".parse().unwrap());
-        assert_eq!(parse_retry_after(&headers), None);
-    }
-
-    #[test]
-    fn parse_retry_after_integer() {
-        let mut headers = HeaderMap::new();
-        headers.insert("retry-after", "5".parse().unwrap());
-        assert_eq!(parse_retry_after(&headers), Some(5.0));
     }
 }

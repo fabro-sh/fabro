@@ -27,7 +27,7 @@ use crate::types::{AdapterTimeout, Request, Response, StreamEvent};
 /// auth, base URL, and the streaming byte loop, and delegates all wire
 /// translation to the codec.
 pub struct Adapter {
-    pub(crate) http: super::http_api::HttpApi,
+    pub(crate) http: crate::transport::HttpTransport,
     provider_name:   String,
     catalog:         Option<Arc<Catalog>>,
 }
@@ -41,7 +41,7 @@ impl Adapter {
     #[must_use]
     pub fn new_optional_auth(api_key: Option<String>, base_url: impl Into<String>) -> Self {
         Self {
-            http:          super::http_api::HttpApi::new_optional(api_key, base_url),
+            http:          crate::transport::HttpTransport::new_optional(api_key, base_url),
             provider_name: "openai-compatible".to_string(),
             catalog:       None,
         }

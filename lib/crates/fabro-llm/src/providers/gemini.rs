@@ -25,7 +25,7 @@ const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta
 /// Gemini has no route variance (single auth scheme, count-tokens always
 /// available, no forced streaming), so there is no route config.
 pub struct Adapter {
-    pub(crate) http: super::http_api::HttpApi,
+    pub(crate) http: crate::transport::HttpTransport,
     provider_name:   String,
     catalog:         Option<Arc<Catalog>>,
 }
@@ -39,7 +39,7 @@ impl Adapter {
     #[must_use]
     pub fn new_optional_auth(api_key: Option<String>) -> Self {
         Self {
-            http:          super::http_api::HttpApi::new_optional(api_key, DEFAULT_BASE_URL),
+            http:          crate::transport::HttpTransport::new_optional(api_key, DEFAULT_BASE_URL),
             provider_name: "gemini".to_string(),
             catalog:       None,
         }

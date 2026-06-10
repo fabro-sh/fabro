@@ -11,6 +11,7 @@ pub mod providers;
 pub mod retry;
 pub mod token_count;
 pub mod tools;
+pub(crate) mod transport;
 pub mod types;
 
 pub use error::{Error, ProviderErrorDetail, ProviderErrorKind, Result};

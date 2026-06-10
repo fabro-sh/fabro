@@ -30,7 +30,7 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 /// Completions) to properly surface reasoning tokens, built-in tools, and
 /// server-side state.
 pub struct Adapter {
-    pub(crate) http: super::http_api::HttpApi,
+    pub(crate) http: crate::transport::HttpTransport,
     org_id:          Option<String>,
     project_id:      Option<String>,
     provider_name:   String,
@@ -48,7 +48,7 @@ impl Adapter {
     #[must_use]
     pub fn new_optional_auth(api_key: Option<String>) -> Self {
         Self {
-            http:          super::http_api::HttpApi::new_optional(api_key, DEFAULT_BASE_URL),
+            http:          crate::transport::HttpTransport::new_optional(api_key, DEFAULT_BASE_URL),
             org_id:        None,
             project_id:    None,
             provider_name: "openai".to_string(),
