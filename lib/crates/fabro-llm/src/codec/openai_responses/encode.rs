@@ -389,6 +389,7 @@ mod tests {
     fn encode_body(request: &Request, stream: bool, codex: bool) -> serde_json::Value {
         let params = CodecParams {
             openai_codex: codex,
+            ..CodecParams::default()
         };
         let ctx = CodecCtx {
             request,

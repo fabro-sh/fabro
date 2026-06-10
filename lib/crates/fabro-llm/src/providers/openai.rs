@@ -118,6 +118,7 @@ impl Adapter {
     fn codec_params(&self) -> CodecParams {
         CodecParams {
             openai_codex: self.codex_mode,
+            ..CodecParams::default()
         }
     }
 
@@ -139,8 +140,8 @@ impl Adapter {
     }
 
     /// Build the canonical request for the codec, resolving file-backed
-    /// attachments to inline data first.
-    async fn resolve_request(&self, request: &Request) -> Request {
+    /// attachments to inline data first. Borrowed when nothing needs loading.
+    async fn resolve_request<'a>(&self, request: &'a Request) -> std::borrow::Cow<'a, Request> {
         // OpenAI loads images inline; audio and documents render as text
         // placeholders in the codec, so they are not loaded here.
         let policy = AttachmentPolicy {

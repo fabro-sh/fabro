@@ -610,7 +610,8 @@ reasoning = true
     fn direct_params() -> CodecParams {
         CodecParams {
             anthropic_version: AnthropicVersion::Header("2023-06-01"),
-            anthropic_beta:    true,
+            anthropic_beta: true,
+            ..CodecParams::default()
         }
     }
 

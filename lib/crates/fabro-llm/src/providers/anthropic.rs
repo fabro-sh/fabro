@@ -94,7 +94,8 @@ impl Adapter {
                 auth:                  AuthScheme::ApiKey,
                 codec_params:          CodecParams {
                     anthropic_version: AnthropicVersion::Header("2023-06-01"),
-                    anthropic_beta:    true,
+                    anthropic_beta: true,
+                    ..CodecParams::default()
                 },
                 supports_count_tokens: true,
                 force_streaming:       false,
