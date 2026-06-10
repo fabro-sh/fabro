@@ -38,4 +38,8 @@ export interface ModelFeatures {
      * Whether the model endpoint supports prompt caching.
      */
     'prompt_cache': boolean;
+    /**
+     * Whether the model accepts classic sampling parameters (temperature, top_p).
+     */
+    'sampling_params': boolean;
 }

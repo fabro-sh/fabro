@@ -15,11 +15,12 @@
 
 
 /**
- * Whether the model endpoint supports a native reasoning-effort parameter.
+ * Whether the model endpoint supports a native reasoning-effort parameter. `levels` accepts discrete effort levels; `adaptive` accepts effort levels with natively always-on adaptive thinking; `none` has no native effort parameter.
  */
 
 export const ReasoningEffortFeature = {
     LEVELS: 'levels',
+    ADAPTIVE: 'adaptive',
     NONE: 'none'
 } as const;
 
