@@ -345,7 +345,7 @@ mod tests {
     /// Build the request body the way the adapter's encode path does (no
     /// catalog: the wire model id is the request model).
     fn body_for(request: &Request) -> serde_json::Value {
-        let params = CodecParams;
+        let params = CodecParams::default();
         let ctx = CodecCtx {
             request,
             provider_name: "gemini",
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn encode_endpoints_carry_model_and_streaming_variant() {
         let request = minimal_request();
-        let params = CodecParams;
+        let params = CodecParams::default();
         let ctx = CodecCtx {
             request:       &request,
             provider_name: "gemini",
@@ -398,7 +398,7 @@ mod tests {
             "Search files",
             serde_json::json!({"type": "object"}),
         )]);
-        let params = CodecParams;
+        let params = CodecParams::default();
         let ctx = CodecCtx {
             request:       &request,
             provider_name: "gemini",

@@ -80,8 +80,8 @@ impl Adapter {
     }
 
     /// Build the canonical request for the codec, resolving file-backed
-    /// attachments to inline data first.
-    async fn resolve_request(&self, request: &Request) -> Request {
+    /// attachments to inline data first. Borrowed when nothing needs loading.
+    async fn resolve_request<'a>(&self, request: &'a Request) -> std::borrow::Cow<'a, Request> {
         // Gemini loads all three attachment kinds inline.
         let policy = AttachmentPolicy {
             images:    true,
@@ -190,7 +190,7 @@ impl ProviderAdapter for Adapter {
         let resolved = self.resolve_request(request).await;
         let codec = GeminiGenerate;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let params = CodecParams;
+        let params = CodecParams::default();
         let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
         let Some(encoded) = codec.encode_count_tokens(&ctx).transpose()? else {
@@ -219,7 +219,7 @@ impl ProviderAdapter for Adapter {
         let resolved = self.resolve_request(request).await;
         let codec = GeminiGenerate;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let params = CodecParams;
+        let params = CodecParams::default();
         let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
         let encoded = codec.encode(&ctx, false)?;
@@ -238,7 +238,7 @@ impl ProviderAdapter for Adapter {
         let resolved = self.resolve_request(request).await;
         let codec = GeminiGenerate;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let params = CodecParams;
+        let params = CodecParams::default();
         let stream_read_timeout = self.http.stream_read_timeout;
         let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
