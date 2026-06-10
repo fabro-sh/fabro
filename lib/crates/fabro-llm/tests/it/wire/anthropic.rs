@@ -330,6 +330,26 @@ async fn encode_opus_omits_1m_beta_header() {
 }
 
 #[tokio::test]
+async fn encode_opus_drops_sampling_params() {
+    let request = Request {
+        temperature: Some(0.0),
+        top_p: Some(0.5),
+        ..base_request("claude-opus-4-8")
+    };
+
+    let capture = encode_capture(adapter().with_catalog(builtin_catalog()), &request).await;
+
+    assert!(
+        capture.body.get("temperature").is_none(),
+        "Opus 4.7/4.8 reject temperature; it must not be sent"
+    );
+    assert!(
+        capture.body.get("top_p").is_none(),
+        "Opus 4.7/4.8 reject top_p; it must not be sent"
+    );
+}
+
+#[tokio::test]
 async fn encode_fable_without_effort_omits_default_thinking() {
     let capture = encode_capture(
         adapter().with_catalog(builtin_catalog()),

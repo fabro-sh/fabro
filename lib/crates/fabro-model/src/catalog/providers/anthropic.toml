@@ -53,6 +53,7 @@ vision = true
 reasoning = true
 reasoning_effort = "levels"
 prompt_cache = true
+sampling_params = false
 
 [models."claude-opus-4-8".controls]
 speed = ["fast"]
@@ -86,6 +87,7 @@ vision = true
 reasoning = true
 reasoning_effort = "levels"
 prompt_cache = true
+sampling_params = false
 
 [models."claude-opus-4-7".controls]
 speed = ["fast"]

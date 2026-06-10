@@ -1368,7 +1368,10 @@ async fn build_api_request(
     }
 
     let is_fast = request.speed == Some(Speed::Fast);
-    // Models with always-on adaptive behavior reject classic sampling knobs.
+    // Models with `sampling_params = false` reject classic sampling knobs.
+    // This gate covers only the typed request fields; values injected through
+    // `provider_options.anthropic` (e.g. `top_k`) are a raw escape hatch and
+    // pass through unfiltered.
     let (temperature, top_p) = if model_info.is_none_or(Model::supports_sampling_params) {
         (request.temperature, request.top_p)
     } else {
