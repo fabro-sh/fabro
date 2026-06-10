@@ -1,12 +1,9 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use fabro_http::HeaderMap;
 use fabro_model::{Catalog, Model};
 use fabro_static::EnvVars;
 use tokio::fs;
-use tracing::warn;
 
-use crate::error::{Error, error_from_status_code};
 use crate::types::{Message, Role};
 
 #[must_use]
@@ -138,64 +135,6 @@ pub async fn load_file_as_base64(path: &str) -> Result<(String, String), std::io
 // Transport pieces moved to `crate::transport`; re-exported here because
 // fabro-cli imports them from this path (frozen public surface).
 pub use crate::transport::{LineReader, parse_rate_limit_headers, parse_retry_after};
-
-/// Send an HTTP request, read the response body, and return it along with the
-/// response headers.
-///
-/// Returns an error on non-success status.
-///
-/// # Errors
-///
-/// Returns `Error::Network` on connection failure or `Error::Provider` on
-/// non-success status.
-pub async fn send_and_read_response(
-    request: fabro_http::RequestBuilder,
-    provider: &str,
-    error_code_field: &str,
-) -> Result<(String, HeaderMap), Error> {
-    send_and_read_response_with_operation(request, provider, error_code_field, "provider_request")
-        .await
-}
-
-pub(crate) async fn send_and_read_response_with_operation(
-    request: fabro_http::RequestBuilder,
-    provider: &str,
-    error_code_field: &str,
-    operation: &str,
-) -> Result<(String, HeaderMap), Error> {
-    let http_resp = request.send().await.map_err(|e| {
-        if e.is_timeout() {
-            warn!(provider = %provider, operation = %operation, error = %e, "Provider request timed out");
-            Error::request_timeout(format!("{provider}: {e}"), e)
-        } else {
-            warn!(provider = %provider, operation = %operation, error = %e, "Provider network error");
-            Error::network(e.to_string(), e)
-        }
-    })?;
-
-    let status = http_resp.status();
-    let retry_after = parse_retry_after(http_resp.headers());
-    let headers = http_resp.headers().clone();
-    let body = http_resp
-        .text()
-        .await
-        .map_err(|e| Error::network(e.to_string(), e))?;
-
-    if !status.is_success() {
-        warn!(provider = %provider, operation = %operation, status = status.as_u16(), "Provider returned error");
-        let (msg, code, raw) = parse_error_body(&body, error_code_field);
-        return Err(error_from_status_code(
-            status.as_u16(),
-            msg,
-            provider.to_string(),
-            code,
-            raw,
-            retry_after,
-        ));
-    }
-
-    Ok((body, headers))
-}
 
 #[cfg(test)]
 mod tests {

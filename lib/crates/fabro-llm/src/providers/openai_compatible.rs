@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::provider::{
     ProviderAdapter, StreamEventStream, validate_standard_speed, validate_tool_choice,
 };
-use crate::providers::common::{api_model_id, parse_rate_limit_headers, send_and_read_response};
+use crate::providers::common::api_model_id;
 use crate::transport::{self, SseFraming};
 use crate::types::{AdapterTimeout, Request, Response};
 
@@ -154,9 +154,7 @@ impl ProviderAdapter for Adapter {
             req = req.timeout(t);
         }
 
-        let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
-        let rate_limit = parse_rate_limit_headers(&headers);
-        codec.decode_response(&body, &ctx, rate_limit)
+        transport::complete_via_http(req, &codec, &ctx).await
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {

@@ -9,13 +9,6 @@
 //! The split mirrors `codec/mod.rs`: a codec knows *what the bytes say*; this
 //! module knows *how they travel*.
 
-// Wired into the adapters over the next commits of this PR; the send/stream
-// helpers have no callers until then.
-#![allow(
-    dead_code,
-    reason = "Transport helpers land ahead of the adapter rewires later in this PR."
-)]
-
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
@@ -53,11 +46,6 @@ impl HttpTransport {
             .connect_timeout(Duration::from_secs_f64(timeout.connect))
             .build()
             .expect("LLM HTTP client should build")
-    }
-
-    #[must_use]
-    pub(crate) fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
-        Self::new_optional(Some(api_key.into()), base_url)
     }
 
     #[must_use]

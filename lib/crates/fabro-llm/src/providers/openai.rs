@@ -9,10 +9,7 @@ use crate::error::Error;
 use crate::provider::{
     ProviderAdapter, StreamEventStream, validate_standard_speed, validate_tool_choice,
 };
-use crate::providers::common::{
-    self as common, parse_rate_limit_headers, send_and_read_response,
-    send_and_read_response_with_operation,
-};
+use crate::providers::common::{self as common};
 use crate::token_count::{InputTokenCount, InputTokenCountMethod};
 use crate::transport::{self, SseFraming};
 use crate::types::{AdapterTimeout, Request, Response, StreamEvent};
@@ -229,13 +226,8 @@ impl ProviderAdapter for Adapter {
         if let Some(t) = self.http.request_timeout {
             req = req.timeout(t);
         }
-        let (body, _headers) = send_and_read_response_with_operation(
-            req,
-            &self.provider_name,
-            "type",
-            "input_token_count",
-        )
-        .await?;
+        let (body, _headers) =
+            transport::send_for_body(req, "input_token_count", &codec, &ctx).await?;
         let input_tokens = codec.decode_count_tokens(&body)?;
 
         Ok(Some(InputTokenCount {
@@ -267,9 +259,7 @@ impl ProviderAdapter for Adapter {
         if let Some(t) = self.http.request_timeout {
             req = req.timeout(t);
         }
-        let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
-        let rate_limit = parse_rate_limit_headers(&headers);
-        codec.decode_response(&body, &ctx, rate_limit)
+        transport::complete_via_http(req, &codec, &ctx).await
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
