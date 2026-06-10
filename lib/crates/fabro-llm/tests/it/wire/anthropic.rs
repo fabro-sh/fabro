@@ -745,6 +745,7 @@ async fn stream_refusal_returns_error_without_final_response() {
         Error::Provider { kind, detail } => {
             assert_eq!(*kind, ProviderErrorKind::ContentFilter);
             assert_eq!(detail.error_code.as_deref(), Some("refusal"));
+            assert!(detail.message.contains("claude-fable-5"));
             assert_eq!(
                 detail.raw.as_ref().unwrap()["stop_details"]["category"],
                 "cyber"

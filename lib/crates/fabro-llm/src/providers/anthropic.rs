@@ -1084,7 +1084,7 @@ fn refusal_error(
     raw: serde_json::Value,
     stop_details: Option<&serde_json::Value>,
 ) -> Error {
-    let model_label = if model.is_empty() { "model" } else { model };
+    let model_label = if model.is_empty() { "The model" } else { model };
     let message = stop_details
         .and_then(|details| details.get("explanation"))
         .and_then(serde_json::Value::as_str)
@@ -1347,8 +1347,9 @@ async fn build_api_request(
         }
     } else {
         // Auto-set adaptive thinking for known effort-capable models when no
-        // explicit thinking config or reasoning_effort is provided. Adaptive
-        // models are natively adaptive and must not receive a `thinking` param.
+        // explicit thinking config or reasoning_effort is provided. Natively
+        // adaptive models don't need one injected (and reject a manual on/off
+        // toggle).
         let thinking = explicit_thinking.or_else(|| {
             if model_info
                 .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
@@ -1368,7 +1369,7 @@ async fn build_api_request(
 
     let is_fast = request.speed == Some(Speed::Fast);
     // Models with always-on adaptive behavior reject classic sampling knobs.
-    let (temperature, top_p) = if model_info.is_none_or(|m| m.features.sampling_params) {
+    let (temperature, top_p) = if model_info.is_none_or(Model::supports_sampling_params) {
         (request.temperature, request.top_p)
     } else {
         (None, None)
@@ -2068,6 +2069,21 @@ mod tests {
         });
         let result = build_beta_header(Some(&opts), false, false);
         assert_eq!(result, Some("interleaved-thinking-2025-05-14".to_string()));
+    }
+
+    #[test]
+    fn refusal_error_falls_back_to_generic_label_when_model_is_empty() {
+        let err = refusal_error("anthropic", "", serde_json::json!({}), None);
+        match err {
+            Error::Provider { detail, .. } => {
+                assert!(
+                    detail.message.starts_with("The model refused"),
+                    "unexpected message: {}",
+                    detail.message
+                );
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
     }
 
     #[test]

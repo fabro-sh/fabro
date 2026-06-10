@@ -3172,7 +3172,7 @@ reasoning = false
         let err = fabro_agent::Error::Llm(refusal_llm_error());
         match classify_agent_error(err, false) {
             AgentApiErrorDisposition::Terminal(Error::Llm(llm_err)) => {
-                assert!(llm_err.to_string().contains("refused the request"));
+                assert!(llm_err.to_string().contains("claude-fable-5 refused"));
             }
             _ => panic!("expected Terminal(Error::Llm) when refusal failover is disallowed"),
         }
