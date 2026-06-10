@@ -6,10 +6,8 @@
 //! so `finish()` returns nothing.
 
 use super::SYNTHETIC_TOOL_NAME;
-use super::decode::{
-    convert_synthetic_tool_to_text, map_finish_reason, refusal_error, uses_json_schema_format,
-};
-use crate::codec::{CodecCtx, RawEvent, StreamDecoder};
+use super::decode::{convert_synthetic_tool_to_text, map_finish_reason, refusal_error};
+use crate::codec::{RawEvent, StreamDecoder};
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind};
 use crate::types::{
     ContentPart, FinishReason, Message, RateLimitInfo, Response, Role, StreamEvent, ThinkingData,
@@ -43,12 +41,16 @@ pub(super) struct SseAccumulator {
 }
 
 impl SseAccumulator {
-    pub(super) fn new(ctx: &CodecCtx<'_>, rate_limit: Option<RateLimitInfo>) -> Self {
+    pub(super) fn new(
+        provider: &str,
+        json_schema_mode: bool,
+        rate_limit: Option<RateLimitInfo>,
+    ) -> Self {
         Self {
             id: String::new(),
             model: String::new(),
-            provider: ctx.provider_name.to_string(),
-            json_schema_mode: uses_json_schema_format(ctx.request),
+            provider: provider.to_string(),
+            json_schema_mode,
             content_parts: Vec::new(),
             usage: TokenCounts::default(),
             finish_reason: FinishReason::Stop,
@@ -61,22 +63,21 @@ impl SseAccumulator {
     }
 
     fn take_response(&mut self) -> Response {
-        let content_parts = std::mem::take(&mut self.content_parts);
         Response {
-            id:            self.id.clone(),
-            model:         self.model.clone(),
+            id:            std::mem::take(&mut self.id),
+            model:         std::mem::take(&mut self.model),
             provider:      self.provider.clone(),
             message:       Message {
                 role:         Role::Assistant,
-                content:      content_parts,
+                content:      std::mem::take(&mut self.content_parts),
                 name:         None,
                 tool_call_id: None,
             },
-            finish_reason: self.finish_reason.clone(),
-            usage:         self.usage.clone(),
+            finish_reason: std::mem::replace(&mut self.finish_reason, FinishReason::Stop),
+            usage:         std::mem::take(&mut self.usage),
             raw:           None,
             warnings:      vec![],
-            rate_limit:    self.rate_limit.clone(),
+            rate_limit:    self.rate_limit.take(),
         }
     }
 
@@ -128,11 +129,7 @@ impl SseAccumulator {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
 
-        let index = data
-            .get("index")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let text_id = Some(format!("block_{index}"));
+        let text_id = Some(block_text_id(data));
 
         match block_type {
             "text" => {
@@ -190,14 +187,9 @@ impl SseAccumulator {
                     .unwrap_or("");
                 self.current_text.push_str(text);
 
-                let index = data
-                    .get("index")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
-
                 vec![StreamEvent::TextDelta {
                     delta:   text.to_string(),
-                    text_id: Some(format!("block_{index}")),
+                    text_id: Some(block_text_id(data)),
                 }]
             }
             "input_json_delta" => {
@@ -251,15 +243,10 @@ impl SseAccumulator {
         match current_block {
             Some(ContentBlockKind::Text) => {
                 let text = std::mem::take(&mut self.current_text);
-                self.content_parts.push(ContentPart::text(&text));
-
-                let index = data
-                    .get("index")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
+                self.content_parts.push(ContentPart::text(text));
 
                 vec![StreamEvent::TextEnd {
-                    text_id: Some(format!("block_{index}")),
+                    text_id: Some(block_text_id(data)),
                 }]
             }
             Some(ContentBlockKind::ToolUse { id, name }) => {
@@ -313,6 +300,15 @@ impl SseAccumulator {
             response:      Box::new(response),
         }]
     }
+}
+
+/// The `text_id` for a content-block event: `block_<index>`.
+fn block_text_id(data: &serde_json::Value) -> String {
+    let index = data
+        .get("index")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    format!("block_{index}")
 }
 
 /// Extract the `stop_details` from a refusal `message_delta`, if present.
@@ -390,8 +386,8 @@ fn convert_stream_event_for_json_schema(event: StreamEvent) -> StreamEvent {
             StreamEvent::TextStart { text_id: None }
         }
         StreamEvent::ToolCallDelta { tool_call } if tool_call.name == SYNTHETIC_TOOL_NAME => {
-            let delta = match &tool_call.arguments {
-                serde_json::Value::String(s) => s.clone(),
+            let delta = match tool_call.arguments {
+                serde_json::Value::String(s) => s,
                 other => other.to_string(),
             };
             StreamEvent::TextDelta {
@@ -463,23 +459,8 @@ impl StreamDecoder for SseAccumulator {
 mod tests {
     use super::*;
 
-    /// Build an accumulator without threading a `CodecCtx`/`Request`: the test
-    /// module sees the private fields, so the few that matter are set directly.
     fn new_accumulator(provider: &str, json_schema_mode: bool) -> SseAccumulator {
-        SseAccumulator {
-            id: String::new(),
-            model: String::new(),
-            provider: provider.to_string(),
-            json_schema_mode,
-            content_parts: Vec::new(),
-            usage: TokenCounts::default(),
-            finish_reason: FinishReason::Stop,
-            current_block: None,
-            current_text: String::new(),
-            current_thinking: String::new(),
-            current_tool_args: String::new(),
-            rate_limit: None,
-        }
+        SseAccumulator::new(provider, json_schema_mode, None)
     }
 
     #[test]

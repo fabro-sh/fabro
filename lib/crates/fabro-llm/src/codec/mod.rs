@@ -10,18 +10,6 @@
 //! defaults) so the per-dialect codecs that follow only ever *override*
 //! methods, never extend the contract.
 
-// The contract is defined in full now, but `openai_compatible` (the first
-// codec) is the simplest dialect and does not exercise every seam: the
-// `model`/`params` context, `RawEvent.event`, and the count-tokens methods
-// are consumed by the anthropic/openai/gemini codecs and the transport
-// consolidation in later PRs of this series. Scoped to this trait-definition
-// file; the codec impls below are fully used.
-#![allow(
-    dead_code,
-    reason = "Codec contract is defined in full ahead of the dialects (PRs 3-6) that exercise \
-              the capability context, SSE event type, and count-tokens routes."
-)]
-
 pub(crate) mod anthropic_messages;
 pub(crate) mod openai_compatible;
 
@@ -151,9 +139,9 @@ pub(crate) trait Codec: Send + Sync {
     /// Map a non-2xx response to an `Error`. `retry_after` is the
     /// transport-parsed `retry-after` header value in seconds (header parsing
     /// is the transport's job, like `rate_limit` on the decode methods).
-    /// Default = shared HTTP-status mapping (what openai_compatible uses);
-    /// anthropic/openai/gemini override to fold in dialect error bodies
-    /// (error.type, gRPC status, …).
+    /// Default = shared HTTP-status mapping, which openai_compatible and
+    /// anthropic use as-is; a codec overrides when its dialect's error bodies
+    /// need more (e.g. gemini's gRPC status).
     fn decode_error(
         &self,
         status: u16,

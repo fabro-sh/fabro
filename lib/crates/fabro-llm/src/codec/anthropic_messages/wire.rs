@@ -13,8 +13,8 @@ pub(super) struct ApiRequest {
     pub temperature:    Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p:          Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_sequences: Option<Vec<String>>,
+    /// Always serialized, even when empty (pinned by wire tests).
+    pub stop_sequences: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools:          Option<Vec<ApiToolDef>>,
     #[serde(skip_serializing_if = "Option::is_none")]

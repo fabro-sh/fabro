@@ -4,15 +4,14 @@ use fabro_model::{Catalog, ReasoningEffortFeature};
 use futures::stream;
 
 use crate::attachments::{self, AttachmentPolicy};
-use crate::codec::anthropic_messages::AnthropicMessages;
+use crate::codec::anthropic_messages::{AnthropicMessages, anthropic_option};
 use crate::codec::{
     AnthropicVersion, Codec, CodecCtx, CodecParams, EncodedRequest, RawEvent, StreamDecoder,
 };
-use crate::error::{Error, error_from_status_code};
+use crate::error::Error;
 use crate::provider::{self, ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
-    self as common, parse_error_body, parse_rate_limit_headers, parse_retry_after,
-    send_and_read_response,
+    self as common, parse_rate_limit_headers, parse_retry_after, send_and_read_response,
 };
 use crate::token_count::{InputTokenCount, InputTokenCountMethod};
 use crate::types::{AdapterTimeout, Request, Response, StreamEvent};
@@ -110,9 +109,26 @@ impl Adapter {
         }
     }
 
-    /// Build the canonical request context for the codec, resolving file-backed
-    /// attachments to inline data first.
-    async fn resolve_request(&self, request: &Request) -> Request {
+    /// Build the borrowed codec context. `deployment_id` and `params` are
+    /// created by the caller so their borrows outlive the context.
+    fn codec_ctx<'a>(
+        &'a self,
+        request: &'a Request,
+        deployment_id: &'a str,
+        params: &'a CodecParams,
+    ) -> CodecCtx<'a> {
+        CodecCtx {
+            request,
+            provider_name: &self.provider_name,
+            deployment_id,
+            model: common::catalog_model(self.catalog.as_deref(), &request.model),
+            params,
+        }
+    }
+
+    /// Build the canonical request for the codec, resolving file-backed
+    /// attachments to inline data first. Borrowed when nothing needs loading.
+    async fn resolve_request<'a>(&self, request: &'a Request) -> std::borrow::Cow<'a, Request> {
         // Anthropic loads images and documents inline; audio falls back to a
         // text placeholder in the codec, so it is not loaded here.
         let policy = AttachmentPolicy {
@@ -202,32 +218,37 @@ struct StreamLoop {
 
 /// The `provider_options.anthropic.thinking.type` value, if any.
 fn anthropic_thinking_type(provider_options: Option<&serde_json::Value>) -> Option<&str> {
-    provider_options
-        .and_then(|opts| opts.get("anthropic"))
-        .and_then(|anthropic| anthropic.get("thinking"))
+    anthropic_option(provider_options, "thinking")
         .and_then(|thinking| thinking.get("type"))
         .and_then(serde_json::Value::as_str)
 }
 
 /// Parse an SSE event block (lines separated within a `\n\n`-delimited chunk)
 /// into `(event_type, data)`. Returns `None` for blocks with no `data:` lines
-/// (e.g. heartbeat comments).
-fn parse_sse_block(event_block: &str) -> Option<(String, String)> {
-    let mut event_type = String::new();
-    let mut data_parts: Vec<String> = Vec::new();
+/// (e.g. heartbeat comments). Borrows from the block — Anthropic events carry
+/// a single `data:` line, so the hot path allocates nothing.
+fn parse_sse_block(event_block: &str) -> Option<(&str, std::borrow::Cow<'_, str>)> {
+    let mut event_type = "";
+    let mut data: Option<std::borrow::Cow<'_, str>> = None;
 
     for line in event_block.lines() {
         if let Some(rest) = line.strip_prefix("event:") {
-            event_type = rest.trim().to_string();
+            event_type = rest.trim();
         } else if let Some(rest) = line.strip_prefix("data:") {
-            data_parts.push(rest.trim().to_string());
+            let rest = rest.trim();
+            data = Some(match data {
+                None => std::borrow::Cow::Borrowed(rest),
+                Some(prev) => {
+                    let mut joined = prev.into_owned();
+                    joined.push('\n');
+                    joined.push_str(rest);
+                    std::borrow::Cow::Owned(joined)
+                }
+            });
         }
     }
 
-    if data_parts.is_empty() {
-        return None;
-    }
-    Some((event_type, data_parts.join("\n")))
+    data.map(|data| (event_type, data))
 }
 
 #[async_trait::async_trait]
@@ -249,13 +270,7 @@ impl ProviderAdapter for Adapter {
         let resolved = self.resolve_request(request).await;
         let codec = AnthropicMessages;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let ctx = CodecCtx {
-            request:       &resolved,
-            provider_name: &self.provider_name,
-            deployment_id: &deployment_id,
-            model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-            params:        &route.codec_params,
-        };
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &route.codec_params);
 
         let Some(encoded) = codec.encode_count_tokens(&ctx).transpose()? else {
             return Ok(None);
@@ -290,13 +305,7 @@ impl ProviderAdapter for Adapter {
         let resolved = self.resolve_request(request).await;
         let codec = AnthropicMessages;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let ctx = CodecCtx {
-            request:       &resolved,
-            provider_name: &self.provider_name,
-            deployment_id: &deployment_id,
-            model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-            params:        &route.codec_params,
-        };
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &route.codec_params);
 
         let encoded = codec.encode(&ctx, false)?;
         let mut req = self.build_http_request(&encoded, &route);
@@ -315,57 +324,28 @@ impl ProviderAdapter for Adapter {
         let resolved = self.resolve_request(request).await;
         let codec = AnthropicMessages;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
-        let rate_limit;
-        let stream_read_timeout = self.http.stream_read_timeout;
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &route.codec_params);
 
-        let http_resp = {
-            let ctx = CodecCtx {
-                request:       &resolved,
-                provider_name: &self.provider_name,
-                deployment_id: &deployment_id,
-                model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-                params:        &route.codec_params,
-            };
-            let encoded = codec.encode(&ctx, true)?;
-            let req = self.build_http_request(&encoded, &route);
-            let resp = req
-                .send()
+        let encoded = codec.encode(&ctx, true)?;
+        let http_resp = self
+            .build_http_request(&encoded, &route)
+            .send()
+            .await
+            .map_err(|e| Error::network(e.to_string(), e))?;
+
+        let status = http_resp.status();
+        if !status.is_success() {
+            let retry_after = parse_retry_after(http_resp.headers());
+            let body = http_resp
+                .text()
                 .await
                 .map_err(|e| Error::network(e.to_string(), e))?;
+            return Err(codec.decode_error(status.as_u16(), &body, &ctx, retry_after));
+        }
 
-            let status = resp.status();
-            if !status.is_success() {
-                let retry_after = parse_retry_after(resp.headers());
-                let body = resp
-                    .text()
-                    .await
-                    .map_err(|e| Error::network(e.to_string(), e))?;
-                let (msg, code, raw) = parse_error_body(&body, "type");
-                return Err(error_from_status_code(
-                    status.as_u16(),
-                    msg,
-                    self.provider_name.clone(),
-                    code,
-                    raw,
-                    retry_after,
-                ));
-            }
-            rate_limit = parse_rate_limit_headers(resp.headers());
-            resp
-        };
-
-        // Build the decoder while the ctx is still in scope; it captures owned
-        // state and does not borrow ctx beyond construction.
-        let decoder = {
-            let ctx = CodecCtx {
-                request:       &resolved,
-                provider_name: &self.provider_name,
-                deployment_id: &deployment_id,
-                model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-                params:        &route.codec_params,
-            };
-            codec.stream_decoder(&ctx, rate_limit)
-        };
+        let rate_limit = parse_rate_limit_headers(http_resp.headers());
+        let stream_read_timeout = self.http.stream_read_timeout;
+        let decoder = codec.stream_decoder(&ctx, rate_limit);
 
         let out = stream::unfold(
             StreamLoop {
@@ -400,7 +380,7 @@ impl ProviderAdapter for Adapter {
                                 continue;
                             };
                             match state.decoder.on_event(RawEvent {
-                                event: Some(&event_type),
+                                event: Some(event_type),
                                 data:  &data,
                             }) {
                                 Ok(events) => state.pending.extend(events),

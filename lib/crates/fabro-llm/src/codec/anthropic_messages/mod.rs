@@ -14,6 +14,8 @@ mod encode;
 mod stream;
 mod wire;
 
+pub(crate) use encode::anthropic_option;
+
 use crate::codec::{Codec, CodecCtx, EncodedRequest, StreamDecoder};
 use crate::error::Error;
 use crate::types::{RateLimitInfo, Response};
@@ -44,7 +46,11 @@ impl Codec for AnthropicMessages {
         ctx: &CodecCtx<'_>,
         rate_limit: Option<RateLimitInfo>,
     ) -> Box<dyn StreamDecoder> {
-        Box::new(stream::SseAccumulator::new(ctx, rate_limit))
+        Box::new(stream::SseAccumulator::new(
+            ctx.provider_name,
+            decode::uses_json_schema_format(ctx.request),
+            rate_limit,
+        ))
     }
 
     fn encode_count_tokens(&self, ctx: &CodecCtx<'_>) -> Option<Result<EncodedRequest, Error>> {

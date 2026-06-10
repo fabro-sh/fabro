@@ -1,5 +1,7 @@
 //! Response decoding: Anthropic Messages body → canonical `Response`.
 
+use serde::Deserialize;
+
 use super::SYNTHETIC_TOOL_NAME;
 use super::wire::{ApiResponse, ApiUsage, CountTokensResponse};
 use crate::codec::CodecCtx;
@@ -128,7 +130,7 @@ pub(super) fn decode_response(
             e,
         )
     })?;
-    let api_resp: ApiResponse = serde_json::from_value(raw.clone()).map_err(|e| {
+    let api_resp = ApiResponse::deserialize(&raw).map_err(|e| {
         Error::network(
             format!("failed to parse {} response: {e}", ctx.provider_name),
             e,
@@ -151,13 +153,14 @@ pub(super) fn decode_response(
         .collect();
 
     // If we used JsonSchema mode, convert the synthetic tool call back to text.
-    let content_parts = if uses_json_schema_format(ctx.request) {
+    let json_schema_mode = uses_json_schema_format(ctx.request);
+    let content_parts = if json_schema_mode {
         convert_synthetic_tool_to_text(content_parts)
     } else {
         content_parts
     };
 
-    let finish_reason = if uses_json_schema_format(ctx.request) {
+    let finish_reason = if json_schema_mode {
         // The model was forced to call a tool, so stop_reason is "tool_use",
         // but from the caller's perspective, the request completed normally.
         FinishReason::Stop

@@ -26,35 +26,33 @@ const KNOWN_ANTHROPIC_OPTION_KEYS: &[&str] = &["thinking", "auto_cache", "beta_h
 // --- Public entry points -----------------------------------------------------
 
 pub(super) fn encode(ctx: &CodecCtx<'_>, stream: bool) -> EncodedRequest {
-    let built = build_request(ctx, stream);
-    let body = merge_provider_options(&built.request, ctx.request.provider_options.as_ref());
+    let request = build_request(ctx, stream);
+    let body = merge_provider_options(&request, ctx.request.provider_options.as_ref());
     EncodedRequest {
         body,
         endpoint: "/messages".to_string(),
-        headers: build_headers(ctx, &built),
+        headers: build_headers(ctx),
     }
 }
 
 pub(super) fn encode_count_tokens(ctx: &CodecCtx<'_>) -> EncodedRequest {
-    let built = build_request(ctx, false);
-    let headers = build_headers(ctx, &built);
-    let count_request = CountTokensRequest::from(built.request);
+    let count_request = CountTokensRequest::from(build_request(ctx, false));
     let body = serde_json::to_value(&count_request).unwrap_or_else(|_| serde_json::json!({}));
     EncodedRequest {
         body,
         endpoint: "/messages/count_tokens".to_string(),
-        headers,
+        headers: build_headers(ctx),
     }
 }
 
-/// The assembled `ApiRequest` plus the inputs needed to build dialect headers.
-struct Built {
-    request:    ApiRequest,
-    auto_cache: bool,
-    is_fast:    bool,
+/// Whether auto prompt-caching applies: the model supports it and the request
+/// hasn't opted out.
+fn auto_cache(ctx: &CodecCtx<'_>) -> bool {
+    ctx.model.is_some_and(|m| m.features.prompt_cache)
+        && is_auto_cache_enabled(ctx.request.provider_options.as_ref())
 }
 
-fn build_headers(ctx: &CodecCtx<'_>, built: &Built) -> Vec<(String, String)> {
+fn build_headers(ctx: &CodecCtx<'_>) -> Vec<(String, String)> {
     let mut headers = Vec::new();
     if let AnthropicVersion::Header(version) = ctx.params.anthropic_version {
         headers.push(("anthropic-version".to_string(), version.to_string()));
@@ -62,8 +60,8 @@ fn build_headers(ctx: &CodecCtx<'_>, built: &Built) -> Vec<(String, String)> {
     if ctx.params.anthropic_beta {
         if let Some(beta) = build_beta_header(
             ctx.request.provider_options.as_ref(),
-            built.auto_cache,
-            built.is_fast,
+            auto_cache(ctx),
+            ctx.request.speed == Some(Speed::Fast),
         ) {
             headers.push(("anthropic-beta".to_string(), beta));
         }
@@ -71,20 +69,18 @@ fn build_headers(ctx: &CodecCtx<'_>, built: &Built) -> Vec<(String, String)> {
     headers
 }
 
-fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
+fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> ApiRequest {
     let request = ctx.request;
     let (system, other_messages) = common::extract_system_prompt(&request.messages);
     let mut api_messages = translate_messages(&other_messages);
 
-    let mut omit_tools = false;
-    let tool_choice_json = request.tool_choice.as_ref().and_then(|tc| {
-        if matches!(tc, ToolChoice::None) {
-            omit_tools = true;
-            None
-        } else {
-            translate_tool_choice(tc)
-        }
-    });
+    // `ToolChoice::None` omits the tools entirely instead of sending a choice.
+    let omit_tools = matches!(request.tool_choice, Some(ToolChoice::None));
+    let mut tool_choice_json = if omit_tools {
+        None
+    } else {
+        request.tool_choice.as_ref().and_then(translate_tool_choice)
+    };
 
     let mut api_tools = if omit_tools {
         None
@@ -93,9 +89,7 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
     };
 
     let model_info = ctx.model;
-    let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
-    let auto_cache =
-        supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
+    let auto_cache = auto_cache(ctx);
 
     let mut system_value = system.and_then(|s| {
         if s.trim().is_empty() {
@@ -108,7 +102,6 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
     });
 
     // Apply response_format (may inject synthetic tool or system prompt suffix).
-    let mut tool_choice_json = tool_choice_json;
     apply_response_format(
         request,
         &mut api_tools,
@@ -174,7 +167,6 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
         output_config = None;
     }
 
-    let is_fast = request.speed == Some(Speed::Fast);
     // Models with `sampling_params = false` reject classic sampling knobs.
     // This gate covers only the typed request fields; values injected through
     // `provider_options.anthropic` (e.g. `top_k`) are a raw escape hatch and
@@ -186,14 +178,14 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
             (None, None)
         };
 
-    let request_struct = ApiRequest {
+    ApiRequest {
         model: ctx.deployment_id.to_string(),
         messages: api_messages,
         max_tokens: resolved_max_tokens,
         system: system_value,
         temperature,
         top_p,
-        stop_sequences: Some(request.stop_sequences.clone().unwrap_or_default()),
+        stop_sequences: request.stop_sequences.clone().unwrap_or_default(),
         tools: api_tools,
         tool_choice: tool_choice_json,
         thinking,
@@ -205,12 +197,6 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
             .map(str::to_string),
         metadata: request.metadata.clone(),
         stream,
-    };
-
-    Built {
-        request: request_struct,
-        auto_cache,
-        is_fast,
     }
 }
 
@@ -252,32 +238,40 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
             }
             Some(block)
         }
-        ContentPart::Image(img) => {
-            if let Some(url) = &img.url {
-                Some(serde_json::json!({"type": "image", "source": {"type": "url", "url": url}}))
-            } else {
-                img.data.as_ref().map(|data| {
-                    let mime = img.media_type.as_deref().unwrap_or("image/png");
-                    let b64 = BASE64_STANDARD.encode(data);
-                    serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
-                })
-            }
-        }
-        ContentPart::Document(doc) => {
-            if let Some(url) = &doc.url {
-                Some(serde_json::json!({"type": "document", "source": {"type": "url", "url": url}}))
-            } else {
-                doc.data.as_ref().map(|data| {
-                    let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
-                    let b64 = BASE64_STANDARD.encode(data);
-                    serde_json::json!({"type": "document", "source": {"type": "base64", "media_type": mime, "data": b64}})
-                })
-            }
-        }
+        ContentPart::Image(img) => media_block(
+            "image",
+            img.url.as_deref(),
+            img.data.as_deref(),
+            img.media_type.as_deref().unwrap_or("image/png"),
+        ),
+        ContentPart::Document(doc) => media_block(
+            "document",
+            doc.url.as_deref(),
+            doc.data.as_deref(),
+            doc.media_type.as_deref().unwrap_or("application/pdf"),
+        ),
         ContentPart::Audio(_) => Some(
             serde_json::json!({"type": "text", "text": "[Audio content not supported by this provider]"}),
         ),
         ContentPart::Other { .. } => None,
+    }
+}
+
+/// An `image`/`document` content block: URL source when present, otherwise
+/// base64-encoded inline data.
+fn media_block(
+    kind: &str,
+    url: Option<&str>,
+    data: Option<&[u8]>,
+    mime: &str,
+) -> Option<serde_json::Value> {
+    if let Some(url) = url {
+        Some(serde_json::json!({"type": kind, "source": {"type": "url", "url": url}}))
+    } else {
+        data.map(|data| {
+            let b64 = BASE64_STANDARD.encode(data);
+            serde_json::json!({"type": kind, "source": {"type": "base64", "media_type": mime, "data": b64}})
+        })
     }
 }
 
@@ -417,13 +411,24 @@ fn apply_response_format(
 
 // --- Prompt caching / thinking / beta headers --------------------------------
 
+/// The `provider_options.anthropic` namespace object, if any.
+fn anthropic_options(provider_options: Option<&serde_json::Value>) -> Option<&serde_json::Value> {
+    provider_options.and_then(|opts| opts.get("anthropic"))
+}
+
+/// A single `provider_options.anthropic.<key>` value, if any. `pub(crate)` so
+/// the adapter's `validate_request` reads the same namespace the same way.
+pub(crate) fn anthropic_option<'a>(
+    provider_options: Option<&'a serde_json::Value>,
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    anthropic_options(provider_options).and_then(|anthropic| anthropic.get(key))
+}
+
 fn extract_thinking_config(
     provider_options: Option<&serde_json::Value>,
 ) -> Option<serde_json::Value> {
-    provider_options
-        .and_then(|opts| opts.get("anthropic"))
-        .and_then(|anthropic| anthropic.get("thinking"))
-        .cloned()
+    anthropic_option(provider_options, "thinking").cloned()
 }
 
 fn effort_to_budget_tokens(effort: ReasoningEffort, max_tokens: i64) -> i64 {
@@ -438,9 +443,7 @@ fn effort_to_budget_tokens(effort: ReasoningEffort, max_tokens: i64) -> i64 {
 }
 
 fn is_auto_cache_enabled(provider_options: Option<&serde_json::Value>) -> bool {
-    provider_options
-        .and_then(|opts| opts.get("anthropic"))
-        .and_then(|anthropic| anthropic.get("auto_cache"))
+    anthropic_option(provider_options, "auto_cache")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(true)
 }
@@ -487,10 +490,8 @@ fn build_beta_header(
 ) -> Option<String> {
     let mut headers: Vec<String> = Vec::new();
 
-    if let Some(beta_array) = provider_options
-        .and_then(|opts| opts.get("anthropic"))
-        .and_then(|anthropic| anthropic.get("beta_headers"))
-        .and_then(serde_json::Value::as_array)
+    if let Some(beta_array) =
+        anthropic_option(provider_options, "beta_headers").and_then(serde_json::Value::as_array)
     {
         headers.extend(
             beta_array
@@ -523,7 +524,7 @@ fn merge_provider_options(
 ) -> serde_json::Value {
     let mut body = serde_json::to_value(api_request).unwrap_or_else(|_| serde_json::json!({}));
 
-    if let Some(anthropic_opts) = provider_options.and_then(|opts| opts.get("anthropic")) {
+    if let Some(anthropic_opts) = anthropic_options(provider_options) {
         if let (Some(base), Some(overrides)) = (body.as_object_mut(), anthropic_opts.as_object()) {
             for (key, value) in overrides {
                 if !KNOWN_ANTHROPIC_OPTION_KEYS.contains(&key.as_str()) {
@@ -981,7 +982,7 @@ reasoning = true
             system:         Some(system_with_cache_control("You are helpful.")),
             temperature:    None,
             top_p:          None,
-            stop_sequences: None,
+            stop_sequences: Vec::new(),
             tools:          None,
             tool_choice:    None,
             thinking:       None,
@@ -1174,7 +1175,7 @@ reasoning = true
             system:         None,
             temperature:    None,
             top_p:          None,
-            stop_sequences: None,
+            stop_sequences: Vec::new(),
             tools:          None,
             tool_choice:    None,
             thinking:       None,
@@ -1207,7 +1208,7 @@ reasoning = true
             system:         None,
             temperature:    None,
             top_p:          None,
-            stop_sequences: None,
+            stop_sequences: Vec::new(),
             tools:          None,
             tool_choice:    None,
             thinking:       None,
