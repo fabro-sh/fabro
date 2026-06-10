@@ -2963,7 +2963,7 @@ reasoning = false
         LlmError::Provider {
             kind:   ProviderErrorKind::ContentFilter,
             detail: Box::new(ProviderErrorDetail {
-                message:     "Claude Fable 5 refused the request".into(),
+                message:     "claude-fable-5 refused the request".into(),
                 provider:    "anthropic".into(),
                 status_code: None,
                 error_code:  Some("refusal".into()),
@@ -3172,7 +3172,7 @@ reasoning = false
         let err = fabro_agent::Error::Llm(refusal_llm_error());
         match classify_agent_error(err, false) {
             AgentApiErrorDisposition::Terminal(Error::Llm(llm_err)) => {
-                assert!(llm_err.to_string().contains("Claude Fable 5 refused"));
+                assert!(llm_err.to_string().contains("refused the request"));
             }
             _ => panic!("expected Terminal(Error::Llm) when refusal failover is disallowed"),
         }

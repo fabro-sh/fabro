@@ -314,6 +314,22 @@ async fn encode_fable_uses_api_id_effort_and_omits_1m_beta() {
 }
 
 #[tokio::test]
+async fn encode_opus_omits_1m_beta_header() {
+    let capture = encode_capture(
+        adapter().with_catalog(builtin_catalog()),
+        &base_request("claude-opus-4-8"),
+    )
+    .await;
+
+    assert!(
+        !header_value(&capture, "anthropic-beta")
+            .unwrap_or("")
+            .contains("context-1m-2025-08-07"),
+        "1M context is GA on opus; the legacy beta opt-in must not be sent"
+    );
+}
+
+#[tokio::test]
 async fn encode_fable_without_effort_omits_default_thinking() {
     let capture = encode_capture(
         adapter().with_catalog(builtin_catalog()),
@@ -526,6 +542,7 @@ async fn decode_refusal_returns_failover_eligible_content_filter_error() {
             assert_eq!(*kind, ProviderErrorKind::ContentFilter);
             assert_eq!(detail.provider, "anthropic");
             assert_eq!(detail.error_code.as_deref(), Some("refusal"));
+            assert!(detail.message.contains("claude-fable-5"));
             assert!(detail.message.contains("declined"));
             assert_eq!(
                 detail.raw.as_ref().unwrap()["stop_details"]["category"],

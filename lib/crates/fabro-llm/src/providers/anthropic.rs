@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use fabro_model::{Catalog, ReasoningEffortFeature};
+use fabro_model::{Catalog, Model, ReasoningEffortFeature};
 use futures::stream;
 
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind, error_from_status_code};
-use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::provider::{ProviderAdapter, StreamEventStream, validate_tool_choice};
 use crate::providers::common::{
     self as common, extract_system_prompt, parse_error_body, parse_rate_limit_headers,
     parse_retry_after, send_and_read_response,
@@ -588,7 +588,6 @@ fn convert_stream_event_for_json_schema(event: StreamEvent) -> StreamEvent {
 
 const CACHE_BETA_HEADER: &str = "prompt-caching-2024-07-31";
 const FAST_MODE_BETA_HEADER: &str = "fast-mode-2026-02-01";
-const CLAUDE_FABLE_5_MODEL: &str = "claude-fable-5";
 
 /// Check whether auto-caching is disabled via `provider_options`.
 ///
@@ -685,13 +684,10 @@ fn apply_cache_control_to_conversation_prefix(messages: &mut [ApiMessage]) {
 
 /// Collect beta headers from `provider_options` and merge with the caching
 /// header when auto-caching is active.
-const CONTEXT_1M_BETA_HEADER: &str = "context-1m-2025-08-07";
-
 fn build_beta_header(
     provider_options: Option<&serde_json::Value>,
     include_cache_header: bool,
     include_fast_mode_header: bool,
-    include_1m_context: bool,
 ) -> Option<String> {
     let mut headers: Vec<String> = Vec::new();
 
@@ -717,11 +713,6 @@ fn build_beta_header(
     // Add fast-mode header if speed=fast and not already present
     if include_fast_mode_header && !headers.iter().any(|h| h == FAST_MODE_BETA_HEADER) {
         headers.push(FAST_MODE_BETA_HEADER.to_string());
-    }
-
-    // Add 1M context header for models with >= 1M context window
-    if include_1m_context && !headers.iter().any(|h| h == CONTEXT_1M_BETA_HEADER) {
-        headers.push(CONTEXT_1M_BETA_HEADER.to_string());
     }
 
     if headers.is_empty() {
@@ -1066,6 +1057,7 @@ fn process_sse_event_for_provider(
             .and_then(|delta| delta.get("stop_details"));
         Err(refusal_error(
             provider_name,
+            &acc.model,
             refusal_stream_raw(data),
             stop_details,
         ))
@@ -1088,15 +1080,17 @@ fn refusal_stream_raw(data: &serde_json::Value) -> serde_json::Value {
 
 fn refusal_error(
     provider_name: &str,
+    model: &str,
     raw: serde_json::Value,
     stop_details: Option<&serde_json::Value>,
 ) -> Error {
+    let model_label = if model.is_empty() { "model" } else { model };
     let message = stop_details
         .and_then(|details| details.get("explanation"))
         .and_then(serde_json::Value::as_str)
         .map_or_else(
-            || "Claude Fable 5 refused the request".to_string(),
-            |explanation| format!("Claude Fable 5 refused the request: {explanation}"),
+            || format!("{model_label} refused the request"),
+            |explanation| format!("{model_label} refused the request: {explanation}"),
         );
 
     Error::Provider {
@@ -1288,7 +1282,6 @@ async fn build_api_request(
 
     let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model);
     let api_model = common::api_model_id(adapter.catalog.as_deref(), &request.model);
-    let is_fable = api_model == CLAUDE_FABLE_5_MODEL;
     let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
     let auto_cache =
         supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
@@ -1324,8 +1317,7 @@ async fn build_api_request(
     // Check whether this model supports the `output_config.effort` parameter.
     // Older reasoning models (e.g. claude-sonnet-4-5) need `thinking` with
     // `budget_tokens` instead.
-    let supports_effort =
-        model_info.is_none_or(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels);
+    let supports_effort = model_info.is_none_or(Model::supports_reasoning_effort);
 
     let mut resolved_max_tokens = request
         .max_tokens
@@ -1355,11 +1347,11 @@ async fn build_api_request(
         }
     } else {
         // Auto-set adaptive thinking for known effort-capable models when no
-        // explicit thinking config or reasoning_effort is provided.
+        // explicit thinking config or reasoning_effort is provided. Adaptive
+        // models are natively adaptive and must not receive a `thinking` param.
         let thinking = explicit_thinking.or_else(|| {
-            if !is_fable
-                && model_info
-                    .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
+            if model_info
+                .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
             {
                 Some(serde_json::json!({"type": "adaptive"}))
             } else {
@@ -1375,11 +1367,11 @@ async fn build_api_request(
     }
 
     let is_fast = request.speed == Some(Speed::Fast);
-    // Fable uses adaptive behavior and rejects legacy sampling knobs.
-    let (temperature, top_p) = if is_fable {
-        (None, None)
-    } else {
+    // Models with always-on adaptive behavior reject classic sampling knobs.
+    let (temperature, top_p) = if model_info.is_none_or(|m| m.features.sampling_params) {
         (request.temperature, request.top_p)
+    } else {
+        (None, None)
     };
 
     let api_request = ApiRequest {
@@ -1416,14 +1408,9 @@ async fn build_api_request(
         }
         req_builder = req_builder.header("anthropic-version", "2023-06-01");
 
-        let include_1m_context =
-            !is_fable && model_info.is_some_and(|m| m.context_window() >= 1_000_000);
-        if let Some(beta_str) = build_beta_header(
-            request.provider_options.as_ref(),
-            auto_cache,
-            is_fast,
-            include_1m_context,
-        ) {
+        if let Some(beta_str) =
+            build_beta_header(request.provider_options.as_ref(), auto_cache, is_fast)
+        {
             req_builder = req_builder.header("anthropic-beta", beta_str);
         }
     } else if let Some(api_key) = &adapter.http.api_key {
@@ -1456,14 +1443,10 @@ impl ProviderAdapter for Adapter {
         let count_request = CountTokensRequest::from(api_request);
 
         let model_info = common::catalog_model(self.catalog.as_deref(), &request.model);
-        let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);
-        let is_fable = api_model == CLAUDE_FABLE_5_MODEL;
         let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
         let auto_cache =
             supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
         let is_fast = request.speed == Some(Speed::Fast);
-        let include_1m_context =
-            !is_fable && model_info.is_some_and(|m| m.context_window() >= 1_000_000);
 
         let url = self.count_tokens_url();
         let mut req = self.http.client.post(&url);
@@ -1474,12 +1457,9 @@ impl ProviderAdapter for Adapter {
             req = req.header("x-api-key", api_key);
         }
         req = req.header("anthropic-version", "2023-06-01");
-        if let Some(beta_str) = build_beta_header(
-            request.provider_options.as_ref(),
-            auto_cache,
-            is_fast,
-            include_1m_context,
-        ) {
+        if let Some(beta_str) =
+            build_beta_header(request.provider_options.as_ref(), auto_cache, is_fast)
+        {
             req = req.header("anthropic-beta", beta_str);
         }
 
@@ -1540,6 +1520,7 @@ impl ProviderAdapter for Adapter {
         if api_resp.stop_reason.as_deref() == Some("refusal") {
             return Err(refusal_error(
                 &self.provider_name,
+                &api_resp.model,
                 raw,
                 api_resp.stop_details.as_ref(),
             ));
@@ -1676,17 +1657,20 @@ impl ProviderAdapter for Adapter {
 
     fn validate_request(&self, request: &Request) -> Result<(), Error> {
         if let Some(tool_choice) = &request.tool_choice {
-            crate::provider::validate_tool_choice(self, tool_choice)?;
+            validate_tool_choice(self, tool_choice)?;
         }
 
-        let api_model = common::api_model_id(self.catalog.as_deref(), &request.model);
-        if api_model == CLAUDE_FABLE_5_MODEL {
+        let model_info = common::catalog_model(self.catalog.as_deref(), &request.model);
+        if let Some(model) =
+            model_info.filter(|m| m.features.reasoning_effort == ReasoningEffortFeature::Adaptive)
+        {
             if let Some(kind @ ("enabled" | "disabled")) =
                 anthropic_thinking_type(request.provider_options.as_ref())
             {
                 return Err(Error::Configuration {
                     message: format!(
-                        "Claude Fable 5 uses always-on adaptive thinking; provider_options.anthropic.thinking.type = \"{kind}\" is not supported. Omit thinking or set only display options."
+                        "{} uses always-on adaptive thinking; provider_options.anthropic.thinking.type = \"{kind}\" is not supported. Omit thinking or set only display options.",
+                        model.display_name()
                     ),
                     source:  None,
                 });
@@ -2037,13 +2021,13 @@ mod tests {
 
     #[test]
     fn beta_header_includes_cache_header() {
-        let result = build_beta_header(None, true, false, false);
+        let result = build_beta_header(None, true, false);
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
 
     #[test]
     fn beta_header_no_cache_no_user_headers() {
-        let result = build_beta_header(None, false, false, false);
+        let result = build_beta_header(None, false, false);
         assert_eq!(result, None);
     }
 
@@ -2054,7 +2038,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), true, false, false);
+        let result = build_beta_header(Some(&opts), true, false);
         assert_eq!(
             result,
             Some(format!(
@@ -2070,7 +2054,7 @@ mod tests {
                 "beta_headers": [CACHE_BETA_HEADER]
             }
         });
-        let result = build_beta_header(Some(&opts), true, false, false);
+        let result = build_beta_header(Some(&opts), true, false);
         // Should not duplicate the header
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
@@ -2082,7 +2066,7 @@ mod tests {
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), false, false, false);
+        let result = build_beta_header(Some(&opts), false, false);
         assert_eq!(result, Some("interleaved-thinking-2025-05-14".to_string()));
     }
 
@@ -2628,7 +2612,7 @@ reasoning = true
         ];
 
         // No user headers — only cache header should appear
-        let header = build_beta_header(None, true, false, false).unwrap_or_default();
+        let header = build_beta_header(None, true, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -2642,7 +2626,7 @@ reasoning = true
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let header = build_beta_header(Some(&opts), true, false, false).unwrap_or_default();
+        let header = build_beta_header(Some(&opts), true, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -3022,7 +3006,7 @@ reasoning_effort = "levels"
     }
     #[test]
     fn beta_header_includes_both_cache_and_fast_mode() {
-        let result = build_beta_header(None, true, true, false);
+        let result = build_beta_header(None, true, true);
         let header = result.expect("should produce a header");
         assert!(
             header.contains(CACHE_BETA_HEADER),

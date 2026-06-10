@@ -24,8 +24,9 @@ max_output = 128000
 tools = true
 vision = true
 reasoning = true
-reasoning_effort = "levels"
+reasoning_effort = "adaptive"
 prompt_cache = true
+sampling_params = false
 
 [models."claude-fable-5".costs]
 input_cost_per_mtok = 10.0
