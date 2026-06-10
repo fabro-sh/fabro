@@ -1,6 +1,8 @@
 //! Response decoding: Gemini `generateContent` body → canonical `Response`,
 //! plus the gRPC-status error mapping behind the codec's `decode_error`.
 
+use serde::Deserialize;
+
 use super::wire::{ApiResponse, CountTokensResponse, UsageMetadata};
 use crate::codec::CodecCtx;
 use crate::error::{
@@ -116,7 +118,9 @@ pub(super) fn decode_response(
     ctx: &CodecCtx<'_>,
     rate_limit: Option<RateLimitInfo>,
 ) -> Result<Response, Error> {
-    let api_resp: ApiResponse = serde_json::from_str(body)
+    let raw: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| Error::network(format!("failed to parse Gemini response: {e}"), e))?;
+    let api_resp = ApiResponse::deserialize(&raw)
         .map_err(|e| Error::network(format!("failed to parse Gemini response: {e}"), e))?;
 
     let candidate = api_resp
@@ -155,7 +159,7 @@ pub(super) fn decode_response(
         },
         finish_reason,
         usage,
-        raw: serde_json::from_str(body).ok(),
+        raw: Some(raw),
         warnings: vec![],
         rate_limit,
     })

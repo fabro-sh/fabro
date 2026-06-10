@@ -91,6 +91,23 @@ impl Adapter {
         attachments::resolve(request, policy).await
     }
 
+    /// Build the borrowed codec context. `deployment_id` and `params` are
+    /// created by the caller so their borrows outlive the context.
+    fn codec_ctx<'a>(
+        &'a self,
+        request: &'a Request,
+        deployment_id: &'a str,
+        params: &'a CodecParams,
+    ) -> CodecCtx<'a> {
+        CodecCtx {
+            request,
+            provider_name: &self.provider_name,
+            deployment_id,
+            model: common::catalog_model(self.catalog.as_deref(), &request.model),
+            params,
+        }
+    }
+
     /// Apply the base URL, auth (`x-goog-api-key`), and codec-emitted headers
     /// to an encoded request.
     fn build_http_request(&self, encoded: &EncodedRequest) -> fabro_http::RequestBuilder {
@@ -174,13 +191,7 @@ impl ProviderAdapter for Adapter {
         let codec = GeminiGenerate;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
         let params = CodecParams;
-        let ctx = CodecCtx {
-            request:       &resolved,
-            provider_name: &self.provider_name,
-            deployment_id: &deployment_id,
-            model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-            params:        &params,
-        };
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
         let Some(encoded) = codec.encode_count_tokens(&ctx).transpose()? else {
             return Ok(None);
@@ -209,13 +220,7 @@ impl ProviderAdapter for Adapter {
         let codec = GeminiGenerate;
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
         let params = CodecParams;
-        let ctx = CodecCtx {
-            request:       &resolved,
-            provider_name: &self.provider_name,
-            deployment_id: &deployment_id,
-            model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-            params:        &params,
-        };
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
         let encoded = codec.encode(&ctx, false)?;
         let mut req = self.build_http_request(&encoded);
@@ -235,48 +240,26 @@ impl ProviderAdapter for Adapter {
         let deployment_id = common::api_model_id(self.catalog.as_deref(), &resolved.model);
         let params = CodecParams;
         let stream_read_timeout = self.http.stream_read_timeout;
-        let rate_limit;
+        let ctx = self.codec_ctx(&resolved, &deployment_id, &params);
 
-        let http_resp = {
-            let ctx = CodecCtx {
-                request:       &resolved,
-                provider_name: &self.provider_name,
-                deployment_id: &deployment_id,
-                model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-                params:        &params,
-            };
-            let encoded = codec.encode(&ctx, true)?;
-            let resp = self
-                .build_http_request(&encoded)
-                .send()
+        let encoded = codec.encode(&ctx, true)?;
+        let http_resp = self
+            .build_http_request(&encoded)
+            .send()
+            .await
+            .map_err(|e| Error::network(e.to_string(), e))?;
+
+        let status = http_resp.status();
+        if !status.is_success() {
+            let retry_after = parse_retry_after(http_resp.headers());
+            let body = http_resp
+                .text()
                 .await
                 .map_err(|e| Error::network(e.to_string(), e))?;
-
-            let status = resp.status();
-            if !status.is_success() {
-                let retry_after = parse_retry_after(resp.headers());
-                let body = resp
-                    .text()
-                    .await
-                    .map_err(|e| Error::network(e.to_string(), e))?;
-                return Err(codec.decode_error(status.as_u16(), &body, &ctx, retry_after));
-            }
-            rate_limit = parse_rate_limit_headers(resp.headers());
-            resp
-        };
-
-        // Build the decoder while the ctx is still in scope; it captures owned
-        // state and does not borrow ctx beyond construction.
-        let decoder = {
-            let ctx = CodecCtx {
-                request:       &resolved,
-                provider_name: &self.provider_name,
-                deployment_id: &deployment_id,
-                model:         common::catalog_model(self.catalog.as_deref(), &resolved.model),
-                params:        &params,
-            };
-            codec.stream_decoder(&ctx, rate_limit)
-        };
+            return Err(codec.decode_error(status.as_u16(), &body, &ctx, retry_after));
+        }
+        let rate_limit = parse_rate_limit_headers(http_resp.headers());
+        let decoder = codec.stream_decoder(&ctx, rate_limit);
 
         let out = stream::unfold(
             StreamLoop {

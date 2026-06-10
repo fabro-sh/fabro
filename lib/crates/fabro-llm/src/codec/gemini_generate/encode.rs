@@ -110,6 +110,26 @@ fn build_tool_call_id_to_name(messages: &[&Message]) -> std::collections::HashMa
     map
 }
 
+/// Encode a media attachment part: URL-backed attachments become `fileData`,
+/// inline bytes become base64 `inlineData`.
+fn media_part(
+    url: Option<&str>,
+    data: Option<&[u8]>,
+    media_type: Option<&str>,
+    default_mime: &str,
+) -> Option<serde_json::Value> {
+    let mime = media_type.unwrap_or(default_mime);
+    match url {
+        Some(url) => Some(serde_json::json!({
+            "fileData": {"mimeType": mime, "fileUri": url}
+        })),
+        None => data.map(|data| {
+            let b64 = BASE64_STANDARD.encode(data);
+            serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
+        }),
+    }
+}
+
 /// Translate unified messages to Gemini content format. Sync: file-backed
 /// attachments are already resolved to inline data upstream.
 pub(super) fn translate_messages(messages: &[&Message]) -> Vec<Content> {
@@ -144,45 +164,24 @@ pub(super) fn translate_messages(messages: &[&Message]) -> Vec<Content> {
                     }
                     Some(part_json)
                 }
-                ContentPart::Image(img) => match &img.url {
-                    Some(url) => {
-                        let mime = img.media_type.as_deref().unwrap_or("image/png");
-                        Some(serde_json::json!({
-                            "fileData": {"mimeType": mime, "fileUri": url}
-                        }))
-                    }
-                    None => img.data.as_ref().map(|data| {
-                        let mime = img.media_type.as_deref().unwrap_or("image/png");
-                        let b64 = BASE64_STANDARD.encode(data);
-                        serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
-                    }),
-                },
-                ContentPart::Audio(audio) => match &audio.url {
-                    Some(url) => {
-                        let mime = audio.media_type.as_deref().unwrap_or("audio/wav");
-                        Some(serde_json::json!({
-                            "fileData": {"mimeType": mime, "fileUri": url}
-                        }))
-                    }
-                    None => audio.data.as_ref().map(|data| {
-                        let mime = audio.media_type.as_deref().unwrap_or("audio/wav");
-                        let b64 = BASE64_STANDARD.encode(data);
-                        serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
-                    }),
-                },
-                ContentPart::Document(doc) => match &doc.url {
-                    Some(url) => {
-                        let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
-                        Some(serde_json::json!({
-                            "fileData": {"mimeType": mime, "fileUri": url}
-                        }))
-                    }
-                    None => doc.data.as_ref().map(|data| {
-                        let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
-                        let b64 = BASE64_STANDARD.encode(data);
-                        serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
-                    }),
-                },
+                ContentPart::Image(img) => media_part(
+                    img.url.as_deref(),
+                    img.data.as_deref(),
+                    img.media_type.as_deref(),
+                    "image/png",
+                ),
+                ContentPart::Audio(audio) => media_part(
+                    audio.url.as_deref(),
+                    audio.data.as_deref(),
+                    audio.media_type.as_deref(),
+                    "audio/wav",
+                ),
+                ContentPart::Document(doc) => media_part(
+                    doc.url.as_deref(),
+                    doc.data.as_deref(),
+                    doc.media_type.as_deref(),
+                    "application/pdf",
+                ),
                 ContentPart::ToolResult(tr) => {
                     // Gemini's functionResponse uses the function *name*, not the call ID.
                     // Look up the original function name from the tool call mapping.
