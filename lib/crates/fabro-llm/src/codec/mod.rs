@@ -11,6 +11,7 @@
 //! methods, never extend the contract.
 
 pub(crate) mod anthropic_messages;
+pub(crate) mod gemini_generate;
 pub(crate) mod openai_compatible;
 pub(crate) mod openai_responses;
 
