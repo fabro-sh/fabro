@@ -18,7 +18,6 @@ use crate::types::{
 
 const CACHE_BETA_HEADER: &str = "prompt-caching-2024-07-31";
 const FAST_MODE_BETA_HEADER: &str = "fast-mode-2026-02-01";
-const CONTEXT_1M_BETA_HEADER: &str = "context-1m-2025-08-07";
 
 /// Known `provider_options.anthropic` keys handled directly by the codec; not
 /// re-merged into the body.
@@ -50,10 +49,9 @@ pub(super) fn encode_count_tokens(ctx: &CodecCtx<'_>) -> EncodedRequest {
 
 /// The assembled `ApiRequest` plus the inputs needed to build dialect headers.
 struct Built {
-    request:            ApiRequest,
-    auto_cache:         bool,
-    is_fast:            bool,
-    include_1m_context: bool,
+    request:    ApiRequest,
+    auto_cache: bool,
+    is_fast:    bool,
 }
 
 fn build_headers(ctx: &CodecCtx<'_>, built: &Built) -> Vec<(String, String)> {
@@ -66,7 +64,6 @@ fn build_headers(ctx: &CodecCtx<'_>, built: &Built) -> Vec<(String, String)> {
             ctx.request.provider_options.as_ref(),
             built.auto_cache,
             built.is_fast,
-            built.include_1m_context,
         ) {
             headers.push(("anthropic-beta".to_string(), beta));
         }
@@ -130,18 +127,30 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
 
     // Older reasoning models (e.g. claude-sonnet-4-5) need `thinking` with
     // `budget_tokens` instead of `output_config.effort`.
-    let supports_effort =
-        model_info.is_none_or(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels);
+    let supports_effort = model_info.is_none_or(fabro_model::Model::supports_reasoning_effort);
 
     let mut resolved_max_tokens = request
         .max_tokens
         .or_else(|| model_info.and_then(|m| m.limits.max_output))
         .unwrap_or(65536);
 
+    // Default thinking when none is configured explicitly: adaptive for
+    // `levels` models, with or without an effort level — effort is guidance
+    // for thinking allocation, not a replacement for it. Natively adaptive
+    // models don't need one injected (and reject a manual on/off toggle).
+    let default_thinking = || {
+        if model_info.is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
+        {
+            Some(serde_json::json!({"type": "adaptive"}))
+        } else {
+            None
+        }
+    };
+
     let (mut thinking, mut output_config) = if let Some(effort) = &request.reasoning_effort {
         if supports_effort {
             (
-                explicit_thinking,
+                explicit_thinking.or_else(default_thinking),
                 Some(serde_json::json!({"effort": <&'static str>::from(*effort)})),
             )
         } else if explicit_thinking.is_none() {
@@ -157,16 +166,7 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
             (explicit_thinking, None)
         }
     } else {
-        let thinking = explicit_thinking.or_else(|| {
-            if model_info
-                .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
-            {
-                Some(serde_json::json!({"type": "adaptive"}))
-            } else {
-                None
-            }
-        });
-        (thinking, None)
+        (explicit_thinking.or_else(default_thinking), None)
     };
 
     if tool_choice_forces_tool_use(tool_choice_json.as_ref()) {
@@ -175,15 +175,24 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
     }
 
     let is_fast = request.speed == Some(Speed::Fast);
-    let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
+    // Models with `sampling_params = false` reject classic sampling knobs.
+    // This gate covers only the typed request fields; values injected through
+    // `provider_options.anthropic` (e.g. `top_k`) are a raw escape hatch and
+    // pass through unfiltered.
+    let (temperature, top_p) =
+        if model_info.is_none_or(fabro_model::Model::supports_sampling_params) {
+            (request.temperature, request.top_p)
+        } else {
+            (None, None)
+        };
 
     let request_struct = ApiRequest {
         model: ctx.deployment_id.to_string(),
         messages: api_messages,
         max_tokens: resolved_max_tokens,
         system: system_value,
-        temperature: request.temperature,
-        top_p: request.top_p,
+        temperature,
+        top_p,
         stop_sequences: Some(request.stop_sequences.clone().unwrap_or_default()),
         tools: api_tools,
         tool_choice: tool_choice_json,
@@ -202,7 +211,6 @@ fn build_request(ctx: &CodecCtx<'_>, stream: bool) -> Built {
         request: request_struct,
         auto_cache,
         is_fast,
-        include_1m_context,
     }
 }
 
@@ -476,7 +484,6 @@ fn build_beta_header(
     provider_options: Option<&serde_json::Value>,
     include_cache_header: bool,
     include_fast_mode_header: bool,
-    include_1m_context: bool,
 ) -> Option<String> {
     let mut headers: Vec<String> = Vec::new();
 
@@ -499,10 +506,6 @@ fn build_beta_header(
 
     if include_fast_mode_header && !headers.iter().any(|h| h == FAST_MODE_BETA_HEADER) {
         headers.push(FAST_MODE_BETA_HEADER.to_string());
-    }
-
-    if include_1m_context && !headers.iter().any(|h| h == CONTEXT_1M_BETA_HEADER) {
-        headers.push(CONTEXT_1M_BETA_HEADER.to_string());
     }
 
     if headers.is_empty() {
@@ -843,13 +846,13 @@ reasoning = true
 
     #[test]
     fn beta_header_includes_cache_header() {
-        let result = build_beta_header(None, true, false, false);
+        let result = build_beta_header(None, true, false);
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
 
     #[test]
     fn beta_header_no_cache_no_user_headers() {
-        let result = build_beta_header(None, false, false, false);
+        let result = build_beta_header(None, false, false);
         assert_eq!(result, None);
     }
 
@@ -860,7 +863,7 @@ reasoning = true
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), true, false, false);
+        let result = build_beta_header(Some(&opts), true, false);
         assert_eq!(
             result,
             Some(format!(
@@ -876,7 +879,7 @@ reasoning = true
                 "beta_headers": [CACHE_BETA_HEADER]
             }
         });
-        let result = build_beta_header(Some(&opts), true, false, false);
+        let result = build_beta_header(Some(&opts), true, false);
         // Should not duplicate the header
         assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
     }
@@ -888,7 +891,7 @@ reasoning = true
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let result = build_beta_header(Some(&opts), false, false, false);
+        let result = build_beta_header(Some(&opts), false, false);
         assert_eq!(result, Some("interleaved-thinking-2025-05-14".to_string()));
     }
 
@@ -902,7 +905,7 @@ reasoning = true
         ];
 
         // No user headers — only cache header should appear
-        let header = build_beta_header(None, true, false, false).unwrap_or_default();
+        let header = build_beta_header(None, true, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -916,7 +919,7 @@ reasoning = true
                 "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         });
-        let header = build_beta_header(Some(&opts), true, false, false).unwrap_or_default();
+        let header = build_beta_header(Some(&opts), true, false).unwrap_or_default();
         for dep in &deprecated {
             assert!(
                 !header.contains(dep),
@@ -927,7 +930,7 @@ reasoning = true
 
     #[test]
     fn beta_header_includes_both_cache_and_fast_mode() {
-        let result = build_beta_header(None, true, true, false);
+        let result = build_beta_header(None, true, true);
         let header = result.expect("should produce a header");
         assert!(
             header.contains(CACHE_BETA_HEADER),

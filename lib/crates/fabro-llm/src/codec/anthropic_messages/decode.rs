@@ -3,7 +3,7 @@
 use super::SYNTHETIC_TOOL_NAME;
 use super::wire::{ApiResponse, ApiUsage, CountTokensResponse};
 use crate::codec::CodecCtx;
-use crate::error::Error;
+use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind};
 use crate::types::{
     ContentPart, FinishReason, Message, RateLimitInfo, Request, Response, ResponseFormatType, Role,
     ThinkingData, TokenCounts, ToolCall,
@@ -86,17 +86,63 @@ pub(super) fn uses_json_schema_format(request: &Request) -> bool {
         .is_some_and(|f| matches!(f.kind, ResponseFormatType::JsonSchema))
 }
 
+/// Map a refusal stop reason (Claude Fable 5) to a content-filter provider
+/// error. Shared by the response decoder and the stream decoder; the
+/// `error_code = "refusal"` marker is what makes it failover-eligible.
+pub(super) fn refusal_error(
+    provider_name: &str,
+    model: &str,
+    raw: serde_json::Value,
+    stop_details: Option<&serde_json::Value>,
+) -> Error {
+    let model_label = if model.is_empty() { "The model" } else { model };
+    let message = stop_details
+        .and_then(|details| details.get("explanation"))
+        .and_then(serde_json::Value::as_str)
+        .map_or_else(
+            || format!("{model_label} refused the request"),
+            |explanation| format!("{model_label} refused the request: {explanation}"),
+        );
+
+    Error::Provider {
+        kind:   ProviderErrorKind::ContentFilter,
+        detail: Box::new(ProviderErrorDetail {
+            message,
+            provider: provider_name.to_string(),
+            status_code: None,
+            error_code: Some("refusal".to_string()),
+            retry_after: None,
+            raw: Some(raw),
+        }),
+    }
+}
+
 pub(super) fn decode_response(
     body: &str,
     ctx: &CodecCtx<'_>,
     rate_limit: Option<RateLimitInfo>,
 ) -> Result<Response, Error> {
-    let api_resp: ApiResponse = serde_json::from_str(body).map_err(|e| {
+    let raw: serde_json::Value = serde_json::from_str(body).map_err(|e| {
         Error::network(
             format!("failed to parse {} response: {e}", ctx.provider_name),
             e,
         )
     })?;
+    let api_resp: ApiResponse = serde_json::from_value(raw.clone()).map_err(|e| {
+        Error::network(
+            format!("failed to parse {} response: {e}", ctx.provider_name),
+            e,
+        )
+    })?;
+
+    if api_resp.stop_reason.as_deref() == Some("refusal") {
+        return Err(refusal_error(
+            ctx.provider_name,
+            &api_resp.model,
+            raw,
+            api_resp.stop_details.as_ref(),
+        ));
+    }
 
     let content_parts: Vec<ContentPart> = api_resp
         .content
@@ -131,7 +177,7 @@ pub(super) fn decode_response(
         },
         finish_reason,
         usage: token_counts_from_api_usage(&api_resp.usage),
-        raw: serde_json::from_str(body).ok(),
+        raw: Some(raw),
         warnings: vec![],
         rate_limit,
     })

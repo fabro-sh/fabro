@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use fabro_model::Catalog;
+use fabro_model::{Catalog, ReasoningEffortFeature};
 use futures::stream;
 
 use crate::attachments::{self, AttachmentPolicy};
@@ -9,7 +9,7 @@ use crate::codec::{
     AnthropicVersion, Codec, CodecCtx, CodecParams, EncodedRequest, RawEvent, StreamDecoder,
 };
 use crate::error::{Error, error_from_status_code};
-use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::provider::{self, ProviderAdapter, StreamEventStream};
 use crate::providers::common::{
     self as common, parse_error_body, parse_rate_limit_headers, parse_retry_after,
     send_and_read_response,
@@ -198,6 +198,15 @@ struct StreamLoop {
     pending:          std::collections::VecDeque<StreamEvent>,
     done:             bool,
     finished_emitted: bool,
+}
+
+/// The `provider_options.anthropic.thinking.type` value, if any.
+fn anthropic_thinking_type(provider_options: Option<&serde_json::Value>) -> Option<&str> {
+    provider_options
+        .and_then(|opts| opts.get("anthropic"))
+        .and_then(|anthropic| anthropic.get("thinking"))
+        .and_then(|thinking| thinking.get("type"))
+        .and_then(serde_json::Value::as_str)
 }
 
 /// Parse an SSE event block (lines separated within a `\n\n`-delimited chunk)
@@ -410,6 +419,34 @@ impl ProviderAdapter for Adapter {
 
     fn supports_tool_choice(&self, mode: &str) -> bool {
         matches!(mode, "auto" | "none" | "required" | "named")
+    }
+
+    fn validate_request(&self, request: &Request) -> Result<(), Error> {
+        if let Some(tool_choice) = &request.tool_choice {
+            provider::validate_tool_choice(self, tool_choice)?;
+        }
+
+        // Always-adaptive models reject manual enabled/disabled thinking
+        // configs at the API, so fail them locally with a clear message
+        // instead.
+        let model_info = common::catalog_model(self.catalog.as_deref(), &request.model);
+        if let Some(model) = model_info
+            .filter(|m| m.features.reasoning_effort == ReasoningEffortFeature::AlwaysAdaptive)
+        {
+            if let Some(kind @ ("enabled" | "disabled")) =
+                anthropic_thinking_type(request.provider_options.as_ref())
+            {
+                return Err(Error::Configuration {
+                    message: format!(
+                        "{} uses always-on adaptive thinking; provider_options.anthropic.thinking.type = \"{kind}\" is not supported. Omit thinking or set only display options.",
+                        model.display_name()
+                    ),
+                    source:  None,
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 

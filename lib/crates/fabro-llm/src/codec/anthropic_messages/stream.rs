@@ -6,7 +6,9 @@
 //! so `finish()` returns nothing.
 
 use super::SYNTHETIC_TOOL_NAME;
-use super::decode::{convert_synthetic_tool_to_text, map_finish_reason, uses_json_schema_format};
+use super::decode::{
+    convert_synthetic_tool_to_text, map_finish_reason, refusal_error, uses_json_schema_format,
+};
 use crate::codec::{CodecCtx, RawEvent, StreamDecoder};
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind};
 use crate::types::{
@@ -313,6 +315,34 @@ impl SseAccumulator {
     }
 }
 
+/// Extract the `stop_details` from a refusal `message_delta`, if present.
+fn refusal_stop_details(data: &serde_json::Value) -> Option<&serde_json::Value> {
+    data.get("delta")
+        .and_then(|delta| delta.get("stop_details"))
+}
+
+/// Whether a `message_delta` event carries a refusal stop reason.
+fn is_refusal_message_delta(event_type: &str, data: &serde_json::Value) -> bool {
+    event_type == "message_delta"
+        && data
+            .get("delta")
+            .and_then(|delta| delta.get("stop_reason"))
+            .and_then(serde_json::Value::as_str)
+            == Some("refusal")
+}
+
+/// Wrap a refusal stream event in the same raw shape the non-streaming
+/// refusal error carries (`stop_reason` + `stop_details` + the event).
+fn refusal_stream_raw(data: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "stop_reason": "refusal",
+        "stop_details": refusal_stop_details(data)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        "stream_event": data,
+    })
+}
+
 /// Map an Anthropic `error` stream event to a provider error.
 fn stream_error_event_to_provider_error(data: &serde_json::Value, provider_name: &str) -> Error {
     let error = data.get("error").unwrap_or(data);
@@ -398,6 +428,18 @@ impl StreamDecoder for SseAccumulator {
 
         if event_type == "error" {
             return Err(stream_error_event_to_provider_error(&data, &self.provider));
+        }
+
+        // A refusal (Claude Fable 5) arrives as a `message_delta` stop reason;
+        // surface it as an error instead of letting `message_stop` emit a
+        // normal Finish.
+        if is_refusal_message_delta(event_type, &data) {
+            return Err(refusal_error(
+                &self.provider,
+                &self.model,
+                refusal_stream_raw(&data),
+                refusal_stop_details(&data),
+            ));
         }
 
         let events = self.process_event(event_type, &data);

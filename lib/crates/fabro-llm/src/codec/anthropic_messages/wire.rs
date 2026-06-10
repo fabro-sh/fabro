@@ -96,11 +96,13 @@ impl CacheControl {
 
 #[derive(serde::Deserialize)]
 pub(super) struct ApiResponse {
-    pub id:          String,
-    pub model:       String,
-    pub content:     Vec<serde_json::Value>,
-    pub stop_reason: Option<String>,
-    pub usage:       ApiUsage,
+    pub id:           String,
+    pub model:        String,
+    pub content:      Vec<serde_json::Value>,
+    pub stop_reason:  Option<String>,
+    #[serde(default)]
+    pub stop_details: Option<serde_json::Value>,
+    pub usage:        ApiUsage,
 }
 
 #[derive(serde::Deserialize)]
