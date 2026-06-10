@@ -350,6 +350,33 @@ async fn encode_opus_drops_sampling_params() {
 }
 
 #[tokio::test]
+async fn encode_opus_effort_keeps_adaptive_thinking() {
+    let request = Request {
+        reasoning_effort: Some(ReasoningEffort::High),
+        ..base_request("claude-opus-4-8")
+    };
+
+    let capture = encode_capture(adapter().with_catalog(builtin_catalog()), &request).await;
+
+    assert_eq!(capture.body["output_config"]["effort"], "high");
+    assert_eq!(
+        capture.body["thinking"]["type"], "adaptive",
+        "asking for effort must not turn thinking off; Opus 4.7/4.8 run without thinking unless adaptive is sent"
+    );
+}
+
+#[tokio::test]
+async fn encode_opus_without_effort_injects_adaptive_thinking() {
+    let capture = encode_capture(
+        adapter().with_catalog(builtin_catalog()),
+        &base_request("claude-opus-4-8"),
+    )
+    .await;
+
+    assert_eq!(capture.body["thinking"]["type"], "adaptive");
+}
+
+#[tokio::test]
 async fn encode_fable_without_effort_omits_default_thinking() {
     let capture = encode_capture(
         adapter().with_catalog(builtin_catalog()),

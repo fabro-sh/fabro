@@ -17,6 +17,9 @@ expression: rendered
   ],
   "max_tokens": 128,
   "stop_sequences": [],
+  "thinking": {
+    "type": "adaptive"
+  },
   "output_config": {
     "effort": "high"
   }

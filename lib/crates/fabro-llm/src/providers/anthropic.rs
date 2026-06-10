@@ -1324,10 +1324,23 @@ async fn build_api_request(
         .or_else(|| model_info.and_then(|m| m.limits.max_output))
         .unwrap_or(65536);
 
+    // Default thinking when none is configured explicitly: adaptive for
+    // `levels` models, with or without an effort level — effort is guidance
+    // for thinking allocation, not a replacement for it. Natively adaptive
+    // models don't need one injected (and reject a manual on/off toggle).
+    let default_thinking = || {
+        if model_info.is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
+        {
+            Some(serde_json::json!({"type": "adaptive"}))
+        } else {
+            None
+        }
+    };
+
     let (mut thinking, mut output_config) = if let Some(effort) = &request.reasoning_effort {
         if supports_effort {
             (
-                explicit_thinking,
+                explicit_thinking.or_else(default_thinking),
                 Some(serde_json::json!({"effort": <&'static str>::from(*effort)})),
             )
         } else if explicit_thinking.is_none() {
@@ -1346,20 +1359,7 @@ async fn build_api_request(
             (explicit_thinking, None)
         }
     } else {
-        // Auto-set adaptive thinking for known effort-capable models when no
-        // explicit thinking config or reasoning_effort is provided. Natively
-        // adaptive models don't need one injected (and reject a manual on/off
-        // toggle).
-        let thinking = explicit_thinking.or_else(|| {
-            if model_info
-                .is_some_and(|m| m.features.reasoning_effort == ReasoningEffortFeature::Levels)
-            {
-                Some(serde_json::json!({"type": "adaptive"}))
-            } else {
-                None
-            }
-        });
-        (thinking, None)
+        (explicit_thinking.or_else(default_thinking), None)
     };
 
     if tool_choice_forces_tool_use(tool_choice_json.as_ref()) {
