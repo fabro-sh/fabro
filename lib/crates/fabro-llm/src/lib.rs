@@ -2,7 +2,7 @@ pub mod adapter_registry;
 mod attachments;
 pub mod client;
 mod codec;
-pub mod cost;
+pub(crate) mod cost;
 pub mod error;
 pub mod generate;
 pub mod middleware;

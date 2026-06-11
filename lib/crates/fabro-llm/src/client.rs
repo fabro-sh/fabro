@@ -337,35 +337,16 @@ impl Client {
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
-            provider.validate_request(request)?;
-            let mut response = provider.complete(request).await?;
-            cost::apply_estimated_cost(
-                self.catalog.as_deref(),
-                &request.model,
-                request.speed,
-                &mut response,
-            );
-            return Ok(response);
+            return complete_stamped(&provider, self.catalog.as_deref(), request).await;
         }
 
         // Build middleware chain. Cost is stamped at the base so middleware
         // observes the final response.
-        let provider_clone = provider.clone();
         let catalog = self.catalog.clone();
         let base: NextFn = Arc::new(move |req: Request| {
-            let p = provider_clone.clone();
+            let provider = provider.clone();
             let catalog = catalog.clone();
-            Box::pin(async move {
-                p.validate_request(&req)?;
-                let mut response = p.complete(&req).await?;
-                cost::apply_estimated_cost(
-                    catalog.as_deref(),
-                    &req.model,
-                    req.speed,
-                    &mut response,
-                );
-                Ok(response)
-            })
+            Box::pin(async move { complete_stamped(&provider, catalog.as_deref(), &req).await })
         });
 
         let chain = self.middleware.iter().rev().fold(base, |next, mw| {
@@ -392,28 +373,16 @@ impl Client {
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
-            provider.validate_request(request)?;
-            let stream = provider.stream(request).await?;
-            return Ok(stamp_stream_costs(
-                self.catalog.clone(),
-                request.model.clone(),
-                request.speed,
-                stream,
-            ));
+            return stream_stamped(&provider, self.catalog.clone(), request).await;
         }
 
         // Build streaming middleware chain. Cost is stamped at the base so
         // middleware observes the final Finish events.
-        let provider_clone = provider.clone();
         let catalog = self.catalog.clone();
         let base: NextStreamFn = Arc::new(move |req: Request| {
-            let p = provider_clone.clone();
+            let provider = provider.clone();
             let catalog = catalog.clone();
-            Box::pin(async move {
-                p.validate_request(&req)?;
-                let stream = p.stream(&req).await?;
-                Ok(stamp_stream_costs(catalog, req.model, req.speed, stream))
-            })
+            Box::pin(async move { stream_stamped(&provider, catalog, &req).await })
         });
 
         let chain = self.middleware.iter().rev().fold(base, |next, mw| {
@@ -520,6 +489,38 @@ impl Client {
     }
 }
 
+/// Validate, run, and cost-stamp a blocking request. Shared by
+/// [`Client::complete`]'s direct path and its middleware-chain base so cost
+/// stamping stays single-sited.
+async fn complete_stamped(
+    provider: &Arc<dyn ProviderAdapter>,
+    catalog: Option<&Catalog>,
+    request: &Request,
+) -> Result<Response, Error> {
+    provider.validate_request(request)?;
+    let mut response = provider.complete(request).await?;
+    cost::apply_estimated_cost(catalog, &request.model, request.speed, &mut response);
+    Ok(response)
+}
+
+/// Validate and run a streaming request, cost-stamping terminal
+/// [`StreamEvent::Finish`] responses. Shared by [`Client::stream`]'s direct
+/// path and its middleware-chain base so cost stamping stays single-sited.
+async fn stream_stamped(
+    provider: &Arc<dyn ProviderAdapter>,
+    catalog: Option<Arc<Catalog>>,
+    request: &Request,
+) -> Result<StreamEventStream, Error> {
+    provider.validate_request(request)?;
+    let stream = provider.stream(request).await?;
+    Ok(stamp_stream_costs(
+        catalog,
+        request.model.clone(),
+        request.speed,
+        stream,
+    ))
+}
+
 /// Wrap a provider event stream so terminal [`StreamEvent::Finish`]
 /// responses carry a catalog-estimated cost, mirroring what
 /// [`Client::complete`] stamps on blocking responses.
@@ -532,20 +533,11 @@ fn stamp_stream_costs(
     use futures::StreamExt;
 
     Box::pin(stream.map(move |event| {
-        event.map(|event| match event {
-            StreamEvent::Finish {
-                finish_reason,
-                usage,
-                mut response,
-            } => {
-                cost::apply_estimated_cost(catalog.as_deref(), &model, speed, &mut response);
-                StreamEvent::Finish {
-                    finish_reason,
-                    usage,
-                    response,
-                }
+        event.map(|mut event| {
+            if let StreamEvent::Finish { response, .. } = &mut event {
+                cost::apply_estimated_cost(catalog.as_deref(), &model, speed, response);
             }
-            other => other,
+            event
         })
     }))
 }
