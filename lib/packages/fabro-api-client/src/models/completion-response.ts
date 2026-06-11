@@ -19,6 +19,9 @@ import type { CompletionMessage } from './completion-message';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { CompletionUsage } from './completion-usage';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { CostSource } from './cost-source';
 
 export interface CompletionResponse {
     'id': string;
@@ -30,4 +33,9 @@ export interface CompletionResponse {
     'stop_reason': string;
     'usage': CompletionUsage;
     'output'?: any;
+    /**
+     * USD cost of the completion when known: estimated from catalog prices unless the provider returned authoritative billing data.
+     */
+    'cost_usd'?: number;
+    'cost_source'?: CostSource;
 }

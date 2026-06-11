@@ -177,6 +177,8 @@ async fn create_completion(
                             output_tokens: response.usage.output_tokens,
                         },
                         output,
+                        cost_usd: response.cost_usd,
+                        cost_source: response.cost_source,
                     })
                     .into_response()
                 }
@@ -197,6 +199,8 @@ async fn create_completion(
                             output_tokens: response.usage.output_tokens,
                         },
                         output: None,
+                        cost_usd: response.cost_usd,
+                        cost_source: response.cost_source,
                     })
                     .into_response()
                 }

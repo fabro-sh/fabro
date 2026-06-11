@@ -355,6 +355,8 @@ mod tests {
                 raw:           None,
                 warnings:      Vec::new(),
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 

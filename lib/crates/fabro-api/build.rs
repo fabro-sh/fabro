@@ -647,6 +647,7 @@ fn main() {
         ("CompletionMessage", "fabro_types::Message", &[]),
         ("CompletionMessageRole", "fabro_types::Role", &[]),
         ("CompletionContentPart", "fabro_types::ContentPart", &[]),
+        ("CostSource", "fabro_model::CostSource", &[]),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());

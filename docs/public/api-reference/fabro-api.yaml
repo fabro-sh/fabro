@@ -7904,6 +7904,21 @@ components:
           $ref: "#/components/schemas/CompletionUsage"
         output:
           description: Parsed structured output when schema was provided.
+        cost_usd:
+          type: number
+          format: double
+          description: >
+            USD cost of the completion when known: estimated from catalog
+            prices unless the provider returned authoritative billing data.
+        cost_source:
+          $ref: "#/components/schemas/CostSource"
+
+    CostSource:
+      type: string
+      description: >
+        Whether `cost_usd` came from provider billing data (authoritative)
+        or catalog price estimation (estimated).
+      enum: [authoritative, estimated]
 
     # ── Playground ────────────────────────────────────────────────────────
 

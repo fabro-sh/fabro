@@ -94,6 +94,7 @@ models/completion-tool-choice.ts
 models/completion-tool-definition.ts
 models/completion-usage.ts
 models/conclusion.ts
+models/cost-source.ts
 models/create-automation-request.ts
 models/create-completion-request.ts
 models/create-environment-request.ts

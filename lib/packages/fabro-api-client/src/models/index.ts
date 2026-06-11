@@ -66,6 +66,7 @@ export * from './completion-tool-choice';
 export * from './completion-tool-definition';
 export * from './completion-usage';
 export * from './conclusion';
+export * from './cost-source';
 export * from './create-automation-request';
 export * from './create-completion-request';
 export * from './create-environment-request';
