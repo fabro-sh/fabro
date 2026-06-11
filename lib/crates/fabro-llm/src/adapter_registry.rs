@@ -381,15 +381,12 @@ mod tests {
     #[test]
     fn custom_primary_auth_header_overrides_extra_header() {
         let config = AdapterConfig {
-            provider_id:   "custom".to_string(),
-            auth_header:   Some(ApiKeyHeader::Custom {
+            base_url: Some("https://api.custom.test/v1".to_string()),
+            extra_headers: HashMap::from([("x-api-key".to_string(), "secondary-key".to_string())]),
+            ..AdapterConfig::new("custom", ApiKeyHeader::Custom {
                 name:  "x-api-key".to_string(),
                 value: "primary-key".to_string(),
-            }),
-            base_url:      Some("https://api.custom.test/v1".to_string()),
-            extra_headers: HashMap::from([("x-api-key".to_string(), "secondary-key".to_string())]),
-            kind_options:  AdapterKindOptions::None,
-            catalog:       None,
+            })
         };
 
         let adapter = build_openai_compatible_adapter(config).unwrap();
@@ -404,12 +401,8 @@ mod tests {
     #[test]
     fn openai_compatible_factory_uses_provider_id_for_name() {
         let config = AdapterConfig {
-            provider_id:   "kimi".to_string(),
-            auth_header:   Some(ApiKeyHeader::Bearer("k".to_string())),
-            base_url:      Some("https://api.moonshot.ai/v1".to_string()),
-            extra_headers: HashMap::new(),
-            kind_options:  AdapterKindOptions::None,
-            catalog:       None,
+            base_url: Some("https://api.moonshot.ai/v1".to_string()),
+            ..AdapterConfig::new("kimi", ApiKeyHeader::Bearer("k".to_string()))
         };
         let adapter = factory_for(AdapterKind::OpenAiCompatible)(config).unwrap();
         assert_eq!(adapter.name(), "kimi");
@@ -418,9 +411,7 @@ mod tests {
     #[test]
     fn openai_compatible_factory_preserves_extra_headers() {
         let config = AdapterConfig {
-            provider_id:   "portkey".to_string(),
-            auth_header:   Some(ApiKeyHeader::Bearer("unused-primary-key".to_string())),
-            base_url:      Some("https://api.portkey.ai/v1".to_string()),
+            base_url: Some("https://api.portkey.ai/v1".to_string()),
             extra_headers: HashMap::from([
                 (
                     "x-portkey-api-key".to_string(),
@@ -431,8 +422,10 @@ mod tests {
                     "@bedrock-prod".to_string(),
                 ),
             ]),
-            kind_options:  AdapterKindOptions::None,
-            catalog:       None,
+            ..AdapterConfig::new(
+                "portkey",
+                ApiKeyHeader::Bearer("unused-primary-key".to_string()),
+            )
         };
 
         let adapter = build_openai_compatible_adapter(config).unwrap();
@@ -451,18 +444,15 @@ mod tests {
     #[test]
     fn anthropic_factory_preserves_extra_headers() {
         let config = AdapterConfig {
-            provider_id:   "anthropic-through-portkey".to_string(),
-            auth_header:   Some(ApiKeyHeader::Custom {
-                name:  "x-api-key".to_string(),
-                value: "unused-primary-key".to_string(),
-            }),
-            base_url:      Some("https://api.portkey.ai/v1".to_string()),
+            base_url: Some("https://api.portkey.ai/v1".to_string()),
             extra_headers: HashMap::from([(
                 "x-portkey-api-key".to_string(),
                 "resolved-portkey-key".to_string(),
             )]),
-            kind_options:  AdapterKindOptions::None,
-            catalog:       None,
+            ..AdapterConfig::new("anthropic-through-portkey", ApiKeyHeader::Custom {
+                name:  "x-api-key".to_string(),
+                value: "unused-primary-key".to_string(),
+            })
         };
 
         let adapter = build_anthropic_adapter(config);
