@@ -79,5 +79,7 @@ pub(super) fn decode_response(
         raw: serde_json::from_str(body).ok(),
         warnings: vec![],
         rate_limit,
+        cost_usd: None,
+        cost_source: None,
     })
 }

@@ -162,6 +162,8 @@ pub(super) fn decode_response(
         raw: Some(raw),
         warnings: vec![],
         rate_limit,
+        cost_usd: None,
+        cost_source: None,
     })
 }
 

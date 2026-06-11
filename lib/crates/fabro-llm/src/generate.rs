@@ -1138,6 +1138,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 
@@ -1166,6 +1168,8 @@ mod tests {
                         raw:           None,
                         warnings:      vec![],
                         rate_limit:    None,
+                        cost_usd:      None,
+                        cost_source:   None,
                     },
                 )),
             ];
@@ -1274,6 +1278,8 @@ mod tests {
                     raw:           None,
                     warnings:      vec![],
                     rate_limit:    None,
+                    cost_usd:      None,
+                    cost_source:   None,
                 })
             } else {
                 // Second call: return text
@@ -1291,6 +1297,8 @@ mod tests {
                     raw:           None,
                     warnings:      vec![],
                     rate_limit:    None,
+                    cost_usd:      None,
+                    cost_source:   None,
                 })
             }
         }
@@ -1360,6 +1368,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
 
         acc.process(&StreamEvent::finish(
@@ -1565,6 +1575,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 
@@ -1596,6 +1608,8 @@ mod tests {
                     raw:           None,
                     warnings:      vec![],
                     rate_limit:    None,
+                    cost_usd:      None,
+                    cost_source:   None,
                 },
             )));
 
@@ -1775,6 +1789,8 @@ mod tests {
                     raw:           None,
                     warnings:      vec![],
                     rate_limit:    None,
+                    cost_usd:      None,
+                    cost_source:   None,
                 })
             }
 
@@ -1941,6 +1957,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 
@@ -1970,6 +1988,8 @@ mod tests {
                     raw:           None,
                     warnings:      vec![],
                     rate_limit:    None,
+                    cost_usd:      None,
+                    cost_source:   None,
                 };
                 let events = vec![
                     Ok(StreamEvent::ToolCallEnd { tool_call }),
@@ -1997,6 +2017,8 @@ mod tests {
                     raw:           None,
                     warnings:      vec![],
                     rate_limit:    None,
+                    cost_usd:      None,
+                    cost_source:   None,
                 };
                 let events = vec![
                     Ok(StreamEvent::text_delta(text, Some("t1".into()))),
@@ -2113,6 +2135,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
 
         let tool_calls = vec![ToolCall::new(
@@ -2276,6 +2300,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 
@@ -2307,6 +2333,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             };
             let events = vec![
                 Ok(StreamEvent::text_delta(text, Some("t1".into()))),
@@ -2389,6 +2417,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 
@@ -2405,6 +2435,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             };
             let events = vec![
                 Ok(StreamEvent::text_delta(text, Some("t1".into()))),
@@ -2487,6 +2519,8 @@ mod tests {
                     raw:           None,
                     warnings:      vec![],
                     rate_limit:    None,
+                    cost_usd:      None,
+                    cost_source:   None,
                 })
             }
 
@@ -2512,6 +2546,8 @@ mod tests {
                         raw:           None,
                         warnings:      vec![],
                         rate_limit:    None,
+                        cost_usd:      None,
+                        cost_source:   None,
                     };
                     let events = vec![
                         Ok(StreamEvent::ToolCallEnd { tool_call }),
@@ -2536,6 +2572,8 @@ mod tests {
                         raw:           None,
                         warnings:      vec![],
                         rate_limit:    None,
+                        cost_usd:      None,
+                        cost_source:   None,
                     };
                     let events = vec![
                         Ok(StreamEvent::text_delta(text, Some("t1".into()))),

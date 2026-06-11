@@ -416,6 +416,8 @@ impl SseAccumulator {
             raw: Some(response_data.clone()),
             warnings: vec![],
             rate_limit: self.rate_limit.clone(),
+            cost_usd: None,
+            cost_source: None,
         };
 
         events.push(StreamEvent::finish(

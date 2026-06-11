@@ -78,6 +78,8 @@ impl SseAccumulator {
             raw:           None,
             warnings:      vec![],
             rate_limit:    self.rate_limit.take(),
+            cost_usd:      None,
+            cost_source:   None,
         }
     }
 
@@ -630,6 +632,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         });
         let event = StreamEvent::Finish {
             finish_reason: FinishReason::ToolCalls,

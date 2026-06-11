@@ -8,13 +8,14 @@ use tracing::debug;
 use crate::adapter_registry::{
     AdapterConfig, AdapterKindOptions, OpenAiAdapterOptions, factory_for,
 };
+use crate::cost;
 use crate::error::{Error, ProviderErrorKind};
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::token_count::{
     InputTokenCount, InputTokenCountMethod, InputTokenCountPreference, estimate_input_tokens,
 };
-use crate::types::{Request, Response, Speed, Warning};
+use crate::types::{Request, Response, Speed, StreamEvent, Warning};
 
 /// The core client that routes requests to provider adapters (Section 2.2, 3).
 #[derive(Clone)]
@@ -337,16 +338,33 @@ impl Client {
 
         if self.middleware.is_empty() {
             provider.validate_request(request)?;
-            return provider.complete(request).await;
+            let mut response = provider.complete(request).await?;
+            cost::apply_estimated_cost(
+                self.catalog.as_deref(),
+                &request.model,
+                request.speed,
+                &mut response,
+            );
+            return Ok(response);
         }
 
-        // Build middleware chain
+        // Build middleware chain. Cost is stamped at the base so middleware
+        // observes the final response.
         let provider_clone = provider.clone();
+        let catalog = self.catalog.clone();
         let base: NextFn = Arc::new(move |req: Request| {
             let p = provider_clone.clone();
+            let catalog = catalog.clone();
             Box::pin(async move {
                 p.validate_request(&req)?;
-                p.complete(&req).await
+                let mut response = p.complete(&req).await?;
+                cost::apply_estimated_cost(
+                    catalog.as_deref(),
+                    &req.model,
+                    req.speed,
+                    &mut response,
+                );
+                Ok(response)
             })
         });
 
@@ -375,16 +393,26 @@ impl Client {
 
         if self.middleware.is_empty() {
             provider.validate_request(request)?;
-            return provider.stream(request).await;
+            let stream = provider.stream(request).await?;
+            return Ok(stamp_stream_costs(
+                self.catalog.clone(),
+                request.model.clone(),
+                request.speed,
+                stream,
+            ));
         }
 
-        // Build streaming middleware chain
+        // Build streaming middleware chain. Cost is stamped at the base so
+        // middleware observes the final Finish events.
         let provider_clone = provider.clone();
+        let catalog = self.catalog.clone();
         let base: NextStreamFn = Arc::new(move |req: Request| {
             let p = provider_clone.clone();
+            let catalog = catalog.clone();
             Box::pin(async move {
                 p.validate_request(&req)?;
-                p.stream(&req).await
+                let stream = p.stream(&req).await?;
+                Ok(stamp_stream_costs(catalog, req.model, req.speed, stream))
             })
         });
 
@@ -492,6 +520,36 @@ impl Client {
     }
 }
 
+/// Wrap a provider event stream so terminal [`StreamEvent::Finish`]
+/// responses carry a catalog-estimated cost, mirroring what
+/// [`Client::complete`] stamps on blocking responses.
+fn stamp_stream_costs(
+    catalog: Option<Arc<Catalog>>,
+    model: String,
+    speed: Option<Speed>,
+    stream: StreamEventStream,
+) -> StreamEventStream {
+    use futures::StreamExt;
+
+    Box::pin(stream.map(move |event| {
+        event.map(|event| match event {
+            StreamEvent::Finish {
+                finish_reason,
+                usage,
+                mut response,
+            } => {
+                cost::apply_estimated_cost(catalog.as_deref(), &model, speed, &mut response);
+                StreamEvent::Finish {
+                    finish_reason,
+                    usage,
+                    response,
+                }
+            }
+            other => other,
+        })
+    }))
+}
+
 fn token_count_fallback_eligible(error: &Error) -> bool {
     matches!(
         error,
@@ -595,6 +653,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 
@@ -616,6 +676,8 @@ mod tests {
                         raw: None,
                         warnings: vec![],
                         rate_limit: None,
+                        cost_usd: None,
+                        cost_source: None,
                     },
                 )),
             ];
@@ -774,6 +836,130 @@ mod tests {
         let response = client.complete(&test_request()).await.unwrap();
         assert_eq!(response.text(), "Hello!");
         assert_eq!(response.provider, "test");
+    }
+
+    /// Hermetic catalog pricing `mock-model` under the `test` provider so
+    /// cost stamping has something to estimate from.
+    fn priced_mock_catalog() -> Arc<Catalog> {
+        let settings: LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai_compatible"
+base_url = "https://test.invalid/v1"
+
+[models."mock-model"]
+provider = "test"
+display_name = "Mock"
+family = "mock"
+default = true
+
+[models."mock-model".limits]
+context_window = 100000
+
+[models."mock-model".features]
+tools = false
+vision = false
+reasoning = false
+
+[models."mock-model".costs]
+input_cost_per_mtok = 1.0
+output_cost_per_mtok = 2.0
+"#,
+        )
+        .unwrap();
+        Arc::new(Catalog::from_settings(&settings).unwrap())
+    }
+
+    #[tokio::test]
+    async fn complete_stamps_estimated_cost_from_catalog() {
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
+        client.catalog = Some(priced_mock_catalog());
+
+        let response = client.complete(&test_request()).await.unwrap();
+
+        // 10 input tokens at $1/MTok + 20 output tokens at $2/MTok.
+        assert_eq!(response.cost_source, Some(CostSource::Estimated));
+        let cost = response.cost_usd.expect("cost should be stamped");
+        assert!((cost - 0.000_05).abs() < 1e-12, "got {cost}");
+    }
+
+    #[tokio::test]
+    async fn complete_leaves_cost_unset_without_catalog() {
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
+
+        let response = client.complete(&test_request()).await.unwrap();
+
+        assert_eq!(response.cost_usd, None);
+        assert_eq!(response.cost_source, None);
+    }
+
+    #[tokio::test]
+    async fn complete_stamps_cost_beneath_middleware() {
+        struct Passthrough;
+
+        #[async_trait]
+        impl Middleware for Passthrough {
+            async fn handle_complete(
+                &self,
+                request: Request,
+                next: NextFn,
+            ) -> Result<Response, Error> {
+                next(request).await
+            }
+
+            async fn handle_stream(
+                &self,
+                request: Request,
+                next: NextStreamFn,
+            ) -> Result<StreamEventStream, Error> {
+                next(request).await
+            }
+        }
+
+        let mut client = Client::new(HashMap::new(), None, vec![Arc::new(Passthrough)]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
+        client.catalog = Some(priced_mock_catalog());
+
+        let response = client.complete(&test_request()).await.unwrap();
+
+        assert_eq!(response.cost_source, Some(CostSource::Estimated));
+    }
+
+    #[tokio::test]
+    async fn stream_stamps_estimated_cost_on_finish() {
+        use futures::StreamExt;
+
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
+        client.catalog = Some(priced_mock_catalog());
+
+        let mut stream = client.stream(&test_request()).await.unwrap();
+        let mut finish_response = None;
+        while let Some(event) = stream.next().await {
+            if let StreamEvent::Finish { response, .. } = event.unwrap() {
+                finish_response = Some(response);
+            }
+        }
+
+        let response = finish_response.expect("stream should yield a Finish event");
+        // MockProvider's Finish usage is zero tokens — priced, just $0.
+        assert_eq!(response.cost_source, Some(CostSource::Estimated));
+        assert_eq!(response.cost_usd, Some(0.0));
     }
 
     #[tokio::test]

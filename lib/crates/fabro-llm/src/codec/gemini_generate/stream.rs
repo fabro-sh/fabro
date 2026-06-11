@@ -201,6 +201,8 @@ impl SseAccumulator {
             raw:           None,
             warnings:      vec![],
             rate_limit:    self.rate_limit.clone(),
+            cost_usd:      None,
+            cost_source:   None,
         };
 
         StreamEvent::finish(finish_reason, self.usage.clone(), response)

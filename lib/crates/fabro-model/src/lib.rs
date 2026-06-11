@@ -12,7 +12,7 @@ pub mod types;
 
 pub use adapter::{AdapterKind, AgentProfileKind};
 pub use billing::{
-    AnthropicBillingFacts, AnthropicModelPricing, BilledModelUsage, BilledTokenCounts,
+    AnthropicBillingFacts, AnthropicModelPricing, BilledModelUsage, BilledTokenCounts, CostSource,
     GeminiBillingFacts, GeminiModelPricing, GeminiStoragePricing, GeminiStorageSegment,
     ModelBillingFacts, ModelBillingInput, ModelPricing, ModelPricingPolicy, ModelRef, ModelUsage,
     OpenAiBillingFacts, OpenAiModelPricing, PricePerMTok, Speed, TokenCounts, UsdMicros,

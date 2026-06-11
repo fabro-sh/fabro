@@ -122,6 +122,19 @@ impl Speed {
     }
 }
 
+/// Source of a USD cost value attached to a completion response.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum CostSource {
+    /// The provider returned billing data in-band with the response.
+    Authoritative,
+    /// Computed from catalog prices and token usage.
+    Estimated,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModelRef {
     pub provider: ProviderId,

@@ -221,6 +221,10 @@ impl ToolChoice {
 
 // --- 3.7 Response ---
 
+// Billing vocabulary shared with the catalog/billing layer and the API
+// surface; re-exported here so `fabro_llm::types::*` imports keep working.
+pub use fabro_model::CostSource;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     pub id:            String,
@@ -232,6 +236,13 @@ pub struct Response {
     pub raw:           Option<serde_json::Value>,
     pub warnings:      Vec<Warning>,
     pub rate_limit:    Option<RateLimitInfo>,
+    /// USD cost of this completion, when known or estimable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd:      Option<f64>,
+    /// Whether `cost_usd` came from provider billing data or a catalog
+    /// estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_source:   Option<CostSource>,
 }
 
 impl Response {
@@ -703,6 +714,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         assert_eq!(response.text(), "Hello world");
     }
@@ -731,6 +744,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         let calls = response.tool_calls();
         assert_eq!(calls.len(), 1);
@@ -762,6 +777,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         assert_eq!(response.reasoning(), Some("Let me think...".to_string()));
         assert_eq!(response.text(), "The answer is 42.");
@@ -779,6 +796,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         assert_eq!(response.reasoning(), None);
     }
@@ -949,6 +968,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         let tool_calls = vec![ToolCall::new(
             "call_1",

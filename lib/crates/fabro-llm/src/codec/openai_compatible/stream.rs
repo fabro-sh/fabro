@@ -222,6 +222,8 @@ impl StreamState {
             raw:           None,
             warnings:      vec![],
             rate_limit:    self.rate_limit.clone(),
+            cost_usd:      None,
+            cost_source:   None,
         };
 
         events.push(StreamEvent::finish(
