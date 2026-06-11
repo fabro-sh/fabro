@@ -778,8 +778,8 @@ fn configured_repo_origin_url(settings: &WorkflowSettings) -> Option<String> {
     {
         return None;
     }
-    let owner = scm.owner.clone()?;
-    let repository = scm.repository.clone()?;
+    let owner = scm.owner.as_deref()?;
+    let repository = scm.repository.as_deref()?;
     if owner.trim().is_empty() || repository.trim().is_empty() {
         return None;
     }

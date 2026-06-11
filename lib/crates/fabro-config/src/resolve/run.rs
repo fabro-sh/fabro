@@ -134,16 +134,15 @@ fn resolve_model(model: Option<&RunModelLayer>) -> RunModelSettings {
 }
 
 fn resolve_git(git: Option<&RunGitLayer>) -> RunGitSettings {
+    let author = git.and_then(|git| git.author.as_ref());
+    if let Some(author) = author {
+        super::warn_if_demoted_template("run.git.author.name", author.name.as_deref());
+        super::warn_if_demoted_template("run.git.author.email", author.email.as_deref());
+    }
     RunGitSettings {
-        author: git.and_then(|git| {
-            git.author.as_ref().map(|author| {
-                super::warn_if_demoted_template("run.git.author.name", author.name.as_deref());
-                super::warn_if_demoted_template("run.git.author.email", author.email.as_deref());
-                GitAuthorSettings {
-                    name:  author.name.clone(),
-                    email: author.email.clone(),
-                }
-            })
+        author: author.map(|author| GitAuthorSettings {
+            name:  author.name.clone(),
+            email: author.email.clone(),
         }),
     }
 }

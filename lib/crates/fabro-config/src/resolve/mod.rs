@@ -60,8 +60,9 @@ pub(crate) fn default_interp(path: impl AsRef<std::path::Path>) -> InterpString 
 /// claimed template tokens. These fields are plain `String` now — `{{ vars.*
 /// }}` (which previously substituted via the run-scoped String pass, a
 /// now-removed accident) and `{{ env.* }}` are both treated as literal text.
-/// Only `InterpString` fields interpolate. Unclaimed `{{ ... }}` text (jq
-/// programs, Go templates) never interpolated and does not warn.
+/// Other plain-`String` fields still substitute `{{ vars.* }}` until the
+/// String pass itself is retired in a later slice. Unclaimed `{{ ... }}` text
+/// (jq programs, Go templates) never interpolated and does not warn.
 pub(crate) fn warn_if_demoted_template(field: &str, value: Option<&str>) {
     if value.is_some_and(|value| !InterpString::parse(value).is_literal()) {
         tracing::warn!(

@@ -84,9 +84,8 @@ impl RunNamespace {
         substitute_goal(&mut self.goal, &mut lookup)?;
         substitute_option(&mut self.working_dir, &mut lookup)?;
         substitute_string_map(&mut self.metadata, &mut lookup)?;
-        // run.model.provider/name and run.git.author.* are plain `String`,
-        // demoted out of the interpolation set (D2): NO variable substitution.
-        // Only InterpString fields access variables — these don't anymore.
+        // run.model.provider/name and run.git.author.* were demoted to plain
+        // `String` and removed from this pass (D2): values stay literal.
         substitute_option_string(&mut self.model.controls.reasoning_effort, &mut lookup)?;
         substitute_option_string(&mut self.model.controls.speed, &mut lookup)?;
         substitute_string_vec(&mut self.checkpoint.exclude_globs, &mut lookup)?;
@@ -104,8 +103,8 @@ impl RunNamespace {
             substitute_option(&mut slack.channel, &mut lookup)?;
         }
         substitute_map(&mut self.integrations.github.permissions, &mut lookup)?;
-        // run.scm.owner/repository are plain `String` (demoted, D2): no
-        // variable substitution.
+        // run.scm.owner/repository were demoted and removed from this pass
+        // (D2): values stay literal.
         substitute_string_vec(&mut self.prepare.commands, &mut lookup)?;
         for mcp in self.agent.mcps.values_mut() {
             substitute_string(&mut mcp.name, &mut lookup)?;
@@ -409,12 +408,9 @@ mod run_namespace_variable_substitution_tests {
 
     #[test]
     fn demoted_fields_do_not_interpolate() {
-        // run.model.*, run.git.author.*, run.scm.owner/repository were demoted
-        // out of the interpolation set (D2) to plain `String`. They no longer
-        // access variables at all: `{{ vars.* }}` and `{{ env.* }}` are both
-        // left literal even when a value is available. Only InterpString fields
-        // interpolate — the old run-scoped String `vars` substitution on these
-        // fields was an incidental behavior that is now removed.
+        // Demoted fields (run.model.*, run.git.author.*, run.scm.owner/
+        // repository) were removed from the vars pass (D2): `{{ vars.* }}`
+        // and `{{ env.* }}` stay literal even when a value is available.
         let mut run = RunNamespace {
             model: super::RunModelSettings {
                 provider: Some("{{ vars.PROVIDER }}".to_string()),

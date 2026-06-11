@@ -573,19 +573,15 @@ fn resolve_start_llm(
     let provider = settings
         .model
         .provider
-        .clone()
+        .as_deref()
         .filter(|value| !value.is_empty());
 
     let default_provider_id = catalog
         .default_for_configured_ids(configured)
         .provider
         .clone();
-    let provider_context = routing::resolve_provider_context(
-        catalog,
-        &default_provider_id,
-        &model,
-        provider.as_deref(),
-    )?;
+    let provider_context =
+        routing::resolve_provider_context(catalog, &default_provider_id, &model, provider)?;
     let provider_id = provider_context.provider_id;
     let fallback_chain = resolve_fallback_chain(catalog, &provider_id, &model, &settings.model);
 

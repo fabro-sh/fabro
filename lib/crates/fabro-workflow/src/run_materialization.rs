@@ -10,8 +10,8 @@ pub fn materialize_run(
     catalog: &Catalog,
     configured_providers: &[ProviderId],
 ) -> WorkflowSettings {
-    let configured_model = settings.run.model.name.clone();
-    let configured_provider = settings.run.model.provider.clone();
+    let configured_model = settings.run.model.name.take();
+    let configured_provider = settings.run.model.provider.take();
     let graph_provider = graph
         .attrs
         .get("default_provider")
