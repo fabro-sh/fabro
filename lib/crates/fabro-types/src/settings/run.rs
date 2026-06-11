@@ -22,7 +22,7 @@ use super::size::Size;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunNamespace {
     pub goal:          Option<RunGoal>,
-    pub working_dir:   Option<InterpString>,
+    pub working_dir:   Option<String>,
     pub metadata:      HashMap<String, String>,
     pub inputs:        HashMap<String, toml::Value>,
     pub model:         RunModelSettings,
@@ -82,10 +82,10 @@ impl RunNamespace {
         F: FnMut(&str) -> Option<String>,
     {
         substitute_goal(&mut self.goal, &mut lookup)?;
-        substitute_option(&mut self.working_dir, &mut lookup)?;
         substitute_string_map(&mut self.metadata, &mut lookup)?;
-        // run.model.provider/name and run.git.author.* were demoted to plain
-        // `String` and removed from this pass (D2): values stay literal.
+        // run.working_dir, run.model.provider/name, and run.git.author.* were
+        // demoted to plain `String` and removed from this pass (D2/D11):
+        // values stay literal.
         substitute_option_string(&mut self.model.controls.reasoning_effort, &mut lookup)?;
         substitute_option_string(&mut self.model.controls.speed, &mut lookup)?;
         substitute_string_vec(&mut self.checkpoint.exclude_globs, &mut lookup)?;
@@ -317,7 +317,6 @@ mod run_namespace_variable_substitution_tests {
             goal: Some(RunGoal::Inline(InterpString::parse(
                 "deploy {{ vars.ENV }} in {{ env.REGION }}",
             ))),
-            working_dir: Some(InterpString::parse("/workspace/{{ vars.ENV }}")),
             prepare: RunPrepareSettings {
                 commands:   vec!["echo {{ vars.ENV }} {{ env.REGION }}".to_string()],
                 timeout_ms: 1_000,
@@ -376,10 +375,6 @@ mod run_namespace_variable_substitution_tests {
             goal_source,
             Some("deploy prod in {{ env.REGION }}".to_string())
         );
-        assert_eq!(
-            run.working_dir.as_ref().map(InterpString::as_source),
-            Some("/workspace/prod".to_string())
-        );
         assert_eq!(run.prepare.commands, vec![
             "echo prod {{ env.REGION }}".to_string()
         ]);
@@ -408,10 +403,12 @@ mod run_namespace_variable_substitution_tests {
 
     #[test]
     fn demoted_fields_do_not_interpolate() {
-        // Demoted fields (run.model.*, run.git.author.*, run.scm.owner/
-        // repository) were removed from the vars pass (D2): `{{ vars.* }}`
-        // and `{{ env.* }}` stay literal even when a value is available.
+        // Demoted fields (run.working_dir, run.model.*, run.git.author.*,
+        // run.scm.owner/repository) were removed from the vars pass (D2/D11):
+        // `{{ vars.* }}` and `{{ env.* }}` stay literal even when a value is
+        // available.
         let mut run = RunNamespace {
+            working_dir: Some("/workspace/{{ vars.ENV }}".to_string()),
             model: super::RunModelSettings {
                 provider: Some("{{ vars.PROVIDER }}".to_string()),
                 name: Some("{{ vars.MODEL }}".to_string()),
@@ -435,6 +432,10 @@ mod run_namespace_variable_substitution_tests {
         run.substitute_variables(|_| Some("SUBSTITUTED".to_string()))
             .unwrap();
 
+        assert_eq!(
+            run.working_dir.as_deref(),
+            Some("/workspace/{{ vars.ENV }}")
+        );
         assert_eq!(run.model.provider.as_deref(), Some("{{ vars.PROVIDER }}"));
         assert_eq!(run.model.name.as_deref(), Some("{{ vars.MODEL }}"));
         let author = run.git.author.as_ref().unwrap();

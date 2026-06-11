@@ -9,7 +9,6 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::interp::InterpString;
 use super::run::{AgentPermissions, McpServerSettings};
 
 /// A structurally resolved `[cli]` view for consumers.
@@ -26,8 +25,8 @@ pub struct CliNamespace {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum CliTargetSettings {
-    Http { url: InterpString },
-    Unix { path: InterpString },
+    Http { url: String },
+    Unix { path: String },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

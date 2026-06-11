@@ -19,7 +19,7 @@ pub struct RunLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal:          Option<RunGoalLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub working_dir:   Option<InterpString>,
+    pub working_dir:   Option<String>,
     /// Flat string-to-string map. Replaces wholesale across layers.
     #[serde(default, skip_serializing_if = "ReplaceMap::is_empty")]
     pub metadata:      ReplaceMap<String>,

@@ -29,6 +29,19 @@ pub(crate) fn require_interp(
     })
 }
 
+pub(crate) fn require_string(
+    value: Option<&String>,
+    path: &str,
+    errors: &mut Vec<ResolveError>,
+) -> String {
+    value.cloned().unwrap_or_else(|| {
+        errors.push(ResolveError::Missing {
+            path: path.to_string(),
+        });
+        String::new()
+    })
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "parsed_value special case: the TCP listen address parses the literal source \

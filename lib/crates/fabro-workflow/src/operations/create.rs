@@ -1276,7 +1276,7 @@ mod tests {
                 },
                 settings: settings_from_run_layer({
                     RunLayer {
-                        working_dir: Some(InterpString::parse("workspace")),
+                        working_dir: Some("workspace".to_string()),
                         execution: Some(RunExecutionLayer {
                             mode: Some(RunMode::DryRun),
                             ..RunExecutionLayer::default()

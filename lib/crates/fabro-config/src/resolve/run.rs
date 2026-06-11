@@ -49,6 +49,8 @@ pub fn resolve_run(
         });
     }
 
+    super::warn_if_demoted_template("run.working_dir", layer.working_dir.as_deref());
+
     RunNamespace {
         goal: resolve_goal(layer.goal.as_ref()),
         working_dir: layer.working_dir.clone(),

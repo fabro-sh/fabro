@@ -3,7 +3,7 @@ use fabro_types::settings::cli::{
     CliLoggingSettings, CliNamespace, CliOutputSettings, CliTargetSettings, CliUpdatesSettings,
 };
 
-use super::{ResolveError, require_interp};
+use super::{ResolveError, require_string};
 use crate::{CliExecLayer, CliLayer, CliTargetLayer};
 
 pub fn resolve_cli(layer: &CliLayer, errors: &mut Vec<ResolveError>) -> CliNamespace {
@@ -46,12 +46,18 @@ fn resolve_target(
     errors: &mut Vec<ResolveError>,
 ) -> Option<CliTargetSettings> {
     match target {
-        Some(CliTargetLayer::Http { url }) => Some(CliTargetSettings::Http {
-            url: require_interp(url.as_ref(), "cli.target.url", errors),
-        }),
-        Some(CliTargetLayer::Unix { path }) => Some(CliTargetSettings::Unix {
-            path: require_interp(path.as_ref(), "cli.target.path", errors),
-        }),
+        Some(CliTargetLayer::Http { url }) => {
+            super::warn_if_demoted_template("cli.target.http.url", url.as_deref());
+            Some(CliTargetSettings::Http {
+                url: require_string(url.as_ref(), "cli.target.url", errors),
+            })
+        }
+        Some(CliTargetLayer::Unix { path }) => {
+            super::warn_if_demoted_template("cli.target.unix.path", path.as_deref());
+            Some(CliTargetSettings::Unix {
+                path: require_string(path.as_ref(), "cli.target.path", errors),
+            })
+        }
         None => None,
     }
 }

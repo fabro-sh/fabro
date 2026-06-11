@@ -1,6 +1,5 @@
 //! Sparse `[cli]` settings layer definitions.
 
-use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::{CliAuthStrategy, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::AgentPermissions;
 use serde::{Deserialize, Serialize};
@@ -32,11 +31,11 @@ pub struct CliLayer {
 pub enum CliTargetLayer {
     Http {
         #[serde(default)]
-        url: Option<InterpString>,
+        url: Option<String>,
     },
     Unix {
         #[serde(default)]
-        path: Option<InterpString>,
+        path: Option<String>,
     },
 }
 

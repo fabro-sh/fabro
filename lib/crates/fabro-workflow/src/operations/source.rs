@@ -126,11 +126,12 @@ fn resolve_goal_override(
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::settings::InterpString;
+
     use super::*;
 
     #[test]
     fn resolve_workflow_uses_explicit_cwd_for_relative_work_dir() {
-        use fabro_types::settings::InterpString;
         use fabro_types::settings::run::RunNamespace;
 
         let dir = tempfile::tempdir().unwrap();
@@ -141,7 +142,7 @@ mod tests {
             },
             settings: WorkflowSettings {
                 run: RunNamespace {
-                    working_dir: Some(InterpString::parse("workspace")),
+                    working_dir: Some("workspace".to_string()),
                     ..RunNamespace::default()
                 },
                 ..WorkflowSettings::default()
@@ -155,7 +156,6 @@ mod tests {
 
     #[test]
     fn resolve_workflow_reads_goal_override_from_dense_run_settings() {
-        use fabro_types::settings::InterpString;
         use fabro_types::settings::run::{RunGoal, RunNamespace};
 
         let dir = tempfile::tempdir().unwrap();

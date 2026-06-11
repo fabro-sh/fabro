@@ -3,7 +3,6 @@
     reason = "sync test fixture setup; not on a Tokio path"
 )]
 
-use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::{CliTargetSettings, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::AgentPermissions;
 use temp_env::with_var;
@@ -42,7 +41,7 @@ url = "https://config.example.com"
     assert_eq!(
         user_settings.cli.target,
         Some(CliTargetSettings::Http {
-            url: InterpString::parse("https://config.example.com"),
+            url: "https://config.example.com".to_string(),
         })
     );
 }
@@ -80,10 +79,6 @@ fn user_settings_resolve_returns_defaults_when_default_settings_file_is_missing(
     });
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "test asserts the raw template source"
-)]
 #[test]
 fn resolves_cli_target_exec_and_output_settings() {
     let cli = UserSettingsBuilder::from_toml(
@@ -125,7 +120,7 @@ level = "debug"
     let CliTargetSettings::Http { url } = cli.target.expect("target") else {
         panic!("expected http target");
     };
-    assert_eq!(url.as_source(), "https://config.example.com");
+    assert_eq!(url, "https://config.example.com");
 
     assert!(cli.exec.prevent_idle_sleep);
     assert_eq!(cli.exec.model.provider.as_deref(), Some("openai"));

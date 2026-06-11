@@ -1785,7 +1785,7 @@ mod runs {
                 goal: Some(RunGoal::Inline(InterpString::parse(
                     "Add rate limiting to auth endpoints",
                 ))),
-                working_dir: Some(InterpString::parse("/workspace/api-server")),
+                working_dir: Some("/workspace/api-server".to_string()),
                 model: RunModelSettings {
                     provider: Some("anthropic".to_string()),
                     name: Some("claude-opus-4-6".to_string()),
