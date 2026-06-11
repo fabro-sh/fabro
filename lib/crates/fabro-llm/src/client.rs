@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_auth::{ApiCredential, CredentialSource};
-use fabro_model::{Catalog, ProviderId};
+use fabro_model::{AdapterKind, Catalog, ProviderId};
 use tracing::debug;
 
-use crate::adapter_registry::{AdapterConfig, factory_for};
+use crate::adapter_registry::{
+    AdapterConfig, AdapterKindOptions, OpenAiAdapterOptions, factory_for,
+};
 use crate::error::{Error, ProviderErrorKind};
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
@@ -146,15 +148,21 @@ impl Client {
             let provider_id = credential.provider.clone();
             let adapter = if let Some(provider) = catalog.provider(&provider_id) {
                 let factory = factory_for(provider.adapter);
+                let kind_options = match provider.adapter {
+                    AdapterKind::OpenAi => AdapterKindOptions::OpenAi(OpenAiAdapterOptions {
+                        codex_mode: credential.codex_mode,
+                        org_id:     credential.org_id,
+                        project_id: credential.project_id,
+                    }),
+                    _ => AdapterKindOptions::None,
+                };
                 factory(AdapterConfig {
-                    provider_id:   provider.id.to_string(),
-                    auth_header:   credential.auth_header,
-                    base_url:      credential.base_url.or_else(|| provider.base_url.clone()),
+                    provider_id: provider.id.to_string(),
+                    auth_header: credential.auth_header,
+                    base_url: credential.base_url.or_else(|| provider.base_url.clone()),
                     extra_headers: credential.extra_headers,
-                    codex_mode:    credential.codex_mode,
-                    org_id:        credential.org_id,
-                    project_id:    credential.project_id,
-                    catalog:       Some(Arc::clone(&catalog)),
+                    kind_options,
+                    catalog: Some(Arc::clone(&catalog)),
                 })
             } else {
                 Err(Error::Configuration {

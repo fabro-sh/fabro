@@ -32,13 +32,31 @@ pub struct AdapterConfig {
     pub base_url:      Option<String>,
     /// Extra HTTP headers attached to every outgoing request.
     pub extra_headers: HashMap<String, String>,
-    /// OpenAI-only: route through the ChatGPT Codex backend.
-    pub codex_mode:    bool,
-    /// OpenAI-only: organization ID.
-    pub org_id:        Option<String>,
-    /// OpenAI-only: project ID.
-    pub project_id:    Option<String>,
+    /// Adapter-kind-specific options; factories for other kinds ignore
+    /// options that are not theirs.
+    pub kind_options:  AdapterKindOptions,
     pub catalog:       Option<Arc<Catalog>>,
+}
+
+/// Construction options that only apply to one adapter kind, kept out of the
+/// shared [`AdapterConfig`] fields.
+#[derive(Debug, Clone, Default)]
+pub enum AdapterKindOptions {
+    /// No kind-specific options.
+    #[default]
+    None,
+    OpenAi(OpenAiAdapterOptions),
+}
+
+/// OpenAI-only construction options.
+#[derive(Debug, Clone, Default)]
+pub struct OpenAiAdapterOptions {
+    /// Route through the ChatGPT Codex backend.
+    pub codex_mode: bool,
+    /// Organization ID.
+    pub org_id:     Option<String>,
+    /// Project ID.
+    pub project_id: Option<String>,
 }
 
 impl AdapterConfig {
@@ -49,9 +67,7 @@ impl AdapterConfig {
             auth_header:   Some(auth_header),
             base_url:      None,
             extra_headers: HashMap::new(),
-            codex_mode:    false,
-            org_id:        None,
-            project_id:    None,
+            kind_options:  AdapterKindOptions::None,
             catalog:       None,
         }
     }
@@ -104,6 +120,10 @@ fn build_anthropic(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Er
 
 fn build_openai_adapter(mut config: AdapterConfig) -> providers::OpenAiAdapter {
     let api_key = apply_primary_auth_header(config.auth_header.take(), &mut config.extra_headers);
+    let options = match config.kind_options {
+        AdapterKindOptions::OpenAi(options) => options,
+        AdapterKindOptions::None => OpenAiAdapterOptions::default(),
+    };
     let mut adapter =
         providers::OpenAiAdapter::new_optional_auth(api_key).with_name(config.provider_id.clone());
     if let Some(base_url) = config.base_url {
@@ -112,13 +132,13 @@ fn build_openai_adapter(mut config: AdapterConfig) -> providers::OpenAiAdapter {
     if !config.extra_headers.is_empty() {
         adapter = adapter.with_default_headers(config.extra_headers);
     }
-    if config.codex_mode {
+    if options.codex_mode {
         adapter = adapter.with_codex_mode();
     }
-    if let Some(org_id) = config.org_id {
+    if let Some(org_id) = options.org_id {
         adapter = adapter.with_org_id(org_id);
     }
-    if let Some(project_id) = config.project_id {
+    if let Some(project_id) = options.project_id {
         adapter = adapter.with_project_id(project_id);
     }
     if let Some(catalog) = config.catalog {
@@ -368,9 +388,7 @@ mod tests {
             }),
             base_url:      Some("https://api.custom.test/v1".to_string()),
             extra_headers: HashMap::from([("x-api-key".to_string(), "secondary-key".to_string())]),
-            codex_mode:    false,
-            org_id:        None,
-            project_id:    None,
+            kind_options:  AdapterKindOptions::None,
             catalog:       None,
         };
 
@@ -390,9 +408,7 @@ mod tests {
             auth_header:   Some(ApiKeyHeader::Bearer("k".to_string())),
             base_url:      Some("https://api.moonshot.ai/v1".to_string()),
             extra_headers: HashMap::new(),
-            codex_mode:    false,
-            org_id:        None,
-            project_id:    None,
+            kind_options:  AdapterKindOptions::None,
             catalog:       None,
         };
         let adapter = factory_for(AdapterKind::OpenAiCompatible)(config).unwrap();
@@ -415,9 +431,7 @@ mod tests {
                     "@bedrock-prod".to_string(),
                 ),
             ]),
-            codex_mode:    false,
-            org_id:        None,
-            project_id:    None,
+            kind_options:  AdapterKindOptions::None,
             catalog:       None,
         };
 
@@ -447,9 +461,7 @@ mod tests {
                 "x-portkey-api-key".to_string(),
                 "resolved-portkey-key".to_string(),
             )]),
-            codex_mode:    false,
-            org_id:        None,
-            project_id:    None,
+            kind_options:  AdapterKindOptions::None,
             catalog:       None,
         };
 
