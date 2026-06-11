@@ -12,7 +12,7 @@ use fabro_llm::error::{
 use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
 use fabro_llm::providers::common::{LineReader, parse_retry_after};
 use fabro_llm::types::{
-    FinishReason, Message, Request, Response as LlmResponse, StreamEvent, TokenCounts,
+    CostSource, FinishReason, Message, Request, Response as LlmResponse, StreamEvent, TokenCounts,
 };
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::ProviderId;
@@ -52,6 +52,8 @@ struct ServerCompletionResponse {
     message:     Message,
     stop_reason: String,
     usage:       ServerUsage,
+    cost_usd:    Option<f64>,
+    cost_source: Option<CostSource>,
 }
 
 #[derive(Deserialize)]
@@ -227,8 +229,10 @@ impl ProviderAdapter for AuthenticatedFabroServerAdapter {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
-            cost_usd:      None,
-            cost_source:   None,
+            // Carry the server's cost through; the local client's stamping
+            // never overwrites an already-set cost.
+            cost_usd:      server_response.cost_usd,
+            cost_source:   server_response.cost_source,
         })
     }
 

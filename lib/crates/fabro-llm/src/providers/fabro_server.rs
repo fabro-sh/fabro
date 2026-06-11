@@ -5,7 +5,9 @@ use tracing::{debug, error};
 use crate::error::{Error, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::transport::{LineReader, parse_sse_block};
-use crate::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
+use crate::types::{
+    CostSource, FinishReason, Message, Request, Response, StreamEvent, TokenCounts,
+};
 
 /// Provider adapter that routes LLM requests through an fabro server's
 /// `/completions` endpoint, delegating to whatever real provider the server
@@ -41,6 +43,8 @@ struct ServerCompletionResponse {
     message:     Message,
     stop_reason: String,
     usage:       ServerUsage,
+    cost_usd:    Option<f64>,
+    cost_source: Option<CostSource>,
 }
 
 #[derive(serde::Deserialize)]
@@ -151,8 +155,10 @@ impl ProviderAdapter for Adapter {
             raw: None,
             warnings: vec![],
             rate_limit: None,
-            cost_usd: None,
-            cost_source: None,
+            // Carry the server's cost through; the local client's stamping
+            // never overwrites an already-set cost.
+            cost_usd: server_resp.cost_usd,
+            cost_source: server_resp.cost_source,
         })
     }
 
@@ -309,7 +315,9 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
             "usage": {
                 "input_tokens": 10,
                 "output_tokens": 5
-            }
+            },
+            "cost_usd": 0.000_25,
+            "cost_source": "estimated"
         });
 
         server.mock(|when, then| {
@@ -335,6 +343,8 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
         assert_eq!(response.usage.input_tokens, 10);
         assert_eq!(response.usage.output_tokens, 5);
         assert_eq!(response.usage.total_tokens(), 15);
+        assert_eq!(response.cost_usd, Some(0.000_25));
+        assert_eq!(response.cost_source, Some(CostSource::Estimated));
     }
 
     #[tokio::test]
