@@ -6,7 +6,7 @@ use fabro_model::{AdapterKind, Catalog, ProviderId};
 use tracing::debug;
 
 use crate::adapter_registry::{
-    AdapterConfig, AdapterKindOptions, OpenAiAdapterOptions, factory_for,
+    self, AdapterConfig, AdapterKindOptions, OpenAiAdapterOptions, factory_for,
 };
 use crate::error::{Error, ProviderErrorKind};
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
@@ -258,18 +258,18 @@ impl Client {
             )
     }
 
-    /// Resolve the provider for a request.
+    /// Resolve the provider for a request: an explicit `request.provider`
+    /// wins, then the model's catalog route, then the default provider.
     fn resolve_provider(&self, request: &Request) -> Result<Arc<dyn ProviderAdapter>, Error> {
-        let catalog_provider = self.catalog.as_ref().and_then(|catalog| {
-            catalog
-                .get(&request.model)
-                .map(|info| info.provider.to_string())
-        });
+        let route = self
+            .catalog
+            .as_ref()
+            .and_then(|catalog| adapter_registry::resolve_route(catalog, &request.model));
 
         let provider_name = request
             .provider
             .as_deref()
-            .or(catalog_provider.as_deref())
+            .or_else(|| route.as_ref().map(|route| route.provider.as_str()))
             .or(self.default_provider.as_deref())
             .ok_or_else(|| Error::Configuration {
                 message: "No provider specified and no default provider set".into(),
@@ -1397,6 +1397,68 @@ reasoning = false
         let provider = client.resolve_provider(&request).unwrap();
 
         assert_eq!(provider.name(), "acme");
+    }
+
+    /// Build a Client with one registered mock per catalog provider, so
+    /// dispatch tests can observe which provider a request resolves to.
+    async fn client_with_all_catalog_providers(catalog: &Arc<Catalog>) -> Client {
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        for provider in catalog.providers() {
+            client
+                .register_provider(Arc::new(MockProvider::new(provider.id.as_str(), "ok")))
+                .await
+                .unwrap();
+        }
+        client.catalog = Some(Arc::clone(catalog));
+        client
+    }
+
+    /// Live-dispatch counterpart of the adapter_registry route-equivalence
+    /// table: for every built-in model, `resolve_provider` lands on the same
+    /// provider the resolved route names.
+    #[tokio::test]
+    async fn dispatch_agrees_with_resolve_route_for_every_builtin_model() {
+        let catalog = catalog_with("");
+        let client = client_with_all_catalog_providers(&catalog).await;
+
+        for model in catalog.list(None) {
+            let route = adapter_registry::resolve_route(&catalog, &model.id)
+                .expect("built-in model should resolve to a route");
+            let mut request = test_request();
+            request.model = model.id.clone();
+
+            let provider = client.resolve_provider(&request).unwrap();
+
+            assert_eq!(provider.name(), route.provider.as_str(), "{}", model.id);
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_provider_wins_over_the_model_route() {
+        let catalog = catalog_with("");
+        let client = client_with_all_catalog_providers(&catalog).await;
+
+        let mut request = test_request();
+        request.model = "gpt-5.4-mini".to_string();
+        request.provider = Some("anthropic".to_string());
+
+        let provider = client.resolve_provider(&request).unwrap();
+
+        assert_eq!(provider.name(), "anthropic");
+    }
+
+    #[tokio::test]
+    async fn unknown_model_falls_back_to_default_provider() {
+        let catalog = catalog_with("");
+        let client = client_with_all_catalog_providers(&catalog).await;
+        let default = client.default_provider().unwrap().to_string();
+
+        let mut request = test_request();
+        request.model = "model-not-in-any-catalog".to_string();
+
+        let provider = client.resolve_provider(&request).unwrap();
+
+        assert_eq!(provider.name(), default);
     }
 
     #[tokio::test]
