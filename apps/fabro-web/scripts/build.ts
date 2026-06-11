@@ -20,7 +20,8 @@ const buildsRootDir = join(rootPath, ".dist-builds");
 const distPath = join(rootPath, "dist");
 const publicDir = join(rootPath, "public");
 const templatePath = join(rootPath, "index.template.html");
-const pierreWorkerDir = join(rootPath, "node_modules", "@pierre", "diffs", "dist", "worker");
+const workspaceRoot = Bun.fileURLToPath(new URL("../../..", import.meta.url));
+const pierreWorkerDir = join(workspaceRoot, "node_modules", "@pierre", "diffs", "dist", "worker");
 const watch = Bun.argv.includes("--watch");
 
 function newBuildId(): string {
@@ -47,7 +48,7 @@ async function buildOnce() {
   }
 
   const cssResult = await Bun.spawn([
-    "./node_modules/.bin/tailwindcss",
+    Bun.which("tailwindcss") ?? "./node_modules/.bin/tailwindcss",
     "-i",
     "app/app.css",
     "-o",
