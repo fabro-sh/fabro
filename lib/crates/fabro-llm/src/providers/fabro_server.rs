@@ -167,23 +167,21 @@ impl ProviderAdapter for Adapter {
                 match reader.read_next_chunk("\n\n").await {
                     Ok(Some(block)) => {
                         if let Some((Some("stream_event"), data)) = parse_sse_block(&block) {
-                            {
-                                match serde_json::from_str::<StreamEvent>(&data) {
-                                    Ok(event) => return Some((Ok(event), reader)),
-                                    Err(e) => {
-                                        return Some((
-                                            Err(Error::stream_error(
-                                                format!("failed to parse stream event: {e}"),
-                                                e,
-                                            )),
-                                            reader,
-                                        ));
-                                    }
+                            match serde_json::from_str::<StreamEvent>(&data) {
+                                Ok(event) => return Some((Ok(event), reader)),
+                                Err(e) => {
+                                    return Some((
+                                        Err(Error::stream_error(
+                                            format!("failed to parse stream event: {e}"),
+                                            e,
+                                        )),
+                                        reader,
+                                    ));
                                 }
                             }
-                            // Skip non-stream_event SSE events
                         }
-                        // Empty or unparsable block — keep reading.
+                        // Empty, unparsable, or non-stream_event block — keep
+                        // reading.
                     }
                     Ok(None) => return None,
                     Err(e) => return Some((Err(e), reader)),
