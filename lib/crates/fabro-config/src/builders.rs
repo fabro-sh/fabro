@@ -330,6 +330,7 @@ fn provider_settings_to_catalog(
     model_catalog::ProviderCatalogSettings {
         display_name:   settings.display_name,
         adapter:        settings.adapter,
+        codec:          settings.codec,
         agent_profile:  settings.agent_profile,
         auth:           settings.auth,
         billing_policy: settings.billing_policy,
@@ -346,6 +347,7 @@ fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCat
     let ModelSettings {
         provider,
         api_id,
+        codec,
         agent_profile,
         display_name,
         family,
@@ -365,6 +367,7 @@ fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCat
     model_catalog::ModelCatalogSettings {
         provider,
         api_id,
+        codec,
         agent_profile,
         display_name,
         family,
