@@ -1726,6 +1726,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 
