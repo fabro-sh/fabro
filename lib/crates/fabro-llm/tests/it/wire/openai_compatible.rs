@@ -331,10 +331,10 @@ async fn decode_reasoning_content_as_thinking() {
     fabro_test::fabro_json_snapshot!(response);
 }
 
-/// Compat usage reads only prompt/completion tokens; cached-token details are
-/// ignored today (parsing them is a 438-redo behavior change).
+/// Cached and reasoning detail tokens are split into their own disjoint
+/// buckets and subtracted out of input/output.
 #[tokio::test]
-async fn decode_usage_ignores_token_details() {
+async fn decode_usage_parses_token_details() {
     let response = decode_response(serde_json::json!({
         "id": "chatcmpl_test",
         "object": "chat.completion",
@@ -351,6 +351,38 @@ async fn decode_usage_ignores_token_details() {
             "total_tokens": 150,
             "prompt_tokens_details": {"cached_tokens": 80},
             "completion_tokens_details": {"reasoning_tokens": 20}
+        }
+    }))
+    .await;
+    fabro_test::fabro_json_snapshot!(response);
+}
+
+/// OpenRouter usage superset: in-band `cost` becomes an authoritative
+/// `cost_usd`, and `cache_write_tokens` lands in its own disjoint bucket.
+/// Unmodeled fields (`cost_details`, `audio_tokens`, top-level `provider`,
+/// `native_finish_reason`) are tolerated and ignored.
+#[tokio::test]
+async fn decode_usage_openrouter_cost_and_cache_write() {
+    let response = decode_response(serde_json::json!({
+        "id": "gen_or_test",
+        "object": "chat.completion",
+        "created": CREATED_TS,
+        "model": MODEL,
+        "provider": "Anthropic",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": "ok"},
+            "finish_reason": "stop",
+            "native_finish_reason": "end_turn"
+        }],
+        "usage": {
+            "prompt_tokens": 200,
+            "completion_tokens": 10,
+            "total_tokens": 210,
+            "cost": 0.0042,
+            "cost_details": {"upstream_inference_cost": null},
+            "prompt_tokens_details": {"cached_tokens": 50, "cache_write_tokens": 100, "audio_tokens": 0},
+            "completion_tokens_details": {"reasoning_tokens": 0}
         }
     }))
     .await;
@@ -384,6 +416,20 @@ async fn stream_text_happy_path_request() {
 #[tokio::test]
 async fn stream_text_happy_path_events() {
     let (_, events) = stream_text_happy_path_capture().await;
+    fabro_test::fabro_json_snapshot!(events);
+}
+
+/// OpenRouter streams report `cost` in the usage chunk; the Finish response
+/// carries it as authoritative, with cached tokens in their own bucket.
+#[tokio::test]
+async fn stream_usage_openrouter_cost() {
+    let sse = support::sse_data_transcript(&[
+        r#"{"id":"gen_or_stream","object":"chat.completion.chunk","created":1700000000,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}"#,
+        r#"{"id":"gen_or_stream","object":"chat.completion.chunk","created":1700000000,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        r#"{"id":"gen_or_stream","object":"chat.completion.chunk","created":1700000000,"model":"test-model","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":2,"total_tokens":14,"cost":0.00031,"prompt_tokens_details":{"cached_tokens":4,"cache_write_tokens":0}}}"#,
+        "[DONE]",
+    ]);
+    let (_capture, events) = stream_capture(&base_request(MODEL), &sse).await;
     fabro_test::fabro_json_snapshot!(events);
 }
 

@@ -1,11 +1,12 @@
 //! Response decoding: Chat Completions body → canonical `Response`.
 
 use super::translate::{self, map_finish_reason};
-use super::wire::ApiResponse;
+use super::wire::{ApiResponse, ApiUsage};
 use crate::codec::CodecCtx;
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind};
 use crate::types::{
-    ContentPart, Message, RateLimitInfo, Response, Role, ThinkingData, TokenCounts, ToolCall,
+    ContentPart, CostSource, Message, RateLimitInfo, Response, Role, ThinkingData, TokenCounts,
+    ToolCall,
 };
 
 pub(super) fn decode_response(
@@ -58,11 +59,12 @@ pub(super) fn decode_response(
     let usage = api_resp
         .usage
         .as_ref()
-        .map_or_else(TokenCounts::default, |u| TokenCounts {
-            input_tokens: u.prompt_tokens,
-            output_tokens: u.completion_tokens,
-            ..TokenCounts::default()
-        });
+        .map_or_else(TokenCounts::default, ApiUsage::token_counts);
+
+    // In-band cost (OpenRouter) is authoritative billing data; the client's
+    // catalog estimate never overwrites it.
+    let cost_usd = api_resp.usage.as_ref().and_then(|u| u.cost);
+    let cost_source = cost_usd.is_some().then_some(CostSource::Authoritative);
 
     Ok(Response {
         id: api_resp.id,
@@ -79,7 +81,7 @@ pub(super) fn decode_response(
         raw: serde_json::from_str(body).ok(),
         warnings: vec![],
         rate_limit,
-        cost_usd: None,
-        cost_source: None,
+        cost_usd,
+        cost_source,
     })
 }

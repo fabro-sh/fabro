@@ -8,8 +8,8 @@ use super::wire::{AccumulatedToolCall, StreamChunk};
 use crate::codec::{CodecCtx, RawEvent, StreamDecoder};
 use crate::error::Error;
 use crate::types::{
-    ContentPart, FinishReason, Message, RateLimitInfo, Response, Role, StreamEvent, ThinkingData,
-    TokenCounts, ToolCall,
+    ContentPart, CostSource, FinishReason, Message, RateLimitInfo, Response, Role, StreamEvent,
+    ThinkingData, TokenCounts, ToolCall,
 };
 
 /// Accumulated state while decoding the Chat Completions SSE stream.
@@ -28,6 +28,9 @@ pub(super) struct StreamState {
     /// True after `finish_events()` has run (guards against duplicates).
     finished:              bool,
     rate_limit:            Option<RateLimitInfo>,
+    /// In-band USD cost from the usage chunk (OpenRouter), surfaced as
+    /// authoritative on the final response.
+    cost_usd:              Option<f64>,
 }
 
 impl StreamState {
@@ -46,6 +49,7 @@ impl StreamState {
             custom_tool_names: super::translate::custom_tool_names(ctx.request),
             finished: false,
             rate_limit,
+            cost_usd: None,
         }
     }
 
@@ -65,11 +69,10 @@ impl StreamState {
 
         // Capture usage if present (often in a dedicated chunk).
         if let Some(usage) = &chunk.usage {
-            self.usage = TokenCounts {
-                input_tokens: usage.prompt_tokens,
-                output_tokens: usage.completion_tokens,
-                ..TokenCounts::default()
-            };
+            self.usage = usage.token_counts();
+            if usage.cost.is_some() {
+                self.cost_usd = usage.cost;
+            }
         }
 
         let choices = chunk.choices.as_ref()?;
@@ -222,8 +225,8 @@ impl StreamState {
             raw:           None,
             warnings:      vec![],
             rate_limit:    self.rate_limit.clone(),
-            cost_usd:      None,
-            cost_source:   None,
+            cost_usd:      self.cost_usd,
+            cost_source:   self.cost_usd.is_some().then_some(CostSource::Authoritative),
         };
 
         events.push(StreamEvent::finish(

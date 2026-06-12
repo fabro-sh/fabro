@@ -1,0 +1,65 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+{
+  "id": "gen_or_test",
+  "model": "test-model",
+  "provider": "openai-compatible",
+  "message": {
+    "role": "assistant",
+    "content": [
+      {
+        "kind": "text",
+        "data": "ok"
+      }
+    ]
+  },
+  "finish_reason": "stop",
+  "usage": {
+    "input_tokens": 50,
+    "output_tokens": 10,
+    "reasoning_tokens": 0,
+    "cache_read_tokens": 50,
+    "cache_write_tokens": 100
+  },
+  "raw": {
+    "id": "gen_or_test",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "test-model",
+    "provider": "Anthropic",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "ok"
+        },
+        "finish_reason": "stop",
+        "native_finish_reason": "end_turn"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 200,
+      "completion_tokens": 10,
+      "total_tokens": 210,
+      "cost": 0.0042,
+      "cost_details": {
+        "upstream_inference_cost": null
+      },
+      "prompt_tokens_details": {
+        "cached_tokens": 50,
+        "cache_write_tokens": 100,
+        "audio_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 0
+      }
+    }
+  },
+  "warnings": [],
+  "rate_limit": null,
+  "cost_usd": 0.0042,
+  "cost_source": "authoritative"
+}

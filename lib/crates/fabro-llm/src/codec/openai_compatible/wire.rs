@@ -1,5 +1,7 @@
 //! Serde types mirroring the OpenAI Chat Completions wire shapes.
 
+use crate::types::TokenCounts;
+
 #[derive(serde::Serialize)]
 pub(super) struct ApiRequest {
     pub model:           String,
@@ -92,8 +94,65 @@ pub(super) struct ApiFunction {
     reason = "Field names mirror the provider API payload."
 )]
 pub(super) struct ApiUsage {
-    pub prompt_tokens:     i64,
+    pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    /// Tolerant superset: aggregator dialects (OpenRouter) report in-band
+    /// USD cost and cache/reasoning token detail. Absent on plain providers.
+    #[serde(default)]
+    pub cost: Option<f64>,
+    #[serde(default)]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+    #[serde(default)]
+    pub completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct PromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens:      Option<i64>,
+    /// OpenRouter-specific: explicit-cache write tokens.
+    #[serde(default)]
+    pub cache_write_tokens: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct CompletionTokensDetails {
+    #[serde(default)]
+    pub reasoning_tokens: Option<i64>,
+}
+
+impl ApiUsage {
+    /// Normalize into disjoint [`TokenCounts`] buckets: cached and
+    /// cache-write detail tokens are subtracted out of `input_tokens`, and
+    /// reasoning tokens out of `output_tokens`, mirroring the
+    /// `openai_responses` convention.
+    pub(super) fn token_counts(&self) -> TokenCounts {
+        let cached = self
+            .prompt_tokens_details
+            .as_ref()
+            .and_then(|d| d.cached_tokens)
+            .unwrap_or(0);
+        let cache_write = self
+            .prompt_tokens_details
+            .as_ref()
+            .and_then(|d| d.cache_write_tokens)
+            .unwrap_or(0);
+        let reasoning = self
+            .completion_tokens_details
+            .as_ref()
+            .and_then(|d| d.reasoning_tokens)
+            .unwrap_or(0);
+        TokenCounts {
+            input_tokens:       self
+                .prompt_tokens
+                .saturating_sub(cached)
+                .saturating_sub(cache_write),
+            output_tokens:      self.completion_tokens.saturating_sub(reasoning),
+            reasoning_tokens:   reasoning,
+            cache_read_tokens:  cached,
+            cache_write_tokens: cache_write,
+        }
+    }
 }
 
 // --- Streaming response types ---
