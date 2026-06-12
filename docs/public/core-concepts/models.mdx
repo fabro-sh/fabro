@@ -126,11 +126,20 @@ Provider auth is declared in `[llm.providers.<id>.auth]` with ordered `env:<NAME
 
 Provider `agent_profile` defaults from `adapter` and controls profile-specific behavior such as project-memory filenames, CLI/ACP command selection, and native session routing. Valid values are `anthropic`, `openai`, and `gemini`; model-level values override provider-level values.
 
-Provider `billing_policy` defaults from `adapter` and controls usage-cost estimation. Use `openai`, `anthropic`, `gemini`, or `none`.
+Provider `billing_policy` defaults from `adapter` and controls usage-cost estimation. Use `openai`, `anthropic`, `gemini`, or `none`. Model rows may override it for models whose billing family differs from their provider's — for example, Claude models served through OpenRouter set `billing_policy = "anthropic"` so cache reads and writes price correctly.
 
 <Note>
 Provider fields in configuration, APIs, and model routing are provider ID strings. Built-in names like `anthropic`, `openai`, and `gemini` still work, but custom IDs like `proxy` work anywhere a provider ID is accepted.
 </Note>
+
+### OpenRouter
+
+Fabro ships an [OpenRouter](/integrations/openrouter) provider definition with a curated model catalog, disabled by default. Enable it in settings and store an API key with `fabro provider login openrouter`:
+
+```toml title="settings.toml"
+[llm.providers.openrouter]
+enabled = true
+```
 
 ### Ollama
 

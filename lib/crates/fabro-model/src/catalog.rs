@@ -1897,6 +1897,57 @@ reasoning = false
     }
 
     #[test]
+    fn builtin_openrouter_provider_is_opt_in() {
+        let openrouter = ProviderId::new("openrouter");
+        let builtin = Catalog::builtin();
+
+        assert!(builtin.provider(&openrouter).is_none());
+        assert!(builtin.list(Some(&openrouter)).is_empty());
+
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.openrouter]
+enabled = true
+",
+        ))
+        .expect("enabled OpenRouter override should build from the built-in provider settings");
+
+        let provider = catalog
+            .provider(&openrouter)
+            .expect("enabled OpenRouter provider should be present");
+        assert_eq!(provider.adapter, AdapterKind::OpenAiCompatible);
+        assert_eq!(provider.codec, CodecKind::OpenAiCompatible);
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert_eq!(provider.billing_policy, BillingPolicy::OpenAi);
+
+        // Claude rows override the provider's OpenAI billing default;
+        // open-weights rows inherit it.
+        assert_eq!(
+            catalog
+                .model_settings("anthropic/claude-sonnet-4-6")
+                .unwrap()
+                .billing_policy,
+            BillingPolicy::Anthropic
+        );
+        assert_eq!(
+            catalog
+                .model_settings("deepseek/deepseek-v4-flash")
+                .unwrap()
+                .billing_policy,
+            BillingPolicy::OpenAi
+        );
+        assert_eq!(
+            catalog
+                .default_for_provider(&openrouter)
+                .map(|model| model.id.as_str()),
+            Some("anthropic/claude-sonnet-4-6")
+        );
+    }
+
+    #[test]
     fn builtin_ollama_provider_is_opt_in() {
         let ollama = ProviderId::new("ollama");
         let builtin = Catalog::builtin();

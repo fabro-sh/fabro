@@ -28,6 +28,7 @@ const OPTIONAL_VAULT_SECRETS: &[&str] = &[
     EnvVars::KIMI_API_KEY,
     EnvVars::MINIMAX_API_KEY,
     EnvVars::OPENAI_API_KEY,
+    EnvVars::OPENROUTER_API_KEY,
     EnvVars::ZAI_API_KEY,
     EnvVars::DAYTONA_API_KEY,
 ];
@@ -90,6 +91,7 @@ mod tests {
             EnvVars::KIMI_API_KEY,
             EnvVars::MINIMAX_API_KEY,
             EnvVars::OPENAI_API_KEY,
+            EnvVars::OPENROUTER_API_KEY,
             EnvVars::ZAI_API_KEY,
         ] {
             assert_eq!(

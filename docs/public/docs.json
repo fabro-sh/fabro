@@ -95,6 +95,7 @@
               "integrations/github",
               "integrations/daytona",
               "integrations/litellm",
+              "integrations/openrouter",
               "integrations/slack",
               "integrations/brave-search"
             ]
