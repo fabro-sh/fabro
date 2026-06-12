@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub(crate) mod bedrock;
 pub mod common;
 pub mod fabro_server;
 pub mod gemini;
@@ -6,6 +7,7 @@ pub mod openai;
 pub mod openai_compatible;
 
 pub use anthropic::Adapter as AnthropicAdapter;
+pub use bedrock::Adapter as BedrockAdapter;
 pub use fabro_server::Adapter as FabroServerAdapter;
 pub use gemini::Adapter as GeminiAdapter;
 pub use openai::Adapter as OpenAiAdapter;
