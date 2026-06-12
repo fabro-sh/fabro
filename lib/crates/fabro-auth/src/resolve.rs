@@ -28,6 +28,9 @@ pub(crate) enum ResolvedSecret {
         credential: Box<OAuthCredential>,
         vault_name: String,
     },
+    /// Opaque AWS SigV4 source: no static secret; the adapter signs requests
+    /// using the AWS default credential chain.
+    AwsSigv4,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,6 +336,9 @@ impl CredentialResolver {
                 Err(err) => Err(vault_lookup_error(provider, name, err)),
             },
             CredentialRef::Env(name) => Ok((self.env_lookup)(name).map(ResolvedSecret::ApiKey)),
+            // AWS SigV4 is an opaque source: it always "resolves" (the adapter
+            // signs at request time from the AWS chain), no vault/env lookup.
+            CredentialRef::AwsSigv4 => Ok(Some(ResolvedSecret::AwsSigv4)),
         }
     }
 
@@ -379,6 +385,21 @@ impl CredentialResolver {
     ) -> Result<ApiCredential, ResolveError> {
         let base_url = Self::provider_base_url_for_catalog(provider_id, catalog);
         match secret {
+            // Opaque AWS SigV4 source: carry the marker so the adapter signs
+            // with the AWS chain; no static secret resolved here.
+            ResolvedSecret::AwsSigv4 => Ok(ApiCredential {
+                provider: provider_id.clone(),
+                auth_header: Some(ApiKeyHeader::AwsSigv4),
+                extra_headers: self.resolved_extra_headers_for_catalog(
+                    vault,
+                    provider_id,
+                    catalog,
+                )?,
+                base_url,
+                codex_mode: false,
+                org_id: None,
+                project_id: None,
+            }),
             ResolvedSecret::ApiKey(key) => {
                 let provider = catalog
                     .provider(provider_id)
@@ -577,6 +598,37 @@ mod tests {
             api.base_url.as_deref(),
             Some("https://chatgpt.com/backend-api/codex")
         );
+    }
+
+    #[tokio::test]
+    async fn sigv4_provider_resolves_to_aws_sigv4_credential() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        // No env credentials configured: SigV4 must still resolve.
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+        let catalog = catalog_with(
+            r#"
+[providers.bedrock]
+adapter = "bedrock"
+base_url = "https://bedrock-runtime.eu-west-1.amazonaws.com"
+
+[providers.bedrock.auth]
+credentials = ["aws_sigv4"]
+"#,
+        );
+
+        let resolved = resolver
+            .resolve(
+                ProviderId::from("bedrock"),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
+            .await
+            .unwrap();
+
+        let ResolvedCredential::Api(api) = resolved;
+        assert_eq!(api.provider, ProviderId::from("bedrock"));
+        assert_eq!(api.auth_header, Some(ApiKeyHeader::AwsSigv4));
     }
 
     #[tokio::test]

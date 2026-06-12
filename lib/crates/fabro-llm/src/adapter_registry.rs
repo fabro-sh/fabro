@@ -90,7 +90,9 @@ fn apply_primary_auth_header(
             extra_headers.insert(name, value);
             None
         }
-        None => None,
+        // SigV4 is not a static header; only the Bedrock adapter consumes
+        // the marker (it signs at request time).
+        Some(ApiKeyHeader::AwsSigv4) | None => None,
     }
 }
 
@@ -205,6 +207,23 @@ fn build_openai_compatible(config: AdapterConfig) -> Result<Arc<dyn ProviderAdap
     Ok(Arc::new(build_openai_compatible_adapter(config)?))
 }
 
+/// Placeholder until the Bedrock adapter lands later in this series; the
+/// adapter kind exists first so the auth/config grammar can be wired and
+/// tested ahead of it.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Adapter factories share the by-value AdapterFactory signature."
+)]
+fn build_bedrock(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, Error> {
+    Err(Error::Configuration {
+        message: format!(
+            "provider '{}': the bedrock adapter is not yet wired",
+            config.provider_id
+        ),
+        source:  None,
+    })
+}
+
 /// Return the factory for a known adapter kind.
 #[must_use]
 pub fn factory_for(adapter_kind: AdapterKind) -> AdapterFactory {
@@ -213,6 +232,7 @@ pub fn factory_for(adapter_kind: AdapterKind) -> AdapterFactory {
         AdapterKind::OpenAi => build_openai,
         AdapterKind::Gemini => build_gemini,
         AdapterKind::OpenAiCompatible => build_openai_compatible,
+        AdapterKind::Bedrock => build_bedrock,
     }
 }
 

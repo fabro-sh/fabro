@@ -171,11 +171,20 @@ pub struct CostRates {
     pub cache_input_cost_per_mtok: Option<f64>,
 }
 
+/// Where a provider's credential comes from.
+///
+/// `Vault`/`Env` reference a stored secret resolved to an auth header.
+/// `AwsSigv4` is an opaque source: the credential comes from the AWS default
+/// credential chain and the request is SigV4-signed rather than carrying a
+/// static secret. Folding this into the credential list (instead of a separate
+/// `scheme` field) keeps the "where do credentials come from" decision in one
+/// place and makes invalid combinations unrepresentable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum CredentialRef {
     Vault(String),
     Env(String),
+    AwsSigv4,
 }
 
 impl std::fmt::Display for CredentialRef {
@@ -183,6 +192,7 @@ impl std::fmt::Display for CredentialRef {
         match self {
             Self::Vault(name) => write!(f, "vault:{name}"),
             Self::Env(name) => write!(f, "env:{name}"),
+            Self::AwsSigv4 => write!(f, "aws_sigv4"),
         }
     }
 }
@@ -209,6 +219,9 @@ impl FromStr for CredentialRef {
             }
             return Ok(Self::Env(name.to_string()));
         }
+        if value == "aws_sigv4" {
+            return Ok(Self::AwsSigv4);
+        }
         Err(CredentialRefParseError::Invalid)
     }
 }
@@ -223,7 +236,7 @@ impl TryFrom<String> for CredentialRef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CredentialRefParseError {
-    #[error("credential reference must be `vault:<name>` or `env:<NAME>`")]
+    #[error("credential reference must be `vault:<name>`, `env:<NAME>`, or `aws_sigv4`")]
     Invalid,
     #[error("credential reference is missing a name after `vault:`")]
     EmptyVault,
@@ -234,6 +247,9 @@ pub enum CredentialRefParseError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderAuthConfig {
+    /// Ordered credential sources; the first that resolves wins. Static secrets
+    /// use `env:<NAME>` / `vault:<NAME>`; AWS SigV4 (Bedrock) uses `aws_sigv4`,
+    /// which resolves opaquely from the AWS credential chain.
     pub credentials: Vec<CredentialRef>,
     #[serde(default)]
     pub header:      ApiKeyHeaderPolicy,
@@ -511,7 +527,7 @@ impl CatalogProvider {
             .iter()
             .find_map(|credential_ref| match credential_ref {
                 CredentialRef::Vault(name) => Some(name.as_str()),
-                CredentialRef::Env(_) => None,
+                CredentialRef::Env(_) | CredentialRef::AwsSigv4 => None,
             })
     }
 }
@@ -1367,7 +1383,9 @@ struct AdapterDefaults {
 
 fn adapter_defaults(adapter: AdapterKind) -> AdapterDefaults {
     match adapter {
-        AdapterKind::Anthropic => AdapterDefaults {
+        // Bedrock hosts Anthropic-family models, so it shares the Anthropic
+        // agent profile and billing policy by default.
+        AdapterKind::Anthropic | AdapterKind::Bedrock => AdapterDefaults {
             agent_profile:  AgentProfileKind::Anthropic,
             billing_policy: BillingPolicy::Anthropic,
         },
@@ -1830,6 +1848,56 @@ mod tests {
 
     fn minimal_settings(source: &str) -> LlmCatalogSettings {
         toml::from_str(source).expect("fixture should parse as an LLM settings layer")
+    }
+
+    const BEDROCK_SIGV4_LAYER: &str = r#"
+[providers.bedrock]
+adapter = "bedrock"
+base_url = "https://bedrock-runtime.eu-west-1.amazonaws.com"
+
+[providers.bedrock.auth]
+credentials = ["aws_sigv4"]
+
+[models."bedrock-sonnet"]
+provider = "bedrock"
+api_id = "anthropic.claude-sonnet-4-6"
+display_name = "Bedrock Sonnet"
+family = "claude-4"
+default = true
+
+[models."bedrock-sonnet".limits]
+context_window = 200000
+max_output = 64000
+
+[models."bedrock-sonnet".features]
+tools = true
+vision = true
+reasoning = true
+"#;
+
+    #[test]
+    fn provider_parses_bedrock_base_url_and_sigv4_credential() {
+        let catalog = Catalog::from_settings(&minimal_settings(BEDROCK_SIGV4_LAYER)).unwrap();
+        let provider = catalog.provider(&ProviderId::from("bedrock")).unwrap();
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://bedrock-runtime.eu-west-1.amazonaws.com")
+        );
+        assert_eq!(provider.auth.as_ref().unwrap().credentials, vec![
+            CredentialRef::AwsSigv4
+        ]);
+        // Bedrock inherits the Anthropic agent profile and billing by default.
+        assert_eq!(provider.agent_profile, AgentProfileKind::Anthropic);
+        assert_eq!(provider.billing_policy, BillingPolicy::Anthropic);
+    }
+
+    #[test]
+    fn aws_sigv4_credential_round_trips() {
+        assert_eq!(
+            "aws_sigv4".parse::<CredentialRef>().unwrap(),
+            CredentialRef::AwsSigv4
+        );
+        assert_eq!(CredentialRef::AwsSigv4.to_string(), "aws_sigv4");
     }
 
     // ---- Catalog struct tests ----

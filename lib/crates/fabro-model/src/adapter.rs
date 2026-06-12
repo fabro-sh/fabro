@@ -32,6 +32,7 @@ pub enum AdapterKind {
     #[serde(rename = "openai_compatible")]
     #[strum(to_string = "openai_compatible")]
     OpenAiCompatible,
+    Bedrock,
 }
 
 impl AdapterKind {
@@ -85,6 +86,16 @@ mod tests {
             assert_eq!(parsed, *kind);
             assert_eq!(kind.as_str().parse::<AdapterKind>().unwrap(), *kind);
         }
+    }
+
+    #[test]
+    fn bedrock_adapter_kind_roundtrips() {
+        assert_eq!(AdapterKind::Bedrock.as_str(), "bedrock");
+        assert_eq!(
+            "bedrock".parse::<AdapterKind>().unwrap(),
+            AdapterKind::Bedrock
+        );
+        assert!(AdapterKind::VARIANTS.contains(&AdapterKind::Bedrock));
     }
 
     #[test]

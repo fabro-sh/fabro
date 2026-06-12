@@ -32,6 +32,12 @@ base64.workspace = true
 bytes.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+aws-config.workspace = true
+aws-credential-types.workspace = true
+aws-sigv4.workspace = true
+aws-smithy-eventstream.workspace = true
+aws-smithy-runtime-api.workspace = true
+aws-smithy-types.workspace = true
 fabro-http.workspace = true
 fabro-auth = { path = "../fabro-auth" }
 fabro-model = { path = "../fabro-model" }

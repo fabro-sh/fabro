@@ -40,6 +40,10 @@ pub enum CodecKind {
     #[strum(to_string = "openai_compatible")]
     OpenAiCompatible,
     GeminiGenerate,
+    /// Amazon Bedrock's unified Converse/ConverseStream dialect: one
+    /// model-agnostic envelope AWS translates to each hosted family's
+    /// native format server-side.
+    BedrockConverse,
 }
 
 impl CodecKind {
@@ -53,6 +57,7 @@ impl CodecKind {
             AdapterKind::OpenAi => Self::OpenAiResponses,
             AdapterKind::Gemini => Self::GeminiGenerate,
             AdapterKind::OpenAiCompatible => Self::OpenAiCompatible,
+            AdapterKind::Bedrock => Self::BedrockConverse,
         }
     }
 
@@ -90,6 +95,7 @@ mod tests {
             (CodecKind::OpenAiResponses, "openai_responses"),
             (CodecKind::OpenAiCompatible, "openai_compatible"),
             (CodecKind::GeminiGenerate, "gemini_generate"),
+            (CodecKind::BedrockConverse, "bedrock_converse"),
         ] {
             assert_eq!(kind.as_str(), expected);
             assert_eq!(kind.to_string(), expected);
@@ -103,6 +109,7 @@ mod tests {
             (AdapterKind::OpenAi, CodecKind::OpenAiResponses),
             (AdapterKind::Gemini, CodecKind::GeminiGenerate),
             (AdapterKind::OpenAiCompatible, CodecKind::OpenAiCompatible),
+            (AdapterKind::Bedrock, CodecKind::BedrockConverse),
         ] {
             assert_eq!(CodecKind::default_for(adapter), expected);
         }

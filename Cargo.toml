@@ -33,6 +33,22 @@ fs2 = "0.4"
 base64 = "0.22"
 bytes = "1"
 tokio-util = "0.7"
+# AWS building blocks for the native Bedrock adapter. Lean stack: request
+# signing + credential chain + event-stream decode only. Transport for the
+# actual Bedrock inference calls stays on fabro-http; the full
+# aws-sdk-bedrockruntime (and its parallel hyper stack) is not pulled in.
+# aws-config keeps its DEFAULT features on purpose: `rt-tokio` supplies the
+# TokioSleep impl the credential chain's retry requires (without it,
+# resolving the default chain panics with "an async sleep implementation is
+# required"), and `sso`/`credentials-process` make from_default_chain's
+# documented SSO/credential-process support real. `rustls` pins the TLS
+# backend for credential-resolution HTTP.
+aws-config = { version = "1", features = ["behavior-version-latest", "rustls"] }
+aws-credential-types = { version = "1", features = ["hardcoded-credentials"] }
+aws-sigv4 = "1"
+aws-smithy-eventstream = "0.60"
+aws-smithy-runtime-api = "1"
+aws-smithy-types = "1"
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 jsonschema = { version = "0.42", default-features = false }

@@ -102,7 +102,7 @@ fn provider_env_var_label(provider: &ProviderId, catalog: &Catalog) -> String {
                 .iter()
                 .filter_map(|credential| match credential {
                     CredentialRef::Env(name) => Some(name.as_str()),
-                    CredentialRef::Vault(_) => None,
+                    CredentialRef::Vault(_) | CredentialRef::AwsSigv4 => None,
                 })
                 .collect::<Vec<_>>()
                 .join(" / ")

@@ -23,7 +23,7 @@ impl ApiKeyStrategy {
                     .iter()
                     .filter_map(|credential_ref| match credential_ref {
                         CredentialRef::Env(name) => Some(name.clone()),
-                        CredentialRef::Vault(_) => None,
+                        CredentialRef::Vault(_) | CredentialRef::AwsSigv4 => None,
                     })
                     .collect()
             })

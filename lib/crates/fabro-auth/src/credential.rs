@@ -45,7 +45,13 @@ pub struct OAuthConfig {
 #[derive(Clone, PartialEq, Eq)]
 pub enum ApiKeyHeader {
     Bearer(String),
-    Custom { name: String, value: String },
+    Custom {
+        name:  String,
+        value: String,
+    },
+    /// No static header: the request is authenticated by AWS SigV4 signing,
+    /// with credentials resolved from the AWS default chain at request time.
+    AwsSigv4,
 }
 
 fn redact_for_debug(value: &str) -> String {
@@ -69,6 +75,7 @@ impl std::fmt::Debug for ApiKeyHeader {
                 .field("name", name)
                 .field("value", &redact_for_debug(value))
                 .finish(),
+            Self::AwsSigv4 => f.write_str("AwsSigv4"),
         }
     }
 }
