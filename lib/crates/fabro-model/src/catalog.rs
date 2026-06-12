@@ -941,6 +941,24 @@ impl Catalog {
         Some(model_codec.unwrap_or(provider.codec))
     }
 
+    /// The billing family for `model_id_or_alias` on `provider_id`: the model
+    /// row's policy when one is configured, otherwise the provider's (unknown
+    /// passthrough model ids keep the provider policy).
+    #[must_use]
+    pub fn effective_billing_policy(
+        &self,
+        provider_id: &ProviderId,
+        model_id_or_alias: Option<&str>,
+    ) -> Option<BillingPolicy> {
+        let provider = self.provider(provider_id)?;
+        let model_policy = model_id_or_alias
+            .and_then(|model_id| self.get(model_id))
+            .filter(|model| model.provider == provider.id)
+            .and_then(|model| self.model_settings.get(&model.id))
+            .map(|settings| settings.billing_policy);
+        Some(model_policy.unwrap_or(provider.billing_policy))
+    }
+
     /// List all models, optionally filtered by provider.
     #[must_use]
     pub fn list(&self, provider: Option<&ProviderId>) -> Vec<&Model> {

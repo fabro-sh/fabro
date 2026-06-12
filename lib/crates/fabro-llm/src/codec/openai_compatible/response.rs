@@ -5,8 +5,7 @@ use super::wire::{ApiResponse, ApiUsage};
 use crate::codec::CodecCtx;
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind};
 use crate::types::{
-    ContentPart, CostSource, Message, RateLimitInfo, Response, Role, ThinkingData, TokenCounts,
-    ToolCall,
+    ContentPart, Message, RateLimitInfo, Response, Role, ThinkingData, TokenCounts, ToolCall,
 };
 
 pub(super) fn decode_response(
@@ -56,15 +55,10 @@ pub(super) fn decode_response(
 
     let finish_reason = map_finish_reason(choice.finish_reason.as_deref());
 
-    let usage = api_resp
-        .usage
-        .as_ref()
-        .map_or_else(TokenCounts::default, ApiUsage::token_counts);
-
-    // In-band cost (OpenRouter) is authoritative billing data; the client's
-    // catalog estimate never overwrites it.
-    let cost_usd = api_resp.usage.as_ref().and_then(|u| u.cost);
-    let cost_source = cost_usd.is_some().then_some(CostSource::Authoritative);
+    let wire_usage = api_resp.usage.as_ref();
+    let usage = wire_usage.map_or_else(TokenCounts::default, ApiUsage::token_counts);
+    let cost_usd = wire_usage.and_then(|u| u.cost);
+    let cost_source = translate::authoritative_cost_source(cost_usd);
 
     Ok(Response {
         id: api_resp.id,

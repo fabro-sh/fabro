@@ -8,8 +8,8 @@ use super::wire::{AccumulatedToolCall, StreamChunk};
 use crate::codec::{CodecCtx, RawEvent, StreamDecoder};
 use crate::error::Error;
 use crate::types::{
-    ContentPart, CostSource, FinishReason, Message, RateLimitInfo, Response, Role, StreamEvent,
-    ThinkingData, TokenCounts, ToolCall,
+    ContentPart, FinishReason, Message, RateLimitInfo, Response, Role, StreamEvent, ThinkingData,
+    TokenCounts, ToolCall,
 };
 
 /// Accumulated state while decoding the Chat Completions SSE stream.
@@ -70,9 +70,8 @@ impl StreamState {
         // Capture usage if present (often in a dedicated chunk).
         if let Some(usage) = &chunk.usage {
             self.usage = usage.token_counts();
-            if usage.cost.is_some() {
-                self.cost_usd = usage.cost;
-            }
+            // Keep a previously seen cost when a later usage chunk omits it.
+            self.cost_usd = usage.cost.or(self.cost_usd);
         }
 
         let choices = chunk.choices.as_ref()?;
@@ -226,7 +225,7 @@ impl StreamState {
             warnings:      vec![],
             rate_limit:    self.rate_limit.clone(),
             cost_usd:      self.cost_usd,
-            cost_source:   self.cost_usd.is_some().then_some(CostSource::Authoritative),
+            cost_source:   super::translate::authoritative_cost_source(self.cost_usd),
         };
 
         events.push(StreamEvent::finish(

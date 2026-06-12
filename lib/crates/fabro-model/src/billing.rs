@@ -458,15 +458,8 @@ impl Catalog {
         model_ref: &ModelRef,
         tokens: &TokenCounts,
     ) -> Option<ModelBillingFacts> {
-        let provider = self.provider(&model_ref.provider)?;
-        // The model row may override the provider's billing family; unknown
-        // models keep the provider policy (matching today's behavior for
-        // passthrough model ids).
-        let policy = self
-            .get(&model_ref.model_id)
-            .filter(|model| model.provider == provider.id)
-            .and_then(|model| self.model_settings(&model.id))
-            .map_or(provider.billing_policy, |settings| settings.billing_policy);
+        let policy =
+            self.effective_billing_policy(&model_ref.provider, Some(&model_ref.model_id))?;
         ModelBillingFacts::for_policy(policy, tokens)
     }
 

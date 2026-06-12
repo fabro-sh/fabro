@@ -2,9 +2,15 @@
 
 use super::wire::{ChatFunction, ChatMessage, ChatToolCall};
 use crate::types::{
-    ContentPart, FinishReason, Message, Request, ResponseFormat, ResponseFormatType, Role,
-    ToolChoice, ToolDefinition,
+    ContentPart, CostSource, FinishReason, Message, Request, ResponseFormat, ResponseFormatType,
+    Role, ToolChoice, ToolDefinition,
 };
+
+/// In-band cost (OpenRouter) is authoritative billing data; the client's
+/// catalog estimate never overwrites it.
+pub(super) fn authoritative_cost_source(cost_usd: Option<f64>) -> Option<CostSource> {
+    cost_usd.is_some().then_some(CostSource::Authoritative)
+}
 
 pub(super) fn map_finish_reason(reason: Option<&str>) -> FinishReason {
     match reason {
