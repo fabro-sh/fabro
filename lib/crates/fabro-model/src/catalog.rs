@@ -1983,6 +1983,112 @@ reasoning = false
     }
 
     #[test]
+    fn builtin_bedrock_provider_is_opt_in() {
+        let bedrock = ProviderId::new("bedrock");
+        let builtin = Catalog::builtin();
+
+        assert!(builtin.provider(&bedrock).is_none());
+        assert!(builtin.list(Some(&bedrock)).is_empty());
+
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.bedrock]
+enabled = true
+",
+        ))
+        .expect("enabled Bedrock override should build from the built-in provider settings");
+
+        let provider = catalog
+            .provider(&bedrock)
+            .expect("enabled Bedrock provider should be present");
+        assert_eq!(provider.adapter, AdapterKind::Bedrock);
+        assert_eq!(provider.codec, CodecKind::BedrockConverse);
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://bedrock-runtime.us-east-1.amazonaws.com")
+        );
+        // Bearer key first, SigV4 chain as the fallback.
+        assert_eq!(provider.auth.as_ref().unwrap().credentials, vec![
+            CredentialRef::Env("AWS_BEARER_TOKEN_BEDROCK".to_string()),
+            CredentialRef::AwsSigv4,
+        ]);
+
+        // Claude rows bill Anthropic-style; open-weights rows override the
+        // provider's Anthropic defaults the other way.
+        assert_eq!(
+            catalog
+                .model_settings("us.anthropic.claude-sonnet-4-6")
+                .unwrap()
+                .billing_policy,
+            BillingPolicy::Anthropic
+        );
+        assert_eq!(
+            catalog.model_settings("zai.glm-5").unwrap().billing_policy,
+            BillingPolicy::OpenAi
+        );
+        assert_eq!(
+            catalog
+                .model_settings("us.anthropic.claude-haiku-4-5")
+                .unwrap()
+                .api_id,
+            "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        );
+        assert_eq!(
+            catalog
+                .default_for_provider(&bedrock)
+                .map(|model| model.id.as_str()),
+            Some("us.anthropic.claude-sonnet-4-6")
+        );
+        // Fable 5 ships with sampling params pinned off (the Converse
+        // encoder drops temperature/top_p for it).
+        let fable = catalog
+            .get("us.anthropic.claude-fable-5")
+            .expect("fable row should be present");
+        assert!(!fable.features.sampling_params);
+        assert_eq!(
+            catalog
+                .model_settings("us.anthropic.claude-fable-5")
+                .unwrap()
+                .billing_policy,
+            BillingPolicy::Anthropic
+        );
+    }
+
+    #[test]
+    fn builtin_bedrock_openai_provider_is_opt_in() {
+        let provider_id = ProviderId::new("bedrock-openai");
+        let builtin = Catalog::builtin();
+
+        assert!(builtin.provider(&provider_id).is_none());
+
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.bedrock-openai]
+enabled = true
+",
+        ))
+        .expect("enabled bedrock-openai override should build");
+
+        let provider = catalog
+            .provider(&provider_id)
+            .expect("enabled bedrock-openai provider should be present");
+        // OpenAI frontier on Bedrock rides the existing openai_responses
+        // dialect against the bedrock-mantle endpoint — pure configuration.
+        assert_eq!(provider.adapter, AdapterKind::OpenAi);
+        assert_eq!(provider.codec, CodecKind::OpenAiResponses);
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://bedrock-mantle.us-east-1.api.aws/openai/v1")
+        );
+        assert_eq!(
+            catalog
+                .default_for_provider(&provider_id)
+                .map(|model| model.id.as_str()),
+            Some("openai.gpt-5.5")
+        );
+    }
+
+    #[test]
     fn builtin_openrouter_provider_is_opt_in() {
         let openrouter = ProviderId::new("openrouter");
         let builtin = Catalog::builtin();

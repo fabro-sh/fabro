@@ -2547,6 +2547,20 @@ entropy = 3
 keywords = ["t3blbkfj"]
 
 [[rules]]
+id = "aws-bedrock-long-term-api-key"
+description = "Found an AWS Bedrock long-term API key, posing a risk of unauthorized model invocation and billing."
+regex = '''\b(ABSK[A-Za-z0-9+/]{109,269}={0,2})(?:[\x60'\"\s;]|\\[nr]|$)'''
+entropy = 3
+keywords = ["absk"]
+
+[[rules]]
+id = "aws-bedrock-short-term-api-key"
+description = "Found an AWS Bedrock short-term API key, posing a risk of unauthorized model invocation."
+regex = '''\b(bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t[A-Za-z0-9+/=]{16,})(?:[\x60'\"\s;]|\\[nr]|$)'''
+entropy = 3
+keywords = ["bedrock-api-key-"]
+
+[[rules]]
 id = "openrouter-api-key"
 description = "Found an OpenRouter API Key, posing a risk of unauthorized access to LLM provider routing and billing."
 regex = '''\b(sk-or-v1-[0-9a-f]{64})(?:['|\"|\n|\r|\s|\x60|;]|$)'''

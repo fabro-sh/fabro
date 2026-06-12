@@ -333,7 +333,7 @@ fn exec_accepts_configured_custom_provider_from_settings() {
     let context = test_context!();
     context.write_home(
         ".fabro/settings.toml",
-        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nagent_profile = \"openai\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[llm.providers.bedrock.auth]\ncredentials = [\"env:BEDROCK_API_KEY\"]\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
+        "_version = 1\n\n[llm.providers.acme-aws]\nadapter = \"openai_compatible\"\nagent_profile = \"openai\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[llm.providers.acme-aws.auth]\ncredentials = [\"env:ACME_AWS_API_KEY\"]\n\n[cli.exec.model]\nprovider = \"acme-aws\"\nname = \"acme-claude-sonnet-4-6\"\n",
     );
 
     let mut cmd = context.exec_cmd();
@@ -350,7 +350,7 @@ fn exec_accepts_configured_custom_provider_from_settings() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-      × LLM credentials not configured for provider 'bedrock'
+      × LLM credentials not configured for provider 'acme-aws'
     ");
 }
 
@@ -398,7 +398,7 @@ fn exec_server_target_accepts_configured_custom_provider_from_settings() {
     let context = test_context!();
     context.write_home(
         ".fabro/settings.toml",
-        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nagent_profile = \"openai\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[llm.providers.bedrock.auth]\ncredentials = [\"env:BEDROCK_API_KEY\"]\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
+        "_version = 1\n\n[llm.providers.acme-aws]\nadapter = \"openai_compatible\"\nagent_profile = \"openai\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[llm.providers.acme-aws.auth]\ncredentials = [\"env:ACME_AWS_API_KEY\"]\n\n[cli.exec.model]\nprovider = \"acme-aws\"\nname = \"acme-claude-sonnet-4-6\"\n",
     );
     let server = MockServer::start();
     server.mock(|when, then| {
@@ -425,7 +425,7 @@ fn exec_server_target_accepts_configured_custom_provider_from_settings() {
         "expected remote server failure marker, got: {stderr}"
     );
     assert!(
-        !stderr.contains("unknown provider: bedrock"),
+        !stderr.contains("unknown provider: acme-aws"),
         "exec should resolve custom providers from settings for remote transport: {stderr}"
     );
 }

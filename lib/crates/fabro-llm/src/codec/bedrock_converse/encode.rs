@@ -45,14 +45,25 @@ pub(super) fn encode(ctx: &CodecCtx<'_>, stream: bool) -> Result<EncodedRequest,
     }
     body.insert("messages".to_string(), Value::Array(messages));
 
+    // Models with `sampling_params = false` reject classic sampling knobs
+    // (Claude Fable 5 pins temperature on Bedrock too).
+    let (temperature, top_p) = if ctx
+        .model
+        .is_none_or(fabro_model::Model::supports_sampling_params)
+    {
+        (request.temperature, request.top_p)
+    } else {
+        (None, None)
+    };
+
     let mut inference = Map::new();
     if let Some(max_tokens) = request.max_tokens {
         inference.insert("maxTokens".to_string(), json!(max_tokens));
     }
-    if let Some(temperature) = request.temperature {
+    if let Some(temperature) = temperature {
         inference.insert("temperature".to_string(), json!(temperature));
     }
-    if let Some(top_p) = request.top_p {
+    if let Some(top_p) = top_p {
         inference.insert("topP".to_string(), json!(top_p));
     }
     if let Some(stop) = &request.stop_sequences {
@@ -303,6 +314,8 @@ fn merge_provider_options(body: &mut Value, provider_options: Option<&Value>, pr
 
 #[cfg(test)]
 mod tests {
+    use fabro_model::Catalog;
+    use fabro_model::catalog::LlmCatalogSettings;
     use serde_json::json;
 
     use super::*;
@@ -474,6 +487,52 @@ mod tests {
             params:        &params,
         };
         assert!(encode(&ctx, false).is_err());
+    }
+
+    #[test]
+    fn sampling_params_false_drops_temperature_and_top_p() {
+        let settings: LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.bedrock]
+adapter = "bedrock"
+enabled = true
+base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
+
+[models."pinned-model"]
+provider = "bedrock"
+display_name = "Pinned"
+family = "claude-5"
+default = true
+
+[models."pinned-model".limits]
+context_window = 100000
+
+[models."pinned-model".features]
+tools = true
+vision = false
+reasoning = true
+sampling_params = false
+"#,
+        )
+        .unwrap();
+        let catalog = Catalog::from_settings(&settings).unwrap();
+
+        let mut request = base_request("pinned-model");
+        request.top_p = Some(0.9);
+        let params = CodecParams::default();
+        let ctx = CodecCtx {
+            request:       &request,
+            provider_name: "bedrock",
+            deployment_id: "pinned-model",
+            model:         catalog.get("pinned-model"),
+            params:        &params,
+        };
+        let encoded = encode(&ctx, false).unwrap();
+
+        let inference = &encoded.body["inferenceConfig"];
+        assert!(inference.get("temperature").is_none());
+        assert!(inference.get("topP").is_none());
+        assert_eq!(inference["maxTokens"], 256);
     }
 
     #[test]

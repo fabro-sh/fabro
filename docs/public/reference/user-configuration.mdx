@@ -198,7 +198,7 @@ x-team-secret = { vault = "gateway_team_secret" }
 | `billing_policy` | `"openai"` \| `"anthropic"` \| `"gemini"` \| `"none"` | derived from `adapter` | Provider-owned billing algorithm for usage estimates. Override for exceptional providers such as local no-billing runtimes. |
 | `base_url` | string | built-in value or adapter runtime default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
 | `auth` | table | omitted | API-key auth config. Omit the table entirely for providers that need no API key; any `extra_headers` are still attached. |
-| `auth.credentials` | array<string> | required when `auth` present | Ordered credential refs. Accepted forms are `vault:<NAME>` and `env:<NAME>`. Literal secret strings are rejected. |
+| `auth.credentials` | array<string> | required when `auth` present | Ordered credential refs. Accepted forms are `vault:<NAME>`, `env:<NAME>`, and `aws_sigv4` (sign requests from the AWS default credential chain — Bedrock). Literal secret strings are rejected. |
 | `auth.header` | `"bearer"` or `{ custom = "Header-Name" }` | `"bearer"` | Primary API-key header policy. Omit when the provider uses a standard bearer token. |
 | `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values must be typed refs: `{ literal = "..." }`, `{ env = "NAME" }`, or `{ vault = "NAME" }`. |
 | `priority` | integer | `0` | Higher-priority configured providers win default selection; ties use canonical provider ID. |

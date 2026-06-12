@@ -150,7 +150,11 @@ pub(super) fn map_stop_reason(reason: Option<&str>) -> FinishReason {
         None | Some("end_turn" | "stop_sequence") => FinishReason::Stop,
         Some("max_tokens" | "model_context_window_exceeded") => FinishReason::Length,
         Some("tool_use") => FinishReason::ToolCalls,
-        Some("guardrail_intervened" | "content_filtered") => FinishReason::ContentFilter,
+        // `refusal` is the Claude 5 blocking-classifier stop, passed through
+        // by Bedrock for Fable-class models.
+        Some("guardrail_intervened" | "content_filtered" | "refusal") => {
+            FinishReason::ContentFilter
+        }
         Some(other) => FinishReason::Other(other.to_string()),
     }
 }
@@ -191,6 +195,10 @@ mod tests {
         );
         assert_eq!(
             map_stop_reason(Some("content_filtered")),
+            FinishReason::ContentFilter
+        );
+        assert_eq!(
+            map_stop_reason(Some("refusal")),
             FinishReason::ContentFilter
         );
         assert_eq!(

@@ -1,0 +1,372 @@
+[providers.bedrock]
+display_name = "Amazon Bedrock"
+adapter = "bedrock"
+api_key_url = "https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html"
+base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
+priority = 20
+enabled = false
+
+[providers.bedrock.auth]
+# An explicit Bedrock API key wins; SigV4 (the AWS default credential
+# chain, resolved at request time) is the fallback. `aws_sigv4` always
+# resolves, which is why this provider ships disabled: enabling it is the
+# operator's statement that AWS credentials are expected to work.
+credentials = ["env:AWS_BEARER_TOKEN_BEDROCK", "aws_sigv4"]
+
+# To enable Bedrock, add the following to ~/.fabro/settings.toml:
+#
+# [llm.providers.bedrock]
+# enabled = true
+# base_url = "https://bedrock-runtime.<your-region>.amazonaws.com"
+#
+# The signing region is derived from the base_url. Authenticate with
+# either a Bedrock API key (AWS_BEARER_TOKEN_BEDROCK) or any AWS default
+# credential chain source (env keys, profile, IMDS, IRSA, SSO).
+#
+# Model ids use cross-region inference profiles (`us.` / `global.`
+# prefixes) where on-demand access requires them. Pricing rows are
+# best-effort estimates from June 2026 list prices.
+
+# ---------- Anthropic Claude ----------
+#
+# Claude bills Anthropic-style cache reads/writes, so these rows override
+# the provider's billing default. Claude Fable 5 is deliberately absent:
+# its Bedrock deployment pins sampling parameters (temperature must be
+# unset) that the Converse route does not gate yet — a named follow-up.
+
+[models."us.anthropic.claude-sonnet-4-6"]
+provider = "bedrock"
+display_name = "Claude Sonnet 4.6 (Bedrock)"
+family = "claude-4"
+billing_policy = "anthropic"
+default = true
+
+[models."us.anthropic.claude-sonnet-4-6".limits]
+context_window = 1000000
+max_output = 64000
+
+[models."us.anthropic.claude-sonnet-4-6".features]
+tools = true
+vision = true
+reasoning = true
+prompt_cache = true
+
+[models."us.anthropic.claude-sonnet-4-6".costs]
+input_cost_per_mtok = 3.0
+output_cost_per_mtok = 15.0
+cache_input_cost_per_mtok = 0.3
+
+[models."us.anthropic.claude-opus-4-8"]
+provider = "bedrock"
+display_name = "Claude Opus 4.8 (Bedrock)"
+family = "claude-4"
+billing_policy = "anthropic"
+
+[models."us.anthropic.claude-opus-4-8".limits]
+context_window = 1000000
+max_output = 128000
+
+[models."us.anthropic.claude-opus-4-8".features]
+tools = true
+vision = true
+reasoning = true
+prompt_cache = true
+
+[models."us.anthropic.claude-opus-4-8".costs]
+input_cost_per_mtok = 5.0
+output_cost_per_mtok = 25.0
+cache_input_cost_per_mtok = 0.5
+
+[models."us.anthropic.claude-haiku-4-5"]
+provider = "bedrock"
+api_id = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+display_name = "Claude Haiku 4.5 (Bedrock)"
+family = "claude-4"
+billing_policy = "anthropic"
+small_default = true
+
+[models."us.anthropic.claude-haiku-4-5".limits]
+context_window = 200000
+max_output = 64000
+
+[models."us.anthropic.claude-haiku-4-5".features]
+tools = true
+vision = true
+reasoning = false
+prompt_cache = true
+
+[models."us.anthropic.claude-haiku-4-5".costs]
+input_cost_per_mtok = 1.0
+output_cost_per_mtok = 5.0
+cache_input_cost_per_mtok = 0.1
+
+# ---------- OpenAI open-weights ----------
+#
+# GPT-5.5/5.4 are NOT here: on Bedrock they are Responses-API-only on the
+# bedrock-mantle endpoint (no Converse), a named follow-up route.
+
+[models."openai.gpt-oss-120b"]
+provider = "bedrock"
+api_id = "openai.gpt-oss-120b-1:0"
+display_name = "GPT-OSS 120B (Bedrock)"
+family = "gpt-oss"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."openai.gpt-oss-120b".limits]
+context_window = 128000
+max_output = 16384
+
+[models."openai.gpt-oss-120b".features]
+tools = true
+vision = false
+reasoning = true
+
+[models."openai.gpt-oss-120b".costs]
+input_cost_per_mtok = 0.15
+output_cost_per_mtok = 0.60
+
+[models."openai.gpt-oss-20b"]
+provider = "bedrock"
+api_id = "openai.gpt-oss-20b-1:0"
+display_name = "GPT-OSS 20B (Bedrock)"
+family = "gpt-oss"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."openai.gpt-oss-20b".limits]
+context_window = 128000
+max_output = 16384
+
+[models."openai.gpt-oss-20b".features]
+tools = true
+vision = false
+reasoning = true
+
+[models."openai.gpt-oss-20b".costs]
+input_cost_per_mtok = 0.07
+output_cost_per_mtok = 0.30
+
+# ---------- Amazon Nova ----------
+
+[models."amazon.nova-2-lite"]
+provider = "bedrock"
+api_id = "global.amazon.nova-2-lite-v1:0"
+display_name = "Nova 2 Lite (Bedrock)"
+family = "nova-2"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."amazon.nova-2-lite".limits]
+context_window = 1000000
+max_output = 65536
+
+[models."amazon.nova-2-lite".features]
+tools = true
+vision = true
+reasoning = false
+
+[models."amazon.nova-2-lite".costs]
+input_cost_per_mtok = 0.30
+output_cost_per_mtok = 2.50
+
+# ---------- Open-weights ----------
+
+[models."meta.llama4-maverick"]
+provider = "bedrock"
+api_id = "us.meta.llama4-maverick-17b-instruct-v1:0"
+display_name = "Llama 4 Maverick (Bedrock)"
+family = "llama-4"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."meta.llama4-maverick".limits]
+context_window = 1000000
+max_output = 8192
+
+[models."meta.llama4-maverick".features]
+tools = true
+vision = true
+reasoning = false
+
+[models."mistral.mistral-large-3"]
+provider = "bedrock"
+api_id = "mistral.mistral-large-3-675b-instruct"
+display_name = "Mistral Large 3 (Bedrock)"
+family = "mistral-large"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."mistral.mistral-large-3".limits]
+context_window = 256000
+max_output = 32768
+
+[models."mistral.mistral-large-3".features]
+tools = true
+vision = true
+reasoning = false
+
+[models."mistral.mistral-large-3".costs]
+input_cost_per_mtok = 0.50
+output_cost_per_mtok = 1.50
+
+[models."mistral.devstral-2"]
+provider = "bedrock"
+api_id = "mistral.devstral-2-123b"
+display_name = "Devstral 2 (Bedrock)"
+family = "devstral"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."mistral.devstral-2".limits]
+context_window = 256000
+max_output = 32768
+
+[models."mistral.devstral-2".features]
+tools = true
+vision = false
+reasoning = false
+
+[models."deepseek.v3-2"]
+provider = "bedrock"
+api_id = "deepseek.v3.2"
+display_name = "DeepSeek V3.2 (Bedrock)"
+family = "deepseek-v3"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."deepseek.v3-2".limits]
+context_window = 164000
+max_output = 8192
+
+[models."deepseek.v3-2".features]
+tools = true
+vision = false
+reasoning = true
+
+[models."deepseek.v3-2".costs]
+input_cost_per_mtok = 0.62
+output_cost_per_mtok = 1.85
+
+[models."qwen.qwen3-coder-next"]
+provider = "bedrock"
+display_name = "Qwen3 Coder Next (Bedrock)"
+family = "qwen3"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."qwen.qwen3-coder-next".limits]
+context_window = 256000
+max_output = 16384
+
+[models."qwen.qwen3-coder-next".features]
+tools = true
+vision = false
+reasoning = false
+
+[models."moonshotai.kimi-k2.5"]
+provider = "bedrock"
+display_name = "Kimi K2.5 (Bedrock)"
+family = "kimi-k2"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."moonshotai.kimi-k2.5".limits]
+context_window = 262144
+max_output = 16384
+
+[models."moonshotai.kimi-k2.5".features]
+tools = true
+vision = true
+reasoning = false
+
+[models."moonshotai.kimi-k2.5".costs]
+input_cost_per_mtok = 0.60
+output_cost_per_mtok = 3.00
+
+[models."zai.glm-5"]
+provider = "bedrock"
+display_name = "GLM 5 (Bedrock)"
+family = "glm"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."zai.glm-5".limits]
+context_window = 200000
+max_output = 128000
+
+[models."zai.glm-5".features]
+tools = true
+vision = false
+reasoning = false
+
+[models."zai.glm-5".costs]
+input_cost_per_mtok = 1.00
+output_cost_per_mtok = 3.20
+
+[models."minimax.minimax-m2.5"]
+provider = "bedrock"
+display_name = "MiniMax M2.5 (Bedrock)"
+family = "minimax-m2"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."minimax.minimax-m2.5".limits]
+context_window = 196000
+max_output = 8192
+
+[models."minimax.minimax-m2.5".features]
+tools = true
+vision = false
+reasoning = false
+
+[models."minimax.minimax-m2.5".costs]
+input_cost_per_mtok = 0.30
+output_cost_per_mtok = 1.20
+
+[models."nvidia.nemotron-3-super"]
+provider = "bedrock"
+api_id = "nvidia.nemotron-super-3-120b"
+display_name = "Nemotron 3 Super (Bedrock)"
+family = "nemotron-3"
+billing_policy = "openai"
+agent_profile = "openai"
+
+[models."nvidia.nemotron-3-super".limits]
+context_window = 256000
+max_output = 32768
+
+[models."nvidia.nemotron-3-super".features]
+tools = true
+vision = false
+reasoning = false
+
+# Claude Fable 5: adaptive thinking is always on server-side; the row pins
+# sampling_params = false so the Converse encoder drops temperature/top_p
+# (Bedrock rejects them for this model). Requires the account-level
+# provider_data_share opt-in in the Bedrock console. Effort-level mapping
+# through additionalModelRequestFields is a named follow-up, so
+# reasoning_effort stays undeclared here (requests carrying one are
+# rejected up front rather than silently dropped).
+
+[models."us.anthropic.claude-fable-5"]
+provider = "bedrock"
+display_name = "Claude Fable 5 (Bedrock)"
+family = "claude-5"
+billing_policy = "anthropic"
+
+[models."us.anthropic.claude-fable-5".limits]
+context_window = 1000000
+max_output = 128000
+
+[models."us.anthropic.claude-fable-5".features]
+tools = true
+vision = true
+reasoning = true
+prompt_cache = true
+sampling_params = false
+
+[models."us.anthropic.claude-fable-5".costs]
+input_cost_per_mtok = 10.0
+output_cost_per_mtok = 50.0
+cache_input_cost_per_mtok = 1.0

@@ -141,6 +141,16 @@ Fabro ships an [OpenRouter](/integrations/openrouter) provider definition with a
 enabled = true
 ```
 
+### Amazon Bedrock
+
+Fabro ships an [Amazon Bedrock](/integrations/bedrock) provider definition with a curated multi-vendor catalog over Bedrock's Converse API, disabled by default. Enable it and authenticate with a Bedrock API key or AWS SigV4 credentials:
+
+```toml title="settings.toml"
+[llm.providers.bedrock]
+enabled = true
+base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
+```
+
 ### Ollama
 
 Fabro ships an Ollama provider definition that is disabled by default. Enable it in settings when you want Fabro to route through a local Ollama server:

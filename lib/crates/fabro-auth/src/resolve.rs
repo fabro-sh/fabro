@@ -610,6 +610,7 @@ mod tests {
             r#"
 [providers.bedrock]
 adapter = "bedrock"
+enabled = true
 base_url = "https://bedrock-runtime.eu-west-1.amazonaws.com"
 
 [providers.bedrock.auth]

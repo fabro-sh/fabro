@@ -1016,8 +1016,8 @@ mod tests {
         let mut settings = LlmCatalogSettings::default();
         settings
             .providers
-            .insert("bedrock".to_string(), ProviderCatalogSettings {
-                display_name: Some("Bedrock".to_string()),
+            .insert("acme-aws".to_string(), ProviderCatalogSettings {
+                display_name: Some("Acme AWS".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
                 agent_profile: Some(AgentProfileKind::OpenAi),
@@ -1026,7 +1026,7 @@ mod tests {
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
         let args = AgentArgs {
             prompt:        "test".to_string(),
-            provider:      Some("bedrock".to_string()),
+            provider:      Some("acme-aws".to_string()),
             model:         None,
             permissions:   None,
             auto_approve:  false,
@@ -1037,7 +1037,7 @@ mod tests {
         };
 
         let provider_id = parse_provider(&args).unwrap();
-        assert_eq!(provider_id, ProviderId::new("bedrock"));
+        assert_eq!(provider_id, ProviderId::new("acme-aws"));
         assert_eq!(
             profile_kind_for_provider(&catalog, &provider_id, None).unwrap(),
             AgentProfileKind::OpenAi
@@ -1049,8 +1049,8 @@ mod tests {
         let mut settings = LlmCatalogSettings::default();
         settings
             .providers
-            .insert("bedrock".to_string(), ProviderCatalogSettings {
-                display_name: Some("Bedrock".to_string()),
+            .insert("acme-aws".to_string(), ProviderCatalogSettings {
+                display_name: Some("Acme AWS".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
                 agent_profile: Some(AgentProfileKind::OpenAi),
@@ -1058,9 +1058,9 @@ mod tests {
             });
         settings
             .models
-            .insert("bedrock-claude".to_string(), ModelCatalogSettings {
-                provider: Some("bedrock".to_string()),
-                display_name: Some("Bedrock Claude".to_string()),
+            .insert("acme-aws-claude".to_string(), ModelCatalogSettings {
+                provider: Some("acme-aws".to_string()),
+                display_name: Some("Acme AWS Claude".to_string()),
                 family: Some("claude".to_string()),
                 default: Some(true),
                 limits: Some(SettingsModelLimits {
@@ -1081,7 +1081,7 @@ mod tests {
         let args = AgentArgs {
             prompt:        "test".to_string(),
             provider:      None,
-            model:         Some("bedrock-claude".to_string()),
+            model:         Some("acme-aws-claude".to_string()),
             permissions:   None,
             auto_approve:  false,
             debug:         false,
@@ -1092,7 +1092,7 @@ mod tests {
 
         assert_eq!(
             resolve_provider_id(&catalog, &args).unwrap(),
-            ProviderId::new("bedrock")
+            ProviderId::new("acme-aws")
         );
     }
 
@@ -1101,8 +1101,8 @@ mod tests {
         let mut settings = LlmCatalogSettings::default();
         settings
             .providers
-            .insert("bedrock".to_string(), ProviderCatalogSettings {
-                display_name: Some("Bedrock".to_string()),
+            .insert("acme-aws".to_string(), ProviderCatalogSettings {
+                display_name: Some("Acme AWS".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
                 agent_profile: Some(AgentProfileKind::OpenAi),
@@ -1124,7 +1124,7 @@ mod tests {
 
         assert_eq!(
             resolve_provider_id(&catalog, &args).unwrap(),
-            ProviderId::new("bedrock")
+            ProviderId::new("acme-aws")
         );
     }
 
@@ -1133,8 +1133,8 @@ mod tests {
         let mut settings = LlmCatalogSettings::default();
         settings
             .providers
-            .insert("bedrock".to_string(), ProviderCatalogSettings {
-                display_name: Some("Bedrock".to_string()),
+            .insert("acme-aws".to_string(), ProviderCatalogSettings {
+                display_name: Some("Acme AWS".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
                 agent_profile: Some(AgentProfileKind::OpenAi),
@@ -1142,9 +1142,9 @@ mod tests {
             });
         settings
             .models
-            .insert("bedrock-claude".to_string(), ModelCatalogSettings {
-                provider: Some("bedrock".to_string()),
-                display_name: Some("Bedrock Claude".to_string()),
+            .insert("acme-aws-claude".to_string(), ModelCatalogSettings {
+                provider: Some("acme-aws".to_string()),
+                display_name: Some("Acme AWS Claude".to_string()),
                 family: Some("claude".to_string()),
                 default: Some(true),
                 agent_profile: Some(AgentProfileKind::Anthropic),
@@ -1167,8 +1167,8 @@ mod tests {
         assert_eq!(
             profile_kind_for_provider(
                 &catalog,
-                &ProviderId::new("bedrock"),
-                Some("bedrock-claude")
+                &ProviderId::new("acme-aws"),
+                Some("acme-aws-claude")
             )
             .unwrap(),
             AgentProfileKind::Anthropic
@@ -1180,20 +1180,20 @@ mod tests {
         let mut settings = LlmCatalogSettings::default();
         settings
             .providers
-            .insert("bedrock".to_string(), ProviderCatalogSettings {
-                display_name: Some("Bedrock".to_string()),
+            .insert("acme-aws".to_string(), ProviderCatalogSettings {
+                display_name: Some("Acme AWS".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
                 agent_profile: Some(AgentProfileKind::OpenAi),
                 ..ProviderCatalogSettings::default()
             });
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
-        let provider_id = ProviderId::new("bedrock");
+        let provider_id = ProviderId::new("acme-aws");
 
-        let model_id = summarizer_model_id(&provider_id, &catalog, "bedrock-claude-sonnet-4-6");
+        let model_id = summarizer_model_id(&provider_id, &catalog, "acme-aws-claude-sonnet-4-6");
 
         assert_eq!(model_id.provider(), &provider_id);
-        assert_eq!(model_id.model_id(), "bedrock-claude-sonnet-4-6");
+        assert_eq!(model_id.model_id(), "acme-aws-claude-sonnet-4-6");
     }
 
     #[test]
@@ -1201,20 +1201,20 @@ mod tests {
         let mut settings = LlmCatalogSettings::default();
         settings
             .providers
-            .insert("bedrock".to_string(), ProviderCatalogSettings {
-                display_name: Some("Bedrock".to_string()),
+            .insert("acme-aws".to_string(), ProviderCatalogSettings {
+                display_name: Some("Acme AWS".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
                 agent_profile: Some(AgentProfileKind::Anthropic),
                 ..ProviderCatalogSettings::default()
             });
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
-        let provider_id = ProviderId::new("bedrock");
+        let provider_id = ProviderId::new("acme-aws");
 
-        let model_id = summarizer_model_id(&provider_id, &catalog, "bedrock-claude-sonnet-4-6");
+        let model_id = summarizer_model_id(&provider_id, &catalog, "acme-aws-claude-sonnet-4-6");
 
         assert_eq!(model_id.provider(), &provider_id);
-        assert_eq!(model_id.model_id(), "bedrock-claude-sonnet-4-6");
+        assert_eq!(model_id.model_id(), "acme-aws-claude-sonnet-4-6");
     }
 
     // subagent tool registration tests

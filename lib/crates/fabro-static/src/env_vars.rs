@@ -40,6 +40,7 @@ impl EnvVars {
 
     // LLM providers and tool integrations
     pub const ANTHROPIC_API_KEY: &'static str = "ANTHROPIC_API_KEY";
+    pub const AWS_BEARER_TOKEN_BEDROCK: &'static str = "AWS_BEARER_TOKEN_BEDROCK";
     pub const ANTHROPIC_BASE_URL: &'static str = "ANTHROPIC_BASE_URL";
     pub const BRAVE_SEARCH_API_KEY: &'static str = "BRAVE_SEARCH_API_KEY";
     pub const CHATGPT_ACCOUNT_ID: &'static str = "CHATGPT_ACCOUNT_ID";
@@ -179,6 +180,7 @@ mod tests {
             EnvVars::FABRO_WORKER_TOKEN,
             EnvVars::ANTHROPIC_API_KEY,
             EnvVars::ANTHROPIC_BASE_URL,
+            EnvVars::AWS_BEARER_TOKEN_BEDROCK,
             EnvVars::BRAVE_SEARCH_API_KEY,
             EnvVars::CHATGPT_ACCOUNT_ID,
             EnvVars::GEMINI_API_KEY,

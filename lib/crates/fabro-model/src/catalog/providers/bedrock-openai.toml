@@ -1,0 +1,70 @@
+[providers.bedrock-openai]
+display_name = "Amazon Bedrock (OpenAI frontier)"
+adapter = "openai"
+api_key_url = "https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html"
+base_url = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+priority = 19
+enabled = false
+
+[providers.bedrock-openai.auth]
+credentials = ["env:AWS_BEARER_TOKEN_BEDROCK"]
+
+# OpenAI's frontier models on Bedrock (GPT-5.5/5.4) are served ONLY by the
+# bedrock-mantle endpoint's OpenAI Responses API — they are not reachable
+# through Converse or InvokeModel on bedrock-runtime. That surface speaks
+# the openai_responses dialect with a Bedrock API key as the bearer token,
+# so this companion provider row is pure configuration over the existing
+# openai adapter: same AWS account and key as the `bedrock` provider, a
+# different endpoint and wire dialect.
+#
+# Notes:
+# - Auth is Bedrock-API-key only on this row (SigV4 on mantle uses the
+#   `bedrock-mantle` signing name, which the openai adapter does not do).
+# - bedrock-mantle is regional (13 regions); change base_url to
+#   `https://bedrock-mantle.<region>.api.aws/openai/v1` as needed.
+# - Responses state: Fabro always sends `store: false`, so nothing is
+#   retained under mantle's default 30-day Project retention.
+#
+# To enable, add to ~/.fabro/settings.toml:
+#
+# [llm.providers.bedrock-openai]
+# enabled = true
+
+[models."openai.gpt-5.5"]
+provider = "bedrock-openai"
+display_name = "GPT-5.5 (Bedrock)"
+family = "gpt-5"
+default = true
+
+[models."openai.gpt-5.5".limits]
+context_window = 272000
+max_output = 128000
+
+[models."openai.gpt-5.5".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+
+[models."openai.gpt-5.5".costs]
+input_cost_per_mtok = 5.5
+output_cost_per_mtok = 33.0
+
+[models."openai.gpt-5.4"]
+provider = "bedrock-openai"
+display_name = "GPT-5.4 (Bedrock)"
+family = "gpt-5"
+
+[models."openai.gpt-5.4".limits]
+context_window = 272000
+max_output = 128000
+
+[models."openai.gpt-5.4".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+
+[models."openai.gpt-5.4".costs]
+input_cost_per_mtok = 2.75
+output_cost_per_mtok = 16.5
