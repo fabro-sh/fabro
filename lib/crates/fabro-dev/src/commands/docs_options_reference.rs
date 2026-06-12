@@ -301,6 +301,7 @@ cache_input_cost_per_mtok = 0.60
 | `provider` | string | None | Provider ID this model belongs to. |
 | `api_id` | string | model ID | Identifier sent to the provider API. |
 | `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | provider profile | Agent profile override for this model. Model overrides take precedence over provider overrides. |
+| `billing_policy` | `"openai"` \| `"anthropic"` \| `"gemini"` \| `"none"` | provider policy | Billing algorithm override for this model — for models whose billing family differs from their provider's (e.g. Claude served through OpenRouter bills Anthropic-style cache reads/writes). |
 | `display_name` | string | model ID | Human-readable model name. |
 | `family` | string | model ID | Family label used for catalog display and matching. |
 | `training` | string | None | Training data cutoff label. |
