@@ -79,6 +79,11 @@ pub struct ModelCatalogSettings {
     /// accepted today.
     #[serde(default)]
     pub codec:                Option<CodecKind>,
+    /// Billing family for this model, overriding the provider's policy
+    /// (e.g. Anthropic cache billing for a Claude model served through an
+    /// aggregator whose other models bill OpenAI-style).
+    #[serde(default)]
+    pub billing_policy:       Option<BillingPolicy>,
     #[serde(default)]
     pub agent_profile:        Option<AgentProfileKind>,
     #[serde(default)]
@@ -519,14 +524,17 @@ pub struct CatalogModelControls {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CatalogModelSettings {
-    pub api_id:        String,
+    pub api_id:         String,
     /// Wire dialect for this model's route (the provider codec unless the
     /// model row overrides it).
-    pub codec:         CodecKind,
-    pub agent_profile: AgentProfileKind,
-    pub controls:      CatalogModelControls,
-    pub speed_costs:   HashMap<Speed, ModelCosts>,
-    probe:             bool,
+    pub codec:          CodecKind,
+    /// Billing family for this model (the provider policy unless the model
+    /// row overrides it).
+    pub billing_policy: BillingPolicy,
+    pub agent_profile:  AgentProfileKind,
+    pub controls:       CatalogModelControls,
+    pub speed_costs:    HashMap<Speed, ModelCosts>,
+    probe:              bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1185,6 +1193,7 @@ fn merge_model_settings(
         provider:             higher.provider.or(fallback.provider),
         api_id:               higher.api_id.or(fallback.api_id),
         codec:                higher.codec.or(fallback.codec),
+        billing_policy:       higher.billing_policy.or(fallback.billing_policy),
         agent_profile:        higher.agent_profile.or(fallback.agent_profile),
         display_name:         higher.display_name.or(fallback.display_name),
         family:               higher.family.or(fallback.family),
@@ -1485,6 +1494,7 @@ fn build_model(
             .clone()
             .unwrap_or_else(|| model_id.to_string()),
         codec: resolve_model_codec(model_id, provider, settings.codec)?,
+        billing_policy: settings.billing_policy.unwrap_or(provider.billing_policy),
         agent_profile: settings.agent_profile.unwrap_or(provider.agent_profile),
         controls,
         speed_costs,

@@ -446,7 +446,7 @@ impl Catalog {
         pricing_for_model_costs(
             model,
             provider.id.clone(),
-            provider.billing_policy,
+            settings.billing_policy,
             model_ref.speed,
             &costs,
         )
@@ -458,8 +458,16 @@ impl Catalog {
         model_ref: &ModelRef,
         tokens: &TokenCounts,
     ) -> Option<ModelBillingFacts> {
-        self.provider(&model_ref.provider)
-            .and_then(|provider| ModelBillingFacts::for_policy(provider.billing_policy, tokens))
+        let provider = self.provider(&model_ref.provider)?;
+        // The model row may override the provider's billing family; unknown
+        // models keep the provider policy (matching today's behavior for
+        // passthrough model ids).
+        let policy = self
+            .get(&model_ref.model_id)
+            .filter(|model| model.provider == provider.id)
+            .and_then(|model| self.model_settings(&model.id))
+            .map_or(provider.billing_policy, |settings| settings.billing_policy);
+        ModelBillingFacts::for_policy(policy, tokens)
     }
 
     /// Price a partial token sample for `model` using catalog pricing.
@@ -727,6 +735,77 @@ mod tests {
             },
             total_usd_micros,
         }
+    }
+
+    #[test]
+    fn model_billing_policy_override_changes_the_billing_algorithm() {
+        let catalog = catalog_from_toml(
+            r#"
+[providers.aggregator]
+display_name = "Aggregator"
+adapter = "openai_compatible"
+base_url = "https://aggregator.test/v1"
+
+[models."claude-via-aggregator"]
+provider = "aggregator"
+billing_policy = "anthropic"
+display_name = "Claude (via Aggregator)"
+family = "claude"
+default = true
+
+[models."claude-via-aggregator".limits]
+context_window = 200000
+
+[models."claude-via-aggregator".features]
+tools = true
+vision = false
+reasoning = false
+
+[models."claude-via-aggregator".costs]
+input_cost_per_mtok = 3.0
+output_cost_per_mtok = 15.0
+cache_input_cost_per_mtok = 0.3
+
+[models."plain-model"]
+provider = "aggregator"
+display_name = "Plain"
+family = "plain"
+
+[models."plain-model".limits]
+context_window = 100000
+
+[models."plain-model".features]
+tools = false
+vision = false
+reasoning = false
+
+[models."plain-model".costs]
+input_cost_per_mtok = 3.0
+output_cost_per_mtok = 15.0
+cache_input_cost_per_mtok = 0.3
+"#,
+        );
+
+        let tokens = TokenCounts {
+            cache_write_tokens: 1_000_000,
+            ..TokenCounts::default()
+        };
+        let claude = ModelRef {
+            provider: ProviderId::new("aggregator"),
+            model_id: "claude-via-aggregator".to_string(),
+            speed:    None,
+        };
+        let plain = ModelRef {
+            provider: ProviderId::new("aggregator"),
+            model_id: "plain-model".to_string(),
+            speed:    None,
+        };
+
+        // The override bills Anthropic-style: cache writes at 1.25x input
+        // ($3/MTok -> $3.75/MTok -> $3.75 for 1M write tokens).
+        assert_eq!(catalog.price_tokens(&claude, &tokens), Some(3_750_000));
+        // The provider's default OpenAI policy has no cache-write charge.
+        assert_eq!(catalog.price_tokens(&plain, &tokens), Some(0));
     }
 
     #[test]

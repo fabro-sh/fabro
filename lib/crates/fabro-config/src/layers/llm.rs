@@ -104,6 +104,11 @@ pub struct ModelSettings {
     /// catalog build.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codec:                Option<CodecKind>,
+    /// Billing family for this model, overriding the provider's policy
+    /// (e.g. Anthropic cache billing for a Claude model served through an
+    /// aggregator).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_policy:       Option<BillingPolicy>,
     /// Agent profile used for routing/profile-specific behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_profile:        Option<AgentProfileKind>,
@@ -358,6 +363,23 @@ codec = "anthropic_messages"
         assert_eq!(
             parsed.models.get("acme_large").unwrap().codec,
             Some(fabro_model::CodecKind::AnthropicMessages)
+        );
+    }
+
+    #[test]
+    fn model_billing_policy_parses_from_toml() {
+        let parsed: LlmLayer = toml::from_str(
+            r#"
+[models.acme_claude]
+provider = "acme"
+billing_policy = "anthropic"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed.models.get("acme_claude").unwrap().billing_policy,
+            Some(fabro_model::BillingPolicy::Anthropic)
         );
     }
 

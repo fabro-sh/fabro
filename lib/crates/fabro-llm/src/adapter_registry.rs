@@ -251,7 +251,7 @@ pub fn resolve_route(catalog: &Catalog, model_id_or_alias: &str) -> Option<Route
         transport:      provider.adapter,
         codec:          settings.codec,
         deployment_id:  settings.api_id.clone(),
-        billing_policy: provider.billing_policy,
+        billing_policy: settings.billing_policy,
         agent_profile:  settings.agent_profile,
     })
 }
