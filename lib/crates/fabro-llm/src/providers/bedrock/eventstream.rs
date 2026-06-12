@@ -17,6 +17,7 @@ use crate::error::Error;
 
 /// One decoded ConverseStream event: the `:event-type` header value plus the
 /// frame's JSON payload, ready to feed a stream decoder.
+#[derive(Debug)]
 pub(crate) struct DecodedEvent {
     pub event_type: String,
     pub payload:    String,
@@ -126,7 +127,7 @@ pub(crate) mod tests {
             ))
             .add_header(Header::new(
                 ":event-type",
-                HeaderValue::String(event_type.into()),
+                HeaderValue::String(event_type.to_string().into()),
             ))
             .add_header(Header::new(
                 ":content-type",

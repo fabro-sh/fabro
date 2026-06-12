@@ -22,6 +22,7 @@ pub(crate) const SERVICE: &str = "bedrock";
 /// Where the signer's credentials come from.
 enum CredentialSource {
     /// Fixed credentials (tests / explicitly supplied keys).
+    #[cfg(test)]
     Static(Credentials),
     /// The AWS default provider chain. Credentials are resolved per request
     /// so expiring session credentials (STS, IRSA, instance roles) refresh
@@ -77,6 +78,7 @@ impl Sigv4Signer {
         use aws_credential_types::provider::ProvideCredentials;
 
         match &self.credentials {
+            #[cfg(test)]
             CredentialSource::Static(credentials) => Ok(credentials.clone()),
             CredentialSource::Chain(provider) => {
                 provider
