@@ -1,0 +1,65 @@
+---
+title: "Automations"
+description: "Named, repeatable run configurations with API and schedule triggers"
+---
+
+An **automation** is a saved run configuration — a repository, ref, and workflow — plus the triggers that may start it. Every trigger fire creates and starts a normal Fabro run through the same pipeline as `POST /api/v1/runs`, so automation runs get the same lifecycle, events, and observability as manually created runs. Each run records the automation and trigger that created it.
+
+## Defining automations
+
+The server keeps one TOML file per automation in an `automations/` directory next to its `settings.toml`. Manage them in the web UI at `/automations`, through the `/api/v1/automations` REST API, or by editing the files directly:
+
+```toml title="automations/nightly-release.toml"
+name = "Nightly release"
+description = "Cut a nightly build from main"
+
+[target]
+repository = "fabro-sh/fabro"
+ref = "main"
+workflow = "release"
+
+[[triggers]]
+type = "api"
+id = "manual"
+enabled = true
+
+[[triggers]]
+type = "schedule"
+id = "nightly"
+enabled = true
+expression = "0 0 * * *"
+```
+
+The target names a GitHub repository as an `owner/repo` slug, the ref to run against, and a project workflow defined in that repository. When a trigger fires, Fabro clones the repository at the ref, resolves the workflow, and creates and starts the run. Repositories are cached server-side as bare clones, so repeat fires fetch only what changed.
+
+## Triggers
+
+Each trigger has an `id` and its own `enabled` flag. Trigger-level `enabled` is the sole activation control — there is no automation-level master switch.
+
+### API triggers
+
+`POST /api/v1/automations/{id}/runs` creates and starts a run through the automation's API trigger. The request is rejected with a conflict when the automation has no enabled API trigger. The Run button on automation cards and detail pages in the web UI uses the same endpoint.
+
+### Schedule triggers
+
+`expression` is a five-field cron expression evaluated in UTC:
+
+```toml
+[[triggers]]
+type = "schedule"
+id = "weekday-mornings"
+enabled = true
+expression = "0 9 * * 1-5"
+```
+
+The server fires each enabled schedule trigger at its next occurrence and creates and starts a run. Creating, editing, or deleting an automation takes effect immediately — no restart needed. If a fire fails (for example, the clone or workflow resolution errors), Fabro logs a warning and waits for the next occurrence rather than retrying.
+
+## Web UI
+
+The `/automations` area lists automations with create, edit, delete, and Run actions. Saves are revision-checked, so concurrent edits fail loudly instead of silently overwriting each other. The detail page shows the automation's configuration and its run history with status, time, and repo filters.
+
+To bootstrap an automation from work you have already run, open a run's actions menu and choose **Create automation from run** — the new-automation form is pre-filled from that run's repository and workflow. Runs that were created by an automation show **View automation** instead.
+
+## API
+
+`/api/v1/automations` provides full CRUD: list, create, fetch, replace, and delete. Responses carry an `ETag` revision; `PUT` and `DELETE` require a matching `If-Match` header. `GET /api/v1/automations/{id}/runs` lists the automation's runs newest-first with standard pagination.

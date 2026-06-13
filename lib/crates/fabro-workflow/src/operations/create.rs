@@ -1133,6 +1133,10 @@ mod tests {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test asserts the raw template source"
+    )]
     #[tokio::test]
     async fn create_persists_normalized_config_and_initial_state() {
         let dir = tempfile::tempdir().unwrap();

@@ -2,7 +2,6 @@ pub mod anthropic;
 pub mod common;
 pub mod fabro_server;
 pub mod gemini;
-pub mod http_api;
 pub mod openai;
 pub mod openai_compatible;
 

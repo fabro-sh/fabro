@@ -17,10 +17,14 @@ use crate::ids::ProviderId;
     strum::EnumString,
     strum::IntoStaticStr,
 )]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum ReasoningEffortFeature {
     Levels,
+    /// Effort levels are supported, and thinking is natively always-on
+    /// adaptive at the endpoint; a manual thinking on/off toggle is not
+    /// accepted.
+    AlwaysAdaptive,
     #[default]
     None,
 }
@@ -29,6 +33,10 @@ pub enum ReasoningEffortFeature {
 pub struct ModelLimits {
     pub context_window: i64,
     pub max_output:     Option<i64>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,6 +51,22 @@ pub struct ModelFeatures {
     /// Whether this model endpoint supports prompt caching annotations.
     #[serde(default)]
     pub prompt_cache:     bool,
+    /// Whether the model endpoint accepts classic sampling parameters
+    /// (`temperature`, `top_p`). Models with always-on adaptive behavior
+    /// reject them.
+    #[serde(default = "default_true")]
+    pub sampling_params:  bool,
+}
+
+impl ModelFeatures {
+    /// Whether the model endpoint accepts a native reasoning-effort level.
+    #[must_use]
+    pub fn supports_reasoning_effort(&self) -> bool {
+        matches!(
+            self.reasoning_effort,
+            ReasoningEffortFeature::Levels | ReasoningEffortFeature::AlwaysAdaptive
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -114,11 +138,15 @@ impl Model {
     }
 
     pub fn supports_reasoning_effort(&self) -> bool {
-        self.features.reasoning_effort == ReasoningEffortFeature::Levels
+        self.features.supports_reasoning_effort()
     }
 
     pub fn supports_prompt_cache(&self) -> bool {
         self.features.prompt_cache
+    }
+
+    pub fn supports_sampling_params(&self) -> bool {
+        self.features.sampling_params
     }
 
     pub fn training(&self) -> Option<&str> {
@@ -164,6 +192,22 @@ mod tests {
     use crate::ids::ProviderId;
 
     #[test]
+    fn reasoning_effort_feature_always_adaptive_round_trips() {
+        let parsed: ReasoningEffortFeature =
+            serde_json::from_value(serde_json::json!("always_adaptive")).unwrap();
+        assert_eq!(parsed, ReasoningEffortFeature::AlwaysAdaptive);
+        assert_eq!(
+            serde_json::to_value(parsed).unwrap(),
+            serde_json::json!("always_adaptive")
+        );
+        assert_eq!(parsed.to_string(), "always_adaptive");
+        assert_eq!(
+            "always_adaptive".parse::<ReasoningEffortFeature>().unwrap(),
+            parsed
+        );
+    }
+
+    #[test]
     fn inherent_methods_return_correct_values() {
         let info = Model {
             id:                   "model-id".to_string(),
@@ -182,6 +226,7 @@ mod tests {
                 reasoning:        true,
                 reasoning_effort: ReasoningEffortFeature::Levels,
                 prompt_cache:     true,
+                sampling_params:  true,
             },
             costs:                ModelCosts {
                 input_cost_per_mtok:       Some(1.0),
@@ -206,6 +251,7 @@ mod tests {
         assert!(info.supports_reasoning());
         assert!(info.supports_reasoning_effort());
         assert!(info.supports_prompt_cache());
+        assert!(info.supports_sampling_params());
         assert_eq!(info.training(), Some("training"));
         assert_eq!(info.knowledge_cutoff(), Some("knowledge-cutoff"));
         assert_eq!(info.input_cost_per_mtok(), Some(1.0));

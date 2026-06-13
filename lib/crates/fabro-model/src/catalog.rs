@@ -11,6 +11,7 @@ use tracing::warn;
 
 use crate::Speed;
 use crate::adapter::{AdapterKind, AgentProfileKind};
+use crate::codec::CodecKind;
 use crate::ids::ProviderId;
 use crate::provider::Provider;
 use crate::reasoning::ReasoningEffort;
@@ -42,6 +43,10 @@ pub struct ProviderCatalogSettings {
     pub display_name:   Option<String>,
     #[serde(default)]
     pub adapter:        Option<String>,
+    /// Wire dialect for this provider's routes. Defaults to the adapter's
+    /// codec; only the default pairing is accepted today.
+    #[serde(default)]
+    pub codec:          Option<CodecKind>,
     #[serde(default)]
     pub agent_profile:  Option<AgentProfileKind>,
     #[serde(default)]
@@ -69,6 +74,16 @@ pub struct ModelCatalogSettings {
     pub provider:             Option<String>,
     #[serde(default)]
     pub api_id:               Option<String>,
+    /// Wire dialect for this model's route, overriding the provider's codec
+    /// (the multiplexer case). Only the adapter's default pairing is
+    /// accepted today.
+    #[serde(default)]
+    pub codec:                Option<CodecKind>,
+    /// Billing family for this model, overriding the provider's policy
+    /// (e.g. Anthropic cache billing for a Claude model served through an
+    /// aggregator whose other models bill OpenAI-style).
+    #[serde(default)]
+    pub billing_policy:       Option<BillingPolicy>,
     #[serde(default)]
     pub agent_profile:        Option<AgentProfileKind>,
     #[serde(default)]
@@ -123,6 +138,8 @@ pub struct SettingsModelFeatures {
     pub reasoning_effort: Option<ReasoningEffortFeature>,
     #[serde(default)]
     pub prompt_cache:     Option<bool>,
+    #[serde(default)]
+    pub sampling_params:  Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -472,6 +489,9 @@ pub struct CatalogProvider {
     pub id:             ProviderId,
     pub display_name:   String,
     pub adapter:        AdapterKind,
+    /// Wire dialect driven by this provider's routes; models may override it
+    /// via [`CatalogModelSettings::codec`].
+    pub codec:          CodecKind,
     pub agent_profile:  AgentProfileKind,
     pub auth:           Option<ProviderAuthConfig>,
     pub billing_policy: BillingPolicy,
@@ -504,11 +524,17 @@ pub struct CatalogModelControls {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CatalogModelSettings {
-    pub api_id:        String,
-    pub agent_profile: AgentProfileKind,
-    pub controls:      CatalogModelControls,
-    pub speed_costs:   HashMap<Speed, ModelCosts>,
-    probe:             bool,
+    pub api_id:         String,
+    /// Wire dialect for this model's route (the provider codec unless the
+    /// model row overrides it).
+    pub codec:          CodecKind,
+    /// Billing family for this model (the provider policy unless the model
+    /// row overrides it).
+    pub billing_policy: BillingPolicy,
+    pub agent_profile:  AgentProfileKind,
+    pub controls:       CatalogModelControls,
+    pub speed_costs:    HashMap<Speed, ModelCosts>,
+    probe:              bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -553,6 +579,24 @@ pub enum CatalogBuildError {
     UnknownAdapter {
         provider: ProviderId,
         adapter:  String,
+    },
+    #[error(
+        "provider '{provider}' configures codec '{codec}', but adapter '{adapter}' only supports '{expected}'"
+    )]
+    UnsupportedProviderCodec {
+        provider: ProviderId,
+        adapter:  AdapterKind,
+        codec:    CodecKind,
+        expected: CodecKind,
+    },
+    #[error(
+        "model '{model}' configures codec '{codec}', but adapter '{adapter}' only supports '{expected}'"
+    )]
+    UnsupportedModelCodec {
+        model:    String,
+        adapter:  AdapterKind,
+        codec:    CodecKind,
+        expected: CodecKind,
     },
     #[error("provider '{provider}' API-key auth must declare at least one credential")]
     EmptyApiKeyCredentials { provider: ProviderId },
@@ -599,7 +643,7 @@ pub enum CatalogBuildError {
     #[error("model '{model}' declares reasoning_effort feature but features.reasoning is false")]
     ReasoningEffortWithoutReasoning { model: String },
     #[error(
-        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels"
+        "model '{model}' must declare at least one reasoning_effort when features.reasoning_effort is levels or always_adaptive"
     )]
     EmptyReasoningEffortControls { model: String },
     #[error("model '{model}' has invalid speed '{value}'")]
@@ -879,6 +923,42 @@ impl Catalog {
         Some(model_profile.unwrap_or(provider.agent_profile))
     }
 
+    /// The codec a request for `model_id_or_alias` on `provider_id` speaks:
+    /// the model row's codec when one is configured, otherwise the
+    /// provider's.
+    #[must_use]
+    pub fn effective_codec(
+        &self,
+        provider_id: &ProviderId,
+        model_id_or_alias: Option<&str>,
+    ) -> Option<CodecKind> {
+        let provider = self.provider(provider_id)?;
+        let model_codec = model_id_or_alias
+            .and_then(|model_id| self.get(model_id))
+            .filter(|model| model.provider == provider.id)
+            .and_then(|model| self.model_settings.get(&model.id))
+            .map(|settings| settings.codec);
+        Some(model_codec.unwrap_or(provider.codec))
+    }
+
+    /// The billing family for `model_id_or_alias` on `provider_id`: the model
+    /// row's policy when one is configured, otherwise the provider's (unknown
+    /// passthrough model ids keep the provider policy).
+    #[must_use]
+    pub fn effective_billing_policy(
+        &self,
+        provider_id: &ProviderId,
+        model_id_or_alias: Option<&str>,
+    ) -> Option<BillingPolicy> {
+        let provider = self.provider(provider_id)?;
+        let model_policy = model_id_or_alias
+            .and_then(|model_id| self.get(model_id))
+            .filter(|model| model.provider == provider.id)
+            .and_then(|model| self.model_settings.get(&model.id))
+            .map(|settings| settings.billing_policy);
+        Some(model_policy.unwrap_or(provider.billing_policy))
+    }
+
     /// List all models, optionally filtered by provider.
     #[must_use]
     pub fn list(&self, provider: Option<&ProviderId>) -> Vec<&Model> {
@@ -1110,6 +1190,7 @@ fn merge_provider_settings(
     ProviderCatalogSettings {
         display_name:   higher.display_name.or(fallback.display_name),
         adapter:        higher.adapter.or(fallback.adapter),
+        codec:          higher.codec.or(fallback.codec),
         agent_profile:  higher.agent_profile.or(fallback.agent_profile),
         auth:           higher.auth.or(fallback.auth),
         billing_policy: higher.billing_policy.or(fallback.billing_policy),
@@ -1129,6 +1210,8 @@ fn merge_model_settings(
     ModelCatalogSettings {
         provider:             higher.provider.or(fallback.provider),
         api_id:               higher.api_id.or(fallback.api_id),
+        codec:                higher.codec.or(fallback.codec),
+        billing_policy:       higher.billing_policy.or(fallback.billing_policy),
         agent_profile:        higher.agent_profile.or(fallback.agent_profile),
         display_name:         higher.display_name.or(fallback.display_name),
         family:               higher.family.or(fallback.family),
@@ -1189,6 +1272,7 @@ fn merge_model_features_settings(
         reasoning:        higher.reasoning.or(fallback.reasoning),
         reasoning_effort: higher.reasoning_effort.or(fallback.reasoning_effort),
         prompt_cache:     higher.prompt_cache.or(fallback.prompt_cache),
+        sampling_params:  higher.sampling_params.or(fallback.sampling_params),
     }
 }
 
@@ -1252,6 +1336,7 @@ fn build_providers(
             }
         })?;
         let defaults = adapter_defaults(adapter);
+        let codec = resolve_provider_codec(&provider_id, adapter, settings.codec)?;
         let agent_profile = settings.agent_profile.unwrap_or(defaults.agent_profile);
         let auth = settings.auth.clone();
         validate_provider_auth(&provider_id, auth.as_ref())?;
@@ -1260,6 +1345,7 @@ fn build_providers(
             id: provider_id,
             display_name: settings.display_name.clone().unwrap_or_else(|| id.clone()),
             adapter,
+            codec,
             agent_profile,
             auth,
             billing_policy: settings.billing_policy.unwrap_or(defaults.billing_policy),
@@ -1293,6 +1379,45 @@ fn adapter_defaults(adapter: AdapterKind) -> AdapterDefaults {
             agent_profile:  AgentProfileKind::Gemini,
             billing_policy: BillingPolicy::Gemini,
         },
+    }
+}
+
+/// Resolve a provider row's codec, rejecting pairings outside the adapter's
+/// default so no new route combination is silently enabled by configuration.
+fn resolve_provider_codec(
+    provider: &ProviderId,
+    adapter: AdapterKind,
+    configured: Option<CodecKind>,
+) -> Result<CodecKind, CatalogBuildError> {
+    let expected = CodecKind::default_for(adapter);
+    match configured {
+        Some(codec) if codec != expected => Err(CatalogBuildError::UnsupportedProviderCodec {
+            provider: provider.clone(),
+            adapter,
+            codec,
+            expected,
+        }),
+        _ => Ok(expected),
+    }
+}
+
+/// Resolve a model row's codec against its provider, with the same
+/// only-the-default-pairing rule as [`resolve_provider_codec`].
+fn resolve_model_codec(
+    model_id: &str,
+    provider: &CatalogProvider,
+    configured: Option<CodecKind>,
+) -> Result<CodecKind, CatalogBuildError> {
+    let expected = CodecKind::default_for(provider.adapter);
+    match configured {
+        Some(codec) if codec != expected => Err(CatalogBuildError::UnsupportedModelCodec {
+            model: model_id.to_string(),
+            adapter: provider.adapter,
+            codec,
+            expected,
+        }),
+        Some(codec) => Ok(codec),
+        None => Ok(provider.codec),
     }
 }
 
@@ -1386,6 +1511,8 @@ fn build_model(
             .api_id
             .clone()
             .unwrap_or_else(|| model_id.to_string()),
+        codec: resolve_model_codec(model_id, provider, settings.codec)?,
+        billing_policy: settings.billing_policy.unwrap_or(provider.billing_policy),
         agent_profile: settings.agent_profile.unwrap_or(provider.agent_profile),
         controls,
         speed_costs,
@@ -1427,7 +1554,7 @@ fn build_model_features(
             field: "features.reasoning",
         })?;
     let reasoning_effort = features.reasoning_effort.unwrap_or_default();
-    if !reasoning && reasoning_effort == ReasoningEffortFeature::Levels {
+    if !reasoning && reasoning_effort != ReasoningEffortFeature::None {
         return Err(CatalogBuildError::ReasoningEffortWithoutReasoning {
             model: model_id.to_string(),
         });
@@ -1449,6 +1576,7 @@ fn build_model_features(
         reasoning,
         reasoning_effort,
         prompt_cache: features.prompt_cache.unwrap_or_default(),
+        sampling_params: features.sampling_params.unwrap_or(true),
     })
 }
 
@@ -1496,8 +1624,7 @@ fn build_model_controls(
     features: &ModelFeatures,
     settings: &ModelCatalogSettings,
 ) -> Result<CatalogModelControls, CatalogBuildError> {
-    let supports_native_reasoning_effort =
-        features.reasoning_effort == ReasoningEffortFeature::Levels;
+    let supports_native_reasoning_effort = features.supports_reasoning_effort();
     let reasoning_effort = match settings
         .controls
         .as_ref()
@@ -1785,6 +1912,57 @@ reasoning = false
         let model = catalog.get("al").expect("model alias should resolve");
         assert_eq!(model.id, "acme-large");
         assert_eq!(model.provider, ProviderId::new("acme"));
+    }
+
+    #[test]
+    fn builtin_openrouter_provider_is_opt_in() {
+        let openrouter = ProviderId::new("openrouter");
+        let builtin = Catalog::builtin();
+
+        assert!(builtin.provider(&openrouter).is_none());
+        assert!(builtin.list(Some(&openrouter)).is_empty());
+
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.openrouter]
+enabled = true
+",
+        ))
+        .expect("enabled OpenRouter override should build from the built-in provider settings");
+
+        let provider = catalog
+            .provider(&openrouter)
+            .expect("enabled OpenRouter provider should be present");
+        assert_eq!(provider.adapter, AdapterKind::OpenAiCompatible);
+        assert_eq!(provider.codec, CodecKind::OpenAiCompatible);
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert_eq!(provider.billing_policy, BillingPolicy::OpenAi);
+
+        // Claude rows override the provider's OpenAI billing default;
+        // open-weights rows inherit it.
+        assert_eq!(
+            catalog
+                .model_settings("anthropic/claude-sonnet-4-6")
+                .unwrap()
+                .billing_policy,
+            BillingPolicy::Anthropic
+        );
+        assert_eq!(
+            catalog
+                .model_settings("deepseek/deepseek-v4-flash")
+                .unwrap()
+                .billing_policy,
+            BillingPolicy::OpenAi
+        );
+        assert_eq!(
+            catalog
+                .default_for_provider(&openrouter)
+                .map(|model| model.id.as_str()),
+            Some("anthropic/claude-sonnet-4-6")
+        );
     }
 
     #[test]
@@ -2077,6 +2255,162 @@ enabled = true
             CatalogBuildError::UnknownAdapter { provider, adapter }
                 if provider == ProviderId::new("test-provider") && adapter == "not_real"
         ));
+    }
+
+    // ---- Codec on the route ----
+
+    #[test]
+    fn provider_codec_defaults_from_adapter() {
+        let catalog = Catalog::builtin();
+
+        for (provider, expected) in [
+            ("anthropic", CodecKind::AnthropicMessages),
+            ("openai", CodecKind::OpenAiResponses),
+            ("gemini", CodecKind::GeminiGenerate),
+            ("kimi", CodecKind::OpenAiCompatible),
+        ] {
+            let provider_id = ProviderId::new(provider);
+            assert_eq!(catalog.provider(&provider_id).unwrap().codec, expected);
+            assert_eq!(catalog.effective_codec(&provider_id, None), Some(expected));
+        }
+    }
+
+    #[test]
+    fn model_codec_inherits_provider_codec() {
+        let catalog = Catalog::builtin();
+
+        assert_eq!(
+            catalog.model_settings("claude-sonnet-4-5").unwrap().codec,
+            CodecKind::AnthropicMessages
+        );
+        assert_eq!(
+            catalog.model_settings("gpt-5.4").unwrap().codec,
+            CodecKind::OpenAiResponses
+        );
+        assert_eq!(
+            catalog.effective_codec(&ProviderId::anthropic(), Some("claude-sonnet-4-5")),
+            Some(CodecKind::AnthropicMessages)
+        );
+    }
+
+    #[test]
+    fn explicit_codec_matching_the_adapter_default_is_accepted() {
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r#"
+[providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+codec = "openai_compatible"
+base_url = "https://api.acme.test/v1"
+
+[models."acme-large"]
+provider = "acme"
+codec = "openai_compatible"
+display_name = "Acme Large"
+family = "acme"
+
+[models."acme-large".limits]
+context_window = 128000
+
+[models."acme-large".features]
+tools = true
+vision = false
+reasoning = false
+"#,
+        ))
+        .expect("default codec pairing should build");
+
+        assert_eq!(
+            catalog.provider(&ProviderId::new("acme")).unwrap().codec,
+            CodecKind::OpenAiCompatible
+        );
+        assert_eq!(
+            catalog.model_settings("acme-large").unwrap().codec,
+            CodecKind::OpenAiCompatible
+        );
+        assert_eq!(
+            catalog.effective_codec(&ProviderId::new("acme"), Some("acme-large")),
+            Some(CodecKind::OpenAiCompatible)
+        );
+    }
+
+    #[test]
+    fn provider_codec_outside_the_adapter_default_is_rejected() {
+        let layer = minimal_settings(
+            r#"
+[providers.test-provider]
+display_name = "Test Provider"
+adapter = "openai"
+codec = "anthropic_messages"
+"#,
+        );
+
+        let err = Catalog::from_settings(&layer).unwrap_err();
+
+        assert!(matches!(
+            err,
+            CatalogBuildError::UnsupportedProviderCodec {
+                provider,
+                adapter: AdapterKind::OpenAi,
+                codec: CodecKind::AnthropicMessages,
+                expected: CodecKind::OpenAiResponses,
+            } if provider == ProviderId::new("test-provider")
+        ));
+    }
+
+    #[test]
+    fn model_codec_outside_the_adapter_default_is_rejected() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+enabled = true
+
+[models.one]
+provider = "test"
+codec = "gemini_generate"
+display_name = "One"
+family = "test"
+default = true
+
+[models.one.limits]
+context_window = 1000
+
+[models.one.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+
+        let err = Catalog::from_settings(&layer).unwrap_err();
+
+        assert!(matches!(
+            err,
+            CatalogBuildError::UnsupportedModelCodec {
+                model,
+                adapter: AdapterKind::OpenAi,
+                codec: CodecKind::GeminiGenerate,
+                expected: CodecKind::OpenAiResponses,
+            } if model == "one"
+        ));
+    }
+
+    #[test]
+    fn builtin_override_can_pin_the_default_codec() {
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r#"
+[providers.anthropic]
+codec = "anthropic_messages"
+"#,
+        ))
+        .expect("override pinning the default codec should build");
+
+        assert_eq!(
+            catalog.provider(&ProviderId::anthropic()).unwrap().codec,
+            CodecKind::AnthropicMessages
+        );
     }
 
     #[test]
@@ -3449,6 +3783,52 @@ reasoning_effort = ["low", "medium"]
     }
 
     #[test]
+    fn catalog_from_settings_accepts_reasoning_effort_feature_always_adaptive() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "always_adaptive"
+prompt_cache = true
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        let model = catalog.get("model").unwrap();
+        assert_eq!(
+            model.features.reasoning_effort,
+            crate::ReasoningEffortFeature::AlwaysAdaptive
+        );
+        assert!(model.supports_reasoning_effort());
+        // Always-adaptive models get the full default effort controls, same as
+        // Levels.
+        assert_eq!(
+            catalog
+                .model_settings("model")
+                .unwrap()
+                .controls
+                .reasoning_effort,
+            ReasoningEffort::VARIANTS.to_vec()
+        );
+    }
+
+    #[test]
     fn catalog_from_settings_accepts_reasoning_effort_controls_without_native_effort_feature() {
         let settings = minimal_settings(
             r#"
@@ -3560,6 +3940,89 @@ reasoning_effort = "levels"
         ));
     }
 
+    #[test]
+    fn catalog_from_settings_rejects_always_adaptive_effort_without_reasoning() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+default = true
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = false
+reasoning_effort = "always_adaptive"
+"#,
+        );
+
+        assert!(matches!(
+            Catalog::from_settings(&settings).unwrap_err(),
+            CatalogBuildError::ReasoningEffortWithoutReasoning { model }
+                if model == "model"
+        ));
+    }
+
+    #[test]
+    fn catalog_from_settings_sampling_params_defaults_true_and_accepts_false() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.with-sampling]
+provider = "test"
+display_name = "With"
+family = "test"
+default = true
+
+[models.with-sampling.limits]
+context_window = 1000
+
+[models.with-sampling.features]
+tools = true
+vision = false
+reasoning = false
+
+[models.no-sampling]
+provider = "test"
+display_name = "Without"
+family = "test"
+
+[models.no-sampling.limits]
+context_window = 1000
+
+[models.no-sampling.features]
+tools = true
+vision = false
+reasoning = false
+sampling_params = false
+"#,
+        );
+
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        assert!(
+            catalog
+                .get("with-sampling")
+                .unwrap()
+                .features
+                .sampling_params
+        );
+        assert!(!catalog.get("no-sampling").unwrap().features.sampling_params);
+    }
+
     // ---- Provider / catalog data integrity tests ----
 
     #[test]
@@ -3637,6 +4100,7 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: true,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3692,6 +4156,7 @@ reasoning_effort = "levels"
                 reasoning: false,
                 reasoning_effort: None,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3755,6 +4220,7 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
@@ -3810,6 +4276,7 @@ reasoning_effort = "levels"
                 reasoning: true,
                 reasoning_effort: Levels,
                 prompt_cache: false,
+                sampling_params: true,
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(

@@ -211,6 +211,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         }
     }
 
@@ -226,6 +228,7 @@ mod tests {
             reasoning:        true,
             reasoning_effort: ReasoningEffortFeature::Levels,
             prompt_cache:     false,
+            sampling_params:  true,
         });
 
         let outcome = run_model_test(&info, ModelTestMode::Deep, empty_test_client()).await;

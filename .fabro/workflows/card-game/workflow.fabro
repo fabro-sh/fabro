@@ -1,0 +1,284 @@
+digraph CardGame {
+    graph [
+        goal="Build a terminal-based card game in Python",
+        rankdir=LR,
+        default_max_retries=3,
+        retry_target="impl_setup",
+        fallback_retry_target="impl_logic"
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    expand_spec [
+        label="Expand Spec",
+        shape=box,
+        prompt="Goal: $goal
+
+Create a detailed implementation spec for the requested Python terminal card game.
+
+Cover:
+- Game rules and data structures (Card, Deck, Pile or equivalent state types)
+- Terminal rendering approach using the standard-library curses module
+- Input handling and move/action validation
+- Win/loss detection
+- UI layout
+- Test strategy
+
+Keep game rules testable without curses. Include a smoke mode so `python3 main.py --smoke` starts enough of the app to prove imports and setup without requiring an interactive terminal.
+
+Write the spec to .ai/card-game-spec.md.
+Write status.json at workspace root: outcome=succeeded if the spec is complete, outcome=failed with failure_reason otherwise."
+    ]
+
+    impl_setup [
+        label="Setup Project",
+        shape=box,
+        prompt="Read .ai/card-game-spec.md.
+
+Create the Python project skeleton under card-game-app/:
+- pyproject.toml with pytest configured
+- main.py entrypoint
+- src/card_game_tui/ package
+- tests/ directory
+- README.md stub
+
+Add minimal importable modules so the project compiles.
+
+Run:
+cd card-game-app && python3 -m py_compile main.py src/card_game_tui/*.py
+
+Write status.json at workspace root: outcome=succeeded if the project skeleton exists and compiles, outcome=failed with failure_reason otherwise."
+    ]
+
+    verify_setup [
+        label="Verify Setup",
+        shape=box,
+        class="verify",
+        prompt="Verify setup for the card game app.
+
+Check:
+1. card-game-app/pyproject.toml exists
+2. card-game-app/main.py exists
+3. card-game-app/src/card_game_tui exists
+4. Python files compile
+
+Run:
+cd card-game-app && python3 -m py_compile main.py src/card_game_tui/*.py
+
+Write findings to .ai/verify_setup.md.
+Write status.json at workspace root: outcome=succeeded if all checks pass, outcome=failed with failure_reason otherwise."
+    ]
+
+    check_setup [shape=diamond, label="Setup OK?"]
+
+    impl_data [
+        label="Data Structures",
+        shape=box,
+        prompt="Read .ai/card-game-spec.md.
+
+Implement Card, Deck, Pile, or equivalent game-state types under card-game-app/src/card_game_tui/.
+
+Add focused unit tests under card-game-app/tests/.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v
+
+Write status.json at workspace root: outcome=succeeded if tests pass and the data model is implemented, outcome=failed with failure_reason otherwise."
+    ]
+
+    verify_data [
+        label="Verify Data",
+        shape=box,
+        class="verify",
+        prompt="Verify the card game data structures.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 -m py_compile main.py src/card_game_tui/*.py
+
+Check that the core game-state types are defined and basic operations work.
+
+Write findings to .ai/verify_data.md.
+Write status.json at workspace root: outcome=succeeded if all checks pass, outcome=failed with failure_reason otherwise."
+    ]
+
+    check_data [shape=diamond, label="Data OK?"]
+
+    impl_logic [
+        label="Game Logic",
+        shape=box,
+        class="hard",
+        max_retries=2,
+        prompt="Read .ai/card-game-spec.md and the current card-game-app implementation.
+
+Implement the requested card game's rules:
+- Initial setup/deal where applicable
+- Move/action validation
+- Auto-complete or helper actions where applicable
+- Win/loss condition
+- Undo
+
+Add tests for legal actions, illegal actions, win/loss detection, and edge cases.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v
+
+Write status.json at workspace root: outcome=succeeded if all tests pass and rules are implemented, outcome=failed with failure_reason otherwise."
+    ]
+
+    verify_logic [
+        label="Verify Logic",
+        shape=box,
+        class="verify",
+        prompt="Verify the card game logic.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v
+
+Check move/action validation, win/loss detection, and undo.
+
+Write findings to .ai/verify_logic.md.
+Write status.json at workspace root: outcome=succeeded if all checks pass, outcome=failed with failure_reason otherwise."
+    ]
+
+    check_logic [shape=diamond, label="Logic OK?"]
+
+    impl_ui [
+        label="Terminal UI",
+        shape=box,
+        class="hard",
+        max_retries=2,
+        prompt="Read .ai/card-game-spec.md and the game logic.
+
+Implement the curses TUI:
+- Card rendering using ASCII art
+- Board layout
+- Keyboard input
+- Move/action selection
+- Help text
+- `python3 main.py --smoke` non-interactive smoke path
+
+Keep rendering helpers testable where practical and avoid coupling game rules to curses.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 -m py_compile main.py src/card_game_tui/*.py && python3 main.py --smoke
+
+Write status.json at workspace root: outcome=succeeded if tests pass, files compile, and smoke mode works, outcome=failed with failure_reason otherwise."
+    ]
+
+    verify_ui [
+        label="Verify UI",
+        shape=box,
+        class="verify",
+        prompt="Verify the terminal UI.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 -m py_compile main.py src/card_game_tui/*.py && python3 main.py --smoke
+
+Check that:
+- main.py can start smoke mode
+- UI module imports without requiring an interactive terminal
+- Board rendering helpers have tests or smoke coverage
+- Controls are documented in README.md
+
+Write findings to .ai/verify_ui.md.
+Write status.json at workspace root: outcome=succeeded if all checks pass, outcome=failed with failure_reason otherwise."
+    ]
+
+    check_ui [shape=diamond, label="UI OK?"]
+
+    impl_integration [
+        label="Integrate",
+        shape=box,
+        prompt="Finish the card game app.
+
+Do the integration work:
+- Wire main.py to start the curses game loop normally
+- Keep --smoke non-interactive
+- Add README.md run instructions and controls
+- Add any missing tests needed for confidence
+- Ensure no generated files are outside card-game-app/ except .ai/ reports and root status.json
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 main.py --smoke
+
+Write status.json at workspace root: outcome=succeeded if the app is playable and tests pass, outcome=failed with failure_reason otherwise."
+    ]
+
+    verify_integration [
+        label="Verify Integration",
+        shape=box,
+        class="verify",
+        prompt="Verify final integration.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 -m py_compile main.py src/card_game_tui/*.py && python3 main.py --smoke
+
+Check README.md includes setup, run, test, and controls instructions.
+
+Write findings to .ai/verify_integration.md.
+Write status.json at workspace root: outcome=succeeded if all checks pass, outcome=failed with failure_reason otherwise."
+    ]
+
+    check_integration [shape=diamond, label="Integration OK?"]
+
+    review [
+        label="Final Review",
+        shape=box,
+        class="hard",
+        goal_gate=true,
+        prompt="Review the complete card game app against .ai/card-game-spec.md.
+
+Confirm:
+- The app is in card-game-app/
+- It is Python 3.11+ and uses curses for the TUI
+- The requested game rules are implemented correctly
+- Keyboard controls are usable and documented
+- Tests pass
+- Smoke mode works without an interactive terminal
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 main.py --smoke
+
+Write review to .ai/card-game-review.md.
+Write status.json at workspace root: outcome=succeeded if the app is complete and demo-ready, outcome=failed with specific missing or broken items."
+    ]
+
+    check_review [shape=diamond, label="Review OK?"]
+
+    start -> expand_spec -> impl_setup -> verify_setup -> check_setup
+
+    check_setup -> impl_data  [condition="outcome=succeeded"]
+    check_setup -> impl_setup [condition="outcome=failed", label="Retry"]
+    check_setup -> impl_setup [label="Fallback"]
+
+    impl_data -> verify_data -> check_data
+
+    check_data -> impl_logic [condition="outcome=succeeded"]
+    check_data -> impl_data  [condition="outcome=failed", label="Retry"]
+    check_data -> impl_data  [label="Fallback"]
+
+    impl_logic -> verify_logic -> check_logic
+
+    check_logic -> impl_ui    [condition="outcome=succeeded"]
+    check_logic -> impl_logic [condition="outcome=failed", label="Retry"]
+    check_logic -> impl_logic [label="Fallback"]
+
+    impl_ui -> verify_ui -> check_ui
+
+    check_ui -> impl_integration [condition="outcome=succeeded"]
+    check_ui -> impl_ui          [condition="outcome=failed", label="Retry"]
+    check_ui -> impl_ui          [label="Fallback"]
+
+    impl_integration -> verify_integration -> check_integration
+
+    check_integration -> review           [condition="outcome=succeeded"]
+    check_integration -> impl_integration [condition="outcome=failed", label="Retry"]
+    check_integration -> impl_integration [label="Fallback"]
+
+    review -> check_review
+
+    check_review -> exit    [condition="outcome=succeeded"]
+    check_review -> impl_ui [condition="outcome=failed", label="Fix"]
+    check_review -> impl_ui [label="Fallback"]
+}

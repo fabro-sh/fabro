@@ -1,0 +1,16 @@
+---
+title: "Workflow playground"
+date: "2026-06-09"
+---
+
+## Workflow playground
+
+Building a workflow used to mean writing DOT by hand. The new `/playground` page lets you build one by describing it: chat with Ask Fabro on the right while a live canvas re-renders the workflow graph on the left. The canvas supports pan, zoom, fit-to-window, click-to-inspect node details, and a Play button that walks through the graph so you can sanity-check the flow before running anything.
+
+When you're happy with it, download the workflow as a `.fabro.zip` — including `workflow.fabro`, `workflow.toml`, and a README — or use **Run for real** to create an actual run and jump straight to its run page.
+
+## More
+
+<Accordion title="Fixes">
+- Custom-named LLM providers now report their configured name in responses and error details instead of a hardcoded `anthropic`/`openai`/`gemini` label
+</Accordion>

@@ -372,6 +372,10 @@ provider = "daytona"
         assert!(migrated.is_none());
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test asserts the raw template source"
+    )]
     #[test]
     fn daytona_snapshot_labels_and_lifecycle_migrate() {
         let migrated = migrate(

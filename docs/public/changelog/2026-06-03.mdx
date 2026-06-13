@@ -1,0 +1,8 @@
+---
+title: "Embedded VNC session fix"
+date: "2026-06-03"
+---
+
+## Embedded VNC session fix
+
+Fixed embedded sandbox VNC sessions failing to load: the viewer reads browser local storage, which the iframe sandbox policy was blocking. VNC previews inside run pages work again.

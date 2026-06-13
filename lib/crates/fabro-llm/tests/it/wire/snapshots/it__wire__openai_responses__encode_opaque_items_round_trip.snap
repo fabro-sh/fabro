@@ -1,0 +1,55 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "model": "gpt-test",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Think about 2+2."
+        }
+      ]
+    },
+    {
+      "type": "reasoning",
+      "id": "rs_1",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Adding."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "id": "msg_1",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "4."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Now 3+3?"
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 128,
+  "store": false,
+  "include": [
+    "reasoning.encrypted_content"
+  ]
+}

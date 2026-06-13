@@ -444,9 +444,9 @@ GitHub App mode stores these secrets in the vault. `fabro install` writes them a
 
 ### Slack integration (optional)
 
-Slack credentials are server-level secrets. They enable one Slack connection that is shared by human interview prompts and run lifecycle notifications. `server.integrations.slack.default_channel` is optional and is used only as the default destination for interview prompts; lifecycle notifications use `[run.notifications.<name>.slack].channel` in run or workflow configuration.
+Slack credentials are server-level secrets. Add `[server.integrations.slack]` to enable one Slack connection that is shared by human interview prompts and run lifecycle notifications. `server.integrations.slack.default_channel` is optional and is used only as the default destination for interview prompts; lifecycle notifications use `[run.notifications.<name>.slack].channel` in run or workflow configuration.
 
-Fabro resolves these from the vault only. If both are present, startup logs `Slack integration enabled` and then the Slack Socket Mode connection status. If either is missing or empty, startup logs `Slack integration disabled; missing credentials` with the missing variable names.
+Fabro resolves these from the vault only. When `[server.integrations.slack]` is present and both credentials are present, startup logs `Slack integration enabled` and then the Slack Socket Mode connection status. If the Slack config table is absent or `enabled = false`, startup logs `Slack integration disabled by server configuration`. If the table is present but either credential is missing or empty, startup logs `Slack integration disabled; missing credentials` with the missing variable names.
 
 ```bash
 fabro secret set FABRO_SLACK_BOT_TOKEN xoxb-...

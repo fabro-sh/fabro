@@ -1,0 +1,45 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "model": "gpt-test",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "What is the capital of France?"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Paris."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "And of Spain?"
+        }
+      ]
+    }
+  ],
+  "instructions": "You are a terse assistant.",
+  "max_output_tokens": 128,
+  "store": false,
+  "include": [
+    "reasoning.encrypted_content"
+  ]
+}

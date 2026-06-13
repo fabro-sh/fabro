@@ -109,10 +109,11 @@ The server runtime does not read Slack tokens from process env or `server.env`. 
 
 Restart the server after changing Slack credentials so the Socket Mode connection is recreated with the new tokens.
 
-Optionally, set a default interview channel in your [server configuration](/administration/server-configuration):
+Enable Slack in your [server configuration](/administration/server-configuration). You can leave `default_channel` out if you only use per-route lifecycle notification channels:
 
 ```toml title="settings.toml"
 [server.integrations.slack]
+enabled = true
 default_channel = "#fabro-reviews"
 ```
 

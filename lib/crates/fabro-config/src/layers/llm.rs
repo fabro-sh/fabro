@@ -29,7 +29,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use fabro_model::catalog::deserialize_knowledge_cutoff;
-use fabro_model::{AgentProfileKind, BillingPolicy, ProviderAuthConfig};
+use fabro_model::{AgentProfileKind, BillingPolicy, CodecKind, ProviderAuthConfig};
 pub use fabro_model::{
     CredentialRef, CredentialRefParseError, HeaderValueRef, ReasoningEffortFeature,
 };
@@ -58,6 +58,11 @@ pub struct ProviderSettings {
     /// Adapter registry key (e.g. `"openai_compatible"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter:        Option<String>,
+    /// Wire dialect for this provider's routes (e.g. `"anthropic_messages"`).
+    /// Defaults to the adapter's codec; only the default pairing is accepted
+    /// today — validated at catalog build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec:          Option<CodecKind>,
     /// Agent profile used for routing/profile-specific behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_profile:  Option<AgentProfileKind>,
@@ -94,6 +99,16 @@ pub struct ModelSettings {
     /// when omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_id:               Option<String>,
+    /// Wire dialect for this model's route, overriding the provider's codec.
+    /// Only the adapter's default pairing is accepted today — validated at
+    /// catalog build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec:                Option<CodecKind>,
+    /// Billing family for this model, overriding the provider's policy
+    /// (e.g. Anthropic cache billing for a Claude model served through an
+    /// aggregator).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_policy:       Option<BillingPolicy>,
     /// Agent profile used for routing/profile-specific behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_profile:        Option<AgentProfileKind>,
@@ -161,6 +176,8 @@ pub struct ModelFeatures {
     pub reasoning_effort: Option<ReasoningEffortFeature>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_cache:     Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling_params:  Option<bool>,
 }
 
 /// User-facing allow-list for native control values Fabro accepts on this
@@ -312,6 +329,57 @@ agent_profile = "anthropic"
         assert_eq!(
             parsed.providers.get("acme").unwrap().agent_profile,
             Some(fabro_model::AgentProfileKind::Anthropic)
+        );
+    }
+
+    #[test]
+    fn provider_codec_parses_from_toml() {
+        let parsed: LlmLayer = toml::from_str(
+            r#"
+[providers.acme]
+adapter = "openai_compatible"
+codec = "openai_compatible"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed.providers.get("acme").unwrap().codec,
+            Some(fabro_model::CodecKind::OpenAiCompatible)
+        );
+    }
+
+    #[test]
+    fn model_codec_parses_from_toml() {
+        let parsed: LlmLayer = toml::from_str(
+            r#"
+[models.acme_large]
+provider = "acme"
+codec = "anthropic_messages"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed.models.get("acme_large").unwrap().codec,
+            Some(fabro_model::CodecKind::AnthropicMessages)
+        );
+    }
+
+    #[test]
+    fn model_billing_policy_parses_from_toml() {
+        let parsed: LlmLayer = toml::from_str(
+            r#"
+[models.acme_claude]
+provider = "acme"
+billing_policy = "anthropic"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parsed.models.get("acme_claude").unwrap().billing_policy,
+            Some(fabro_model::BillingPolicy::Anthropic)
         );
     }
 

@@ -1,0 +1,57 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+[
+  {
+    "type": "text_start",
+    "text_id": null
+  },
+  {
+    "type": "text_delta",
+    "delta": "Hi",
+    "text_id": null
+  },
+  {
+    "type": "text_end",
+    "text_id": null
+  },
+  {
+    "type": "finish",
+    "finish_reason": "stop",
+    "usage": {
+      "input_tokens": 8,
+      "output_tokens": 2,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 4,
+      "cache_write_tokens": 0
+    },
+    "response": {
+      "id": "gen_or_stream",
+      "model": "test-model",
+      "provider": "openai-compatible",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "kind": "text",
+            "data": "Hi"
+          }
+        ]
+      },
+      "finish_reason": "stop",
+      "usage": {
+        "input_tokens": 8,
+        "output_tokens": 2,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 4,
+        "cache_write_tokens": 0
+      },
+      "raw": null,
+      "warnings": [],
+      "rate_limit": null,
+      "cost_usd": 0.00031,
+      "cost_source": "authoritative"
+    }
+  }
+]

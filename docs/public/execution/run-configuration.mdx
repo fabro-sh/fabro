@@ -376,17 +376,16 @@ repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-Inputs can be used in final string attributes with `{{ inputs.name }}` syntax:
+Inputs can be used in graph `goal` and node `prompt` attributes with `{{ inputs.name }}` syntax:
 
 ```dot title="c-i.fabro"
 digraph CI {
     graph [goal="Run tests for {{ inputs.repo_name }}"]
-    clone [shape=parallelogram, script="git clone {{ inputs.repo_url }} repo"]
-    test  [label="Test", prompt="Run the {{ inputs.language }} test suite."]
+    test [label="Test", prompt="Clone {{ inputs.repo_url }} and run the {{ inputs.language }} test suite."]
 }
 ```
 
-Inputs cannot parameterize workflow structure or file references such as node IDs, edges, `import` paths, `@file` paths, or child workflow paths.
+Inputs cannot parameterize workflow structure, file references such as node IDs, edges, `import` paths, `@file` paths, or child workflow paths, or any attribute besides `prompt` and `goal` — other attributes such as `script` and `label` are literal text.
 
 If a workflow template references an undefined input like `{{ inputs.langauge }}`, `fabro validate` reports a warning. Run-style commands promote that diagnostic to an error before creating or starting a run.
 

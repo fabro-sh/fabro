@@ -110,19 +110,19 @@ After import under the placeholder `validate`, `validate.lint`'s retry target be
 
 ## Templating
 
-Imported files are parsed as static DOT before template expansion. The import path and graph structure must be literal, but templates remain supported inside final string attributes such as `prompt`, `script`, and `label`:
+Imported files are parsed as static DOT before template expansion. The import path and graph structure must be literal, but templates remain supported inside node `prompt` attributes:
 
 ```dot title="shared/lint.fabro"
 digraph Lint {
     start [shape=Mdiamond]
     exit  [shape=Msquare]
 
-    run [label="Lint", shape=parallelogram, script="{{ inputs.linter }}"]
+    run [label="Lint", prompt="Run {{ inputs.linter }} and fix any reported issues."]
     start -> run -> exit
 }
 ```
 
-Do not put templates in `import` paths, node IDs, edge definitions, or other structural references. See [Variables](/workflows/variables#expansion-timing) for the rendering pipeline.
+Do not put templates in `import` paths, node IDs, edge definitions, other structural references, or attributes besides `prompt` — they are literal text. See [Variables](/workflows/variables#expansion-timing) for the rendering pipeline.
 
 ## Nested imports
 

@@ -1,0 +1,18 @@
+---
+title: "Installer sandbox provider selection"
+date: "2026-06-02"
+---
+
+<Warning>
+**Slack now requires explicit configuration.** Slack no longer reports enabled or starts from vault tokens alone — an explicit `[server.integrations.slack]` table must be present in server settings. If you relied on vault tokens without a config table, add the table to re-enable Slack.
+</Warning>
+
+## Installer sandbox provider selection
+
+The web installer previously enabled all three sandbox providers (Docker, Daytona, and local) regardless of which runtime you picked. The wizard now enables only the runtime you select, plus local execution if the new **Allow local sandboxes** checkbox (checked by default) stays on. The unselected runtime is written to `settings.toml` as `enabled = false`, so it stays off instead of being defaulted back on by the config resolver.
+
+## More
+
+<Accordion title="Fixes">
+- Fixed the automations page showing `No automations match ""` while loading or when the trigger filter excluded everything; loading, error, empty, and no-match states are now distinct, and a fresh workspace gets a "Create your first automation" panel
+</Accordion>

@@ -10,7 +10,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 declare const Bun: any;
 
@@ -20,8 +20,19 @@ const buildsRootDir = join(rootPath, ".dist-builds");
 const distPath = join(rootPath, "dist");
 const publicDir = join(rootPath, "public");
 const templatePath = join(rootPath, "index.template.html");
-const pierreWorkerDir = join(rootPath, "node_modules", "@pierre", "diffs", "dist", "worker");
 const watch = Bun.argv.includes("--watch");
+
+// Locate dependencies through module resolution rather than hardcoded
+// node_modules paths: where packages land on disk depends on the Bun install
+// linker (hoisted puts them at the workspace root, isolated symlinks them into
+// the app's node_modules), so any fixed path breaks on one of the layouts.
+const pierreWorkerDir = join(dirname(Bun.resolveSync("@pierre/diffs", rootPath)), "worker");
+
+const tailwindCliPackageJsonPath = Bun.resolveSync("@tailwindcss/cli/package.json", rootPath);
+const tailwindCliBin = join(
+  dirname(tailwindCliPackageJsonPath),
+  JSON.parse(await readFile(tailwindCliPackageJsonPath, "utf8")).bin.tailwindcss,
+);
 
 function newBuildId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -47,7 +58,8 @@ async function buildOnce() {
   }
 
   const cssResult = await Bun.spawn([
-    "./node_modules/.bin/tailwindcss",
+    process.execPath,
+    tailwindCliBin,
     "-i",
     "app/app.css",
     "-o",

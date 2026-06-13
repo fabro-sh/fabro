@@ -1,0 +1,43 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "model": "claude-sonnet-4-20250514",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Think step by step: what is 2+2?"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "The user wants 2+2, which is 4.",
+          "signature": "sig_test_abc123"
+        },
+        {
+          "type": "text",
+          "text": "4."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Now 3+3?"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 128,
+  "stop_sequences": []
+}

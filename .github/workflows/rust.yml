@@ -108,6 +108,13 @@ jobs:
           cache-on-failure: true
       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
       - run: cargo nextest run --locked --workspace --status-level slow --profile ci
+      # Twin-mode e2e suites. These are hermetic (in-process twin provider, no
+      # secrets): FABRO_TEST_MODE defaults to twin, so live-only tests
+      # self-skip. Scoped to the packages whose ignored tests are fully green
+      # in twin mode; widen as the remaining suites are fixed up for CI.
+      # Must not use the e2e nextest profile here: NEXTEST_PROFILE=e2e implies
+      # strict mode, which fails (rather than skips) live tests without keys.
+      - run: cargo nextest run --locked --workspace --status-level slow --profile ci --run-ignored only -E 'package(fabro-agent) + package(fabro-llm) + package(twin-openai)'
 
   test-macos:
     name: Test (macOS)

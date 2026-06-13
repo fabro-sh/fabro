@@ -52,6 +52,7 @@
             "pages": [
               "execution/run-configuration",
               "execution/child-runs",
+              "execution/automations",
               "execution/environments",
               "execution/context",
               "execution/checkpoints",
@@ -94,6 +95,7 @@
               "integrations/github",
               "integrations/daytona",
               "integrations/litellm",
+              "integrations/openrouter",
               "integrations/slack",
               "integrations/brave-search"
             ]
@@ -225,6 +227,41 @@
             ]
           },
           {
+            "group": "Automations",
+            "icon": "robot",
+            "pages": [
+              "GET /api/v1/automations",
+              "POST /api/v1/automations",
+              "GET /api/v1/automations/{id}",
+              "PUT /api/v1/automations/{id}",
+              "DELETE /api/v1/automations/{id}",
+              "GET /api/v1/automations/{id}/runs",
+              "POST /api/v1/automations/{id}/runs"
+            ]
+          },
+          {
+            "group": "Environments",
+            "icon": "box",
+            "pages": [
+              "GET /api/v1/environments",
+              "POST /api/v1/environments",
+              "GET /api/v1/environments/{id}",
+              "PUT /api/v1/environments/{id}",
+              "DELETE /api/v1/environments/{id}"
+            ]
+          },
+          {
+            "group": "Variables",
+            "icon": "brackets-curly",
+            "pages": [
+              "GET /api/v1/variables",
+              "POST /api/v1/variables",
+              "GET /api/v1/variables/{name}",
+              "PUT /api/v1/variables/{name}",
+              "DELETE /api/v1/variables/{name}"
+            ]
+          },
+          {
             "group": "More",
             "icon": "ellipsis",
             "pages": [
@@ -252,9 +289,24 @@
         "icon": "clock-rotate-left",
         "groups": [
           {
+            "group": "June 2026",
+            "icon": "clock-rotate-left",
+            "pages": [
+              "changelog/2026-06-10",
+              "changelog/2026-06-09",
+              "changelog/2026-06-05",
+              "changelog/2026-06-03",
+              "changelog/2026-06-02"
+            ]
+          },
+          {
             "group": "May 2026",
             "icon": "clock-rotate-left",
             "pages": [
+              "changelog/2026-05-30",
+              "changelog/2026-05-29",
+              "changelog/2026-05-28",
+              "changelog/2026-05-27",
               "changelog/2026-05-26",
               "changelog/2026-05-25",
               "changelog/2026-05-24",

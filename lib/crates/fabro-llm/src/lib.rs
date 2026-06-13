@@ -1,5 +1,8 @@
 pub mod adapter_registry;
+mod attachments;
 pub mod client;
+mod codec;
+pub(crate) mod cost;
 pub mod error;
 pub mod generate;
 pub mod middleware;
@@ -9,6 +12,7 @@ pub mod providers;
 pub mod retry;
 pub mod token_count;
 pub mod tools;
+pub(crate) mod transport;
 pub mod types;
 
 pub use error::{Error, ProviderErrorDetail, ProviderErrorKind, Result};

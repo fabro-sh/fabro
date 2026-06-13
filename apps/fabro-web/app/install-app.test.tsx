@@ -741,7 +741,7 @@ describe("InstallApp", () => {
       expect(putIdx).toBeGreaterThan(testIdx);
       const sandboxTestCall = fetchCalls[testIdx];
       expect(sandboxTestCall?.init?.body).toBe(
-        JSON.stringify({ provider: "daytona", api_key: "dtn_secret" }),
+        JSON.stringify({ provider: "daytona", allow_local: true, api_key: "dtn_secret" }),
       );
 
       await act(async () => {

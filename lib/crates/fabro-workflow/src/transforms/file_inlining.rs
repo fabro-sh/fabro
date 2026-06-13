@@ -192,45 +192,52 @@ impl FileInliningTransform {
             .with_inputs(self.inputs.clone());
 
         for (node_id, node) in &mut graph.nodes {
-            for attr_name in ["prompt", "output_schema"] {
-                let Some(AttrValue::String(attr_value)) = node.attrs.get(attr_name) else {
-                    continue;
-                };
+            // `prompt` is an importable template: MiniJinja-render the value,
+            // then inline any `@file` reference (whose contents are rendered
+            // too). Clone up front so the immutable borrow ends before we
+            // re-insert.
+            let prompt = match node.attrs.get("prompt") {
+                Some(AttrValue::String(value)) => Some(value.clone()),
+                _ => None,
+            };
+            if let Some(attr_value) = prompt {
                 let target = TemplateRenderTarget::node_attr(
                     self.source_name.clone(),
                     node_id.clone(),
-                    attr_name,
+                    "prompt",
                 )
-                .with_source_origin(self.source_text.as_deref(), attr_value)
+                .with_source_origin(self.source_text.as_deref(), &attr_value)
                 .with_template_store(template_render_store(
                     &self.current_dir,
                     Arc::clone(&self.resolver),
                     self.source_name.as_deref(),
-                    attr_value,
+                    &attr_value,
                 )?);
                 let rendered = render_template_for_target(
-                    attr_value,
+                    &attr_value,
                     &ctx,
                     self.render_mode,
                     &target,
                     &mut diagnostics,
                 )?;
-                let value = match self.render_resolved_file_ref(
-                    &rendered,
-                    &ctx,
-                    target,
-                    &mut diagnostics,
-                )? {
-                    Some(value) => value,
-                    None if attr_name == "output_schema" && rendered.starts_with('@') => {
-                        return Err(Error::Validation(format!(
-                            "node '{node_id}' output_schema has unresolved file reference: {rendered}"
-                        )));
-                    }
-                    None => rendered,
-                };
+                let value = self
+                    .render_resolved_file_ref(&rendered, &ctx, target, &mut diagnostics)?
+                    .unwrap_or(rendered);
                 node.attrs
-                    .insert(attr_name.to_string(), AttrValue::String(value));
+                    .insert("prompt".to_string(), AttrValue::String(value));
+            }
+
+            // `output_schema` is NOT a template: an inline JSON string is used
+            // verbatim, and an `@file` reference is loaded verbatim. Neither the
+            // value nor the loaded contents are MiniJinja-rendered.
+            let output_schema = match node.attrs.get("output_schema") {
+                Some(AttrValue::String(value)) => Some(value.clone()),
+                _ => None,
+            };
+            if let Some(attr_value) = output_schema {
+                let value = self.resolve_output_schema_ref(node_id, &attr_value)?;
+                node.attrs
+                    .insert("output_schema".to_string(), AttrValue::String(value));
             }
         }
 
@@ -292,6 +299,24 @@ impl FileInliningTransform {
             &target,
             diagnostics,
         )?))
+    }
+
+    /// Resolve an `output_schema` value. An inline JSON string is returned
+    /// as-is; an `@file` reference is loaded verbatim. Unlike `prompt`,
+    /// `output_schema` is not a template, so neither the value nor the loaded
+    /// file contents are MiniJinja-rendered.
+    fn resolve_output_schema_ref(&self, node_id: &str, value: &str) -> Result<String, Error> {
+        let Some(path_str) = value.strip_prefix('@') else {
+            return Ok(value.to_string());
+        };
+        validate_static_reference(path_str, ReferenceKind::FileInline)
+            .map_err(|error| Error::Validation(error.to_string()))?;
+        let Some(resolved) = self.resolver.resolve(&self.current_dir, path_str) else {
+            return Err(Error::Validation(format!(
+                "node '{node_id}' output_schema has unresolved file reference: {value}"
+            )));
+        };
+        Ok(resolved.content)
     }
 
     fn template_root_for_resolved_file(&self, path: &Path) -> PathBuf {
@@ -534,6 +559,69 @@ mod tests {
                 .get("output_schema")
                 .and_then(AttrValue::as_str),
             Some("routing")
+        );
+    }
+
+    #[test]
+    fn file_inlining_transform_does_not_render_templates_in_output_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Fix bugs".to_string()),
+        );
+        let mut node = Node::new("emit");
+        // `output_schema` is not a template: `{{ goal }}` must stay literal.
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String(r#"{"title": "{{ goal }}"}"#.to_string()),
+        );
+        graph.nodes.insert("emit".to_string(), node);
+
+        let transform = FileInliningTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+        );
+        let graph = transform.apply(graph).unwrap();
+
+        assert_eq!(
+            graph.nodes["emit"]
+                .attrs
+                .get("output_schema")
+                .and_then(AttrValue::as_str),
+            Some(r#"{"title": "{{ goal }}"}"#)
+        );
+    }
+
+    #[test]
+    fn file_inlining_transform_loads_output_schema_file_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        // File contents contain template syntax that must NOT be rendered.
+        std::fs::write(
+            dir.path().join("schema.json"),
+            r#"{"kind": "{{ inputs.kind }}"}"#,
+        )
+        .unwrap();
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("emit");
+        node.attrs.insert(
+            "output_schema".to_string(),
+            AttrValue::String("@schema.json".to_string()),
+        );
+        graph.nodes.insert("emit".to_string(), node);
+
+        let transform = FileInliningTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+        );
+        let graph = transform.apply(graph).unwrap();
+
+        assert_eq!(
+            graph.nodes["emit"]
+                .attrs
+                .get("output_schema")
+                .and_then(AttrValue::as_str),
+            Some(r#"{"kind": "{{ inputs.kind }}"}"#)
         );
     }
 

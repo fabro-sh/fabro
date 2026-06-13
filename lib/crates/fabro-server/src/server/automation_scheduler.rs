@@ -10,7 +10,7 @@ use fabro_automation::{
 };
 use fabro_types::{AutomationRef, Principal, RunId, SystemActorKind};
 use tokio::time::sleep;
-use tracing::{Instrument, info, info_span, warn};
+use tracing::{Instrument, error, info, info_span, warn};
 
 use super::{AppState, handler};
 use crate::automation_materializer::AutomationRunMaterializeInput;
@@ -230,7 +230,7 @@ async fn fire_scheduled_automation_run(
     {
         Ok(materialized) => materialized,
         Err(err) => {
-            warn!(
+            error!(
                 due_at = %due_at,
                 error = %err,
                 "Failed to materialize scheduled automation run",

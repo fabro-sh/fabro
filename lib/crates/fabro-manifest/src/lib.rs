@@ -769,6 +769,11 @@ fn build_git_context(
     })
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source is today's behavior; run.scm.owner/repository are slated for demotion to plain String in the \
+              interpolation unification (D2)"
+)]
 fn configured_repo_origin_url(settings: &WorkflowSettings) -> Option<String> {
     let scm = &settings.run.scm;
     if !scm
@@ -897,6 +902,10 @@ mod tests {
         )]))
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test asserts the raw template source"
+    )]
     #[test]
     fn build_run_overrides_sets_common_cli_and_mcp_layers() {
         let overrides = build_run_overrides(RunOverrideInput {

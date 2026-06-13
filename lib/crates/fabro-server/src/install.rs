@@ -427,31 +427,42 @@ enum InstallSandboxProvider {
 
 #[derive(Clone, Debug, Deserialize)]
 struct InstallSandboxInput {
-    provider: InstallSandboxProvider,
-    api_key:  Option<String>,
+    provider:    InstallSandboxProvider,
+    api_key:     Option<String>,
+    allow_local: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
-enum InstallSandboxState {
+enum InstallSandboxProviderState {
     Docker,
     Daytona { api_key: InstallSecret },
 }
 
+#[derive(Clone, Debug)]
+struct InstallSandboxState {
+    provider:    InstallSandboxProviderState,
+    allow_local: bool,
+}
+
 impl InstallSandboxState {
     fn as_session_value(&self) -> serde_json::Value {
-        match self {
-            Self::Docker => serde_json::json!({ "provider": "docker" }),
-            Self::Daytona { .. } => serde_json::json!({
+        match &self.provider {
+            InstallSandboxProviderState::Docker => serde_json::json!({
+                "provider": "docker",
+                "allow_local": self.allow_local,
+            }),
+            InstallSandboxProviderState::Daytona { .. } => serde_json::json!({
                 "provider": "daytona",
                 "api_key_saved": true,
+                "allow_local": self.allow_local,
             }),
         }
     }
 
     fn to_persistence_selection(&self) -> InstallSandboxSelection {
-        match self {
-            Self::Docker => InstallSandboxSelection::Docker,
-            Self::Daytona { .. } => InstallSandboxSelection::Daytona,
+        match &self.provider {
+            InstallSandboxProviderState::Docker => InstallSandboxSelection::Docker,
+            InstallSandboxProviderState::Daytona { .. } => InstallSandboxSelection::Daytona,
         }
     }
 
@@ -966,10 +977,16 @@ async fn post_install_sandbox_test(
     let api_key = {
         let pending_install = lock_unpoisoned(&state.pending_install, "install session");
         match resolve_install_sandbox_state(pending_install.sandbox.as_ref(), input) {
-            Ok(InstallSandboxState::Docker) => {
+            Ok(InstallSandboxState {
+                provider: InstallSandboxProviderState::Docker,
+                ..
+            }) => {
                 return Json(serde_json::json!({ "ok": true })).into_response();
             }
-            Ok(InstallSandboxState::Daytona { api_key }) => api_key.expose_secret().to_string(),
+            Ok(InstallSandboxState {
+                provider: InstallSandboxProviderState::Daytona { api_key },
+                ..
+            }) => api_key.expose_secret().to_string(),
             Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
         }
     };
@@ -1048,21 +1065,27 @@ fn resolve_install_sandbox_state(
     current: Option<&InstallSandboxState>,
     input: InstallSandboxInput,
 ) -> Result<InstallSandboxState, String> {
-    match input.provider {
-        InstallSandboxProvider::Docker => Ok(InstallSandboxState::Docker),
+    // Local sandboxes are allowed by default unless the wizard unchecked the box.
+    let allow_local = input.allow_local.unwrap_or(true);
+    let provider = match input.provider {
+        InstallSandboxProvider::Docker => InstallSandboxProviderState::Docker,
         InstallSandboxProvider::Daytona => {
             let api_key = match trim_install_field(input.api_key) {
                 Some(value) => InstallSecret::new(value),
-                None => match current {
-                    Some(InstallSandboxState::Daytona { api_key }) => {
+                None => match current.map(|state| &state.provider) {
+                    Some(InstallSandboxProviderState::Daytona { api_key }) => {
                         InstallSecret::new(api_key.expose_secret())
                     }
                     _ => return Err("api_key is required for daytona".to_string()),
                 },
             };
-            Ok(InstallSandboxState::Daytona { api_key })
+            InstallSandboxProviderState::Daytona { api_key }
         }
-    }
+    };
+    Ok(InstallSandboxState {
+        provider,
+        allow_local,
+    })
 }
 
 fn resolve_install_object_store_state(
@@ -1546,12 +1569,15 @@ async fn post_install_finish(
             return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
         }
     };
-    if let Err(err) = write_sandbox_settings(&mut settings_doc, sandbox.to_persistence_selection())
-    {
+    if let Err(err) = write_sandbox_settings(
+        &mut settings_doc,
+        sandbox.to_persistence_selection(),
+        sandbox.allow_local,
+    ) {
         return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
     }
     let mut vault_secrets = Vec::new();
-    if let InstallSandboxState::Daytona { api_key } = &sandbox {
+    if let InstallSandboxProviderState::Daytona { api_key } = &sandbox.provider {
         vault_secrets.push(VaultSecretWrite {
             name:        EnvVars::DAYTONA_API_KEY.to_string(),
             value:       api_key.expose_secret().to_string(),
@@ -1755,11 +1781,13 @@ async fn post_install_finish(
     }
     {
         let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
-        if matches!(
-            pending_install.sandbox.as_ref(),
-            Some(InstallSandboxState::Daytona { .. })
-        ) {
-            pending_install.sandbox = Some(InstallSandboxState::Docker);
+        if let Some(sandbox) = pending_install.sandbox.as_mut() {
+            if matches!(
+                sandbox.provider,
+                InstallSandboxProviderState::Daytona { .. }
+            ) {
+                sandbox.provider = InstallSandboxProviderState::Docker;
+            }
         }
     }
 
@@ -2328,11 +2356,11 @@ mod tests {
         DEFAULT_INSTALL_GITHUB_API_BASE_URL, GitHubAppOwner, GithubAppInstall, GithubInstallState,
         InstallAppState, InstallAwsCredentialPair, InstallFinishGuard,
         InstallObjectStoreCredentialMode, InstallObjectStoreInput, InstallObjectStoreProvider,
-        InstallObjectStoreState, InstallSandboxState, InstallTokenQuery, LlmProvidersInput,
-        PendingInstall, ServerConfigInput, ServerSecrets, classify_object_store_validation_error,
-        detect_canonical_url, install_object_store_lookup, lock_unpoisoned, post_install_finish,
-        provider_base_url_override, resolve_install_object_store_state, token_is_valid,
-        write_artifact_store_metadata,
+        InstallObjectStoreState, InstallSandboxProviderState, InstallSandboxState,
+        InstallTokenQuery, LlmProvidersInput, PendingInstall, ServerConfigInput, ServerSecrets,
+        classify_object_store_validation_error, detect_canonical_url, install_object_store_lookup,
+        lock_unpoisoned, post_install_finish, provider_base_url_override,
+        resolve_install_object_store_state, token_is_valid, write_artifact_store_metadata,
     };
 
     #[test]
@@ -2441,7 +2469,10 @@ mod tests {
             pending.object_store = Some(InstallObjectStoreState::Local {
                 root: dir.path().join("runs").display().to_string(),
             });
-            pending.sandbox = Some(InstallSandboxState::Docker);
+            pending.sandbox = Some(InstallSandboxState {
+                provider:    InstallSandboxProviderState::Docker,
+                allow_local: true,
+            });
             pending.llm = Some(LlmProvidersInput {
                 providers: Vec::new(),
             });

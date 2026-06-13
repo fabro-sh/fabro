@@ -80,6 +80,10 @@ provider = "not-a-provider"
     assert!(rendered.contains("run.environment.provider"));
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test asserts the raw template source"
+)]
 #[test]
 fn namespace_resolvers_cover_root_level_settings_shape() {
     let source = r#"

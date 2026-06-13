@@ -51,6 +51,11 @@ impl GitAuthor {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source is today's behavior; run.git.author.* is slated for demotion to plain String in the \
+              interpolation unification (D2)"
+)]
 impl From<&GitAuthorLayer> for GitAuthor {
     fn from(value: &GitAuthorLayer) -> Self {
         Self::from_options(
@@ -60,6 +65,11 @@ impl From<&GitAuthorLayer> for GitAuthor {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source is today's behavior; run.git.author.* is slated for demotion to plain String in the \
+              interpolation unification (D2)"
+)]
 impl From<&GitAuthorSettings> for GitAuthor {
     fn from(value: &GitAuthorSettings) -> Self {
         Self::from_options(

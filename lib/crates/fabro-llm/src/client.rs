@@ -2,17 +2,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_auth::{ApiCredential, CredentialSource};
-use fabro_model::{Catalog, ProviderId};
+use fabro_model::{AdapterKind, Catalog, ProviderId};
 use tracing::debug;
 
-use crate::adapter_registry::{AdapterConfig, factory_for};
+use crate::adapter_registry::{
+    self, AdapterConfig, AdapterKindOptions, OpenAiAdapterOptions, factory_for,
+};
+use crate::cost;
 use crate::error::{Error, ProviderErrorKind};
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::token_count::{
     InputTokenCount, InputTokenCountMethod, InputTokenCountPreference, estimate_input_tokens,
 };
-use crate::types::{Request, Response, Speed, Warning};
+use crate::types::{Request, Response, Speed, StreamEvent, Warning};
 
 /// The core client that routes requests to provider adapters (Section 2.2, 3).
 #[derive(Clone)]
@@ -146,15 +149,21 @@ impl Client {
             let provider_id = credential.provider.clone();
             let adapter = if let Some(provider) = catalog.provider(&provider_id) {
                 let factory = factory_for(provider.adapter);
+                let kind_options = match provider.adapter {
+                    AdapterKind::OpenAi => AdapterKindOptions::OpenAi(OpenAiAdapterOptions {
+                        codex_mode: credential.codex_mode,
+                        org_id:     credential.org_id,
+                        project_id: credential.project_id,
+                    }),
+                    _ => AdapterKindOptions::None,
+                };
                 factory(AdapterConfig {
-                    provider_id:   provider.id.to_string(),
-                    auth_header:   credential.auth_header,
-                    base_url:      credential.base_url.or_else(|| provider.base_url.clone()),
+                    provider_id: provider.id.to_string(),
+                    auth_header: credential.auth_header,
+                    base_url: credential.base_url.or_else(|| provider.base_url.clone()),
                     extra_headers: credential.extra_headers,
-                    codex_mode:    credential.codex_mode,
-                    org_id:        credential.org_id,
-                    project_id:    credential.project_id,
-                    catalog:       Some(Arc::clone(&catalog)),
+                    kind_options,
+                    catalog: Some(Arc::clone(&catalog)),
                 })
             } else {
                 Err(Error::Configuration {
@@ -250,18 +259,18 @@ impl Client {
             )
     }
 
-    /// Resolve the provider for a request.
+    /// Resolve the provider for a request: an explicit `request.provider`
+    /// wins, then the model's catalog route, then the default provider.
     fn resolve_provider(&self, request: &Request) -> Result<Arc<dyn ProviderAdapter>, Error> {
-        let catalog_provider = self.catalog.as_ref().and_then(|catalog| {
-            catalog
-                .get(&request.model)
-                .map(|info| info.provider.to_string())
-        });
+        let route = self
+            .catalog
+            .as_ref()
+            .and_then(|catalog| adapter_registry::resolve_route(catalog, &request.model));
 
         let provider_name = request
             .provider
             .as_deref()
-            .or(catalog_provider.as_deref())
+            .or_else(|| route.as_ref().map(|route| route.provider.as_str()))
             .or(self.default_provider.as_deref())
             .ok_or_else(|| Error::Configuration {
                 message: "No provider specified and no default provider set".into(),
@@ -328,18 +337,16 @@ impl Client {
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
-            provider.validate_request(request)?;
-            return provider.complete(request).await;
+            return complete_stamped(&provider, self.catalog.as_deref(), request).await;
         }
 
-        // Build middleware chain
-        let provider_clone = provider.clone();
+        // Build middleware chain. Cost is stamped at the base so middleware
+        // observes the final response.
+        let catalog = self.catalog.clone();
         let base: NextFn = Arc::new(move |req: Request| {
-            let p = provider_clone.clone();
-            Box::pin(async move {
-                p.validate_request(&req)?;
-                p.complete(&req).await
-            })
+            let provider = provider.clone();
+            let catalog = catalog.clone();
+            Box::pin(async move { complete_stamped(&provider, catalog.as_deref(), &req).await })
         });
 
         let chain = self.middleware.iter().rev().fold(base, |next, mw| {
@@ -366,18 +373,16 @@ impl Client {
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
-            provider.validate_request(request)?;
-            return provider.stream(request).await;
+            return stream_stamped(&provider, self.catalog.clone(), request).await;
         }
 
-        // Build streaming middleware chain
-        let provider_clone = provider.clone();
+        // Build streaming middleware chain. Cost is stamped at the base so
+        // middleware observes the final Finish events.
+        let catalog = self.catalog.clone();
         let base: NextStreamFn = Arc::new(move |req: Request| {
-            let p = provider_clone.clone();
-            Box::pin(async move {
-                p.validate_request(&req)?;
-                p.stream(&req).await
-            })
+            let provider = provider.clone();
+            let catalog = catalog.clone();
+            Box::pin(async move { stream_stamped(&provider, catalog, &req).await })
         });
 
         let chain = self.middleware.iter().rev().fold(base, |next, mw| {
@@ -484,6 +489,59 @@ impl Client {
     }
 }
 
+/// Validate, run, and cost-stamp a blocking request. Shared by
+/// [`Client::complete`]'s direct path and its middleware-chain base so cost
+/// stamping stays single-sited.
+async fn complete_stamped(
+    provider: &Arc<dyn ProviderAdapter>,
+    catalog: Option<&Catalog>,
+    request: &Request,
+) -> Result<Response, Error> {
+    provider.validate_request(request)?;
+    let mut response = provider.complete(request).await?;
+    cost::apply_estimated_cost(catalog, &request.model, request.speed, &mut response);
+    Ok(response)
+}
+
+/// Validate and run a streaming request, cost-stamping terminal
+/// [`StreamEvent::Finish`] responses. Shared by [`Client::stream`]'s direct
+/// path and its middleware-chain base so cost stamping stays single-sited.
+async fn stream_stamped(
+    provider: &Arc<dyn ProviderAdapter>,
+    catalog: Option<Arc<Catalog>>,
+    request: &Request,
+) -> Result<StreamEventStream, Error> {
+    provider.validate_request(request)?;
+    let stream = provider.stream(request).await?;
+    Ok(stamp_stream_costs(
+        catalog,
+        request.model.clone(),
+        request.speed,
+        stream,
+    ))
+}
+
+/// Wrap a provider event stream so terminal [`StreamEvent::Finish`]
+/// responses carry a catalog-estimated cost, mirroring what
+/// [`Client::complete`] stamps on blocking responses.
+fn stamp_stream_costs(
+    catalog: Option<Arc<Catalog>>,
+    model: String,
+    speed: Option<Speed>,
+    stream: StreamEventStream,
+) -> StreamEventStream {
+    use futures::StreamExt;
+
+    Box::pin(stream.map(move |event| {
+        event.map(|mut event| {
+            if let StreamEvent::Finish { response, .. } = &mut event {
+                cost::apply_estimated_cost(catalog.as_deref(), &model, speed, response);
+            }
+            event
+        })
+    }))
+}
+
 fn token_count_fallback_eligible(error: &Error) -> bool {
     matches!(
         error,
@@ -587,6 +645,8 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             })
         }
 
@@ -608,6 +668,8 @@ mod tests {
                         raw: None,
                         warnings: vec![],
                         rate_limit: None,
+                        cost_usd: None,
+                        cost_source: None,
                     },
                 )),
             ];
@@ -766,6 +828,130 @@ mod tests {
         let response = client.complete(&test_request()).await.unwrap();
         assert_eq!(response.text(), "Hello!");
         assert_eq!(response.provider, "test");
+    }
+
+    /// Hermetic catalog pricing `mock-model` under the `test` provider so
+    /// cost stamping has something to estimate from.
+    fn priced_mock_catalog() -> Arc<Catalog> {
+        let settings: LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai_compatible"
+base_url = "https://test.invalid/v1"
+
+[models."mock-model"]
+provider = "test"
+display_name = "Mock"
+family = "mock"
+default = true
+
+[models."mock-model".limits]
+context_window = 100000
+
+[models."mock-model".features]
+tools = false
+vision = false
+reasoning = false
+
+[models."mock-model".costs]
+input_cost_per_mtok = 1.0
+output_cost_per_mtok = 2.0
+"#,
+        )
+        .unwrap();
+        Arc::new(Catalog::from_settings(&settings).unwrap())
+    }
+
+    #[tokio::test]
+    async fn complete_stamps_estimated_cost_from_catalog() {
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
+        client.catalog = Some(priced_mock_catalog());
+
+        let response = client.complete(&test_request()).await.unwrap();
+
+        // 10 input tokens at $1/MTok + 20 output tokens at $2/MTok.
+        assert_eq!(response.cost_source, Some(CostSource::Estimated));
+        let cost = response.cost_usd.expect("cost should be stamped");
+        assert!((cost - 0.000_05).abs() < 1e-12, "got {cost}");
+    }
+
+    #[tokio::test]
+    async fn complete_leaves_cost_unset_without_catalog() {
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
+
+        let response = client.complete(&test_request()).await.unwrap();
+
+        assert_eq!(response.cost_usd, None);
+        assert_eq!(response.cost_source, None);
+    }
+
+    #[tokio::test]
+    async fn complete_stamps_cost_beneath_middleware() {
+        struct Passthrough;
+
+        #[async_trait]
+        impl Middleware for Passthrough {
+            async fn handle_complete(
+                &self,
+                request: Request,
+                next: NextFn,
+            ) -> Result<Response, Error> {
+                next(request).await
+            }
+
+            async fn handle_stream(
+                &self,
+                request: Request,
+                next: NextStreamFn,
+            ) -> Result<StreamEventStream, Error> {
+                next(request).await
+            }
+        }
+
+        let mut client = Client::new(HashMap::new(), None, vec![Arc::new(Passthrough)]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
+        client.catalog = Some(priced_mock_catalog());
+
+        let response = client.complete(&test_request()).await.unwrap();
+
+        assert_eq!(response.cost_source, Some(CostSource::Estimated));
+    }
+
+    #[tokio::test]
+    async fn stream_stamps_estimated_cost_on_finish() {
+        use futures::StreamExt;
+
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(Arc::new(MockProvider::new("test", "Hello!")))
+            .await
+            .unwrap();
+        client.catalog = Some(priced_mock_catalog());
+
+        let mut stream = client.stream(&test_request()).await.unwrap();
+        let mut finish_response = None;
+        while let Some(event) = stream.next().await {
+            if let StreamEvent::Finish { response, .. } = event.unwrap() {
+                finish_response = Some(response);
+            }
+        }
+
+        let response = finish_response.expect("stream should yield a Finish event");
+        // MockProvider's Finish usage is zero tokens — priced, just $0.
+        assert_eq!(response.cost_source, Some(CostSource::Estimated));
+        assert_eq!(response.cost_usd, Some(0.0));
     }
 
     #[tokio::test]
@@ -1389,6 +1575,68 @@ reasoning = false
         let provider = client.resolve_provider(&request).unwrap();
 
         assert_eq!(provider.name(), "acme");
+    }
+
+    /// Build a Client with one registered mock per catalog provider, so
+    /// dispatch tests can observe which provider a request resolves to.
+    async fn client_with_all_catalog_providers(catalog: &Arc<Catalog>) -> Client {
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        for provider in catalog.providers() {
+            client
+                .register_provider(Arc::new(MockProvider::new(provider.id.as_str(), "ok")))
+                .await
+                .unwrap();
+        }
+        client.catalog = Some(Arc::clone(catalog));
+        client
+    }
+
+    /// Live-dispatch counterpart of the adapter_registry route-equivalence
+    /// table: for every built-in model, `resolve_provider` lands on the same
+    /// provider the resolved route names.
+    #[tokio::test]
+    async fn dispatch_agrees_with_resolve_route_for_every_builtin_model() {
+        let catalog = catalog_with("");
+        let client = client_with_all_catalog_providers(&catalog).await;
+
+        for model in catalog.list(None) {
+            let route = adapter_registry::resolve_route(&catalog, &model.id)
+                .expect("built-in model should resolve to a route");
+            let mut request = test_request();
+            request.model = model.id.clone();
+
+            let provider = client.resolve_provider(&request).unwrap();
+
+            assert_eq!(provider.name(), route.provider.as_str(), "{}", model.id);
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_provider_wins_over_the_model_route() {
+        let catalog = catalog_with("");
+        let client = client_with_all_catalog_providers(&catalog).await;
+
+        let mut request = test_request();
+        request.model = "gpt-5.4-mini".to_string();
+        request.provider = Some("anthropic".to_string());
+
+        let provider = client.resolve_provider(&request).unwrap();
+
+        assert_eq!(provider.name(), "anthropic");
+    }
+
+    #[tokio::test]
+    async fn unknown_model_falls_back_to_default_provider() {
+        let catalog = catalog_with("");
+        let client = client_with_all_catalog_providers(&catalog).await;
+        let default = client.default_provider().unwrap().to_string();
+
+        let mut request = test_request();
+        request.model = "model-not-in-any-catalog".to_string();
+
+        let provider = client.resolve_provider(&request).unwrap();
+
+        assert_eq!(provider.name(), default);
     }
 
     #[tokio::test]

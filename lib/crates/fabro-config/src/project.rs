@@ -144,6 +144,12 @@ fn sibling_workflow_toml_for(graph: &Path) -> Option<PathBuf> {
     (toml_graph == graph).then_some(candidate)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "known leak: run.working_dir is a path kept as InterpString (not demoted); it should \
+              resolve {{ env.* }}/{{ vars.* }} tokens but consumes them raw today; strict \
+              resolution scheduled in the interpolation unification (Phase 2 keep-rows)"
+)]
 pub fn resolve_working_directory_from_run(run: &RunNamespace, caller_cwd: &Path) -> PathBuf {
     let Some(work_dir) = run.working_dir.as_ref().map(InterpString::as_source) else {
         return caller_cwd.to_path_buf();

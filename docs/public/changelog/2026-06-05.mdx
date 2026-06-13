@@ -1,0 +1,14 @@
+---
+title: "Workflow templates scoped to prompt and goal"
+date: "2026-06-05"
+---
+
+<Warning>
+**Template rendering removed from most DOT attributes.** Node `label`, `model`, `provider`, `speed`, edge `label`, and `condition` are no longer rendered as templates — `{{ ... }}` and `{% ... %}` in those attributes is now literal text. Workflows that still use template syntax in a demoted attribute get a `detemplated_attribute` warning so you can migrate. `condition` routing expressions are unaffected; only the template pre-render step is gone.
+</Warning>
+
+## Workflow templates scoped to prompt and goal
+
+Full template rendering in DOT workflows is now limited to the two content fields that legitimately need it: the node `prompt` and the graph `goal`, which can reference `{{ inputs.* }}` and `{{ goal }}`. Every other graph, node, and edge attribute is a plain value. This makes workflow files easier to reason about — an attribute like `model` or `condition` always means exactly what it says, instead of potentially being a template that resolves to something else at run time.
+
+`output_schema` is now a plain string or `@file` reference rather than a template; `@file` references still inline the file's contents.

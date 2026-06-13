@@ -460,7 +460,11 @@ pub fn write_object_store_settings(
     }
 }
 
-fn write_sandbox_provider_policy(server: &mut toml::Table) -> Result<()> {
+fn write_sandbox_provider_policy(
+    server: &mut toml::Table,
+    selection: InstallSandboxSelection,
+    allow_local: bool,
+) -> Result<()> {
     use fabro_types::SandboxProviderKind;
     let sandbox = ensure_table(server, "sandbox")?;
     let providers = ensure_table(sandbox, "providers")?;
@@ -469,15 +473,23 @@ fn write_sandbox_provider_policy(server: &mut toml::Table) -> Result<()> {
         SandboxProviderKind::Docker,
         SandboxProviderKind::Daytona,
     ] {
+        // Only enable the providers the operator configured or allowed in the
+        // install wizard: the chosen runtime, plus local when allowed.
+        let enabled = match provider {
+            SandboxProviderKind::Local => allow_local,
+            SandboxProviderKind::Docker => selection == InstallSandboxSelection::Docker,
+            SandboxProviderKind::Daytona => selection == InstallSandboxSelection::Daytona,
+        };
         let entry = ensure_table(providers, &provider.to_string())?;
-        entry.insert("enabled".to_string(), toml::Value::Boolean(true));
+        entry.insert("enabled".to_string(), toml::Value::Boolean(enabled));
     }
     Ok(())
 }
 
 pub fn write_sandbox_settings(
     doc: &mut toml::Value,
-    _selection: InstallSandboxSelection,
+    selection: InstallSandboxSelection,
+    allow_local: bool,
 ) -> Result<()> {
     let root = root_table_mut(doc)?;
     let run = ensure_table(root, "run")?;
@@ -485,7 +497,7 @@ pub fn write_sandbox_settings(
     environment.insert("id".to_string(), toml::Value::String("default".to_string()));
 
     let server = ensure_table(root, "server")?;
-    write_sandbox_provider_policy(server)?;
+    write_sandbox_provider_policy(server, selection, allow_local)?;
     Ok(())
 }
 
@@ -1411,7 +1423,7 @@ stale = "remove-me"
     #[test]
     fn write_sandbox_settings_records_run_default_without_environment_catalog() {
         let mut doc = toml::Value::Table(toml::Table::default());
-        write_sandbox_settings(&mut doc, InstallSandboxSelection::Docker)
+        write_sandbox_settings(&mut doc, InstallSandboxSelection::Docker, true)
             .expect("docker sandbox selection should succeed");
 
         assert_eq!(
@@ -1426,13 +1438,13 @@ stale = "remove-me"
         assert!(doc.get("environments").is_none());
         assert_eq!(sandbox_provider_enabled(&doc, "local"), Some(true));
         assert_eq!(sandbox_provider_enabled(&doc, "docker"), Some(true));
-        assert_eq!(sandbox_provider_enabled(&doc, "daytona"), Some(true));
+        assert_eq!(sandbox_provider_enabled(&doc, "daytona"), Some(false));
     }
 
     #[test]
     fn write_sandbox_settings_records_daytona_policy_without_environment_catalog() {
         let mut doc = toml::Value::Table(toml::Table::default());
-        write_sandbox_settings(&mut doc, InstallSandboxSelection::Daytona)
+        write_sandbox_settings(&mut doc, InstallSandboxSelection::Daytona, true)
             .expect("daytona sandbox selection should succeed");
 
         assert_eq!(
@@ -1446,8 +1458,19 @@ stale = "remove-me"
         );
         assert!(doc.get("environments").is_none());
         assert_eq!(sandbox_provider_enabled(&doc, "local"), Some(true));
-        assert_eq!(sandbox_provider_enabled(&doc, "docker"), Some(true));
+        assert_eq!(sandbox_provider_enabled(&doc, "docker"), Some(false));
         assert_eq!(sandbox_provider_enabled(&doc, "daytona"), Some(true));
+    }
+
+    #[test]
+    fn write_sandbox_settings_disables_local_when_not_allowed() {
+        let mut doc = toml::Value::Table(toml::Table::default());
+        write_sandbox_settings(&mut doc, InstallSandboxSelection::Docker, false)
+            .expect("docker sandbox selection should succeed");
+
+        assert_eq!(sandbox_provider_enabled(&doc, "local"), Some(false));
+        assert_eq!(sandbox_provider_enabled(&doc, "docker"), Some(true));
+        assert_eq!(sandbox_provider_enabled(&doc, "daytona"), Some(false));
     }
 
     fn sandbox_provider_enabled(doc: &toml::Value, provider: &str) -> Option<bool> {

@@ -1,0 +1,35 @@
+---
+title: "Scheduled automations"
+date: "2026-05-29"
+---
+
+<Warning>
+**Top-level automation `enabled` flag removed.** Automations no longer have a master `enabled` gate — trigger-level `enabled` is now the sole activation control. The field is removed from the `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest` API schemas, and automation TOML with a top-level `enabled` key is rejected.
+</Warning>
+
+## Scheduled automations
+
+Automation schedule triggers now fire on their own. The server tracks each enabled schedule trigger's UTC cron expression and creates and starts a normal Fabro run whenever one comes due, using the same materialization path as API-triggered runs. Creating, editing, or deleting an automation takes effect immediately — no restart needed. A failed run attempt waits for the next cron occurrence rather than retrying in a loop.
+
+## Create an automation from a run
+
+A run that worked is often the automation you wanted. The run actions menu now includes **Create automation from run**, which opens the new-automation form pre-populated from the run's workflow, repository, and settings. Runs that were already created by an automation show **View automation** instead.
+
+## More
+
+<Accordion title="API">
+- New `/api/v1/environments` CRUD endpoints manage server-side environment definitions; Dockerfiles must be inline (path references are rejected)
+</Accordion>
+
+<Accordion title="Improvements">
+- Automation runs start 5–15 seconds faster: repositories are cached as bare clones on the server instead of being recloned for every run
+- Added status, time, and repo filters to the runs list on the automation detail page
+- Restyled toasts to match the app theme
+- Removed the non-editable slug field from the automation edit page
+- Aligned automation toolbar controls and centered the Size column in the runs list
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed Dockerfile-based environments defined in the `[environments.*]` catalog failing at sandbox creation on Daytona
+- Fixed `/automations/{id}` links so the plural path is the canonical detail route
+</Accordion>

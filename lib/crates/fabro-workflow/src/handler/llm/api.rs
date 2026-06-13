@@ -1678,6 +1678,65 @@ mod tests {
         }
     }
 
+    struct RefusalTestProvider;
+
+    #[async_trait]
+    impl ProviderAdapter for RefusalTestProvider {
+        fn name(&self) -> &str {
+            "anthropic"
+        }
+
+        async fn complete(
+            &self,
+            _request: &Request,
+        ) -> Result<fabro_llm::types::Response, LlmError> {
+            Err(refusal_llm_error())
+        }
+
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
+            Ok(Box::pin(stream::empty()))
+        }
+    }
+
+    struct TextTestProvider {
+        provider: &'static str,
+        text:     &'static str,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for TextTestProvider {
+        fn name(&self) -> &str {
+            self.provider
+        }
+
+        async fn complete(
+            &self,
+            request: &Request,
+        ) -> Result<fabro_llm::types::Response, LlmError> {
+            Ok(fabro_llm::types::Response {
+                id:            "msg_fallback".to_string(),
+                model:         request.model.clone(),
+                provider:      self.provider.to_string(),
+                message:       Message::assistant(self.text),
+                finish_reason: fabro_llm::types::FinishReason::Stop,
+                usage:         TokenCounts {
+                    input_tokens: 3,
+                    output_tokens: 2,
+                    ..TokenCounts::default()
+                },
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
+            })
+        }
+
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
+            Ok(Box::pin(stream::empty()))
+        }
+    }
+
     fn mock_llm_catalog(server: &MockServer) -> Arc<Catalog> {
         let settings: LlmCatalogSettings = toml::from_str(&format!(
             r#"
@@ -2646,6 +2705,70 @@ reasoning = false
     }
 
     #[tokio::test]
+    async fn one_shot_falls_back_after_refusal_error() {
+        let fallback_chain = vec![FallbackTarget {
+            provider: "openai".to_string(),
+            model:    "gpt-5.5".to_string(),
+        }];
+        let backend = AgentApiBackend::new_from_env(
+            "claude-fable-5".to_string(),
+            ProviderId::anthropic(),
+            fallback_chain.clone(),
+            SteeringHub::for_tests(),
+        );
+        let mut providers = HashMap::new();
+        providers.insert(
+            "anthropic".to_string(),
+            Arc::new(RefusalTestProvider) as Arc<dyn ProviderAdapter>,
+        );
+        providers.insert(
+            "openai".to_string(),
+            Arc::new(TextTestProvider {
+                provider: "openai",
+                text:     "fallback ok",
+            }) as Arc<dyn ProviderAdapter>,
+        );
+        let client = Client::new(providers, Some("anthropic".to_string()), Vec::new());
+        let node = Node::new("ask");
+        let context = Context::new();
+        let stage_scope = StageScope::for_handler(&context, &node.id);
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let request = Request {
+            model:            "claude-fable-5".to_string(),
+            messages:         vec![Message::user("Hello")],
+            provider:         Some("anthropic".to_string()),
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       Some(128),
+            stop_sequences:   None,
+            reasoning_effort: None,
+            speed:            None,
+            metadata:         None,
+            provider_options: None,
+        };
+
+        let completion = backend
+            .complete_one_shot_request(
+                &client,
+                &node,
+                &emitter,
+                &stage_scope,
+                &request,
+                EffectiveRequestControls::default(),
+                &fallback_chain,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(completion.response.text(), "fallback ok");
+        assert_eq!(completion.model.provider, ProviderId::openai());
+        assert_eq!(completion.model.model_id, "gpt-5.5");
+    }
+
+    #[tokio::test]
     async fn one_shot_repairs_custom_output_schema_with_previous_assistant_message() {
         let server = MockServer::start();
         let first = server.mock(|when, then| {
@@ -2839,6 +2962,27 @@ reasoning = false
         }
     }
 
+    fn refusal_llm_error() -> LlmError {
+        LlmError::Provider {
+            kind:   ProviderErrorKind::ContentFilter,
+            detail: Box::new(ProviderErrorDetail {
+                message:     "claude-fable-5 refused the request".into(),
+                provider:    "anthropic".into(),
+                status_code: None,
+                error_code:  Some("refusal".into()),
+                retry_after: None,
+                raw:         Some(serde_json::json!({
+                    "stop_reason": "refusal",
+                    "stop_details": {
+                        "type": "refusal",
+                        "category": "cyber",
+                        "explanation": "This request was declined."
+                    }
+                })),
+            }),
+        }
+    }
+
     #[tokio::test]
     async fn spawn_bridge_task_sets_cancelled_and_cancels_session_token() {
         let run_token = CancellationToken::new();
@@ -3014,6 +3158,26 @@ reasoning = false
         match classify_agent_error(err, true) {
             AgentApiErrorDisposition::Terminal(Error::Llm(_)) => {}
             _ => panic!("expected Terminal(Error::Llm) for non-failover-eligible LLM error"),
+        }
+    }
+
+    #[test]
+    fn classify_refusal_llm_returns_failover_when_allowed() {
+        let err = fabro_agent::Error::Llm(refusal_llm_error());
+        assert!(matches!(
+            classify_agent_error(err, true),
+            AgentApiErrorDisposition::FailoverEligible(_)
+        ));
+    }
+
+    #[test]
+    fn classify_refusal_llm_returns_terminal_when_not_allowed() {
+        let err = fabro_agent::Error::Llm(refusal_llm_error());
+        match classify_agent_error(err, false) {
+            AgentApiErrorDisposition::Terminal(Error::Llm(llm_err)) => {
+                assert!(llm_err.to_string().contains("claude-fable-5 refused"));
+            }
+            _ => panic!("expected Terminal(Error::Llm) when refusal failover is disallowed"),
         }
     }
 

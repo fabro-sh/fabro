@@ -1,0 +1,14 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+{
+  "model": "test-model",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Describe these attachments.[Document 'report.pdf': content type not supported by this provider]"
+    }
+  ],
+  "max_tokens": 128
+}

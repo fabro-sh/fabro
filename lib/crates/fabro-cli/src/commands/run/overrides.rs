@@ -114,6 +114,10 @@ pub(crate) fn preflight_args_overrides(args: &PreflightArgs) -> Result<ManifestS
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests assert the raw template source"
+)]
 mod tests {
     use super::*;
 

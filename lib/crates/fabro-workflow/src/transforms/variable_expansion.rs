@@ -223,6 +223,36 @@ fn template_diagnostic(error: &TemplateError, target: &TemplateRenderTarget) -> 
     }
 }
 
+const DETEMPLATED_ATTRIBUTE_RULE: &str = "detemplated_attribute";
+
+/// True when `text` contains MiniJinja template syntax (`{{ … }}` or
+/// `{% … %}`).
+fn contains_template_syntax(text: &str) -> bool {
+    text.contains("{{") || text.contains("{%")
+}
+
+/// Warning emitted when an attribute that is no longer a template still
+/// contains template syntax — the syntax is now treated as literal text.
+fn detemplated_attribute_diagnostic(attr_name: &str, target: &TemplateRenderTarget) -> Diagnostic {
+    Diagnostic {
+        rule: DETEMPLATED_ATTRIBUTE_RULE.to_owned(),
+        severity: Severity::Warning,
+        message: format!(
+            "`{attr_name}` in {} is no longer a template; `{{{{ … }}}}` / `{{% … %}}` is treated \
+             as literal text. Only node `prompt` and graph `goal` support templating.",
+            target.owner
+        ),
+        node_id: target.node_id.clone(),
+        edge: target.edge.clone(),
+        fix: Some(format!(
+            "remove the template syntax from `{attr_name}`, or move the dynamic value into a \
+             `prompt`/`goal`"
+        )),
+        source_path: target.source_name.clone(),
+        ..Diagnostic::default()
+    }
+}
+
 /// Expands `{{ goal }}` / `{{ inputs.* }}` across all string attributes.
 pub struct TemplateTransform {
     pub inputs:      HashMap<String, toml::Value>,
@@ -271,6 +301,8 @@ impl TemplateTransform {
     ) -> Result<(), Error> {
         for (attr_name, value) in attrs {
             if let AttrValue::String(text) = value {
+                // The graph `goal` is rendered separately and must not be
+                // re-rendered here.
                 if matches!(scope, AttributeScope::Graph) && attr_name == "goal" {
                     continue;
                 }
@@ -285,7 +317,16 @@ impl TemplateTransform {
                 let target = owner_for_attr(attr_name)
                     .with_source_name(source_name.cloned().unwrap_or_else(|| "workflow".into()))
                     .with_source_origin(source_text, text);
-                *text = render_template_for_target(text, ctx, render_mode, &target, diagnostics)?;
+                if matches!(scope, AttributeScope::Node) && attr_name == "prompt" {
+                    // `prompt` is the only templated node attribute.
+                    *text =
+                        render_template_for_target(text, ctx, render_mode, &target, diagnostics)?;
+                } else if contains_template_syntax(text) {
+                    // Every other attribute is no longer a template (`label`,
+                    // `model`, `provider`, `speed`, `condition`, edge `label`,
+                    // …): leave it literal and warn so authors can migrate.
+                    diagnostics.push(detemplated_attribute_diagnostic(attr_name, &target));
+                }
             }
         }
         Ok(())
@@ -378,7 +419,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn template_transform_replaces_goal_and_inputs_across_string_attrs() {
+    fn template_transform_renders_prompt_and_leaves_other_attrs_literal() {
         let mut graph = Graph::new("test");
         graph.attrs.insert(
             "goal".to_string(),
@@ -419,25 +460,37 @@ mod tests {
                 toml::Value::String("hello".to_string()),
             ),
         ]));
-        let graph = transform.apply(graph).unwrap();
+        let (graph, diagnostics) = transform.apply_with_diagnostics(graph).unwrap();
 
-        let prompt = graph.nodes["plan"]
-            .attrs
-            .get("prompt")
-            .and_then(AttrValue::as_str)
-            .unwrap();
-        assert_eq!(prompt, "Achieve: Fix bugs now");
+        // `prompt` is the only templated attribute and is still rendered.
+        assert_eq!(
+            graph.nodes["plan"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("Achieve: Fix bugs now")
+        );
+        // `label` (node, graph, edge) is no longer a template: left literal.
         assert_eq!(
             graph.nodes["plan"].attrs.get("label"),
-            Some(&AttrValue::String("Planner".to_string()))
+            Some(&AttrValue::String("{{ inputs.name }}".to_string()))
         );
         assert_eq!(
             graph.attrs.get("label"),
-            Some(&AttrValue::String("Workflow: Fix bugs".to_string()))
+            Some(&AttrValue::String("Workflow: {{ goal }}".to_string()))
         );
         assert_eq!(
             graph.edges[0].attrs.get("label"),
-            Some(&AttrValue::String("hello".to_string()))
+            Some(&AttrValue::String("{{ inputs.greeting }}".to_string()))
+        );
+        // Each demoted `label` still containing template syntax warns.
+        let detemplated = diagnostics
+            .iter()
+            .filter(|d| d.rule == DETEMPLATED_ATTRIBUTE_RULE)
+            .count();
+        assert_eq!(
+            detemplated, 3,
+            "expected a migration warning per demoted label, got: {diagnostics:?}"
         );
     }
 

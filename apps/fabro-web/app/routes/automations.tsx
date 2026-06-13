@@ -21,7 +21,8 @@ import { ApiError, apiData, automationsApi } from "../lib/api-client";
 import { findScheduleTrigger, hasEnabledApiTrigger } from "../lib/automation";
 import { useAutomations } from "../lib/queries";
 import { queryKeys } from "../lib/query-keys";
-import { ConfirmDialog } from "../components/ui";
+import { ConfirmDialog, PRIMARY_BUTTON_CLASS } from "../components/ui";
+import { EmptyState, ErrorState, LoadingState } from "../components/state";
 import { useToast } from "../components/toast";
 
 export function meta({}: any) {
@@ -300,44 +301,70 @@ export default function Automations() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-64">
-          <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          <input
-            type="text"
-            aria-label="Search automations"
-            placeholder="Search automations…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
-          />
-        </div>
-        <FilterButton<TriggerFilter>
-          label="Trigger"
-          value={triggerFilter}
-          allValue="all"
-          options={TRIGGER_FILTER_OPTIONS}
-          onChange={(next) => setTriggerFilter(next)}
+      {automationsQuery.isLoading ? (
+        <LoadingState label="Loading automations…" />
+      ) : automationsQuery.error ? (
+        <ErrorState
+          title="Couldn't load automations"
+          description="Something went wrong while loading your automations."
+          onRetry={() => mutate(queryKeys.automations.list())}
         />
-        <div className="ml-auto">
-          <CreateAutomationButton />
-        </div>
-      </div>
-      <div className="space-y-3">
-        {filtered.map((automation) => (
-          <AutomationCard
-            key={automation.id}
-            automation={automation}
-            busy={deleting || (runningId !== null && runningId !== automation.id)}
-            running={runningId === automation.id}
-            onRun={() => runAutomation(automation)}
-            onDelete={() => setPendingDelete(automation)}
-          />
-        ))}
-        {filtered.length === 0 && (
-          <p className="py-8 text-center text-sm text-fg-muted">No automations match "{query}"</p>
-        )}
-      </div>
+      ) : automations.length === 0 ? (
+        <EmptyState
+          icon={RocketLaunchIcon}
+          title="Create your first automation"
+          description="Automations run a workflow on a schedule or on demand, so recurring work happens without you kicking it off by hand."
+          action={
+            <Link to="/automations/new" className={PRIMARY_BUTTON_CLASS}>
+              <PlusIcon className="size-4" aria-hidden="true" />
+              Create Automation
+            </Link>
+          }
+        />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-64">
+              <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
+              <input
+                type="text"
+                aria-label="Search automations"
+                placeholder="Search automations…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
+              />
+            </div>
+            <FilterButton<TriggerFilter>
+              label="Trigger"
+              value={triggerFilter}
+              allValue="all"
+              options={TRIGGER_FILTER_OPTIONS}
+              onChange={(next) => setTriggerFilter(next)}
+            />
+            <div className="ml-auto">
+              <CreateAutomationButton />
+            </div>
+          </div>
+          <div className="space-y-3">
+            {filtered.map((automation) => (
+              <AutomationCard
+                key={automation.id}
+                automation={automation}
+                busy={deleting || (runningId !== null && runningId !== automation.id)}
+                running={runningId === automation.id}
+                onRun={() => runAutomation(automation)}
+                onDelete={() => setPendingDelete(automation)}
+              />
+            ))}
+            {filtered.length === 0 && (
+              <p className="py-8 text-center text-sm text-fg-muted">
+                No automations match your filters.
+              </p>
+            )}
+          </div>
+        </>
+      )}
       <ConfirmDialog
         open={pendingDelete !== null}
         title="Delete automation"

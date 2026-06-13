@@ -560,6 +560,11 @@ fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions
     docker_config_from_environment(&settings.environment, !settings.clone.enabled)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source is today's behavior; run.model.name/provider are slated for demotion to plain String in the \
+              interpolation unification (D2)"
+)]
 fn resolve_start_llm(
     catalog: &Catalog,
     configured: &[ProviderId],

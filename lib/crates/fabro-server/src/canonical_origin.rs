@@ -7,6 +7,10 @@ use fabro_types::settings::{ServerNamespace, validate_public_url};
 
 use crate::server::EnvLookup;
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "raw source shown in the error message when resolution fails"
+)]
 pub(crate) fn resolve_canonical_origin(
     resolved: &ServerNamespace,
     env_lookup: &EnvLookup,

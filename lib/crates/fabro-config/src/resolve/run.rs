@@ -141,6 +141,11 @@ fn resolve_git(git: Option<&RunGitLayer>) -> RunGitSettings {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "known leak: prepare step templates collapse to raw source unresolved; strict \
+              resolution scheduled in the interpolation unification (Phase 2)"
+)]
 fn resolve_prepare(
     prepare: Option<&RunPrepareLayer>,
     errors: &mut Vec<ResolveError>,
@@ -281,6 +286,11 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "known leak: MCP transport templates collapse to raw source unresolved; strict \
+              resolution scheduled in the interpolation unification (Phase 2, supersedes PR #370)"
+)]
 pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
     let transport = match entry {
         McpEntryLayer::Stdio {
@@ -357,6 +367,11 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "known leak: MCP transport templates collapse to raw source unresolved; strict \
+              resolution scheduled in the interpolation unification (Phase 2, supersedes PR #370)"
+)]
 fn resolve_mcp_command(
     script: Option<&InterpString>,
     command: Option<&Vec<InterpString>>,
@@ -369,6 +384,11 @@ fn resolve_mcp_command(
         .unwrap_or_default()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "intentional source preservation: the hook executor re-resolves {{ env.* }} \
+              tokens at hook fire time"
+)]
 fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) -> HookDefinition {
     let variants = [
         hook.script.is_some() || hook.command.is_some(),
@@ -414,6 +434,11 @@ fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) 
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "intentional source preservation: the hook executor re-resolves {{ env.* }} \
+              tokens at hook fire time"
+)]
 fn resolve_hook_type(hook: &HookEntry) -> Option<HookType> {
     if hook.script.is_some() || hook.command.is_some() {
         return None;

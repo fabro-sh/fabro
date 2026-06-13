@@ -1,23 +1,49 @@
 ---
-title: "Inbound IP allowlisting removed"
+title: "Run variables and the Automations API"
 date: "2026-05-27"
 ---
 
-## Inbound IP allowlisting removed
+<Warning>
+**Inbound IP allowlisting removed.** Fabro no longer includes an in-process inbound source-IP allowlist for the web UI, API, static assets, or GitHub webhook routes. This is a hard removal: existing `settings.toml` files that still contain `[server.ip_allowlist]` or `[server.integrations.github.webhooks.ip_allowlist]` now fail as unknown fields. Move any source-IP restrictions to deployment-layer controls such as a reverse proxy, firewall, VPN, Tailscale ACLs, or platform ingress policy. GitHub webhook HMAC signature verification, GitHub username allowlists, and sandbox egress CIDR allow lists are unchanged.
+</Warning>
 
-Fabro no longer includes an in-process inbound source-IP allowlist for the web UI, API, static assets, or GitHub webhook routes. The former `[server.ip_allowlist]` setting and GitHub webhook overlay at `[server.integrations.github.webhooks.ip_allowlist]` have been removed from server configuration and the settings API.
+<Warning>
+**Devcontainer support removed.** Fabro no longer reads repository devcontainer metadata to derive sandbox snapshots, environment variables, or lifecycle commands. Define sandbox environments directly with `image.dockerfile` or `image.docker` instead.
+</Warning>
 
-This is a hard removal: existing `settings.toml` files that still contain those keys now fail as unknown fields. Move any source-IP restrictions to deployment-layer controls such as a reverse proxy, firewall, VPN, Tailscale ACLs, Kubernetes ingress policy, cloud load balancer, or platform ingress.
+<Warning>
+**`image.ref` renamed to `image.docker`.** Docker image selection in environment settings now uses `image.docker`. Daytona only accepts `image.dockerfile` for custom snapshots and continues to default to `daytona-medium` when no Dockerfile is configured.
+</Warning>
 
-GitHub webhook HMAC signature verification is unchanged. GitHub username allowlists and sandbox egress CIDR allow lists are also unchanged.
+## Server-managed variables
+
+Workflows often need non-sensitive values — regions, repository names, feature flags — that previously had to live in environment variables or be hardcoded into config. Fabro now has a first-class variables store: manage variables in Settings > Variables or via the new `fabro variable` CLI namespace, then reference them as `{{ vars.NAME }}` in run-owned config fields alongside the existing `{{ env.NAME }}` interpolation.
+
+```bash
+fabro variable set REGION us-east-1
+fabro variable list
+```
+
+Unlike secrets, variables are intentionally readable — `list` and `get` show stored values — while `fabro secret` remains write-only.
+
+## Automations API
+
+Automations now have a full REST API. `GET/POST /api/v1/automations` and `GET/PUT/DELETE /api/v1/automations/{id}` manage automation definitions with revision-checked writes, and `GET/POST /api/v1/automations/{id}/runs` lists an automation's runs or triggers a new one through its API trigger. Runs created by an automation record a reference to it, so you can trace where a run came from.
 
 ## More
 
-<Accordion title="Breaking changes">
-- Removed `server.ip_allowlist` and GitHub webhook `ip_allowlist` from `GET /api/v1/settings` responses and generated API clients
-- Removed server config support for `[server.ip_allowlist]` and `[server.integrations.github.webhooks.ip_allowlist]`
+<Accordion title="API">
+- New `/api/v1/variables` CRUD endpoints for server-managed variables
+- `Run.sandbox` now reports an explicit lifecycle state (`planned`, `initializing`, `ready`, `failed`), and sandbox detail, files, services, terminal, and VNC endpoints return a clear 404 until a sandbox instance actually exists
 </Accordion>
 
-<Accordion title="Security">
-- Fabro no longer performs runtime source-IP filtering; enforce inbound network restrictions upstream
+<Accordion title="Improvements">
+- Succeeded runs can now be retried; manual retry covers all unarchived terminal runs
+- OpenAI default model selection now resolves to `gpt-5.5` and Gemini to `gemini-3.5-flash`
+- Daytona snapshot names are now deterministic identifiers computed by Fabro instead of user-supplied references, so Dockerfile contents never leak into snapshot names
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed the run timeline leaving the Initializing phase open when a run failed before execution started
+- Fixed the runs empty state being pushed to the bottom of the page
 </Accordion>

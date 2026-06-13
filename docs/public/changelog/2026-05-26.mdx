@@ -27,14 +27,17 @@ Together with the recent size and action columns, the runs list is becoming a de
 
 <Accordion title="Fixes">
 - Fixed content security policy headers for the hosted web app
+- Fixed GitHub avatars being blocked by the content security policy
 - Fixed terminal origin checks when a browser omits the default port
 - Fixed GitHub App post-install copy so it works across installation origins
 - Fixed agent session compaction dropping accumulated usage totals
+- Fixed the runs board not filling the viewport, which made horizontal scrolling work only inside the board itself
 - Removed retired GPT-5.2 and GPT-5.3 catalog entries
 </Accordion>
 
 <Accordion title="Improvements">
 - Added a multi-select run status filter to the `/runs` toolbar
 - Added a Created by avatar column to the runs list
+- Rebuilt tooltips, hover cards, and toasts on Radix UI and Sonner for real keyboard accessibility and smarter positioning
 - Compacted the Test column on Settings > Models
 </Accordion>

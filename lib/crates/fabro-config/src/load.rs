@@ -38,6 +38,10 @@ pub(crate) fn load_settings_path(path: &Path, source: SettingsSource) -> Result<
     Ok(layer)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "guarded by is_literal() above; the raw source is the literal value"
+)]
 pub(crate) fn resolve_goal_file_paths(file: &mut SettingsLayer, base_dir: &Path) {
     let Some(run) = file.run.as_mut() else {
         return;

@@ -20,6 +20,7 @@
 export interface InstallSandboxSummary {
     'provider': InstallSandboxSummaryProviderEnum;
     'api_key_saved'?: boolean;
+    'allow_local'?: boolean;
 }
 
 export const InstallSandboxSummaryProviderEnum = {

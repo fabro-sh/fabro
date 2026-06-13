@@ -5317,6 +5317,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── Playground ────────────────────────────────────────────────────────
+
+  /api/v1/playground/chat:
+    post:
+      operationId: createPlaygroundChat
+      tags: [Playground]
+      summary: Chat with the playground assistant
+      description: |
+        Drives a single turn of the playground chat that builds a workflow
+        graph incrementally. The server is stateless: each request includes
+        the full current draft, and the response streams text deltas plus a
+        single `write_workflow_file` tool call carrying the full new contents
+        of `workflow.fabro` for the client to parse, diff against its local
+        draft, and animate into the canvas.
+
+        Responses are always SSE. Frames use `event: stream_event` with a
+        JSON-serialized StreamEvent payload — see /api/v1/completions for the
+        StreamEvent shape. The tool call arrives on a `tool_call_end` event
+        with the tool name and parsed JSON arguments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePlaygroundChatRequest"
+      responses:
+        "200":
+          description: SSE stream of text deltas and tool calls.
+        "400":
+          description: Invalid request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Settings ──────────────────────────────────────────────────────────
 
   /api/v1/settings:
@@ -5965,7 +6003,7 @@ components:
           example: true
 
     InstallSandboxInput:
-      description: Sandbox provider selected during browser install. `api_key` is required for Daytona and ignored for Docker.
+      description: Sandbox provider selected during browser install. `api_key` is required for Daytona and ignored for Docker. `allow_local` enables the local sandbox provider alongside the selected runtime; it defaults to true when omitted.
       type: object
       required:
         - provider
@@ -5975,6 +6013,8 @@ components:
           enum: [docker, daytona]
         api_key:
           type: string
+        allow_local:
+          type: boolean
 
     InstallSandboxSummary:
       description: Redacted summary of the sandbox provider selected during browser install.
@@ -5986,6 +6026,8 @@ components:
           type: string
           enum: [docker, daytona]
         api_key_saved:
+          type: boolean
+        allow_local:
           type: boolean
 
     InstallGithubTokenTestInput:
@@ -7533,10 +7575,15 @@ components:
           example: 128000
 
     ReasoningEffortFeature:
-      description: Whether the model endpoint supports a native reasoning-effort parameter.
+      description: >-
+        Whether the model endpoint supports a native reasoning-effort
+        parameter. `levels` accepts discrete effort levels; `always_adaptive`
+        accepts effort levels with natively always-on adaptive thinking;
+        `none` has no native effort parameter.
       type: string
       enum:
         - levels
+        - always_adaptive
         - none
 
     ReasoningEffort:
@@ -7558,6 +7605,7 @@ components:
         - reasoning
         - reasoning_effort
         - prompt_cache
+        - sampling_params
       properties:
         tools:
           type: boolean
@@ -7573,6 +7621,9 @@ components:
         prompt_cache:
           type: boolean
           description: Whether the model endpoint supports prompt caching.
+        sampling_params:
+          type: boolean
+          description: Whether the model accepts classic sampling parameters (temperature, top_p).
 
     ModelCosts:
       description: Pricing per million tokens in USD.
@@ -7838,6 +7889,51 @@ components:
           $ref: "#/components/schemas/CompletionUsage"
         output:
           description: Parsed structured output when schema was provided.
+        cost_usd:
+          type: number
+          format: double
+          description: >
+            USD cost of the completion when known: estimated from catalog
+            prices unless the provider returned authoritative billing data.
+        cost_source:
+          $ref: "#/components/schemas/CostSource"
+
+    CostSource:
+      type: string
+      description: >
+        Whether `cost_usd` came from provider billing data (authoritative)
+        or catalog price estimation (estimated).
+      enum: [authoritative, estimated]
+
+    # ── Playground ────────────────────────────────────────────────────────
+
+    CreatePlaygroundChatRequest:
+      description: >
+        Body of POST /api/v1/playground/chat. The server is stateless across
+        turns: the browser owns the draft and submits it as the literal
+        `workflow.fabro` contents with every turn. The server embeds the
+        file in the model's system prompt and exposes a single
+        `write_workflow_file` tool that emits the full new contents of
+        `workflow.fabro`; the browser parses, diffs, and animates the
+        result.
+      type: object
+      required: [messages, workflow_fabro]
+      properties:
+        messages:
+          type: array
+          description: assistant-ui-style message history for the turn.
+          items:
+            $ref: "#/components/schemas/CompletionMessage"
+        workflow_fabro:
+          type: string
+          description: >
+            Full current `workflow.fabro` (Graphviz DOT) contents as
+            rendered by the client — a complete `digraph <name> { ... }`
+            block including the `start` / `exit` terminals. This is the
+            same format the model writes back via `write_workflow_file`.
+        model:
+          type: string
+          description: Model id or alias. Server picks the default if omitted.
 
     PaginatedSavedQueryList:
       description: Paginated list of saved queries.

@@ -29,6 +29,11 @@ pub(crate) fn require_interp(
     })
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "parsed_value special case: the TCP listen address parses the literal source \
+              (templates intentionally unsupported)"
+)]
 pub(crate) fn parse_socket_addr(
     value: &InterpString,
     path: &str,

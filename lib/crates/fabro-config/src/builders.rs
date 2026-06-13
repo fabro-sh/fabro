@@ -330,6 +330,7 @@ fn provider_settings_to_catalog(
     model_catalog::ProviderCatalogSettings {
         display_name:   settings.display_name,
         adapter:        settings.adapter,
+        codec:          settings.codec,
         agent_profile:  settings.agent_profile,
         auth:           settings.auth,
         billing_policy: settings.billing_policy,
@@ -346,6 +347,8 @@ fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCat
     let ModelSettings {
         provider,
         api_id,
+        codec,
+        billing_policy,
         agent_profile,
         display_name,
         family,
@@ -365,6 +368,8 @@ fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCat
     model_catalog::ModelCatalogSettings {
         provider,
         api_id,
+        codec,
+        billing_policy,
         agent_profile,
         display_name,
         family,
@@ -397,6 +402,7 @@ fn model_features_to_catalog(features: &LlmModelFeatures) -> model_catalog::Sett
         reasoning:        features.reasoning,
         reasoning_effort: features.reasoning_effort,
         prompt_cache:     features.prompt_cache,
+        sampling_params:  features.sampling_params,
     }
 }
 
@@ -693,6 +699,10 @@ command = ["demo-mcp"]
         );
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test asserts the raw template source"
+    )]
     #[test]
     fn workflow_builder_preserves_run_overrides_when_cli_overrides_are_added() {
         let settings = WorkflowSettingsBuilder::new()

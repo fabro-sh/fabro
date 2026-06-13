@@ -1,6 +1,6 @@
 #![expect(
     clippy::disallowed_methods,
-    reason = "sync test fixture setup; not on a Tokio path"
+    reason = "sync test fixture setup and raw template source assertions; not on a Tokio path"
 )]
 
 use fabro_types::settings::InterpString;
@@ -110,7 +110,7 @@ fn resolves_server_defaults_from_empty_settings() {
 }
 
 #[test]
-fn resolved_server_integrations_are_slack_only_for_chat() {
+fn resolved_server_integrations_disable_slack_when_config_is_absent() {
     let settings = resolve_server(&empty_settings_with_auth_methods());
 
     let integrations =
@@ -128,11 +128,25 @@ fn resolved_server_integrations_are_slack_only_for_chat() {
                 "webhooks": null,
             },
             "slack": {
-                "enabled": true,
+                "enabled": false,
                 "default_channel": null,
             },
         })
     );
+}
+
+#[test]
+fn resolved_server_integrations_enable_slack_when_config_is_present() {
+    let settings = resolve_server(&parse(
+        r"
+_version = 1
+
+[server.integrations.slack]
+",
+    ));
+
+    assert!(settings.integrations.slack.enabled);
+    assert!(settings.integrations.slack.default_channel.is_none());
 }
 
 #[test]

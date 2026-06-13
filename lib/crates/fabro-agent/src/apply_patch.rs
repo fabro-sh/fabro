@@ -1750,6 +1750,8 @@ def farewell(name):
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             },
             text_response("Done! Updated greet and farewell functions."),
         ];
@@ -1826,6 +1828,8 @@ def farewell(name):
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
+                cost_usd:      None,
+                cost_source:   None,
             },
             text_response("I will correct the patch."),
         ];

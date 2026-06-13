@@ -159,6 +159,7 @@ describe("VncPanel render", () => {
       "https://preview.example.com/sb-1/6080?token=abc",
     );
     expect(iframes[0]?.props.allow).toContain("clipboard-write");
+    expect(iframes[0]?.props.sandbox).toContain("allow-same-origin");
   });
 
   test("renders an actionable error state for 409 startup failures", () => {

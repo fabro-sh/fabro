@@ -21,6 +21,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::auth::{GithubEndpoints, browser_shell};
 use crate::error::ApiError;
+use crate::interp::process_env_var;
 use crate::jwt_auth::{AuthMode, auth_method_name, dev_token_matches};
 use crate::principal_middleware::{
     RequestAuth, RequestAuthContext, UserProfile, require_authenticated_user,
@@ -343,14 +344,6 @@ fn session_timestamp(timestamp: i64) -> Result<DateTime<Utc>, ApiError> {
             "Authenticated session timestamp is out of range.",
         )
     })
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Web auth resolves configured {{ env.* }} URLs through this process-env facade."
-)]
-fn process_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
 }
 
 async fn login_dev_token(

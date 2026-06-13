@@ -9,6 +9,30 @@ priority = 100
 credentials = ["env:ANTHROPIC_API_KEY", "vault:ANTHROPIC_API_KEY"]
 header = { custom = "x-api-key" }
 
+[models."claude-fable-5"]
+provider = "anthropic"
+api_id = "claude-fable-5"
+display_name = "Claude Fable 5"
+family = "claude-5"
+aliases = ["fable", "claude-fable"]
+
+[models."claude-fable-5".limits]
+context_window = 1000000
+max_output = 128000
+
+[models."claude-fable-5".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "always_adaptive"
+prompt_cache = true
+sampling_params = false
+
+[models."claude-fable-5".costs]
+input_cost_per_mtok = 10.0
+output_cost_per_mtok = 50.0
+cache_input_cost_per_mtok = 1.0
+
 [models."claude-opus-4-8"]
 provider = "anthropic"
 api_id = "claude-opus-4-8"
@@ -29,6 +53,7 @@ vision = true
 reasoning = true
 reasoning_effort = "levels"
 prompt_cache = true
+sampling_params = false
 
 [models."claude-opus-4-8".controls]
 speed = ["fast"]
@@ -62,6 +87,7 @@ vision = true
 reasoning = true
 reasoning_effort = "levels"
 prompt_cache = true
+sampling_params = false
 
 [models."claude-opus-4-7".controls]
 speed = ["fast"]

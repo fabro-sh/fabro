@@ -15,11 +15,12 @@
 
 
 /**
- * Sandbox provider selected during browser install. `api_key` is required for Daytona and ignored for Docker.
+ * Sandbox provider selected during browser install. `api_key` is required for Daytona and ignored for Docker. `allow_local` enables the local sandbox provider alongside the selected runtime; it defaults to true when omitted.
  */
 export interface InstallSandboxInput {
     'provider': InstallSandboxInputProviderEnum;
     'api_key'?: string;
+    'allow_local'?: boolean;
 }
 
 export const InstallSandboxInputProviderEnum = {

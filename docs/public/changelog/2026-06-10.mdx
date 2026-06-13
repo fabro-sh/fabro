@@ -1,0 +1,24 @@
+---
+title: "Claude Fable 5 support"
+date: "2026-06-10"
+---
+
+## Claude Fable 5 support
+
+Fabro now includes Anthropic's `claude-fable-5` in the built-in model catalog, with `fable` and `claude-fable` aliases. It supports the model's 1M context window, 128K max output, vision, tools, prompt caching, and native `reasoning_effort` levels without changing the default Anthropic model from `claude-sonnet-4-6`.
+
+Fable refusals are now handled through Fabro's provider-neutral fallback system. When Anthropic returns `stop_reason: "refusal"`, Fabro surfaces a content-filter LLM error with the refusal detail preserved and retries through `run.model.fallbacks` when configured.
+
+## More
+
+<Accordion title="Models">
+- Added `claude-fable-5` to the Anthropic catalog at $10 / $50 per MTok input/output pricing
+- Added aliases `fable` and `claude-fable`
+- Kept `claude-sonnet-4-6` as the Anthropic default
+- Omitted deprecated Anthropic sampling parameters for Fable requests
+</Accordion>
+
+<Accordion title="Fallbacks">
+- Fable refusal responses now participate in configured model fallback chains
+- Refusals without a configured fallback surface as clear LLM content-filter errors
+</Accordion>

@@ -1,0 +1,22 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+[
+  {
+    "type": "stream_start"
+  },
+  {
+    "type": "text_start",
+    "text_id": "block_0"
+  },
+  {
+    "type": "text_delta",
+    "delta": "Hello",
+    "text_id": "block_0"
+  },
+  {
+    "type": "text_end",
+    "text_id": "block_0"
+  }
+]

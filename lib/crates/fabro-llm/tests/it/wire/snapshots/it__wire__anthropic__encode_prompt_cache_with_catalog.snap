@@ -1,0 +1,95 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/anthropic.rs
+expression: rendered
+---
+{
+  "method": "POST",
+  "path": "/messages",
+  "headers": [
+    [
+      "accept",
+      "*/*"
+    ],
+    [
+      "anthropic-beta",
+      "prompt-caching-2024-07-31"
+    ],
+    [
+      "anthropic-version",
+      "2023-06-01"
+    ],
+    [
+      "content-length",
+      "559"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "host",
+      "[host]"
+    ],
+    [
+      "x-api-key",
+      "test-key"
+    ]
+  ],
+  "body": {
+    "model": "test-claude",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Review this."
+          }
+        ]
+      }
+    ],
+    "max_tokens": 128,
+    "system": [
+      {
+        "type": "text",
+        "text": "You are a careful reviewer.",
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
+    ],
+    "stop_sequences": [],
+    "tools": [
+      {
+        "name": "search",
+        "description": "Search files",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "read_file",
+        "description": "Read a file by path",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
+    ]
+  }
+}

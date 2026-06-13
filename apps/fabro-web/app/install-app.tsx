@@ -107,6 +107,7 @@ type SandboxForm = {
   provider: SandboxProvider;
   apiKey:   string;
   apiKeySaved: boolean;
+  allowLocal:  boolean;
 };
 type RunStepSubmit = (args: {
   action:   () => Promise<void>;
@@ -1064,6 +1065,29 @@ function SandboxStep({
           }
         }}
       />
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-overlay px-4 py-3.5 outline-1 -outline-offset-1 outline-white/10 transition-colors hover:bg-overlay-strong hover:outline-white/15">
+        <input
+          type="checkbox"
+          name="sandbox_allow_local"
+          checked={sandboxForm.allowLocal}
+          onChange={(event) =>
+            dispatchInstall({
+              type:  "sandboxPatched",
+              patch: { allowLocal: event.target.checked },
+            })
+          }
+          className="mt-0.5 size-4 shrink-0 rounded border-white/20 bg-transparent accent-teal-500 focus:ring-1 focus:ring-teal-500/60"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-fg">
+            Allow local sandboxes
+          </span>
+          <span className="mt-1 block text-xs/5 text-fg-3">
+            Permit runs that use the local provider, which executes directly on
+            the Fabro host. The runtime selected above stays the default.
+          </span>
+        </span>
+      </label>
       {sandboxForm.provider === "daytona" ? (
         <div className="space-y-5">
           <Field
@@ -2239,7 +2263,7 @@ function buildObjectStorePayload(form: ObjectStoreForm): InstallObjectStoreInput
 }
 
 function defaultSandboxForm(): SandboxForm {
-  return { provider: "docker", apiKey: "", apiKeySaved: false };
+  return { provider: "docker", apiKey: "", apiKeySaved: false, allowLocal: true };
 }
 
 function hydrateSandboxForm(
@@ -2257,15 +2281,19 @@ function hydrateSandboxForm(
     provider:    summary.provider === "daytona" ? "daytona" : "docker",
     apiKey:      "",
     apiKeySaved: Boolean(summary.api_key_saved),
+    allowLocal:  summary.allow_local ?? true,
   };
 }
 
 function buildSandboxPayload(form: SandboxForm): InstallSandboxInput {
   if (form.provider === "docker") {
-    return { provider: "docker" };
+    return { provider: "docker", allow_local: form.allowLocal };
   }
   const apiKey = form.apiKey.trim();
-  const payload: InstallSandboxInput = { provider: "daytona" };
+  const payload: InstallSandboxInput = {
+    provider:    "daytona",
+    allow_local: form.allowLocal,
+  };
   if (apiKey) {
     payload.api_key = apiKey;
   }

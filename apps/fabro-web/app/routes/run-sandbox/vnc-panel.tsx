@@ -246,9 +246,9 @@ function VncBody({
       src={url}
       title="Sandbox VNC desktop"
       // Daytona's signed preview already pins the iframe to the noVNC service;
-      // clipboard + fullscreen let the embedded session feel native.
+      // noVNC reads localStorage, which requires the child to keep its origin.
       allow="clipboard-read; clipboard-write; fullscreen"
-      sandbox="allow-forms allow-pointer-lock allow-scripts"
+      sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts"
       className="size-full border-0"
     />
   );

@@ -1,0 +1,101 @@
+digraph CardGameFast {
+    graph [
+        goal="Quickly build a terminal-based card game in Python",
+        rankdir=LR,
+        default_max_retries=2,
+        retry_target="implement_app"
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan_app [
+        label="Plan App",
+        shape=box,
+        prompt="Goal: $goal
+
+Create a concise implementation plan for the requested Python terminal card game.
+
+Cover:
+- Game rules and data structures (Card, Deck, Pile or equivalent state types)
+- Terminal rendering approach using the standard-library curses module
+- Input handling and move/action validation
+- Win/loss detection
+- UI layout
+- Test strategy
+
+Put all app files under card-game-app/. Include `python3 main.py --smoke` for non-interactive demo verification.
+
+Write the plan to .ai/card-game-fast-plan.md.
+Write status.json at workspace root: outcome=succeeded if the plan is complete, outcome=failed with failure_reason otherwise."
+    ]
+
+    implement_app [
+        label="Implement App",
+        shape=box,
+        class="hard",
+        max_retries=2,
+        prompt="Read .ai/card-game-fast-plan.md.
+
+Build the complete app under card-game-app/ in one focused pass:
+- pyproject.toml
+- main.py
+- src/card_game_tui/ package
+- tests/ package
+- README.md
+
+Implement:
+- Card, Deck, Pile, or equivalent game-state types
+- Requested game rules: initial setup/deal where applicable, move/action validation, auto-complete or helper actions where applicable, win/loss condition, undo
+- Curses UI with card rendering, board layout, keyboard input, move/action selection, and help text
+- --smoke mode that imports the app, creates a game, renders a text snapshot or summary, and exits without curses interaction
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 -m py_compile main.py src/card_game_tui/*.py && python3 main.py --smoke
+
+Write status.json at workspace root: outcome=succeeded if the app builds, tests pass, and smoke mode works, outcome=failed with failure_reason otherwise."
+    ]
+
+    verify_app [
+        label="Verify App",
+        shape=box,
+        class="verify",
+        goal_gate=true,
+        prompt="Verify the completed card game app.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 -m py_compile main.py src/card_game_tui/*.py && python3 main.py --smoke
+
+Check:
+- The app is under card-game-app/
+- It uses curses for the interactive TUI
+- It implements the requested game rules
+- README.md explains setup, run, tests, and controls
+- No generated files are outside card-game-app/ except .ai/ reports and root status.json
+
+Write findings to .ai/card-game-fast-verify.md.
+Write status.json at workspace root: outcome=succeeded if the app is demo-ready, outcome=failed with specific missing or broken items."
+    ]
+
+    fix_app [
+        label="Fix App",
+        shape=box,
+        class="hard",
+        max_retries=2,
+        prompt="The fast card game verification failed.
+
+Read .ai/card-game-fast-verify.md and fix the issues in card-game-app/.
+
+Run:
+cd card-game-app && python3 -m pytest tests/ -v && python3 -m py_compile main.py src/card_game_tui/*.py && python3 main.py --smoke
+
+Write status.json at workspace root: outcome=succeeded if all issues are fixed, outcome=failed with failure_reason otherwise."
+    ]
+
+    start -> plan_app -> implement_app -> verify_app
+
+    verify_app -> exit    [condition="outcome=succeeded"]
+    verify_app -> fix_app [condition="outcome=failed", label="Fix"]
+    verify_app -> fix_app [label="Fallback"]
+    fix_app -> verify_app
+}

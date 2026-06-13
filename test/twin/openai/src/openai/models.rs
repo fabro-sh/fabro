@@ -344,15 +344,16 @@ fn validate_message_input_item(item: &InputItem) -> Result<(), OpenAiError> {
         ));
     }
 
-    validate_input_content(&item.content)
+    let role = item.role.as_deref().unwrap_or_default();
+    validate_input_content(role, &item.content)
 }
 
-fn validate_input_content(content: &InputContent) -> Result<(), OpenAiError> {
+fn validate_input_content(role: &str, content: &InputContent) -> Result<(), OpenAiError> {
     match content {
         InputContent::Text(_) => Ok(()),
         InputContent::Parts(parts) if !parts.is_empty() => {
             for part in parts {
-                validate_input_content_part(part)?;
+                validate_input_content_part(role, part)?;
             }
             Ok(())
         }
@@ -363,9 +364,12 @@ fn validate_input_content(content: &InputContent) -> Result<(), OpenAiError> {
     }
 }
 
-fn validate_input_content_part(part: &ContentPart) -> Result<(), OpenAiError> {
+fn validate_input_content_part(role: &str, part: &ContentPart) -> Result<(), OpenAiError> {
     match part.kind.as_str() {
         "input_text" | "text" if part.text.as_deref().is_some() => Ok(()),
+        // Assistant history items are replayed with their original output
+        // parts; the real API accepts output_text on assistant messages.
+        "output_text" if role == "assistant" && part.text.as_deref().is_some() => Ok(()),
         "input_image"
             if part
                 .image_url
@@ -377,6 +381,14 @@ fn validate_input_content_part(part: &ContentPart) -> Result<(), OpenAiError> {
         "input_text" | "text" => Err(OpenAiError::invalid_request(
             "input",
             "text input parts require text",
+        )),
+        "output_text" if role == "assistant" => Err(OpenAiError::invalid_request(
+            "input",
+            "text input parts require text",
+        )),
+        "output_text" => Err(OpenAiError::invalid_request(
+            "input",
+            "output_text parts are only valid on assistant messages",
         )),
         "input_image" => Err(OpenAiError::invalid_request(
             "input",

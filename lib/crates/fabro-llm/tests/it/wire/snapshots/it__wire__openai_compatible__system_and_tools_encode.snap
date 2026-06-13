@@ -1,0 +1,62 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_compatible.rs
+expression: rendered
+---
+{
+  "method": "POST",
+  "path": "/chat/completions",
+  "headers": [
+    [
+      "accept",
+      "*/*"
+    ],
+    [
+      "authorization",
+      "Bearer test-key"
+    ],
+    [
+      "content-length",
+      "305"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ],
+    [
+      "host",
+      "[host]"
+    ]
+  ],
+  "body": {
+    "model": "test-model",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Be concise"
+      },
+      {
+        "role": "user",
+        "content": "Hello"
+      }
+    ],
+    "temperature": 0.5,
+    "max_tokens": 128,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "search",
+          "description": "Search files",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

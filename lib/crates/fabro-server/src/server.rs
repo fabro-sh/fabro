@@ -28,21 +28,20 @@ pub use fabro_api::types::{
     BatchDeleteRunsResultOutcome, BatchDeleteRunsSummary, BatchRunLifecycleRequest,
     BatchRunLifecycleResponse, BatchRunLifecycleResult, BatchRunLifecycleResultOutcome,
     BatchRunLifecycleSummary, BillingByModel, BillingStageRef, CloseRunPullRequestResponse,
-    CompletionContentPart, CompletionMessage, CompletionMessageRole, CompletionResponse,
-    CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
-    CreateRunPullRequestRequest, CreateSecretRequest, CreateVariableRequest, DeleteRunResponse,
-    DeleteRunSandbox, DeleteSecretRequest, DenyRunRequest, DiskUsageResponse, DiskUsageRunRow,
-    DiskUsageSummaryRow, ErrorResponseEntry, ForkRequest, ForkResponse, IntegrationConnectionKind,
-    IntegrationConnectionState, IntegrationConnectionStatus, IntegrationProvider,
-    IntegrationStatus, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
-    MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
-    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, Provider,
-    ProviderList, PruneRunEntry, PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection,
-    RenderWorkflowGraphRequest, RewindRequest, RewindResponse, Run, RunArtifactEntry,
-    RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals, RunError, RunManifest,
-    RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse, SandboxService,
-    SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
-    StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
+    CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
+    CreatePlaygroundChatRequest, CreateRunPullRequestRequest, CreateSecretRequest,
+    CreateVariableRequest, DeleteRunResponse, DeleteRunSandbox, DeleteSecretRequest,
+    DenyRunRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ErrorResponseEntry,
+    ForkRequest, ForkResponse, IntegrationConnectionKind, IntegrationConnectionState,
+    IntegrationConnectionStatus, IntegrationProvider, IntegrationStatus, LinkRunPullRequestRequest,
+    MergeRunPullRequestRequest, MergeRunPullRequestResponse, ModelReference, PaginatedEventList,
+    PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
+    Provider, ProviderList, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
+    RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest, RewindResponse, Run,
+    RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
+    RunError, RunManifest, RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse,
+    SandboxService, SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler,
+    StageState, StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
     SystemDiskResourceScope, SystemDiskResources, SystemInfoResponse, SystemIntegrationStatus,
     SystemIntegrationsResponse, SystemMemoryResourceScope, SystemMemoryResources,
     SystemRepairRunIssue, SystemRepairRunsResponse, SystemResourcesResponse, SystemRunCounts,
@@ -61,8 +60,7 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::model_test::run_model_test;
 use fabro_llm::types::{
-    ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest, Role, ToolChoice,
-    ToolDefinition,
+    FinishReason, Message as LlmMessage, Request as LlmRequest, ToolChoice, ToolDefinition,
 };
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{BilledTokenCounts, Catalog, ModelRef, ModelTestMode, ProviderId};
@@ -148,6 +146,7 @@ use crate::error::ApiError;
 use crate::github_webhooks::{
     WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, parse_event_metadata, verify_signature,
 };
+use crate::interp::{process_env_var, resolve_interp, resolve_interp_with};
 use crate::jwt_auth::{self, AuthMode};
 use crate::principal_middleware::{
     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunManagementTarget,
@@ -1351,7 +1350,7 @@ impl AppState {
 
     pub(crate) fn server_storage_dir(&self) -> PathBuf {
         PathBuf::from(
-            resolve_interp_string(&self.server_settings().server.storage.root)
+            resolve_interp(&self.server_settings().server.storage.root)
                 .expect("server storage root should be resolved at startup"),
         )
     }
@@ -1489,10 +1488,7 @@ impl AppState {
     }
 
     pub(crate) fn resolve_interp(&self, value: &InterpString) -> anyhow::Result<String> {
-        value
-            .resolve(|name| (self.env_lookup)(name))
-            .map(|resolved| resolved.value)
-            .map_err(anyhow::Error::from)
+        resolve_interp_with(value, |name| (self.env_lookup)(name))
     }
 
     pub(crate) fn canonical_origin(&self) -> Result<String, String> {
@@ -1504,6 +1500,11 @@ impl AppState {
             .and_then(|value| auth::derive_cookie_key(value.as_bytes()).ok())
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "known leak: GitHub App id/slug passes unresolved; strict resolution scheduled in the \
+              interpolation unification (Phase 2)"
+    )]
     pub(crate) fn github_credentials(
         &self,
         settings: &GithubIntegrationSettings,
@@ -1627,21 +1628,6 @@ fn decode_secret_pem(name: &str, raw: &str) -> Result<String, String> {
         .map_err(|err| format!("{name} is not valid PEM or base64: {err}"))?;
     String::from_utf8(pem_bytes)
         .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
-}
-
-fn resolve_interp_string(value: &InterpString) -> anyhow::Result<String> {
-    value
-        .resolve(process_env_var)
-        .map(|resolved| resolved.value)
-        .map_err(anyhow::Error::from)
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Server state owns process-env lookup facades for interpolation and non-secret configuration."
-)]
-pub(crate) fn process_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
 }
 
 fn start_optional_slack_service(state: &Arc<AppState>) {
@@ -2411,7 +2397,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     let worker_tokens = worker_token_keys_from_server_secrets(&server_secrets)?;
     let github_api_base_url = github_api_base_url.unwrap_or_else(fabro_github::github_api_base_url);
     let storage_root = PathBuf::from(
-        resolve_interp_string(&current_server_settings.server.storage.root)
+        resolve_interp(&current_server_settings.server.storage.root)
             .context("resolve server storage root")?,
     );
     let automation_repo_cache = Arc::new(GitRepoCache::new(

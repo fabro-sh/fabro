@@ -1,104 +1,22 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// --- 3.1 / 3.2 / 3.5 Canonical chat + content data structures ---
+//
+// `Message`, `Role`, `ContentPart`, `ImageData`, `AudioData`,
+// `DocumentData`, `ThinkingData`, `ToolCall`, and `ToolResult` are the
+// canonical provider-neutral replay primitives. They live in `fabro-types`
+// so the event stream, API responses, and runtime history can share one
+// model. They are re-exported here so existing `fabro_llm::types::*`
+// imports keep working.
+pub use fabro_types::{
+    AudioData, ContentPart, DocumentData, ImageData, Message, Role, ThinkingData, ToolCall,
+    ToolResult,
+};
 use fabro_util::backoff::BackoffPolicy;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
-
-// --- 3.2 Role ---
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    System,
-    User,
-    Assistant,
-    Tool,
-    Developer,
-}
-
-// --- 3.5 Content Data Structures ---
-//
-// `ContentPart`, `ImageData`, `AudioData`, `DocumentData`, `ThinkingData`,
-// `ToolCall`, and `ToolResult` are the canonical provider-neutral replay
-// primitives. They live in `fabro-types` so the event stream, API responses,
-// and runtime history can share one model. They are re-exported here so
-// existing `fabro_llm::types::*` imports keep working.
-pub use fabro_types::{
-    AudioData, ContentPart, DocumentData, ImageData, ThinkingData, ToolCall, ToolResult,
-};
-
-// --- 3.1 Message ---
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Message {
-    pub role:         Role,
-    pub content:      Vec<ContentPart>,
-    pub name:         Option<String>,
-    pub tool_call_id: Option<String>,
-}
-
-impl Message {
-    pub fn system(text: impl Into<String>) -> Self {
-        Self {
-            role:         Role::System,
-            content:      vec![ContentPart::text(text)],
-            name:         None,
-            tool_call_id: None,
-        }
-    }
-
-    pub fn user(text: impl Into<String>) -> Self {
-        Self {
-            role:         Role::User,
-            content:      vec![ContentPart::text(text)],
-            name:         None,
-            tool_call_id: None,
-        }
-    }
-
-    pub fn assistant(text: impl Into<String>) -> Self {
-        Self {
-            role:         Role::Assistant,
-            content:      vec![ContentPart::text(text)],
-            name:         None,
-            tool_call_id: None,
-        }
-    }
-
-    pub fn tool_result(
-        tool_call_id: impl Into<String>,
-        content: serde_json::Value,
-        is_error: bool,
-    ) -> Self {
-        let id = tool_call_id.into();
-        Self {
-            role:         Role::Tool,
-            content:      vec![ContentPart::ToolResult(ToolResult {
-                tool_call_id: id.clone(),
-                content,
-                is_error,
-                image_data: None,
-                image_media_type: None,
-            })],
-            name:         None,
-            tool_call_id: Some(id),
-        }
-    }
-
-    /// Concatenates text from all text content parts.
-    #[must_use]
-    pub fn text(&self) -> String {
-        self.content
-            .iter()
-            .filter_map(|part| match part {
-                ContentPart::Text(text) => Some(text.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-}
 
 // --- 3.8 FinishReason ---
 
@@ -303,6 +221,10 @@ impl ToolChoice {
 
 // --- 3.7 Response ---
 
+// Billing vocabulary shared with the catalog/billing layer and the API
+// surface; re-exported here so `fabro_llm::types::*` imports keep working.
+pub use fabro_model::CostSource;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     pub id:            String,
@@ -314,6 +236,13 @@ pub struct Response {
     pub raw:           Option<serde_json::Value>,
     pub warnings:      Vec<Warning>,
     pub rate_limit:    Option<RateLimitInfo>,
+    /// USD cost of this completion, when known or estimable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd:      Option<f64>,
+    /// Whether `cost_usd` came from provider billing data or a catalog
+    /// estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_source:   Option<CostSource>,
 }
 
 impl Response {
@@ -785,6 +714,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         assert_eq!(response.text(), "Hello world");
     }
@@ -813,6 +744,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         let calls = response.tool_calls();
         assert_eq!(calls.len(), 1);
@@ -844,6 +777,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         assert_eq!(response.reasoning(), Some("Let me think...".to_string()));
         assert_eq!(response.text(), "The answer is 42.");
@@ -861,6 +796,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         assert_eq!(response.reasoning(), None);
     }
@@ -1031,6 +968,8 @@ mod tests {
             raw:           None,
             warnings:      vec![],
             rate_limit:    None,
+            cost_usd:      None,
+            cost_source:   None,
         };
         let tool_calls = vec![ToolCall::new(
             "call_1",

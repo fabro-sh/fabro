@@ -80,6 +80,10 @@ fn user_settings_resolve_returns_defaults_when_default_settings_file_is_missing(
     });
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test asserts the raw template source"
+)]
 #[test]
 fn resolves_cli_target_exec_and_output_settings() {
     let cli = UserSettingsBuilder::from_toml(

@@ -1073,6 +1073,7 @@ mod tests {
                     reasoning:        Some(false),
                     reasoning_effort: None,
                     prompt_cache:     None,
+                    sampling_params:  None,
                 }),
                 ..ModelCatalogSettings::default()
             });
@@ -1157,6 +1158,7 @@ mod tests {
                     reasoning:        Some(false),
                     reasoning_effort: None,
                     prompt_cache:     None,
+                    sampling_params:  None,
                 }),
                 ..ModelCatalogSettings::default()
             });

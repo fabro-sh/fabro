@@ -1,0 +1,32 @@
+---
+source: lib/crates/fabro-llm/tests/it/wire/openai_responses.rs
+expression: rendered
+---
+{
+  "model": "gpt-test",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Hello"
+        }
+      ]
+    }
+  ],
+  "temperature": 0.7,
+  "max_output_tokens": 128,
+  "top_p": 0.9,
+  "stop": [
+    "END"
+  ],
+  "metadata": {
+    "trace_id": "trace-123"
+  },
+  "store": false,
+  "include": [
+    "reasoning.encrypted_content"
+  ]
+}

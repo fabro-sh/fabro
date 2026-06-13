@@ -4,8 +4,10 @@ use tracing::{debug, error};
 
 use crate::error::{Error, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream};
-use crate::providers::common::LineReader;
-use crate::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
+use crate::transport::{LineReader, parse_sse_block};
+use crate::types::{
+    CostSource, FinishReason, Message, Request, Response, StreamEvent, TokenCounts,
+};
 
 /// Provider adapter that routes LLM requests through an fabro server's
 /// `/completions` endpoint, delegating to whatever real provider the server
@@ -41,6 +43,8 @@ struct ServerCompletionResponse {
     message:     Message,
     stop_reason: String,
     usage:       ServerUsage,
+    cost_usd:    Option<f64>,
+    cost_source: Option<CostSource>,
 }
 
 #[derive(serde::Deserialize)]
@@ -151,6 +155,10 @@ impl ProviderAdapter for Adapter {
             raw: None,
             warnings: vec![],
             rate_limit: None,
+            // Carry the server's cost through; the local client's stamping
+            // never overwrites an already-set cost.
+            cost_usd: server_resp.cost_usd,
+            cost_source: server_resp.cost_source,
         })
     }
 
@@ -166,24 +174,22 @@ impl ProviderAdapter for Adapter {
             loop {
                 match reader.read_next_chunk("\n\n").await {
                     Ok(Some(block)) => {
-                        if let Some((event_type, data)) = parse_sse_block(&block) {
-                            if event_type == "stream_event" {
-                                match serde_json::from_str::<StreamEvent>(&data) {
-                                    Ok(event) => return Some((Ok(event), reader)),
-                                    Err(e) => {
-                                        return Some((
-                                            Err(Error::stream_error(
-                                                format!("failed to parse stream event: {e}"),
-                                                e,
-                                            )),
-                                            reader,
-                                        ));
-                                    }
+                        if let Some((Some("stream_event"), data)) = parse_sse_block(&block) {
+                            match serde_json::from_str::<StreamEvent>(&data) {
+                                Ok(event) => return Some((Ok(event), reader)),
+                                Err(e) => {
+                                    return Some((
+                                        Err(Error::stream_error(
+                                            format!("failed to parse stream event: {e}"),
+                                            e,
+                                        )),
+                                        reader,
+                                    ));
                                 }
                             }
-                            // Skip non-stream_event SSE events
                         }
-                        // Empty or unparsable block — keep reading.
+                        // Empty, unparsable, or non-stream_event block — keep
+                        // reading.
                     }
                     Ok(None) => return None,
                     Err(e) => return Some((Err(e), reader)),
@@ -198,29 +204,6 @@ impl ProviderAdapter for Adapter {
 fn redacted_url_for_log(url: &str) -> String {
     DisplaySafeUrl::parse(url)
         .map_or_else(|_| "<invalid url>".to_string(), |url| url.redacted_string())
-}
-
-/// Parse a single SSE event block into `(event_type, data)`.
-///
-/// Returns `None` if the block doesn't contain both an `event:` and `data:`
-/// line.
-fn parse_sse_block(block: &str) -> Option<(String, String)> {
-    let mut event_type = None;
-    let mut data_lines: Vec<&str> = Vec::new();
-
-    for line in block.lines() {
-        if let Some(value) = line.strip_prefix("event:") {
-            event_type = Some(value.trim().to_string());
-        } else if let Some(value) = line.strip_prefix("data:") {
-            data_lines.push(value.trim());
-        }
-    }
-
-    let event_type = event_type?;
-    if data_lines.is_empty() {
-        return None;
-    }
-    Some((event_type, data_lines.join("\n")))
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +315,9 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
             "usage": {
                 "input_tokens": 10,
                 "output_tokens": 5
-            }
+            },
+            "cost_usd": 0.000_25,
+            "cost_source": "estimated"
         });
 
         server.mock(|when, then| {
@@ -358,6 +343,8 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
         assert_eq!(response.usage.input_tokens, 10);
         assert_eq!(response.usage.output_tokens, 5);
         assert_eq!(response.usage.total_tokens(), 15);
+        assert_eq!(response.cost_usd, Some(0.000_25));
+        assert_eq!(response.cost_source, Some(CostSource::Estimated));
     }
 
     #[tokio::test]
@@ -464,7 +451,7 @@ data: {\"type\":\"stream_start\"}\n\
     fn parse_sse_block_valid() {
         let block = "event: stream_event\ndata: {\"type\":\"stream_start\"}";
         let (event_type, data) = parse_sse_block(block).unwrap();
-        assert_eq!(event_type, "stream_event");
+        assert_eq!(event_type, Some("stream_event"));
         assert_eq!(data, "{\"type\":\"stream_start\"}");
     }
 
@@ -474,10 +461,13 @@ data: {\"type\":\"stream_start\"}\n\
         assert!(parse_sse_block(block).is_none());
     }
 
+    /// A block without an `event:` line parses with `event = None`; the
+    /// stream loop's `Some("stream_event")` match is what filters it out.
     #[test]
     fn parse_sse_block_missing_event() {
         let block = "data: {\"type\":\"stream_start\"}";
-        assert!(parse_sse_block(block).is_none());
+        let (event_type, _) = parse_sse_block(block).unwrap();
+        assert_eq!(event_type, None);
     }
 
     #[test]

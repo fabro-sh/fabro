@@ -31,6 +31,7 @@ disallowed-methods = [
   { path = "reqwest::blocking::Client::new", reason = "Use fabro_http::blocking_http_client() or fabro_http::blocking_test_http_client()", allow-invalid = true },
   { path = "reqwest::blocking::Client::builder", reason = "Use fabro_http::BlockingHttpClientBuilder::new()", allow-invalid = true },
   { path = "reqwest::get", reason = "Build a fabro_http client and send the request explicitly", allow-invalid = true },
+  { path = "fabro_types::settings::interp::InterpString::as_source", reason = "Returns the unresolved template source, which leaks {{ ... }} tokens as literal text downstream. Resolve via resolve()/resolve_with() or substitute via substitute_with() instead; document intentional raw-source access (serialization, error messages, deliberate source preservation) with #[expect(clippy::disallowed_methods, reason = \"...\")]", allow-invalid = true },
 ]
 disallowed-types = [
   { path = "std::io::Read", reason = "Blocking trait; prefer tokio::io::AsyncReadExt on Tokio paths. Document intentional sync I/O with #[expect(clippy::disallowed_types, reason = \"...\")]" },

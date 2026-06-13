@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use super::super::{
-    ApiError, AppState, CompletionContentPart, CompletionMessage, CompletionMessageRole,
-    CompletionResponse, CompletionToolChoiceMode, CompletionUsage, ContentPart,
-    CreateCompletionRequest, Duration, Event, FinishReason, GenerateParams, IntoResponse, Json,
-    KeepAlive, LlmMessage, LlmRequest, RequiredUser, Response, Role, Router, Sse, State,
-    StatusCode, ToolChoice, ToolDefinition, Ulid, error, generate_object, info, post, warn,
+    ApiError, AppState, CompletionResponse, CompletionToolChoiceMode, CompletionUsage,
+    CreateCompletionRequest, FinishReason, GenerateParams, IntoResponse, Json, LlmMessage,
+    LlmRequest, RequiredUser, Response, Router, State, StatusCode, ToolChoice, ToolDefinition,
+    Ulid, error, generate_object, info, post, warn,
 };
+use super::llm_sse;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/completions", post(create_completion))
@@ -20,54 +20,6 @@ fn finish_reason_to_api_stop_reason(reason: &FinishReason) -> String {
         FinishReason::ContentFilter => "content_filter".to_string(),
         FinishReason::Error => "error".to_string(),
         FinishReason::Other(s) => s.clone(),
-    }
-}
-
-fn convert_api_message(msg: &CompletionMessage) -> LlmMessage {
-    let role = match msg.role {
-        CompletionMessageRole::System => Role::System,
-        CompletionMessageRole::User => Role::User,
-        CompletionMessageRole::Assistant => Role::Assistant,
-        CompletionMessageRole::Tool => Role::Tool,
-        CompletionMessageRole::Developer => Role::Developer,
-    };
-    let content: Vec<ContentPart> = msg
-        .content
-        .iter()
-        .filter_map(|part| {
-            let json = serde_json::to_value(part).ok()?;
-            serde_json::from_value(json).ok()
-        })
-        .collect();
-    LlmMessage {
-        role,
-        content,
-        name: msg.name.clone(),
-        tool_call_id: msg.tool_call_id.clone(),
-    }
-}
-
-fn convert_llm_message(msg: &LlmMessage) -> CompletionMessage {
-    let role = match msg.role {
-        Role::System => CompletionMessageRole::System,
-        Role::User => CompletionMessageRole::User,
-        Role::Assistant => CompletionMessageRole::Assistant,
-        Role::Tool => CompletionMessageRole::Tool,
-        Role::Developer => CompletionMessageRole::Developer,
-    };
-    let content: Vec<CompletionContentPart> = msg
-        .content
-        .iter()
-        .filter_map(|part| {
-            let json = serde_json::to_value(part).ok()?;
-            serde_json::from_value(json).ok()
-        })
-        .collect();
-    CompletionMessage {
-        role,
-        content,
-        name: msg.name.clone(),
-        tool_call_id: msg.tool_call_id.clone(),
     }
 }
 
@@ -92,14 +44,14 @@ async fn create_completion(
 
     info!(model = %model_id, provider = ?provider_name, "Completion request received");
 
-    // Build messages list
+    // Build messages list. Request messages are already the canonical
+    // `fabro_types::Message` — the API schema reuses it via build.rs
+    // `with_replacement`, so no conversion is needed.
     let mut messages: Vec<LlmMessage> = Vec::new();
     if let Some(system) = req.system {
         messages.push(LlmMessage::system(system));
     }
-    for msg in &req.messages {
-        messages.push(convert_api_message(msg));
-    }
+    messages.extend(req.messages);
 
     // Convert tools
     let tools: Option<Vec<ToolDefinition>> = if req.tools.is_empty() {
@@ -185,43 +137,7 @@ async fn create_completion(
             }
         };
 
-        let sse_stream = tokio_stream::StreamExt::filter_map(stream_result, |event| match event {
-            Ok(ref evt) => match serde_json::to_string(evt) {
-                Ok(json) => Some(Ok::<_, std::convert::Infallible>(
-                    Event::default().event("stream_event").data(json),
-                )),
-                Err(e) => Some(Ok(Event::default().event("stream_event").data(
-                    serde_json::json!({
-                        "type": "error",
-                        "error": {"Stream": {"message": format!("failed to serialize event: {e}")}},
-                        "raw": null
-                    })
-                    .to_string(),
-                ))),
-            },
-            Err(e) => Some(Ok(Event::default().event("stream_event").data(
-                serde_json::json!({
-                    "type": "error",
-                    "error": {"Stream": {"message": e.to_string()}},
-                    "raw": null
-                })
-                .to_string(),
-            ))),
-        });
-        let sse_stream = futures_util::StreamExt::take_until(
-            sse_stream,
-            state.shutdown_token().cancelled_owned(),
-        );
-
-        Sse::new(sse_stream)
-            .keep_alive(
-                KeepAlive::new().interval(Duration::from_secs(15)).event(
-                    Event::default()
-                        .event("ping")
-                        .data(serde_json::json!({"type": "ping"}).to_string()),
-                ),
-            )
-            .into_response()
+        llm_sse::stream_response(stream_result, state.shutdown_token())
     } else {
         // Non-streaming path
         let msg_id = Ulid::new().to_string();
@@ -244,35 +160,50 @@ async fn create_completion(
                 params = params.top_p(top_p);
             }
             match generate_object(params, schema).await {
-                Ok(result) => Json(CompletionResponse {
-                    id:          msg_id,
-                    model:       model_id,
-                    message:     convert_llm_message(&result.response.message),
-                    stop_reason: finish_reason_to_api_stop_reason(&result.finish_reason),
-                    usage:       CompletionUsage {
-                        input_tokens:  result.usage.input_tokens,
-                        output_tokens: result.usage.output_tokens,
-                    },
-                    output:      result.output,
-                })
-                .into_response(),
+                Ok(result) => {
+                    // `result.finish_reason` / `result.usage` resolve through
+                    // GenerateResult's Deref to the inner Response; move the
+                    // Response out once so `message` can be taken by value.
+                    let output = result.output;
+                    let response = result.response;
+                    let stop_reason = finish_reason_to_api_stop_reason(&response.finish_reason);
+                    Json(CompletionResponse {
+                        id: msg_id,
+                        model: model_id,
+                        message: response.message,
+                        stop_reason,
+                        usage: CompletionUsage {
+                            input_tokens:  response.usage.input_tokens,
+                            output_tokens: response.usage.output_tokens,
+                        },
+                        output,
+                        cost_usd: response.cost_usd,
+                        cost_source: response.cost_source,
+                    })
+                    .into_response()
+                }
                 Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
                     .into_response(),
             }
         } else {
             match client.complete(&request).await {
-                Ok(response) => Json(CompletionResponse {
-                    id:          response.id,
-                    model:       response.model,
-                    message:     convert_llm_message(&response.message),
-                    stop_reason: finish_reason_to_api_stop_reason(&response.finish_reason),
-                    usage:       CompletionUsage {
-                        input_tokens:  response.usage.input_tokens,
-                        output_tokens: response.usage.output_tokens,
-                    },
-                    output:      None,
-                })
-                .into_response(),
+                Ok(response) => {
+                    let stop_reason = finish_reason_to_api_stop_reason(&response.finish_reason);
+                    Json(CompletionResponse {
+                        id: response.id,
+                        model: response.model,
+                        message: response.message,
+                        stop_reason,
+                        usage: CompletionUsage {
+                            input_tokens:  response.usage.input_tokens,
+                            output_tokens: response.usage.output_tokens,
+                        },
+                        output: None,
+                        cost_usd: response.cost_usd,
+                        cost_source: response.cost_source,
+                    })
+                    .into_response()
+                }
                 Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
                     .into_response(),
             }

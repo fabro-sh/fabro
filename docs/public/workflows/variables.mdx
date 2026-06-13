@@ -3,18 +3,18 @@ title: "Variables"
 description: "Using templates in workflows"
 ---
 
-Fabro uses `{{ ... }}` templates for workflow strings and prompts.
+Fabro renders `{{ ... }}` templates in exactly two workflow attributes: the graph `goal` and node `prompt`s. Every other attribute is literal text.
 
 ## Template context
 
-Workflow and prompt templates can reference:
+Goal and prompt templates can reference:
 
 | Expression | Resolves to |
 |---|---|
 | `{{ goal }}` | The workflow goal |
 | `{{ inputs.name }}` | A value from `[run.inputs]`, optionally overridden by CLI input flags |
 
-Environment variables are **not** available in workflow or prompt templates. Use `{{ env.NAME }}` only in config strings and HTTP hook headers.
+Environment variables are **not** available in goal or prompt templates. Use `{{ env.NAME }}` only in config strings and HTTP hook headers.
 
 ## Run config inputs
 
@@ -35,7 +35,7 @@ repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-These values are available in final string attributes such as `goal`, `prompt`, `script`, `label`, and edge labels:
+These values are available in the graph `goal` and node `prompt` attributes:
 
 ```dot title="check.fabro"
 digraph Check {
@@ -44,12 +44,13 @@ digraph Check {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    clone [label="Clone", shape=parallelogram, script="git clone {{ inputs.repo_url }} repo"]
-    test  [label="Test", prompt="Run the {{ inputs.language }} test suite in the repo/ directory."]
+    test [label="Test", prompt="Clone {{ inputs.repo_url }} and run the {{ inputs.language }} test suite."]
 
-    start -> clone -> test -> exit
+    start -> test -> exit
 }
 ```
+
+Other attributes — `script`, `label`, `model`, `provider`, `condition`, and all edge attributes — do not render templates. If one of them contains `{{ … }}` or `{% … %}`, the syntax is treated as literal text and Fabro records a `detemplated_attribute` warning suggesting you move the dynamic value into a `prompt` or `goal`.
 
 Override individual inputs at run time with repeatable `-I` / `--input` flags:
 
@@ -98,11 +99,11 @@ Fabro keeps workflow structure static and renders workflow templates once:
 
 1. Fabro parses the root DOT and imported `.fabro` files without rendering them.
 2. Literal `import`, `@file`, graph-goal file, and child-workflow references are resolved.
-3. Final graph, node, and edge string attributes are rendered with the `{ goal, inputs }` context.
+3. The graph `goal` and node `prompt` attributes are rendered with the `{ goal, inputs }` context.
 
-Templates are not supported in graph syntax, node IDs, edge structure, `import` paths, `@file` paths, child workflow paths, or other file references.
+Templates are not supported in graph syntax, node IDs, edge structure, `import` paths, `@file` paths, child workflow paths, other file references, or any attribute besides `prompt` and `goal`.
 
-Fabro renders the graph `goal` first and stores the rendered value back onto the graph. Other attributes that use `{{ goal }}` receive that rendered value.
+Fabro renders the graph `goal` first and stores the rendered value back onto the graph. Prompts that use `{{ goal }}` receive that rendered value.
 
 ## Undefined variables
 

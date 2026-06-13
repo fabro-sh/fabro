@@ -1,0 +1,26 @@
+---
+title: "Automations in the web UI"
+date: "2026-05-28"
+---
+
+<Warning>
+**Environment catalogs are now server-owned.** Environment definitions move out of project and workflow TOML into server-owned files, and config validation now rejects environment catalogs defined in project, workflow, or user config.
+</Warning>
+
+## Automations in the web UI
+
+The Automations area is now functional end-to-end and visible outside demo mode. The list page shows your real automations with create, edit, and delete actions (saves are revision-checked, so concurrent edits fail loudly instead of silently overwriting), and a Run button on each card triggers the automation and takes you to the new run. The detail page is rebuilt like a run page, with status chips, Edit and Run actions, and a runs panel showing the automation's history.
+
+On the backend, runs created through an automation's API trigger now start automatically instead of sitting in Submitted forever.
+
+## More
+
+<Accordion title="Improvements">
+- Added `claude-opus-4-8` to the model catalog; the `opus` and `claude-opus` aliases now resolve to Opus 4.8
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed OpenAI-compatible providers dropping raw freeform tool-call arguments, which left tools like `apply_patch` receiving `{}` instead of the patch text
+- Fixed context compaction separating tool results from the tool calls that produced them, which OpenAI rejects as orphaned outputs
+- Fixed compacted conversation content also appearing in the compaction summary at the preserve boundary
+</Accordion>

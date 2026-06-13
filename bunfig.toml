@@ -1,0 +1,9 @@
+# Pin the install linker so every contributor's bun install produces the same
+# node_modules layout. Bun < 1.3 defaulted workspaces to the hoisted linker
+# (packages at the workspace root); Bun >= 1.3 defaults to isolated (packages
+# symlinked into each app's node_modules from a central store). Tooling that
+# touches node_modules should not have to handle both.
+#
+# Requires Bun >= 1.3.
+[install]
+linker = "isolated"
