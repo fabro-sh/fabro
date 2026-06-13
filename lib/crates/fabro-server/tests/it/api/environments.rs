@@ -159,7 +159,7 @@ async fn list_environments_returns_seeded_catalog_sorted_by_id() {
         .expect("list environments should respond");
     let body = response_json(response, StatusCode::OK, "GET /api/v1/environments").await;
 
-    assert_eq!(body["meta"]["total"], 4);
+    assert_eq!(body["meta"]["total"], 2);
     assert_eq!(
         body["data"]
             .as_array()
@@ -169,7 +169,7 @@ async fn list_environments_returns_seeded_catalog_sorted_by_id() {
                 .as_str()
                 .expect("environment should have id"))
             .collect::<Vec<_>>(),
-        vec!["daytona", "default", "docker", "local"]
+        vec!["default", "local"]
     );
 }
 
@@ -201,7 +201,7 @@ async fn create_environment_persists_sibling_toml_and_is_visible() {
         .await
         .expect("list environments should respond");
     let list = response_json(list, StatusCode::OK, "GET /api/v1/environments").await;
-    assert_eq!(list["meta"]["total"], 5);
+    assert_eq!(list["meta"]["total"], 3);
     assert!(
         list["data"]
             .as_array()

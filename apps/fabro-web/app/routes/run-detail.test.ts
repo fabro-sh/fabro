@@ -887,6 +887,9 @@ describe("RunDetail full-height child routes", () => {
       await deletion.promise;
       await Promise.resolve();
     });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     expect(deleteRunApiMock).toHaveBeenCalledTimes(1);
     expect(deleteRunApiMock.mock.calls[0]?.[0]).toBe("run_1");

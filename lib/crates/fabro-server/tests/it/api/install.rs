@@ -2584,7 +2584,13 @@ async fn sandbox_switching_from_daytona_to_docker_drops_saved_key() {
     .await;
 
     let settings = std::fs::read_to_string(&config_path).unwrap();
-    assert!(settings.contains("provider = \"docker\""));
+    assert!(
+        settings.contains("[run.environment]"),
+        "settings.toml should select the default environment"
+    );
+    let default_environment =
+        std::fs::read_to_string(temp_dir.path().join("environments/default.toml")).unwrap();
+    assert!(default_environment.contains("provider = \"docker\""));
     let vault = Vault::load(Storage::new(temp_dir.path()).secrets_path()).unwrap();
     assert_eq!(vault.get("DAYTONA_API_KEY"), None);
 }

@@ -467,9 +467,9 @@ impl InstallSandboxState {
     }
 
     fn to_environment_provider(&self) -> EnvironmentProvider {
-        match self {
-            Self::Docker => EnvironmentProvider::Docker,
-            Self::Daytona { .. } => EnvironmentProvider::Daytona,
+        match &self.provider {
+            InstallSandboxProviderState::Docker => EnvironmentProvider::Docker,
+            InstallSandboxProviderState::Daytona { .. } => EnvironmentProvider::Daytona,
         }
     }
 }

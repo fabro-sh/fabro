@@ -2550,6 +2550,7 @@ dependencies = [
  "assert_cmd",
  "axum",
  "fabro-config",
+ "fabro-environment",
  "fabro-http",
  "fabro-proc",
  "fabro-static",

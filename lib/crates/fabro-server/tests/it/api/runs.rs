@@ -1,5 +1,6 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use fabro_types::settings::run::EnvironmentProvider;
 use tower::ServiceExt;
 
 use crate::helpers::{
@@ -54,7 +55,7 @@ async fn request_json(
 
 fn daytona_manifest() -> serde_json::Value {
     let mut manifest = minimal_manifest_json(MINIMAL_DOT);
-    manifest["args"] = serde_json::json!({ "environment": "daytona" });
+    manifest["args"] = serde_json::json!({ "environment": "default" });
     manifest
 }
 
@@ -69,12 +70,26 @@ enabled = false
     )
 }
 
+fn daytona_disabled_app() -> (axum::Router, tempfile::TempDir) {
+    let temp_dir = tempfile::tempdir().expect("daytona disabled test tempdir should be created");
+    let active_config_path = temp_dir.path().join("settings.toml");
+    let environment_dir = temp_dir.path().join("environments");
+    fabro_environment::seed_default_environment(&environment_dir, EnvironmentProvider::Daytona)
+        .expect("daytona default environment should seed");
+    let settings = daytona_disabled_settings();
+    let state = fabro_server::test_support::TestAppStateBuilder::new()
+        .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
+        .active_config_path(active_config_path)
+        .build();
+    (
+        fabro_server::test_support::build_test_router(state),
+        temp_dir,
+    )
+}
+
 #[tokio::test]
 async fn create_run_rejects_disabled_sandbox_provider() {
-    let app = fabro_server::test_support::build_test_router(test_app_state_with_options(
-        daytona_disabled_settings(),
-        5,
-    ));
+    let (app, _temp_dir) = daytona_disabled_app();
 
     let request = Request::builder()
         .method("POST")
@@ -97,10 +112,7 @@ async fn create_run_rejects_disabled_sandbox_provider() {
 
 #[tokio::test]
 async fn preflight_reports_disabled_sandbox_provider() {
-    let app = fabro_server::test_support::build_test_router(test_app_state_with_options(
-        daytona_disabled_settings(),
-        5,
-    ));
+    let (app, _temp_dir) = daytona_disabled_app();
 
     let request = Request::builder()
         .method("POST")

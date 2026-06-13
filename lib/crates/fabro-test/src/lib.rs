@@ -656,6 +656,15 @@ fn home_settings_path(home_dir: &Path) -> PathBuf {
     home_dir.join(".fabro/settings.toml")
 }
 
+fn seed_settings_environments(settings_path: &Path) {
+    let environment_dir = settings_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("environments");
+    fabro_environment::seed_environments(&environment_dir)
+        .unwrap_or_else(|err| panic!("failed to seed {}: {err}", environment_dir.display()));
+}
+
 fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
     ensure_parent_dir(path);
     std::fs::write(
@@ -666,6 +675,7 @@ fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
         ),
     )
     .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+    seed_settings_environments(path);
 }
 
 fn write_test_server_dev_token(storage_dir: &Path) {
@@ -701,6 +711,7 @@ fn write_settings_table(path: &Path, table: &TomlMap<String, TomlValue>) {
     }
     std::fs::write(path, contents)
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+    seed_settings_environments(path);
 }
 
 fn server_target_from_table(table: &TomlMap<String, TomlValue>) -> Option<String> {
@@ -805,6 +816,7 @@ fn sync_home_settings(
         ensure_parent_dir(settings_path);
         std::fs::write(settings_path, contents)
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", settings_path.display()));
+        seed_settings_environments(settings_path);
         return;
     }
 
@@ -858,6 +870,7 @@ fn ensure_home_server_auth_methods(
     };
 
     if has_explicit_server_auth_methods(&table) {
+        seed_settings_environments(settings_path);
         return;
     }
 
@@ -956,6 +969,7 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
     ensure_parent_dir(config_path);
     std::fs::create_dir_all(&server.storage_dir)
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", server.storage_dir.display()));
+    seed_settings_environments(config_path);
     write_test_server_dev_token(&server.storage_dir);
     ServerDaemon::remove(&server_runtime_directory(server));
     let _ = std::fs::remove_file(&server.socket_path);
