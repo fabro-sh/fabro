@@ -16,12 +16,17 @@ The immediate deliverable is Mattermost parity with Slack: run lifecycle notific
 interactive human interview prompts. The trait exists so future providers (Teams, and others)
 do not require changes to `fabro-server`'s core wiring.
 
+> **Why this spec looks the way it does:** Every significant design choice is documented in the
+> [Decision Log appendix](#appendix-decision-log) at the end of this document, ordered from most
+> to least architecturally significant. Inline links throughout the spec (`→ Decision N`) point
+> to the relevant entry.
+
 ## Design Principles
 
 - Mirror the existing `SandboxProvider` pattern: shared trait crate, concrete implementations
-  in provider crates, server holds `Vec<Arc<dyn ChatService>>`.
+  in provider crates, server holds `Vec<Arc<dyn ChatService>>`. ([→ Decision 1](#decision-1-chatservice-trait), [→ Decision 5](#decision-5-vec-of-chatservice-in-appstate))
 - Keep `axum` a dependency of `fabro-server` only. Provider crates use `http` crate types
-  (`HeaderMap`, status codes) but never Axum router types.
+  (`HeaderMap`, status codes) but never Axum router types. ([→ Decision 4](#decision-4-handle_webhook-method-vs-router-fragment), [→ Decision 8](#decision-8-webhookoutcome-struct-instead-of-axum-response))
 - Every design decision for Mattermost defaults to mirroring Slack. Divergences are driven
   solely by API differences.
 - MS Teams stubs must be real enough to prove the trait contract holds for a pure-inbound-HTTP
@@ -35,6 +40,8 @@ do not require changes to `fabro-server`'s core wiring.
 lib/crates/fabro-chat/     — ChatService trait and shared types
 lib/crates/fabro-teams/    — MS Teams stub implementation
 ```
+
+([→ Decision 2](#decision-2-fabro-chat-crate-placement))
 
 ### Dependency graph
 
@@ -53,11 +60,11 @@ fabro-slack  fabro-mattermost  fabro-teams
 `fabro-chat` depends on `fabro-interview` (for `Answer`) and `fabro-types` (for `Principal`,
 `RunId`, `EventEnvelope`). It does not depend on `axum`.
 
-`fabro-server` replaces `Option<Arc<SlackService>>` with `Vec<Arc<dyn ChatService>>`.
+`fabro-server` replaces `Option<Arc<SlackService>>` with `Vec<Arc<dyn ChatService>>`. ([→ Decision 5](#decision-5-vec-of-chatservice-in-appstate))
 
 ## `fabro-chat` — Trait and Shared Types
 
-### `ChatService` trait
+### `ChatService` trait ([→ Decision 1](#decision-1-chatservice-trait))
 
 ```rust
 #[async_trait]
@@ -67,30 +74,30 @@ pub trait ChatService: Send + Sync {
     /// Start the provider's inbound event loop.
     /// Slack: spawns Socket Mode WebSocket loop.
     /// Mattermost: spawns WebSocket loop.
-    /// Teams: no-op — Teams delivers events via inbound HTTP only.
+    /// Teams: no-op — Teams delivers events via inbound HTTP only. (→ Decision 6, 7)
     async fn start(&self, on_submit: Arc<dyn Fn(AnswerSubmission) + Send + Sync>);
 
     /// Handle an outbound Fabro event (send notifications, post interview questions).
     async fn handle_event(
         &self,
         envelope: &EventEnvelope,
-        context: &dyn ChatEventContext,
+        context: &dyn ChatEventContext,  // → Decision 3
     );
 
     /// Handle an inbound HTTP webhook (button actions, Teams activities).
-    /// Slack always returns 404 — it has no inbound HTTP surface.
+    /// Slack always returns 404 — it has no inbound HTTP surface. (→ Decision 4)
     async fn handle_webhook(
         &self,
         sub_path: &str,
         headers: &HeaderMap,
         body: &Bytes,
-    ) -> WebhookOutcome;
+    ) -> WebhookOutcome;  // → Decision 8
 
     fn connection_status(&self) -> IntegrationConnectionStatus;
 }
 ```
 
-### `ChatEventContext` trait
+### `ChatEventContext` trait ([→ Decision 3](#decision-3-chateventcontext-for-circular-dependency))
 
 Breaks the circular dependency between `fabro-chat` and `fabro-server`. `AppState` implements
 this in `fabro-server`; provider crates never see `AppState`.
@@ -123,7 +130,7 @@ pub struct AnswerSubmission {
 }
 ```
 
-**`WebhookOutcome`** — avoids Axum types in provider crates:
+**`WebhookOutcome`** — avoids Axum types in provider crates ([→ Decision 8](#decision-8-webhookoutcome-struct-instead-of-axum-response)):
 ```rust
 pub struct WebhookOutcome {
     pub status: u16,
@@ -156,8 +163,8 @@ The internal modules (`client`, `connection`, `dispatch`, `blocks`, `threads`, `
 |---|---|
 | `kind()` | `ChatProviderKind::Slack` |
 | `start(on_submit)` | existing Socket Mode WebSocket loop |
-| `handle_event(envelope, context)` | existing logic; `state.store.get_cached_run()` → `context.get_run_projection()`; `state.env_lookup` → `context.resolve_env()` |
-| `handle_webhook(...)` | returns `WebhookOutcome { status: 404, body: None }` — Slack has no inbound HTTP surface |
+| `handle_event(envelope, context)` | existing logic; `state.store.get_cached_run()` → `context.get_run_projection()`; `state.env_lookup` → `context.resolve_env()` ([→ Decision 3](#decision-3-chateventcontext-for-circular-dependency)) |
+| `handle_webhook(...)` | returns `WebhookOutcome { status: 404, body: None }` — Slack has no inbound HTTP surface ([→ Decision 4](#decision-4-handle_webhook-method-vs-router-fragment)) |
 | `connection_status()` | existing method, moved as-is |
 
 The only meaningful code change is threading `ChatEventContext` through `handle_event`. Every
@@ -191,7 +198,7 @@ pub struct MattermostIntegrationSettings {
 
 | Secret | Purpose |
 |---|---|
-| `FABRO_MATTERMOST_TOKEN` | Bot/personal access token for REST API (`Authorization: Bearer`) and WebSocket authentication. Single token — no equivalent of Slack's separate app token. |
+| `FABRO_MATTERMOST_TOKEN` | Bot/personal access token for REST API (`Authorization: Bearer`) and WebSocket authentication. Single token — no equivalent of Slack's separate app token. ([→ Decision 9](#decision-9-single-mattermost-token)) |
 | `FABRO_MATTERMOST_WEBHOOK_SECRET` | Random token embedded as `?token=` in every button's `integration.url`. Handler verifies with constant-time compare before processing. |
 
 Both must be present for the integration to be `Configured`. Missing either disables it with a
@@ -347,6 +354,7 @@ pub struct MattermostService {
 
 `on_submit` is stored after `start()` is called so `handle_webhook` can invoke it when a button
 is clicked (the only path where button-action answers arrive, separate from the WS loop).
+([→ Decision 10](#decision-10-on_submit-stored-on-service))
 
 `handle_event` dispatches on `EventBody`:
 - `InterviewStarted` → resolve channel, post question attachment, register thread (freeform/allow_freeform), store `PostedMessage`
@@ -359,7 +367,7 @@ is clicked (the only path where button-action answers arrive, separate from the 
 
 The stub must be complete enough to prove the `ChatService` trait contract holds for a
 provider with no outbound connection. It exercises the `start()` no-op path and the
-`handle_webhook()` as sole event delivery mechanism.
+`handle_webhook()` as sole event delivery mechanism. ([→ Decision 6](#decision-6-ms-teams-stubs-included-now))
 
 ### Config & secrets
 
@@ -393,7 +401,7 @@ Minimal crate with `service.rs` and `lib.rs` only:
 | Method | Implementation |
 |---|---|
 | `kind()` | `ChatProviderKind::Teams` |
-| `start(on_submit)` | documented no-op; logs `"Teams: no outbound connection (pure inbound HTTP)"` |
+| `start(on_submit)` | documented no-op; logs `"Teams: no outbound connection (pure inbound HTTP)"` ([→ Decision 7](#decision-7-start-required-even-for-no-op-providers)) |
 | `handle_event(envelope, context)` | logs `"Teams notifications not yet implemented"` and returns |
 | `handle_webhook(sub_path, headers, body)` | returns `WebhookOutcome { status: 200, body: None }` — accepts any POST without validation (stub behavior) |
 | `connection_status()` | always returns `IntegrationConnectionStatus { status: Connected, .. }` — no connection to track |
@@ -411,13 +419,13 @@ slack_service: Option<Arc<SlackService>>,
 slack_started: AtomicBool,
 ```
 
-**Added:**
+**Added:** ([→ Decision 5](#decision-5-vec-of-chatservice-in-appstate))
 ```rust
 chat_services:         Vec<Arc<dyn ChatService>>,
 chat_services_started: AtomicBool,
 ```
 
-### `AppState` implements `ChatEventContext`
+### `AppState` implements `ChatEventContext` ([→ Decision 3](#decision-3-chateventcontext-for-circular-dependency))
 
 ```rust
 #[async_trait]
@@ -441,7 +449,7 @@ Single `start_chat_services(state: &Arc<AppState>)` function replaces
 2. **Inbound loop** — calls `service.start(on_submit)`. For Slack and Mattermost this runs
    forever (WebSocket with reconnect). For Teams it returns immediately.
 
-### Webhook dispatch
+### Webhook dispatch ([→ Decision 4](#decision-4-handle_webhook-method-vs-router-fragment))
 
 Single route outside the `principal_layer` nest:
 
@@ -539,14 +547,14 @@ user-visible CLI surface for chat integrations.
 - `client.rs`: `parse_post_response`, channel cache hit on second call.
 - `attachments.rs`: `question_to_attachments` for each `QuestionType`, `run_lifecycle_attachments`
   for each `RunLifecycleKind`, `answered_attachments`, truncation at limits — all asserted with
-  `insta` inline JSON snapshots.
+  `insta` inline JSON snapshots. ([→ Decision 11](#decision-11-fabro-idiomatic-test-assertions))
 - `connection.rs`: `process_message` for `hello`, `posted` (registered + unregistered thread),
   `goodbye`, malformed JSON; `wss_url_from_base` for `https://` and `http://` inputs.
 - `dispatch.rs`: table-driven over all `DispatchAction` variants.
 - `webhook.rs`: `parse_action` for yes/no/selected; missing fields return `None`;
   `constant_time_eq` correct/incorrect/different-length inputs.
 - `handle_webhook`: correct token → `200`, wrong token → `401`, missing token → `401` —
-  asserted with `expect_axum_status` helpers from `fabro-test`, not raw `assert_eq!`.
+  asserted with `expect_axum_status` helpers from `fabro-test`, not raw `assert_eq!`. ([→ Decision 11](#decision-11-fabro-idiomatic-test-assertions))
 
 Live provider tests requiring a real Mattermost instance:
 ```rust
@@ -566,7 +574,7 @@ async fn mattermost_posts_lifecycle_notification() { ... }
 - Webhook dispatch route: `POST /api/v1/webhooks/mattermost` with correct token → 200; wrong
   token → 401; `POST /api/v1/webhooks/slack` → 404; unknown provider → 404.
 - Existing conformance test updated to include `/api/v1/webhooks/:provider/*rest` route.
-- HTTP assertions use `expect_axum_status` / `expect_axum_ok_json` from `fabro-test`.
+- HTTP assertions use `expect_axum_status` / `expect_axum_ok_json` from `fabro-test`. ([→ Decision 11](#decision-11-fabro-idiomatic-test-assertions))
 
 ### Manual integration test (Mattermost)
 
@@ -604,7 +612,7 @@ tactical choices.
 
 ---
 
-### 1. Introduce a `ChatService` trait rather than sibling concrete services
+### Decision 1: ChatService Trait
 
 **Decision:** Extract a shared `ChatService` trait that Slack, Mattermost, and Teams all
 implement, rather than leaving each integration as an independent concrete struct wired
@@ -623,7 +631,7 @@ pressure to keep provider code self-contained.
 
 ---
 
-### 2. New `fabro-chat` crate for the trait, not `fabro-types` or a server-internal trait
+### Decision 2: fabro-chat Crate Placement
 
 **Decision:** The `ChatService` trait lives in a new `lib/crates/fabro-chat/` crate. Provider
 crates depend on it and implement it. `fabro-server` depends on it and holds
@@ -643,7 +651,7 @@ considered:
 
 ---
 
-### 3. `ChatEventContext` trait to break the circular dependency between `fabro-chat` and `fabro-server`
+### Decision 3: ChatEventContext for Circular Dependency
 
 **Decision:** `handle_event` takes `&dyn ChatEventContext` instead of `&AppState`. `AppState`
 implements `ChatEventContext` in `fabro-server`.
@@ -660,7 +668,7 @@ equivalent of defining a Ruby module in a gem that `ApplicationController` then 
 
 ---
 
-### 4. `handle_webhook` method on the trait rather than `fn router() -> Option<Router>`
+### Decision 4: handle_webhook Method vs Router Fragment
 
 **Decision:** Each provider implements `handle_webhook(sub_path, headers, body) -> WebhookOutcome`
 on the trait. The server owns a single `POST /api/v1/webhooks/:provider/*rest` route and
@@ -683,7 +691,7 @@ full router ownership.
 
 ---
 
-### 5. `Vec<Arc<dyn ChatService>>` in `AppState` rather than named optional fields
+### Decision 5: Vec of ChatService in AppState
 
 **Decision:** `AppState` holds `chat_services: Vec<Arc<dyn ChatService>>` rather than
 `slack_service: Option<Arc<SlackService>>`, `mattermost_service: Option<Arc<MattermostService>>`,
@@ -697,7 +705,7 @@ operation in `server.rs`. Dispatch in the webhook handler and event loop iterate
 
 ---
 
-### 6. MS Teams included as stubs in this design, not deferred
+### Decision 6: MS Teams Stubs Included Now
 
 **Decision:** A `fabro-teams` stub crate is included in this design even though it ships no
 real Teams functionality.
@@ -711,7 +719,7 @@ must be a valid no-op) before any code is written.
 
 ---
 
-### 7. `start()` is part of the `ChatService` contract even though Teams implements it as a no-op
+### Decision 7: start() Required Even for No-op Providers
 
 **Decision:** `start()` is a required method on the trait. Teams' implementation is a
 documented no-op that logs one line and returns immediately.
@@ -725,7 +733,7 @@ inbound HTTP.
 
 ---
 
-### 8. `WebhookOutcome { status: u16, body: Option<String> }` instead of `axum::response::Response`
+### Decision 8: WebhookOutcome Struct Instead of Axum Response
 
 **Decision:** `handle_webhook` returns a lightweight `WebhookOutcome` struct defined in
 `fabro-chat`, not an Axum `Response`.
@@ -737,7 +745,7 @@ and is convertible to an Axum response in `fabro-server`'s dispatch handler with
 
 ---
 
-### 9. Single `FABRO_MATTERMOST_TOKEN` instead of separate bot and app tokens
+### Decision 9: Single Mattermost Token
 
 **Decision:** One vault secret covers both REST API calls and WebSocket authentication.
 
@@ -749,7 +757,7 @@ add operator confusion.
 
 ---
 
-### 10. `on_submit` stored on `MattermostService` after `start()` rather than passed through every call
+### Decision 10: on_submit Stored on Service
 
 **Decision:** `MattermostService` stores `on_submit` in an `Arc<Mutex<Option<...>>>` field
 populated when `start()` is called. `handle_webhook` reads it from the field.
@@ -762,7 +770,7 @@ callback without the server needing to pass it explicitly on every HTTP request.
 
 ---
 
-### 11. Attachment tests use `insta` inline snapshots; webhook HTTP tests use `expect_axum_*` helpers
+### Decision 11: Fabro-Idiomatic Test Assertions
 
 **Decision:** Attachment JSON is asserted with `insta::assert_json_snapshot!`. HTTP status
 assertions in server tests use `expect_axum_status` / `expect_axum_ok_json` from `fabro-test`.
