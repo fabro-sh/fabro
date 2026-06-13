@@ -39,6 +39,10 @@ export interface Environment {
      */
     'revision': string;
     'provider': EnvironmentProvider;
+    /**
+     * Runtime command working directory for this environment.
+     */
+    'cwd'?: string | null;
     'image': EnvironmentApiImageSettings;
     'resources': EnvironmentResourcesSettings;
     'network': EnvironmentNetworkSettings;

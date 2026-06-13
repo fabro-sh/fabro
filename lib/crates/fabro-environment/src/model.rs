@@ -101,6 +101,9 @@ pub(crate) fn canonical_bytes(layer: &EnvironmentLayer) -> String {
     if let Some(provider) = layer.provider.as_deref() {
         doc["provider"] = value(provider);
     }
+    if let Some(cwd) = layer.cwd.as_deref() {
+        doc["cwd"] = value(cwd);
+    }
     if let Some(image) = layer.image.as_ref() {
         append_image(doc.as_table_mut(), image);
     }
@@ -180,6 +183,7 @@ async fn inline_dense_dockerfile(
 fn environment_settings_to_layer(settings: &EnvironmentSettings) -> EnvironmentLayer {
     EnvironmentLayer {
         provider:  Some(settings.provider.to_string()),
+        cwd:       settings.cwd.clone(),
         image:     image_settings_to_layer(&settings.image),
         resources: resources_settings_to_layer(&settings.resources),
         network:   network_settings_to_layer(&settings.network),

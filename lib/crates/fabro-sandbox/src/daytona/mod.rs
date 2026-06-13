@@ -513,6 +513,22 @@ impl DaytonaSandbox {
             .map_err(|_| crate::Error::message("Daytona working directory already initialized"))
     }
 
+    async fn apply_configured_cwd(
+        &self,
+        sandbox: &daytona_sdk::Sandbox,
+        cwd: &str,
+    ) -> crate::Result<()> {
+        let fs_svc = sandbox
+            .fs()
+            .await
+            .map_err(|e| crate::Error::context("Failed to get Daytona fs service", e))?;
+        fs_svc
+            .create_folder(cwd, None)
+            .await
+            .map_err(|e| wrap_fs_error("Failed to create configured Daytona cwd", cwd, e))?;
+        self.set_working_directory(cwd.to_string())
+    }
+
     /// Build `SandboxBaseParams` from config, generating a unique sandbox name.
     fn base_params(&self) -> daytona_sdk::SandboxBaseParams {
         let name = if let Some(ref id) = self.run_id {
@@ -845,8 +861,10 @@ impl Sandbox for DaytonaSandbox {
                     .await
                     .map_err(|e| crate::Error::context("Failed to create working directory", e))?;
                 let _ = self.repo_cloned.set(false);
-                self.set_working_directory(WORKING_DIRECTORY)
-                    .map_err(|err| self.fail_init(init_start, err))?;
+                if self.config.cwd.is_none() {
+                    self.set_working_directory(WORKING_DIRECTORY)
+                        .map_err(|err| self.fail_init(init_start, err))?;
+                }
             }
             CloneDecision::GitHub { origin_url, branch } => {
                 let layout =
@@ -1033,8 +1051,10 @@ impl Sandbox for DaytonaSandbox {
 
                         let _ = self.repo_cloned.set(true);
                         let _ = self.origin_url.set(origin_url.clone());
-                        self.set_working_directory(layout.execution_directory.clone())
-                            .map_err(|err| self.fail_init(init_start, err))?;
+                        if self.config.cwd.is_none() {
+                            self.set_working_directory(layout.execution_directory.clone())
+                                .map_err(|err| self.fail_init(init_start, err))?;
+                        }
                         if let Some(token) = clone_token {
                             match fabro_github::embed_token_in_url(&origin_url, &token) {
                                 Ok(auth_url) => {
@@ -1117,6 +1137,12 @@ impl Sandbox for DaytonaSandbox {
                     }
                 }
             }
+        }
+
+        if let Some(cwd) = self.config.cwd.as_deref() {
+            self.apply_configured_cwd(&sandbox, cwd)
+                .await
+                .map_err(|err| self.fail_init(init_start, err))?;
         }
 
         let sandbox_name = sandbox.name.clone();

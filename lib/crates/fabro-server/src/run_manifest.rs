@@ -20,6 +20,7 @@ use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::from_environment::{
     daytona_config_from_environment, docker_config_from_environment,
+    local_working_directory_from_environment,
 };
 use fabro_sandbox::redact::redact_auth_url;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxSpec};
@@ -850,17 +851,21 @@ fn preflight_sandbox_spec(
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
     daytona_api_key: Option<String>,
-) -> SandboxSpec {
+) -> std::result::Result<SandboxSpec, fabro_sandbox::Error> {
     let clone_origin_url = prepared
         .git
         .as_ref()
         .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url));
     let clone_branch = prepared.git.as_ref().map(|git| git.branch.clone());
 
-    match sandbox_provider {
-        SandboxProviderKind::Local => SandboxSpec::Local {
-            working_directory: prepared.source_directory.clone(),
-        },
+    Ok(match sandbox_provider {
+        SandboxProviderKind::Local => {
+            let working_directory = local_working_directory_from_environment(
+                &resolved_run.environment,
+                Some(&prepared.source_directory),
+            )?;
+            SandboxSpec::Local { working_directory }
+        }
         SandboxProviderKind::Docker => {
             let mut config = resolve_docker_config(resolved_run);
             config.skip_clone = true;
@@ -884,7 +889,7 @@ fn preflight_sandbox_spec(
                 api_key: daytona_api_key,
             }
         }
-    }
+    })
 }
 
 async fn run_sandbox_check(
@@ -895,13 +900,25 @@ async fn run_sandbox_check(
     github_app: Option<fabro_github::GitHubCredentials>,
     daytona_api_key: Option<String>,
 ) -> bool {
-    let spec = preflight_sandbox_spec(
+    let spec = match preflight_sandbox_spec(
         sandbox_provider,
         prepared,
         resolved_run,
         github_app.clone(),
         daytona_api_key,
-    );
+    ) {
+        Ok(spec) => spec,
+        Err(err) => {
+            checks.push(CheckResult {
+                name:        "Sandbox".into(),
+                status:      CheckStatus::Error,
+                summary:     "failed".into(),
+                details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
+                remediation: Some(err.to_string()),
+            });
+            return false;
+        }
+    };
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = spec.build(None).await.map_err(|err| {
         if matches!(sandbox_provider, SandboxProviderKind::Daytona) {
             format!("Daytona sandbox creation failed: {err}")
@@ -1707,12 +1724,12 @@ provider = "local"
         );
 
         match spec {
-            SandboxSpec::Docker {
+            Ok(SandboxSpec::Docker {
                 config,
                 clone_origin_url,
                 clone_branch,
                 ..
-            } => {
+            }) => {
                 assert!(config.skip_clone);
                 assert_eq!(
                     clone_origin_url.as_deref(),

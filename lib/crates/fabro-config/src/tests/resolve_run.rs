@@ -180,6 +180,76 @@ NODE_ENV = "development"
 }
 
 #[test]
+fn resolves_environment_cwd_from_injected_server_catalog() {
+    let settings = workflow_settings_from_toml_with_catalog(
+        r#"
+_version = 1
+
+[run.environment]
+id = "host"
+"#,
+        r#"
+[environments.host]
+provider = "local"
+cwd = "/srv/fabro/workspaces/team-a"
+"#,
+    )
+    .expect("server-managed environment cwd should resolve");
+
+    assert_eq!(
+        settings.run.environment.cwd.as_deref(),
+        Some("/srv/fabro/workspaces/team-a")
+    );
+}
+
+#[test]
+fn rejects_environment_cwd_in_client_workflow_catalog() {
+    let err = workflow_settings_from_toml(
+        r#"
+_version = 1
+
+[run.environment]
+id = "host"
+
+[environments.host]
+provider = "local"
+cwd = "/srv/fabro/workspaces/team-a"
+"#,
+    )
+    .expect_err("client-owned workflow environments must not set cwd");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("environments.host.cwd") && message.contains("server-managed"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn rejects_relative_environment_cwd_from_server_catalog() {
+    let err = workflow_settings_from_toml_with_catalog(
+        r#"
+_version = 1
+
+[run.environment]
+id = "host"
+"#,
+        r#"
+[environments.host]
+provider = "local"
+cwd = "relative/workspace"
+"#,
+    )
+    .expect_err("relative environment cwd should not resolve");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("environment.cwd") && message.contains("absolute path"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
 fn resolves_run_level_clone_branch_controls() {
     let settings = super::workflow_settings_from_toml(
         r"

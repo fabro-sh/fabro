@@ -31,7 +31,14 @@ const LEGACY_LLM_KEYS: &[&str] = &[
 pub enum ParseError {
     Toml(String),
     Version(VersionError),
-    UnknownTopLevelKey { key: String, hint: Option<String> },
+    UnknownTopLevelKey {
+        key:  String,
+        hint: Option<String>,
+    },
+    ServerManagedEnvironmentCwd {
+        path:   String,
+        source: SettingsSource,
+    },
 }
 
 impl fmt::Display for ParseError {
@@ -49,6 +56,10 @@ impl fmt::Display for ParseError {
                     )
                 }
             }
+            Self::ServerManagedEnvironmentCwd { path, source } => write!(
+                f,
+                "`{path}` is server-managed and cannot be set in {source} settings; configure cwd on a server-managed environment instead."
+            ),
         }
     }
 }
@@ -128,12 +139,40 @@ impl SettingsSource {
     pub(crate) fn runs_settings_migrations(self) -> bool {
         matches!(self, Self::ActiveSettings)
     }
+
+    #[must_use]
+    fn allows_environment_cwd(self) -> bool {
+        matches!(self, Self::ActiveSettings)
+    }
+}
+
+impl fmt::Display for SettingsSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::ActiveSettings => "active server",
+            Self::Project => "project",
+            Self::Workflow => "workflow",
+            Self::DirectRun => "direct-run",
+            Self::User => "user",
+        };
+        f.write_str(label)
+    }
 }
 
 pub fn validate_settings_source(
-    _layer: &SettingsLayer,
-    _source: SettingsSource,
+    layer: &SettingsLayer,
+    source: SettingsSource,
 ) -> Result<(), ParseError> {
+    if !source.allows_environment_cwd() {
+        for (id, environment) in layer.environments.iter() {
+            if environment.cwd.is_some() {
+                return Err(ParseError::ServerManagedEnvironmentCwd {
+                    path: format!("environments.{id}.cwd"),
+                    source,
+                });
+            }
+        }
+    }
     Ok(())
 }
 

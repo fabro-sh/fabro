@@ -3,6 +3,8 @@
 //! These mappings are consumed by both the workflow run-start path and the
 //! server preflight path, so they live here next to their destination types.
 
+use std::path::{Path, PathBuf};
+
 #[cfg(feature = "daytona")]
 use fabro_types::settings::run::DockerfileSource as ResolvedDockerfileSource;
 use fabro_types::settings::run::{EnvironmentNetworkMode, RunEnvironmentSettings};
@@ -27,6 +29,7 @@ pub fn daytona_config_from_environment(
             .lifecycle
             .auto_stop
             .map(|duration| duration_to_minutes_i32(duration.as_std())),
+        cwd: settings.cwd.clone(),
         labels: (!settings.labels.is_empty()).then(|| settings.labels.clone()),
         snapshot: settings
             .image
@@ -82,6 +85,7 @@ pub fn docker_config_from_environment(
             .docker
             .clone()
             .unwrap_or(default_options.image),
+        cwd: settings.cwd.clone(),
         network_mode: match settings.network.mode {
             EnvironmentNetworkMode::Block => Some("none".to_string()),
             EnvironmentNetworkMode::AllowAll | EnvironmentNetworkMode::CidrAllowList => {
@@ -100,6 +104,30 @@ pub fn docker_config_from_environment(
         skip_clone,
         ..DockerSandboxOptions::default()
     }
+}
+
+pub fn local_working_directory_from_environment(
+    settings: &RunEnvironmentSettings,
+    source_directory: Option<&Path>,
+) -> crate::Result<PathBuf> {
+    if let Some(cwd) = settings.cwd.as_deref() {
+        return Ok(PathBuf::from(cwd));
+    }
+
+    let Some(source_directory) = source_directory else {
+        return Err(crate::Error::message(
+            "local environment requires a server-side working directory; configure `environment.cwd = \"/absolute/path\"` on the selected local environment",
+        ));
+    };
+
+    if source_directory.is_dir() {
+        return Ok(source_directory.to_path_buf());
+    }
+
+    Err(crate::Error::message(format!(
+        "local environment source_directory does not exist or is not a directory on this server: {}. Configure `environment.cwd = \"/absolute/path\"` on the selected local environment for remote client/server deployments.",
+        source_directory.display()
+    )))
 }
 
 #[cfg(feature = "docker")]
@@ -121,4 +149,97 @@ fn duration_to_minutes_i32(duration: std::time::Duration) -> i32 {
 fn size_to_gb_i32(bytes: u64) -> i32 {
     let gb = bytes / 1_000_000_000;
     i32::try_from(gb).unwrap_or(i32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    use fabro_types::settings::run::{
+        EnvironmentImageSettings, EnvironmentLifecycleSettings, EnvironmentNetworkSettings,
+        EnvironmentProvider, EnvironmentResourcesSettings,
+    };
+
+    use super::*;
+
+    fn run_environment(provider: EnvironmentProvider) -> RunEnvironmentSettings {
+        RunEnvironmentSettings {
+            id: "host".to_string(),
+            provider,
+            cwd: None,
+            image: EnvironmentImageSettings::default(),
+            resources: EnvironmentResourcesSettings::default(),
+            network: EnvironmentNetworkSettings::default(),
+            lifecycle: EnvironmentLifecycleSettings::default(),
+            labels: HashMap::new(),
+            env: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn local_working_directory_prefers_environment_cwd() {
+        let mut settings = run_environment(EnvironmentProvider::Local);
+        settings.cwd = Some("/srv/fabro/workspaces/team-a".to_string());
+        let missing_source = Path::new("/path/that/should/not/exist");
+
+        let resolved = local_working_directory_from_environment(&settings, Some(missing_source))
+            .expect("configured cwd should be accepted");
+
+        assert_eq!(resolved, PathBuf::from("/srv/fabro/workspaces/team-a"));
+        assert!(!missing_source.exists());
+    }
+
+    #[test]
+    fn local_working_directory_uses_existing_source_directory_without_cwd() {
+        let settings = run_environment(EnvironmentProvider::Local);
+        let dir = tempfile::tempdir().unwrap();
+
+        let resolved = local_working_directory_from_environment(&settings, Some(dir.path()))
+            .expect("existing source directory should be accepted");
+
+        assert_eq!(resolved, dir.path());
+    }
+
+    #[test]
+    fn local_working_directory_rejects_missing_source_directory_without_cwd() {
+        let settings = run_environment(EnvironmentProvider::Local);
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("client-only");
+
+        let err = local_working_directory_from_environment(&settings, Some(&missing))
+            .expect_err("missing source directory without cwd should fail");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("environment.cwd") && message.contains("does not exist"),
+            "unexpected error: {message}"
+        );
+        assert!(!missing.exists());
+    }
+
+    #[cfg(feature = "docker")]
+    #[test]
+    fn docker_config_carries_environment_cwd() {
+        let mut settings = run_environment(EnvironmentProvider::Docker);
+        settings.cwd = Some("/workspace/custom".to_string());
+
+        let config = docker_config_from_environment(&settings, false);
+
+        assert_eq!(config.cwd.as_deref(), Some("/workspace/custom"));
+    }
+
+    #[cfg(feature = "daytona")]
+    #[test]
+    fn daytona_config_carries_environment_cwd() {
+        let mut settings = run_environment(EnvironmentProvider::Daytona);
+        settings.cwd = Some("/home/daytona/workspace/custom".to_string());
+
+        let config = daytona_config_from_environment(&settings, false);
+
+        assert_eq!(
+            config.cwd.as_deref(),
+            Some("/home/daytona/workspace/custom")
+        );
+    }
 }

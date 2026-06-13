@@ -788,6 +788,8 @@ impl Default for EnvironmentLifecycleSettings {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentSettings {
     pub provider:  EnvironmentProvider,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd:       Option<String>,
     pub image:     EnvironmentImageSettings,
     pub resources: EnvironmentResourcesSettings,
     pub network:   EnvironmentNetworkSettings,
@@ -800,6 +802,7 @@ impl Default for EnvironmentSettings {
     fn default() -> Self {
         Self {
             provider:  EnvironmentProvider::Local,
+            cwd:       None,
             image:     EnvironmentImageSettings::default(),
             resources: EnvironmentResourcesSettings::default(),
             network:   EnvironmentNetworkSettings::default(),
@@ -814,6 +817,8 @@ impl Default for EnvironmentSettings {
 pub struct RunEnvironmentSettings {
     pub id:        String,
     pub provider:  EnvironmentProvider,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd:       Option<String>,
     pub image:     EnvironmentImageSettings,
     pub resources: EnvironmentResourcesSettings,
     pub network:   EnvironmentNetworkSettings,
@@ -828,6 +833,7 @@ impl RunEnvironmentSettings {
         Self {
             id,
             provider: environment.provider,
+            cwd: environment.cwd,
             image: environment.image,
             resources: environment.resources,
             network: environment.network,

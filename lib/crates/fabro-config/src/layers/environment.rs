@@ -12,6 +12,8 @@ pub struct EnvironmentLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider:  Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd:       Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image:     Option<EnvironmentImageLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resources: Option<EnvironmentResourcesLayer>,
@@ -49,6 +51,7 @@ impl RunEnvironmentLayer {
     pub fn into_environment_override(self) -> EnvironmentLayer {
         EnvironmentLayer {
             provider:  None,
+            cwd:       None,
             image:     self.image,
             resources: self.resources,
             network:   self.network,

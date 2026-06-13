@@ -51,6 +51,17 @@ fn environment_response_round_trips_public_json_shape() {
 }
 
 #[test]
+fn environment_response_round_trips_cwd_json_shape() {
+    let mut value = environment_settings_json();
+    value["id"] = json!("docker-inline");
+    value["revision"] = json!("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    value["cwd"] = json!("/workspace/custom");
+
+    let api: ApiEnvironment = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(api).unwrap(), value);
+}
+
+#[test]
 fn create_environment_request_round_trips_inline_dockerfile_json_shape() {
     let mut value = environment_settings_json();
     value["id"] = json!("docker-inline");

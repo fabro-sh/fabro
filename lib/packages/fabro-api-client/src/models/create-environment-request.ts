@@ -35,6 +35,10 @@ import type { EnvironmentResourcesSettings } from './environment-resources-setti
 export interface CreateEnvironmentRequest {
     'id': string;
     'provider': EnvironmentProvider;
+    /**
+     * Runtime command working directory for this environment.
+     */
+    'cwd'?: string | null;
     'image': EnvironmentApiImageSettings;
     'resources': EnvironmentResourcesSettings;
     'network': EnvironmentNetworkSettings;

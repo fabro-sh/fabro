@@ -6371,6 +6371,10 @@ components:
           example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Runtime command working directory for this environment.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -6406,6 +6410,10 @@ components:
           example: docker
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Runtime command working directory for this environment.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -6436,6 +6444,10 @@ components:
       properties:
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Runtime command working directory for this environment.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -13342,6 +13354,10 @@ components:
           type: string
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Runtime command working directory for this environment.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentImageSettings"
         resources:
@@ -13363,6 +13379,10 @@ components:
       properties:
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Runtime command working directory for this environment.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentImageSettings"
         resources:

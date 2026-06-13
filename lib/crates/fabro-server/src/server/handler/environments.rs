@@ -34,6 +34,7 @@ struct EnvironmentListMeta {
 struct CreateEnvironmentRequest {
     id:        EnvironmentId,
     provider:  EnvironmentProvider,
+    cwd:       Option<String>,
     image:     ApiEnvironmentImageSettings,
     resources: EnvironmentResourcesSettings,
     network:   EnvironmentNetworkSettings,
@@ -46,6 +47,7 @@ struct CreateEnvironmentRequest {
 #[serde(deny_unknown_fields)]
 struct ReplaceEnvironmentRequest {
     provider:  EnvironmentProvider,
+    cwd:       Option<String>,
     image:     ApiEnvironmentImageSettings,
     resources: EnvironmentResourcesSettings,
     network:   EnvironmentNetworkSettings,
@@ -81,6 +83,7 @@ impl CreateEnvironmentRequest {
             id:       self.id,
             settings: EnvironmentSettings {
                 provider:  self.provider,
+                cwd:       self.cwd,
                 image:     self.image.into_settings()?,
                 resources: self.resources,
                 network:   self.network,
@@ -96,6 +99,7 @@ impl ReplaceEnvironmentRequest {
     fn into_settings(self) -> Result<EnvironmentSettings, ApiError> {
         Ok(EnvironmentSettings {
             provider:  self.provider,
+            cwd:       self.cwd,
             image:     self.image.into_settings()?,
             resources: self.resources,
             network:   self.network,

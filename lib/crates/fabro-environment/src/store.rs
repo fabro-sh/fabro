@@ -479,6 +479,7 @@ mod tests {
     fn settings(provider: EnvironmentProvider) -> EnvironmentSettings {
         EnvironmentSettings {
             provider,
+            cwd: None,
             image: EnvironmentImageSettings::default(),
             resources: EnvironmentResourcesSettings::default(),
             network: EnvironmentNetworkSettings::default(),
@@ -838,6 +839,86 @@ path = "Dockerfile"
             .unwrap();
 
         assert_ne!(created.revision, replaced.revision);
+    }
+
+    #[tokio::test]
+    async fn create_persists_cwd_and_load_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let environment_dir = dir.path().join("environments");
+        let store = EnvironmentStore::load(&environment_dir, true).unwrap();
+        let mut settings = settings(EnvironmentProvider::Local);
+        settings.cwd = Some("/srv/fabro/workspaces/team-a".to_string());
+
+        let created = store
+            .create(EnvironmentDraft {
+                id: EnvironmentId::new("host").unwrap(),
+                settings,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            created.settings.cwd.as_deref(),
+            Some("/srv/fabro/workspaces/team-a")
+        );
+        let persisted = fs::read_to_string(environment_dir.join("host.toml"))
+            .await
+            .unwrap();
+        assert!(persisted.contains("cwd = \"/srv/fabro/workspaces/team-a\""));
+
+        let loaded = EnvironmentStore::load(&environment_dir, true).unwrap();
+        let host = loaded.get(&EnvironmentId::new("host").unwrap()).unwrap();
+        assert_eq!(
+            host.settings.cwd.as_deref(),
+            Some("/srv/fabro/workspaces/team-a")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_rejects_relative_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = EnvironmentStore::load(dir.path().join("environments"), true).unwrap();
+        let mut settings = settings(EnvironmentProvider::Local);
+        settings.cwd = Some("relative/workspace".to_string());
+
+        let err = store
+            .create(EnvironmentDraft {
+                id: EnvironmentId::new("host").unwrap(),
+                settings,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
+        let message = err.to_string();
+        assert!(
+            message.contains("environment.cwd") && message.contains("absolute path"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn load_rejects_empty_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let environment_dir = dir.path().join("environments");
+        std::fs::create_dir_all(&environment_dir).unwrap();
+        std::fs::write(
+            environment_dir.join("bad.toml"),
+            r#"
+provider = "local"
+cwd = ""
+"#,
+        )
+        .unwrap();
+
+        let err = EnvironmentStore::load(&environment_dir, true).unwrap_err();
+
+        assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
+        let message = err.to_string();
+        assert!(
+            message.contains("environment.cwd") && message.contains("must not be empty"),
+            "unexpected error: {message}"
+        );
     }
 
     #[tokio::test]

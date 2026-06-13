@@ -176,11 +176,14 @@ async fn list_environments_returns_seeded_catalog_sorted_by_id() {
 #[tokio::test]
 async fn create_environment_persists_sibling_toml_and_is_visible() {
     let (app, _temp_dir, environment_dir) = environment_app();
+    let mut body = environment_body("custom-env", "docker");
+    body["cwd"] = json!("/workspace/custom");
 
-    let created = create_environment(&app, "custom-env", "docker").await;
+    let created = create_environment_with_body(&app, &body).await;
 
     assert_eq!(created["id"], "custom-env");
     assert_eq!(created["provider"], "docker");
+    assert_eq!(created["cwd"], "/workspace/custom");
     assert!(environment_dir.join("custom-env.toml").exists());
 
     let retrieved = app
@@ -195,6 +198,7 @@ async fn create_environment_persists_sibling_toml_and_is_visible() {
     )
     .await;
     assert_eq!(retrieved["id"], "custom-env");
+    assert_eq!(retrieved["cwd"], "/workspace/custom");
 
     let list = app
         .oneshot(empty_request(Method::GET, "/environments"))
@@ -214,6 +218,10 @@ async fn create_environment_persists_sibling_toml_and_is_visible() {
     assert_eq!(
         persisted.get("provider").and_then(toml::Value::as_str),
         Some("docker")
+    );
+    assert_eq!(
+        persisted.get("cwd").and_then(toml::Value::as_str),
+        Some("/workspace/custom")
     );
     assert!(persisted.get("id").is_none());
     assert!(persisted.get("revision").is_none());
@@ -254,6 +262,7 @@ async fn replace_environment_updates_file_and_returns_new_etag() {
     let revision = revision_from(&created);
     let mut replacement = environment_settings("local");
     replacement["labels"] = json!({ "tier": "dev" });
+    replacement["cwd"] = json!("/srv/fabro/local");
 
     let response = app
         .oneshot(request_with_if_match(
@@ -281,6 +290,7 @@ async fn replace_environment_updates_file_and_returns_new_etag() {
 
     assert_eq!(body["provider"], "local");
     assert_eq!(body["labels"]["tier"], "dev");
+    assert_eq!(body["cwd"], "/srv/fabro/local");
     assert_ne!(body["revision"], revision);
     assert_eq!(etag, format!("\"{}\"", revision_from(&body)));
     let persisted = persisted_environment_toml(&environment_dir, "replace-env").await;
@@ -291,6 +301,10 @@ async fn replace_environment_updates_file_and_returns_new_etag() {
             .and_then(|labels| labels.get("tier"))
             .and_then(toml::Value::as_str),
         Some("dev")
+    );
+    assert_eq!(
+        persisted.get("cwd").and_then(toml::Value::as_str),
+        Some("/srv/fabro/local")
     );
 }
 
@@ -522,6 +536,31 @@ async fn invalid_environment_settings_return_unprocessable_entity() {
         "POST /api/v1/environments invalid settings",
     )
     .await;
+}
+
+#[tokio::test]
+async fn relative_environment_cwd_over_rest_returns_unprocessable_entity() {
+    let (app, _temp_dir, environment_dir) = environment_app();
+    let mut body = environment_body("relative-cwd", "local");
+    body["cwd"] = json!("relative/workspace");
+
+    let response = app
+        .oneshot(json_request(Method::POST, "/environments", &body))
+        .await
+        .expect("invalid cwd create should respond");
+    let error = response_json(
+        response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "POST /api/v1/environments relative cwd",
+    )
+    .await;
+
+    assert!(!environment_dir.join("relative-cwd.toml").exists());
+    let message = serde_json::to_string(&error).expect("error should serialize");
+    assert!(
+        message.contains("environment.cwd") && message.contains("absolute path"),
+        "unexpected error: {message}"
+    );
 }
 
 #[tokio::test]

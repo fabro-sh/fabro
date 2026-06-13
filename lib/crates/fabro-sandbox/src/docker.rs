@@ -62,6 +62,8 @@ pub fn docker_access_command(container_id: &str, working_directory: &str) -> Str
 pub struct DockerSandboxOptions {
     /// Docker image to use.
     pub image:        String,
+    /// Command working directory override inside the container.
+    pub cwd:          Option<String>,
     /// Docker network mode. Default: `Some("bridge")`.
     pub network_mode: Option<String>,
     /// Memory limit in bytes. `None` = unlimited.
@@ -80,6 +82,7 @@ impl Default for DockerSandboxOptions {
     fn default() -> Self {
         Self {
             image:        "buildpack-deps:noble".to_string(),
+            cwd:          None,
             network_mode: Some("bridge".to_string()),
             memory_limit: None,
             cpu_quota:    None,
@@ -586,7 +589,34 @@ impl DockerSandbox {
                 result.stderr
             )));
         }
-        self.set_working_directory(WORKING_DIRECTORY)?;
+        if self.config.cwd.is_none() {
+            self.set_working_directory(WORKING_DIRECTORY)?;
+        }
+        Ok(())
+    }
+
+    async fn apply_configured_cwd(&self) -> crate::Result<()> {
+        let Some(cwd) = self.config.cwd.as_deref() else {
+            return Ok(());
+        };
+        let result = self
+            .docker_exec_shell(
+                &format!("mkdir -p {}", shell_quote(cwd)),
+                10_000,
+                Some("/"),
+                None,
+                None,
+            )
+            .await?;
+        if !result.is_success() {
+            return Err(crate::Error::message(format!(
+                "Failed to create configured Docker cwd {} (exit {}): {}",
+                cwd,
+                result.display_exit_code(),
+                result.stderr
+            )));
+        }
+        self.set_working_directory(cwd.to_string())?;
         Ok(())
     }
 
@@ -660,7 +690,9 @@ impl DockerSandbox {
 
         let _ = self.repo_cloned.set(true);
         let _ = self.origin_url.set(origin_url.clone());
-        self.set_working_directory(layout.execution_directory.clone())?;
+        if self.config.cwd.is_none() {
+            self.set_working_directory(layout.execution_directory.clone())?;
+        }
 
         if let Some(auth_url) = auth_url.as_ref() {
             let command = format!(
@@ -1360,6 +1392,10 @@ impl Sandbox for DockerSandbox {
                     return Err(self.fail_init(init_start, e));
                 }
             }
+        }
+
+        if let Err(e) = self.apply_configured_cwd().await {
+            return Err(self.fail_init(init_start, e));
         }
 
         let init_duration = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
