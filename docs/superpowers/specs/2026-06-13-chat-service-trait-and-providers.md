@@ -595,6 +595,34 @@ Against `docker run --name mattermost-preview -p 8065:8065 mattermost/mattermost
 - Updated: `docs/public/administration/server-configuration.mdx` — add Mattermost and Teams sections and new secrets to the secrets table
 - Updated: `.env.example` — add `FABRO_MATTERMOST_TOKEN`, `FABRO_MATTERMOST_WEBHOOK_SECRET`, `FABRO_TEAMS_WEBHOOK_SECRET` (commented out)
 
+## Implementation Sequence
+
+This design is delivered as four stacked PRs, each independently reviewable and testable.
+Each PR has its own implementation plan.
+
+**PR 1 — `fabro-chat`: trait and shared types**
+Create `lib/crates/fabro-chat/` with the `ChatService` and `ChatEventContext` traits, shared
+types (`AnswerSubmission`, `ChatProviderKind`, `WebhookOutcome`), and test-support helpers
+(`MockChatEventContext`, `assert_chat_service_contract`). No wiring, no behavior change — just
+the contract. Reviewers can approve the API surface before any implementation lands.
+
+**PR 2 — Slack refactor**
+Move `SlackService` from `server.rs` into `fabro-slack` and implement `ChatService` on it.
+Rewire `AppState` to hold `Vec<Arc<dyn ChatService>>`, implement `ChatEventContext` for
+`AppState`, replace `start_optional_slack_service` with `start_chat_services`, and add the
+`POST /api/v1/webhooks/:provider/*rest` dispatch route. All existing Slack behavior passes
+unchanged — this PR has zero user-visible effect.
+
+**PR 3 — Mattermost**
+Add `fabro-mattermost` (all eight modules), `MattermostIntegrationSettings` /
+`Principal::Mattermost` type additions, the two new vault secrets, server wiring, and the
+docs page. First PR that ships new user-facing functionality.
+
+**PR 4 — MS Teams stub**
+Add `fabro-teams` (two modules), `TeamsIntegrationSettings` / `Principal::Teams`, one vault
+secret, server wiring, and the stub docs page. Closes the loop on trait validation for
+pure-inbound-HTTP providers.
+
 ## Out of Scope
 
 - Full MS Teams implementation (Adaptive Cards, JWT validation, Bot Framework activity routing).
