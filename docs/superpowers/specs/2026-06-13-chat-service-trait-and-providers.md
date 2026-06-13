@@ -117,6 +117,7 @@ pub trait ChatService: Send + Sync {
     async fn handle_webhook(
         &self,
         sub_path: &str,
+        query_string: &str,   // raw query string, e.g. "token=abc&foo=bar"
         headers: &HeaderMap,
         body: &Bytes,
     ) -> WebhookOutcome;  // → Decision 8
@@ -135,8 +136,15 @@ this in `fabro-server`; provider crates never see `AppState`.
 pub trait ChatEventContext: Send + Sync {
     async fn get_run_projection(&self, run_id: RunId) -> Option<Arc<RunProjection>>;
     fn resolve_env(&self, name: &str) -> Option<String>;
+    /// Base URL for the Fabro web UI, used to build run deep links in notifications.
+    fn run_web_url(&self, run_id: &RunId) -> Option<String>;
+    /// Canonical server origin (e.g. `https://fabro.example.com`), used by Mattermost
+    /// to build button `integration.url` values.
+    fn canonical_origin(&self) -> Option<String>;
 }
 ```
+
+`MockChatEventContext` in `test-support` provides configurable stubs for all four methods.
 
 ### Shared types
 
@@ -192,7 +200,7 @@ The internal modules (`client`, `connection`, `dispatch`, `blocks`, `threads`, `
 | `kind()` | `ChatProviderKind::Slack` |
 | `start(on_submit)` | existing Socket Mode WebSocket loop |
 | `handle_event(envelope, context)` | existing logic; `state.store.get_cached_run()` → `context.get_run_projection()`; `state.env_lookup` → `context.resolve_env()` ([→ Decision 3](#decision-3-chateventcontext-for-circular-dependency)) |
-| `handle_webhook(...)` | returns `WebhookOutcome { status: 404, body: None }` — Slack has no inbound HTTP surface ([→ Decision 4](#decision-4-handle_webhook-method-vs-router-fragment)) |
+| `handle_webhook(sub_path, query_string, headers, body)` | returns `WebhookOutcome { status: 404, body: None }` — Slack has no inbound HTTP surface ([→ Decision 4](#decision-4-handle_webhook-method-vs-router-fragment)) |
 | `connection_status()` | existing method, moved as-is |
 
 The only meaningful code change is threading `ChatEventContext` through `handle_event`. Every
@@ -486,9 +494,9 @@ POST /api/v1/webhooks/:provider/*rest
 ```
 
 Handler:
-1. Extract `:provider` path segment
+1. Extract `:provider` path segment and raw query string (`uri.query().unwrap_or("")`)
 2. Find service in `chat_services` where `service.kind().as_str() == provider`
-3. Call `service.handle_webhook(rest, &headers, &body).await`
+3. Call `service.handle_webhook(rest, query_string, &headers, &body).await`
 4. Convert `WebhookOutcome` to HTTP response
 
 Unknown provider → 404. Slack → 404 (its `handle_webhook` always returns 404).
@@ -524,6 +532,12 @@ Teams {
 
 `kind()` and `display()` updated for both variants.
 
+**OpenAPI:** `docs/public/api-reference/fabro-api.yaml` — the `Principal` oneOf discriminator
+currently lists only `slack` among chat actors. Add `mattermost` and `teams` discriminator
+entries with their respective property schemas. After editing the YAML, run
+`cargo build -p fabro-api` to regenerate Rust types and
+`cd lib/packages/fabro-api-client && bun run generate` to regenerate the TypeScript client.
+
 ### Settings
 
 `ServerIntegrationsSettings`:
@@ -538,6 +552,57 @@ pub struct ServerIntegrationsSettings {
 
 `NotificationRouteSettings` and `RunInterviewsSettings`: add `mattermost` and `teams`
 optional provider settings fields parallel to existing `slack` fields.
+
+## `fabro-config` changes
+
+The TOML pipeline is `fabro-config` (raw parse with `deny_unknown_fields`) → resolver →
+`fabro-types` resolved structs. New integration fields must land in both layers or the TOML is
+rejected before the resolver runs.
+
+### Raw config structs (`fabro-config`)
+
+Mirror every new `fabro-types` settings struct with a raw counterpart in `fabro-config`:
+
+```rust
+// fabro-config/src/server.rs (raw layer)
+pub struct RawServerIntegrationsSettings {
+    pub github:     RawGithubIntegrationSettings,
+    pub slack:      RawSlackIntegrationSettings,
+    pub mattermost: RawMattermostIntegrationSettings,  // new
+    pub teams:      RawTeamsIntegrationSettings,        // new
+}
+
+pub struct RawMattermostIntegrationSettings {
+    pub enabled:         Option<bool>,
+    pub url:             Option<String>,
+    pub team:            Option<String>,
+    pub default_channel: Option<String>,
+}
+
+pub struct RawTeamsIntegrationSettings {
+    pub enabled: Option<bool>,
+}
+```
+
+Likewise add `mattermost` and `teams` optional fields to the raw run notification and
+interview settings structs that already carry a `slack` field.
+
+### Resolver
+
+In the resolver function that converts raw config → `ServerNamespace`, populate the new
+fields:
+
+```rust
+integrations: ServerIntegrationsSettings {
+    github:     resolve_github(&raw.integrations.github),
+    slack:      resolve_slack(&raw.integrations.slack),
+    mattermost: resolve_mattermost(&raw.integrations.mattermost),  // new
+    teams:      resolve_teams(&raw.integrations.teams),             // new
+},
+```
+
+`resolve_mattermost` and `resolve_teams` follow the same pattern as `resolve_slack`: apply
+defaults, convert `Option<String>` → `Option<InterpString>`.
 
 ## `fabro-static` changes
 
