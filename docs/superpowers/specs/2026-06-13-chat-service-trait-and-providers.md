@@ -594,3 +594,182 @@ Against `docker run --name mattermost-preview -p 8065:8065 mattermost/mattermost
 - Multi-team routing. One `team` per Fabro server; all channels must be in that team.
 - Mattermost slash commands or outgoing webhooks as an alternative inbound path.
 - A fourth chat provider beyond Slack, Mattermost, and Teams.
+
+---
+
+## Appendix: Decision Log
+
+Decisions are ordered from most architecturally significant (shapes the whole design) to minor
+tactical choices.
+
+---
+
+### 1. Introduce a `ChatService` trait rather than sibling concrete services
+
+**Decision:** Extract a shared `ChatService` trait that Slack, Mattermost, and Teams all
+implement, rather than leaving each integration as an independent concrete struct wired
+separately into `server.rs`.
+
+**Why:** The original Mattermost design (superseded by this one) proposed a
+`MattermostService` struct sitting beside `SlackService` in `server.rs` — no shared
+abstraction. Bryan Helmkamp's review noted this approach does not scale: adding MS Teams would
+require a third round of identical server wiring, and provider-specific details would keep
+leaking into `server.rs`. A trait enforces the boundary and makes adding future providers
+additive-only changes to the server.
+
+**Alternatives considered:** Keeping sibling concrete services was the original design. It is
+simpler in the short term but makes `server.rs` grow with each new provider and creates no
+pressure to keep provider code self-contained.
+
+---
+
+### 2. New `fabro-chat` crate for the trait, not `fabro-types` or a server-internal trait
+
+**Decision:** The `ChatService` trait lives in a new `lib/crates/fabro-chat/` crate. Provider
+crates depend on it and implement it. `fabro-server` depends on it and holds
+`Vec<Arc<dyn ChatService>>`.
+
+**Why:** This mirrors the existing `fabro-sandbox` / `SandboxProvider` pattern exactly —
+the most referenced multi-provider abstraction in the codebase. Three alternatives were
+considered:
+
+- **Trait in `fabro-types`:** `fabro-types` is a pure-types crate with no async dependencies.
+  Adding async trait methods and `http::HeaderMap` would pull the crate in the wrong direction.
+- **Trait in `fabro-server` (server-internal):** The trait cannot be tested outside the server,
+  and provider crates cannot implement it without depending on `fabro-server`, which creates a
+  circular dependency (`fabro-server` → `fabro-slack` → `fabro-server`).
+- **New `fabro-chat` crate:** Clean layering, no circular dependencies, testable in isolation.
+  The new crate analogy to `fabro-sandbox` made this feel natural rather than novel.
+
+---
+
+### 3. `ChatEventContext` trait to break the circular dependency between `fabro-chat` and `fabro-server`
+
+**Decision:** `handle_event` takes `&dyn ChatEventContext` instead of `&AppState`. `AppState`
+implements `ChatEventContext` in `fabro-server`.
+
+**Why:** `handle_event` needs to fetch run projections and resolve environment variables — both
+live in `AppState`. Putting `AppState` directly in the trait signature would require
+`fabro-chat` to depend on `fabro-server`, which depends on `fabro-chat` — a circular dependency
+Rust's crate system forbids.
+
+`ChatEventContext` is a narrow interface (`get_run_projection`, `resolve_env`) defined in
+`fabro-chat`. `AppState` satisfies it in `fabro-server`. Provider crates never see `AppState`.
+This is the standard Rust pattern for breaking large dependency cycles via trait objects — the
+equivalent of defining a Ruby module in a gem that `ApplicationController` then `include`s.
+
+---
+
+### 4. `handle_webhook` method on the trait rather than `fn router() -> Option<Router>`
+
+**Decision:** Each provider implements `handle_webhook(sub_path, headers, body) -> WebhookOutcome`
+on the trait. The server owns a single `POST /api/v1/webhooks/:provider/*rest` route and
+dispatches to the right service. Providers do not return Axum `Router` fragments.
+
+**Why:** Two options were considered:
+
+- **Option A — `fn router(&self, state: Arc<AppState>) -> Option<Router>`:** Each provider
+  builds and returns Axum routes. Maximally flexible — providers own their full HTTP surface.
+  But it requires every provider crate to depend on `axum`, which today is a dependency of
+  `fabro-server` only. It also couples the trait to `AppState` via the signature.
+- **Option B — `handle_webhook` method (chosen):** The server owns all Axum machinery.
+  Provider crates use `http` crate types (`HeaderMap`, status codes) but never `axum`. The
+  `AppState` decoupling is preserved. The existing `github_webhook_routes` function in
+  `server.rs` — a plain function that returns a `Router` and gets `.merge()`d in — showed that
+  HTTP routing is already treated as a server-level concern in this codebase.
+
+The `*rest` wildcard sub-path gives each provider a namespaced URL space without requiring
+full router ownership.
+
+---
+
+### 5. `Vec<Arc<dyn ChatService>>` in `AppState` rather than named optional fields
+
+**Decision:** `AppState` holds `chat_services: Vec<Arc<dyn ChatService>>` rather than
+`slack_service: Option<Arc<SlackService>>`, `mattermost_service: Option<Arc<MattermostService>>`,
+etc.
+
+**Why:** Named fields require `server.rs` to be modified for every new provider — exactly the
+coupling the trait exists to eliminate. A `Vec` makes adding a fourth provider a zero-change
+operation in `server.rs`. Dispatch in the webhook handler and event loop iterates the vec;
+`kind()` is the discriminant. This mirrors how `SandboxProviderRegistry` holds
+`Vec<Arc<dyn SandboxProvider>>`.
+
+---
+
+### 6. MS Teams included as stubs in this design, not deferred
+
+**Decision:** A `fabro-teams` stub crate is included in this design even though it ships no
+real Teams functionality.
+
+**Why:** The `ChatService` trait needs to be validated against all three event-delivery shapes
+before the implementation plan is written. Slack and Mattermost both have an outbound WebSocket
+loop; Teams does not — it is a pure-inbound-HTTP provider. Without a Teams stub, the trait
+could accidentally encode WebSocket assumptions that would require a breaking trait change when
+Teams is eventually implemented. The stub makes those assumptions visible (e.g. that `start()`
+must be a valid no-op) before any code is written.
+
+---
+
+### 7. `start()` is part of the `ChatService` contract even though Teams implements it as a no-op
+
+**Decision:** `start()` is a required method on the trait. Teams' implementation is a
+documented no-op that logs one line and returns immediately.
+
+**Why:** The alternative — making `start()` optional via a default method — would obscure the
+contract for providers that do have an inbound connection loop. Every provider must declare how
+it handles inbound events; "I have no connection to start" is a valid answer and is expressed
+clearly by a no-op implementation rather than by omitting the method. A no-op that logs is
+also operationally useful: it confirms in server logs that Teams is active and waiting for
+inbound HTTP.
+
+---
+
+### 8. `WebhookOutcome { status: u16, body: Option<String> }` instead of `axum::response::Response`
+
+**Decision:** `handle_webhook` returns a lightweight `WebhookOutcome` struct defined in
+`fabro-chat`, not an Axum `Response`.
+
+**Why:** Returning `axum::response::Response` from the trait would require every provider
+crate to depend on `axum` — the same problem as the router fragment option (Decision 4). A
+plain struct with a status code and optional body is sufficient for all three providers' needs
+and is convertible to an Axum response in `fabro-server`'s dispatch handler with two lines.
+
+---
+
+### 9. Single `FABRO_MATTERMOST_TOKEN` instead of separate bot and app tokens
+
+**Decision:** One vault secret covers both REST API calls and WebSocket authentication.
+
+**Why:** Mattermost has no equivalent of Slack's Socket Mode app token. Slack requires two
+tokens because Socket Mode uses a separate app-level token to open the WebSocket, distinct from
+the bot token used for API calls. Mattermost's WebSocket authentication uses the same bearer
+token as the REST API. Introducing a second Mattermost token would have no purpose and would
+add operator confusion.
+
+---
+
+### 10. `on_submit` stored on `MattermostService` after `start()` rather than passed through every call
+
+**Decision:** `MattermostService` stores `on_submit` in an `Arc<Mutex<Option<...>>>` field
+populated when `start()` is called. `handle_webhook` reads it from the field.
+
+**Why:** The trait's `handle_webhook` signature does not include `on_submit` — it has no
+`on_submit` parameter. Adding one would make the signature inconsistent with Slack (which never
+calls `on_submit` from `handle_webhook`) and would expose a callback that most providers do not
+need. Storing it after `start()` is the minimal coupling: `handle_webhook` can fire the
+callback without the server needing to pass it explicitly on every HTTP request.
+
+---
+
+### 11. Attachment tests use `insta` inline snapshots; webhook HTTP tests use `expect_axum_*` helpers
+
+**Decision:** Attachment JSON is asserted with `insta::assert_json_snapshot!`. HTTP status
+assertions in server tests use `expect_axum_status` / `expect_axum_ok_json` from `fabro-test`.
+
+**Why:** The existing Fabro testing strategy (`docs/internal/testing-strategy.md`) specifies:
+prefer snapshots over ad hoc assertions for structured output; use shared HTTP assertion helpers
+rather than raw `assert_eq!(status, ...)`. Attachment objects are structured JSON payloads —
+exactly the "good structured snapshot target" the strategy describes. The `expect_axum_*`
+helpers include the request shape in failure output, making test failures easier to diagnose.
+Following these conventions keeps new tests consistent with the rest of the test suite.
