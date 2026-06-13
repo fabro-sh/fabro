@@ -97,7 +97,8 @@
               "integrations/litellm",
               "integrations/openrouter",
               "integrations/slack",
-              "integrations/brave-search"
+              "integrations/brave-search",
+              "integrations/dos"
             ]
           },
           {
