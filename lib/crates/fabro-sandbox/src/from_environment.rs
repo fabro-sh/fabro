@@ -29,7 +29,6 @@ pub fn daytona_config_from_environment(
             .lifecycle
             .auto_stop
             .map(|duration| duration_to_minutes_i32(duration.as_std())),
-        cwd: settings.cwd.clone(),
         labels: (!settings.labels.is_empty()).then(|| settings.labels.clone()),
         snapshot: settings
             .image
@@ -85,7 +84,6 @@ pub fn docker_config_from_environment(
             .docker
             .clone()
             .unwrap_or(default_options.image),
-        cwd: settings.cwd.clone(),
         network_mode: match settings.network.mode {
             EnvironmentNetworkMode::Block => Some("none".to_string()),
             EnvironmentNetworkMode::AllowAll | EnvironmentNetworkMode::CidrAllowList => {
@@ -216,30 +214,5 @@ mod tests {
             "unexpected error: {message}"
         );
         assert!(!missing.exists());
-    }
-
-    #[cfg(feature = "docker")]
-    #[test]
-    fn docker_config_carries_environment_cwd() {
-        let mut settings = run_environment(EnvironmentProvider::Docker);
-        settings.cwd = Some("/workspace/custom".to_string());
-
-        let config = docker_config_from_environment(&settings, false);
-
-        assert_eq!(config.cwd.as_deref(), Some("/workspace/custom"));
-    }
-
-    #[cfg(feature = "daytona")]
-    #[test]
-    fn daytona_config_carries_environment_cwd() {
-        let mut settings = run_environment(EnvironmentProvider::Daytona);
-        settings.cwd = Some("/home/daytona/workspace/custom".to_string());
-
-        let config = daytona_config_from_environment(&settings, false);
-
-        assert_eq!(
-            config.cwd.as_deref(),
-            Some("/home/daytona/workspace/custom")
-        );
     }
 }

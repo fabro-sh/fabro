@@ -33,7 +33,7 @@ export interface RunEnvironmentSettings {
     'id': string;
     'provider': EnvironmentProvider;
     /**
-     * Runtime command working directory for this environment.
+     * Local-provider command working directory for this environment. Docker and Daytona ignore this value.
      */
     'cwd'?: string | null;
     'image': EnvironmentImageSettings;

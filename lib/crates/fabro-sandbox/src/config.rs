@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct DaytonaSettings {
     pub auto_stop_interval: Option<i32>,
-    pub cwd:                Option<String>,
     pub labels:             Option<HashMap<String, String>>,
     pub snapshot:           Option<DaytonaSnapshotSettings>,
     pub network:            Option<DaytonaNetwork>,

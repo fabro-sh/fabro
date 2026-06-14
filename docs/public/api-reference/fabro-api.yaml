@@ -6373,7 +6373,7 @@ components:
           $ref: "#/components/schemas/EnvironmentProvider"
         cwd:
           type: ["string", "null"]
-          description: Runtime command working directory for this environment.
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
           example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
@@ -6412,7 +6412,7 @@ components:
           $ref: "#/components/schemas/EnvironmentProvider"
         cwd:
           type: ["string", "null"]
-          description: Runtime command working directory for this environment.
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
           example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
@@ -6446,7 +6446,7 @@ components:
           $ref: "#/components/schemas/EnvironmentProvider"
         cwd:
           type: ["string", "null"]
-          description: Runtime command working directory for this environment.
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
           example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
@@ -13356,7 +13356,7 @@ components:
           $ref: "#/components/schemas/EnvironmentProvider"
         cwd:
           type: ["string", "null"]
-          description: Runtime command working directory for this environment.
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
           example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentImageSettings"
@@ -13381,7 +13381,7 @@ components:
           $ref: "#/components/schemas/EnvironmentProvider"
         cwd:
           type: ["string", "null"]
-          description: Runtime command working directory for this environment.
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
           example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentImageSettings"

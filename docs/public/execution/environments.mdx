@@ -56,21 +56,20 @@ repo = "fabro-sh/fabro"
 NODE_ENV = "development"
 ```
 
-Server-managed environments can also set `cwd`, an optional runtime command
-working directory:
+Server-managed local environments can also set `cwd`, an optional runtime
+command working directory:
 
 ```toml title="environments/host.toml"
 provider = "local"
 cwd = "/srv/fabro/workspaces/team-a"
 ```
 
-`cwd` is owned by the server environment. It is not a replacement for
-`run.working_dir`, and for Docker or Daytona it does not change where Fabro
-creates the provider workspace or clones repositories. It only overrides the
-final working directory used for commands after the provider workspace is ready.
-Workflow, project, user, and direct-run `[environments.<slug>]` catalogs cannot
-set `cwd`; configure it in the server-managed environment file or through the
-environments API.
+`cwd` is owned by the server environment and is only honored by the `local`
+provider. It is not a replacement for `run.working_dir`. Docker and Daytona
+ignore `cwd` and report a preflight warning because those clone-based providers
+own their workspace layout. Workflow, project, user, and direct-run
+`[environments.<slug>]` catalogs cannot set `cwd`; configure it in the
+server-managed environment file or through the environments API.
 
 The same fields nest under `[environments.<slug>]` when defined in workflow or project TOML instead:
 
@@ -166,7 +165,7 @@ stop_on_terminal = true
 | `labels` | Warning; ignored | Warning; ignored | Daytona labels |
 | `lifecycle.auto_stop` | Warning; ignored | Warning; ignored | Daytona auto-stop |
 | `env` | Process environment overlay | Container environment | Sandbox environment |
-| `cwd` | Server-side command working directory | Runtime command cwd override after workspace setup | Runtime command cwd override after workspace setup |
+| `cwd` | Server-side command working directory | Warning; ignored | Warning; ignored |
 
 ## Local
 
@@ -203,7 +202,7 @@ memory = "4GB"
 mode = "block"
 ```
 
-Docker and Daytona are clone-based providers. When a run has a GitHub origin, Fabro clones it into the provider workspace. Set `[run.clone] enabled = false` to start with an empty workspace. If `cwd` is set, Fabro still uses the normal clone layout, then creates the configured runtime directory inside the sandbox and uses it as the command working directory.
+Docker and Daytona are clone-based providers. When a run has a GitHub origin, Fabro clones it into the provider workspace. Set `[run.clone] enabled = false` to start with an empty workspace. Docker and Daytona ignore `cwd`; use the provider-owned workspace layout and `run.working_dir` for repository-relative commands.
 
 ## Daytona
 

@@ -684,6 +684,9 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
             }
         }
         EnvironmentProvider::Docker => {
+            if environment.cwd.is_some() {
+                warnings.push("docker provider ignores cwd".to_string());
+            }
             if environment.resources.disk.is_some() {
                 warnings.push("docker provider ignores disk resource limits".to_string());
             }
@@ -697,7 +700,11 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
                 warnings.push("docker provider ignores image.dockerfile".to_string());
             }
         }
-        EnvironmentProvider::Daytona => {}
+        EnvironmentProvider::Daytona => {
+            if environment.cwd.is_some() {
+                warnings.push("daytona provider ignores cwd".to_string());
+            }
+        }
     }
     warnings
 }
@@ -1538,6 +1545,28 @@ enabled = {clone_enabled}
         .run;
 
         (prepared, resolved)
+    }
+
+    #[test]
+    fn docker_environment_cwd_is_reported_as_ignored() {
+        let mut resolved = RunNamespace::default();
+        resolved.environment.provider = EnvironmentProvider::Docker;
+        resolved.environment.cwd = Some("/workspace/custom".to_string());
+
+        assert_eq!(environment_capability_warnings(&resolved), vec![
+            "docker provider ignores cwd".to_string()
+        ]);
+    }
+
+    #[test]
+    fn daytona_environment_cwd_is_reported_as_ignored() {
+        let mut resolved = RunNamespace::default();
+        resolved.environment.provider = EnvironmentProvider::Daytona;
+        resolved.environment.cwd = Some("/home/daytona/workspace/custom".to_string());
+
+        assert_eq!(environment_capability_warnings(&resolved), vec![
+            "daytona provider ignores cwd".to_string()
+        ]);
     }
 
     #[test]
