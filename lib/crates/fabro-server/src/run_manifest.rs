@@ -2162,7 +2162,9 @@ issues = "read"
     #[tokio::test]
     async fn preflight_allows_pull_request_enabled_without_github_credentials() {
         let state = crate::test_support::test_app_state();
+        let source_dir = tempfile::tempdir().unwrap();
         let mut manifest = minimal_manifest();
+        manifest.cwd = source_dir.path().to_string_lossy().into_owned();
         manifest.configs.push(types::ManifestConfig {
             path:   Some("/tmp/project/.fabro/project.toml".to_string()),
             source: Some(
