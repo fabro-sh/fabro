@@ -17,6 +17,31 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::NO_COLOR,
     EnvVars::CLICOLOR,
     EnvVars::CLICOLOR_FORCE,
+    // AWS credential-chain inputs for the Bedrock provider. Other providers'
+    // secrets reach the worker through the server vault (read via FABRO_HOME),
+    // but Bedrock SigV4 has no stored secret — it re-resolves from the ambient
+    // AWS chain on every request so STS/SSO/IRSA sessions can refresh, which
+    // means the chain's *inputs* must survive `env_clear()` in the worker, not
+    // a snapshot taken at launch. We pass the identity surface only (static
+    // keys, session token, the Bedrock bearer key, profile/region selectors,
+    // and the web-identity/ECS role vars); HOME already carries the shared
+    // `~/.aws` config + SSO cache. Endpoint/metadata overrides
+    // (AWS_ENDPOINT_*, AWS_METADATA_ENDPOINT, AWS_IMDSV1_FALLBACK) are
+    // deliberately excluded — they belong to the server's S3 path, not to the
+    // worker's outbound model calls.
+    EnvVars::AWS_ACCESS_KEY_ID,
+    EnvVars::AWS_SECRET_ACCESS_KEY,
+    EnvVars::AWS_SESSION_TOKEN,
+    EnvVars::AWS_BEARER_TOKEN_BEDROCK,
+    EnvVars::AWS_PROFILE,
+    EnvVars::AWS_REGION,
+    EnvVars::AWS_DEFAULT_REGION,
+    EnvVars::AWS_ROLE_ARN,
+    EnvVars::AWS_ROLE_SESSION_NAME,
+    EnvVars::AWS_WEB_IDENTITY_TOKEN_FILE,
+    EnvVars::AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
+    EnvVars::AWS_CONTAINER_CREDENTIALS_FULL_URI,
+    EnvVars::AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE,
 ];
 
 const RENDER_GRAPH_ENV_ALLOWLIST: &[&str] = &[EnvVars::PATH, EnvVars::HOME, EnvVars::TMPDIR];
@@ -91,6 +116,11 @@ mod tests {
             ("NO_COLOR".to_string(), "1".to_string()),
             ("CLICOLOR".to_string(), "0".to_string()),
             ("CLICOLOR_FORCE".to_string(), "1".to_string()),
+            ("AWS_ACCESS_KEY_ID".to_string(), "AKIAEXAMPLE".to_string()),
+            ("AWS_SECRET_ACCESS_KEY".to_string(), "secret".to_string()),
+            ("AWS_SESSION_TOKEN".to_string(), "session".to_string()),
+            ("AWS_BEARER_TOKEN_BEDROCK".to_string(), "bearer".to_string()),
+            ("AWS_REGION".to_string(), "us-east-2".to_string()),
             ("SESSION_SECRET".to_string(), "leak".to_string()),
             ("FABRO_JWT_PRIVATE_KEY".to_string(), "leak".to_string()),
             ("FABRO_JWT_PUBLIC_KEY".to_string(), "leak".to_string()),
@@ -122,6 +152,29 @@ mod tests {
         assert_eq!(actual.get("NO_COLOR").map(String::as_str), Some("1"));
         assert_eq!(actual.get("CLICOLOR").map(String::as_str), Some("0"));
         assert_eq!(actual.get("CLICOLOR_FORCE").map(String::as_str), Some("1"));
+        // Bedrock SigV4 chain inputs cross into the worker so it can re-resolve
+        // credentials per request; a generic secret with no allowlist entry
+        // still does not.
+        assert_eq!(
+            actual.get("AWS_ACCESS_KEY_ID").map(String::as_str),
+            Some("AKIAEXAMPLE")
+        );
+        assert_eq!(
+            actual.get("AWS_SECRET_ACCESS_KEY").map(String::as_str),
+            Some("secret")
+        );
+        assert_eq!(
+            actual.get("AWS_SESSION_TOKEN").map(String::as_str),
+            Some("session")
+        );
+        assert_eq!(
+            actual.get("AWS_BEARER_TOKEN_BEDROCK").map(String::as_str),
+            Some("bearer")
+        );
+        assert_eq!(
+            actual.get("AWS_REGION").map(String::as_str),
+            Some("us-east-2")
+        );
         assert!(!actual.contains_key("FABRO_LOG_DESTINATION"));
         assert_eq!(
             actual.get("FABRO_DEV_TOKEN").map(String::as_str),
