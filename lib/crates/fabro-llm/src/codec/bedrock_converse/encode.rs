@@ -173,13 +173,24 @@ fn encode_content_part(part: &ContentPart) -> Option<Value> {
                 }
             }))
         }
-        ContentPart::ToolCall(tool_call) => Some(json!({
-            "toolUse": {
-                "toolUseId": tool_call.id,
-                "name": tool_call.name,
-                "input": tool_call.arguments,
-            }
-        })),
+        ContentPart::ToolCall(tool_call) => {
+            // Converse requires `toolUse.input` to be a JSON object document.
+            // A no-argument tool call carries `Null` (the stream decoder gets
+            // no input fragments to parse), which Bedrock rejects as
+            // "toolUse.input is empty". Coerce any non-object to `{}` so the
+            // wire is always valid, regardless of where the call originated.
+            let input = match &tool_call.arguments {
+                Value::Object(_) => tool_call.arguments.clone(),
+                _ => json!({}),
+            };
+            Some(json!({
+                "toolUse": {
+                    "toolUseId": tool_call.id,
+                    "name": tool_call.name,
+                    "input": input,
+                }
+            }))
+        }
         ContentPart::ToolResult(result) => {
             let content = match &result.content {
                 Value::String(text) => json!([{ "text": text }]),
@@ -242,7 +253,7 @@ fn encode_tool_config(request: &Request, caching: bool) -> Option<Value> {
                 "toolSpec": {
                     "name": tool.name,
                     "description": tool.description,
-                    "inputSchema": { "json": tool.parameters },
+                    "inputSchema": { "json": tool_input_schema(&tool.parameters) },
                 }
             })
         })
@@ -267,6 +278,24 @@ fn encode_tool_config(request: &Request, caching: bool) -> Option<Value> {
         Some(ToolChoice::Auto | ToolChoice::None) | None => {}
     }
     Some(Value::Object(config))
+}
+
+/// Normalize a tool's JSON-Schema for Bedrock's `toolSpec.inputSchema.json`.
+/// Converse strictly validates the schema and requires a top-level `type`;
+/// some model families (e.g. DeepSeek) reject a typeless schema that Claude
+/// tolerates. Tools may arrive with a loose schema (no top-level `type`, or a
+/// bare `{}` for a no-argument tool), so default the type to `object`.
+fn tool_input_schema(parameters: &Value) -> Value {
+    match parameters {
+        Value::Object(map) => {
+            let mut map = map.clone();
+            map.entry("type").or_insert_with(|| json!("object"));
+            Value::Object(map)
+        }
+        // A non-object schema is not a valid tool input schema; substitute the
+        // empty-object schema Bedrock accepts.
+        _ => json!({ "type": "object", "properties": {} }),
+    }
 }
 
 /// Mirror the anthropic codec's conversation-prefix cache placement: a
@@ -321,7 +350,7 @@ mod tests {
     use super::*;
     use crate::codec::CodecParams;
     use crate::types::{
-        ResponseFormat, ResponseFormatType, ThinkingData, ToolDefinition, ToolResult,
+        ResponseFormat, ResponseFormatType, ThinkingData, ToolCall, ToolDefinition, ToolResult,
     };
 
     fn base_request(model: &str) -> Request {
@@ -413,6 +442,36 @@ mod tests {
     }
 
     #[test]
+    fn typeless_tool_schema_gains_object_type() {
+        // Bedrock rejects a tool inputSchema without a top-level `type` (some
+        // model families validate strictly); the encoder must default it.
+        let mut request = base_request("claude");
+        request.tools = Some(vec![
+            ToolDefinition::function("no_type", "schema without a type", json!({})),
+            ToolDefinition::function(
+                "props_only",
+                "properties but no top-level type",
+                json!({"properties": {"q": {"type": "string"}}}),
+            ),
+        ]);
+        let encoded = encode_with(&request);
+        let tools = &encoded.body["toolConfig"]["tools"];
+        assert_eq!(
+            tools[0]["toolSpec"]["inputSchema"]["json"]["type"],
+            "object"
+        );
+        assert_eq!(
+            tools[1]["toolSpec"]["inputSchema"]["json"]["type"],
+            "object"
+        );
+        // An existing nested schema is preserved, not clobbered.
+        assert_eq!(
+            tools[1]["toolSpec"]["inputSchema"]["json"]["properties"]["q"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
     fn tool_results_ride_in_user_messages() {
         let mut request = base_request("claude");
         request.messages = vec![Message {
@@ -435,6 +494,28 @@ mod tests {
             message["content"][0]["toolResult"]["content"][0]["text"],
             "42"
         );
+    }
+
+    #[test]
+    fn no_argument_tool_call_encodes_empty_object_input() {
+        // A no-arg tool call decodes to `Null` arguments; Bedrock rejects a
+        // null/empty `toolUse.input`, so the encoder must emit `{}`.
+        let mut request = base_request("claude");
+        request.messages = vec![Message {
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(ToolCall::new(
+                "tool-1",
+                "TaskList",
+                Value::Null,
+            ))],
+            name:         None,
+            tool_call_id: None,
+        }];
+        let encoded = encode_with(&request);
+        let tool_use = &encoded.body["messages"][0]["content"][0]["toolUse"];
+        assert_eq!(tool_use["toolUseId"], "tool-1");
+        assert_eq!(tool_use["name"], "TaskList");
+        assert_eq!(tool_use["input"], json!({}));
     }
 
     #[test]

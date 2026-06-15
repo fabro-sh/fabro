@@ -115,7 +115,12 @@ pub(super) fn decode_content_block(block: &Value) -> Option<ContentPart> {
     if let Some(tool_use) = block.get("toolUse") {
         let id = tool_use.get("toolUseId").and_then(Value::as_str)?;
         let name = tool_use.get("name").and_then(Value::as_str)?;
-        let input = tool_use.get("input").cloned().unwrap_or(Value::Null);
+        // A no-argument tool call is canonically `{}`, not null (so it
+        // re-encodes to a valid Converse `toolUse.input` object).
+        let input = match tool_use.get("input") {
+            Some(Value::Null) | None => Value::Object(serde_json::Map::new()),
+            Some(value) => value.clone(),
+        };
         return Some(ContentPart::ToolCall(ToolCall::new(id, name, input)));
     }
     if let Some(reasoning) = block.get("reasoningContent") {

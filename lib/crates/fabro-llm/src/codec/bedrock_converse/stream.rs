@@ -218,7 +218,15 @@ impl ConverseStreamDecoder {
                 vec![StreamEvent::ReasoningEnd]
             }
             BlockState::ToolUse { id, name, input } => {
-                let arguments = serde_json::from_str(&input).unwrap_or(Value::Null);
+                // A no-argument tool call streams no input fragments, leaving
+                // the buffer empty; canonically that is an empty object, not
+                // null (matching the anthropic/openai codecs, and what Bedrock
+                // wants back on re-encode).
+                let arguments = if input.trim().is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::from_str(&input).unwrap_or(Value::Null)
+                };
                 let mut tool_call = ToolCall::new(&id, &name, arguments);
                 tool_call.raw_arguments = Some(input);
                 self.parts.push(ContentPart::ToolCall(tool_call.clone()));
@@ -382,6 +390,25 @@ mod tests {
         assert_eq!(response.provider, "bedrock");
         // Byte-stream end after metadata adds nothing.
         assert!(d.finish().is_empty());
+    }
+
+    #[test]
+    fn no_argument_tool_call_decodes_empty_object_not_null() {
+        // A no-arg tool call (e.g. TaskList) streams no input fragments; the
+        // arguments must be `{}` so it re-encodes to a valid Converse input.
+        let mut d = decoder();
+        feed(&mut d, "messageStart", r#"{"role":"assistant"}"#);
+        feed(
+            &mut d,
+            "contentBlockStart",
+            r#"{"start":{"toolUse":{"toolUseId":"tool-1","name":"TaskList"}},"contentBlockIndex":0}"#,
+        );
+        let stop = feed(&mut d, "contentBlockStop", r#"{"contentBlockIndex":0}"#);
+        let StreamEvent::ToolCallEnd { tool_call } = &stop[0] else {
+            panic!("expected ToolCallEnd");
+        };
+        assert_eq!(tool_call.arguments, serde_json::json!({}));
+        assert!(!tool_call.arguments.is_null());
     }
 
     #[test]
