@@ -96,6 +96,23 @@ describe("mapRunListItem", () => {
     expect(item.pullRequestUrl).toBe("https://github.com/fabro-sh/fabro/pull/123");
   });
 
+  test("trusts GitLab merge request links for board items", () => {
+    const summary = makeRun({
+      pull_request: {
+        provider:   "gitlab",
+        owner_path: "platform/tools",
+        repo:       "fabro",
+        number:     17,
+        html_url:   "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17",
+      },
+    });
+    const item = mapRunListItem(summary);
+    expect(item.number).toBe(17);
+    expect(item.pullRequestUrl).toBe(
+      "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17",
+    );
+  });
+
   test("uses a fallback title when the server title is blank", () => {
     const summary = makeRun({ id: "01EMPTY", goal: "", title: "" });
 
@@ -123,6 +140,23 @@ describe("mapRunToRunItem", () => {
     expect(item.lifecycleStatus).toBe("running");
     expect(item.number).toBe(456);
     expect(item.pullRequestUrl).toBe("https://github.com/fabro-sh/fabro/pull/456");
+  });
+
+  test("maps GitLab merge request URLs to RunItem", () => {
+    const summary = makeRun({
+      pull_request: {
+        provider:   "gitlab",
+        owner_path: "platform/tools",
+        repo:       "fabro",
+        number:     18,
+        html_url:   "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/18",
+      },
+    });
+    const item = mapRunToRunItem(summary);
+    expect(item.number).toBe(18);
+    expect(item.pullRequestUrl).toBe(
+      "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/18",
+    );
   });
 
   test("handles missing optional fields", () => {

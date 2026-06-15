@@ -20,4 +20,23 @@ describe("PullRequestChip", () => {
     expect(link.props.href).toBe("https://github.com/acme/widgets/pull/42");
     expect(rendered).toContain("#42");
   });
+
+  test("renders a linked GitLab merge request number", () => {
+    let renderer: TestRenderer.ReactTestRenderer | undefined;
+    act(() => {
+      renderer = TestRenderer.create(
+        <PullRequestChip
+          number={17}
+          url="https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17"
+        />,
+      );
+    });
+
+    const link = renderer!.root.findByType("a");
+    const rendered = JSON.stringify(renderer!.toJSON());
+    expect(link.props.href).toBe(
+      "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17",
+    );
+    expect(rendered).toContain("#17");
+  });
 });

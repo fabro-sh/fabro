@@ -976,6 +976,33 @@ describe("RunDetail full-height child routes", () => {
     ).toBe("#123");
   });
 
+  test("shows a linked GitLab merge request pill in the run header", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+      pullRequest: {
+        provider:   "gitlab",
+        owner_path: "platform/tools",
+        repo:       "fabro",
+        number:     17,
+        html_url:   "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17",
+      },
+    });
+
+    const links = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href ===
+          "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17",
+    );
+
+    expect(links).toHaveLength(1);
+    expect(links[0].props.target).toBe("_blank");
+    const numberSpan = links[0].findByType("span");
+    expect(
+      numberSpan.children.filter((child) => typeof child !== "object").join(""),
+    ).toBe("#17");
+  });
+
   test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1/files",
