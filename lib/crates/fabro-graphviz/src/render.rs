@@ -21,7 +21,7 @@ const DARK_MODE_STYLE: &str = r##"
   }
 </style>"##;
 
-/// DOT graph-level defaults injected after the first `{`.
+/// DOT graph-level defaults injected after the graph opening `{`.
 const DOT_STYLE_DEFAULTS: &str = r##"
     bgcolor="transparent"
     node [color="#357f9e", fontname="Helvetica", fontsize=12, fontcolor="#1a1a1a"]
@@ -48,6 +48,11 @@ pub fn apply_direction<'a>(source: &'a str, direction: &str) -> std::borrow::Cow
 /// Inject DOT graph-level style defaults.
 #[must_use]
 pub fn inject_dot_style_defaults(source: &str) -> String {
+    let source = normalize_dot_for_graphviz(source);
+    inject_dot_style_defaults_raw(&source)
+}
+
+fn inject_dot_style_defaults_raw(source: &str) -> String {
     let Some(pos) = source.find('{') else {
         return source.to_string();
     };
@@ -259,10 +264,8 @@ impl<'a> RenderableDot<'a> {
     /// normalizing Fabro-specific syntax such as dotted attribute keys.
     #[must_use]
     pub fn from_fabro_source(source: &'a str) -> Self {
-        let styled_source = inject_dot_style_defaults(source);
-        let render_source = normalize_dot_for_graphviz(&styled_source).into_owned();
         Self {
-            source: Cow::Owned(render_source),
+            source: Cow::Owned(inject_dot_style_defaults(source)),
         }
     }
 
@@ -325,6 +328,22 @@ mod tests {
     #[test]
     fn render_dot_produces_svg() {
         let svg = render_dot("digraph { a -> b }").unwrap();
+        assert!(String::from_utf8(svg).unwrap().contains("<svg"));
+    }
+
+    #[test]
+    fn render_dot_accepts_leading_comment_with_template_braces() {
+        let svg = render_dot(
+            r#"// The goal is rendered into prompts as {{ goal }}.
+digraph G {
+    start [shape=Mdiamond]
+    exit [shape=Msquare]
+    a [label="A"]
+    start -> a -> exit
+}"#,
+        )
+        .unwrap();
+
         assert!(String::from_utf8(svg).unwrap().contains("<svg"));
     }
 
