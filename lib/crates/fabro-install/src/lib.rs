@@ -385,7 +385,14 @@ pub fn write_github_app_settings(
 pub fn write_gitlab_token_settings(doc: &mut toml::Value, base_url: &str) -> Result<()> {
     let root = root_table_mut(doc)?;
     let server = ensure_table(root, "server")?;
-    ensure_table(server, "auth")?;
+    let auth = ensure_table(server, "auth")?;
+    if let Some(methods) = auth.get_mut("methods").and_then(toml::Value::as_array_mut) {
+        methods.retain(|value| value.as_str() != Some("gitlab"));
+        if methods.is_empty() {
+            methods.push(toml::Value::String("dev-token".to_string()));
+        }
+    }
+    auth.remove("gitlab");
 
     let gitlab = gitlab_integration_table(doc)?;
     gitlab.insert("enabled".into(), toml::Value::Boolean(true));
@@ -845,8 +852,8 @@ mod tests {
         OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite, VaultSecretWrite,
         default_web_url, merge_server_settings, persist_install_outputs_direct,
         prepare_dev_token_write_for_install, set_cli_target_http, set_server_listen,
-        write_github_app_settings, write_gitlab_app_settings, write_object_store_settings,
-        write_sandbox_settings,
+        write_github_app_settings, write_gitlab_app_settings,
+        write_gitlab_token_settings, write_object_store_settings, write_sandbox_settings,
     };
 
     fn format_config_toml() -> String {
@@ -1151,6 +1158,64 @@ client_id = "github-client"
                 .collect::<Vec<_>>(),
             vec!["dev-token", "github", "gitlab"]
         );
+    }
+
+    #[test]
+    fn write_gitlab_token_settings_removes_gitlab_auth() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token", "gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+allowed_groups = ["platform/fabro-admins"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "https://gitlab.ipt.example"
+client_id = "gitlab-client"
+"#,
+        )
+        .unwrap();
+
+        write_gitlab_token_settings(&mut doc, "https://gitlab.ipt.example").unwrap();
+
+        let auth = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("auth"))
+            .and_then(toml::Value::as_table)
+            .expect("server.auth should exist");
+        let methods = auth
+            .get("methods")
+            .and_then(toml::Value::as_array)
+            .expect("server.auth.methods should exist");
+        assert_eq!(
+            methods
+                .iter()
+                .map(|value| value.as_str().expect("auth method should be a string"))
+                .collect::<Vec<_>>(),
+            vec!["dev-token"]
+        );
+        assert!(auth.get("gitlab").is_none());
+
+        let gitlab = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("integrations"))
+            .and_then(toml::Value::as_table)
+            .and_then(|integrations| integrations.get("gitlab"))
+            .and_then(toml::Value::as_table)
+            .expect("server.integrations.gitlab should exist");
+        assert_eq!(
+            gitlab.get("strategy").and_then(toml::Value::as_str),
+            Some("token")
+        );
+        assert!(gitlab.get("client_id").is_none());
     }
 
     #[test]
