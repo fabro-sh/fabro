@@ -195,7 +195,7 @@ Each step must exit with status 0. If any step fails, the run aborts before the 
 
 ### `[run.clone]`
 
-Configure whether clone-based sandboxes clone the run's GitHub origin before execution.
+Configure whether clone-based sandboxes clone the run's GitHub or GitLab origin before execution.
 
 ```toml title="run.toml"
 [run.clone]
@@ -282,6 +282,7 @@ memory = "8GB"
 | `lifecycle.stop_on_terminal` | Stop the sandbox when the run reaches a terminal state. |
 | `lifecycle.auto_stop` | Daytona auto-stop duration, such as `"30m"`. |
 | `labels` | Provider labels. Merge by key across layers. |
+| `volumes` | Provider volume hints. Lists replace wholesale across layers. |
 | `env` | Environment variables passed to command and agent execution. Merge by key across layers. |
 
 When `provider = "local"`, Fabro runs directly in the resolved working
@@ -320,6 +321,17 @@ issues = "read"
 Only requested permissions are included. The upper bound is the permission set granted to the installed GitHub App, and Fabro logs a warning and continues without `GITHUB_TOKEN` if the app is not configured or is not installed on the repository.
 
 This table follows the normal settings precedence order. A higher-precedence layer can set `permissions = {}` to clear inherited permissions and run without a GitHub token.
+
+### `[run.integrations.gitlab]`
+
+Request the configured GitLab automation token for workflow stages that need `GITLAB_TOKEN` inside the sandbox.
+
+```toml title="run.toml"
+[run.integrations.gitlab]
+token = true
+```
+
+The token is injected only when requested and is not written to run manifests. The server must have `GITLAB_TOKEN` in its vault.
 
 ### `[run.notifications]`
 
@@ -376,16 +388,17 @@ repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-Inputs can be used in graph `goal` and node `prompt` attributes with `{{ inputs.name }}` syntax:
+Inputs can be used in final string attributes with `{{ inputs.name }}` syntax:
 
 ```dot title="c-i.fabro"
 digraph CI {
     graph [goal="Run tests for {{ inputs.repo_name }}"]
-    test [label="Test", prompt="Clone {{ inputs.repo_url }} and run the {{ inputs.language }} test suite."]
+    clone [shape=parallelogram, script="git clone {{ inputs.repo_url }} repo"]
+    test  [label="Test", prompt="Run the {{ inputs.language }} test suite."]
 }
 ```
 
-Inputs cannot parameterize workflow structure, file references such as node IDs, edges, `import` paths, `@file` paths, or child workflow paths, or any attribute besides `prompt` and `goal` — other attributes such as `script` and `label` are literal text.
+Inputs cannot parameterize workflow structure or file references such as node IDs, edges, `import` paths, `@file` paths, or child workflow paths.
 
 If a workflow template references an undefined input like `{{ inputs.langauge }}`, `fabro validate` reports a warning. Run-style commands promote that diagnostic to an error before creating or starting a run.
 
@@ -458,7 +471,7 @@ The `sandbox` transport runs the MCP server inside the workflow's sandbox. This 
 
 ### `[run.pull_request]`
 
-Automatically open a GitHub pull request when the workflow run completes successfully. Requires a [GitHub App](/integrations/github) to be configured.
+Automatically open a pull request or merge request when the workflow run completes successfully. GitHub origins require a [GitHub App](/integrations/github). GitLab origins require a configured [GitLab integration](/integrations/gitlab) with `GITLAB_TOKEN`.
 
 ```toml title="run.toml"
 [run.pull_request]
@@ -472,8 +485,12 @@ merge_strategy = "squash"
 |---|---|
 | `enabled` | When `true`, Fabro creates a PR from the agent's working branch after a successful run. Default: `false`. |
 | `draft` | When `true`, the PR is created as a draft pull request. Default: `true`. |
-| `auto_merge` | When `true`, enables GitHub auto-merge on the created PR. Implies `draft = false` since GitHub doesn't allow auto-merge on draft PRs. The repository must have auto-merge enabled in GitHub settings. Default: `false`. |
+| `auto_merge` | When `true`, enables provider auto-merge on the created pull request or merge request. Implies `draft = false` since providers do not allow auto-merge on drafts. The repository must have auto-merge enabled in provider settings. Default: `false`. |
 | `merge_strategy` | Merge method when `auto_merge` is enabled: `squash` (default), `merge`, or `rebase`. |
+
+Auto-PR creation only runs when the workflow completes successfully or partially successfully and the terminal diff is non-empty. Empty-diff runs complete normally and skip PR creation.
+
+GitLab merge requests appear through Fabro's existing pull request routes, events, and UI labels.
 
 ### `[[run.hooks]]`
 
@@ -558,7 +575,7 @@ provider = "daytona"
 dockerfile = { path = "Dockerfile" }
 ```
 
-Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), TOML `run.inputs` tables replace wholesale, CLI input flags merge per key at highest precedence, environment `env` and `labels` merge by key, and `run.prepare.steps` replaces whole-list.
+Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), TOML `run.inputs` tables replace wholesale, CLI input flags merge per key at highest precedence, environment `env` and `labels` merge by key, environment `volumes` replace as a whole list, and `run.prepare.steps` replaces whole-list.
 
 ### Machine defaults
 

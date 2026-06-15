@@ -30,10 +30,14 @@ Fabro configures server auth with bootstrap methods:
 
 ```toml title="settings.toml"
 [server.auth]
-methods = ["dev-token", "github"]
+methods = ["dev-token", "github", "gitlab"]
 
 [server.auth.github]
 allowed_usernames = ["alice", "bob"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+allowed_groups = ["platform/fabro-admins"]
 ```
 
 Protected `/api/v1/*` routes always accept:
@@ -53,15 +57,17 @@ Authorization: Bearer fabro_dev_...
 
 This is the simplest way to make ad hoc local requests with `curl` or a script. The dev token is also available as a web login method when the web UI is enabled.
 
-### GitHub OAuth
+### OAuth Login
 
 When `"github"` is enabled, browser users can sign in through GitHub OAuth. Successful logins mint a server-issued session cookie that the browser automatically sends on subsequent API requests.
 
 `[server.auth.github].allowed_usernames` restricts which GitHub usernames may complete login.
 
+When `"gitlab"` is enabled, browser users can sign in through GitLab OAuth. GitLab auth allows users when their username is listed in `[server.auth.gitlab].allowed_usernames` or one returned GitLab group `full_path` is listed in `[server.auth.gitlab].allowed_groups`. Empty GitLab allowlists do not block startup, but no GitLab user can sign in until at least one allowlist entry exists.
+
 ### Browser Sessions
 
-When `[server.web].enabled = true`, the server requires `SESSION_SECRET` and issues a private `__fabro_session` cookie after successful login. The cookie is session transport only; the underlying bootstrap method remains `dev-token` or `github`, and that provenance is preserved in run metadata.
+When `[server.web].enabled = true`, the server requires `SESSION_SECRET` and issues a private `__fabro_session` cookie after successful login. The cookie is session transport only; the underlying bootstrap method remains `dev-token`, `github`, or `gitlab`, and that provenance is preserved in run metadata.
 
 ### HTTPS and Reverse Proxies
 

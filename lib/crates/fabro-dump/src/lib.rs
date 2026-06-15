@@ -489,6 +489,7 @@ mod tests {
             graph:            Graph::new("ship"),
             graph_source:     Some("digraph Ship {}".to_string()),
             workflow_slug:    Some("demo".to_string()),
+            source_context:   None,
             automation:       None,
             source_directory: Some("/tmp/project".to_string()),
             git:              Some(fabro_types::GitContext {

@@ -34,7 +34,7 @@ Files that omit `_version` are treated as version `1`. The legacy top-level `ver
 | Scope | Examples |
 |---|---|
 | CLI-only | `[cli.target]`, `[cli.auth]`, `[cli.exec]`, `[cli.output]`, `[cli.updates]`, `[cli.logging]` |
-| Shared run defaults | `[run.model]`, `[run.environment]`, `[environments.<slug>]`, `[run.checkpoint]`, `[run.inputs]`, `[run.prepare]`, `[run.pull_request]`, `[run.integrations.github.permissions]`, `[run.hooks]`, `[run.agent.mcps]` |
+| Shared run defaults | `[run.model]`, `[run.environment]`, `[environments.<slug>]`, `[run.checkpoint]`, `[run.inputs]`, `[run.prepare]`, `[run.pull_request]`, `[run.integrations.github.permissions]`, `[run.integrations.gitlab]`, `[run.hooks]`, `[run.agent.mcps]` |
 | Shared LLM catalog | `[llm.providers.<id>]`, `[llm.models.<id>]`, model limits, features, controls, and costs |
 | Server-only | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
 
@@ -130,6 +130,9 @@ enabled = true
 [run.integrations.github.permissions]
 contents = "write"
 pull_requests = "write"
+
+[run.integrations.gitlab]
+token = true
 
 [run.agent.mcps.filesystem]
 type = "stdio"
@@ -425,10 +428,23 @@ enabled = true
 
 | Key | Type / values | Default | Description |
 |---|---|---|---|
-| `auto_merge` | boolean | false | Enable GitHub auto-merge for created pull requests. Implies `draft =<br />false`. |
+| `auto_merge` | boolean | false | Enable provider auto-merge for created pull requests or merge requests. Implies `draft =<br />false`. |
 | `draft` | boolean | true | Open created pull requests as drafts. |
 | `enabled` | boolean | false | Automatically create a PR after successful runs. |
 | `merge_strategy` | "merge" \| "squash" \| "rebase" | "squash" | Merge method to configure for the pull request. |
+
+## `[run.integrations.gitlab]`
+
+Request the configured GitLab automation token for workflow command and agent stages.
+
+```toml title="settings.toml"
+[run.integrations.gitlab]
+token = true
+```
+
+| Key | Type / values | Default | Description |
+|---|---|---|---|
+| `token` | boolean | false | Opt in to injecting `GITLAB_TOKEN` at execution time. The token is not written to run manifests. |
 
 ## `[run.agent]`
 

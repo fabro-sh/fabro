@@ -1,0 +1,113 @@
+mod api;
+mod oauth;
+mod server;
+mod state;
+
+pub use server::TestGitLabServer;
+pub use state::{GitLabGroupFixture, GitLabProjectFixture, GitLabUserFixture};
+
+#[cfg(test)]
+mod tests {
+    use super::TestGitLabServer;
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This twin contract test must explicitly prove local reqwest clients disable proxy discovery."
+    )]
+    #[tokio::test]
+    async fn creates_fetches_merges_and_closes_merge_request() {
+        let server = TestGitLabServer::start().await;
+        server.add_user("alice", "Alice Example", "alice@example.test");
+        server.add_project("platform/tools/fabro", "main", &["feature/fabro"]);
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let base = server.base_url();
+        let create_url = format!("{base}/api/v4/projects/platform%2Ftools%2Ffabro/merge_requests");
+        let response = client
+            .post(create_url)
+            .bearer_auth(server.automation_token())
+            .json(&serde_json::json!({
+                "source_branch": "feature/fabro",
+                "target_branch": "main",
+                "title": "Implement GitLab",
+                "description": "Body",
+                "remove_source_branch": false
+            }))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+        let value: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(value["iid"], 1);
+        assert_eq!(
+            value["web_url"],
+            format!("{base}/platform/tools/fabro/-/merge_requests/1")
+        );
+
+        let get_url = format!("{base}/api/v4/projects/platform%2Ftools%2Ffabro/merge_requests/1");
+        assert_eq!(
+            client
+                .get(&get_url)
+                .bearer_auth(server.automation_token())
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::OK
+        );
+
+        assert_eq!(
+            client
+                .put(format!("{get_url}/merge"))
+                .bearer_auth(server.automation_token())
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::OK
+        );
+
+        assert_eq!(
+            client
+                .put(get_url)
+                .bearer_auth(server.automation_token())
+                .json(&serde_json::json!({ "state_event": "close" }))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::OK
+        );
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This twin contract test must explicitly prove local reqwest clients disable proxy discovery."
+    )]
+    #[tokio::test]
+    async fn fetches_project_by_encoded_path() {
+        let server = TestGitLabServer::start().await;
+        server.add_project("platform/tools/fabro", "main", &["feature/fabro"]);
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let response = client
+            .get(format!(
+                "{}/api/v4/projects/platform%2Ftools%2Ffabro",
+                server.base_url()
+            ))
+            .bearer_auth(server.automation_token())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let value: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(value["path_with_namespace"], "platform/tools/fabro");
+        assert_eq!(value["default_branch"], "main");
+        assert_eq!(
+            value["web_url"],
+            format!("{}/platform/tools/fabro", server.base_url())
+        );
+    }
+}

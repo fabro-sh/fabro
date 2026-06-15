@@ -35,6 +35,7 @@ fabro-workflow = { path = "../fabro-workflow" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona", "docker"] }
 fabro-github = { path = "../fabro-github" }
+fabro-gitlab = { path = "../fabro-gitlab" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-manifest = { path = "../fabro-manifest" }
@@ -118,3 +119,4 @@ fabro-macros = { path = "../fabro-macros" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
 fabro-test = { workspace = true }
 fabro-types = { path = "../fabro-types", features = ["test-support"] }
+twin-gitlab = { workspace = true }

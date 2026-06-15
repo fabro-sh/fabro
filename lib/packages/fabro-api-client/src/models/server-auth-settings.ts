@@ -18,9 +18,13 @@
 import type { ServerAuthGithubSettings } from './server-auth-github-settings';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { ServerAuthGitlabSettings } from './server-auth-gitlab-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { ServerAuthMethod } from './server-auth-method';
 
 export interface ServerAuthSettings {
     'methods': Array<ServerAuthMethod>;
     'github': ServerAuthGithubSettings;
+    'gitlab': ServerAuthGitlabSettings;
 }

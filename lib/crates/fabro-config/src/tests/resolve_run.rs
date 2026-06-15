@@ -407,6 +407,22 @@ channel = "#ops"
 }
 
 #[test]
+fn gitlab_run_token_request_resolves() {
+    let settings = super::workflow_settings_from_toml(
+        r"
+_version = 1
+
+[run.integrations.gitlab]
+token = true
+",
+    )
+    .expect("gitlab run token request should resolve")
+    .run;
+
+    assert!(settings.integrations.gitlab.token);
+}
+
+#[test]
 fn parsing_rejects_unknown_run_chat_destinations() {
     let notifications = r##"
 _version = 1

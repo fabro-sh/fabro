@@ -24,6 +24,7 @@ use crate::error::Error;
 use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::git::GitAuthor;
 use crate::github_token_source::{AppIatMinter, GitHubTokenSource};
+use crate::gitlab_token_source::GitLabTokenSource;
 use crate::handler::llm::{AgentAcpBackend, AgentApiBackend, BackendRouter, routing};
 use crate::handler::{HandlerRegistry, default_registry};
 use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_branch_name};
@@ -34,7 +35,11 @@ use crate::services::{
 };
 use crate::steering_hub::SteeringHub;
 
-type BuiltSandboxEnv = (HashMap<String, String>, Option<Arc<GitHubTokenSource>>);
+type BuiltSandboxEnv = (
+    HashMap<String, String>,
+    Option<Arc<GitHubTokenSource>>,
+    Option<Arc<GitLabTokenSource>>,
+);
 
 async fn run_hooks(
     hook_runner: Option<&HookRunner>,
@@ -86,12 +91,20 @@ fn build_sandbox_env(
     github_app: Option<&fabro_github::GitHubCredentials>,
 ) -> Result<BuiltSandboxEnv, Error> {
     let env = spec.toml_env.clone();
+    let gitlab_token_source = if spec.gitlab_token_requested {
+        let token = spec.gitlab_token.as_ref().ok_or_else(|| {
+            Error::engine("GITLAB_TOKEN was requested but no GitLab token is configured")
+        })?;
+        Some(Arc::new(GitLabTokenSource::new_static(token.clone())))
+    } else {
+        None
+    };
 
     let Some(permissions) = spec.github_permissions.as_ref().filter(|p| !p.is_empty()) else {
-        return Ok((env, None));
+        return Ok((env, None, gitlab_token_source));
     };
     let Some(creds) = github_app else {
-        return Ok((env, None));
+        return Ok((env, None, gitlab_token_source));
     };
 
     let source = match creds {
@@ -103,7 +116,7 @@ fn build_sandbox_env(
         }
         fabro_github::GitHubCredentials::App(app) => {
             let Some(origin_url) = spec.origin_url.as_deref() else {
-                return Ok((env, None));
+                return Ok((env, None, gitlab_token_source));
             };
             let https_url = fabro_github::ssh_url_to_https(origin_url);
             let (owner, repo) = fabro_github::parse_github_owner_repo(&https_url)
@@ -127,7 +140,7 @@ fn build_sandbox_env(
         }
     };
 
-    Ok((env, source))
+    Ok((env, source, gitlab_token_source))
 }
 
 async fn build_registry(
@@ -425,13 +438,14 @@ pub async fn initialize(
         });
     }
 
-    let (base_env, github_token) = build_sandbox_env(
+    let (base_env, github_token, gitlab_token) = build_sandbox_env(
         &options.sandbox_env,
         options.run_options.github_app.as_ref(),
     )?;
     let tool_env_provider = Arc::new(WorkflowToolEnvProvider {
         base_env:     base_env.clone(),
         github_token: github_token.clone(),
+        gitlab_token: gitlab_token.clone(),
     });
     let github_token_refresh_managed = github_token
         .as_deref()
@@ -612,6 +626,7 @@ pub async fn initialize(
         git_state: std::sync::RwLock::new(None),
         base_env,
         github_token,
+        gitlab_token,
         inputs: options.run_options.settings.run.inputs.clone(),
         dry_run: options.dry_run,
         workflow_path: options.workflow_path.clone(),
@@ -828,9 +843,11 @@ mod tests {
             workflow_bundle:   None,
             hooks:             fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env:       SandboxEnvSpec {
-                toml_env:           HashMap::new(),
-                github_permissions: None,
-                origin_url:         None,
+                toml_env:               HashMap::new(),
+                github_permissions:     None,
+                gitlab_token_requested: false,
+                gitlab_token:           None,
+                origin_url:             None,
             },
             vault:             None,
             git:               None,
@@ -910,9 +927,14 @@ mod tests {
             workflow_bundle:   None,
             hooks:             fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env:       SandboxEnvSpec {
-                toml_env:           HashMap::from([("TEST_KEY".to_string(), "value".to_string())]),
-                github_permissions: None,
-                origin_url:         None,
+                toml_env:               HashMap::from([(
+                    "TEST_KEY".to_string(),
+                    "value".to_string(),
+                )]),
+                github_permissions:     None,
+                gitlab_token_requested: false,
+                gitlab_token:           None,
+                origin_url:             None,
             },
             vault:             None,
             git:               None,
@@ -987,6 +1009,7 @@ mod tests {
         let tool_env_provider = Arc::new(WorkflowToolEnvProvider {
             base_env:     HashMap::new(),
             github_token: None,
+            gitlab_token: None,
         });
         let (_registry, effective_dry_run) = build_registry(
             &LlmSpec {
@@ -1011,6 +1034,44 @@ mod tests {
         .unwrap();
 
         assert!(!effective_dry_run);
+    }
+
+    #[test]
+    fn build_sandbox_env_does_not_construct_gitlab_source_when_not_requested() {
+        let spec = SandboxEnvSpec {
+            toml_env:               HashMap::from([("FOO".to_string(), "bar".to_string())]),
+            github_permissions:     None,
+            gitlab_token_requested: false,
+            gitlab_token:           None,
+            origin_url:             None,
+        };
+
+        let (env, github_token, gitlab_token) = build_sandbox_env(&spec, None).unwrap();
+
+        assert_eq!(env.get("FOO").map(String::as_str), Some("bar"));
+        assert!(github_token.is_none());
+        assert!(gitlab_token.is_none());
+    }
+
+    #[test]
+    fn build_sandbox_env_errors_when_gitlab_token_requested_without_source() {
+        let spec = SandboxEnvSpec {
+            toml_env:               HashMap::new(),
+            github_permissions:     None,
+            gitlab_token_requested: true,
+            gitlab_token:           None,
+            origin_url:             None,
+        };
+
+        let Err(err) = build_sandbox_env(&spec, None) else {
+            panic!("expected missing GitLab token source to fail");
+        };
+
+        assert!(
+            err.to_string()
+                .contains("GITLAB_TOKEN was requested but no GitLab token is configured"),
+            "got: {err}"
+        );
     }
 
     #[tokio::test]
@@ -1108,9 +1169,11 @@ mod tests {
             workflow_bundle:   None,
             hooks:             fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env:       SandboxEnvSpec {
-                toml_env:           HashMap::new(),
-                github_permissions: None,
-                origin_url:         None,
+                toml_env:               HashMap::new(),
+                github_permissions:     None,
+                gitlab_token_requested: false,
+                gitlab_token:           None,
+                origin_url:             None,
             },
             vault:             Some(vault),
             git:               None,
@@ -1204,9 +1267,11 @@ mod tests {
             workflow_bundle:   None,
             hooks:             fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env:       SandboxEnvSpec {
-                toml_env:           HashMap::new(),
-                github_permissions: None,
-                origin_url:         None,
+                toml_env:               HashMap::new(),
+                github_permissions:     None,
+                gitlab_token_requested: false,
+                gitlab_token:           None,
+                origin_url:             None,
             },
             vault:             None,
             git:               None,
@@ -1318,9 +1383,11 @@ mod tests {
             workflow_bundle: None,
             hooks: fabro_hooks::HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
-                toml_env:           HashMap::new(),
-                github_permissions: None,
-                origin_url:         None,
+                toml_env:               HashMap::new(),
+                github_permissions:     None,
+                gitlab_token_requested: false,
+                gitlab_token:           None,
+                origin_url:             None,
             },
             vault: None,
             git: None,

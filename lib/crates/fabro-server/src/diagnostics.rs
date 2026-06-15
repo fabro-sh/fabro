@@ -10,8 +10,8 @@ use fabro_model::{Catalog, ProviderId};
 use fabro_redact::redact_string;
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
-use fabro_types::settings::ServerAuthMethod;
-use fabro_types::settings::server::GithubIntegrationStrategy;
+use fabro_types::settings::server::{GithubIntegrationStrategy, GitlabIntegrationStrategy};
+use fabro_types::settings::{InterpString, ServerAuthMethod};
 use fabro_util::check_report::{CheckDetail, CheckResult, CheckSection, CheckStatus};
 use fabro_util::dev_token::validate_dev_token_format;
 use fabro_util::session_secret;
@@ -88,9 +88,10 @@ fn validate_session_secret(value: &str) -> Result<(), String> {
 }
 
 pub async fn run_all(state: &AppState) -> DiagnosticsReport {
-    let (llm, github, sandbox, brave) = tokio::join!(
+    let (llm, github, gitlab, sandbox, brave) = tokio::join!(
         check_llm_providers(state),
         check_github_app(state),
+        check_gitlab(state),
         check_sandbox(state),
         check_brave_search(state),
     );
@@ -101,13 +102,218 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
         sections: vec![
             CheckSection {
                 title:  "Credentials".to_string(),
-                checks: vec![llm, github, sandbox, brave],
+                checks: vec![llm, github, gitlab, sandbox, brave],
             },
             CheckSection {
                 title:  "Configuration".to_string(),
                 checks: vec![crypto, check_storage_dir(state)],
             },
         ],
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GitlabDiagnosticInput {
+    pub enabled:               bool,
+    pub strategy:              GitlabIntegrationStrategy,
+    pub base_url:              Option<String>,
+    pub client_id:             Option<String>,
+    pub client_secret_present: bool,
+    pub token_present:         bool,
+    pub token:                 Option<String>,
+    pub allowed_usernames:     Vec<String>,
+    pub allowed_groups:        Vec<String>,
+}
+
+async fn check_gitlab(state: &AppState) -> CheckResult {
+    let settings = state.server_settings();
+    let gitlab = &settings.server.integrations.gitlab;
+    let auth = &settings.server.auth.gitlab;
+    let base_url = gitlab.base_url.as_ref().map(|value| {
+        state
+            .resolve_interp(value)
+            .unwrap_or_else(|_| value.as_source())
+    });
+    let client_id = gitlab.client_id.as_ref().map(|value| {
+        state
+            .resolve_interp(value)
+            .unwrap_or_else(|_| value.as_source())
+    });
+    let token = state.vault_secret(EnvVars::GITLAB_TOKEN);
+    let input = GitlabDiagnosticInput {
+        enabled: gitlab.enabled,
+        strategy: gitlab.strategy,
+        base_url,
+        client_id,
+        client_secret_present: state
+            .vault_secret(EnvVars::GITLAB_APP_CLIENT_SECRET)
+            .is_some_and(|value| !value.trim().is_empty()),
+        token_present: token.as_ref().is_some_and(|value| !value.trim().is_empty()),
+        token,
+        allowed_usernames: auth.allowed_usernames.clone(),
+        allowed_groups: auth.allowed_groups.clone(),
+    };
+    run_gitlab_diagnostics_for_test(input).await
+}
+
+pub(crate) async fn run_gitlab_diagnostics_for_test(input: GitlabDiagnosticInput) -> CheckResult {
+    if !input.enabled {
+        return CheckResult {
+            name:        "GitLab".to_string(),
+            status:      CheckStatus::Warning,
+            summary:     "not configured".to_string(),
+            details:     Vec::new(),
+            remediation: Some(
+                "Configure [server.integrations.gitlab] to enable GitLab".to_string(),
+            ),
+        };
+    }
+
+    let mut details = Vec::new();
+    let mut errors = Vec::new();
+
+    let base = match input
+        .base_url
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(base_url) => match fabro_gitlab::repository::GitLabBaseUrl::parse(base_url) {
+            Ok(base) => Some(base),
+            Err(err) => {
+                errors.push(format!("invalid GitLab base URL: {err}"));
+                None
+            }
+        },
+        None => {
+            errors.push("server.integrations.gitlab.base_url is not configured".to_string());
+            None
+        }
+    };
+
+    if !input.token_present {
+        errors.push(format!("{} not configured in vault", EnvVars::GITLAB_TOKEN));
+    }
+    if input.strategy == GitlabIntegrationStrategy::App {
+        if input
+            .client_id
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            errors.push("server.integrations.gitlab.client_id is not configured".to_string());
+        }
+        if !input.client_secret_present {
+            errors.push(format!(
+                "{} not configured in vault",
+                EnvVars::GITLAB_APP_CLIENT_SECRET
+            ));
+        }
+        if input.allowed_usernames.is_empty() && input.allowed_groups.is_empty() {
+            details.push(CheckDetail {
+                text: "No GitLab users can authenticate until an allowed username or group is configured.".to_string(),
+                warn: true,
+            });
+        }
+    }
+
+    if !errors.is_empty() {
+        details.extend(errors.iter().cloned().map(CheckDetail::new));
+        return CheckResult {
+            name: "GitLab".to_string(),
+            status: CheckStatus::Error,
+            summary: "configuration incomplete".to_string(),
+            details,
+            remediation: Some(errors.join("; ")),
+        };
+    }
+
+    if let (Some(base), Some(token)) = (base, input.token.as_deref()) {
+        let api_url = base.api_url("user");
+        let http = match http_client_or_check("GitLab", CheckStatus::Error) {
+            Ok(http) => http,
+            Err(result) => return result,
+        };
+        let probe = timeout(Duration::from_secs(15), async move {
+            http.get(api_url.as_str())
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Accept", "application/json")
+                .send()
+                .await
+                .map_err(anyhow::Error::new)
+        })
+        .await;
+
+        match probe {
+            Ok(Ok(response)) if response.status().is_success() => {}
+            Ok(Ok(response)) if response.status() == fabro_http::StatusCode::UNAUTHORIZED => {
+                return CheckResult {
+                    name:        "GitLab".to_string(),
+                    status:      CheckStatus::Error,
+                    summary:     "token invalid".to_string(),
+                    details:     vec![CheckDetail::new(format!(
+                        "GitLab returned {}",
+                        response.status()
+                    ))],
+                    remediation: Some(
+                        "Run fabro install or run `fabro secret set GITLAB_TOKEN`".to_string(),
+                    ),
+                };
+            }
+            Ok(Ok(response)) => {
+                return CheckResult {
+                    name:        "GitLab".to_string(),
+                    status:      CheckStatus::Error,
+                    summary:     "connectivity error".to_string(),
+                    details:     vec![CheckDetail::new(format!(
+                        "GitLab returned {}",
+                        response.status()
+                    ))],
+                    remediation: Some(
+                        "Check GitLab connectivity and the vault GITLAB_TOKEN".to_string(),
+                    ),
+                };
+            }
+            Ok(Err(err)) => {
+                return CheckResult {
+                    name:        "GitLab".to_string(),
+                    status:      CheckStatus::Error,
+                    summary:     "connectivity error".to_string(),
+                    details:     vec![CheckDetail::new(format!("{err:#}"))],
+                    remediation: Some(
+                        "Check GitLab connectivity and the vault GITLAB_TOKEN".to_string(),
+                    ),
+                };
+            }
+            Err(_) => {
+                return CheckResult {
+                    name:        "GitLab".to_string(),
+                    status:      CheckStatus::Error,
+                    summary:     "timeout".to_string(),
+                    details:     vec![CheckDetail::new("GitLab probe timed out".to_string())],
+                    remediation: Some(
+                        "Check GitLab connectivity and the vault GITLAB_TOKEN".to_string(),
+                    ),
+                };
+            }
+        }
+    }
+
+    let status = if details.iter().any(|detail| detail.warn) {
+        CheckStatus::Warning
+    } else {
+        CheckStatus::Pass
+    };
+    CheckResult {
+        name: "GitLab".to_string(),
+        status,
+        summary: if status == CheckStatus::Pass {
+            "configured".to_string()
+        } else {
+            "configured with warnings".to_string()
+        },
+        details,
+        remediation: (status == CheckStatus::Warning).then(|| {
+            "Configure [server.auth.gitlab] allowed_usernames or allowed_groups".to_string()
+        }),
     }
 }
 
@@ -765,7 +971,7 @@ mod tests {
 
     use fabro_config::RunLayer;
     use fabro_vault::SecretType;
-    use httpmock::Method::POST;
+    use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
     use serde_json::json;
 
@@ -917,6 +1123,97 @@ mod tests {
                 .any(|detail| detail.text == "openai: OK"),
             "expected openai OK detail, got: {:?}",
             result.details
+        );
+    }
+
+    #[tokio::test]
+    async fn gitlab_app_mode_warns_when_allowlists_are_empty() {
+        let result = run_gitlab_diagnostics_for_test(GitlabDiagnosticInput {
+            enabled:               true,
+            strategy:              GitlabIntegrationStrategy::App,
+            base_url:              Some("https://gitlab.ipt.example".to_string()),
+            client_id:             Some("gitlab-client".to_string()),
+            client_secret_present: true,
+            token_present:         true,
+            token:                 None,
+            allowed_usernames:     Vec::new(),
+            allowed_groups:        Vec::new(),
+        })
+        .await;
+
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(
+            result
+                .details
+                .iter()
+                .any(|message| { message.text.contains("No GitLab users can authenticate") })
+        );
+    }
+
+    #[tokio::test]
+    async fn gitlab_token_mode_probes_api_user() {
+        let server = MockServer::start_async().await;
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/gitlab/api/v4/user")
+                    .header("authorization", "Bearer gitlab-token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "username": "automation" }));
+            })
+            .await;
+
+        let result = run_gitlab_diagnostics_for_test(GitlabDiagnosticInput {
+            enabled:               true,
+            strategy:              GitlabIntegrationStrategy::Token,
+            base_url:              Some(server.url("/gitlab")),
+            client_id:             None,
+            client_secret_present: false,
+            token_present:         true,
+            token:                 Some("gitlab-token".to_string()),
+            allowed_usernames:     Vec::new(),
+            allowed_groups:        Vec::new(),
+        })
+        .await;
+
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert_eq!(result.summary, "configured");
+    }
+
+    #[tokio::test]
+    async fn gitlab_app_mode_reports_missing_credentials() {
+        let result = run_gitlab_diagnostics_for_test(GitlabDiagnosticInput {
+            enabled:               true,
+            strategy:              GitlabIntegrationStrategy::App,
+            base_url:              Some("https://gitlab.ipt.example".to_string()),
+            client_id:             None,
+            client_secret_present: false,
+            token_present:         false,
+            token:                 None,
+            allowed_usernames:     vec!["alice".to_string()],
+            allowed_groups:        Vec::new(),
+        })
+        .await;
+
+        assert_eq!(result.status, CheckStatus::Error);
+        assert!(
+            result
+                .details
+                .iter()
+                .any(|detail| { detail.text.contains("server.integrations.gitlab.client_id") })
+        );
+        assert!(
+            result
+                .details
+                .iter()
+                .any(|detail| { detail.text.contains(EnvVars::GITLAB_APP_CLIENT_SECRET) })
+        );
+        assert!(
+            result
+                .details
+                .iter()
+                .any(|detail| { detail.text.contains(EnvVars::GITLAB_TOKEN) })
         );
     }
 

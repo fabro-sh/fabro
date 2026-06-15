@@ -4,9 +4,9 @@ use fabro_types::settings::run::{
     McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
     NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunBranchSettings,
     RunCheckpointSettings, RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal,
-    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
-    RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
-    RunScmSettings, ScmGitHubSettings, TlsMode,
+    RunIntegrationsGithubSettings, RunIntegrationsGitlabSettings, RunIntegrationsSettings,
+    RunInterviewsSettings, RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace,
+    RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 
 use super::{ResolveError, resolve_run_environment};
@@ -14,9 +14,9 @@ use crate::{
     EnvironmentLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
     InterviewsLayer, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
     NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
-    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer,
-    RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer,
-    RunScmLayer, StringOrSplice,
+    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsGitlabLayer, RunIntegrationsLayer,
+    RunLayer, RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer,
+    RunRunBranchLayer, RunScmLayer, StringOrSplice,
 };
 
 pub fn resolve_run(
@@ -95,7 +95,16 @@ fn resolve_integrations(layer: Option<&RunIntegrationsLayer>) -> RunIntegrations
             permissions: github.permissions.clone().unwrap_or_default(),
         })
         .unwrap_or_default();
-    RunIntegrationsSettings { github }
+    let gitlab = resolve_gitlab_integration(layer.and_then(|layer| layer.gitlab.as_ref()));
+    RunIntegrationsSettings { github, gitlab }
+}
+
+fn resolve_gitlab_integration(
+    layer: Option<&RunIntegrationsGitlabLayer>,
+) -> RunIntegrationsGitlabSettings {
+    RunIntegrationsGitlabSettings {
+        token: layer.and_then(|layer| layer.token).unwrap_or(false),
+    }
 }
 
 fn resolve_goal(goal: Option<&RunGoalLayer>) -> Option<RunGoal> {

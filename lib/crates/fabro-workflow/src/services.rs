@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::event::Emitter;
 use crate::github_token_source::GitHubTokenSource;
+use crate::gitlab_token_source::GitLabTokenSource;
 use crate::handler::HandlerRegistry;
 use crate::interview_runtime::RunInterviewBlocker;
 use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
@@ -236,6 +237,8 @@ pub struct EngineServices {
     pub base_env:         HashMap<String, String>,
     /// GitHub token source used to inject `GITHUB_TOKEN` at the point of use.
     pub github_token:     Option<Arc<GitHubTokenSource>>,
+    /// GitLab token source used to inject `GITLAB_TOKEN` at the point of use.
+    pub gitlab_token:     Option<Arc<GitLabTokenSource>>,
     /// Typed values from `[run.inputs]`, available to prompt templates.
     pub inputs:           HashMap<String, toml::Value>,
     /// When true, handlers should skip real execution and return simulated
@@ -249,7 +252,12 @@ pub struct EngineServices {
 
 impl EngineServices {
     pub async fn env_for_stage(&self) -> anyhow::Result<HashMap<String, String>> {
-        resolve_workflow_env(&self.base_env, self.github_token.as_ref()).await
+        resolve_workflow_env(
+            &self.base_env,
+            self.github_token.as_ref(),
+            self.gitlab_token.as_ref(),
+        )
+        .await
     }
 
     /// Read the current git state (if any).
@@ -346,6 +354,7 @@ impl EngineServices {
             git_state:       std::sync::RwLock::new(None),
             base_env:        HashMap::new(),
             github_token:    None,
+            gitlab_token:    None,
             inputs:          HashMap::new(),
             dry_run:         false,
             workflow_path:   None,
@@ -357,22 +366,32 @@ impl EngineServices {
 pub struct WorkflowToolEnvProvider {
     pub base_env:     HashMap<String, String>,
     pub github_token: Option<Arc<GitHubTokenSource>>,
+    pub gitlab_token: Option<Arc<GitLabTokenSource>>,
 }
 
 #[async_trait::async_trait]
 impl ToolEnvProvider for WorkflowToolEnvProvider {
     async fn resolve(&self) -> anyhow::Result<HashMap<String, String>> {
-        resolve_workflow_env(&self.base_env, self.github_token.as_ref()).await
+        resolve_workflow_env(
+            &self.base_env,
+            self.github_token.as_ref(),
+            self.gitlab_token.as_ref(),
+        )
+        .await
     }
 }
 
 async fn resolve_workflow_env(
     base_env: &HashMap<String, String>,
     github_token: Option<&Arc<GitHubTokenSource>>,
+    gitlab_token: Option<&Arc<GitLabTokenSource>>,
 ) -> anyhow::Result<HashMap<String, String>> {
     let mut env = base_env.clone();
     if let Some(source) = github_token {
         env.insert("GITHUB_TOKEN".to_string(), source.current_token().await?);
+    }
+    if let Some(source) = gitlab_token {
+        env.insert("GITLAB_TOKEN".to_string(), source.token()?);
     }
     Ok(env)
 }
@@ -388,6 +407,7 @@ mod tests {
 
     use super::{EngineServices, WorkflowToolEnvProvider};
     use crate::github_token_source::{GitHubTokenSource, IatMinter};
+    use crate::gitlab_token_source::GitLabTokenSource;
 
     #[tokio::test]
     async fn test_default_uses_stub_credential_source() {
@@ -408,6 +428,7 @@ mod tests {
         let provider = WorkflowToolEnvProvider {
             base_env:     HashMap::from([("FOO".to_string(), "bar".to_string())]),
             github_token: None,
+            gitlab_token: None,
         };
 
         let env = provider.resolve().await.unwrap();
@@ -421,12 +442,45 @@ mod tests {
         let provider = WorkflowToolEnvProvider {
             base_env:     HashMap::from([("FOO".to_string(), "bar".to_string())]),
             github_token: Some(Arc::new(GitHubTokenSource::pat("ghp_pat".to_string()))),
+            gitlab_token: None,
         };
 
         let env = provider.resolve().await.unwrap();
 
         assert_eq!(env.get("FOO").map(String::as_str), Some("bar"));
         assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_pat"));
+    }
+
+    #[tokio::test]
+    async fn workflow_tool_env_provider_merges_current_gitlab_token() {
+        let provider = WorkflowToolEnvProvider {
+            base_env:     HashMap::from([("FOO".to_string(), "bar".to_string())]),
+            github_token: None,
+            gitlab_token: Some(Arc::new(GitLabTokenSource::new_static("glpat-test"))),
+        };
+
+        let env = provider.resolve().await.unwrap();
+
+        assert_eq!(env.get("FOO").map(String::as_str), Some("bar"));
+        assert_eq!(
+            env.get("GITLAB_TOKEN").map(String::as_str),
+            Some("glpat-test")
+        );
+        assert!(!env.contains_key("GITHUB_TOKEN"));
+    }
+
+    #[tokio::test]
+    async fn workflow_tool_env_provider_returns_base_env_without_gitlab_token() {
+        let provider = WorkflowToolEnvProvider {
+            base_env:     HashMap::from([("FOO".to_string(), "bar".to_string())]),
+            github_token: None,
+            gitlab_token: None,
+        };
+
+        let env = provider.resolve().await.unwrap();
+
+        assert_eq!(env.get("FOO").map(String::as_str), Some("bar"));
+        assert!(!env.contains_key("GITLAB_TOKEN"));
     }
 
     struct FailingMinter;
@@ -445,6 +499,7 @@ mod tests {
             github_token: Some(Arc::new(GitHubTokenSource::mintable(Arc::new(
                 FailingMinter,
             )))),
+            gitlab_token: None,
         };
 
         let err = format!("{:#}", provider.resolve().await.unwrap_err());

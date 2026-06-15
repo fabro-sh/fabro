@@ -2,6 +2,7 @@ use std::sync::{Arc, LazyLock};
 
 use fabro_auth::CredentialSource;
 use fabro_github::{self as github_app, ssh_url_to_https};
+use fabro_gitlab::{GitLabContext, merge_requests, repository};
 use fabro_graphviz::parser;
 use fabro_llm::client::Client;
 use fabro_llm::generate::{GenerateParams, generate_object};
@@ -452,9 +453,15 @@ pub struct AutoMergeOptions {
     pub merge_strategy: MergeStrategy,
 }
 
+/// Source-control provider used to open the pull request.
+pub enum PullRequestForge<'a> {
+    Github(github_app::GitHubContext<'a>),
+    Gitlab(fabro_gitlab::GitLabContext),
+}
+
 /// Inputs for [`maybe_open_pull_request`].
 pub struct OpenPullRequestRequest<'a> {
-    pub github:      github_app::GitHubContext<'a>,
+    pub forge:       PullRequestForge<'a>,
     pub origin_url:  &'a str,
     pub base_branch: &'a str,
     pub head_branch: &'a str,
@@ -478,55 +485,42 @@ pub struct CreatedPullRequest {
     pub head_branch: String,
 }
 
-/// Optionally open a pull request after a successful workflow run.
-///
-/// Returns `Ok(Some(CreatedPullRequest))` if a PR was created, `Ok(None)` if
-/// the diff was empty, or `Err` on failure.
-pub async fn maybe_open_pull_request(
-    req: OpenPullRequestRequest<'_>,
-) -> Result<Option<CreatedPullRequest>, String> {
-    if req.diff.is_empty() {
-        debug!("Empty diff, skipping pull request creation");
-        return Ok(None);
-    }
+struct SharedPullRequest<'a> {
+    origin_url:  &'a str,
+    base_branch: &'a str,
+    head_branch: &'a str,
+    title:       &'a str,
+    body:        &'a str,
+    draft:       bool,
+    auto_merge:  Option<AutoMergeOptions>,
+}
 
-    let https_url = ssh_url_to_https(req.origin_url);
+async fn open_github_pull_request(
+    github: &github_app::GitHubContext<'_>,
+    shared: SharedPullRequest<'_>,
+) -> Result<PullRequestLink, String> {
+    let https_url = ssh_url_to_https(shared.origin_url);
     let (owner, repo) =
         github_app::parse_github_owner_repo(&https_url).map_err(|err| format!("{err:#}"))?;
 
-    let content = build_pr_content(
-        req.diff,
-        req.goal,
-        req.model,
-        req.run_store,
-        req.llm_source,
-        Arc::clone(&req.catalog),
-        req.conclusion,
-        req.run_state,
-    )
-    .await
-    .map_err(|err| format!("{err:#}"))?;
-    let body = truncate_pr_body(&content.body);
-    let title = content.title;
-
     let created = github_app::create_pull_request(
-        &req.github,
+        github,
         &owner,
         &repo,
-        req.base_branch,
-        req.head_branch,
-        &title,
-        &body,
-        req.draft,
+        shared.base_branch,
+        shared.head_branch,
+        shared.title,
+        shared.body,
+        shared.draft,
     )
     .await
     .map_err(|err| format!("{err:#}"))?;
 
     info!(pr_url = %created.html_url, created.number, "Pull request created");
 
-    if let Some(am_cfg) = req.auto_merge {
+    if let Some(am_cfg) = shared.auto_merge {
         match github_app::enable_auto_merge(
-            &req.github,
+            github,
             &owner,
             &repo,
             &created.node_id,
@@ -547,10 +541,106 @@ pub async fn maybe_open_pull_request(
         }
     }
 
-    let link = PullRequestLink {
-        owner,
-        repo,
-        number: created.number,
+    Ok(PullRequestLink::github(owner, repo, created.number))
+}
+
+async fn open_gitlab_pull_request(
+    gitlab: &GitLabContext,
+    origin_url: &str,
+    base_branch: &str,
+    head_branch: &str,
+    title: &str,
+    body: &str,
+    draft: bool,
+    auto_merge: Option<AutoMergeOptions>,
+) -> Result<PullRequestLink, String> {
+    let base = repository::GitLabBaseUrl::parse(gitlab.base_url.as_str())
+        .map_err(|err| err.to_string())?;
+    let repo = repository::parse_origin(&base, origin_url).map_err(|err| err.to_string())?;
+    let created = merge_requests::create_merge_request(
+        gitlab,
+        &repo,
+        base_branch,
+        head_branch,
+        title,
+        body,
+        draft,
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+
+    info!(mr_url = %created.web_url, created.iid, "GitLab merge request created");
+
+    if let Some(am_cfg) = auto_merge {
+        match merge_requests::enable_auto_merge(gitlab, &repo, created.iid, am_cfg.merge_strategy)
+            .await
+        {
+            Ok(()) => {
+                info!(mr_iid = created.iid, "GitLab auto-merge enabled");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    mr_iid = created.iid,
+                    error = %e,
+                    "Failed to enable GitLab auto-merge"
+                );
+            }
+        }
+    }
+
+    Ok(merge_requests::to_pull_request_link(&repo, &created))
+}
+
+/// Optionally open a pull request after a successful workflow run.
+///
+/// Returns `Ok(Some(CreatedPullRequest))` if a PR was created, `Ok(None)` if
+/// the diff was empty, or `Err` on failure.
+pub async fn maybe_open_pull_request(
+    req: OpenPullRequestRequest<'_>,
+) -> Result<Option<CreatedPullRequest>, String> {
+    if req.diff.trim().is_empty() {
+        debug!("Empty diff, skipping pull request creation");
+        return Ok(None);
+    }
+
+    let content = build_pr_content(
+        req.diff,
+        req.goal,
+        req.model,
+        req.run_store,
+        req.llm_source,
+        Arc::clone(&req.catalog),
+        req.conclusion,
+        req.run_state,
+    )
+    .await
+    .map_err(|err| format!("{err:#}"))?;
+    let body = truncate_pr_body(&content.body);
+    let title = content.title;
+    let shared = SharedPullRequest {
+        origin_url:  req.origin_url,
+        base_branch: req.base_branch,
+        head_branch: req.head_branch,
+        title:       &title,
+        body:        &body,
+        draft:       req.draft,
+        auto_merge:  req.auto_merge,
+    };
+    let link = match req.forge {
+        PullRequestForge::Github(github) => open_github_pull_request(&github, shared).await?,
+        PullRequestForge::Gitlab(gitlab) => {
+            open_gitlab_pull_request(
+                &gitlab,
+                shared.origin_url,
+                shared.base_branch,
+                shared.head_branch,
+                shared.title,
+                shared.body,
+                shared.draft,
+                shared.auto_merge,
+            )
+            .await?
+        }
     };
 
     Ok(Some(CreatedPullRequest {
@@ -572,6 +662,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
         graph,
         run_options,
         services,
+        final_patch: _,
     } = concluded;
 
     let mut pr_url = None;
@@ -585,11 +676,17 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                 result.status,
                 StageOutcome::Succeeded | StageOutcome::PartiallySucceeded
             ) {
-                let diff = load_pull_request_diff(&services.run_store).await;
-                if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
+                let diff = match options
+                    .final_patch
+                    .as_deref()
+                    .filter(|patch| !patch.trim().is_empty())
+                {
+                    Some(patch) => patch.to_string(),
+                    None => load_pull_request_diff(&services.run_store).await,
+                };
+                if let (Some(base_branch), Some(run_branch), Some(origin)) = (
                     &run_options.base_branch,
                     run_options.run_branch(),
-                    &options.github_app,
                     &options.origin_url,
                 ) {
                     let auto_merge = if pr_cfg.auto_merge {
@@ -599,49 +696,81 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                     } else {
                         None
                     };
+                    let github_api_base_url = github_app::github_api_base_url();
+                    let forge =
+                        if let Some(gitlab) = options.gitlab.as_ref().filter(|gitlab| {
+                            repository::parse_origin(&gitlab.base_url, origin).is_ok()
+                        }) {
+                            Some(PullRequestForge::Gitlab(GitLabContext {
+                                credentials: gitlab.credentials.clone(),
+                                base_url:    gitlab.base_url.url.clone(),
+                                http_client: None,
+                            }))
+                        } else {
+                            options.github_app.as_ref().map(|creds| {
+                                PullRequestForge::Github(github_app::GitHubContext::new(
+                                    creds,
+                                    &github_api_base_url,
+                                ))
+                            })
+                        };
 
-                    match maybe_open_pull_request(OpenPullRequestRequest {
-                        github: github_app::GitHubContext::new(
-                            creds,
-                            &github_app::github_api_base_url(),
-                        ),
-                        origin_url: origin,
-                        base_branch,
-                        head_branch: run_branch,
-                        goal: graph.goal(),
-                        diff: &diff,
-                        model: &options.model,
-                        draft: pr_cfg.draft,
-                        auto_merge,
-                        run_store: &services.run_store,
-                        llm_source: services.llm_source.as_ref(),
-                        catalog: Arc::clone(&services.catalog),
-                        conclusion: Some(&conclusion),
-                        run_state: None,
-                    })
-                    .await
-                    {
-                        Ok(Some(created)) => {
-                            services.emitter.emit(&Event::pull_request_created(
-                                &created.link,
-                                &created.base_branch,
-                                &created.head_branch,
-                                &created.title,
-                                pr_cfg.draft,
-                            ));
-                            pr_url = Some(created.link.html_url());
+                    if let Some(forge) = forge {
+                        match maybe_open_pull_request(OpenPullRequestRequest {
+                            forge,
+                            origin_url: origin,
+                            base_branch,
+                            head_branch: run_branch,
+                            goal: graph.goal(),
+                            diff: &diff,
+                            model: &options.model,
+                            draft: pr_cfg.draft,
+                            auto_merge,
+                            run_store: &services.run_store,
+                            llm_source: services.llm_source.as_ref(),
+                            catalog: Arc::clone(&services.catalog),
+                            conclusion: Some(&conclusion),
+                            run_state: None,
+                        })
+                        .await
+                        {
+                            Ok(Some(created)) => {
+                                services.emitter.emit(&Event::pull_request_created(
+                                    &created.link,
+                                    &created.base_branch,
+                                    &created.head_branch,
+                                    &created.title,
+                                    pr_cfg.draft,
+                                ));
+                                pr_url = Some(created.link.html_url().to_string());
+                            }
+                            Ok(None) => {
+                                services.emitter.notice(
+                                    RunNoticeLevel::Info,
+                                    RunNoticeCode::PullRequestSkipped,
+                                    "PR creation skipped: run produced no diff".to_string(),
+                                );
+                            }
+                            Err(e) => {
+                                services
+                                    .emitter
+                                    .emit(&Event::PullRequestFailed { error: e.clone() });
+                                services.emitter.notice(
+                                    RunNoticeLevel::Warn,
+                                    RunNoticeCode::PullRequestFailed,
+                                    format!("PR creation failed: {e}"),
+                                );
+                            }
                         }
-                        Ok(None) => {}
-                        Err(e) => {
-                            services
-                                .emitter
-                                .emit(&Event::PullRequestFailed { error: e.clone() });
-                            services.emitter.notice(
-                                RunNoticeLevel::Warn,
-                                RunNoticeCode::PullRequestFailed,
-                                format!("PR creation failed: {e}"),
-                            );
-                        }
+                    } else {
+                        services.emitter.emit(&Event::PullRequestFailed {
+                            error: "PR creation failed: no configured GitHub or GitLab credentials match the run origin".to_string(),
+                        });
+                        services.emitter.notice(
+                            RunNoticeLevel::Warn,
+                            RunNoticeCode::PullRequestFailed,
+                            "PR creation failed: no configured GitHub or GitLab credentials match the run origin".to_string(),
+                        );
                     }
                 }
             }
@@ -664,6 +793,82 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
 }
 
 #[cfg(test)]
+mod gitlab_pull_request_tests {
+    use fabro_types::pull_request::PullRequestProvider;
+    use httpmock::Method::POST;
+    use httpmock::MockServer;
+
+    use super::*;
+
+    async fn open_gitlab_pull_request_for_test() -> PullRequestLink {
+        let server = MockServer::start_async().await;
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/api/v4/projects/platform%2Ftools%2Ffabro/merge_requests");
+                then.status(201).json_body(serde_json::json!({
+                    "iid": 1,
+                    "title": "Implement feature",
+                    "description": "Body",
+                    "web_url": "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/1",
+                    "state": "opened",
+                    "draft": false,
+                    "work_in_progress": false,
+                    "merged_at": null,
+                    "merge_status": "can_be_merged",
+                    "detailed_merge_status": "mergeable",
+                    "changes_count": "1",
+                    "source_branch": "fabro/run-1",
+                    "target_branch": "main",
+                    "author": { "username": "fabro" },
+                    "created_at": "2026-06-13T00:00:00Z",
+                    "updated_at": "2026-06-13T00:00:00Z"
+                }));
+            })
+            .await;
+        let base_url = fabro_gitlab::repository::GitLabBaseUrl::parse(&server.base_url()).unwrap();
+        let gitlab = fabro_gitlab::GitLabContext {
+            credentials: fabro_gitlab::GitLabCredentials::Token("glpat-test".to_string()),
+            base_url:    base_url.url,
+            http_client: Some(
+                fabro_http::HttpClientBuilder::new()
+                    .no_proxy()
+                    .build()
+                    .unwrap(),
+            ),
+        };
+        let origin_url = format!("{}/platform/tools/fabro.git", server.base_url());
+
+        open_gitlab_pull_request(
+            &gitlab,
+            &origin_url,
+            "main",
+            "fabro/run-1",
+            "Implement feature",
+            "Body",
+            false,
+            None,
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn gitlab_origin_creates_merge_request_link() {
+        let result = open_gitlab_pull_request_for_test().await;
+
+        assert_eq!(result.provider, PullRequestProvider::Gitlab);
+        assert_eq!(result.owner_path, "platform/tools");
+        assert_eq!(result.repo, "fabro");
+        assert_eq!(result.number, 1);
+        assert_eq!(
+            result.html_url,
+            "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/1"
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -680,7 +885,7 @@ mod tests {
     use fabro_store::Database;
     use fabro_types::{
         BilledTokenCounts, RunProjection, RunSpec, SuccessReason, WorkflowSettings,
-        first_event_seq, fixtures, test_support,
+        first_event_seq, fixtures,
     };
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
@@ -732,8 +937,6 @@ mod tests {
                 raw:           None,
                 warnings:      vec![],
                 rate_limit:    None,
-                cost_usd:      None,
-                cost_source:   None,
             })
         }
 
@@ -762,8 +965,6 @@ mod tests {
                         raw:           None,
                         warnings:      vec![],
                         rate_limit:    None,
-                        cost_usd:      None,
-                        cost_source:   None,
                     },
                 )),
             ];
@@ -825,9 +1026,10 @@ mod tests {
                 graph_source:     None,
                 workflow_slug:    None,
                 automation:       None,
+                source_context:   None,
                 source_directory: None,
                 labels:           HashMap::new(),
-                provenance:       test_support::test_run_provenance(),
+                provenance:       None,
                 manifest_blob:    None,
                 definition_blob:  None,
                 git:              None,
@@ -939,13 +1141,16 @@ mod tests {
             graph: Graph::new("test"),
             run_options,
             services: EngineServices::test_default().run,
+            final_patch: None,
         };
 
         let finalized = pull_request(concluded, &PullRequestOptions {
-            pr_config:  None,
-            github_app: None,
-            origin_url: None,
-            model:      "test-model".to_string(),
+            pr_config:   None,
+            github_app:  None,
+            gitlab:      None,
+            origin_url:  None,
+            model:       "test-model".to_string(),
+            final_patch: None,
         })
         .await;
 
@@ -1143,6 +1348,7 @@ mod tests {
             graph_source:     None,
             workflow_slug:    Some("test".to_string()),
             automation:       None,
+            source_context:   None,
             source_directory: Some("/tmp/project".to_string()),
             git:              Some(fabro_types::GitContext {
                 origin_url:   String::new(),
@@ -1152,7 +1358,7 @@ mod tests {
                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
             }),
             labels:           HashMap::new(),
-            provenance:       test_support::test_run_provenance(),
+            provenance:       None,
             manifest_blob:    None,
             definition_blob:  None,
             fork_source_ref:  None,
@@ -1169,6 +1375,7 @@ mod tests {
             source_directory: run_spec.source_directory.clone(),
             workflow_slug:    run_spec.workflow_slug.clone(),
             automation:       None,
+            source_context:   run_spec.source_context.clone(),
             db_prefix:        None,
             provenance:       run_spec.provenance.clone(),
             manifest_blob:    None,
@@ -1214,6 +1421,7 @@ mod tests {
             graph_source:     None,
             workflow_slug:    Some("test".to_string()),
             automation:       None,
+            source_context:   None,
             source_directory: Some("/tmp/project".to_string()),
             git:              Some(fabro_types::GitContext {
                 origin_url:   String::new(),
@@ -1223,7 +1431,7 @@ mod tests {
                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
             }),
             labels:           HashMap::new(),
-            provenance:       test_support::test_run_provenance(),
+            provenance:       None,
             manifest_blob:    None,
             definition_blob:  None,
             fork_source_ref:  None,
@@ -1240,6 +1448,7 @@ mod tests {
             source_directory: run_spec.source_directory.clone(),
             workflow_slug:    run_spec.workflow_slug.clone(),
             automation:       None,
+            source_context:   run_spec.source_context.clone(),
             db_prefix:        None,
             provenance:       run_spec.provenance.clone(),
             manifest_blob:    None,
@@ -1544,7 +1753,9 @@ mod tests {
         });
         let base_url = github_app::github_api_base_url();
         let result = maybe_open_pull_request(OpenPullRequestRequest {
-            github:      github_app::GitHubContext::new(&creds, &base_url),
+            forge:       PullRequestForge::Github(github_app::GitHubContext::new(
+                &creds, &base_url,
+            )),
             origin_url:  "https://github.com/owner/repo.git",
             base_branch: "main",
             head_branch: "fabro/run/123",
@@ -1565,6 +1776,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn maybe_open_pull_request_skips_whitespace_only_diff() {
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let run_store_handle: RunStoreHandle = run_store.into();
+        let llm_source = test_llm_source();
+        let creds = fabro_github::GitHubCredentials::Pat("test-token".to_string());
+        let base_url = github_app::github_api_base_url();
+
+        let result = maybe_open_pull_request(OpenPullRequestRequest {
+            forge:       PullRequestForge::Github(github_app::GitHubContext::new(
+                &creds, &base_url,
+            )),
+            origin_url:  "https://github.com/owner/repo.git",
+            base_branch: "main",
+            head_branch: "fabro/run/123",
+            goal:        "Fix bug",
+            diff:        " \n\t\n",
+            model:       "claude-sonnet-4-20250514",
+            draft:       false,
+            auto_merge:  None,
+            run_store:   &run_store_handle,
+            llm_source:  llm_source.as_ref(),
+            catalog:     test_catalog(),
+            conclusion:  None,
+            run_state:   None,
+        })
+        .await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn load_pull_request_diff_uses_store_without_disk_patch() {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
@@ -1576,10 +1820,11 @@ mod tests {
             graph_source:     None,
             workflow_slug:    None,
             automation:       None,
+            source_context:   None,
             source_directory: Some(tmp.path().display().to_string()),
             git:              None,
             labels:           std::collections::HashMap::new(),
-            provenance:       test_support::test_run_provenance(),
+            provenance:       None,
             manifest_blob:    None,
             definition_blob:  None,
             fork_source_ref:  None,
@@ -1596,6 +1841,7 @@ mod tests {
             source_directory: run_spec.source_directory.clone(),
             workflow_slug:    None,
             automation:       None,
+            source_context:   run_spec.source_context.clone(),
             db_prefix:        None,
             provenance:       run_spec.provenance.clone(),
             manifest_blob:    None,
@@ -1705,10 +1951,11 @@ mod tests {
             graph_source:     None,
             workflow_slug:    Some("test".to_string()),
             automation:       None,
+            source_context:   None,
             source_directory: Some("/tmp/project".to_string()),
             git:              None,
             labels:           HashMap::new(),
-            provenance:       test_support::test_run_provenance(),
+            provenance:       None,
             manifest_blob:    None,
             definition_blob:  None,
             fork_source_ref:  None,
@@ -1725,8 +1972,9 @@ mod tests {
             source_directory: run_spec.source_directory.clone(),
             workflow_slug:    run_spec.workflow_slug.clone(),
             automation:       None,
+            source_context:   run_spec.source_context.clone(),
             db_prefix:        None,
-            provenance:       test_support::test_run_provenance(),
+            provenance:       None,
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
@@ -1819,6 +2067,19 @@ mod tests {
     /// credential source, and a run store seeded with a non-empty
     /// `final_patch`.
     async fn setup_fallback_test_harness(openai_payload_text: &str) -> FallbackHarness {
+        setup_fallback_test_harness_with_store_patch(openai_payload_text, true).await
+    }
+
+    async fn setup_pr_test_harness_without_store_patch(
+        openai_payload_text: &str,
+    ) -> FallbackHarness {
+        setup_fallback_test_harness_with_store_patch(openai_payload_text, false).await
+    }
+
+    async fn setup_fallback_test_harness_with_store_patch(
+        openai_payload_text: &str,
+        seed_store_patch: bool,
+    ) -> FallbackHarness {
         let openai_server = MockServer::start_async().await;
         let openai_mock = openai_server
             .mock_async(|when, then| {
@@ -1876,10 +2137,11 @@ mod tests {
             graph_source:     None,
             workflow_slug:    None,
             automation:       None,
+            source_context:   None,
             source_directory: None,
             git:              None,
             labels:           HashMap::new(),
-            provenance:       test_support::test_run_provenance(),
+            provenance:       None,
             manifest_blob:    None,
             definition_blob:  None,
             fork_source_ref:  None,
@@ -1896,8 +2158,9 @@ mod tests {
             source_directory: None,
             workflow_slug:    None,
             automation:       None,
+            source_context:   run_spec.source_context.clone(),
             db_prefix:        None,
-            provenance:       test_support::test_run_provenance(),
+            provenance:       None,
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
@@ -1919,21 +2182,23 @@ mod tests {
         append_event(&run_store, &fixtures::RUN_1, &Event::RunRunning)
             .await
             .unwrap();
-        append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::wall_only(1),
-            artifact_count:       0,
-            status:               "succeeded".to_string(),
-            reason:               SuccessReason::Completed,
-            total_usd_micros:     None,
-            final_git_commit_sha: None,
-            final_patch:          Some(
-                "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
-            ),
-            diff_summary:         None,
-            billing:              None,
-        })
-        .await
-        .unwrap();
+        if seed_store_patch {
+            append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
+                timing:               fabro_types::RunTiming::wall_only(1),
+                artifact_count:       0,
+                status:               "succeeded".to_string(),
+                reason:               SuccessReason::Completed,
+                total_usd_micros:     None,
+                final_git_commit_sha: None,
+                final_patch:          Some(
+                    "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
+                ),
+                diff_summary:         None,
+                billing:              None,
+            })
+            .await
+            .unwrap();
+        }
 
         let openai_mock_id = openai_mock.id;
         let github_mock_id = github_mock.id;
@@ -1963,20 +2228,20 @@ mod tests {
         let github = github_app::GitHubContext::new(&harness.creds, &github_base_url);
 
         let result = maybe_open_pull_request(OpenPullRequestRequest {
-            github,
-            origin_url: "https://github.com/owner/repo.git",
+            forge:       PullRequestForge::Github(github),
+            origin_url:  "https://github.com/owner/repo.git",
             base_branch: "main",
             head_branch: "fabro/run/123",
-            goal: "Fix telemetry leak\n\ndetails...",
-            diff: "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
-            model: "gpt-5.4",
-            draft: false,
-            auto_merge: None,
-            run_store: &harness.run_store,
-            llm_source: harness.llm_source.as_ref(),
-            catalog: harness.catalog.clone(),
-            conclusion: None,
-            run_state: None,
+            goal:        "Fix telemetry leak\n\ndetails...",
+            diff:        "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
+            model:       "gpt-5.4",
+            draft:       false,
+            auto_merge:  None,
+            run_store:   &harness.run_store,
+            llm_source:  harness.llm_source.as_ref(),
+            catalog:     harness.catalog.clone(),
+            conclusion:  None,
+            run_state:   None,
         })
         .await
         .expect("PR creation should succeed");
@@ -1984,6 +2249,110 @@ mod tests {
         let record = result.expect("PR record should be Some");
         assert_eq!(record.title, "Fix telemetry leak");
         harness.assert_mocks_called_once().await;
+    }
+
+    #[tokio::test]
+    async fn pull_request_uses_final_patch_option_without_store_projection_patch() {
+        let payload = pr_content_json("Direct patch", "Body");
+        let harness = setup_pr_test_harness_without_store_patch(&payload).await;
+
+        let github_base_url = harness.github_server.url("");
+        let github = github_app::GitHubContext::new(&harness.creds, &github_base_url);
+
+        let result = maybe_open_pull_request(OpenPullRequestRequest {
+            forge:       PullRequestForge::Github(github),
+            origin_url:  "https://github.com/owner/repo.git",
+            base_branch: "main",
+            head_branch: "fabro/run/123",
+            goal:        "Fix bug",
+            diff:        "diff --git a/src/lib.rs b/src/lib.rs\n+fn direct_patch() {}\n",
+            model:       "gpt-5.4",
+            draft:       false,
+            auto_merge:  None,
+            run_store:   &harness.run_store,
+            llm_source:  harness.llm_source.as_ref(),
+            catalog:     harness.catalog.clone(),
+            conclusion:  None,
+            run_state:   None,
+        })
+        .await
+        .expect("PR creation should succeed from direct patch");
+
+        assert!(result.is_some());
+        harness.assert_mocks_called_once().await;
+    }
+
+    #[tokio::test]
+    async fn pull_request_empty_diff_emits_skipped_notice_without_failed_event() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = WorkflowSettings::default();
+        let mut run_options = RunOptions {
+            settings,
+            run_dir: temp.path().to_path_buf(),
+            cancel_token: CancellationToken::new(),
+            run_id: fixtures::RUN_1,
+            labels: HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            pre_run_git: None,
+            fork_source_ref: None,
+            base_branch: None,
+            display_base_sha: None,
+            git: None,
+        };
+        run_options.base_branch = Some("main".to_string());
+        run_options.git = Some(GitCheckpointOptions {
+            base_sha:    None,
+            run_branch:  Some("fabro/run/test".to_string()),
+            meta_branch: None,
+        });
+        let services = EngineServices::test_default().run;
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        services.emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.clone())
+        });
+        let concluded = Concluded {
+            outcome: Ok(Outcome::success()),
+            conclusion: make_test_conclusion(),
+            graph: Graph::new("test"),
+            run_options,
+            services,
+            final_patch: Some(" \n\t\n".to_string()),
+        };
+
+        let finalized = pull_request(concluded, &PullRequestOptions {
+            pr_config:   Some(fabro_types::settings::run::PullRequestSettings {
+                enabled:        true,
+                draft:          false,
+                auto_merge:     false,
+                merge_strategy: fabro_types::settings::run::MergeStrategy::Squash,
+            }),
+            github_app:  Some(fabro_github::GitHubCredentials::Pat(
+                "test-token".to_string(),
+            )),
+            gitlab:      None,
+            origin_url:  Some("https://github.com/owner/repo.git".to_string()),
+            model:       "test-model".to_string(),
+            final_patch: Some(" \n\t\n".to_string()),
+        })
+        .await;
+
+        assert_eq!(finalized.pr_url, None);
+        let events = seen.lock().unwrap();
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.body,
+                fabro_types::EventBody::RunNotice(props)
+                    if props.level == RunNoticeLevel::Info
+                        && props.code == RunNoticeCode::PullRequestSkipped.to_string()
+            )
+        }));
+        assert!(
+            !events.iter().any(|event| {
+                matches!(event.body, fabro_types::EventBody::PullRequestFailed(_))
+            })
+        );
     }
 
     /// LLM returns an empty title; the content builder fallback still caps
@@ -2000,20 +2369,20 @@ mod tests {
         let goal = "x".repeat(200);
 
         let result = maybe_open_pull_request(OpenPullRequestRequest {
-            github,
-            origin_url: "https://github.com/owner/repo.git",
+            forge:       PullRequestForge::Github(github),
+            origin_url:  "https://github.com/owner/repo.git",
             base_branch: "main",
             head_branch: "fabro/run/123",
-            goal: &goal,
-            diff: "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
-            model: "gpt-5.4",
-            draft: false,
-            auto_merge: None,
-            run_store: &harness.run_store,
-            llm_source: harness.llm_source.as_ref(),
-            catalog: harness.catalog.clone(),
-            conclusion: None,
-            run_state: None,
+            goal:        &goal,
+            diff:        "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n",
+            model:       "gpt-5.4",
+            draft:       false,
+            auto_merge:  None,
+            run_store:   &harness.run_store,
+            llm_source:  harness.llm_source.as_ref(),
+            catalog:     harness.catalog.clone(),
+            conclusion:  None,
+            run_state:   None,
         })
         .await
         .expect("PR creation should succeed");

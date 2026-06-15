@@ -9,16 +9,22 @@ use crate::{KeyedMutex, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthCode {
-    pub code:           String,
-    pub identity:       IdpIdentity,
-    pub login:          String,
-    pub name:           String,
-    pub email:          String,
+    pub code:                    String,
+    pub identity:                IdpIdentity,
+    pub login:                   String,
+    pub name:                    String,
+    pub email:                   String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub avatar_url:     String,
-    pub code_challenge: String,
-    pub redirect_uri:   String,
-    pub expires_at:     DateTime<Utc>,
+    pub avatar_url:              String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub authorization_validated: bool,
+    pub code_challenge:          String,
+    pub redirect_uri:            String,
+    pub expires_at:              DateTime<Utc>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl Record for AuthCode {
@@ -111,6 +117,7 @@ mod tests {
             name: "The Octocat".to_string(),
             email: "octocat@example.com".to_string(),
             avatar_url: String::new(),
+            authorization_validated: false,
             code_challenge: "challenge".to_string(),
             redirect_uri: "http://127.0.0.1/callback".to_string(),
             expires_at,

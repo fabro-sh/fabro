@@ -537,6 +537,8 @@ mod run_namespace_variable_substitution_tests {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunIntegrationsSettings {
     pub github: RunIntegrationsGithubSettings,
+    #[serde(default)]
+    pub gitlab: RunIntegrationsGitlabSettings,
 }
 
 /// `[run.integrations.github]` — runtime GitHub token shape.
@@ -548,6 +550,12 @@ pub struct RunIntegrationsSettings {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunIntegrationsGithubSettings {
     pub permissions: HashMap<String, InterpString>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RunIntegrationsGitlabSettings {
+    pub token: bool,
 }
 
 impl RunIntegrationsGithubSettings {

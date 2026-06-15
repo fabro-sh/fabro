@@ -40,15 +40,17 @@ pub use run::{
     InterviewProviderSettings, McpServerSettings, McpTransport, NotificationProviderSettings,
     NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunCheckpointSettings,
     RunEnvironmentSettings, RunExecutionSettings, RunGitSettings, RunGoal,
-    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
-    RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings, RunScmSettings,
-    ScmGitHubSettings, TlsMode,
+    RunIntegrationsGithubSettings, RunIntegrationsGitlabSettings, RunIntegrationsSettings,
+    RunInterviewsSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
+    RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 pub use server::{
-    GithubIntegrationSettings, IntegrationWebhooksSettings, LogDestination, ObjectStoreSettings,
-    ServerApiSettings, ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod,
+    GithubIntegrationSettings, GitlabIntegrationSettings, GitlabIntegrationStrategy,
+    IntegrationWebhooksSettings, LogDestination, ObjectStoreSettings, ServerApiSettings,
+    ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthGitlabSettings, ServerAuthMethod,
     ServerAuthSettings, ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings,
-    ServerNamespace, ServerSchedulerSettings, ServerSlateDbSettings, ServerStorageSettings,
+    ServerNamespace, ServerSandboxProviderSettings, ServerSandboxProvidersSettings,
+    ServerSandboxSettings, ServerSchedulerSettings, ServerSlateDbSettings, ServerStorageSettings,
     ServerWebSettings, SlackIntegrationSettings,
 };
 pub use size::{ParseSizeError, Size};

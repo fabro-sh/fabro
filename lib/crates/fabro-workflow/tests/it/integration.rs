@@ -8264,6 +8264,46 @@ fn make_run_options(dir: &std::path::Path) -> RunOptions {
     }
 }
 
+#[tokio::test]
+async fn gitlab_token_injection_reaches_command_stage() {
+    let graph = parse(
+        r#"digraph GitLabTokenCommand {
+            graph [goal="Verify GitLab token injection"]
+            start [shape=Mdiamond]
+            exit  [shape=Msquare]
+            print_env [shape=parallelogram, label="Print env", script="printf '%s' \"$GITLAB_TOKEN\""]
+            start -> print_env -> exit
+        }"#,
+    )
+    .expect("graph should parse");
+    let run_dir = tempfile::tempdir().expect("run dir should create");
+    let mut run_options = make_run_options(run_dir.path());
+    run_options.settings.run.integrations.gitlab.token = true;
+    let sandbox = Arc::new(fabro_sandbox::test_support::MockSandbox::linux());
+    let engine = WorkflowRunner::new(
+        make_full_registry(Arc::new(AutoApproveInterviewer::engine())),
+        Arc::new(Emitter::default()),
+        sandbox.clone(),
+    );
+
+    let outcome = engine
+        .run_with_gitlab_token(&graph, &run_options, "glpat-test-token")
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.status, StageOutcome::Succeeded);
+    let command_env = sandbox
+        .captured_env_vars
+        .lock()
+        .expect("captured env lock poisoned")
+        .clone()
+        .expect("command stage should receive env vars");
+    assert_eq!(
+        command_env.get("GITLAB_TOKEN").map(String::as_str),
+        Some("glpat-test-token")
+    );
+}
+
 fn make_hook(event: fabro_hooks::HookEvent, command: &str) -> fabro_hooks::HookDefinition {
     fabro_hooks::HookDefinition {
         name: None,

@@ -767,9 +767,9 @@ impl Event {
         draft: bool,
     ) -> Self {
         Self::PullRequestCreated {
-            pr_url: record.html_url(),
+            pr_url: record.html_url().to_string(),
             pr_number: record.number,
-            owner: record.owner.clone(),
+            owner: record.owner_path.clone(),
             repo: record.repo.clone(),
             base_branch: base_branch.to_string(),
             head_branch: head_branch.to_string(),

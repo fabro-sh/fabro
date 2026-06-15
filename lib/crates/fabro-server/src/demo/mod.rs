@@ -905,6 +905,18 @@ pub(crate) async fn get_system_integrations(
                     }
                 },
                 {
+                    "provider": "gitlab",
+                    "enabled": true,
+                    "configured": true,
+                    "status": "configured",
+                    "missing_credentials": [],
+                    "connection": null,
+                    "metadata": {
+                        "strategy": "app",
+                        "base_url": "https://gitlab.example.com"
+                    }
+                },
+                {
                     "provider": "slack",
                     "enabled": true,
                     "configured": true,

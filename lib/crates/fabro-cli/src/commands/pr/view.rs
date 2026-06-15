@@ -14,7 +14,7 @@ pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) ->
 
     info!(
         number = pull_request.number,
-        owner = %pull_request.owner,
+        owner_path = %pull_request.owner_path,
         repo = %pull_request.repo,
         details_status = %detail.meta.details_status,
         "Viewing pull request"

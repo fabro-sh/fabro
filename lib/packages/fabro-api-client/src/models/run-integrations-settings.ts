@@ -16,7 +16,11 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { RunIntegrationsGithubSettings } from './run-integrations-github-settings';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunIntegrationsGitlabSettings } from './run-integrations-gitlab-settings';
 
 export interface RunIntegrationsSettings {
     'github': RunIntegrationsGithubSettings;
+    'gitlab': RunIntegrationsGitlabSettings;
 }

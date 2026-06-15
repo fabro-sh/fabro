@@ -16,7 +16,7 @@ export function meta() {
 
 const DESCRIPTION = (
   <>
-    Authentication methods and permitted GitHub usernames. Edit via{" "}
+    Authentication methods and permitted GitHub or GitLab identities. Edit via{" "}
     <code className="font-mono text-fg-2">settings.toml</code>; changes take
     effect on the next server restart.
   </>
@@ -37,6 +37,12 @@ export default function SettingsSecurity() {
 function SecurityPanel({ settings }: { settings: ServerSettings }) {
   const { auth } = settings.server;
   const githubUsers = auth.github.allowed_usernames;
+  const gitlabEnabled = auth.methods.includes("gitlab");
+  const gitlabUsers = auth.gitlab.allowed_usernames;
+  const gitlabGroups = auth.gitlab.allowed_groups;
+  const gitlabAllowlistsEmpty =
+    gitlabUsers.length === 0 && gitlabGroups.length === 0;
+
   return (
     <Panel title="Security">
       <Row title="Auth methods" help="How users may sign in to this server.">
@@ -60,6 +66,34 @@ function SecurityPanel({ settings }: { settings: ServerSettings }) {
           <UsernameList names={githubUsers} />
         )}
       </Row>
+      {gitlabEnabled ? (
+        <>
+          <Row
+            title="GitLab allowed usernames"
+            help="GitLab usernames permitted to authenticate."
+          >
+            {gitlabUsers.length === 0 ? (
+              <Muted>
+                {gitlabAllowlistsEmpty
+                  ? "No GitLab users can authenticate until an allowed username or group is configured."
+                  : "None"}
+              </Muted>
+            ) : (
+              <UsernameList names={gitlabUsers} />
+            )}
+          </Row>
+          <Row
+            title="GitLab allowed groups"
+            help="GitLab groups permitted to authenticate."
+          >
+            {gitlabGroups.length === 0 ? (
+              <Muted>None</Muted>
+            ) : (
+              <UsernameList names={gitlabGroups} />
+            )}
+          </Row>
+        </>
+      ) : null}
     </Panel>
   );
 }

@@ -4,8 +4,8 @@
 )]
 
 use fabro_types::settings::server::{
-    GithubIntegrationStrategy, LogDestination, ObjectStoreSettings, ServerAuthMethod,
-    ServerListenSettings, ServerNamespace,
+    GithubIntegrationStrategy, GitlabIntegrationStrategy, LogDestination, ObjectStoreSettings,
+    ServerAuthMethod, ServerListenSettings, ServerNamespace,
 };
 use fabro_util::Home;
 use temp_env::with_var;
@@ -122,6 +122,12 @@ fn resolved_server_integrations_disable_slack_when_config_is_absent() {
                 "client_id": null,
                 "slug": null,
                 "webhooks": null,
+            },
+            "gitlab": {
+                "enabled": false,
+                "strategy": "token",
+                "base_url": null,
+                "client_id": null,
             },
             "slack": {
                 "enabled": false,
@@ -418,6 +424,128 @@ enabled = true
         settings.integrations.github.strategy,
         GithubIntegrationStrategy::Token
     );
+}
+
+#[test]
+fn gitlab_app_settings_resolve_with_empty_allowlists() {
+    let settings = ServerSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "https://gitlab.ipt.example/gitlab"
+client_id = "gitlab-client"
+
+[server.auth]
+methods = ["gitlab"]
+"#,
+    )
+    .expect("gitlab app settings should resolve")
+    .server;
+
+    assert!(settings.integrations.gitlab.enabled);
+    assert_eq!(
+        settings.integrations.gitlab.strategy,
+        GitlabIntegrationStrategy::App
+    );
+    assert_eq!(
+        settings
+            .integrations
+            .gitlab
+            .base_url
+            .as_ref()
+            .unwrap()
+            .as_source(),
+        "https://gitlab.ipt.example/gitlab"
+    );
+    assert_eq!(
+        settings
+            .integrations
+            .gitlab
+            .client_id
+            .as_ref()
+            .unwrap()
+            .as_source(),
+        "gitlab-client"
+    );
+    assert!(settings.auth.gitlab.allowed_usernames.is_empty());
+    assert!(settings.auth.gitlab.allowed_groups.is_empty());
+}
+
+#[test]
+fn gitlab_auth_allowlists_resolve() {
+    let settings = ServerSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+allowed_groups = ["platform/fabro-admins"]
+"#,
+    )
+    .expect("gitlab auth allowlists should resolve")
+    .server;
+
+    assert_eq!(settings.auth.gitlab.allowed_usernames, vec!["alice"]);
+    assert_eq!(settings.auth.gitlab.allowed_groups, vec![
+        "platform/fabro-admins"
+    ]);
+}
+
+#[test]
+fn gitlab_token_settings_resolve() {
+    let settings = ServerSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "https://gitlab.ipt.example"
+"#,
+    )
+    .expect("gitlab token settings should resolve")
+    .server;
+
+    assert!(settings.integrations.gitlab.enabled);
+    assert_eq!(
+        settings.integrations.gitlab.strategy,
+        GitlabIntegrationStrategy::Token
+    );
+}
+
+#[test]
+fn absent_gitlab_settings_resolve_to_disabled_without_error() {
+    let settings = ServerSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.web]
+enabled = true
+"#,
+    )
+    .expect("absent gitlab settings should resolve")
+    .server;
+
+    assert!(!settings.integrations.gitlab.enabled);
+    assert_eq!(
+        settings.integrations.gitlab.strategy,
+        GitlabIntegrationStrategy::Token
+    );
+    assert!(settings.integrations.gitlab.base_url.is_none());
+    assert!(settings.auth.gitlab.allowed_usernames.is_empty());
+    assert!(settings.auth.gitlab.allowed_groups.is_empty());
 }
 
 #[test]

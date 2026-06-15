@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use fabro_types::settings::server::{
-    GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
-    ObjectStoreProvider, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
-    ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
+    GithubIntegrationSettings, GithubIntegrationStrategy, GitlabIntegrationSettings,
+    GitlabIntegrationStrategy, IntegrationWebhooksSettings, ObjectStoreProvider,
+    ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings, ServerAuthGithubSettings,
+    ServerAuthGitlabSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
     ServerListenSettings, ServerLoggingSettings, ServerNamespace, ServerSandboxProviderSettings,
     ServerSandboxProvidersSettings, ServerSandboxSettings, ServerSchedulerSettings,
     ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
@@ -17,10 +18,10 @@ use super::{
 };
 use crate::user::default_storage_dir;
 use crate::{
-    IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer,
-    ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerLayer, ServerListenLayer,
-    ServerSandboxLayer, ServerSandboxProviderLayer, ServerSlateDbLayer, ServerStorageLayer,
-    ServerWebLayer,
+    GitlabIntegrationLayer, IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer,
+    ServerApiLayer, ServerArtifactsLayer, ServerAuthGitlabLayer, ServerAuthLayer,
+    ServerIntegrationsLayer, ServerLayer, ServerListenLayer, ServerSandboxLayer,
+    ServerSandboxProviderLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer,
 };
 
 pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> ServerNamespace {
@@ -179,6 +180,18 @@ fn resolve_auth(
         github: ServerAuthGithubSettings {
             allowed_usernames: github.allowed_usernames,
         },
+        gitlab: resolve_gitlab_auth(layer.and_then(|auth| auth.gitlab.as_ref())),
+    }
+}
+
+fn resolve_gitlab_auth(layer: Option<&ServerAuthGitlabLayer>) -> ServerAuthGitlabSettings {
+    ServerAuthGitlabSettings {
+        allowed_usernames: layer
+            .and_then(|layer| layer.allowed_usernames.clone())
+            .unwrap_or_default(),
+        allowed_groups:    layer
+            .and_then(|layer| layer.allowed_groups.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -357,6 +370,9 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                 }
             })
             .unwrap_or_default(),
+        gitlab: resolve_gitlab_integration(
+            layer.and_then(|integrations| integrations.gitlab.as_ref()),
+        ),
         slack:  layer
             .and_then(|integrations| integrations.slack.as_ref())
             .map_or(
@@ -369,6 +385,17 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                     default_channel: slack.default_channel.clone(),
                 },
             ),
+    }
+}
+
+fn resolve_gitlab_integration(layer: Option<&GitlabIntegrationLayer>) -> GitlabIntegrationSettings {
+    GitlabIntegrationSettings {
+        enabled:   layer.and_then(|layer| layer.enabled).unwrap_or(false),
+        strategy:  layer
+            .and_then(|layer| layer.strategy)
+            .unwrap_or(GitlabIntegrationStrategy::Token),
+        base_url:  layer.and_then(|layer| layer.base_url.clone()),
+        client_id: layer.and_then(|layer| layer.client_id.clone()),
     }
 }
 

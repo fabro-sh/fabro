@@ -17,7 +17,8 @@
 
 export const ServerAuthMethod = {
     DEV_TOKEN: 'dev-token',
-    GITHUB: 'github'
+    GITHUB: 'github',
+    GITLAB: 'gitlab'
 } as const;
 
 export type ServerAuthMethod = typeof ServerAuthMethod[keyof typeof ServerAuthMethod];

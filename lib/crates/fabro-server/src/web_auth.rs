@@ -9,6 +9,8 @@ use axum::{Extension, Json, Router};
 use chrono::{DateTime, Utc};
 use cookie::time::Duration;
 use cookie::{Cookie, CookieJar, Key, SameSite};
+use fabro_gitlab::oauth::{GitLabUser, TokenExchangeRequest, TokenExchangeResponse};
+use fabro_gitlab::repository::GitLabBaseUrl;
 use fabro_redact::DisplaySafeUrl;
 use fabro_static::EnvVars;
 use fabro_types::settings::ServerAuthMethod;
@@ -143,7 +145,9 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/login/dev-token", post(login_dev_token))
         .route("/login/github", get(login_github))
+        .route("/login/gitlab", get(login_gitlab))
         .route("/callback/github", get(callback_github))
+        .route("/callback/gitlab", get(callback_gitlab))
         .route("/logout", post(logout))
 }
 
@@ -318,6 +322,7 @@ fn session_provider(auth_method: AuthMethod) -> &'static str {
     match auth_method {
         AuthMethod::DevToken => "dev-token",
         AuthMethod::Github => "github",
+        AuthMethod::Gitlab => "gitlab",
     }
 }
 
@@ -466,6 +471,73 @@ async fn login_github(
 
     let safe_redirect_uri = redacted_url_for_log(&redirect_uri);
     debug!(redirect_uri = %safe_redirect_uri, "OAuth login redirecting to GitHub");
+
+    let mut jar = CookieJar::new();
+    add_oauth_state_cookie(
+        &mut jar,
+        &session_key,
+        &OAuthStateCookie {
+            state:     state_token,
+            exp:       (chrono::Utc::now() + chrono::Duration::minutes(OAUTH_STATE_TTL_MINUTES))
+                .timestamp(),
+            return_to: sanitize_return_to(params.return_to),
+        },
+        session_cookie_secure(state.as_ref()),
+    );
+    let mut response = Redirect::to(authorize_url.as_str()).into_response();
+    append_jar_delta(response.headers_mut(), &jar);
+    response
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "GitLab OAuth authorize URL is raw browser redirect transit; logs use DisplaySafeUrl."
+)]
+async fn login_gitlab(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_mode): Extension<AuthMode>,
+    Query(params): Query<LoginGithubParams>,
+) -> Response {
+    if !auth_method_enabled(&auth_mode, ServerAuthMethod::Gitlab) {
+        return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
+    }
+    let Some(session_key) = state.session_key() else {
+        warn!("GitLab OAuth login failed: SESSION_SECRET not configured");
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "SESSION_SECRET is not configured"}),
+        );
+    };
+    let settings = state.server_settings();
+    let Some(base_url) = resolve_gitlab_base_url(state.as_ref(), &settings) else {
+        warn!("GitLab OAuth login failed: base_url not configured");
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "GitLab base_url is not configured"}),
+        );
+    };
+    let Some(client_id) = resolve_gitlab_client_id(state.as_ref(), &settings) else {
+        warn!("GitLab OAuth login failed: client_id not configured or unresolved");
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "GitLab OAuth client_id is not configured"}),
+        );
+    };
+    let web_url = match state.canonical_origin() {
+        Ok(web_url) => web_url,
+        Err(err) => {
+            warn!(error = %err, "GitLab OAuth login failed: server.web.url is invalid");
+            return json_response(StatusCode::CONFLICT, json!({"error": err}));
+        }
+    };
+
+    let state_token = format!("fabro-{}", ulid::Ulid::new());
+    let redirect_uri = format!("{web_url}/auth/callback/gitlab");
+    let authorize_url =
+        fabro_gitlab::oauth::authorize_url(&base_url, &client_id, &redirect_uri, &state_token);
+
+    let safe_redirect_uri = redacted_url_for_log(&redirect_uri);
+    debug!(redirect_uri = %safe_redirect_uri, "OAuth login redirecting to GitLab");
 
     let mut jar = CookieJar::new();
     add_oauth_state_cookie(
@@ -793,6 +865,367 @@ async fn callback_github(
     response
 }
 
+async fn callback_gitlab(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_mode): Extension<AuthMode>,
+    RequestAuth(auth_slot): RequestAuth,
+    Query(params): Query<OAuthCallbackParams>,
+    headers: HeaderMap,
+) -> Response {
+    auth_slot.replace(RequestAuthContext::invalid());
+
+    if !auth_method_enabled(&auth_mode, ServerAuthMethod::Gitlab) {
+        return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
+    }
+    let Some(session_key) = state.session_key() else {
+        error!("GitLab OAuth callback failed: SESSION_SECRET not configured");
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "SESSION_SECRET is not configured"}),
+        );
+    };
+    let settings = state.server_settings();
+    let stored_state = read_private_oauth_state(&headers, &session_key);
+    let Some(stored_state) = stored_state else {
+        warn!("GitLab OAuth callback failed: state cookie missing or invalid");
+        return static_error_page(
+            "Your login took too long or was tampered with. Please start again.",
+        );
+    };
+    if stored_state.state.as_str() != params.state.as_deref().unwrap_or_default() {
+        warn!("GitLab OAuth callback failed: state mismatch");
+        return static_error_page(
+            "Your login took too long or was tampered with. Please start again.",
+        );
+    }
+
+    if let Some(error_code) = params.error.as_deref() {
+        let (error, error_description, fallback) = match error_code {
+            "unauthorized" => (
+                "unauthorized",
+                "Login not permitted",
+                "/login?error=unauthorized",
+            ),
+            "access_denied" => (
+                "access_denied",
+                "Authorization denied",
+                "/login?error=access_denied",
+            ),
+            _ => (
+                "server_error",
+                "Could not complete GitLab sign-in",
+                "/login?error=server_error",
+            ),
+        };
+        let mut jar = CookieJar::new();
+        remove_oauth_state_cookie(
+            &mut jar,
+            &session_key,
+            session_cookie_secure(state.as_ref()),
+        );
+        let mut response = callback_error_redirect(
+            stored_state.return_to.as_deref(),
+            fallback,
+            &stored_state.state,
+            error,
+            error_description,
+        );
+        append_jar_delta(response.headers_mut(), &jar);
+        return response;
+    }
+
+    let Some(code) = params.code.as_deref() else {
+        warn!("GitLab OAuth callback failed: code missing from successful callback");
+        return callback_error_redirect(
+            stored_state.return_to.as_deref(),
+            "/login?error=server_error",
+            &stored_state.state,
+            "server_error",
+            "Could not complete GitLab sign-in",
+        );
+    };
+    if settings.server.auth.gitlab.allowed_usernames.is_empty()
+        && settings.server.auth.gitlab.allowed_groups.is_empty()
+    {
+        warn!("GitLab OAuth callback denied: username and group allowlists are empty");
+        return callback_error_redirect(
+            stored_state.return_to.as_deref(),
+            "/login?error=unauthorized",
+            &stored_state.state,
+            "unauthorized",
+            "Login not permitted",
+        );
+    }
+
+    let Some(base_url) = resolve_gitlab_base_url(state.as_ref(), &settings) else {
+        error!("GitLab OAuth callback failed: base_url not configured");
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "GitLab base_url is not configured"}),
+        );
+    };
+    let Some(client_id) = resolve_gitlab_client_id(state.as_ref(), &settings) else {
+        error!("GitLab OAuth callback failed: client_id not configured or unresolved");
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "GitLab OAuth client_id is not configured"}),
+        );
+    };
+    let Some(client_secret) = state.vault_secret(EnvVars::GITLAB_APP_CLIENT_SECRET) else {
+        error!("GitLab OAuth callback failed: GITLAB_APP_CLIENT_SECRET not configured");
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "GITLAB_APP_CLIENT_SECRET is not configured"}),
+        );
+    };
+    let web_url = match state.canonical_origin() {
+        Ok(web_url) => web_url,
+        Err(err) => {
+            error!(error = %err, "GitLab OAuth callback failed: server.web.url is invalid");
+            return json_response(StatusCode::CONFLICT, json!({"error": err}));
+        }
+    };
+    let redirect_uri = format!("{web_url}/auth/callback/gitlab");
+    let http = match fabro_http::http_client() {
+        Ok(http) => http,
+        Err(err) => {
+            error!(error = %err, "GitLab OAuth callback failed: could not build HTTP client");
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"error": format!("Failed to build GitLab HTTP client: {err}")}),
+            );
+        }
+    };
+
+    let token = match http
+        .post(fabro_gitlab::oauth::token_url(&base_url))
+        .header(header::ACCEPT, "application/json")
+        .form(&TokenExchangeRequest {
+            client_id: &client_id,
+            client_secret: &client_secret,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: &redirect_uri,
+        })
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            match response.json::<TokenExchangeResponse>().await {
+                Ok(token) => token.access_token,
+                Err(err) => {
+                    error!(error = %err, "GitLab OAuth callback failed: could not parse token response");
+                    return callback_error_redirect(
+                        stored_state.return_to.as_deref(),
+                        "/login?error=server_error",
+                        &stored_state.state,
+                        "server_error",
+                        "Could not complete GitLab sign-in",
+                    );
+                }
+            }
+        }
+        Ok(response) => {
+            let status = response.status();
+            error!(status = %status, "GitLab OAuth callback failed: token exchange returned error");
+            return callback_error_redirect(
+                stored_state.return_to.as_deref(),
+                "/login?error=server_error",
+                &stored_state.state,
+                "server_error",
+                "Could not complete GitLab sign-in",
+            );
+        }
+        Err(err) => {
+            error!(error = %err, "GitLab OAuth callback failed: token exchange request failed");
+            return callback_error_redirect(
+                stored_state.return_to.as_deref(),
+                "/login?error=server_error",
+                &stored_state.state,
+                "server_error",
+                "Could not complete GitLab sign-in",
+            );
+        }
+    };
+
+    let auth_header = format!("Bearer {token}");
+    let profile = match http
+        .get(fabro_gitlab::oauth::user_url(&base_url))
+        .header(header::AUTHORIZATION, &auth_header)
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            match response.json::<GitLabUser>().await {
+                Ok(profile) => profile,
+                Err(err) => {
+                    error!(error = %err, "GitLab OAuth callback failed: could not parse user response");
+                    return callback_error_redirect(
+                        stored_state.return_to.as_deref(),
+                        "/login?error=server_error",
+                        &stored_state.state,
+                        "server_error",
+                        "Could not complete GitLab sign-in",
+                    );
+                }
+            }
+        }
+        Ok(response) => {
+            let status = response.status();
+            error!(status = %status, "GitLab OAuth callback failed: user lookup returned error");
+            return callback_error_redirect(
+                stored_state.return_to.as_deref(),
+                "/login?error=server_error",
+                &stored_state.state,
+                "server_error",
+                "Could not complete GitLab sign-in",
+            );
+        }
+        Err(err) => {
+            error!(error = %err, "GitLab OAuth callback failed: user lookup request failed");
+            return callback_error_redirect(
+                stored_state.return_to.as_deref(),
+                "/login?error=server_error",
+                &stored_state.state,
+                "server_error",
+                "Could not complete GitLab sign-in",
+            );
+        }
+    };
+
+    if !gitlab_login_allowed(&http, &base_url, &auth_header, &settings, &profile).await {
+        warn!(login = %profile.username, "GitLab OAuth callback denied: subject not in allowlists");
+        return callback_error_redirect(
+            stored_state.return_to.as_deref(),
+            "/login?error=unauthorized",
+            &stored_state.state,
+            "unauthorized",
+            "Login not permitted",
+        );
+    }
+
+    let issuer = base_url.url.as_str().trim_end_matches('/').to_string();
+    let now = chrono::Utc::now();
+    let session = SessionCookie {
+        v:           2,
+        login:       profile.username.clone(),
+        auth_method: AuthMethod::Gitlab,
+        identity:    IdpIdentity::new(&issuer, &profile.username)
+            .expect("GitLab username should produce a valid identity"),
+        name:        profile.name.unwrap_or_else(|| profile.username.clone()),
+        email:       profile.email.unwrap_or_default(),
+        avatar_url:  String::new(),
+        user_url:    gitlab_user_url(&base_url, &profile.username),
+        iat:         now.timestamp(),
+        exp:         (now + chrono::Duration::days(30)).timestamp(),
+    };
+    auth_slot.replace(auth_context_from_session(&session));
+
+    info!(login = %session.login, "GitLab OAuth login succeeded");
+
+    let mut jar = CookieJar::new();
+    jar.private_mut(&session_key).add(
+        Cookie::build((
+            SESSION_COOKIE_NAME,
+            serde_json::to_string(&session).unwrap_or_default(),
+        ))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(session_cookie_secure(state.as_ref()))
+        .max_age(Duration::days(30))
+        .build(),
+    );
+    remove_oauth_state_cookie(
+        &mut jar,
+        &session_key,
+        session_cookie_secure(state.as_ref()),
+    );
+    let redirect_target = stored_state
+        .return_to
+        .as_deref()
+        .unwrap_or("/runs")
+        .to_string();
+    let mut response = Redirect::to(&redirect_target).into_response();
+    append_jar_delta(response.headers_mut(), &jar);
+    response
+}
+
+fn resolve_gitlab_base_url(
+    state: &AppState,
+    settings: &fabro_types::ServerSettings,
+) -> Option<GitLabBaseUrl> {
+    let base_url = settings.server.integrations.gitlab.base_url.as_ref()?;
+    let base_url = state.resolve_interp(base_url).ok()?;
+    GitLabBaseUrl::parse(&base_url).ok()
+}
+
+fn resolve_gitlab_client_id(
+    state: &AppState,
+    settings: &fabro_types::ServerSettings,
+) -> Option<String> {
+    let client_id = settings.server.integrations.gitlab.client_id.as_ref()?;
+    state.resolve_interp(client_id).ok()
+}
+
+async fn gitlab_login_allowed(
+    http: &fabro_http::HttpClient,
+    base_url: &GitLabBaseUrl,
+    auth_header: &str,
+    settings: &fabro_types::ServerSettings,
+    profile: &GitLabUser,
+) -> bool {
+    let auth = &settings.server.auth.gitlab;
+    if auth
+        .allowed_usernames
+        .iter()
+        .any(|user| user == &profile.username)
+    {
+        return true;
+    }
+    if auth.allowed_groups.is_empty() {
+        return false;
+    }
+
+    for group in &auth.allowed_groups {
+        let response = match http
+            .get(fabro_gitlab::oauth::group_member_url(
+                base_url, group, profile.id,
+            ))
+            .header(header::AUTHORIZATION, auth_header)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                warn!(group = %group, error = %err, "GitLab OAuth callback failed: group membership request failed");
+                return false;
+            }
+        };
+        if response.status().is_success() {
+            return true;
+        }
+        if response.status() != fabro_http::StatusCode::NOT_FOUND {
+            let status = response.status();
+            warn!(group = %group, status = %status, "GitLab OAuth callback failed: group membership lookup returned error");
+            return false;
+        }
+    }
+    false
+}
+
+fn gitlab_user_url(base_url: &GitLabBaseUrl, username: &str) -> String {
+    let mut url = base_url.url.clone();
+    let prefix = base_url.path_prefix.trim_end_matches('/');
+    let username = username.trim_start_matches('/');
+    if prefix.is_empty() {
+        url.set_path(&format!("/{username}"));
+    } else {
+        url.set_path(&format!("{prefix}/{username}"));
+    }
+    url.to_string()
+}
+
 async fn logout(
     State(state): State<Arc<AppState>>,
     RequestAuth(auth_slot): RequestAuth,
@@ -913,18 +1346,21 @@ async fn list_auth_sessions(
         }
     };
 
-    sessions.extend(cli_sessions.into_iter().map(|token| AuthSession {
-        id:           format!("cli:{}", token.chain_id),
-        kind:         "cli",
-        current:      false,
-        provider:     "github".to_string(),
-        login:        token.login,
-        label:        "Fabro CLI".to_string(),
-        user_agent:   Some(token.user_agent),
-        created_at:   token.issued_at,
-        last_seen_at: token.last_used_at,
-        expires_at:   token.expires_at,
-        revocable:    true,
+    sessions.extend(cli_sessions.into_iter().map(|token| {
+        let provider = cli_session_provider(state.as_ref(), token.identity.issuer());
+        AuthSession {
+            id:           format!("cli:{}", token.chain_id),
+            kind:         "cli",
+            current:      false,
+            provider:     provider.to_string(),
+            login:        token.login,
+            label:        "Fabro CLI".to_string(),
+            user_agent:   Some(token.user_agent),
+            created_at:   token.issued_at,
+            last_seen_at: token.last_used_at,
+            expires_at:   token.expires_at,
+            revocable:    true,
+        }
     }));
     sessions.sort_by(|left, right| {
         right
@@ -934,6 +1370,19 @@ async fn list_auth_sessions(
     });
 
     Json(AuthSessionsResponse { sessions }).into_response()
+}
+
+fn cli_session_provider(state: &AppState, issuer: &str) -> &'static str {
+    if issuer.trim_end_matches('/') == "https://github.com" {
+        return "github";
+    }
+    let settings = state.server_settings();
+    if resolve_gitlab_base_url(state, &settings).is_some_and(|base_url| {
+        issuer.trim_end_matches('/') == base_url.url.as_str().trim_end_matches('/')
+    }) {
+        return "gitlab";
+    }
+    "unknown"
 }
 
 async fn delete_auth_session(
@@ -1005,11 +1454,12 @@ mod tests {
     use fabro_vault::SecretType;
     use serde_json::json;
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     use super::{
         OAUTH_STATE_TTL_MINUTES, api_routes, read_private_oauth_state, read_private_session, routes,
     };
-    use crate::auth::{self, AuthErrorCode, GithubEndpoints};
+    use crate::auth::{self, AuthErrorCode, GithubEndpoints, RefreshToken};
     use crate::jwt_auth::{AuthMode, ConfiguredAuth};
     use crate::principal_middleware::{AuthStatus, RequestAuthContext};
     use crate::server;
@@ -1044,6 +1494,15 @@ mod tests {
     fn github_auth_mode() -> AuthMode {
         AuthMode::Enabled(ConfiguredAuth {
             methods:    vec![ServerAuthMethod::Github],
+            dev_token:  None,
+            jwt_key:    Some(test_jwt_key()),
+            jwt_issuer: Some("https://fabro.example".to_string()),
+        })
+    }
+
+    fn gitlab_auth_mode() -> AuthMode {
+        AuthMode::Enabled(ConfiguredAuth {
+            methods:    vec![ServerAuthMethod::Gitlab],
             dev_token:  None,
             jwt_key:    Some(test_jwt_key()),
             jwt_issuer: Some("https://fabro.example".to_string()),
@@ -1089,6 +1548,46 @@ client_id = "github-client-id"
         .expect("github settings should resolve")
     }
 
+    fn gitlab_settings(
+        web_url: &str,
+        gitlab_base_url: &str,
+        allowed_usernames: &[&str],
+        allowed_groups: &[&str],
+    ) -> fabro_types::ServerSettings {
+        let allowed_usernames = allowed_usernames
+            .iter()
+            .map(|value| format!(r#""{value}""#))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let allowed_groups = allowed_groups
+            .iter()
+            .map(|value| format!(r#""{value}""#))
+            .collect::<Vec<_>>()
+            .join(", ");
+        ServerSettingsBuilder::from_toml(&format!(
+            r#"
+_version = 1
+
+[server.web]
+enabled = true
+url = "{web_url}"
+
+[server.auth]
+methods = ["gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = [{allowed_usernames}]
+allowed_groups = [{allowed_groups}]
+
+[server.integrations.gitlab]
+enabled = true
+base_url = "{gitlab_base_url}"
+client_id = "gitlab-client-id"
+"#
+        ))
+        .expect("gitlab settings should resolve")
+    }
+
     fn test_auth_router_with_settings(
         settings: fabro_types::ServerSettings,
         auth_mode: AuthMode,
@@ -1098,6 +1597,30 @@ client_id = "github-client-id"
             RunLayer::default(),
             Some("web-auth-test-key-material-0123456789"),
         );
+        let translation_state = state.clone();
+        let principal_state = state.clone();
+        axum::Router::new()
+            .nest("/auth", routes())
+            .nest(
+                "/api/v1",
+                api_routes().layer(axum::middleware::from_fn_with_state(
+                    principal_state,
+                    crate::principal_middleware::principal_middleware,
+                )),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                translation_state,
+                crate::auth::auth_translation_middleware,
+            ))
+            .layer(Extension(Arc::new(GithubEndpoints::production_defaults())))
+            .layer(Extension(auth_mode))
+            .with_state(state)
+    }
+
+    fn test_auth_router_with_state(
+        state: Arc<crate::server::AppState>,
+        auth_mode: AuthMode,
+    ) -> axum::Router {
         let translation_state = state.clone();
         let principal_state = state.clone();
         axum::Router::new()
@@ -1256,6 +1779,74 @@ client_id = "github-client-id"
         assert_eq!(body["user"]["login"], "octocat");
         assert_eq!(body["user"]["avatarUrl"], "");
         assert_eq!(body["user"]["userUrl"], "");
+    }
+
+    #[tokio::test]
+    async fn auth_sessions_labels_gitlab_cli_refresh_tokens() {
+        let state = crate::test_support::test_app_state_with_runtime_settings_and_session_key(
+            gitlab_settings(
+                "https://fabro.example",
+                "https://gitlab.example",
+                &["alice"],
+                &[],
+            ),
+            RunLayer::default(),
+            Some("web-auth-test-key-material-0123456789"),
+        );
+        let identity = IdpIdentity::new("https://gitlab.example", "alice").unwrap();
+        let now = chrono::Utc::now();
+        state
+            .store_ref()
+            .refresh_tokens()
+            .await
+            .unwrap()
+            .insert_refresh_token(RefreshToken {
+                token_hash:   [7; 32],
+                chain_id:     Uuid::new_v4(),
+                identity:     identity.clone(),
+                login:        "alice".to_string(),
+                name:         "Alice Example".to_string(),
+                email:        "alice@example.test".to_string(),
+                avatar_url:   String::new(),
+                issued_at:    now,
+                expires_at:   now + chrono::Duration::days(30),
+                last_used_at: now,
+                used:         false,
+                user_agent:   "fabro-cli/0.1".to_string(),
+            })
+            .await
+            .unwrap();
+        let app = test_auth_router_with_state(state, gitlab_auth_mode());
+        let token = auth::issue(
+            &test_jwt_key(),
+            "https://fabro.example",
+            &auth::JwtSubject {
+                identity,
+                login: "alice".to_string(),
+                name: "Alice Example".to_string(),
+                email: "alice@example.test".to_string(),
+                avatar_url: String::new(),
+                user_url: "https://gitlab.example/alice".to_string(),
+                auth_method: AuthMethod::Gitlab,
+            },
+            chrono::Duration::minutes(10),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/auth/sessions")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let body = response_json!(response).await;
+        assert_eq!(body["sessions"][0]["kind"], "cli");
+        assert_eq!(body["sessions"][0]["provider"], "gitlab");
+        assert_eq!(body["sessions"][0]["login"], "alice");
     }
 
     #[tokio::test]
@@ -1710,6 +2301,506 @@ client_id = "github-client-id"
         token.assert_async().await;
         user.assert_async().await;
         emails.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn callback_gitlab_allows_username() {
+        let gitlab = httpmock::MockServer::start_async().await;
+        let token = gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST)
+                    .path("/oauth/token")
+                    .body_includes("client_secret=vault-gitlab-secret");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "access_token": "glpat_oauth",
+                        "token_type": "Bearer",
+                        "scope": "read_user read_api"
+                    }));
+            })
+            .await;
+        let user = gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/user")
+                    .header("authorization", "Bearer glpat_oauth");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "id": 42,
+                        "username": "alice",
+                        "name": "Alice Example",
+                        "email": "alice@example.test"
+                    }));
+            })
+            .await;
+        let state = crate::test_support::test_app_state_with_runtime_settings_and_session_key(
+            gitlab_settings("http://fabro.example", &gitlab.url("/"), &["alice"], &[]),
+            RunLayer::default(),
+            Some("web-auth-test-key-material-0123456789"),
+        );
+        state
+            .vault
+            .write()
+            .await
+            .set(
+                EnvVars::GITLAB_APP_CLIENT_SECRET,
+                "vault-gitlab-secret",
+                SecretType::Token,
+                None,
+            )
+            .unwrap();
+        let app = test_auth_router_with_state(state, gitlab_auth_mode());
+        let key = test_cookie_key();
+        let mut jar = cookie::CookieJar::new();
+        super::add_oauth_state_cookie(
+            &mut jar,
+            &key,
+            &super::OAuthStateCookie {
+                state:     "fabro-test-state".to_string(),
+                exp:       (chrono::Utc::now() + chrono::Duration::minutes(30)).timestamp(),
+                return_to: None,
+            },
+            false,
+        );
+        let cookie = jar
+            .delta()
+            .next()
+            .expect("private oauth cookie should exist")
+            .encoded()
+            .to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/callback/gitlab?code=test-code&state=fabro-test-state")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let response = checked_response!(response, StatusCode::SEE_OTHER).await;
+        let session_cookie = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .find(|value| value.contains(super::SESSION_COOKIE_NAME))
+            .and_then(|value| value.split(';').next())
+            .expect("session cookie should be set")
+            .to_string();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, session_cookie.parse().unwrap());
+        let session = read_private_session(&headers, &key).expect("session should decode");
+        assert_eq!(session.auth_method, AuthMethod::Gitlab);
+        assert_eq!(session.login, "alice");
+        assert_eq!(
+            session.identity.issuer(),
+            gitlab.url("").trim_end_matches('/')
+        );
+        assert_eq!(session.identity.subject(), "alice");
+        token.assert_async().await;
+        user.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn app_mode_oauth_login_against_twin_gitlab() {
+        let gitlab = twin_gitlab::TestGitLabServer::start().await;
+        gitlab.add_user("alice", "Alice Example", "alice@example.test");
+        gitlab.add_group("platform/fabro-admins");
+        gitlab.add_group_member("platform/fabro-admins", "alice");
+        let state = crate::test_support::test_app_state_with_runtime_settings_and_session_key(
+            gitlab_settings("http://fabro.example", gitlab.base_url(), &[], &[
+                "platform/fabro-admins",
+            ]),
+            RunLayer::default(),
+            Some("web-auth-test-key-material-0123456789"),
+        );
+        state
+            .vault
+            .write()
+            .await
+            .set(
+                EnvVars::GITLAB_APP_CLIENT_SECRET,
+                "vault-gitlab-secret",
+                SecretType::Token,
+                None,
+            )
+            .unwrap();
+        let app = test_auth_router_with_state(state, gitlab_auth_mode());
+        let key = test_cookie_key();
+        let mut jar = cookie::CookieJar::new();
+        super::add_oauth_state_cookie(
+            &mut jar,
+            &key,
+            &super::OAuthStateCookie {
+                state:     "fabro-test-state".to_string(),
+                exp:       (chrono::Utc::now() + chrono::Duration::minutes(30)).timestamp(),
+                return_to: None,
+            },
+            false,
+        );
+        let cookie = jar
+            .delta()
+            .next()
+            .expect("private oauth cookie should exist")
+            .encoded()
+            .to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/callback/gitlab?code=gitlab-oauth-code&state=fabro-test-state")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let response = checked_response!(response, StatusCode::SEE_OTHER).await;
+        let session_cookie = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .find(|value| value.contains(super::SESSION_COOKIE_NAME))
+            .and_then(|value| value.split(';').next())
+            .expect("session cookie should be set")
+            .to_string();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, session_cookie.parse().unwrap());
+        let session = read_private_session(&headers, &key).expect("session should decode");
+        assert_eq!(session.auth_method, AuthMethod::Gitlab);
+        assert_eq!(session.login, "alice");
+        assert_eq!(session.identity.issuer(), gitlab.base_url());
+        assert_eq!(session.identity.subject(), "alice");
+    }
+
+    #[tokio::test]
+    async fn callback_gitlab_allows_group_full_path() {
+        let gitlab = httpmock::MockServer::start_async().await;
+        gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST).path("/oauth/token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "access_token": "glpat_oauth", "token_type": "Bearer" }));
+            })
+            .await;
+        gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/api/v4/user");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "id": 43,
+                        "username": "bob",
+                        "name": "Bob Example",
+                        "email": "bob@example.test"
+                    }));
+            })
+            .await;
+        let member = gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/43");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "id": 43, "username": "bob" }));
+            })
+            .await;
+        let state = crate::test_support::test_app_state_with_runtime_settings_and_session_key(
+            gitlab_settings("http://fabro.example", &gitlab.url("/"), &[], &[
+                "platform/fabro-admins",
+            ]),
+            RunLayer::default(),
+            Some("web-auth-test-key-material-0123456789"),
+        );
+        state
+            .vault
+            .write()
+            .await
+            .set(
+                EnvVars::GITLAB_APP_CLIENT_SECRET,
+                "vault-gitlab-secret",
+                SecretType::Token,
+                None,
+            )
+            .unwrap();
+        let app = test_auth_router_with_state(state, gitlab_auth_mode());
+        let key = test_cookie_key();
+        let mut jar = cookie::CookieJar::new();
+        super::add_oauth_state_cookie(
+            &mut jar,
+            &key,
+            &super::OAuthStateCookie {
+                state:     "fabro-test-state".to_string(),
+                exp:       (chrono::Utc::now() + chrono::Duration::minutes(30)).timestamp(),
+                return_to: None,
+            },
+            false,
+        );
+        let cookie = jar
+            .delta()
+            .next()
+            .expect("private oauth cookie should exist")
+            .encoded()
+            .to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/callback/gitlab?code=test-code&state=fabro-test-state")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_status!(response, StatusCode::SEE_OTHER).await;
+        member.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn callback_gitlab_rejects_visible_group_without_membership() {
+        let gitlab = httpmock::MockServer::start_async().await;
+        gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST).path("/oauth/token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "access_token": "glpat_oauth", "token_type": "Bearer" }));
+            })
+            .await;
+        gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/api/v4/user");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "id": 45,
+                        "username": "mallory",
+                        "name": "Mallory Example",
+                        "email": "mallory@example.test"
+                    }));
+            })
+            .await;
+        let visible_groups = gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/api/v4/groups");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!([{ "id": 1, "full_path": "platform/fabro-admins" }]));
+            })
+            .await;
+        let member = gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/45");
+                then.status(404)
+                    .json_body(json!({ "message": "404 Group Member Not Found" }));
+            })
+            .await;
+        let state = crate::test_support::test_app_state_with_runtime_settings_and_session_key(
+            gitlab_settings("http://fabro.example", &gitlab.url("/"), &[], &[
+                "platform/fabro-admins",
+            ]),
+            RunLayer::default(),
+            Some("web-auth-test-key-material-0123456789"),
+        );
+        state
+            .vault
+            .write()
+            .await
+            .set(
+                EnvVars::GITLAB_APP_CLIENT_SECRET,
+                "vault-gitlab-secret",
+                SecretType::Token,
+                None,
+            )
+            .unwrap();
+        let app = test_auth_router_with_state(state, gitlab_auth_mode());
+        let key = test_cookie_key();
+        let mut jar = cookie::CookieJar::new();
+        super::add_oauth_state_cookie(
+            &mut jar,
+            &key,
+            &super::OAuthStateCookie {
+                state:     "fabro-test-state".to_string(),
+                exp:       (chrono::Utc::now() + chrono::Duration::minutes(30)).timestamp(),
+                return_to: None,
+            },
+            false,
+        );
+        let cookie = jar
+            .delta()
+            .next()
+            .expect("private oauth cookie should exist")
+            .encoded()
+            .to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/callback/gitlab?code=test-code&state=fabro-test-state")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("/login?error=unauthorized")
+        );
+        member.assert_async().await;
+        visible_groups.assert_calls_async(0).await;
+    }
+
+    #[tokio::test]
+    async fn callback_gitlab_rejects_empty_allowlists() {
+        let gitlab = httpmock::MockServer::start_async().await;
+        let settings = gitlab_settings("http://fabro.example", &gitlab.url("/"), &[], &[]);
+        let app = test_auth_router_with_settings(settings, gitlab_auth_mode());
+        let key = test_cookie_key();
+        let mut jar = cookie::CookieJar::new();
+        super::add_oauth_state_cookie(
+            &mut jar,
+            &key,
+            &super::OAuthStateCookie {
+                state:     "fabro-test-state".to_string(),
+                exp:       (chrono::Utc::now() + chrono::Duration::minutes(30)).timestamp(),
+                return_to: None,
+            },
+            false,
+        );
+        let cookie = jar
+            .delta()
+            .next()
+            .expect("private oauth cookie should exist")
+            .encoded()
+            .to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/callback/gitlab?code=test-code&state=fabro-test-state")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("/login?error=unauthorized")
+        );
+    }
+
+    #[tokio::test]
+    async fn callback_gitlab_fails_closed_when_group_lookup_fails() {
+        let gitlab = httpmock::MockServer::start_async().await;
+        gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::POST).path("/oauth/token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "access_token": "glpat_oauth", "token_type": "Bearer" }));
+            })
+            .await;
+        gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/api/v4/user");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "id": 44,
+                        "username": "carol",
+                        "name": "Carol Example",
+                        "email": "carol@example.test"
+                    }));
+            })
+            .await;
+        let member = gitlab
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/44");
+                then.status(500);
+            })
+            .await;
+        let state = crate::test_support::test_app_state_with_runtime_settings_and_session_key(
+            gitlab_settings("http://fabro.example", &gitlab.url("/"), &[], &[
+                "platform/fabro-admins",
+            ]),
+            RunLayer::default(),
+            Some("web-auth-test-key-material-0123456789"),
+        );
+        state
+            .vault
+            .write()
+            .await
+            .set(
+                EnvVars::GITLAB_APP_CLIENT_SECRET,
+                "vault-gitlab-secret",
+                SecretType::Token,
+                None,
+            )
+            .unwrap();
+        let app = test_auth_router_with_state(state, gitlab_auth_mode());
+        let key = test_cookie_key();
+        let mut jar = cookie::CookieJar::new();
+        super::add_oauth_state_cookie(
+            &mut jar,
+            &key,
+            &super::OAuthStateCookie {
+                state:     "fabro-test-state".to_string(),
+                exp:       (chrono::Utc::now() + chrono::Duration::minutes(30)).timestamp(),
+                return_to: None,
+            },
+            false,
+        );
+        let cookie = jar
+            .delta()
+            .next()
+            .expect("private oauth cookie should exist")
+            .encoded()
+            .to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/callback/gitlab?code=test-code&state=fabro-test-state")
+                    .header(header::COOKIE, cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("/login?error=unauthorized")
+        );
+        member.assert_async().await;
     }
 
     #[test]

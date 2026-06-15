@@ -28,14 +28,15 @@ export default function SettingsIntegrations() {
   const integrationsQuery = useSystemIntegrations();
   const integrations = integrationsQuery.data?.data;
   const github = integrations?.find((status) => status.provider === "github");
+  const gitlab = integrations?.find((status) => status.provider === "gitlab");
   const slack = integrations?.find((status) => status.provider === "slack");
 
   return (
     <div className="space-y-6">
       <SettingsPageIntro description={DESCRIPTION} />
-      {github && slack ? (
+      {github && gitlab && slack ? (
         <>
-          <GithubPanel status={github} />
+          <VersionControlPanel github={github} gitlab={gitlab} />
           <SlackPanel status={slack} />
         </>
       ) : (
@@ -70,7 +71,13 @@ function ProjectManagementPanel() {
   );
 }
 
-function GithubPanel({ status }: { status: SystemIntegrationStatus }) {
+function VersionControlPanel({
+  github,
+  gitlab,
+}: {
+  github: SystemIntegrationStatus;
+  gitlab: SystemIntegrationStatus;
+}) {
   return (
     <Panel title="Version Control">
       <IntegrationRow
@@ -78,7 +85,14 @@ function GithubPanel({ status }: { status: SystemIntegrationStatus }) {
         name="GitHub"
         help="App for repo access, checks, and PR automation."
       >
-        <IntegrationValue status={status} detail={githubDetail(status)} />
+        <IntegrationValue status={github} detail={githubDetail(github)} />
+      </IntegrationRow>
+      <IntegrationRow
+        slug="gitlab"
+        name="GitLab"
+        help="Token or OAuth app for repo access and merge request automation."
+      >
+        <IntegrationValue status={gitlab} detail={gitlabDetail(gitlab)} />
       </IntegrationRow>
     </Panel>
   );
@@ -232,6 +246,19 @@ function githubDetail(status: SystemIntegrationStatus): string | undefined {
   if (metadata.app_id) return `app id: ${metadata.app_id}`;
   if (metadata.strategy) return `strategy: ${metadata.strategy}`;
   return missingCredentialsDetail(status);
+}
+
+function gitlabDetail(status: SystemIntegrationStatus): string | undefined {
+  const details = [];
+  const strategy = status.metadata?.strategy;
+  const baseUrl = status.metadata?.base_url;
+  const missing = missingCredentialsDetail(status);
+
+  if (strategy) details.push(`strategy: ${strategy}`);
+  if (baseUrl) details.push(baseUrl);
+  if (missing) details.push(missing);
+
+  return details.length > 0 ? details.join(" | ") : undefined;
 }
 
 function slackDetail(status: SystemIntegrationStatus): string | undefined {

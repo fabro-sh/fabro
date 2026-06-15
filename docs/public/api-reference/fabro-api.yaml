@@ -219,6 +219,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /install/object-store/test:
     post:
       operationId: testInstallObjectStore
@@ -422,6 +427,150 @@ paths:
       responses:
         "204":
           description: GitHub token recorded
+        "401":
+          description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid install input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/gitlab/token/test:
+    post:
+      operationId: testGitlabTokenInstall
+      tags: [Install]
+      summary: Validate install GitLab token
+      description: Validates a GitLab personal access token without persisting it. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallGitlabTokenInput"
+      responses:
+        "200":
+          description: GitLab token validated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallGithubTokenTestResponse"
+        "401":
+          description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: GitLab token validation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/gitlab/token:
+    put:
+      operationId: putInstallGitlabToken
+      tags: [Install]
+      summary: Save install GitLab token
+      description: Records the GitLab personal access token chosen during the browser install. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallGitlabTokenInput"
+      responses:
+        "204":
+          description: GitLab token recorded
+        "401":
+          description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid install input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/gitlab/app:
+    put:
+      operationId: putInstallGitlabApp
+      tags: [Install]
+      summary: Save install GitLab app
+      description: Records GitLab OAuth app settings and a token chosen during browser install. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallGitlabAppInput"
+      responses:
+        "204":
+          description: GitLab app recorded
+        "401":
+          description: Invalid or missing install token
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid install input
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /install/github/app:
+    put:
+      operationId: putInstallGithubApp
+      tags: [Install]
+      summary: Save install GitHub App
+      description: Records a pre-existing GitHub App chosen for headless install. Requires the one-time install token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallGithubAppInput"
+      responses:
+        "204":
+          description: GitHub App recorded
         "401":
           description: Invalid or missing install token
           headers:
@@ -5317,44 +5466,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  # ── Playground ────────────────────────────────────────────────────────
-
-  /api/v1/playground/chat:
-    post:
-      operationId: createPlaygroundChat
-      tags: [Playground]
-      summary: Chat with the playground assistant
-      description: |
-        Drives a single turn of the playground chat that builds a workflow
-        graph incrementally. The server is stateless: each request includes
-        the full current draft, and the response streams text deltas plus a
-        single `write_workflow_file` tool call carrying the full new contents
-        of `workflow.fabro` for the client to parse, diff against its local
-        draft, and animate into the canvas.
-
-        Responses are always SSE. Frames use `event: stream_event` with a
-        JSON-serialized StreamEvent payload — see /api/v1/completions for the
-        StreamEvent shape. The tool call arrives on a `tool_call_end` event
-        with the tool name and parsed JSON arguments.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreatePlaygroundChatRequest"
-      responses:
-        "200":
-          description: SSE stream of text deltas and tool calls.
-        "400":
-          description: Invalid request
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   # ── Settings ──────────────────────────────────────────────────────────
 
   /api/v1/settings:
@@ -5477,7 +5588,7 @@ components:
       description: Content-addressed blob identifier.
       schema:
         type: string
-        pattern: '^[0-9a-f]{64}$'
+        pattern: "^[0-9a-f]{64}$"
       example: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
 
     ArtifactFilename:
@@ -5840,6 +5951,10 @@ components:
           oneOf:
             - $ref: "#/components/schemas/InstallGithubSummary"
             - type: "null"
+        gitlab:
+          oneOf:
+            - $ref: "#/components/schemas/InstallGitlabSummary"
+            - type: "null"
         prefill:
           $ref: "#/components/schemas/InstallPrefill"
 
@@ -5950,15 +6065,37 @@ components:
 
     InstallObjectStoreInput:
       description: Object-store mode selected during browser install.
+      discriminator:
+        propertyName: provider
+        mapping:
+          local: "#/components/schemas/InstallObjectStoreLocalInput"
+          s3: "#/components/schemas/InstallObjectStoreS3Input"
+      oneOf:
+        - $ref: "#/components/schemas/InstallObjectStoreLocalInput"
+        - $ref: "#/components/schemas/InstallObjectStoreS3Input"
+
+    InstallObjectStoreLocalInput:
       type: object
       required:
         - provider
+        - root
       properties:
         provider:
           type: string
-          enum: [local, s3]
+          enum: [local]
         root:
           type: string
+
+    InstallObjectStoreS3Input:
+      type: object
+      required:
+        - provider
+        - bucket
+        - region
+      properties:
+        provider:
+          type: string
+          enum: [s3]
         bucket:
           type: string
         region:
@@ -6060,6 +6197,66 @@ components:
         username:
           type: string
 
+    InstallGithubAppInput:
+      type: object
+      required: [app_id, client_id, client_secret, private_key, slug, allowed_username]
+      properties:
+        app_id:
+          type: string
+        client_id:
+          type: string
+        client_secret:
+          type: string
+        private_key:
+          type: string
+        slug:
+          type: string
+        allowed_username:
+          type: string
+        webhook_secret:
+          type: ["string", "null"]
+
+    InstallGitlabTokenInput:
+      description: GitLab personal access token chosen during browser install.
+      type: object
+      required:
+        - base_url
+        - token
+      properties:
+        base_url:
+          type: string
+          format: uri
+        token:
+          type: string
+
+    InstallGitlabAppInput:
+      type: object
+      required:
+        - base_url
+        - client_id
+        - client_secret
+        - token
+        - allowed_usernames
+        - allowed_groups
+      properties:
+        base_url:
+          type: string
+          format: uri
+        client_id:
+          type: string
+        client_secret:
+          type: string
+        token:
+          type: string
+        allowed_usernames:
+          type: array
+          items:
+            type: string
+        allowed_groups:
+          type: array
+          items:
+            type: string
+
     InstallGithubAppManifestInput:
       description: Input required to build the browser-install GitHub App manifest.
       type: object
@@ -6129,6 +6326,30 @@ components:
           type: string
         allowed_username:
           type: string
+
+    InstallGitlabSummary:
+      description: Redacted summary of the GitLab install strategy selected during browser install.
+      type: object
+      required:
+        - strategy
+        - base_url
+      properties:
+        strategy:
+          type: string
+          enum: [token, app]
+        base_url:
+          type: string
+          format: uri
+        client_id:
+          type: string
+        allowed_usernames:
+          type: array
+          items:
+            type: string
+        allowed_groups:
+          type: array
+          items:
+            type: string
 
     InstallFinishResponse:
       description: Response returned after install outputs are persisted successfully.
@@ -6215,11 +6436,13 @@ components:
       oneOf:
         - $ref: "#/components/schemas/AutomationApiTrigger"
         - $ref: "#/components/schemas/AutomationScheduleTrigger"
+        - $ref: "#/components/schemas/AutomationGithubIssueTrigger"
       discriminator:
         propertyName: type
         mapping:
           api: "#/components/schemas/AutomationApiTrigger"
           schedule: "#/components/schemas/AutomationScheduleTrigger"
+          github_issue: "#/components/schemas/AutomationGithubIssueTrigger"
 
     AutomationApiTrigger:
       description: Trigger that allows callers to create runs through the automation API.
@@ -6265,6 +6488,39 @@ components:
           type: string
           description: Five-field cron expression evaluated in UTC.
           example: "0 3 * * *"
+
+    AutomationGithubIssueTrigger:
+      description: GitHub issue label trigger. Fires on issues.labeled and resets on issues.unlabeled for the trigger label.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - enabled
+        - trigger_label
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+          example: bug
+        type:
+          type: string
+          enum: [github_issue]
+        enabled:
+          type: boolean
+          example: true
+        trigger_label:
+          type: string
+          minLength: 1
+          example: fabro
+        issue_label:
+          type: ["string", "null"]
+          minLength: 1
+          example: Bug
+        comment:
+          type: boolean
+          default: true
+          example: true
 
     CreateAutomationRequest:
       description: Request body for creating an automation.
@@ -6358,6 +6614,7 @@ components:
         - network
         - lifecycle
         - labels
+        - volumes
         - env
       properties:
         id:
@@ -6371,10 +6628,6 @@ components:
           example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
-        cwd:
-          type: ["string", "null"]
-          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
-          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -6385,6 +6638,10 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -6402,6 +6659,7 @@ components:
         - network
         - lifecycle
         - labels
+        - volumes
         - env
       properties:
         id:
@@ -6410,10 +6668,6 @@ components:
           example: docker
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
-        cwd:
-          type: ["string", "null"]
-          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
-          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -6424,6 +6678,10 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -6440,14 +6698,11 @@ components:
         - network
         - lifecycle
         - labels
+        - volumes
         - env
       properties:
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
-        cwd:
-          type: ["string", "null"]
-          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
-          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -6458,6 +6713,10 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -7587,15 +7846,10 @@ components:
           example: 128000
 
     ReasoningEffortFeature:
-      description: >-
-        Whether the model endpoint supports a native reasoning-effort
-        parameter. `levels` accepts discrete effort levels; `always_adaptive`
-        accepts effort levels with natively always-on adaptive thinking;
-        `none` has no native effort parameter.
+      description: Whether the model endpoint supports a native reasoning-effort parameter.
       type: string
       enum:
         - levels
-        - always_adaptive
         - none
 
     ReasoningEffort:
@@ -7617,7 +7871,6 @@ components:
         - reasoning
         - reasoning_effort
         - prompt_cache
-        - sampling_params
       properties:
         tools:
           type: boolean
@@ -7633,9 +7886,6 @@ components:
         prompt_cache:
           type: boolean
           description: Whether the model endpoint supports prompt caching.
-        sampling_params:
-          type: boolean
-          description: Whether the model accepts classic sampling parameters (temperature, top_p).
 
     ModelCosts:
       description: Pricing per million tokens in USD.
@@ -7901,51 +8151,6 @@ components:
           $ref: "#/components/schemas/CompletionUsage"
         output:
           description: Parsed structured output when schema was provided.
-        cost_usd:
-          type: number
-          format: double
-          description: >
-            USD cost of the completion when known: estimated from catalog
-            prices unless the provider returned authoritative billing data.
-        cost_source:
-          $ref: "#/components/schemas/CostSource"
-
-    CostSource:
-      type: string
-      description: >
-        Whether `cost_usd` came from provider billing data (authoritative)
-        or catalog price estimation (estimated).
-      enum: [authoritative, estimated]
-
-    # ── Playground ────────────────────────────────────────────────────────
-
-    CreatePlaygroundChatRequest:
-      description: >
-        Body of POST /api/v1/playground/chat. The server is stateless across
-        turns: the browser owns the draft and submits it as the literal
-        `workflow.fabro` contents with every turn. The server embeds the
-        file in the model's system prompt and exposes a single
-        `write_workflow_file` tool that emits the full new contents of
-        `workflow.fabro`; the browser parses, diffs, and animates the
-        result.
-      type: object
-      required: [messages, workflow_fabro]
-      properties:
-        messages:
-          type: array
-          description: assistant-ui-style message history for the turn.
-          items:
-            $ref: "#/components/schemas/CompletionMessage"
-        workflow_fabro:
-          type: string
-          description: >
-            Full current `workflow.fabro` (Graphviz DOT) contents as
-            rendered by the client — a complete `digraph <name> { ... }`
-            block including the `start` / `exit` terminals. This is the
-            same format the model writes back via `write_workflow_file`.
-        model:
-          type: string
-          description: Model id or alias. Server picks the default if omitted.
 
     PaginatedSavedQueryList:
       description: Paginated list of saved queries.
@@ -9081,8 +9286,6 @@ components:
 
     RunProvenance:
       type: object
-      required:
-        - subject
       properties:
         server:
           oneOf:
@@ -9093,7 +9296,9 @@ components:
             - $ref: "#/components/schemas/RunClientProvenance"
             - type: "null"
         subject:
-          $ref: "#/components/schemas/Principal"
+          oneOf:
+            - $ref: "#/components/schemas/Principal"
+            - type: "null"
 
     Principal:
       oneOf:
@@ -9103,6 +9308,7 @@ components:
         - $ref: "#/components/schemas/PrincipalSlack"
         - $ref: "#/components/schemas/PrincipalAgent"
         - $ref: "#/components/schemas/PrincipalSystem"
+        - $ref: "#/components/schemas/PrincipalAnonymous"
       discriminator:
         propertyName: kind
         mapping:
@@ -9112,6 +9318,7 @@ components:
           slack: "#/components/schemas/PrincipalSlack"
           agent: "#/components/schemas/PrincipalAgent"
           system: "#/components/schemas/PrincipalSystem"
+          anonymous: "#/components/schemas/PrincipalAnonymous"
 
     PrincipalUser:
       type: object
@@ -9200,6 +9407,15 @@ components:
           enum: [system]
         system_kind:
           $ref: "#/components/schemas/SystemActorKind"
+
+    PrincipalAnonymous:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum: [anonymous]
 
     RunEvent:
       description: >
@@ -10328,7 +10544,6 @@ components:
         - run_id
         - settings
         - graph
-        - provenance
       properties:
         run_id:
           type: string
@@ -10345,6 +10560,10 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AutomationRef"
             - type: "null"
+        source_context:
+          oneOf:
+            - $ref: "#/components/schemas/RunSourceContext"
+            - type: "null"
         source_directory:
           type: ["string", "null"]
         labels:
@@ -10352,7 +10571,9 @@ components:
           additionalProperties:
             type: string
         provenance:
-          $ref: "#/components/schemas/RunProvenance"
+          oneOf:
+            - $ref: "#/components/schemas/RunProvenance"
+            - type: "null"
         manifest_blob:
           type: ["string", "null"]
         definition_blob:
@@ -10659,12 +10880,18 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AutomationRef"
             - type: "null"
+        source_context:
+          oneOf:
+            - $ref: "#/components/schemas/RunSourceContext"
+            - type: "null"
         repository:
           oneOf:
             - $ref: "#/components/schemas/RepositoryRef"
             - type: "null"
         created_by:
-          $ref: "#/components/schemas/Principal"
+          oneOf:
+            - $ref: "#/components/schemas/Principal"
+            - type: "null"
         origin:
           $ref: "#/components/schemas/RunOrigin"
         labels:
@@ -10770,6 +10997,44 @@ components:
           type: ["string", "null"]
         trigger_id:
           type: ["string", "null"]
+
+    RunSourceContext:
+      description: External source object that caused or anchors a run.
+      oneOf:
+        - $ref: "#/components/schemas/GithubIssueRunSource"
+      discriminator:
+        propertyName: type
+        mapping:
+          github_issue: "#/components/schemas/GithubIssueRunSource"
+
+    GithubIssueRunSource:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - repository
+        - issue_number
+        - issue_title
+        - issue_url
+      properties:
+        type:
+          type: string
+          enum: [github_issue]
+        repository:
+          type: string
+          example: owner/repo
+        issue_number:
+          type: integer
+          format: uint64
+          minimum: 0
+          example: 123
+        issue_title:
+          type: string
+          example: Fix production bug
+        issue_url:
+          type: string
+          format: uri
+          example: https://github.com/owner/repo/issues/123
 
     RunOrigin:
       type: object
@@ -11056,7 +11321,7 @@ components:
           example: https://github.com/fabro-sh/fabro.git
         provider:
           type: string
-          enum: [github, git, unknown]
+          enum: [github, gitlab, git, unknown]
 
     BilledTokenCounts:
       description: Token counts with optional billed USD micros totals.
@@ -11154,29 +11419,38 @@ components:
           description: Error message.
           example: "Stage 'apply-changes' exceeded maximum retries."
 
+    PullRequestProvider:
+      type: string
+      enum:
+        - github
+        - gitlab
+
     PullRequestLink:
-      description: Minimal GitHub pull request link associated with a run.
+      description: Minimal provider-aware pull request link associated with a run.
       type: object
       required:
-        - owner
+        - provider
+        - owner_path
         - repo
         - number
         - html_url
       properties:
-        owner:
+        provider:
+          $ref: "#/components/schemas/PullRequestProvider"
+        owner_path:
           type: string
-          example: fabro-sh
+          minLength: 1
+          description: Repository owner or namespace path. GitLab namespaces may be nested.
         repo:
           type: string
-          example: fabro
+          minLength: 1
         number:
           type: integer
-          example: 123
+          format: uint64
+          minimum: 1
         html_url:
           type: string
           format: uri
-          description: Computed GitHub web URL for the pull request.
-          example: https://github.com/fabro-sh/fabro/pull/123
 
     PullRequest:
       description: Stored pull request link plus optional live GitHub details.
@@ -12876,7 +13150,7 @@ components:
 
     ServerAuthSettings:
       type: object
-      required: [methods, github]
+      required: [methods, github, gitlab]
       properties:
         methods:
           type: array
@@ -12884,16 +13158,33 @@ components:
             $ref: "#/components/schemas/ServerAuthMethod"
         github:
           $ref: "#/components/schemas/ServerAuthGithubSettings"
+        gitlab:
+          $ref: "#/components/schemas/ServerAuthGitlabSettings"
 
     ServerAuthMethod:
       type: string
-      enum: [dev-token, github]
+      enum: [dev-token, github, gitlab]
 
     ServerAuthGithubSettings:
       type: object
       required: [allowed_usernames]
       properties:
         allowed_usernames:
+          type: array
+          items:
+            type: string
+
+    ServerAuthGitlabSettings:
+      type: object
+      required:
+        - allowed_usernames
+        - allowed_groups
+      properties:
+        allowed_usernames:
+          type: array
+          items:
+            type: string
+        allowed_groups:
           type: array
           items:
             type: string
@@ -13005,10 +13296,12 @@ components:
 
     ServerIntegrationsSettings:
       type: object
-      required: [github, slack]
+      required: [github, gitlab, slack]
       properties:
         github:
           $ref: "#/components/schemas/GithubIntegrationSettings"
+        gitlab:
+          $ref: "#/components/schemas/GitlabIntegrationSettings"
         slack:
           $ref: "#/components/schemas/SlackIntegrationSettings"
 
@@ -13040,6 +13333,24 @@ components:
     GithubIntegrationStrategy:
       type: string
       enum: [token, app]
+
+    GitlabIntegrationSettings:
+      type: object
+      required:
+        - enabled
+        - strategy
+      properties:
+        enabled:
+          type: boolean
+        strategy:
+          type: string
+          enum:
+            - token
+            - app
+        base_url:
+          type: ["string", "null"]
+        client_id:
+          type: ["string", "null"]
 
     SlackIntegrationSettings:
       type: object
@@ -13203,10 +13514,12 @@ components:
 
     RunIntegrationsSettings:
       type: object
-      required: [github]
+      required: [github, gitlab]
       properties:
         github:
           $ref: "#/components/schemas/RunIntegrationsGithubSettings"
+        gitlab:
+          $ref: "#/components/schemas/RunIntegrationsGitlabSettings"
 
     RunIntegrationsGithubSettings:
       type: object
@@ -13216,6 +13529,14 @@ components:
           type: object
           additionalProperties:
             type: string
+
+    RunIntegrationsGitlabSettings:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: boolean
 
     RunGoal:
       oneOf:
@@ -13348,16 +13669,12 @@ components:
 
     RunEnvironmentSettings:
       type: object
-      required: [id, provider, image, resources, network, lifecycle, labels, env]
+      required: [id, provider, image, resources, network, lifecycle, labels, volumes, env]
       properties:
         id:
           type: string
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
-        cwd:
-          type: ["string", "null"]
-          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
-          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentImageSettings"
         resources:
@@ -13368,6 +13685,10 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -13375,14 +13696,10 @@ components:
 
     EnvironmentSettings:
       type: object
-      required: [provider, image, resources, network, lifecycle, labels, env]
+      required: [provider, image, resources, network, lifecycle, labels, volumes, env]
       properties:
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
-        cwd:
-          type: ["string", "null"]
-          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
-          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentImageSettings"
         resources:
@@ -13393,6 +13710,10 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -13450,6 +13771,17 @@ components:
         stop_on_terminal:
           type: boolean
         auto_stop:
+          type: ["string", "null"]
+
+    EnvironmentVolumeSettings:
+      type: object
+      required: [id, mount_path, subpath]
+      properties:
+        id:
+          type: string
+        mount_path:
+          type: string
+        subpath:
           type: ["string", "null"]
 
     DockerfileSource:
@@ -13814,7 +14146,7 @@ components:
     IntegrationProvider:
       description: Server integration provider.
       type: string
-      enum: [github, slack]
+      enum: [github, gitlab, slack]
 
     IntegrationStatus:
       description: Computed runtime integration status.
@@ -14239,6 +14571,11 @@ components:
           type: string
           description: Health status indicator.
           example: ok
+        mode:
+          type: string
+          description: Optional server mode indicator when extra operator action is required.
+          enum:
+            - install
 
     SecretType:
       description: Schema of a stored secret.

@@ -74,6 +74,7 @@ struct RunSession {
     stop_on_terminal:  bool,
     pr_config:         Option<PullRequestSettings>,
     pr_github_app:     Option<fabro_github::GitHubCredentials>,
+    pr_gitlab:         Option<fabro_sandbox::GitLabSandboxConfig>,
     pr_origin_url:     Option<String>,
     pr_model:          String,
     workflow_path:     Option<ManifestPath>,
@@ -101,6 +102,8 @@ pub struct StartServices {
     pub artifact_sink:      Option<ArtifactSink>,
     pub run_control:        Option<Arc<RunControlState>>,
     pub github_app:         Option<fabro_github::GitHubCredentials>,
+    pub gitlab:             Option<fabro_sandbox::GitLabSandboxConfig>,
+    pub gitlab_token:       Option<String>,
     /// Server-resolved GitHub integration permissions to inject into the
     /// sandbox env. Empty when github integration has no permissions.
     pub github_permissions: HashMap<String, String>,
@@ -398,6 +401,7 @@ impl RunSession {
             SandboxProviderKind::Docker => SandboxSpec::Docker {
                 config:           resolve_docker_config(resolved),
                 github_app:       services.github_app.clone(),
+                gitlab:           services.gitlab.clone(),
                 run_id:           Some(record.run_id),
                 clone_origin_url: record.repo_origin_url().map(str::to_string),
                 clone_branch:     record.base_branch().map(str::to_string),
@@ -414,6 +418,7 @@ impl RunSession {
                 SandboxSpec::Daytona {
                     config: Box::new(resolve_daytona_config(resolved)),
                     github_app: services.github_app.clone(),
+                    gitlab: services.gitlab.clone(),
                     run_id: Some(record.run_id),
                     clone_origin_url: record.repo_origin_url().map(str::to_string),
                     clone_branch: record.base_branch().map(str::to_string),
@@ -425,9 +430,16 @@ impl RunSession {
         let toml_env = resolved.environment.resolve_env(process_env_var);
         let github_permissions: Option<HashMap<String, String>> =
             (!services.github_permissions.is_empty()).then(|| services.github_permissions.clone());
+        let gitlab_token = if resolved.integrations.gitlab.token {
+            services.gitlab_token.clone()
+        } else {
+            None
+        };
         let sandbox_env = SandboxEnvSpec {
             toml_env,
             github_permissions,
+            gitlab_token_requested: resolved.integrations.gitlab.token,
+            gitlab_token,
             origin_url: record.repo_origin_url().map(str::to_string),
         };
 
@@ -475,6 +487,7 @@ impl RunSession {
             stop_on_terminal: resolved.environment.lifecycle.stop_on_terminal,
             pr_config,
             pr_github_app: services.github_app,
+            pr_gitlab: services.gitlab,
             pr_origin_url: record.repo_origin_url().map(str::to_string),
             pr_model: llm.model,
             workflow_path,
@@ -885,13 +898,6 @@ impl RunSession {
                 .expect("last_git_sha mutex should not be poisoned: no code panics while holding this lock")
                 .clone(),
         };
-        let pr_opts = PullRequestOptions {
-            pr_config:  self.pr_config,
-            github_app: self.pr_github_app,
-            origin_url: self.pr_origin_url,
-            model:      self.pr_model,
-        };
-
         let concluded = match Box::pin(pipeline::finalize(executed, &finalize_opts)).await {
             Ok(concluded) => concluded,
             Err(err) => {
@@ -899,6 +905,16 @@ impl RunSession {
                 store_progress_logger.flush().await;
                 return Err(err);
             }
+        };
+        store_progress_logger.flush().await;
+
+        let pr_opts = PullRequestOptions {
+            pr_config:   self.pr_config,
+            github_app:  self.pr_github_app,
+            gitlab:      self.pr_gitlab,
+            origin_url:  self.pr_origin_url,
+            model:       self.pr_model,
+            final_patch: concluded.final_patch.clone(),
         };
         let finalized = Box::pin(pipeline::pull_request(concluded, &pr_opts)).await;
         // Emit `agent.steer.dropped { reason: run_ended }` for any
@@ -1470,6 +1486,8 @@ reasoning = false
             artifact_sink: None,
             run_control: None,
             github_app: None,
+            gitlab: None,
+            gitlab_token: None,
             github_permissions: HashMap::new(),
             vault: None,
             catalog: test_catalog(),

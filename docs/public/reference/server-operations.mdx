@@ -107,6 +107,7 @@ The server configures auth with `server.auth.methods`:
 
 - **`dev-token`** — Operators can call the API directly with `Authorization: Bearer fabro_dev_...`, and the web login page can accept the dev token too.
 - **`github`** — End users sign in through GitHub OAuth and receive a browser session cookie.
+- **`gitlab`** — End users sign in through GitLab OAuth and receive a browser session cookie.
 
 Both methods can be enabled simultaneously:
 
@@ -117,6 +118,8 @@ methods = ["dev-token", "github"]
 [server.auth.github]
 allowed_usernames = ["alice", "bob"]
 ```
+
+For GitLab, use `methods = ["gitlab"]` or include it beside other methods. GitLab auth allows users when their username is listed in `server.auth.gitlab.allowed_usernames` or one returned GitLab group `full_path` is listed in `server.auth.gitlab.allowed_groups`. Empty GitLab allowlists do not block startup, but no GitLab user can sign in until at least one allowlist entry exists.
 
 ## Demo mode
 

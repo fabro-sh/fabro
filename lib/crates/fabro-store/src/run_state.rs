@@ -293,10 +293,19 @@ impl RunProjectionReducer for RunProjection {
                 }));
             }
             EventBody::PullRequestCreated(props) => {
-                self.pull_request = Some(PullRequestLink {
-                    owner:  props.owner.clone(),
-                    repo:   props.repo.clone(),
-                    number: props.pr_number,
+                self.pull_request = Some(if props.pr_url.contains("/-/merge_requests/") {
+                    PullRequestLink::gitlab(
+                        props.owner.clone(),
+                        props.repo.clone(),
+                        props.pr_number,
+                        props.pr_url.clone(),
+                    )
+                } else {
+                    PullRequestLink::github(
+                        props.owner.clone(),
+                        props.repo.clone(),
+                        props.pr_number,
+                    )
                 });
             }
             EventBody::PullRequestLinked(props) => {
@@ -3434,30 +3443,61 @@ mod tests {
     }
 
     #[test]
+    fn gitlab_merge_request_created_populates_projection_with_gitlab_provider() {
+        use fabro_types::PullRequestProvider;
+        use fabro_types::run_event::PullRequestCreatedProps;
+
+        let mut state = running_projection();
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::PullRequestCreated(PullRequestCreatedProps {
+                    pr_url:
+                        "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/12"
+                            .to_string(),
+                    pr_number:   12,
+                    owner:       "platform/tools".to_string(),
+                    repo:        "fabro".to_string(),
+                    base_branch: "main".to_string(),
+                    head_branch: "fabro/run/demo".to_string(),
+                    title:       "Add MR chip".to_string(),
+                    draft:       false,
+                }),
+                None,
+            ))
+            .unwrap();
+
+        let pull_request = state
+            .pull_request
+            .as_ref()
+            .expect("projection should store pull request");
+        assert_eq!(pull_request.provider, PullRequestProvider::Gitlab);
+        assert_eq!(pull_request.owner_path, "platform/tools");
+        assert_eq!(pull_request.repo, "fabro");
+        assert_eq!(pull_request.number, 12);
+        assert_eq!(
+            pull_request.html_url(),
+            "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/12"
+        );
+    }
+
+    #[test]
     fn pull_request_linked_replaces_and_unlinked_clears_projection() {
         use fabro_types::run_event::{
             PullRequestCreatedProps, PullRequestLinkedProps, PullRequestUnlinkedProps,
         };
 
         let mut state = running_projection();
-        let github_pull_request = PullRequestLink {
-            owner:  "fabro-sh".to_string(),
-            repo:   "fabro".to_string(),
-            number: 123,
-        };
-        let replacement_pull_request = PullRequestLink {
-            owner:  "acme".to_string(),
-            repo:   "widgets".to_string(),
-            number: 42,
-        };
+        let github_pull_request = PullRequestLink::github("fabro-sh", "fabro", 123);
+        let replacement_pull_request = PullRequestLink::github("acme", "widgets", 42);
 
         state
             .apply_event(&test_event(
                 1,
                 EventBody::PullRequestCreated(PullRequestCreatedProps {
-                    pr_url:      github_pull_request.html_url(),
+                    pr_url:      github_pull_request.html_url().to_string(),
                     pr_number:   github_pull_request.number,
-                    owner:       github_pull_request.owner.clone(),
+                    owner:       github_pull_request.owner_path.clone(),
                     repo:        github_pull_request.repo.clone(),
                     base_branch: "main".to_string(),
                     head_branch: "fabro/run/demo".to_string(),

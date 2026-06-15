@@ -25,6 +25,7 @@ export interface RepositoryRef {
 
 export const RepositoryRefProviderEnum = {
     GITHUB: 'github',
+    GITLAB: 'gitlab',
     GIT: 'git',
     UNKNOWN: 'unknown'
 } as const;

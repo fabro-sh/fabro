@@ -68,10 +68,16 @@ where
 
     let methods = settings.auth.methods.clone();
     let github_enabled = methods.contains(&ServerAuthMethod::Github);
+    let gitlab_enabled = methods.contains(&ServerAuthMethod::Gitlab);
     let web_enabled = settings.web.enabled;
     if github_enabled && lookup(EnvVars::GITHUB_APP_CLIENT_SECRET).is_none() {
         return Err(anyhow!(
             "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not configured in the vault."
+        ));
+    }
+    if gitlab_enabled && lookup(EnvVars::GITLAB_APP_CLIENT_SECRET).is_none() {
+        return Err(anyhow!(
+            "Fabro server refuses to start: gitlab auth is enabled but GITLAB_APP_CLIENT_SECRET is not configured in the vault."
         ));
     }
 
@@ -115,6 +121,7 @@ where
 pub fn validate_auth_configuration(settings: &ServerNamespace) -> Result<()> {
     let methods = &settings.auth.methods;
     let github_enabled = methods.contains(&ServerAuthMethod::Github);
+    let gitlab_enabled = methods.contains(&ServerAuthMethod::Gitlab);
     if methods.is_empty() {
         return Err(anyhow!(
             "Fabro server refuses to start: server.auth.methods must not be empty."
@@ -130,6 +137,21 @@ pub fn validate_auth_configuration(settings: &ServerNamespace) -> Result<()> {
     if github_enabled && settings.integrations.github.client_id.is_none() {
         return Err(anyhow!(
             "Fabro server refuses to start: github auth is enabled but server.integrations.github.client_id is not configured."
+        ));
+    }
+    if gitlab_enabled && !web_enabled {
+        return Err(anyhow!(
+            "Fabro server refuses to start: gitlab auth is enabled but server.web.enabled is false."
+        ));
+    }
+    if gitlab_enabled && settings.integrations.gitlab.base_url.is_none() {
+        return Err(anyhow!(
+            "Fabro server refuses to start: gitlab auth is enabled but server.integrations.gitlab.base_url is not configured."
+        ));
+    }
+    if gitlab_enabled && settings.integrations.gitlab.client_id.is_none() {
+        return Err(anyhow!(
+            "Fabro server refuses to start: gitlab auth is enabled but server.integrations.gitlab.client_id is not configured."
         ));
     }
     Ok(())
@@ -186,6 +208,7 @@ fn config_allows_run_auth_method(config: &ConfiguredAuth, method: AuthMethod) ->
     match method {
         AuthMethod::DevToken => config.methods.contains(&ServerAuthMethod::DevToken),
         AuthMethod::Github => config.methods.contains(&ServerAuthMethod::Github),
+        AuthMethod::Gitlab => config.methods.contains(&ServerAuthMethod::Gitlab),
     }
 }
 
@@ -316,6 +339,7 @@ pub fn auth_method_name(method: ServerAuthMethod) -> &'static str {
     match method {
         ServerAuthMethod::DevToken => "dev-token",
         ServerAuthMethod::Github => "github",
+        ServerAuthMethod::Gitlab => "gitlab",
     }
 }
 
@@ -374,6 +398,15 @@ mod tests {
         })
     }
 
+    fn gitlab_jwt_mode() -> AuthMode {
+        AuthMode::Enabled(ConfiguredAuth {
+            methods:    vec![ServerAuthMethod::Gitlab],
+            dev_token:  None,
+            jwt_key:    Some(signing_key()),
+            jwt_issuer: Some("https://fabro.example".to_string()),
+        })
+    }
+
     fn signing_key() -> JwtSigningKey {
         auth::derive_jwt_key(b"0123456789abcdef0123456789abcdef")
             .expect("jwt signing key should derive")
@@ -396,8 +429,29 @@ mod tests {
         }
     }
 
+    fn gitlab_jwt_subject() -> auth::JwtSubject {
+        auth::JwtSubject {
+            identity:    IdpIdentity::new("https://gitlab.example", "alice").unwrap(),
+            login:       "alice".to_string(),
+            name:        "Alice Example".to_string(),
+            email:       "alice@example.test".to_string(),
+            avatar_url:  String::new(),
+            user_url:    "https://gitlab.example/alice".to_string(),
+            auth_method: AuthMethod::Gitlab,
+        }
+    }
+
     fn issue_github_token(ttl: chrono::Duration) -> String {
         auth::issue(&signing_key(), "https://fabro.example", &jwt_subject(), ttl)
+    }
+
+    fn issue_gitlab_token(ttl: chrono::Duration) -> String {
+        auth::issue(
+            &signing_key(),
+            "https://fabro.example",
+            &gitlab_jwt_subject(),
+            ttl,
+        )
     }
 
     fn request_parts(mode: AuthMode, request: Request<Body>) -> Parts {
@@ -717,6 +771,129 @@ client_id = "Iv1.test"
         assert_eq!(config.jwt_issuer.as_deref(), Some("http://localhost:3000"));
     }
 
+    #[test]
+    fn fails_when_gitlab_enabled_without_client_secret() {
+        let file = settings(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+
+[server.integrations.gitlab]
+enabled = true
+base_url = "https://gitlab.example"
+client_id = "gitlab-client"
+"#,
+        );
+        let err = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == "SESSION_SECRET").then(|| {
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string()
+            })
+        })
+        .expect_err("gitlab auth should require client secret");
+        assert!(err.to_string().contains("GITLAB_APP_CLIENT_SECRET"));
+    }
+
+    #[test]
+    fn fails_when_gitlab_enabled_without_web() {
+        let file = settings(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["gitlab"]
+
+[server.web]
+enabled = false
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+
+[server.integrations.gitlab]
+enabled = true
+base_url = "https://gitlab.example"
+client_id = "gitlab-client"
+"#,
+        );
+        let err = resolve_auth_mode_with_lookup(&file, |name| match name {
+            "SESSION_SECRET" => {
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string())
+            }
+            "GITLAB_APP_CLIENT_SECRET" => Some("test-secret".to_string()),
+            _ => None,
+        })
+        .expect_err("gitlab auth should require web mode");
+        assert!(err.to_string().contains("server.web.enabled"));
+    }
+
+    #[test]
+    fn fails_when_gitlab_enabled_without_base_url() {
+        let file = settings(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+
+[server.integrations.gitlab]
+enabled = true
+client_id = "gitlab-client"
+"#,
+        );
+        let err = resolve_auth_mode_with_lookup(&file, |name| match name {
+            "SESSION_SECRET" => {
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string())
+            }
+            "GITLAB_APP_CLIENT_SECRET" => Some("test-secret".to_string()),
+            _ => None,
+        })
+        .expect_err("gitlab auth should require base_url");
+        assert!(
+            err.to_string()
+                .contains("server.integrations.gitlab.base_url")
+        );
+    }
+
+    #[test]
+    fn resolves_gitlab_mode_with_jwt_key() {
+        let file = settings(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+
+[server.integrations.gitlab]
+enabled = true
+base_url = "https://gitlab.example"
+client_id = "gitlab-client"
+"#,
+        );
+        let mode = resolve_auth_mode_with_lookup(&file, |name| match name {
+            "SESSION_SECRET" => {
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string())
+            }
+            "GITLAB_APP_CLIENT_SECRET" => Some("test-secret".to_string()),
+            _ => None,
+        })
+        .expect("gitlab auth should resolve");
+
+        let AuthMode::Enabled(config) = mode;
+        assert_eq!(config.methods, vec![ServerAuthMethod::Gitlab]);
+        assert!(config.jwt_key.is_some());
+        assert_eq!(config.jwt_issuer.as_deref(), Some("http://localhost:3000"));
+    }
+
     #[tokio::test]
     async fn rejects_missing_credentials() {
         let parts = request_parts(
@@ -766,6 +943,27 @@ client_id = "Iv1.test"
             IdpIdentity::new("https://github.com", "12345").unwrap()
         );
         assert_eq!(auth.auth_method, AuthMethod::Github);
+    }
+
+    #[tokio::test]
+    async fn gitlab_jwt_bearer_authenticates_when_gitlab_enabled() {
+        let token = issue_gitlab_token(chrono::Duration::minutes(10));
+        let parts = request_parts(
+            gitlab_jwt_mode(),
+            Request::builder()
+                .uri("/subject")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        );
+
+        let auth = authenticate_parts(&parts).unwrap().unwrap();
+        assert_eq!(auth.login, "alice");
+        assert_eq!(auth.auth_method, AuthMethod::Gitlab);
+        assert_eq!(
+            auth.identity,
+            IdpIdentity::new("https://gitlab.example", "alice").unwrap()
+        );
     }
 
     #[test]

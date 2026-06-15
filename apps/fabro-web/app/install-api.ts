@@ -3,6 +3,9 @@ import type {
   InstallGithubAppManifestInput,
   InstallGithubAppManifestResponse,
   InstallGithubAppOwner,
+  InstallGithubTokenTestResponse,
+  InstallGitlabAppInput,
+  InstallGitlabTokenInput,
   InstallLlmProviderInput,
   InstallObjectStoreInput,
   InstallObjectStoreSummary,
@@ -18,6 +21,9 @@ export type {
   InstallGithubAppManifestInput,
   InstallGithubAppManifestResponse,
   InstallGithubAppOwner,
+  InstallGithubTokenTestResponse,
+  InstallGitlabAppInput,
+  InstallGitlabTokenInput,
   InstallLlmProviderInput,
   InstallObjectStoreInput,
   InstallObjectStoreSummary,
@@ -25,6 +31,8 @@ export type {
   InstallSandboxSummary,
   InstallSessionResponse,
 };
+
+export type InstallGitlabTokenTestResponse = InstallGithubTokenTestResponse;
 
 const INSTALL_TOKEN_KEY = "fabro-install-token";
 
@@ -204,6 +212,39 @@ export async function putInstallGithubToken(
       { token: githubToken, username },
       installOptions(token),
     ), {
+      redirectOnUnauthorized: false,
+    }),
+  );
+}
+
+export async function testGitlabTokenInstall(
+  token: string,
+  input: InstallGitlabTokenInput,
+): Promise<InstallGitlabTokenTestResponse> {
+  return installCall("install gitlab token validation failed", () =>
+    apiData(() => installApi.testGitlabTokenInstall(input, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
+}
+
+export async function putInstallGitlabToken(
+  token: string,
+  input: InstallGitlabTokenInput,
+): Promise<void> {
+  await installCall("install gitlab token request failed", () =>
+    apiData(() => installApi.putInstallGitlabToken(input, installOptions(token)), {
+      redirectOnUnauthorized: false,
+    }),
+  );
+}
+
+export async function putInstallGitlabApp(
+  token: string,
+  input: InstallGitlabAppInput,
+): Promise<void> {
+  await installCall("install gitlab app request failed", () =>
+    apiData(() => installApi.putInstallGitlabApp(input, installOptions(token)), {
       redirectOnUnauthorized: false,
     }),
   );

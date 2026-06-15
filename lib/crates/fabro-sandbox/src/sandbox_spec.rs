@@ -3,15 +3,17 @@ use std::sync::Arc;
 
 #[cfg(feature = "docker")]
 use anyhow::Context as _;
-#[cfg(any(feature = "docker", feature = "daytona"))]
+#[cfg(any(feature = "daytona", feature = "docker"))]
 use fabro_github::GitHubCredentials;
+#[cfg(any(feature = "daytona", feature = "docker"))]
+use fabro_gitlab::repository::GitLabBaseUrl;
 #[allow(
     unused_imports,
     reason = "Daytona-enabled builds persist RunId in the sandbox spec."
 )]
 use fabro_types::{RunId, RunSandboxInstance, RunSandboxRuntime, SandboxProviderKind};
 
-#[cfg(any(feature = "docker", feature = "daytona"))]
+#[cfg(any(feature = "daytona", feature = "docker"))]
 use crate::clone_source;
 #[cfg(feature = "daytona")]
 use crate::daytona::{self, DaytonaConfig, DaytonaSandbox};
@@ -20,7 +22,18 @@ use crate::docker::{self, DockerSandbox, DockerSandboxOptions};
 use crate::local::LocalSandbox;
 use crate::{Sandbox, SandboxEventCallback};
 
+#[cfg(any(feature = "daytona", feature = "docker"))]
+#[derive(Debug, Clone)]
+pub struct GitLabSandboxConfig {
+    pub base_url:    GitLabBaseUrl,
+    pub credentials: fabro_gitlab::GitLabCredentials,
+}
+
 /// Options for sandbox initialization and construction.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Sandbox specs carry provider configuration directly to avoid changing public construction APIs in provider-specific builds."
+)]
 pub enum SandboxSpec {
     Local {
         working_directory: PathBuf,
@@ -29,6 +42,7 @@ pub enum SandboxSpec {
     Docker {
         config:           DockerSandboxOptions,
         github_app:       Option<GitHubCredentials>,
+        gitlab:           Option<GitLabSandboxConfig>,
         run_id:           Option<RunId>,
         clone_origin_url: Option<String>,
         clone_branch:     Option<String>,
@@ -37,6 +51,7 @@ pub enum SandboxSpec {
     Daytona {
         config:           Box<DaytonaConfig>,
         github_app:       Option<GitHubCredentials>,
+        gitlab:           Option<GitLabSandboxConfig>,
         run_id:           Option<RunId>,
         clone_origin_url: Option<String>,
         clone_branch:     Option<String>,
@@ -83,6 +98,7 @@ impl SandboxSpec {
             #[cfg(feature = "docker")]
             Self::Docker {
                 config,
+                gitlab,
                 clone_origin_url,
                 clone_branch,
                 ..
@@ -90,12 +106,14 @@ impl SandboxSpec {
                 let repo_cloned = clone_source::repo_cloned_for_record(
                     config.skip_clone,
                     clone_origin_url.as_deref(),
+                    gitlab.as_ref().map(|config| &config.base_url),
                 );
                 let layout = runtime_layout_metadata(
                     repo_cloned,
                     clone_origin_url.as_deref(),
                     docker::WORKING_DIRECTORY,
                     docker::REPOS_ROOT,
+                    gitlab.as_ref().map(|config| &config.base_url),
                 );
                 RunSandboxInstance {
                     provider: self.provider(),
@@ -107,22 +125,24 @@ impl SandboxSpec {
                         repo_cloned,
                         clone_origin_url: clone_source::clean_clone_origin_for_record(
                             clone_origin_url.as_deref(),
+                            gitlab.as_ref().map(|config| &config.base_url),
                         ),
                         clone_branch: clone_branch.clone(),
                         workspace_root: Some(docker::WORKING_DIRECTORY.to_string()),
                         repos_root: Some(docker::REPOS_ROOT.to_string()),
-                        primary_repo_path: layout
-                            .as_ref()
-                            .map(|layout| layout.primary_repo_path.clone()),
-                        primary_repo_link: layout
-                            .as_ref()
-                            .map(|layout| layout.primary_repo_link.clone()),
+                        primary_repo_path: layout.as_ref().map(|layout| {
+                            clone_source::path_to_remote_string(&layout.primary_repo_path)
+                        }),
+                        primary_repo_link: layout.as_ref().map(|layout| {
+                            clone_source::path_to_remote_string(&layout.primary_repo_link)
+                        }),
                     },
                 }
             }
             #[cfg(feature = "daytona")]
             Self::Daytona {
                 config,
+                gitlab,
                 clone_origin_url,
                 clone_branch,
                 ..
@@ -130,12 +150,14 @@ impl SandboxSpec {
                 let repo_cloned = clone_source::repo_cloned_for_record(
                     config.skip_clone,
                     clone_origin_url.as_deref(),
+                    gitlab.as_ref().map(|config| &config.base_url),
                 );
                 let layout = runtime_layout_metadata(
                     repo_cloned,
                     clone_origin_url.as_deref(),
                     daytona::WORKING_DIRECTORY,
                     daytona::REPOS_ROOT,
+                    gitlab.as_ref().map(|config| &config.base_url),
                 );
                 RunSandboxInstance {
                     provider: self.provider(),
@@ -147,16 +169,17 @@ impl SandboxSpec {
                         repo_cloned,
                         clone_origin_url: clone_source::clean_clone_origin_for_record(
                             clone_origin_url.as_deref(),
+                            gitlab.as_ref().map(|config| &config.base_url),
                         ),
                         clone_branch: clone_branch.clone(),
                         workspace_root: Some(daytona::WORKING_DIRECTORY.to_string()),
                         repos_root: Some(daytona::REPOS_ROOT.to_string()),
-                        primary_repo_path: layout
-                            .as_ref()
-                            .map(|layout| layout.primary_repo_path.clone()),
-                        primary_repo_link: layout
-                            .as_ref()
-                            .map(|layout| layout.primary_repo_link.clone()),
+                        primary_repo_path: layout.as_ref().map(|layout| {
+                            clone_source::path_to_remote_string(&layout.primary_repo_path)
+                        }),
+                        primary_repo_link: layout.as_ref().map(|layout| {
+                            clone_source::path_to_remote_string(&layout.primary_repo_link)
+                        }),
                     },
                 }
             }
@@ -199,13 +222,15 @@ impl SandboxSpec {
             Self::Docker {
                 config,
                 github_app,
+                gitlab,
                 run_id,
                 clone_origin_url,
                 clone_branch,
             } => {
-                let mut sandbox = DockerSandbox::new(
+                let mut sandbox = DockerSandbox::new_with_gitlab(
                     config.clone(),
                     github_app.clone(),
+                    gitlab.clone(),
                     *run_id,
                     clone_origin_url.clone(),
                     clone_branch.clone(),
@@ -220,14 +245,16 @@ impl SandboxSpec {
             Self::Daytona {
                 config,
                 github_app,
+                gitlab,
                 run_id,
                 clone_origin_url,
                 clone_branch,
                 api_key,
             } => {
-                let mut sandbox = DaytonaSandbox::new(
+                let mut sandbox = DaytonaSandbox::new_with_gitlab(
                     config.as_ref().clone(),
                     github_app.clone(),
+                    gitlab.clone(),
                     *run_id,
                     clone_origin_url.clone(),
                     clone_branch.clone(),
@@ -244,17 +271,24 @@ impl SandboxSpec {
     }
 }
 
-#[cfg(any(feature = "docker", feature = "daytona"))]
+#[cfg(any(feature = "daytona", feature = "docker"))]
 fn runtime_layout_metadata(
     repo_cloned: Option<bool>,
     clone_origin_url: Option<&str>,
     workspace_root: &str,
     repos_root: &str,
-) -> Option<clone_source::GitHubRepoLayout> {
+    gitlab_base_url: Option<&GitLabBaseUrl>,
+) -> Option<clone_source::RepoLayout> {
     if repo_cloned != Some(true) {
         return None;
     }
-    clone_source::github_repo_layout(clone_origin_url?, workspace_root, repos_root).ok()
+    clone_source::repo_layout_for_record(
+        clone_origin_url?,
+        workspace_root,
+        repos_root,
+        gitlab_base_url,
+    )
+    .ok()
 }
 
 #[cfg(test)]
@@ -273,6 +307,7 @@ mod tests {
         let spec = SandboxSpec::Docker {
             config:           DockerSandboxOptions::default(),
             github_app:       None,
+            gitlab:           None,
             run_id:           None,
             clone_origin_url: Some("git@github.com:brynary/rack-test.git".to_string()),
             clone_branch:     Some("main".to_string()),
@@ -294,7 +329,7 @@ mod tests {
         assert_eq!(runtime.repos_root.as_deref(), Some("/repos"));
         assert_eq!(
             runtime.primary_repo_path.as_deref(),
-            Some("/repos/brynary/rack-test")
+            Some("/repos/github/brynary/rack-test")
         );
         assert_eq!(
             runtime.primary_repo_link.as_deref(),
@@ -311,6 +346,7 @@ mod tests {
                 ..DockerSandboxOptions::default()
             },
             github_app:       None,
+            gitlab:           None,
             run_id:           None,
             clone_origin_url: Some("https://gitlab.com/acme/widgets".to_string()),
             clone_branch:     None,

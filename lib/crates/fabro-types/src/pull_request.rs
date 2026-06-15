@@ -2,21 +2,69 @@ use serde::de::Error as DeError;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Minimal GitHub pull request reference stored on a workflow run.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum PullRequestProvider {
+    Github,
+    Gitlab,
+}
+
+/// Minimal provider-aware pull request reference stored on a workflow run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestLink {
-    pub owner:  String,
-    pub repo:   String,
-    pub number: u64,
+    pub provider:   PullRequestProvider,
+    pub owner_path: String,
+    pub repo:       String,
+    pub number:     u64,
+    pub html_url:   String,
 }
 
 impl PullRequestLink {
     #[must_use]
-    pub fn html_url(&self) -> String {
-        format!(
-            "https://github.com/{}/{}/pull/{}",
-            self.owner, self.repo, self.number
-        )
+    pub fn html_url(&self) -> &str {
+        &self.html_url
+    }
+
+    #[must_use]
+    pub fn github(owner: impl Into<String>, repo: impl Into<String>, number: u64) -> Self {
+        let owner_path = owner.into();
+        let repo = repo.into();
+        let html_url = github_html_url(&owner_path, &repo, number);
+        Self {
+            provider: PullRequestProvider::Github,
+            owner_path,
+            repo,
+            number,
+            html_url,
+        }
+    }
+
+    #[must_use]
+    pub fn gitlab(
+        owner_path: impl Into<String>,
+        repo: impl Into<String>,
+        number: u64,
+        html_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            provider: PullRequestProvider::Gitlab,
+            owner_path: owner_path.into(),
+            repo: repo.into(),
+            number,
+            html_url: html_url.into(),
+        }
     }
 
     pub fn from_github_url(url: &str) -> Result<Self, String> {
@@ -29,11 +77,12 @@ impl Serialize for PullRequestLink {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("PullRequestLink", 4)?;
-        state.serialize_field("owner", &self.owner)?;
+        let mut state = serializer.serialize_struct("PullRequestLink", 5)?;
+        state.serialize_field("provider", &self.provider)?;
+        state.serialize_field("owner_path", &self.owner_path)?;
         state.serialize_field("repo", &self.repo)?;
         state.serialize_field("number", &self.number)?;
-        state.serialize_field("html_url", &self.html_url())?;
+        state.serialize_field("html_url", &self.html_url)?;
         state.end()
     }
 }
@@ -44,39 +93,73 @@ impl<'de> Deserialize<'de> for PullRequestLink {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
         struct Wire {
             #[serde(default)]
-            html_url: Option<String>,
+            provider:   Option<PullRequestProvider>,
             #[serde(default)]
-            owner:    Option<String>,
+            html_url:   Option<String>,
             #[serde(default)]
-            repo:     Option<String>,
+            owner:      Option<String>,
             #[serde(default)]
-            number:   Option<u64>,
+            owner_path: Option<String>,
+            #[serde(default)]
+            repo:       Option<String>,
+            #[serde(default)]
+            number:     Option<u64>,
         }
 
         let wire = Wire::deserialize(deserializer)?;
-        let (Some(owner), Some(repo), Some(number)) = (wire.owner, wire.repo, wire.number) else {
-            return Err(D::Error::custom("missing pull request owner/repo/number"));
-        };
-        let link = Self {
-            owner,
-            repo,
-            number,
-        };
-
-        if let Some(html_url) = wire.html_url {
-            let url_link =
-                github_pull_request_link_from_url(&html_url).map_err(D::Error::custom)?;
-            if url_link != link {
+        let provider = wire.provider.unwrap_or(PullRequestProvider::Github);
+        let owner_path = match (wire.owner_path, wire.owner) {
+            (Some(owner_path), Some(owner)) if owner_path != owner => {
                 return Err(D::Error::custom(
-                    "pull request html_url does not match owner/repo/number",
+                    "pull request owner_path does not match legacy owner",
                 ));
             }
+            (Some(owner_path), _) | (None, Some(owner_path)) => owner_path,
+            (None, None) => {
+                return Err(D::Error::custom("missing pull request owner_path"));
+            }
+        };
+        let Some(repo) = wire.repo else {
+            return Err(D::Error::custom("missing pull request repo"));
+        };
+        let Some(number) = wire.number else {
+            return Err(D::Error::custom("missing pull request number"));
+        };
+        if owner_path.is_empty() {
+            return Err(D::Error::custom(
+                "pull request owner_path must not be empty",
+            ));
+        }
+        if repo.is_empty() {
+            return Err(D::Error::custom("pull request repo must not be empty"));
+        }
+        if number == 0 {
+            return Err(D::Error::custom("pull request number must be at least 1"));
         }
 
-        Ok(link)
+        match provider {
+            PullRequestProvider::Github => {
+                let link = Self::github(owner_path, repo, number);
+                if let Some(html_url) = wire.html_url {
+                    let url_link =
+                        github_pull_request_link_from_url(&html_url).map_err(D::Error::custom)?;
+                    if url_link != link {
+                        return Err(D::Error::custom(
+                            "pull request html_url does not match provider/owner_path/repo/number",
+                        ));
+                    }
+                }
+                Ok(link)
+            }
+            PullRequestProvider::Gitlab => {
+                let Some(html_url) = wire.html_url else {
+                    return Err(D::Error::custom("missing pull request html_url"));
+                };
+                Ok(Self::gitlab(owner_path, repo, number, html_url))
+            }
+        }
     }
 }
 
@@ -84,7 +167,7 @@ impl<'de> Deserialize<'de> for PullRequestLink {
     clippy::disallowed_types,
     reason = "Pull request links are public github.com URLs stored for display and coordinate inference."
 )]
-fn github_pull_request_link_from_url(raw_url: &str) -> Result<PullRequestLink, String> {
+pub fn github_pull_request_link_from_url(raw_url: &str) -> Result<PullRequestLink, String> {
     let parsed =
         url::Url::parse(raw_url).map_err(|err| format!("Invalid pull request URL: {err}"))?;
     if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
@@ -109,11 +192,15 @@ fn github_pull_request_link_from_url(raw_url: &str) -> Result<PullRequestLink, S
     let number = number
         .parse()
         .map_err(|_| "Pull request URL number must be an unsigned integer.".to_string())?;
-    Ok(PullRequestLink {
-        owner: (*owner).to_string(),
-        repo: (*repo).to_string(),
+    Ok(PullRequestLink::github(
+        (*owner).to_string(),
+        (*repo).to_string(),
         number,
-    })
+    ))
+}
+
+fn github_html_url(owner_path: &str, repo: &str, number: u64) -> String {
+    format!("https://github.com/{owner_path}/{repo}/pull/{number}")
 }
 
 /// Stored pull request link plus optional live GitHub details.
@@ -264,41 +351,104 @@ pub enum CheckRunStatus {
 }
 
 #[cfg(test)]
-mod tests {
+mod provider_link_tests {
     use serde_json::json;
 
     use super::*;
 
     #[test]
-    fn pull_request_link_serializes_computed_html_url() {
-        let link = PullRequestLink {
-            owner:  "fabro-sh".to_string(),
-            repo:   "fabro".to_string(),
-            number: 270,
-        };
+    fn legacy_github_owner_record_deserializes() {
+        let link: PullRequestLink = serde_json::from_value(serde_json::json!({
+            "owner": "fabro-sh",
+            "repo": "fabro",
+            "number": 42
+        }))
+        .unwrap();
+
+        assert_eq!(link.provider, PullRequestProvider::Github);
+        assert_eq!(link.owner_path, "fabro-sh");
+        assert_eq!(link.repo, "fabro");
+        assert_eq!(link.number, 42);
+        assert_eq!(link.html_url, "https://github.com/fabro-sh/fabro/pull/42");
+    }
+
+    #[test]
+    fn new_github_record_serializes_owner_path_and_provider() {
+        let link = PullRequestLink::github("fabro-sh", "fabro", 99);
+        let value = serde_json::to_value(&link).unwrap();
 
         assert_eq!(
-            serde_json::to_value(link).unwrap(),
-            json!({
-                "owner": "fabro-sh",
+            value,
+            serde_json::json!({
+                "provider": "github",
+                "owner_path": "fabro-sh",
                 "repo": "fabro",
-                "number": 270,
-                "html_url": "https://github.com/fabro-sh/fabro/pull/270"
+                "number": 99,
+                "html_url": "https://github.com/fabro-sh/fabro/pull/99"
             })
         );
     }
 
     #[test]
-    fn pull_request_link_rejects_extra_legacy_record_fields() {
-        let result = serde_json::from_value::<PullRequestLink>(json!({
-            "provider": "github",
-            "html_url": "https://github.com/fabro-sh/fabro/pull/270",
-            "number": 270,
+    fn gitlab_record_round_trips_nested_namespace() {
+        let link = PullRequestLink::gitlab(
+            "platform/tools",
+            "fabro",
+            12,
+            "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/12",
+        );
+        let value = serde_json::to_value(&link).unwrap();
+        let round_tripped: PullRequestLink = serde_json::from_value(value).unwrap();
+
+        assert_eq!(round_tripped.provider, PullRequestProvider::Gitlab);
+        assert_eq!(round_tripped.owner_path, "platform/tools");
+        assert_eq!(round_tripped.repo, "fabro");
+        assert_eq!(round_tripped.number, 12);
+        assert_eq!(
+            round_tripped.html_url,
+            "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/12"
+        );
+    }
+
+    #[test]
+    fn gitlab_record_requires_html_url() {
+        let err = serde_json::from_value::<PullRequestLink>(serde_json::json!({
+            "provider": "gitlab",
+            "owner_path": "platform/tools",
+            "repo": "fabro",
+            "number": 12
+        }))
+        .unwrap_err();
+
+        assert!(err.to_string().contains("html_url"));
+    }
+
+    #[test]
+    fn legacy_github_record_ignores_extra_fields() {
+        let link: PullRequestLink = serde_json::from_value(serde_json::json!({
             "owner": "fabro-sh",
             "repo": "fabro",
+            "number": 42,
             "title": "ignored live metadata"
-        }));
+        }))
+        .unwrap();
 
-        assert!(result.is_err());
+        assert_eq!(link, PullRequestLink::github("fabro-sh", "fabro", 42));
+    }
+
+    #[test]
+    fn pull_request_link_serializes_computed_html_url() {
+        let link = PullRequestLink::github("fabro-sh", "fabro", 270);
+
+        assert_eq!(
+            serde_json::to_value(link).unwrap(),
+            json!({
+                "provider": "github",
+                "owner_path": "fabro-sh",
+                "repo": "fabro",
+                "number": 270,
+                "html_url": "https://github.com/fabro-sh/fabro/pull/270"
+            })
+        );
     }
 }

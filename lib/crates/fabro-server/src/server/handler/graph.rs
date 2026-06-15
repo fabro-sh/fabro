@@ -132,6 +132,13 @@ pub(in crate::server) async fn render_dot_subprocess(
     dot_source: &str,
     exe_override: Option<&std::path::Path>,
 ) -> Result<Vec<u8>, RenderSubprocessError> {
+    #[cfg(test)]
+    if exe_override.is_none() && std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).is_none() {
+        let dot = fabro_graphviz::render::RenderableDot::from_fabro_source(dot_source);
+        return fabro_graphviz::render::render_raw_svg(&dot)
+            .map_err(|err| RenderSubprocessError::RenderFailed(err.to_string()));
+    }
+
     let _permit = GRAPHVIZ_RENDER_SEMAPHORE
         .acquire()
         .await

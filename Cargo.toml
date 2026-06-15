@@ -1,5 +1,10 @@
 [workspace]
-members = ["lib/crates/*", "test/twin/openai", "test/twin/github"]
+members = [
+    "lib/crates/*",
+    "test/twin/openai",
+    "test/twin/github",
+    "test/twin/gitlab",
+]
 default-members = ["lib/crates/fabro-cli"]
 resolver = "2"
 
@@ -83,9 +88,11 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 insta = "1"
+parking_lot = "0.12"
 fabro-test = { path = "lib/crates/fabro-test" }
 twin-openai = { path = "test/twin/openai" }
 twin-github = { path = "test/twin/github" }
+twin-gitlab = { path = "test/twin/gitlab" }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "fc58e22f7f25183df6264276ee186bbc32635738", package = "daytona-sdk" }
@@ -99,6 +106,7 @@ rust-embed = "8"
 percent-encoding = "2"
 minijinja = "=2.19.0"
 miette = { version = "7.6", features = ["fancy"] }
+fabro-gitlab = { path = "lib/crates/fabro-gitlab" }
 fabro-http = { path = "lib/crates/fabro-http" }
 fabro-environment = { path = "lib/crates/fabro-environment" }
 fabro-options-metadata = { path = "lib/crates/fabro-options-metadata" }

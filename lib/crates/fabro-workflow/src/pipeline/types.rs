@@ -50,9 +50,6 @@ pub struct Transformed {
 /// Lint rule name attached to diagnostics for undefined template variables.
 pub const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
 
-/// Lint rule name attached to diagnostics for graph goal self-references.
-pub(crate) const GOAL_SELF_REFERENCE_RULE: &str = "goal_self_reference";
-
 /// Output of the VALIDATE phase. Always produced (even with errors).
 /// Caller inspects diagnostics and decides whether to proceed.
 /// Graph is read-only — use accessors, not direct field access.
@@ -242,9 +239,11 @@ pub struct LlmSpec {
 
 #[derive(Clone)]
 pub struct SandboxEnvSpec {
-    pub toml_env:           HashMap<String, String>,
-    pub github_permissions: Option<HashMap<String, String>>,
-    pub origin_url:         Option<String>,
+    pub toml_env:               HashMap<String, String>,
+    pub github_permissions:     Option<HashMap<String, String>>,
+    pub gitlab_token_requested: bool,
+    pub gitlab_token:           Option<String>,
+    pub origin_url:             Option<String>,
 }
 
 pub struct InitOptions {
@@ -309,6 +308,7 @@ pub struct Concluded {
     pub graph:       Graph,
     pub run_options: RunOptions,
     pub services:    Arc<RunServices>,
+    pub final_patch: Option<String>,
 }
 
 /// Output of the PULL_REQUEST phase.
@@ -344,8 +344,10 @@ pub struct FinalizeOptions {
 
 /// Options for the PULL_REQUEST phase.
 pub struct PullRequestOptions {
-    pub pr_config:  Option<PullRequestSettings>,
-    pub github_app: Option<fabro_github::GitHubCredentials>,
-    pub origin_url: Option<String>,
-    pub model:      String,
+    pub pr_config:   Option<PullRequestSettings>,
+    pub github_app:  Option<fabro_github::GitHubCredentials>,
+    pub gitlab:      Option<fabro_sandbox::GitLabSandboxConfig>,
+    pub origin_url:  Option<String>,
+    pub model:       String,
+    pub final_patch: Option<String>,
 }

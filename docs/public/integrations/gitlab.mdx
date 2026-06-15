@@ -1,0 +1,79 @@
+---
+title: GitLab
+description: Configure Fabro to authenticate users and automate merge requests against a GitLab instance.
+---
+
+Fabro supports one configured GitLab instance per server. GitLab can be used for repository automation in token mode, or for both browser authentication and repository automation in app mode.
+
+## Token Mode
+
+Token mode uses the server vault secret `GITLAB_TOKEN` for GitLab API calls, clone, push, branch checks, and merge request operations. It does not enable GitLab browser login.
+
+```toml
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "https://gitlab.example.com"
+```
+
+Store the token in the server vault:
+
+```bash
+fabro secret set GITLAB_TOKEN glpat_...
+```
+
+Prefer group or project access tokens when the deployment can scope Fabro to specific namespaces or projects. Use a personal access token only when scoped token types are not viable.
+
+## App Mode
+
+GitLab app mode uses OAuth for human identity and a server-owned automation token for repository work. This differs from GitHub app mode: Fabro does not mint GitLab installation tokens, so `GITLAB_TOKEN` is still required.
+
+```toml
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "https://gitlab.example.com"
+client_id = "..."
+
+[server.auth]
+methods = ["gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+allowed_groups = ["platform/fabro-admins"]
+```
+
+Store these secrets in the server vault:
+
+```text
+GITLAB_TOKEN
+GITLAB_APP_CLIENT_SECRET
+```
+
+GitLab auth allows a user when their GitLab username is listed in `server.auth.gitlab.allowed_usernames`, or when one returned GitLab group `full_path` is listed in `server.auth.gitlab.allowed_groups`. Empty allowlists do not block server startup, but no GitLab user can authenticate until at least one username or group is configured.
+
+## Relative URL Instances
+
+If GitLab is served under a relative URL, set `base_url` to the browser-visible root:
+
+```toml
+[server.integrations.gitlab]
+base_url = "https://gitlab.example.com/gitlab"
+```
+
+Fabro preserves `/gitlab` for OAuth and API calls, and removes it before computing GitLab project paths.
+
+## Run Token Injection
+
+Command and agent stages receive `GITLAB_TOKEN` only when a run opts in:
+
+```toml
+[run.integrations.gitlab]
+token = true
+```
+
+The token is injected at execution time and is not written to run manifests.
+
+## Merge Requests
+
+GitLab merge requests appear through Fabro's existing pull request routes, events, and UI labels. When `[run.pull_request] enabled = true`, Fabro dispatches to GitHub or GitLab based on the run repository origin and the configured integration.

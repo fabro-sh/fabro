@@ -14,7 +14,7 @@ pub(super) async fn create_command(args: PrCreateArgs, base_ctx: &CommandContext
 
     info!(
         number = record.number,
-        owner = %record.owner,
+        owner_path = %record.owner_path,
         repo = %record.repo,
         "Created pull request"
     );

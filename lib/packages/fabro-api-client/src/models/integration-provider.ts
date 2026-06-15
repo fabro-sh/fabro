@@ -20,6 +20,7 @@
 
 export const IntegrationProvider = {
     GITHUB: 'github',
+    GITLAB: 'gitlab',
     SLACK: 'slack'
 } as const;
 

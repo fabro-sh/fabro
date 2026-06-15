@@ -79,6 +79,7 @@ impl SandboxProvider for DockerSandboxProvider {
         let SandboxCreateSpec::Docker {
             config,
             github_app,
+            gitlab,
             run_id,
             clone_origin_url,
             clone_branch,
@@ -89,8 +90,14 @@ impl SandboxProvider for DockerSandboxProvider {
             ));
         };
 
-        let sandbox =
-            DockerSandbox::new(config, github_app, run_id, clone_origin_url, clone_branch)?;
+        let sandbox = DockerSandbox::new_with_gitlab(
+            config,
+            github_app,
+            gitlab,
+            run_id,
+            clone_origin_url,
+            clone_branch,
+        )?;
         sandbox.initialize().await?;
         let container_id = sandbox.container_identifier()?.to_string();
         self.get(&container_id).await?.ok_or_else(|| {

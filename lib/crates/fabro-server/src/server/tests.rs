@@ -5929,11 +5929,122 @@ strategy = "token"
     .expect("github token settings fixture should resolve")
 }
 
+fn github_gitlab_token_settings(gitlab_base_url: &str) -> ServerSettings {
+    ServerSettingsBuilder::from_toml(&format!(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.github]
+strategy = "token"
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "{gitlab_base_url}"
+"#
+    ))
+    .expect("github/gitlab token settings fixture should resolve")
+}
+
 fn create_github_token_app_state(
     token: Option<&str>,
     github_api_base_url: Option<String>,
 ) -> Arc<AppState> {
     create_github_token_app_state_with_env_lookup(token, github_api_base_url, |_| None)
+}
+
+fn create_github_gitlab_token_app_state(gitlab_base_url: &str) -> Arc<AppState> {
+    let (store, artifact_store) = test_store_bundle();
+    let vault_path = test_secret_store_path();
+    let server_env_path = vault_path.with_file_name("server.env");
+    let config = AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            github_gitlab_token_settings(gitlab_base_url),
+            RunLayer::default(),
+            LlmCatalogSettings::default(),
+        ),
+        registry_factory_override: None,
+        max_concurrent_runs: 5,
+        store,
+        artifact_store,
+        variables_path: vault_path.with_file_name("variables.json"),
+        vault_path,
+        preloaded_vault: None,
+        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
+        env_lookup: Arc::new(|_| None),
+        github_api_base_url: None,
+        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
+        shutdown: tokio_util::sync::CancellationToken::new(),
+        worker_control_bus: None,
+        worker_runtime: None,
+        automation_materializer_override: None,
+        automation_run_start_override: None,
+    };
+    let state = build_app_state(config).expect("test app state should build");
+    state
+        .vault
+        .try_write()
+        .expect("test vault should not already be locked")
+        .set("GITLAB_TOKEN", "glpat-test", SecretType::Token, None)
+        .expect("test gitlab token should be writable");
+    state
+}
+
+fn create_github_gitlab_token_app_state_with_token(
+    gitlab_base_url: &str,
+    token: &str,
+    llm_catalog_settings: LlmCatalogSettings,
+) -> Arc<AppState> {
+    let (store, artifact_store) = test_store_bundle();
+    let vault_path = test_secret_store_path();
+    let server_env_path = vault_path.with_file_name("server.env");
+    let config = AppStateConfig {
+        resolved_settings: resolved_runtime_settings_for_tests(
+            github_gitlab_token_settings(gitlab_base_url),
+            RunLayer::default(),
+            llm_catalog_settings,
+        ),
+        registry_factory_override: None,
+        max_concurrent_runs: 5,
+        store,
+        artifact_store,
+        variables_path: vault_path.with_file_name("variables.json"),
+        vault_path,
+        preloaded_vault: None,
+        server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
+        env_lookup: Arc::new(|_| None),
+        github_api_base_url: None,
+        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
+        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
+        shutdown: tokio_util::sync::CancellationToken::new(),
+        worker_control_bus: None,
+        worker_runtime: None,
+        automation_materializer_override: None,
+        automation_run_start_override: None,
+    };
+    let state = build_app_state(config).expect("test app state should build");
+    state
+        .vault
+        .try_write()
+        .expect("test vault should not already be locked")
+        .set("GITLAB_TOKEN", token, SecretType::Token, None)
+        .expect("test gitlab token should be writable");
+    state
+}
+
+async fn pr_test_gitlab_app_with_minimal_run(
+    gitlab_base_url: &str,
+) -> (Arc<AppState>, Router, String) {
+    let state = create_github_gitlab_token_app_state(gitlab_base_url);
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = create_run(&app, MINIMAL_DOT).await;
+    (state, app, run_id)
 }
 
 fn create_github_token_app_state_with_env_lookup(
@@ -8200,7 +8311,8 @@ async fn get_run_pull_request_returns_live_detail_from_github() {
     let body = response_json!(response, StatusCode::OK).await;
 
     assert_eq!(body["data"]["link"]["number"], 42);
-    assert_eq!(body["data"]["link"]["owner"], "acme");
+    assert_eq!(body["data"]["link"]["provider"], "github");
+    assert_eq!(body["data"]["link"]["owner_path"], "acme");
     assert_eq!(body["data"]["details"]["state"], "closed");
     assert_eq!(body["data"]["details"]["merged"], true);
     assert_eq!(body["data"]["details"]["head_branch"], "feature");
@@ -8254,7 +8366,8 @@ async fn link_run_pull_request_links_github_pr_from_any_repo_and_updates_state()
     let body = response_json!(response, StatusCode::OK).await;
 
     assert_eq!(body["html_url"], "https://github.com/other/repo/pull/987");
-    assert_eq!(body["owner"], "other");
+    assert_eq!(body["provider"], "github");
+    assert_eq!(body["owner_path"], "other");
     assert_eq!(body["repo"], "repo");
     assert_eq!(body["number"], 987);
 
@@ -8272,6 +8385,57 @@ async fn link_run_pull_request_links_github_pr_from_any_repo_and_updates_state()
     assert_eq!(
         state_body["pull_request"]["html_url"],
         "https://github.com/other/repo/pull/987"
+    );
+}
+
+#[tokio::test]
+async fn link_run_pull_request_links_gitlab_mr_from_configured_base_and_updates_state() {
+    let (_state, app, run_id) =
+        pr_test_gitlab_app_with_minimal_run("https://gitlab.ipt.example/gitlab").await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "html_url": "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/42"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    assert_eq!(body["provider"], "gitlab");
+    assert_eq!(body["owner_path"], "platform/tools");
+    assert_eq!(body["repo"], "fabro");
+    assert_eq!(body["number"], 42);
+    assert_eq!(
+        body["html_url"],
+        "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/42"
+    );
+
+    let state_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/state")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let state_body = response_json!(state_response, StatusCode::OK).await;
+    assert_eq!(state_body["pull_request"]["provider"], "gitlab");
+    assert_eq!(
+        state_body["pull_request"]["html_url"],
+        "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/42"
     );
 }
 
@@ -8526,7 +8690,8 @@ async fn create_run_pull_request_creates_and_persists_record() {
     let body = response_json!(response, StatusCode::OK).await;
 
     assert_eq!(body["number"], 42);
-    assert_eq!(body["owner"], "acme");
+    assert_eq!(body["provider"], "github");
+    assert_eq!(body["owner_path"], "acme");
     assert_eq!(body["repo"], "widgets");
     assert_eq!(body["html_url"], "https://github.com/acme/widgets/pull/42");
 
@@ -8542,11 +8707,143 @@ async fn create_run_pull_request_creates_and_persists_record() {
         .unwrap();
     let state_body = response_json!(state_response, StatusCode::OK).await;
     assert_eq!(state_body["pull_request"]["number"], 42);
-    assert_eq!(state_body["pull_request"]["owner"], "acme");
+    assert_eq!(state_body["pull_request"]["provider"], "github");
+    assert_eq!(state_body["pull_request"]["owner_path"], "acme");
     assert_eq!(state_body["pull_request"]["repo"], "widgets");
 
     response_mock.assert_async().await;
     create_mock.assert();
+}
+
+#[tokio::test]
+async fn token_mode_merge_request_lifecycle_against_twin_gitlab() {
+    let gitlab = twin_gitlab::TestGitLabServer::start().await;
+    gitlab.add_project("platform/tools/fabro", "main", &["fabro/run-1"]);
+    let llm = MockServer::start_async().await;
+    let response_mock = llm
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/responses")
+                .header("authorization", "Bearer openai-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(openai_responses_payload(
+                    &serde_json::to_string(&json!({
+                        "title": "Twin GitLab title",
+                        "body": "Narrative from mock.",
+                    }))
+                    .unwrap(),
+                ));
+        })
+        .await;
+    let state = create_github_gitlab_token_app_state_with_token(
+        gitlab.base_url(),
+        gitlab.automation_token(),
+        llm_catalog_settings_with_provider_base_url("openai", llm.url("/v1")),
+    );
+    state
+        .vault
+        .write()
+        .await
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
+        .unwrap();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let origin = format!("{}/platform/tools/fabro.git", gitlab.base_url());
+    Box::pin(create_completed_run_ready_for_pull_request(
+        &state,
+        run_id,
+        Some(&origin),
+        Some("main"),
+        Some("fabro/run-1"),
+        "diff --git a/src/lib.rs b/src/lib.rs\n+fn shipped() {}\n",
+    ))
+    .await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "force": false,
+                        "model": "gpt-5.4"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let created = response_json!(create_response, StatusCode::OK).await;
+
+    assert_eq!(created["provider"], "gitlab");
+    assert_eq!(created["owner_path"], "platform/tools");
+    assert_eq!(created["repo"], "fabro");
+    assert_eq!(created["number"], 1);
+    assert!(
+        created["html_url"]
+            .as_str()
+            .is_some_and(|url| url.ends_with("/-/merge_requests/1"))
+    );
+
+    let get_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let get_body = response_json!(get_response, StatusCode::OK).await;
+    assert_eq!(get_body["data"]["link"]["provider"], "gitlab");
+    assert_eq!(get_body["data"]["details"]["state"], "opened");
+    assert_eq!(get_body["meta"]["details_status"], "available");
+
+    let merge_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request/merge")))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "method": "squash" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let merged = response_json!(merge_response, StatusCode::OK).await;
+    assert_eq!(merged["number"], 1);
+    assert!(
+        merged["html_url"]
+            .as_str()
+            .is_some_and(|url| url.ends_with("/-/merge_requests/1"))
+    );
+
+    let close_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request/close")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let closed = response_json!(close_response, StatusCode::OK).await;
+    assert_eq!(closed["number"], 1);
+    assert!(
+        closed["html_url"]
+            .as_str()
+            .is_some_and(|url| url.ends_with("/-/merge_requests/1"))
+    );
+    response_mock.assert_async().await;
 }
 
 #[tokio::test]
@@ -8829,11 +9126,11 @@ async fn merge_run_pull_request_uses_stored_link_coordinates() {
     });
     let (state, app, run_id) = pr_test_app(Some("ghu_test"), Some(github.base_url()));
 
-    create_run_with_linked_pull_request_record(&state, run_id, PullRequestLink {
-        owner:  "acme".to_string(),
-        repo:   "widgets".to_string(),
-        number: 42,
-    })
+    create_run_with_linked_pull_request_record(
+        &state,
+        run_id,
+        PullRequestLink::github("acme", "widgets", 42),
+    )
     .await;
 
     let response = app

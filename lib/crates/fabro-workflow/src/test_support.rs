@@ -15,6 +15,7 @@ use object_store::local::LocalFileSystem;
 use crate::artifact_upload::ArtifactSink;
 use crate::error::{Error, Result};
 use crate::event::{Emitter, Event, StoreProgressLogger, append_event};
+use crate::gitlab_token_source::GitLabTokenSource;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
@@ -113,10 +114,11 @@ pub fn test_store_dir(run_dir: &std::path::Path) -> PathBuf {
 }
 
 struct InitializedOptions {
-    hook_runner: Option<Arc<fabro_hooks::HookRunner>>,
-    env:         HashMap<String, String>,
-    checkpoint:  Option<Checkpoint>,
-    llm_source:  Option<Arc<dyn CredentialSource>>,
+    hook_runner:  Option<Arc<fabro_hooks::HookRunner>>,
+    env:          HashMap<String, String>,
+    checkpoint:   Option<Checkpoint>,
+    llm_source:   Option<Arc<dyn CredentialSource>>,
+    gitlab_token: Option<Arc<GitLabTokenSource>>,
 }
 
 struct InitializedState {
@@ -244,6 +246,7 @@ async fn initialized(
                 git_state:       std::sync::RwLock::new(None),
                 base_env:        options.env,
                 github_token:    None,
+                gitlab_token:    options.gitlab_token,
                 inputs:          run_options.settings.run.inputs.clone(),
                 dry_run:         run_options.dry_run_enabled(),
                 workflow_path:   None,
@@ -269,10 +272,11 @@ pub async fn run_graph(
         graph,
         run_options,
         InitializedOptions {
-            hook_runner: None,
-            env:         HashMap::new(),
-            checkpoint:  None,
-            llm_source:  None,
+            hook_runner:  None,
+            env:          HashMap::new(),
+            checkpoint:   None,
+            llm_source:   None,
+            gitlab_token: None,
         },
     )
     .await;
@@ -294,10 +298,11 @@ pub async fn run_graph_with_state(
         graph,
         run_options,
         InitializedOptions {
-            hook_runner: None,
-            env:         HashMap::new(),
-            checkpoint:  None,
-            llm_source:  None,
+            hook_runner:  None,
+            env:          HashMap::new(),
+            checkpoint:   None,
+            llm_source:   None,
+            gitlab_token: None,
         },
     )
     .await;
@@ -329,10 +334,11 @@ pub async fn run_graph_with_hooks(
         graph,
         run_options,
         InitializedOptions {
-            hook_runner: Some(hook_runner),
-            env:         env.unwrap_or_default(),
-            checkpoint:  None,
-            llm_source:  None,
+            hook_runner:  Some(hook_runner),
+            env:          env.unwrap_or_default(),
+            checkpoint:   None,
+            llm_source:   None,
+            gitlab_token: None,
         },
     )
     .await;
@@ -356,10 +362,11 @@ pub async fn run_graph_with_hooks_and_state(
         graph,
         run_options,
         InitializedOptions {
-            hook_runner: Some(hook_runner),
-            env:         env.unwrap_or_default(),
-            checkpoint:  None,
-            llm_source:  None,
+            hook_runner:  Some(hook_runner),
+            env:          env.unwrap_or_default(),
+            checkpoint:   None,
+            llm_source:   None,
+            gitlab_token: None,
         },
     )
     .await;
@@ -390,10 +397,11 @@ pub async fn run_graph_from_checkpoint(
         graph,
         run_options,
         InitializedOptions {
-            hook_runner: None,
-            env:         HashMap::new(),
-            checkpoint:  Some(checkpoint.clone()),
-            llm_source:  None,
+            hook_runner:  None,
+            env:          HashMap::new(),
+            checkpoint:   Some(checkpoint.clone()),
+            llm_source:   None,
+            gitlab_token: None,
         },
     )
     .await;
@@ -416,10 +424,11 @@ pub async fn run_graph_from_checkpoint_with_state(
         graph,
         run_options,
         InitializedOptions {
-            hook_runner: None,
-            env:         HashMap::new(),
-            checkpoint:  Some(checkpoint.clone()),
-            llm_source:  None,
+            hook_runner:  None,
+            env:          HashMap::new(),
+            checkpoint:   Some(checkpoint.clone()),
+            llm_source:   None,
+            gitlab_token: None,
         },
     )
     .await;
@@ -450,10 +459,11 @@ pub async fn run_graph_with_state_and_llm_source(
         graph,
         run_options,
         InitializedOptions {
-            hook_runner: None,
-            env:         HashMap::new(),
-            checkpoint:  None,
-            llm_source:  Some(llm_source),
+            hook_runner:  None,
+            env:          HashMap::new(),
+            checkpoint:   None,
+            llm_source:   Some(llm_source),
+            gitlab_token: None,
         },
     )
     .await;
@@ -488,6 +498,37 @@ impl WorkflowRunner {
             emitter,
             sandbox,
         }
+    }
+
+    pub async fn run_with_gitlab_token(
+        &self,
+        graph: &GvGraph,
+        run_options: &RunOptions,
+        token: &str,
+    ) -> Result<Outcome> {
+        let registry = self
+            .registry
+            .lock()
+            .unwrap()
+            .take()
+            .expect("WorkflowRunner may only be used once");
+        let initialized = initialized(
+            registry,
+            Arc::clone(&self.emitter),
+            Arc::clone(&self.sandbox),
+            graph,
+            run_options,
+            InitializedOptions {
+                hook_runner:  None,
+                env:          HashMap::new(),
+                checkpoint:   None,
+                llm_source:   None,
+                gitlab_token: Some(Arc::new(GitLabTokenSource::new_static(token))),
+            },
+        )
+        .await;
+        let executed = execute_and_emit_terminal(initialized).await;
+        executed.outcome
     }
 
     pub async fn run(&self, graph: &GvGraph, run_options: &RunOptions) -> Result<Outcome> {

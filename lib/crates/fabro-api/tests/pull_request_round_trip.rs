@@ -2,7 +2,7 @@ use std::any::{TypeId, type_name};
 
 use fabro_api::types::MergeRunPullRequestRequest;
 use fabro_types::settings::run::MergeStrategy;
-use fabro_types::{PullRequest, PullRequestLink, PullRequestResponse};
+use fabro_types::{PullRequest, PullRequestLink, PullRequestProvider, PullRequestResponse};
 use serde_json::json;
 
 #[test]
@@ -10,7 +10,8 @@ fn pull_request_response_reuses_domain_types() {
     let response: PullRequestResponse = serde_json::from_value(json!({
         "data": {
             "link": {
-                "owner": "fabro-sh",
+                "provider": "github",
+                "owner_path": "fabro-sh",
                 "repo": "fabro",
                 "number": 123,
                 "html_url": "https://github.com/fabro-sh/fabro/pull/123"
@@ -52,7 +53,8 @@ fn merge_strategy_json_matches_openapi_shape() {
 #[test]
 fn pull_request_link_json_matches_openapi_shape() {
     let fixture = json!({
-        "owner": "fabro-sh",
+        "provider": "github",
+        "owner_path": "fabro-sh",
         "repo": "fabro",
         "number": 123,
         "html_url": "https://github.com/fabro-sh/fabro/pull/123"
@@ -65,11 +67,53 @@ fn pull_request_link_json_matches_openapi_shape() {
 }
 
 #[test]
+fn api_pull_request_link_uses_canonical_type() {
+    fn assert_same_type(_: fabro_api::types::PullRequestLink) {}
+
+    assert_same_type(PullRequestLink::github("fabro-sh", "fabro", 1));
+}
+
+#[test]
+fn api_pull_request_link_json_matches_gitlab_schema() {
+    let link = PullRequestLink::gitlab(
+        "platform/tools",
+        "fabro",
+        5,
+        "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/5",
+    );
+
+    let value = serde_json::to_value(link).unwrap();
+    assert_eq!(value["provider"], "gitlab");
+    assert_eq!(value["owner_path"], "platform/tools");
+    assert_eq!(value["repo"], "fabro");
+    assert_eq!(value["number"], 5);
+    assert_eq!(
+        value["html_url"],
+        "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/5"
+    );
+}
+
+#[test]
+fn legacy_github_json_deserializes_through_api_type() {
+    let link: fabro_api::types::PullRequestLink = serde_json::from_value(serde_json::json!({
+        "owner": "fabro-sh",
+        "repo": "fabro",
+        "number": 7
+    }))
+    .unwrap();
+
+    assert_eq!(link.provider, PullRequestProvider::Github);
+    assert_eq!(link.owner_path, "fabro-sh");
+    assert_eq!(link.html_url, "https://github.com/fabro-sh/fabro/pull/7");
+}
+
+#[test]
 fn pull_request_response_json_matches_openapi_shape() {
     let fixture = json!({
         "data": {
             "link": {
-                "owner": "fabro-sh",
+                "provider": "github",
+                "owner_path": "fabro-sh",
                 "repo": "fabro",
                 "number": 123,
                 "html_url": "https://github.com/fabro-sh/fabro/pull/123"

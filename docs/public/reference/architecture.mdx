@@ -40,7 +40,7 @@ Key server config options:
 |---|---|
 | `server.listen` | Bind transport: Unix socket or plain TCP listener |
 | `server.api.url` / `server.web.url` | External API base URL and the single canonical browser/API origin |
-| `server.auth.methods` | Bootstrap auth methods: `dev-token`, `github`, or both |
+| `server.auth.methods` | Bootstrap auth methods: `dev-token`, `github`, `gitlab`, or a combination |
 | `server.scheduler.max_concurrent_runs` | Scheduler concurrency limit (default 5) |
 | `[run.*]` | Defaults applied to every run (overridable per-run) |
 
@@ -67,6 +67,7 @@ API mode supports two bootstrap auth methods, configurable in `settings.toml`:
 
 - **`dev-token`** — Bearer token access for operators and automation
 - **`github`** — GitHub OAuth for browser users, resulting in a session cookie
+- **`gitlab`** — GitLab OAuth for browser users, resulting in a session cookie when the user matches an allowed username or group
 
 ### Demo mode
 

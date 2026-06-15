@@ -52,6 +52,16 @@ pub const GITHUB_APP_VAULT_KEYS: &[&str] = &[
     EnvVars::GITHUB_APP_WEBHOOK_SECRET,
 ];
 
+/// Every GitLab-install secret name. Used to drop stale entries from
+/// `server.env` whenever an install runs so a switch between Token and App
+/// strategies leaves no residue behind.
+pub const GITLAB_INSTALL_SECRET_KEYS: &[&str] =
+    &[EnvVars::GITLAB_TOKEN, EnvVars::GITLAB_APP_CLIENT_SECRET];
+
+/// GitLab App vault secret names cleared when switching back to the Token
+/// strategy.
+pub const GITLAB_APP_VAULT_KEYS: &[&str] = &[EnvVars::GITLAB_APP_CLIENT_SECRET];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultSecretWrite {
     pub name:        String,
@@ -100,6 +110,14 @@ pub enum InstallObjectStoreSelection {
 pub enum InstallSandboxSelection {
     Docker,
     Daytona,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitlabAppInstallSettings {
+    pub base_url:          String,
+    pub client_id:         String,
+    pub allowed_usernames: Vec<String>,
+    pub allowed_groups:    Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,6 +209,48 @@ fn github_integration_table(doc: &mut toml::Value) -> Result<&mut toml::Table> {
     github
         .as_table_mut()
         .context("settings.toml [server.integrations.github] is not a table")
+}
+
+fn gitlab_integration_table(doc: &mut toml::Value) -> Result<&mut toml::Table> {
+    let root = doc
+        .as_table_mut()
+        .context("settings.toml root is not a table")?;
+    let server = root
+        .entry("server")
+        .or_insert_with(|| toml::Value::Table(toml::Table::default()));
+    let server_table = server
+        .as_table_mut()
+        .context("settings.toml [server] is not a table")?;
+    let integrations = server_table
+        .entry("integrations")
+        .or_insert_with(|| toml::Value::Table(toml::Table::default()));
+    let integrations_table = integrations
+        .as_table_mut()
+        .context("settings.toml [server.integrations] is not a table")?;
+    let gitlab = integrations_table
+        .entry("gitlab")
+        .or_insert_with(|| toml::Value::Table(toml::Table::default()));
+    gitlab
+        .as_table_mut()
+        .context("settings.toml [server.integrations.gitlab] is not a table")
+}
+
+fn push_unique_auth_method(auth: &mut toml::Table, method: &str) -> Result<()> {
+    let methods = auth
+        .entry("methods".to_string())
+        .or_insert_with(|| toml::Value::Array(Vec::new()))
+        .as_array_mut()
+        .context("settings.toml [server.auth].methods is not an array")?;
+    if !methods
+        .iter()
+        .any(|value| value.as_str() == Some("dev-token"))
+    {
+        methods.push(toml::Value::String("dev-token".to_string()));
+    }
+    if !methods.iter().any(|value| value.as_str() == Some(method)) {
+        methods.push(toml::Value::String(method.to_string()));
+    }
+    Ok(())
 }
 
 fn set_server_listen(doc: &mut toml::Value, listen_config: &InstallListenConfig) -> Result<()> {
@@ -298,15 +358,7 @@ pub fn write_github_app_settings(
     let root = root_table_mut(doc)?;
     let server = ensure_table(root, "server")?;
     let auth = ensure_table(server, "auth")?;
-    let methods = auth
-        .entry("methods".to_string())
-        .or_insert_with(|| toml::Value::Array(Vec::new()))
-        .as_array_mut()
-        .context("settings.toml [server.auth].methods is not an array")?;
-    if !methods.iter().any(|value| value.as_str() == Some("github")) {
-        methods.push(toml::Value::String("github".to_string()));
-    }
-    methods.retain(|value| value.as_str() != Some("dev-token"));
+    push_unique_auth_method(auth, "github")?;
     let github_auth = ensure_table(auth, "github")?;
     github_auth.insert(
         "allowed_usernames".to_string(),
@@ -327,6 +379,57 @@ pub fn write_github_app_settings(
         "client_id".into(),
         toml::Value::String(client_id.to_string()),
     );
+    Ok(())
+}
+
+pub fn write_gitlab_token_settings(doc: &mut toml::Value, base_url: &str) -> Result<()> {
+    let root = root_table_mut(doc)?;
+    let server = ensure_table(root, "server")?;
+    ensure_table(server, "auth")?;
+
+    let gitlab = gitlab_integration_table(doc)?;
+    gitlab.insert("enabled".into(), toml::Value::Boolean(true));
+    gitlab.insert("strategy".into(), toml::Value::String("token".to_string()));
+    gitlab.insert("base_url".into(), toml::Value::String(base_url.to_string()));
+    gitlab.remove("client_id");
+    Ok(())
+}
+
+pub fn write_gitlab_app_settings(
+    doc: &mut toml::Value,
+    input: GitlabAppInstallSettings,
+) -> Result<()> {
+    let root = root_table_mut(doc)?;
+    let server = ensure_table(root, "server")?;
+    let auth = ensure_table(server, "auth")?;
+    push_unique_auth_method(auth, "gitlab")?;
+    let gitlab_auth = ensure_table(auth, "gitlab")?;
+    gitlab_auth.insert(
+        "allowed_usernames".to_string(),
+        toml::Value::Array(
+            input
+                .allowed_usernames
+                .into_iter()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    );
+    gitlab_auth.insert(
+        "allowed_groups".to_string(),
+        toml::Value::Array(
+            input
+                .allowed_groups
+                .into_iter()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    );
+
+    let gitlab = gitlab_integration_table(doc)?;
+    gitlab.insert("enabled".into(), toml::Value::Boolean(true));
+    gitlab.insert("strategy".into(), toml::Value::String("app".to_string()));
+    gitlab.insert("base_url".into(), toml::Value::String(input.base_url));
+    gitlab.insert("client_id".into(), toml::Value::String(input.client_id));
     Ok(())
 }
 
@@ -491,11 +594,21 @@ pub fn write_sandbox_settings(
     selection: InstallSandboxSelection,
     allow_local: bool,
 ) -> Result<()> {
+    let provider = match selection {
+        InstallSandboxSelection::Docker => "docker",
+        InstallSandboxSelection::Daytona => "daytona",
+    };
     let root = root_table_mut(doc)?;
     let run = ensure_table(root, "run")?;
     let environment = ensure_table(run, "environment")?;
     environment.insert("id".to_string(), toml::Value::String("default".to_string()));
 
+    let environments = ensure_table(root, "environments")?;
+    let default = ensure_table(environments, "default")?;
+    default.insert(
+        "provider".to_string(),
+        toml::Value::String(provider.to_string()),
+    );
     let server = ensure_table(root, "server")?;
     write_sandbox_provider_policy(server, selection, allow_local)?;
     Ok(())
@@ -699,6 +812,7 @@ pub fn persist_install_outputs_direct(
     server_env_writes: &[envfile::EnvFileUpdate],
     server_env_removals: &[envfile::EnvFileRemoval],
     vault_secrets: &[VaultSecretWrite],
+    vault_secret_removals: &[String],
     settings_write: Option<&PendingSettingsWrite<'_>>,
 ) -> std::result::Result<(), PersistInstallOutputsError> {
     InstallPersistencePlan {
@@ -708,7 +822,7 @@ pub fn persist_install_outputs_direct(
         server_env_removals: server_env_removals.to_vec(),
         dev_token_write: None,
         vault_writes: vault_secrets.to_vec(),
-        vault_removals: Vec::new(),
+        vault_removals: vault_secret_removals.to_vec(),
     }
     .persist_direct()
 }
@@ -725,12 +839,14 @@ mod tests {
     use fabro_vault::{SecretType as VaultSecretType, Vault};
 
     use super::{
-        InstallListenConfig, InstallObjectStoreCredentialMode, InstallObjectStoreSelection,
-        InstallPersistencePlan, InstallSandboxSelection, OBJECT_STORE_ACCESS_KEY_ID_ENV,
-        OBJECT_STORE_MANAGED_COMMENT, OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite,
-        VaultSecretWrite, default_web_url, merge_server_settings, persist_install_outputs_direct,
+        GitlabAppInstallSettings, InstallListenConfig, InstallObjectStoreCredentialMode,
+        InstallObjectStoreSelection, InstallPersistencePlan, InstallSandboxSelection,
+        OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_MANAGED_COMMENT,
+        OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite, VaultSecretWrite,
+        default_web_url, merge_server_settings, persist_install_outputs_direct,
         prepare_dev_token_write_for_install, set_cli_target_http, set_server_listen,
-        write_github_app_settings, write_object_store_settings, write_sandbox_settings,
+        write_github_app_settings, write_gitlab_app_settings, write_object_store_settings,
+        write_sandbox_settings,
     };
 
     fn format_config_toml() -> String {
@@ -985,7 +1101,55 @@ stale = "remove-me"
                 .iter()
                 .map(|value| value.as_str().expect("auth method should be a string"))
                 .collect::<Vec<_>>(),
-            vec!["github"]
+            vec!["dev-token", "github"]
+        );
+    }
+
+    #[test]
+    fn write_gitlab_app_settings_preserves_github_settings() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token", "github"]
+
+[server.integrations.github]
+enabled = true
+strategy = "app"
+client_id = "github-client"
+"#,
+        )
+        .unwrap();
+
+        write_gitlab_app_settings(&mut doc, GitlabAppInstallSettings {
+            base_url:          "https://gitlab.ipt.example".to_string(),
+            client_id:         "gitlab-client".to_string(),
+            allowed_usernames: vec!["alice".to_string()],
+            allowed_groups:    vec!["platform/fabro-admins".to_string()],
+        })
+        .unwrap();
+
+        let rendered = toml::to_string_pretty(&doc).expect("settings should serialize");
+        assert!(rendered.contains("[server.integrations.github]"));
+        assert!(rendered.contains("[server.integrations.gitlab]"));
+        assert!(rendered.contains("strategy = \"app\""));
+        assert!(rendered.contains("allowed_groups = [\"platform/fabro-admins\"]"));
+
+        let methods = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("auth"))
+            .and_then(toml::Value::as_table)
+            .and_then(|auth| auth.get("methods"))
+            .and_then(toml::Value::as_array)
+            .expect("server.auth.methods should exist");
+        assert_eq!(
+            methods
+                .iter()
+                .map(|value| value.as_str().expect("auth method should be a string"))
+                .collect::<Vec<_>>(),
+            vec!["dev-token", "github", "gitlab"]
         );
     }
 
@@ -1015,6 +1179,7 @@ stale = "remove-me"
                 secret_type: VaultSecretType::Token,
                 description: None,
             }],
+            &[],
             Some(&PendingSettingsWrite {
                 path:              &settings_path,
                 contents:          "_version = 1\n[server]\nfoo = \"bar\"\n",
@@ -1421,7 +1586,7 @@ stale = "remove-me"
     }
 
     #[test]
-    fn write_sandbox_settings_records_run_default_without_environment_catalog() {
+    fn write_sandbox_settings_records_docker_provider() {
         let mut doc = toml::Value::Table(toml::Table::default());
         write_sandbox_settings(&mut doc, InstallSandboxSelection::Docker, true)
             .expect("docker sandbox selection should succeed");
@@ -1435,14 +1600,22 @@ stale = "remove-me"
                 .and_then(toml::Value::as_str),
             Some("default")
         );
-        assert!(doc.get("environments").is_none());
+        assert_eq!(
+            doc.get("environments")
+                .and_then(toml::Value::as_table)
+                .and_then(|envs| envs.get("default"))
+                .and_then(toml::Value::as_table)
+                .and_then(|env| env.get("provider"))
+                .and_then(toml::Value::as_str),
+            Some("docker")
+        );
         assert_eq!(sandbox_provider_enabled(&doc, "local"), Some(true));
         assert_eq!(sandbox_provider_enabled(&doc, "docker"), Some(true));
         assert_eq!(sandbox_provider_enabled(&doc, "daytona"), Some(false));
     }
 
     #[test]
-    fn write_sandbox_settings_records_daytona_policy_without_environment_catalog() {
+    fn write_sandbox_settings_records_daytona_provider() {
         let mut doc = toml::Value::Table(toml::Table::default());
         write_sandbox_settings(&mut doc, InstallSandboxSelection::Daytona, true)
             .expect("daytona sandbox selection should succeed");
@@ -1456,7 +1629,15 @@ stale = "remove-me"
                 .and_then(toml::Value::as_str),
             Some("default")
         );
-        assert!(doc.get("environments").is_none());
+        assert_eq!(
+            doc.get("environments")
+                .and_then(toml::Value::as_table)
+                .and_then(|envs| envs.get("default"))
+                .and_then(toml::Value::as_table)
+                .and_then(|env| env.get("provider"))
+                .and_then(toml::Value::as_str),
+            Some("daytona")
+        );
         assert_eq!(sandbox_provider_enabled(&doc, "local"), Some(true));
         assert_eq!(sandbox_provider_enabled(&doc, "docker"), Some(false));
         assert_eq!(sandbox_provider_enabled(&doc, "daytona"), Some(true));
@@ -1508,6 +1689,7 @@ stale = "remove-me"
                 comment: Some(OBJECT_STORE_MANAGED_COMMENT.to_string()),
             }],
             &[],
+            &[],
             None,
         )
         .expect("env-only persistence should succeed");
@@ -1546,6 +1728,7 @@ stale = "remove-me"
             }],
             &[],
             &[],
+            &[],
             None,
         )
         .expect("initial env write should succeed");
@@ -1559,6 +1742,7 @@ stale = "remove-me"
                 value:   "second".to_string(),
                 comment: None,
             }],
+            &[],
             &[],
             &[],
             None,

@@ -9,8 +9,12 @@ import { setupReactTestEnv } from "../lib/test-utils";
 let systemIntegrations: SystemIntegrationsResponse | undefined;
 let teardownReactTestEnv: (() => void) | undefined;
 
+mock.restore();
 mock.module("../lib/queries", () => ({
+  useServerSettings:      () => ({ data: undefined }),
   useSystemIntegrations: () => ({ data: systemIntegrations }),
+  useSystemInfo:         () => ({ data: undefined }),
+  useSystemResources:    () => ({ data: undefined }),
 }));
 
 const { default: SettingsIntegrations } = await import("./settings-integrations");
@@ -55,20 +59,41 @@ function sampleStatus(
 
 function sampleIntegrations(
   slack: Partial<SystemIntegrationStatus> = {},
+  gitlab: Partial<SystemIntegrationStatus> | null = {},
 ): SystemIntegrationsResponse {
-  return {
-    data: [
+  const data = [
       sampleStatus({
         provider:   "github",
         status:     "configured",
         connection: null,
         metadata:   { strategy: "app", slug: "fabro-sh" },
       }),
+  ];
+
+  if (gitlab) {
+    data.push(
+      sampleStatus({
+        provider:   "gitlab",
+        status:     "configured",
+        connection: null,
+        metadata:   {
+          strategy: "token",
+          base_url: "https://gitlab.ipt.example",
+        },
+        ...gitlab,
+      }),
+    );
+  }
+
+  data.push(
       sampleStatus({
         metadata: { default_channel: "#fabro" },
         ...slack,
       }),
-    ],
+  );
+
+  return {
+    data,
   };
 }
 
@@ -113,5 +138,22 @@ describe("SettingsIntegrations route", () => {
 
     expect(text).toContain("Missing credentials");
     expect(text).toContain("missing: SLACK_APP_TOKEN, SLACK_BOT_TOKEN");
+  });
+
+  test("renders GitHub and GitLab runtime statuses", () => {
+    systemIntegrations = sampleIntegrations({}, {
+      metadata: {
+        strategy: "app",
+        base_url: "https://gitlab.ipt.example",
+      },
+    });
+
+    const renderer = renderSettingsIntegrations();
+    const text = textContent(renderer.toJSON());
+
+    expect(text).toContain("GitHub");
+    expect(text).toContain("GitLab");
+    expect(text).toContain("https://gitlab.ipt.example");
+    expect(text).toContain("strategy: app");
   });
 });

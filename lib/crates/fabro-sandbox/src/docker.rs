@@ -17,6 +17,7 @@ use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::HostConfig;
 use fabro_github::GitHubCredentials;
+use fabro_types::repository::RepositoryProvider;
 use fabro_types::{CommandOutputStream, CommandTermination, RunId};
 use fabro_util::time::elapsed_ms;
 use futures::StreamExt;
@@ -29,6 +30,7 @@ use crate::clone_source::{self, CloneDecision, EmptyWorkspaceReason};
 use crate::managed_labels::{self, MANAGED_LABEL, RUN_ID_LABEL};
 use crate::redact::redact_auth_url;
 use crate::sandbox::{StdioProcessControl, optional_timeout, resolve_path};
+use crate::sandbox_spec::GitLabSandboxConfig;
 use crate::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
     ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, StderrCollector,
@@ -94,6 +96,7 @@ pub struct DockerSandbox {
     docker:            Docker,
     config:            DockerSandboxOptions,
     github_app:        Option<GitHubCredentials>,
+    gitlab:            Option<GitLabSandboxConfig>,
     run_id:            Option<RunId>,
     clone_origin_url:  Option<String>,
     clone_branch:      Option<String>,
@@ -121,11 +124,30 @@ impl DockerSandbox {
         clone_origin_url: Option<String>,
         clone_branch: Option<String>,
     ) -> crate::Result<Self> {
+        Self::new_with_gitlab(
+            config,
+            github_app,
+            None,
+            run_id,
+            clone_origin_url,
+            clone_branch,
+        )
+    }
+
+    pub fn new_with_gitlab(
+        config: DockerSandboxOptions,
+        github_app: Option<GitHubCredentials>,
+        gitlab: Option<GitLabSandboxConfig>,
+        run_id: Option<RunId>,
+        clone_origin_url: Option<String>,
+        clone_branch: Option<String>,
+    ) -> crate::Result<Self> {
         let docker = Docker::connect_with_local_defaults().map_err(crate::Error::docker_connect)?;
         Ok(Self {
             docker,
             config,
             github_app,
+            gitlab,
             run_id,
             clone_origin_url,
             clone_branch,
@@ -607,9 +629,10 @@ impl DockerSandbox {
         &self,
         origin_url: String,
         branch: Option<String>,
+        coordinates: clone_source::RepoCoordinates,
     ) -> crate::Result<()> {
         self.verify_git_available().await?;
-        let layout = clone_source::github_repo_layout(&origin_url, WORKING_DIRECTORY, REPOS_ROOT)?;
+        let layout = clone_source::repo_layout(WORKING_DIRECTORY, REPOS_ROOT, &coordinates);
 
         self.emit(SandboxEvent::GitCloneStarted {
             url:    origin_url.clone(),
@@ -636,7 +659,7 @@ impl DockerSandbox {
             .as_ref()
             .map_or(origin_url.as_str(), |url| url.as_raw_url().as_str());
 
-        let command = git_clone_and_link_command(clone_url, branch.as_deref(), &layout);
+        let command = git_clone_and_link_command(clone_url, branch.as_deref(), &layout, None);
 
         let result = self
             .docker_exec_shell(&command, 300_000, Some("/"), None, None)
@@ -660,7 +683,9 @@ impl DockerSandbox {
 
         let _ = self.repo_cloned.set(true);
         let _ = self.origin_url.set(origin_url.clone());
-        self.set_working_directory(layout.execution_directory.clone())?;
+        self.set_working_directory(clone_source::path_to_remote_string(
+            &layout.execution_directory,
+        ))?;
 
         if let Some(auth_url) = auth_url.as_ref() {
             let command = format!(
@@ -671,7 +696,9 @@ impl DockerSandbox {
                 .docker_exec_shell(
                     &command,
                     10_000,
-                    Some(&layout.execution_directory),
+                    Some(&clone_source::path_to_remote_string(
+                        &layout.execution_directory,
+                    )),
                     None,
                     None,
                 )
@@ -694,6 +721,90 @@ impl DockerSandbox {
             url:         origin_url,
             duration_ms: clone_duration,
         });
+        Ok(())
+    }
+
+    async fn clone_gitlab_repo(
+        &self,
+        origin_url: String,
+        branch: Option<String>,
+        coordinates: clone_source::RepoCoordinates,
+    ) -> crate::Result<()> {
+        self.verify_git_available().await?;
+        let layout = clone_source::repo_layout(WORKING_DIRECTORY, REPOS_ROOT, &coordinates);
+
+        self.emit(SandboxEvent::GitCloneStarted {
+            url:    origin_url.clone(),
+            branch: branch.clone(),
+        });
+        let clone_start = Instant::now();
+
+        let Some(gitlab) = &self.gitlab else {
+            let err = crate::Error::message(
+                "GitLab repository origin requires configured GitLab credentials",
+            );
+            self.emit(SandboxEvent::GitCloneFailed {
+                url:    origin_url,
+                error:  err.to_string(),
+                causes: err.causes(),
+            });
+            return Err(err);
+        };
+        let fabro_gitlab::GitLabCredentials::Token(token) = &gitlab.credentials;
+        let header = fabro_gitlab::basic_auth_header_value(token);
+        let command =
+            git_clone_and_link_command(&origin_url, branch.as_deref(), &layout, Some(&header));
+
+        let result = self
+            .docker_exec_shell(&command, 300_000, Some("/"), None, None)
+            .await?;
+        if !result.is_success() {
+            let stderr = redact_gitlab_auth(&result.stderr, token, &header);
+            let err = crate::Error::message(format!(
+                "Failed to clone GitLab repo into Docker sandbox: {stderr}"
+            ));
+            self.emit(SandboxEvent::GitCloneFailed {
+                url:    origin_url,
+                error:  err.to_string(),
+                causes: err.causes(),
+            });
+            return Err(err);
+        }
+
+        let _ = self.repo_cloned.set(true);
+        let _ = self.origin_url.set(origin_url.clone());
+        self.set_working_directory(clone_source::path_to_remote_string(
+            &layout.execution_directory,
+        ))?;
+
+        let command = format!(
+            "git -c maintenance.auto=0 config --local {} {}",
+            shell_quote(&format!("http.{origin_url}.extraHeader")),
+            shell_quote(&format!("Authorization: {header}"))
+        );
+        let result = self
+            .docker_exec_shell(
+                &command,
+                10_000,
+                Some(&clone_source::path_to_remote_string(
+                    &layout.execution_directory,
+                )),
+                None,
+                None,
+            )
+            .await?;
+        if !result.is_success() {
+            return Err(result
+                .into_exec_error_with_redactor("git config http.extraHeader (post-clone)", |s| {
+                    redact_gitlab_auth(s, token, &header)
+                }));
+        }
+
+        self.emit(SandboxEvent::GitCloneCompleted {
+            url:         origin_url,
+            duration_ms: u64::try_from(clone_start.elapsed().as_millis()).unwrap_or(u64::MAX),
+        });
+
         Ok(())
     }
 
@@ -1085,8 +1196,18 @@ async fn cache_docker_stdio_completion(
     }
 }
 
-fn git_clone_command(clone_url: &str, branch: Option<&str>, checkout_path: &str) -> String {
-    let mut command = "git -c maintenance.auto=0 -c gc.auto=0 clone".to_string();
+fn git_clone_command(
+    clone_url: &str,
+    branch: Option<&str>,
+    checkout_path: &str,
+    extra_header: Option<&str>,
+) -> String {
+    let mut command = "git -c maintenance.auto=0 -c gc.auto=0".to_string();
+    if let Some(extra_header) = extra_header {
+        command.push_str(" -c http.extraHeader=");
+        command.push_str(&shell_quote(&format!("Authorization: {extra_header}")));
+    }
+    command.push_str(" clone");
     if let Some(branch) = branch {
         command.push_str(" --branch ");
         command.push_str(&shell_quote(branch));
@@ -1105,16 +1226,26 @@ fn git_clone_command(clone_url: &str, branch: Option<&str>, checkout_path: &str)
 fn git_clone_and_link_command(
     clone_url: &str,
     branch: Option<&str>,
-    layout: &clone_source::GitHubRepoLayout,
+    layout: &clone_source::RepoLayout,
+    extra_header: Option<&str>,
 ) -> String {
+    let repos_namespace_path = clone_source::path_to_remote_string(&layout.repos_namespace_path);
+    let primary_repo_path = clone_source::path_to_remote_string(&layout.primary_repo_path);
+    let primary_repo_link = clone_source::path_to_remote_string(&layout.primary_repo_link);
     format!(
         "mkdir -p {} {} && {} && ln -s {} {}",
         shell_quote(WORKING_DIRECTORY),
-        shell_quote(&layout.repos_owner_path),
-        git_clone_command(clone_url, branch, &layout.primary_repo_path),
-        shell_quote(&layout.primary_repo_path),
-        shell_quote(&layout.primary_repo_link),
+        shell_quote(&repos_namespace_path),
+        git_clone_command(clone_url, branch, &primary_repo_path, extra_header),
+        shell_quote(&primary_repo_path),
+        shell_quote(&primary_repo_link),
     )
+}
+
+fn redact_gitlab_auth(value: &str, token: &str, header: &str) -> String {
+    value
+        .replace(token, "<redacted>")
+        .replace(header, "<redacted>")
 }
 
 fn host_config(config: &DockerSandboxOptions) -> HostConfig {
@@ -1338,6 +1469,7 @@ impl Sandbox for DockerSandbox {
             self.config.skip_clone,
             self.clone_origin_url.as_deref(),
             self.clone_branch.as_deref(),
+            self.gitlab.as_ref().map(|config| &config.base_url),
         )
         .map_err(|e| self.fail_init(init_start, e))?;
 
@@ -1355,8 +1487,25 @@ impl Sandbox for DockerSandbox {
                 }
                 let _ = self.repo_cloned.set(false);
             }
-            CloneDecision::GitHub { origin_url, branch } => {
-                if let Err(e) = self.clone_github_repo(origin_url, branch).await {
+            CloneDecision::Repository {
+                origin_url,
+                branch,
+                coordinates,
+            } => {
+                let result = match coordinates.provider {
+                    RepositoryProvider::Github => {
+                        self.clone_github_repo(origin_url, branch, coordinates)
+                            .await
+                    }
+                    RepositoryProvider::Gitlab => {
+                        self.clone_gitlab_repo(origin_url, branch, coordinates)
+                            .await
+                    }
+                    RepositoryProvider::Git | RepositoryProvider::Unknown => Err(
+                        clone_source::unsupported_provider_error(coordinates.provider),
+                    ),
+                };
+                if let Err(e) = result {
                     return Err(self.fail_init(init_start, e));
                 }
             }
@@ -2017,6 +2166,7 @@ mod tests {
             "https://github.com/fabro-sh/fabro",
             Some("main"),
             "/repos/fabro-sh/fabro",
+            None,
         );
         assert_eq!(
             command,
@@ -2026,18 +2176,22 @@ mod tests {
 
     #[test]
     fn clone_and_link_command_creates_workspace_symlink_to_repos_checkout() {
-        let layout = clone_source::github_repo_layout(
+        let layout =
+            clone_source::repo_layout("/workspace", "/repos", &clone_source::RepoCoordinates {
+                provider:       RepositoryProvider::Github,
+                namespace_path: "fabro-sh".to_string(),
+                repo:           "fabro".to_string(),
+            });
+        let command = git_clone_and_link_command(
             "https://github.com/fabro-sh/fabro",
-            "/workspace",
-            "/repos",
-        )
-        .unwrap();
-        let command =
-            git_clone_and_link_command("https://github.com/fabro-sh/fabro", Some("main"), &layout);
+            Some("main"),
+            &layout,
+            None,
+        );
 
         assert_eq!(
             command,
-            "mkdir -p /workspace /repos/fabro-sh && git -c maintenance.auto=0 -c gc.auto=0 clone --branch main --single-branch --depth 10 --no-tags -- https://github.com/fabro-sh/fabro /repos/fabro-sh/fabro && ln -s /repos/fabro-sh/fabro /workspace/fabro"
+            "mkdir -p /workspace /repos/github/fabro-sh && git -c maintenance.auto=0 -c gc.auto=0 clone --branch main --single-branch --depth 10 --no-tags -- https://github.com/fabro-sh/fabro /repos/github/fabro-sh/fabro && ln -s /repos/github/fabro-sh/fabro /workspace/fabro"
         );
     }
 

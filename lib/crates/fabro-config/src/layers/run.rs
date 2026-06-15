@@ -68,6 +68,8 @@ pub struct RunLayer {
 pub struct RunIntegrationsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<RunIntegrationsGithubLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitlab: Option<RunIntegrationsGitlabLayer>,
 }
 
 /// `[run.integrations.github]` — runtime GitHub token shape.
@@ -96,6 +98,13 @@ impl Combine for RunIntegrationsGithubLayer {
             permissions: self.permissions.or(other.permissions),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(default, deny_unknown_fields)]
+pub struct RunIntegrationsGitlabLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<bool>,
 }
 
 /// The source of a run's goal, either inline literal text or a reference to

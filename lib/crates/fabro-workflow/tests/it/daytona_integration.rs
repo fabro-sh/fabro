@@ -1735,7 +1735,7 @@ async fn daytona_cp_upload_download_round_trip() {
 
     // 3. Reconnect via the real cp::reconnect path
     let tmp = tempfile::tempdir().unwrap();
-    let reconnected = reconnect(&record, None)
+    let reconnected = reconnect(&record, None, None)
         .await
         .expect("reconnect should succeed");
 

@@ -126,11 +126,7 @@ fn run_summary_json_matches_openapi_shape() {
             additions:     12,
             deletions:     4,
         }),
-        pull_request:     Some(PullRequestLink {
-            owner:  "fabro-sh".to_string(),
-            repo:   "fabro".to_string(),
-            number: 123,
-        }),
+        pull_request:     Some(PullRequestLink::github("fabro-sh", "fabro", 123)),
         current_question: None,
         superseded_by:    None,
         retried_from:     Some(fixtures::RUN_2),
@@ -218,7 +214,8 @@ fn run_summary_json_matches_openapi_shape() {
                 "deletions": 4
             },
             "pull_request": {
-                "owner": "fabro-sh",
+                "provider": "github",
+                "owner_path": "fabro-sh",
                 "repo": "fabro",
                 "number": 123,
                 "html_url": "https://github.com/fabro-sh/fabro/pull/123"

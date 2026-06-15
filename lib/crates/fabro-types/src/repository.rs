@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString, IntoStaticStr};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryRef {
@@ -21,10 +22,14 @@ impl RepositoryRef {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum RepositoryProvider {
     Github,
+    Gitlab,
     Git,
     Unknown,
 }
@@ -35,6 +40,8 @@ fn repository_provider(origin_url: Option<&str>) -> RepositoryProvider {
     };
     if is_github_origin(origin) {
         RepositoryProvider::Github
+    } else if is_gitlab_origin(origin) {
+        RepositoryProvider::Gitlab
     } else {
         RepositoryProvider::Git
     }
@@ -45,6 +52,13 @@ fn is_github_origin(origin: &str) -> bool {
         || origin.starts_with("https://github.com/")
         || origin.starts_with("http://github.com/")
         || origin.starts_with("ssh://git@github.com/")
+}
+
+fn is_gitlab_origin(origin: &str) -> bool {
+    origin.starts_with("git@gitlab.com:")
+        || origin.starts_with("https://gitlab.com/")
+        || origin.starts_with("http://gitlab.com/")
+        || origin.starts_with("ssh://git@gitlab.com/")
 }
 
 fn repository_name(origin_url: Option<&str>, source_directory: Option<&str>) -> String {

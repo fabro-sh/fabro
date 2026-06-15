@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use fabro_slack::config::{
@@ -8,18 +9,22 @@ use fabro_slack::config::{
 };
 use fabro_static::EnvVars;
 use fabro_types::settings::InterpString;
-use fabro_types::settings::server::GithubIntegrationSettings;
+use fabro_types::settings::server::{GithubIntegrationSettings, GitlabIntegrationStrategy};
+use tokio::time::timeout;
 
 use super::super::{
     AggregateBilling, AggregateBillingTotals, ApiError, AppState, BilledTokenCounts,
-    BillingByModel, DfParams, FABRO_VERSION, GithubIntegrationStrategy, IntegrationConnectionState,
-    IntegrationProvider, IntegrationStatus, IntoResponse, Json, Path, PruneRunsRequest,
-    PruneRunsResponse, Query, RequiredUser, Response, Router, RunStatus, State, StatusCode,
-    SystemInfoResponse, SystemIntegrationStatus, SystemIntegrationsResponse, SystemRepairRunIssue,
+    BillingByModel, DfParams, FABRO_VERSION, GithubIntegrationStrategy,
+    GitlabIntegrationProbeCache, IntegrationConnectionState, IntegrationProvider,
+    IntegrationStatus, IntoResponse, Json, Path, PruneRunsRequest, PruneRunsResponse, Query,
+    RequiredUser, Response, Router, RunStatus, State, StatusCode, SystemInfoResponse,
+    SystemIntegrationStatus, SystemIntegrationsResponse, SystemRepairRunIssue,
     SystemRepairRunsResponse, SystemRunCounts, build_disk_usage_response, build_prune_plan,
     counts_toward_scheduler_capacity, delete_run_internal, diagnostics, get, post,
-    resource_sampler, spawn_blocking, system_sandbox_provider, to_i64,
+    resolve_interp_string, resource_sampler, spawn_blocking, system_sandbox_provider, to_i64,
 };
+
+const GITLAB_INTEGRATION_PROBE_CACHE_TTL: Duration = Duration::from_secs(30);
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -53,6 +58,7 @@ async fn get_server_settings(_auth: RequiredUser, State(state): State<Arc<AppSta
 
 async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     let manifest_run_settings = state.manifest_run_settings();
+    let server_settings = state.server_settings();
     let (total_runs, active_runs, scheduler_slots_used) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         let active = runs
@@ -78,7 +84,7 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
 
     let response = SystemInfoResponse {
         version:          Some(FABRO_VERSION.to_string()),
-        server_url:       Some(state.effective_web_url()),
+        server_url:       Some(server_settings.server.web.url.as_source()),
         git_sha:          option_env!("FABRO_GIT_SHA").map(str::to_string),
         build_date:       option_env!("FABRO_BUILD_DATE").map(str::to_string),
         profile:          option_env!("FABRO_BUILD_PROFILE").map(str::to_string),
@@ -105,6 +111,7 @@ async fn get_system_integrations(
     let response = SystemIntegrationsResponse {
         data: vec![
             github_integration_status(state.as_ref(), &settings.server.integrations.github),
+            gitlab_integration_status(state.as_ref()).await,
             slack_integration_status(state.as_ref()),
         ],
     };
@@ -125,10 +132,10 @@ fn github_integration_status(
         .to_string(),
     );
     if let Some(slug) = settings.slug.as_ref() {
-        metadata.insert("slug".to_string(), slug.clone());
+        metadata.insert("slug".to_string(), display_interp(state, slug));
     }
     if let Some(app_id) = settings.app_id.as_ref() {
-        metadata.insert("app_id".to_string(), app_id.clone());
+        metadata.insert("app_id".to_string(), display_interp(state, app_id));
     }
 
     if !settings.enabled {
@@ -181,8 +188,218 @@ fn github_integration_status(
     )
 }
 
-fn display_interp(state: &AppState, value: &InterpString) -> String {
-    value.resolve_or_source(|name| (state.env_lookup)(name))
+async fn gitlab_integration_status(state: &AppState) -> SystemIntegrationStatus {
+    let settings = &state.server_settings().server.integrations.gitlab;
+    let auth = &state.server_settings().server.auth.gitlab;
+    let mut metadata = BTreeMap::new();
+    metadata.insert("strategy".to_string(), settings.strategy.to_string());
+    let base_url = settings
+        .base_url
+        .as_ref()
+        .map(|value| display_interp(state, value));
+    let parsed_base_url = base_url
+        .as_deref()
+        .map(fabro_gitlab::repository::GitLabBaseUrl::parse);
+    match &parsed_base_url {
+        Some(Ok(base)) => {
+            metadata.insert("base_url".to_string(), base.url.to_string());
+        }
+        Some(Err(_)) => {
+            metadata.insert("base_url_configured".to_string(), "true".to_string());
+        }
+        None => {}
+    }
+    if auth.allowed_usernames.is_empty() && auth.allowed_groups.is_empty() {
+        metadata.insert("allowlists_empty".to_string(), "true".to_string());
+    }
+
+    if !settings.enabled {
+        return integration_status(
+            IntegrationProvider::Gitlab,
+            false,
+            false,
+            IntegrationStatus::Disabled,
+            Vec::new(),
+            metadata,
+        );
+    }
+
+    let client_id = settings
+        .client_id
+        .as_ref()
+        .map(|value| display_interp(state, value));
+    let mut missing = Vec::new();
+    if settings.base_url.is_none() {
+        missing.push("server.integrations.gitlab.base_url".to_string());
+    }
+    if missing_vault_secret(state, EnvVars::GITLAB_TOKEN) {
+        missing.push(EnvVars::GITLAB_TOKEN.to_string());
+    }
+    if settings.strategy == GitlabIntegrationStrategy::App {
+        if client_id
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+        {
+            missing.push("server.integrations.gitlab.client_id".to_string());
+        }
+        if missing_vault_secret(state, EnvVars::GITLAB_APP_CLIENT_SECRET) {
+            missing.push(EnvVars::GITLAB_APP_CLIENT_SECRET.to_string());
+        }
+    }
+    missing.sort();
+
+    let base = match parsed_base_url {
+        Some(Ok(base)) => Some(base),
+        Some(Err(err)) => {
+            metadata.insert(
+                "error".to_string(),
+                format!("invalid GitLab base URL: {err}"),
+            );
+            return integration_status(
+                IntegrationProvider::Gitlab,
+                true,
+                false,
+                IntegrationStatus::Error,
+                Vec::new(),
+                metadata,
+            );
+        }
+        None => None,
+    };
+
+    if !missing.is_empty() {
+        return integration_status(
+            IntegrationProvider::Gitlab,
+            true,
+            false,
+            IntegrationStatus::MissingCredentials,
+            missing,
+            metadata,
+        );
+    }
+
+    let Some(base) = base else {
+        unreachable!("base_url presence already checked in missing credentials")
+    };
+
+    let Some(token) = state.vault_secret(EnvVars::GITLAB_TOKEN) else {
+        unreachable!("GITLAB_TOKEN presence already checked in missing credentials")
+    };
+    let normalized_base_url = base.url.to_string();
+    let cache_key = format!(
+        "base={normalized_base_url}|strategy={}|token_present=true|app_secret_present={}",
+        settings.strategy,
+        !missing_vault_secret(state, EnvVars::GITLAB_APP_CLIENT_SECRET)
+    );
+    if let Some(cached) = cached_gitlab_integration_probe(state, &cache_key).await {
+        if let Some(error) = cached.error {
+            metadata.insert("error".to_string(), error);
+        }
+        return integration_status(
+            IntegrationProvider::Gitlab,
+            true,
+            cached.configured,
+            cached.status,
+            Vec::new(),
+            metadata,
+        );
+    }
+
+    let api_url = base.api_url("user");
+    let probe = match fabro_http::http_client() {
+        Ok(http) => {
+            timeout(Duration::from_secs(5), async move {
+                http.get(api_url.as_str())
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Accept", "application/json")
+                    .send()
+                    .await
+            })
+            .await
+        }
+        Err(err) => {
+            let error = err.to_string();
+            store_gitlab_integration_probe(
+                state,
+                cache_key,
+                false,
+                IntegrationStatus::Error,
+                Some(error.clone()),
+            )
+            .await;
+            metadata.insert("error".to_string(), error);
+            return integration_status(
+                IntegrationProvider::Gitlab,
+                true,
+                false,
+                IntegrationStatus::Error,
+                Vec::new(),
+                metadata,
+            );
+        }
+    };
+
+    let (configured, status, error) = match probe {
+        Ok(Ok(response)) if response.status().is_success() => {
+            (true, IntegrationStatus::Configured, None)
+        }
+        Ok(Ok(response)) => (
+            false,
+            IntegrationStatus::Error,
+            Some(format!("GitLab returned {}", response.status())),
+        ),
+        Ok(Err(err)) => (false, IntegrationStatus::Error, Some(err.to_string())),
+        Err(_) => (
+            false,
+            IntegrationStatus::Error,
+            Some("GitLab probe timed out".to_string()),
+        ),
+    };
+    store_gitlab_integration_probe(state, cache_key, configured, status, error.clone()).await;
+    if let Some(error) = error {
+        metadata.insert("error".to_string(), error);
+    }
+    integration_status(
+        IntegrationProvider::Gitlab,
+        true,
+        configured,
+        status,
+        Vec::new(),
+        metadata,
+    )
+}
+
+async fn cached_gitlab_integration_probe(
+    state: &AppState,
+    cache_key: &str,
+) -> Option<GitlabIntegrationProbeCache> {
+    state
+        .gitlab_integration_probe_cache
+        .lock()
+        .await
+        .as_ref()
+        .filter(|cached| {
+            cached.cache_key == cache_key
+                && cached.checked_at.elapsed() < GITLAB_INTEGRATION_PROBE_CACHE_TTL
+        })
+        .cloned()
+}
+
+async fn store_gitlab_integration_probe(
+    state: &AppState,
+    cache_key: String,
+    configured: bool,
+    status: IntegrationStatus,
+    error: Option<String>,
+) {
+    *state.gitlab_integration_probe_cache.lock().await = Some(GitlabIntegrationProbeCache {
+        cache_key,
+        checked_at: Instant::now(),
+        configured,
+        status,
+        error,
+    });
 }
 
 fn slack_integration_status(state: &AppState) -> SystemIntegrationStatus {
@@ -276,6 +493,331 @@ fn missing_vault_secret(state: &AppState, name: &str) -> bool {
         .as_deref()
         .map(str::trim)
         .is_none_or(str::is_empty)
+}
+
+fn display_interp(state: &AppState, value: &InterpString) -> String {
+    state
+        .resolve_interp(value)
+        .unwrap_or_else(|_| value.as_source())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use fabro_config::{RunLayer, ServerSettingsBuilder};
+    use httpmock::Method::GET;
+    use httpmock::MockServer;
+
+    use super::*;
+    use crate::test_support::TestAppStateBuilder;
+
+    #[tokio::test]
+    async fn gitlab_integration_status_reports_missing_app_credentials() {
+        let settings = ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token", "gitlab"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "https://gitlab.ipt.example"
+
+[server.auth.gitlab]
+allowed_usernames = []
+allowed_groups = []
+"#,
+        )
+        .expect("gitlab settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .vault_entries(HashMap::from([(EnvVars::GITLAB_TOKEN, "gitlab-token")]))
+            .build();
+
+        let status = gitlab_integration_status(&state).await;
+
+        assert_eq!(status.provider, IntegrationProvider::Gitlab);
+        assert!(status.enabled);
+        assert!(!status.configured);
+        assert_eq!(status.status, IntegrationStatus::MissingCredentials);
+        assert_eq!(
+            status.metadata.get("base_url").map(String::as_str),
+            Some("https://gitlab.ipt.example/")
+        );
+        assert_eq!(
+            status.metadata.get("strategy").map(String::as_str),
+            Some("app")
+        );
+        assert_eq!(
+            status.metadata.get("allowlists_empty").map(String::as_str),
+            Some("true")
+        );
+        assert!(
+            status
+                .missing_credentials
+                .iter()
+                .any(|missing| { missing == "server.integrations.gitlab.client_id" })
+        );
+        assert!(
+            status
+                .missing_credentials
+                .iter()
+                .any(|missing| { missing == EnvVars::GITLAB_APP_CLIENT_SECRET })
+        );
+    }
+
+    #[tokio::test]
+    async fn gitlab_integration_status_errors_for_invalid_base_url() {
+        let settings = ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "not a url"
+"#,
+        )
+        .expect("gitlab settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .vault_entries(HashMap::from([(EnvVars::GITLAB_TOKEN, "gitlab-token")]))
+            .build();
+
+        let status = gitlab_integration_status(&state).await;
+
+        assert_eq!(status.provider, IntegrationProvider::Gitlab);
+        assert!(!status.configured);
+        assert_eq!(status.status, IntegrationStatus::Error);
+        assert!(!status.metadata.contains_key("base_url"));
+        assert_eq!(
+            status
+                .metadata
+                .get("base_url_configured")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert!(
+            status
+                .metadata
+                .get("error")
+                .is_some_and(|error| { error.contains("invalid GitLab base URL") })
+        );
+    }
+
+    #[tokio::test]
+    async fn gitlab_integration_status_does_not_expose_raw_invalid_base_url() {
+        let settings = ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "https://user:secret@gitlab.ipt.example"
+"#,
+        )
+        .expect("gitlab settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .vault_entries(HashMap::from([(EnvVars::GITLAB_TOKEN, "gitlab-token")]))
+            .build();
+
+        let status = gitlab_integration_status(&state).await;
+
+        assert_eq!(status.status, IntegrationStatus::Error);
+        assert!(!status.metadata.contains_key("base_url"));
+        assert_eq!(
+            status
+                .metadata
+                .get("base_url_configured")
+                .map(String::as_str),
+            Some("true")
+        );
+        let rendered = serde_json::to_string(&status).unwrap();
+        assert!(!rendered.contains("user"));
+        assert!(!rendered.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn gitlab_integration_status_exposes_normalized_base_url() {
+        let server = MockServer::start_async().await;
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/api/v4/user");
+                then.status(200).json_body(serde_json::json!({
+                    "id": 1,
+                    "username": "gitlab-user"
+                }));
+            })
+            .await;
+        let settings = ServerSettingsBuilder::from_toml(&format!(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "{}?private=value#fragment"
+"#,
+            server.url("")
+        ))
+        .expect("gitlab settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .vault_entries(HashMap::from([(EnvVars::GITLAB_TOKEN, "gitlab-token")]))
+            .build();
+
+        let status = gitlab_integration_status(&state).await;
+
+        assert_eq!(status.status, IntegrationStatus::Configured);
+        let base_url = status
+            .metadata
+            .get("base_url")
+            .expect("base_url metadata should be present");
+        assert!(!base_url.contains("private"));
+        assert!(!base_url.contains("fragment"));
+        assert_eq!(base_url, &server.url("/"));
+    }
+
+    #[tokio::test]
+    async fn gitlab_integration_status_errors_for_api_probe_failure() {
+        let server = MockServer::start_async().await;
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/api/v4/user");
+                then.status(500);
+            })
+            .await;
+        let settings = ServerSettingsBuilder::from_toml(&format!(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "{}"
+"#,
+            server.url("")
+        ))
+        .expect("gitlab settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .vault_entries(HashMap::from([(EnvVars::GITLAB_TOKEN, "gitlab-token")]))
+            .build();
+
+        let status = gitlab_integration_status(&state).await;
+
+        assert_eq!(status.provider, IntegrationProvider::Gitlab);
+        assert!(!status.configured);
+        assert_eq!(status.status, IntegrationStatus::Error);
+        assert!(
+            status
+                .metadata
+                .get("error")
+                .is_some_and(|error| { error.contains("GitLab returned 500") })
+        );
+    }
+
+    #[tokio::test]
+    async fn gitlab_integration_status_caches_api_probe_result() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/api/v4/user");
+                then.status(500);
+            })
+            .await;
+        let settings = ServerSettingsBuilder::from_toml(&format!(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "{}"
+"#,
+            server.url("")
+        ))
+        .expect("gitlab settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .vault_entries(HashMap::from([(EnvVars::GITLAB_TOKEN, "gitlab-token")]))
+            .build();
+
+        let first = gitlab_integration_status(&state).await;
+        let second = gitlab_integration_status(&state).await;
+
+        assert_eq!(first.status, IntegrationStatus::Error);
+        assert_eq!(second.status, IntegrationStatus::Error);
+        assert_eq!(mock.calls_async().await, 1);
+    }
+
+    #[tokio::test]
+    async fn gitlab_integration_status_treats_empty_app_client_id_as_missing() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/api/v4/user");
+                then.status(200).json_body(serde_json::json!({
+                    "id": 1,
+                    "username": "gitlab-user"
+                }));
+            })
+            .await;
+        let settings = ServerSettingsBuilder::from_toml(&format!(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "{}"
+client_id = ""
+"#,
+            server.url("")
+        ))
+        .expect("gitlab settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .vault_entries(HashMap::from([
+                (EnvVars::GITLAB_TOKEN, "gitlab-token"),
+                (EnvVars::GITLAB_APP_CLIENT_SECRET, "gitlab-client-secret"),
+            ]))
+            .build();
+
+        let status = gitlab_integration_status(&state).await;
+
+        assert_eq!(status.status, IntegrationStatus::MissingCredentials);
+        assert!(
+            status
+                .missing_credentials
+                .iter()
+                .any(|missing| { missing == "server.integrations.gitlab.client_id" })
+        );
+        assert_eq!(mock.calls_async().await, 0);
+    }
 }
 
 async fn get_system_resources(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
@@ -468,12 +1010,16 @@ async fn get_github_repo(
     let base_url = fabro_github::github_api_base_url();
     let (token, client) = match github_settings.strategy {
         GithubIntegrationStrategy::App => {
-            if github_settings.app_id.is_none() {
+            let Some(app_id) = github_settings.app_id.as_ref() else {
                 return ApiError::new(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "server.integrations.github.app_id is not configured",
                 )
                 .into_response();
+            };
+            if let Err(err) = resolve_interp_string(app_id) {
+                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                    .into_response();
             }
             let creds = match state.github_credentials(github_settings) {
                 Ok(Some(fabro_github::GitHubCredentials::App(creds))) => creds,
@@ -498,9 +1044,16 @@ async fn get_github_repo(
                         .into_response();
                 }
             };
-            let install_url = creds.installation_url(&owner).unwrap_or_else(|| {
-                format!("https://github.com/organizations/{owner}/settings/installations")
-            });
+            let install_url = match github_settings.slug.as_ref() {
+                Some(slug) => match resolve_interp_string(slug) {
+                    Ok(slug) => format!("https://github.com/apps/{slug}/installations/new"),
+                    Err(err) => {
+                        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                            .into_response();
+                    }
+                },
+                None => format!("https://github.com/organizations/{owner}/settings/installations"),
+            };
 
             let client = match state.http_client() {
                 Ok(http) => http,

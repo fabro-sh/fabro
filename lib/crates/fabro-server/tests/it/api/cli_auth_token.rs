@@ -76,15 +76,17 @@ client_id = "Iv1.test"
     let auth_codes = store.auth_codes().await.unwrap();
     auth_codes
         .insert(AuthCode {
-            code:           "integration-code".to_string(),
-            identity:       fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
-            login:          "octocat".to_string(),
-            name:           "The Octocat".to_string(),
-            email:          "octocat@example.com".to_string(),
-            avatar_url:     String::new(),
-            code_challenge: pkce_challenge("integration-verifier"),
-            redirect_uri:   "http://127.0.0.1:4444/callback".to_string(),
-            expires_at:     chrono::Utc::now() + chrono::Duration::seconds(60),
+            code:                    "integration-code".to_string(),
+            identity:                fabro_types::IdpIdentity::new("https://github.com", "12345")
+                .unwrap(),
+            login:                   "octocat".to_string(),
+            name:                    "The Octocat".to_string(),
+            email:                   "octocat@example.com".to_string(),
+            avatar_url:              String::new(),
+            authorization_validated: false,
+            code_challenge:          pkce_challenge("integration-verifier"),
+            redirect_uri:            "http://127.0.0.1:4444/callback".to_string(),
+            expires_at:              chrono::Utc::now() + chrono::Duration::seconds(60),
         })
         .await
         .unwrap();

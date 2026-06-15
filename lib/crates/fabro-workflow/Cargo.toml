@@ -29,6 +29,7 @@ fabro-dump = { path = "../fabro-dump" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-github = { path = "../fabro-github" }
+fabro-gitlab = { path = "../fabro-gitlab" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-template = { path = "../fabro-template" }
 fabro-tool = { path = "../fabro-tool" }

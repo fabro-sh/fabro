@@ -18,6 +18,9 @@
 import type { InstallGithubSummary } from './install-github-summary';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { InstallGitlabSummary } from './install-gitlab-summary';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { InstallLlmSummary } from './install-llm-summary';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -42,5 +45,6 @@ export interface InstallSessionResponse {
     'object_store'?: InstallObjectStoreSummary | null;
     'sandbox'?: InstallSandboxSummary | null;
     'github'?: InstallGithubSummary | null;
+    'gitlab'?: InstallGitlabSummary | null;
     'prefill': InstallPrefill;
 }

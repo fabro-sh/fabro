@@ -141,6 +141,7 @@ fn print_auth_status(
             .map(|m| match m {
                 ServerAuthMethod::DevToken => "dev-token",
                 ServerAuthMethod::Github => "github",
+                ServerAuthMethod::Gitlab => "gitlab",
             })
             .collect();
         fabro_util::printerr!(

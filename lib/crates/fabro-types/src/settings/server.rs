@@ -97,6 +97,8 @@ pub struct ServerWebSettings {
 pub struct ServerAuthSettings {
     pub methods: Vec<ServerAuthMethod>,
     pub github:  ServerAuthGithubSettings,
+    #[serde(default)]
+    pub gitlab:  ServerAuthGitlabSettings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,11 +106,19 @@ pub struct ServerAuthSettings {
 pub enum ServerAuthMethod {
     DevToken,
     Github,
+    Gitlab,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerAuthGithubSettings {
     pub allowed_usernames: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ServerAuthGitlabSettings {
+    pub allowed_usernames: Vec<String>,
+    pub allowed_groups:    Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +252,8 @@ pub struct ServerLoggingSettings {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerIntegrationsSettings {
     pub github: GithubIntegrationSettings,
+    #[serde(default)]
+    pub gitlab: GitlabIntegrationSettings,
     pub slack:  SlackIntegrationSettings,
 }
 
@@ -253,6 +265,15 @@ pub struct GithubIntegrationSettings {
     pub client_id: Option<String>,
     pub slug:      Option<String>,
     pub webhooks:  Option<IntegrationWebhooksSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitlabIntegrationSettings {
+    pub enabled:   bool,
+    pub strategy:  GitlabIntegrationStrategy,
+    pub base_url:  Option<InterpString>,
+    pub client_id: Option<InterpString>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,6 +337,27 @@ pub enum ObjectStoreProvider {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GithubIntegrationStrategy {
+    #[default]
+    Token,
+    App,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+pub enum GitlabIntegrationStrategy {
     #[default]
     Token,
     App,

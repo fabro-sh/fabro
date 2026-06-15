@@ -11,7 +11,7 @@ use fabro_config::parse::{self, SettingsSource};
 use fabro_config::{
     CliLayer, CliOutputLayer, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
     MergeMap, RunLayer, SettingsLayer, WorkflowSettingsBuilder, parse_input_overrides,
-    parse_labels, project,
+    parse_labels,
 };
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
@@ -20,7 +20,6 @@ use fabro_model::{Catalog, ProviderId};
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::from_environment::{
     daytona_config_from_environment, docker_config_from_environment,
-    local_working_directory_from_environment,
 };
 use fabro_sandbox::redact::redact_auth_url;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxSpec};
@@ -28,9 +27,7 @@ use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
-use fabro_types::{
-    ManifestPath, RunId, RunProvenance, SandboxProviderKind, ServerSettings, WorkflowSettings,
-};
+use fabro_types::{ManifestPath, RunId, SandboxProviderKind, ServerSettings, WorkflowSettings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;
@@ -43,7 +40,6 @@ use tokio::process::Command;
 use tokio::time;
 use tracing::warn;
 
-use crate::interp::process_env_var;
 use crate::server::AppState;
 use crate::server_secrets::LlmClientResult;
 
@@ -177,7 +173,7 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
         target_path,
         workflow_bundle,
         workflow_input,
-        source_directory: project::resolve_working_directory_from_run(&settings.run, &cwd),
+        source_directory: resolve_working_directory(&settings, &cwd),
     })
 }
 
@@ -197,7 +193,6 @@ pub(crate) fn validate_prepared_manifest(
 pub(crate) fn create_run_input(
     prepared: PreparedManifest,
     configured_providers: Vec<ProviderId>,
-    provenance: RunProvenance,
     web_url: Option<String>,
 ) -> CreateRunInput {
     CreateRunInput {
@@ -211,10 +206,11 @@ pub(crate) fn create_run_input(
         run_id: prepared.run_id,
         title: prepared.title,
         automation: None,
+        source_context: None,
         git: prepared.git,
         fork_source_ref: None,
         parent_id: prepared.parent_id,
-        provenance,
+        provenance: None,
         configured_providers,
         web_url,
     }
@@ -379,6 +375,31 @@ fn manifest_args_overrides(
     })
 }
 
+fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> PathBuf {
+    let Some(work_dir) = settings
+        .run
+        .working_dir
+        .as_ref()
+        .map(InterpString::as_source)
+    else {
+        return caller_cwd.to_path_buf();
+    };
+    let path = PathBuf::from(&work_dir);
+    if path.is_absolute() {
+        path
+    } else {
+        caller_cwd.join(path)
+    }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Manifest preflight interpolation owns a process-env lookup facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 fn resolve_manifest_dockerfiles(
     layer: &mut SettingsLayer,
     config_path: &ManifestPath,
@@ -510,12 +531,29 @@ async fn build_preflight_report(
     };
 
     let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
+    let gitlab = match state.gitlab_sandbox_config_for_origin(
+        &server_settings,
+        prepared.git.as_ref().map(|git| git.origin_url.as_str()),
+    ) {
+        Ok(config) => config,
+        Err(err) => {
+            checks.push(CheckResult {
+                name:        "GitLab sandbox credentials".to_string(),
+                status:      CheckStatus::Error,
+                summary:     err,
+                details:     Vec::new(),
+                remediation: None,
+            });
+            None
+        }
+    };
     let sandbox_ok = run_sandbox_check(
         &mut checks,
         sandbox_provider,
         prepared,
         &resolved_run,
         github_app.clone(),
+        gitlab.clone(),
         daytona_api_key,
     )
     .await;
@@ -525,19 +563,23 @@ async fn build_preflight_report(
         prepared,
         &resolved_run,
         github_app.clone(),
+        gitlab.as_ref(),
     )
     .await;
     let llm_ok = run_llm_check(
         &mut checks,
         graph,
         &resolved_run,
+        &configured_providers,
         catalog.as_ref(),
         llm_result,
     )
     .await;
     run_github_token_check(&mut checks, prepared, &resolved_run, github_app).await;
+    let gitlab_token_ok =
+        run_gitlab_token_check(&mut checks, &server_settings, &resolved_run, state);
 
-    let checks_ok = sandbox_ok && repository_access_ok && llm_ok;
+    let checks_ok = sandbox_ok && repository_access_ok && llm_ok && gitlab_token_ok;
 
     Ok((
         CheckReport {
@@ -675,6 +717,9 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
             {
                 warnings.push("local provider ignores resource limits".to_string());
             }
+            if !environment.volumes.is_empty() {
+                warnings.push("local provider ignores volume mounts".to_string());
+            }
             if !environment.labels.is_empty() {
                 warnings.push("local provider ignores labels".to_string());
             }
@@ -683,11 +728,11 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
             }
         }
         EnvironmentProvider::Docker => {
-            if environment.cwd.is_some() {
-                warnings.push("docker provider ignores cwd".to_string());
-            }
             if environment.resources.disk.is_some() {
                 warnings.push("docker provider ignores disk resource limits".to_string());
+            }
+            if !environment.volumes.is_empty() {
+                warnings.push("docker provider ignores volume mounts".to_string());
             }
             if !environment.labels.is_empty() {
                 warnings.push("docker provider ignores labels".to_string());
@@ -699,11 +744,7 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
                 warnings.push("docker provider ignores image.dockerfile".to_string());
             }
         }
-        EnvironmentProvider::Daytona => {
-            if environment.cwd.is_some() {
-                warnings.push("daytona provider ignores cwd".to_string());
-            }
-        }
+        EnvironmentProvider::Daytona => {}
     }
     warnings
 }
@@ -722,6 +763,7 @@ async fn run_repository_access_check(
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
+    gitlab: Option<&fabro_sandbox::GitLabSandboxConfig>,
 ) -> bool {
     run_repository_access_check_with(
         checks,
@@ -729,6 +771,7 @@ async fn run_repository_access_check(
         prepared,
         resolved_run,
         github_app,
+        gitlab,
         check_git_remote_ref,
     )
     .await
@@ -740,6 +783,7 @@ async fn run_repository_access_check_with<F, Fut>(
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
+    gitlab: Option<&fabro_sandbox::GitLabSandboxConfig>,
     check_remote_ref: F,
 ) -> bool
 where
@@ -758,6 +802,18 @@ where
 
     let origin_url = fabro_github::normalize_repo_origin_url(&git.origin_url);
     if let Err(err) = fabro_github::parse_github_owner_repo(&origin_url) {
+        if let Some(gitlab) = gitlab {
+            if fabro_gitlab::repository::parse_origin(&gitlab.base_url, &git.origin_url).is_ok() {
+                checks.push(CheckResult {
+                    name:        "Repository Access".into(),
+                    status:      CheckStatus::Pass,
+                    summary:     "configured GitLab origin".into(),
+                    details:     vec![CheckDetail::new(format!("Origin: {}", git.origin_url))],
+                    remediation: None,
+                });
+                return true;
+            }
+        }
         checks.push(CheckResult {
             name:        "Repository Access".into(),
             status:      CheckStatus::Error,
@@ -856,28 +912,26 @@ fn preflight_sandbox_spec(
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
+    gitlab: Option<fabro_sandbox::GitLabSandboxConfig>,
     daytona_api_key: Option<String>,
-) -> std::result::Result<SandboxSpec, fabro_sandbox::Error> {
+) -> SandboxSpec {
     let clone_origin_url = prepared
         .git
         .as_ref()
         .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url));
     let clone_branch = prepared.git.as_ref().map(|git| git.branch.clone());
 
-    Ok(match sandbox_provider {
-        SandboxProviderKind::Local => {
-            let working_directory = local_working_directory_from_environment(
-                &resolved_run.environment,
-                Some(&prepared.source_directory),
-            )?;
-            SandboxSpec::Local { working_directory }
-        }
+    match sandbox_provider {
+        SandboxProviderKind::Local => SandboxSpec::Local {
+            working_directory: prepared.source_directory.clone(),
+        },
         SandboxProviderKind::Docker => {
             let mut config = resolve_docker_config(resolved_run);
             config.skip_clone = true;
             SandboxSpec::Docker {
                 config,
                 github_app,
+                gitlab,
                 run_id: None,
                 clone_origin_url,
                 clone_branch,
@@ -889,13 +943,14 @@ fn preflight_sandbox_spec(
             SandboxSpec::Daytona {
                 config: Box::new(config),
                 github_app,
+                gitlab,
                 run_id: None,
                 clone_origin_url,
                 clone_branch,
                 api_key: daytona_api_key,
             }
         }
-    })
+    }
 }
 
 async fn run_sandbox_check(
@@ -904,27 +959,17 @@ async fn run_sandbox_check(
     prepared: &PreparedManifest,
     resolved_run: &RunNamespace,
     github_app: Option<fabro_github::GitHubCredentials>,
+    gitlab: Option<fabro_sandbox::GitLabSandboxConfig>,
     daytona_api_key: Option<String>,
 ) -> bool {
-    let spec = match preflight_sandbox_spec(
+    let spec = preflight_sandbox_spec(
         sandbox_provider,
         prepared,
         resolved_run,
         github_app.clone(),
+        gitlab,
         daytona_api_key,
-    ) {
-        Ok(spec) => spec,
-        Err(err) => {
-            checks.push(CheckResult {
-                name:        "Sandbox".into(),
-                status:      CheckStatus::Error,
-                summary:     "failed".into(),
-                details:     vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
-                remediation: Some(err.to_string()),
-            });
-            return false;
-        }
-    };
+    );
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = spec.build(None).await.map_err(|err| {
         if matches!(sandbox_provider, SandboxProviderKind::Daytona) {
             format!("Daytona sandbox creation failed: {err}")
@@ -1007,16 +1052,12 @@ async fn run_llm_check(
     checks: &mut Vec<CheckResult>,
     graph: &Graph,
     settings: &RunNamespace,
+    configured_providers: &[ProviderId],
     catalog: &Catalog,
     llm_result: Result<LlmClientResult>,
 ) -> bool {
-    let model = settings
-        .model
-        .name
-        .as_deref()
-        .unwrap_or_else(|| catalog.default_for_configured_ids(&[]).id.as_str());
-    let provider = settings.model.provider.as_deref();
-    let default_provider = provider.unwrap_or("anthropic");
+    let (model, provider) = resolve_model_provider(settings, graph, configured_providers, catalog);
+    let default_provider = provider.as_deref().unwrap_or("anthropic");
     let mut model_providers = std::collections::BTreeSet::new();
     let mut has_llm_nodes = false;
 
@@ -1025,7 +1066,7 @@ async fn run_llm_check(
             continue;
         }
         has_llm_nodes = true;
-        let node_model = node.model().unwrap_or(model);
+        let node_model = node.model().unwrap_or(&model);
         let node_provider = node.provider().unwrap_or(default_provider);
         let (resolved_model, resolved_provider) = if let Some(info) = catalog.get(node_model) {
             (info.id.clone(), info.provider.to_string())
@@ -1166,6 +1207,36 @@ fn canonical_provider_id(catalog: &Catalog, provider_name: &str) -> ProviderId {
         .map_or(provider_id, |provider| provider.id.clone())
 }
 
+fn resolve_model_provider(
+    settings: &RunNamespace,
+    _graph: &Graph,
+    configured_providers: &[ProviderId],
+    catalog: &Catalog,
+) -> (String, Option<String>) {
+    let provider = settings
+        .model
+        .provider
+        .as_ref()
+        .map(InterpString::as_source);
+    let model = settings.model.name.as_ref().map_or_else(
+        || {
+            catalog
+                .default_for_configured_ids(configured_providers)
+                .id
+                .clone()
+        },
+        InterpString::as_source,
+    );
+
+    match catalog.get(&model) {
+        Some(info) => (
+            info.id.clone(),
+            provider.or(Some(info.provider.to_string())),
+        ),
+        None => (model, provider),
+    }
+}
+
 async fn run_github_token_check(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
@@ -1213,6 +1284,57 @@ async fn run_github_token_check(
             details:     perm_details,
             remediation: Some("No GitHub credentials or origin URL available".to_string()),
         }),
+    }
+}
+
+fn run_gitlab_token_check(
+    checks: &mut Vec<CheckResult>,
+    server_settings: &ServerSettings,
+    resolved_run: &RunNamespace,
+    state: &AppState,
+) -> bool {
+    if !resolved_run.integrations.gitlab.token {
+        return true;
+    }
+
+    let gitlab_settings = &server_settings.server.integrations.gitlab;
+    let integration_configured = gitlab_settings.enabled && gitlab_settings.base_url.is_some();
+    let token_configured = state.vault_secret(EnvVars::GITLAB_TOKEN).is_some();
+
+    match (integration_configured, token_configured) {
+        (true, true) => {
+            checks.push(CheckResult {
+                name:        "GitLab Token".into(),
+                status:      CheckStatus::Pass,
+                summary:     "configured".into(),
+                details:     Vec::new(),
+                remediation: None,
+            });
+            true
+        }
+        (_, false) => {
+            checks.push(CheckResult {
+                name:        "GitLab Token".into(),
+                status:      CheckStatus::Error,
+                summary:
+                    "GITLAB_TOKEN is required because run.integrations.gitlab.token is true".into(),
+                details:     Vec::new(),
+                remediation: Some("Set GITLAB_TOKEN with `fabro secret set GITLAB_TOKEN`.".into()),
+            });
+            false
+        }
+        (false, true) => {
+            checks.push(CheckResult {
+                name:        "GitLab Token".into(),
+                status:      CheckStatus::Error,
+                summary:     "GitLab integration must be enabled with server.integrations.gitlab.base_url because run.integrations.gitlab.token is true".into(),
+                details:     Vec::new(),
+                remediation: Some(
+                    "Configure [server.integrations.gitlab] enabled = true and base_url.".into(),
+                ),
+            });
+            false
+        }
     }
 }
 
@@ -1516,27 +1638,26 @@ enabled = {clone_enabled}
     }
 
     #[test]
-    fn docker_environment_cwd_is_reported_as_ignored() {
-        let mut resolved = RunNamespace::default();
-        resolved.environment.provider = EnvironmentProvider::Docker;
-        resolved.environment.cwd = Some("/workspace/custom".to_string());
+    fn runtime_daytona_config_preserves_volume_mounts() {
+        let settings = fabro_types::settings::run::RunEnvironmentSettings::from_environment(
+            "cloud".to_string(),
+            fabro_types::settings::run::EnvironmentSettings {
+                volumes: vec![fabro_types::settings::run::EnvironmentVolumeSettings {
+                    id:         "vol_auth".to_string(),
+                    mount_path: "/home/daytona/.config".to_string(),
+                    subpath:    Some("agents".to_string()),
+                }],
+                ..fabro_types::settings::run::EnvironmentSettings::default()
+            },
+        );
 
-        assert_eq!(environment_capability_warnings(&resolved), vec![
-            "docker provider ignores cwd".to_string()
-        ]);
+        let config = daytona_config_from_environment(&settings, false);
+
+        assert_eq!(config.volumes.len(), 1);
+        assert_eq!(config.volumes[0].volume_id, "vol_auth");
+        assert_eq!(config.volumes[0].mount_path, "/home/daytona/.config");
+        assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
     }
-
-    #[test]
-    fn daytona_environment_cwd_is_reported_as_ignored() {
-        let mut resolved = RunNamespace::default();
-        resolved.environment.provider = EnvironmentProvider::Daytona;
-        resolved.environment.cwd = Some("/home/daytona/workspace/custom".to_string());
-
-        assert_eq!(environment_capability_warnings(&resolved), vec![
-            "daytona provider ignores cwd".to_string()
-        ]);
-    }
-
     #[test]
     fn prepare_manifest_accepts_project_environment_catalog_definitions() {
         let mut manifest = minimal_manifest();
@@ -1585,6 +1706,7 @@ provider = "local"
             &prepared,
             &resolved,
             None,
+            None,
             move |request, _github_app| {
                 calls_for_check.lock().unwrap().push(request);
                 async { Ok(()) }
@@ -1598,12 +1720,17 @@ provider = "local"
     }
 
     #[tokio::test]
-    async fn repository_access_check_rejects_non_github_origins_before_remote_probe() {
+    async fn repository_access_check_accepts_configured_gitlab_origin_without_remote_probe() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
             SandboxProviderKind::Docker,
             true,
             Some(git_context("https://gitlab.com/acme/widgets", "main")),
         );
+        let gitlab = fabro_sandbox::GitLabSandboxConfig {
+            base_url:    fabro_gitlab::repository::GitLabBaseUrl::parse("https://gitlab.com")
+                .unwrap(),
+            credentials: fabro_gitlab::GitLabCredentials::Token("glpat-test".to_string()),
+        };
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
         let calls_for_check = Arc::clone(&calls);
         let mut checks = Vec::new();
@@ -1614,6 +1741,7 @@ provider = "local"
             &prepared,
             &resolved,
             None,
+            Some(&gitlab),
             move |request, _github_app| {
                 calls_for_check.lock().unwrap().push(request);
                 async { Ok(()) }
@@ -1621,18 +1749,12 @@ provider = "local"
         )
         .await;
 
-        assert!(!ok);
+        assert!(ok);
         assert!(calls.lock().unwrap().is_empty());
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].name, "Repository Access");
-        assert_eq!(checks[0].status, CheckStatus::Error);
-        assert!(
-            checks[0]
-                .remediation
-                .as_deref()
-                .unwrap_or_default()
-                .contains("GitHub repository origins only")
-        );
+        assert_eq!(checks[0].status, CheckStatus::Pass);
+        assert_eq!(checks[0].summary, "configured GitLab origin");
     }
 
     #[tokio::test]
@@ -1654,6 +1776,7 @@ provider = "local"
             SandboxProviderKind::Docker,
             &prepared,
             &resolved,
+            None,
             None,
             move |request, _github_app| {
                 calls_for_check.lock().unwrap().push(request);
@@ -1687,6 +1810,7 @@ provider = "local"
             &prepared,
             &resolved,
             None,
+            None,
             |_request, _github_app| async { Err("remote branch not found".to_string()) },
         )
         .await;
@@ -1718,15 +1842,17 @@ provider = "local"
             &resolved,
             None,
             None,
+            None,
+            None,
         );
 
         match spec {
-            Ok(SandboxSpec::Docker {
+            SandboxSpec::Docker {
                 config,
                 clone_origin_url,
                 clone_branch,
                 ..
-            }) => {
+            } => {
                 assert!(config.skip_clone);
                 assert_eq!(
                     clone_origin_url.as_deref(),
@@ -2128,11 +2254,56 @@ issues = "read"
     }
 
     #[tokio::test]
+    async fn gitlab_token_preflight_fails_when_vault_is_missing_token() {
+        let state = crate::test_support::test_app_state();
+        let mut manifest = minimal_manifest();
+        manifest.workflows.get_mut("workflow.fabro").unwrap().config =
+            Some(types::ManifestWorkflowConfig {
+                path:   "workflow.toml".to_string(),
+                source: r#"_version = 1
+
+[run.environment]
+id = "local"
+
+[run.integrations.gitlab]
+token = true
+"#
+                .to_string(),
+            });
+
+        let prepared = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        )
+        .unwrap();
+        let validated = validate_prepared_manifest(&prepared, test_catalog()).unwrap();
+        assert!(!validated.has_errors());
+
+        let (response, ok) = run_preflight(state.as_ref(), &prepared, &validated)
+            .await
+            .unwrap();
+
+        assert!(!ok);
+        assert!(
+            response.checks.sections[0].checks.iter().any(|check| {
+                check.name == "GitLab Token"
+                    && check.summary.contains(
+                        "GITLAB_TOKEN is required because run.integrations.gitlab.token is true",
+                    )
+            }),
+            "preflight checks did not contain expected GitLab token error: {:?}",
+            response.checks.sections[0]
+                .checks
+                .iter()
+                .map(|c| (&c.name, &c.summary))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
     async fn preflight_allows_pull_request_enabled_without_github_credentials() {
         let state = crate::test_support::test_app_state();
-        let source_dir = tempfile::tempdir().unwrap();
         let mut manifest = minimal_manifest();
-        manifest.cwd = source_dir.path().to_string_lossy().into_owned();
         manifest.configs.push(types::ManifestConfig {
             path:   Some("/tmp/project/.fabro/project.toml".to_string()),
             source: Some(

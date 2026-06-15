@@ -13,16 +13,20 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PullRequestProvider } from './pull-request-provider';
 
 /**
- * Minimal GitHub pull request link associated with a run.
+ * Minimal provider-aware pull request link associated with a run.
  */
 export interface PullRequestLink {
-    'owner': string;
+    'provider': PullRequestProvider;
+    /**
+     * Repository owner or namespace path. GitLab namespaces may be nested.
+     */
+    'owner_path': string;
     'repo': string;
     'number': number;
-    /**
-     * Computed GitHub web URL for the pull request.
-     */
     'html_url': string;
 }

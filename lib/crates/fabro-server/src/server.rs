@@ -69,8 +69,8 @@ use fabro_sandbox::daytona::{self, DaytonaSandbox};
 use fabro_sandbox::details::sandbox_details;
 use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_sandbox::{
-    DaytonaSandboxProvider, DockerSandboxProvider, LocalSandboxProvider, Sandbox, SandboxProvider,
-    SandboxProviderRegistry,
+    DaytonaSandboxProvider, DockerSandboxProvider, GitLabSandboxConfig, LocalSandboxProvider,
+    Sandbox, SandboxProvider, SandboxProviderRegistry,
 };
 use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
 use fabro_slack::config::{
@@ -1005,7 +1005,7 @@ fn slack_lifecycle_pull_request_from_link(link: &PullRequestLink) -> SlackLifecy
     SlackLifecyclePullRequest {
         number: link.number,
         title:  None,
-        url:    Some(link.html_url()),
+        url:    Some(link.html_url().to_string()),
     }
 }
 
@@ -1096,6 +1096,7 @@ pub struct AppState {
     pub(crate) github_api_base_url: String,
     active_config_path: PathBuf,
     http_client: Option<fabro_http::HttpClient>,
+    pub(crate) gitlab_integration_probe_cache: AsyncMutex<Option<GitlabIntegrationProbeCache>>,
     sandbox_provider_registry: SandboxProviderRegistry,
     shutdown: CancellationToken,
     shutting_down: AtomicBool,
@@ -1105,6 +1106,15 @@ pub struct AppState {
 }
 
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
+
+#[derive(Clone, Debug)]
+pub(crate) struct GitlabIntegrationProbeCache {
+    pub cache_key:  String,
+    pub checked_at: Instant,
+    pub configured: bool,
+    pub status:     IntegrationStatus,
+    pub error:      Option<String>,
+}
 
 impl AppState {
     pub(crate) fn automation_store(&self) -> &AutomationStore {
@@ -1543,6 +1553,47 @@ impl AppState {
                 }
             }
         }
+    }
+
+    pub(crate) fn gitlab_sandbox_config_for_origin(
+        &self,
+        settings: &ServerSettings,
+        origin_url: Option<&str>,
+    ) -> Result<Option<GitLabSandboxConfig>, String> {
+        let gitlab = &settings.server.integrations.gitlab;
+        if !gitlab.enabled {
+            return Ok(None);
+        }
+
+        let Some(base_url) = gitlab.base_url.as_ref() else {
+            return Ok(None);
+        };
+        let base_url = fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url.as_source())
+            .map_err(|err| format!("Invalid GitLab base URL: {err}"))?;
+
+        let Some(origin_url) = origin_url else {
+            return Ok(None);
+        };
+        if fabro_gitlab::repository::parse_origin(&base_url, origin_url).is_err() {
+            return Ok(None);
+        }
+
+        let token = self
+            .vault_secret(EnvVars::GITLAB_TOKEN)
+            .as_deref()
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                format!(
+                    "{} is required to clone GitLab repositories",
+                    EnvVars::GITLAB_TOKEN
+                )
+            })?;
+        Ok(Some(GitLabSandboxConfig {
+            base_url,
+            credentials: fabro_gitlab::GitLabCredentials::Token(token),
+        }))
     }
 
     fn begin_shutdown(&self) {
@@ -2461,6 +2512,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         github_api_base_url,
         active_config_path,
         http_client,
+        gitlab_integration_probe_cache: AsyncMutex::new(None),
         sandbox_provider_registry,
         shutdown,
         shutting_down: AtomicBool::new(false),
@@ -3969,6 +4021,32 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         .integrations
         .github
         .resolve_permissions(process_env_var);
+    let gitlab = match state
+        .gitlab_sandbox_config_for_origin(&server_settings, persisted.run_spec().repo_origin_url())
+    {
+        Ok(config) => config,
+        Err(e) => {
+            if cancel_token.is_cancelled() {
+                finish_cancelled_run_before_execution(&state, run_id).await;
+                return;
+            }
+            tracing::error!(run_id = %run_id, error = %e, "Invalid GitLab sandbox credentials");
+            fail_run_before_execution(
+                &state,
+                run_id,
+                FailureReason::WorkflowError,
+                format!("Invalid GitLab sandbox credentials: {e}"),
+            )
+            .await;
+            return;
+        }
+    };
+    let gitlab_token = state
+        .vault_secret(EnvVars::GITLAB_TOKEN)
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string);
     let services = operations::StartServices {
         run_id,
         cancel_token: cancel_token.clone(),
@@ -3980,6 +4058,8 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         artifact_sink: Some(ArtifactSink::Store(state.artifact_store.clone())),
         run_control: None,
         github_app,
+        gitlab,
+        gitlab_token,
         github_permissions,
         vault: Some(Arc::clone(&state.vault)),
         catalog: state.catalog(),

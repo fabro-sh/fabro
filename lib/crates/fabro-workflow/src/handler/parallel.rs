@@ -307,6 +307,7 @@ impl Handler for ParallelHandler {
             let interviewer = Arc::clone(&services.interviewer);
             let base_env = services.base_env.clone();
             let github_token = services.github_token.clone();
+            let gitlab_token = services.gitlab_token.clone();
             let inputs = services.inputs.clone();
             let dry_run = services.dry_run;
             let workflow_path = services.workflow_path.clone();
@@ -380,6 +381,7 @@ impl Handler for ParallelHandler {
                     git_state: std::sync::RwLock::new(None),
                     base_env: base_env.clone(),
                     github_token: github_token.clone(),
+                    gitlab_token: gitlab_token.clone(),
                     inputs: inputs.clone(),
                     dry_run,
                     workflow_path,

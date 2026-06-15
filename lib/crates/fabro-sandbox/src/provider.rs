@@ -21,6 +21,8 @@ use futures::future::join_all;
 use crate::daytona::DaytonaConfig;
 #[cfg(feature = "docker")]
 use crate::docker::DockerSandboxOptions;
+#[cfg(any(feature = "docker", feature = "daytona"))]
+use crate::sandbox_spec::GitLabSandboxConfig;
 
 pub enum SandboxCreateSpec {
     Local,
@@ -28,6 +30,7 @@ pub enum SandboxCreateSpec {
     Docker {
         config:           DockerSandboxOptions,
         github_app:       Option<GitHubCredentials>,
+        gitlab:           Option<GitLabSandboxConfig>,
         run_id:           Option<RunId>,
         clone_origin_url: Option<String>,
         clone_branch:     Option<String>,
@@ -36,6 +39,7 @@ pub enum SandboxCreateSpec {
     Daytona {
         config:           Box<DaytonaConfig>,
         github_app:       Option<GitHubCredentials>,
+        gitlab:           Option<GitLabSandboxConfig>,
         run_id:           Option<RunId>,
         clone_origin_url: Option<String>,
         clone_branch:     Option<String>,

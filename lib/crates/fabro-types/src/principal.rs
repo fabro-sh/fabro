@@ -47,6 +47,7 @@ pub enum Principal {
 #[strum(serialize_all = "snake_case")]
 pub enum AuthMethod {
     Github,
+    Gitlab,
     DevToken,
 }
 

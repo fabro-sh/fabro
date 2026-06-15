@@ -245,6 +245,11 @@ fn main() {
             &[],
         ),
         (
+            "ServerAuthGitlabSettings",
+            "fabro_types::settings::server::ServerAuthGitlabSettings",
+            &[],
+        ),
+        (
             "ServerSandboxSettings",
             "fabro_types::settings::server::ServerSandboxSettings",
             &[],
@@ -307,6 +312,16 @@ fn main() {
         (
             "GithubIntegrationStrategy",
             "fabro_types::settings::server::GithubIntegrationStrategy",
+            &[],
+        ),
+        (
+            "GitlabIntegrationSettings",
+            "fabro_types::settings::server::GitlabIntegrationSettings",
+            &[],
+        ),
+        (
+            "GitlabIntegrationStrategy",
+            "fabro_types::settings::server::GitlabIntegrationStrategy",
             &[],
         ),
         (
@@ -501,6 +516,11 @@ fn main() {
         ("EventEnvelope", "fabro_types::EventEnvelope", &[]),
         ("PullRequest", "fabro_types::PullRequest", &[]),
         ("PullRequestLink", "fabro_types::PullRequestLink", &[]),
+        (
+            "PullRequestProvider",
+            "fabro_types::PullRequestProvider",
+            &[],
+        ),
         ("PullRequestDetails", "fabro_types::PullRequestDetails", &[]),
         ("PullRequestMeta", "fabro_types::PullRequestMeta", &[]),
         (
@@ -528,6 +548,11 @@ fn main() {
         (
             "MergeMethod",
             "fabro_types::settings::run::MergeStrategy",
+            &[],
+        ),
+        (
+            "RunIntegrationsGitlabSettings",
+            "fabro_types::settings::run::RunIntegrationsGitlabSettings",
             &[],
         ),
         ("SecretType", "fabro_types::SecretType", &[]),

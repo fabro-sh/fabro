@@ -110,6 +110,7 @@ impl SandboxProvider for DaytonaSandboxProvider {
         let SandboxCreateSpec::Daytona {
             config,
             github_app,
+            gitlab,
             run_id,
             clone_origin_url,
             clone_branch,
@@ -124,9 +125,10 @@ impl SandboxProvider for DaytonaSandboxProvider {
         let api_key = api_key.or_else(|| self.api_key.clone()).ok_or_else(|| {
             crate::Error::message(format!("{} is not configured", EnvVars::DAYTONA_API_KEY))
         })?;
-        let sandbox = DaytonaSandbox::new(
+        let sandbox = DaytonaSandbox::new_with_gitlab(
             config.as_ref().clone(),
             github_app,
+            gitlab,
             run_id,
             clone_origin_url,
             clone_branch,

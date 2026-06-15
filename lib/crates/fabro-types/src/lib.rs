@@ -91,7 +91,8 @@ pub use principal::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
 pub use pull_request::{
     CheckRun, CheckRunStatus, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
     PullRequestDetailsUnavailableReason, PullRequestGithubDetail, PullRequestLink, PullRequestMeta,
-    PullRequestRef, PullRequestResponse, PullRequestTimestamps, PullRequestUser,
+    PullRequestProvider, PullRequestRef, PullRequestResponse, PullRequestTimestamps,
+    PullRequestUser,
 };
 pub use repository::{RepositoryProvider, RepositoryRef};
 pub use run::{

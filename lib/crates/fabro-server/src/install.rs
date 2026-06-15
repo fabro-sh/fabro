@@ -17,11 +17,13 @@ use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::envfile::{EnvFileRemoval, EnvFileUpdate};
 use fabro_install::{
-    GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, InstallListenConfig, InstallPersistencePlan,
-    InstallSandboxSelection, OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV,
-    PendingSettingsWrite, VaultSecretWrite, merge_server_settings,
-    prepare_dev_token_write_for_install, write_github_app_settings, write_object_store_settings,
-    write_sandbox_settings, write_token_settings,
+    GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, GITLAB_APP_VAULT_KEYS,
+    GITLAB_INSTALL_SECRET_KEYS, GitlabAppInstallSettings, InstallListenConfig,
+    InstallPersistencePlan, InstallSandboxSelection,
+    OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite,
+    VaultSecretWrite, merge_server_settings, prepare_dev_token_write_for_install,
+    write_github_app_settings, write_gitlab_app_settings, write_gitlab_token_settings,
+    write_object_store_settings, write_sandbox_settings, write_token_settings,
 };
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
@@ -31,7 +33,7 @@ use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
-use fabro_types::settings::run::EnvironmentProvider;
+use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::server::ObjectStoreSettings;
 use fabro_types::settings::{is_wildcard_host, validate_public_url_with_label};
 use fabro_util::version::FABRO_VERSION;
@@ -242,6 +244,7 @@ struct PendingInstall {
     object_store:       Option<InstallObjectStoreState>,
     sandbox:            Option<InstallSandboxState>,
     github:             Option<GithubInstallState>,
+    gitlab:             Option<GitlabInstallState>,
     pending_github_app: Option<PendingGithubApp>,
 }
 
@@ -464,13 +467,6 @@ impl InstallSandboxState {
             InstallSandboxProviderState::Daytona { .. } => InstallSandboxSelection::Daytona,
         }
     }
-
-    fn to_environment_provider(&self) -> EnvironmentProvider {
-        match &self.provider {
-            InstallSandboxProviderState::Docker => EnvironmentProvider::Docker,
-            InstallSandboxProviderState::Daytona { .. } => EnvironmentProvider::Daytona,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -479,10 +475,43 @@ struct GithubTokenInput {
     username: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct GithubAppInput {
+    app_id:           String,
+    client_id:        String,
+    client_secret:    String,
+    private_key:      String,
+    slug:             String,
+    allowed_username: String,
+    webhook_secret:   Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct GitlabTokenInput {
+    base_url: String,
+    token:    String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct GitlabAppInput {
+    base_url:          String,
+    client_id:         String,
+    client_secret:     String,
+    token:             String,
+    allowed_usernames: Vec<String>,
+    allowed_groups:    Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 enum GithubInstallState {
     Token(GithubTokenInput),
     App(GithubAppInstall),
+}
+
+#[derive(Clone, Debug)]
+enum GitlabInstallState {
+    Token(GitlabTokenInput),
+    App(GitlabAppInstall),
 }
 
 #[derive(Clone, Debug)]
@@ -505,6 +534,16 @@ struct GithubAppInstall {
     client_secret:    String,
     webhook_secret:   Option<String>,
     pem:              String,
+}
+
+#[derive(Clone, Debug)]
+struct GitlabAppInstall {
+    base_url:          String,
+    client_id:         String,
+    client_secret:     String,
+    token:             String,
+    allowed_usernames: Vec<String>,
+    allowed_groups:    Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -547,6 +586,11 @@ struct GithubAppRedirectQuery {
 #[derive(Clone, Debug, Deserialize)]
 struct GithubUserResponse {
     login: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GitlabUserResponse {
+    username: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -634,6 +678,13 @@ pub fn build_install_router(state: InstallAppState) -> Router {
             post(post_install_github_token_test),
         )
         .route("/install/github/token", put(put_install_github_token))
+        .route("/install/github/app", put(put_install_github_app))
+        .route(
+            "/install/gitlab/token/test",
+            post(post_install_gitlab_token_test),
+        )
+        .route("/install/gitlab/token", put(put_install_gitlab_token))
+        .route("/install/gitlab/app", put(put_install_gitlab_app))
         .route(
             "/install/github/app/manifest",
             post(post_install_github_app_manifest),
@@ -749,15 +800,6 @@ fn install_listen_config(bind: &Bind) -> InstallListenConfig {
     }
 }
 
-/// The environments directory sits next to the active settings file, matching
-/// the server's own `environment_dir_for_active_config` derivation.
-fn install_environment_dir(config_path: &Path) -> PathBuf {
-    config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("environments")
-}
-
 async fn health() -> Response {
     Json(serde_json::json!({
         "status": "ok",
@@ -785,6 +827,7 @@ async fn get_install_session(
         "object_store": redacted_object_store(&pending_install),
         "sandbox": redacted_sandbox(&pending_install),
         "github": redacted_github(&pending_install),
+        "gitlab": redacted_gitlab(&pending_install),
         "prefill": {
             "canonical_url": detect_canonical_url(&headers),
             "object_store_local_root": default_local_object_store_root(&state),
@@ -975,17 +1018,20 @@ async fn post_install_sandbox_test(
 
     let api_key = {
         let pending_install = lock_unpoisoned(&state.pending_install, "install session");
-        match resolve_install_sandbox_state(pending_install.sandbox.as_ref(), input) {
+        match resolve_install_sandbox_state(
+            pending_install.sandbox.as_ref(),
+            input,
+        ) {
+            Ok(InstallSandboxState {
+                provider: InstallSandboxProviderState::Daytona { api_key },
+                ..
+            }) => api_key.expose_secret().to_string(),
             Ok(InstallSandboxState {
                 provider: InstallSandboxProviderState::Docker,
                 ..
             }) => {
                 return Json(serde_json::json!({ "ok": true })).into_response();
             }
-            Ok(InstallSandboxState {
-                provider: InstallSandboxProviderState::Daytona { api_key },
-                ..
-            }) => api_key.expose_secret().to_string(),
             Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
         }
     };
@@ -1035,7 +1081,10 @@ async fn put_install_sandbox(
     observe_operator(&state, &headers);
 
     let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
-    let selection = match resolve_install_sandbox_state(pending_install.sandbox.as_ref(), input) {
+    let selection = match resolve_install_sandbox_state(
+        pending_install.sandbox.as_ref(),
+        input,
+    ) {
         Ok(selection) => selection,
         Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
     };
@@ -1187,12 +1236,16 @@ fn object_store_validation_settings(
     match selection {
         InstallObjectStoreState::Local { .. } => None,
         InstallObjectStoreState::S3 { bucket, region, .. } => Some(ObjectStoreSettings::S3 {
-            bucket:     bucket.clone(),
-            region:     region.clone(),
+            bucket:     InterpString::parse(bucket),
+            region:     InterpString::parse(region),
             endpoint:   None,
             path_style: false,
         }),
     }
+}
+
+fn object_store_validation_prefixes() -> [&'static str; 3] {
+    ["artifacts", "slatedb", "run-logs"]
 }
 
 fn install_object_store_lookup<'a>(
@@ -1219,6 +1272,9 @@ async fn validate_install_object_store_selection(
         return Ok(());
     };
 
+    let client_options = ClientOptions::new()
+        .with_connect_timeout(VALIDATION_CONNECT_TIMEOUT)
+        .with_timeout(VALIDATION_TIMEOUT);
     let (bucket, region, manual_credentials) = match selection {
         InstallObjectStoreState::Local { .. } => return Ok(()),
         InstallObjectStoreState::S3 {
@@ -1226,38 +1282,37 @@ async fn validate_install_object_store_selection(
             region,
             credential_mode: _,
             manual_credentials,
-        } => (
-            bucket.as_str(),
-            region.as_str(),
-            manual_credentials.as_ref(),
-        ),
-    };
-
-    let client_options = ClientOptions::new()
-        .with_connect_timeout(VALIDATION_CONNECT_TIMEOUT)
-        .with_timeout(VALIDATION_TIMEOUT);
-    match timeout(
-        VALIDATION_TIMEOUT,
-        resolve_bucket_region(bucket, &client_options),
-    )
-    .await
-    {
-        Ok(Ok(actual_region)) if actual_region != region => {
-            bail!(
-                "Bucket {bucket} is in region {actual_region}, not {region}. Use the bucket's AWS region and try again."
-            );
-        }
-        Ok(Err(err)) => {
-            let rendered = err.to_string();
-            if rendered.contains("not found") {
-                bail!("Bucket {bucket} was not found.");
+        } => {
+            match timeout(
+                VALIDATION_TIMEOUT,
+                resolve_bucket_region(bucket, &client_options),
+            )
+            .await
+            {
+                Ok(Ok(actual_region)) if actual_region != *region => {
+                    bail!(
+                        "Bucket {bucket} is in region {actual_region}, not {region}. Use the bucket's AWS region and try again."
+                    );
+                }
+                Ok(Err(err)) => {
+                    let rendered = err.to_string();
+                    if rendered.contains("not found") {
+                        bail!("Bucket {bucket} was not found.");
+                    }
+                }
+                Err(_) => {
+                    bail!(VALIDATION_TIMEOUT_MSG);
+                }
+                Ok(Ok(_)) => {}
             }
+
+            (
+                Some(bucket.as_str()),
+                Some(region.as_str()),
+                manual_credentials.as_ref(),
+            )
         }
-        Err(_) => {
-            bail!(VALIDATION_TIMEOUT_MSG);
-        }
-        Ok(Ok(_)) => {}
-    }
+    };
 
     let server_env_path = Storage::new(state.storage_dir.as_ref())
         .runtime_directory()
@@ -1291,20 +1346,28 @@ async fn validate_install_object_store_selection(
         }
     };
     let probe = async {
-        tokio::try_join!(probe_prefix(0, "artifacts"), probe_prefix(1, "slatedb")).map(|_| ())
+        tokio::try_join!(
+            probe_prefix(0, object_store_validation_prefixes()[0]),
+            probe_prefix(1, object_store_validation_prefixes()[1]),
+            probe_prefix(2, object_store_validation_prefixes()[2]),
+        )
+        .map(|_| ())
     };
 
     match timeout(VALIDATION_TIMEOUT, probe).await {
         Ok(Ok(())) => Ok(()),
         Err(_) => bail!(VALIDATION_TIMEOUT_MSG),
-        Ok(Err((index, err))) => bail!(
-            "{}",
-            classify_object_store_validation_error(bucket, region, index, &err)
-        ),
+        Ok(Err((index, err))) => match (bucket, region) {
+            (Some(bucket), Some(region)) => bail!(
+                "{}",
+                classify_object_store_validation_error(bucket, region, index, &err)
+            ),
+            _ => Err(anyhow!(err.to_string())),
+        },
     }
 }
 
-const PREFIX_ACCESS_ERROR_MSG: &str = "Fabro reached the bucket but could not verify access to slatedb/ and artifacts/. Validation requires bucket list access plus object access under both prefixes.";
+const PREFIX_ACCESS_ERROR_MSG: &str = "Fabro reached the bucket but could not verify access to artifacts/, slatedb/, and run-logs/. Validation requires bucket list access plus object access under all three prefixes.";
 const VALIDATION_TIMEOUT_MSG: &str = "Timed out while checking S3 access. Verify the bucket, region, and network path, then try again.";
 
 fn bucket_credentials_error(bucket: &str, region: &str) -> String {
@@ -1387,9 +1450,183 @@ async fn put_install_github_token(
             .into_response();
     }
 
-    lock_unpoisoned(&state.pending_install, "install session").github =
-        Some(GithubInstallState::Token(input));
+    let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
+    pending_install.github = Some(GithubInstallState::Token(input));
+    pending_install.gitlab = None;
     info!(step = "github_token", "install step completed");
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn put_install_github_app(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InstallTokenQuery>,
+    Json(input): Json<GithubAppInput>,
+) -> Response {
+    if let Some(response) = require_valid_token(&state, &headers, query.token.as_deref()) {
+        return response;
+    }
+    observe_operator(&state, &headers);
+
+    if input.app_id.trim().is_empty()
+        || input.client_id.trim().is_empty()
+        || input.client_secret.trim().is_empty()
+        || input.private_key.trim().is_empty()
+        || input.slug.trim().is_empty()
+        || input.allowed_username.trim().is_empty()
+    {
+        return install_error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "app_id, client_id, client_secret, private_key, slug, and allowed_username are required",
+        );
+    }
+
+    let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
+    pending_install.pending_github_app = None;
+    pending_install.github = Some(GithubInstallState::App(GithubAppInstall {
+        owner:            GitHubAppOwner::Personal,
+        app_name:         input.slug.trim().to_string(),
+        allowed_username: input.allowed_username.trim().to_string(),
+        app_id:           input.app_id.trim().to_string(),
+        slug:             input.slug.trim().to_string(),
+        client_id:        input.client_id.trim().to_string(),
+        client_secret:    input.client_secret,
+        webhook_secret:   input.webhook_secret,
+        pem:              input.private_key,
+    }));
+    pending_install.gitlab = None;
+    info!(step = "github_app", "install step completed");
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn post_install_gitlab_token_test(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InstallTokenQuery>,
+    Json(input): Json<GitlabTokenInput>,
+) -> Response {
+    if let Some(response) = require_valid_token(&state, &headers, query.token.as_deref()) {
+        return response;
+    }
+    observe_operator(&state, &headers);
+
+    if input.base_url.trim().is_empty() || input.token.trim().is_empty() {
+        return install_error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "base_url and token are required",
+        );
+    }
+
+    match validate_gitlab_token(input.base_url.trim(), input.token.trim()).await {
+        Ok(username) => Json(serde_json::json!({ "username": username })).into_response(),
+        Err(err) => {
+            warn!(error = ?err, "install GitLab token validation failed");
+            install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err.to_string())
+        }
+    }
+}
+
+async fn put_install_gitlab_token(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InstallTokenQuery>,
+    Json(input): Json<GitlabTokenInput>,
+) -> Response {
+    if let Some(response) = require_valid_token(&state, &headers, query.token.as_deref()) {
+        return response;
+    }
+    observe_operator(&state, &headers);
+
+    if input.base_url.trim().is_empty() || input.token.trim().is_empty() {
+        return install_error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "base_url and token are required",
+        );
+    }
+    let base_url = match validate_install_gitlab_base_url(input.base_url.trim()) {
+        Ok(base_url) => base_url,
+        Err(err) => {
+            return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err.to_string());
+        }
+    };
+    if let Err(err) = validate_gitlab_token(&base_url, input.token.trim()).await {
+        warn!(error = ?err, "install GitLab token validation failed");
+        return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err.to_string());
+    }
+
+    let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
+    pending_install.pending_github_app = None;
+    pending_install.github = None;
+    pending_install.gitlab = Some(GitlabInstallState::Token(GitlabTokenInput {
+        base_url,
+        token: input.token,
+    }));
+    info!(step = "gitlab_token", "install step completed");
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn put_install_gitlab_app(
+    State(state): State<InstallAppState>,
+    headers: HeaderMap,
+    Query(query): Query<InstallTokenQuery>,
+    Json(input): Json<GitlabAppInput>,
+) -> Response {
+    if let Some(response) = require_valid_token(&state, &headers, query.token.as_deref()) {
+        return response;
+    }
+    observe_operator(&state, &headers);
+
+    if input.base_url.trim().is_empty()
+        || input.client_id.trim().is_empty()
+        || input.client_secret.trim().is_empty()
+        || input.token.trim().is_empty()
+    {
+        return install_error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "base_url, client_id, client_secret, token, and at least one allowed username or group are required",
+        );
+    }
+    let base_url = match validate_install_gitlab_base_url(input.base_url.trim()) {
+        Ok(base_url) => base_url,
+        Err(err) => {
+            return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err.to_string());
+        }
+    };
+    if let Err(err) = validate_gitlab_token(&base_url, input.token.trim()).await {
+        warn!(error = ?err, "install GitLab token validation failed");
+        return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err.to_string());
+    }
+    let allowed_usernames: Vec<String> = input
+        .allowed_usernames
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let allowed_groups: Vec<String> = input
+        .allowed_groups
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    if allowed_usernames.is_empty() && allowed_groups.is_empty() {
+        return install_error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "base_url, client_id, client_secret, token, and at least one allowed username or group are required",
+        );
+    }
+
+    let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
+    pending_install.pending_github_app = None;
+    pending_install.github = None;
+    pending_install.gitlab = Some(GitlabInstallState::App(GitlabAppInstall {
+        base_url,
+        client_id: input.client_id.trim().to_string(),
+        client_secret: input.client_secret,
+        token: input.token,
+        allowed_usernames,
+        allowed_groups,
+    }));
+    info!(step = "gitlab_app", "install step completed");
     StatusCode::NO_CONTENT.into_response()
 }
 
@@ -1506,6 +1743,7 @@ async fn get_install_github_app_redirect(
                 webhook_secret:   conversion.webhook_secret,
                 pem:              conversion.pem,
             }));
+            pending_install.gitlab = None;
             info!(step = "github_app", "install step completed");
             (StatusCode::FOUND, [(
                 header::LOCATION,
@@ -1548,9 +1786,11 @@ async fn post_install_finish(
     let Some(llm) = pending_install.llm else {
         return missing_step_response("llm");
     };
-    let Some(github) = pending_install.github else {
+    let github = pending_install.github;
+    let gitlab = pending_install.gitlab;
+    if github.is_none() && gitlab.is_none() {
         return missing_step_response("github");
-    };
+    }
 
     let mut settings_doc = toml::Value::Table(toml::Table::default());
     let install_listen = state.install_listen_config();
@@ -1608,11 +1848,24 @@ async fn post_install_finish(
     };
     let mut server_env_writes = object_store_env_plan.writes;
     let mut server_env_removals = object_store_env_plan.removals;
-    let mut vault_removals = Vec::new();
-    let mut dev_token: Option<String> = None;
-    let mut dev_token_write = None;
-    match github {
-        GithubInstallState::Token(github) => {
+    let mut vault_removals = vec![
+        EnvVars::FABRO_AZURE_ACR_USERNAME.to_string(),
+        EnvVars::FABRO_AZURE_ACR_PASSWORD.to_string(),
+    ];
+    let prepare_dev_token_write = || {
+        let dev_token_path = Storage::new(state.storage_dir.as_ref())
+            .runtime_directory()
+            .dev_token_path();
+        match prepare_dev_token_write_for_install(&dev_token_path) {
+            Ok(value) => Ok((Some(value.token), value.write)),
+            Err(err) => Err(install_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                err.to_string(),
+            )),
+        }
+    };
+    let (dev_token, dev_token_write) = match github {
+        Some(GithubInstallState::Token(github)) => {
             if let Err(err) = write_token_settings(&mut settings_doc) {
                 return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
             }
@@ -1628,22 +1881,12 @@ async fn post_install_finish(
                     .iter()
                     .map(|k| make_env_removal(k)),
             );
-            let dev_token_path = Storage::new(state.storage_dir.as_ref())
-                .runtime_directory()
-                .dev_token_path();
-            let prepared = match prepare_dev_token_write_for_install(&dev_token_path) {
+            match prepare_dev_token_write() {
                 Ok(value) => value,
-                Err(err) => {
-                    return install_error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        err.to_string(),
-                    );
-                }
-            };
-            dev_token_write = prepared.write;
-            dev_token = Some(prepared.token);
+                Err(response) => return response,
+            }
         }
-        GithubInstallState::App(github) => {
+        Some(GithubInstallState::App(github)) => {
             if let Err(err) = write_github_app_settings(
                 &mut settings_doc,
                 &github.app_id,
@@ -1681,7 +1924,82 @@ async fn post_install_finish(
                     .iter()
                     .map(|k| make_env_removal(k)),
             );
+            match prepare_dev_token_write() {
+                Ok(value) => value,
+                Err(response) => return response,
+            }
         }
+        None => {
+            vault_removals.extend(GITHUB_INSTALL_SECRET_KEYS.iter().map(|k| (*k).to_string()));
+            server_env_removals.extend(
+                GITHUB_INSTALL_SECRET_KEYS
+                    .iter()
+                    .map(|k| make_env_removal(k)),
+            );
+            match prepare_dev_token_write() {
+                Ok(value) => value,
+                Err(response) => return response,
+            }
+        }
+    };
+
+    if let Some(gitlab) = gitlab {
+        match gitlab {
+            GitlabInstallState::Token(gitlab) => {
+                if let Err(err) = write_gitlab_token_settings(&mut settings_doc, &gitlab.base_url) {
+                    return install_error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        err.to_string(),
+                    );
+                }
+                vault_secrets.push(VaultSecretWrite {
+                    name:        EnvVars::GITLAB_TOKEN.to_string(),
+                    value:       gitlab.token,
+                    secret_type: VaultSecretType::Token,
+                    description: None,
+                });
+                vault_removals.extend(GITLAB_APP_VAULT_KEYS.iter().map(|k| (*k).to_string()));
+            }
+            GitlabInstallState::App(gitlab) => {
+                if let Err(err) =
+                    write_gitlab_app_settings(&mut settings_doc, GitlabAppInstallSettings {
+                        base_url:          gitlab.base_url,
+                        client_id:         gitlab.client_id,
+                        allowed_usernames: gitlab.allowed_usernames,
+                        allowed_groups:    gitlab.allowed_groups,
+                    })
+                {
+                    return install_error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        err.to_string(),
+                    );
+                }
+                vault_secrets.push(VaultSecretWrite {
+                    name:        EnvVars::GITLAB_TOKEN.to_string(),
+                    value:       gitlab.token,
+                    secret_type: VaultSecretType::Token,
+                    description: None,
+                });
+                vault_secrets.push(VaultSecretWrite {
+                    name:        EnvVars::GITLAB_APP_CLIENT_SECRET.to_string(),
+                    value:       gitlab.client_secret,
+                    secret_type: VaultSecretType::Token,
+                    description: None,
+                });
+            }
+        }
+        server_env_removals.extend(
+            GITLAB_INSTALL_SECRET_KEYS
+                .iter()
+                .map(|k| make_env_removal(k)),
+        );
+    } else {
+        vault_removals.extend(GITLAB_INSTALL_SECRET_KEYS.iter().map(|k| (*k).to_string()));
+        server_env_removals.extend(
+            GITLAB_INSTALL_SECRET_KEYS
+                .iter()
+                .map(|k| make_env_removal(k)),
+        );
     }
 
     let settings_toml = match toml::to_string_pretty(&settings_doc) {
@@ -1749,17 +2067,6 @@ async fn post_install_finish(
             })),
         )
             .into_response();
-    }
-
-    // Seed the default environment next to the settings file. The server does
-    // not seed on startup, so install is the only place the default is written;
-    // existing files are preserved, so re-running install never clobbers edits.
-    let environment_dir = install_environment_dir(state.config_path.as_ref());
-    if let Err(err) = fabro_environment::seed_default_environment(
-        &environment_dir,
-        sandbox.to_environment_provider(),
-    ) {
-        warn!(error = %err, "failed to seed default environment after install");
     }
 
     if let Ok(settings) = fabro_config::ServerSettingsBuilder::from_toml(&settings_toml) {
@@ -1975,6 +2282,9 @@ fn completed_steps(pending_install: &PendingInstall) -> Vec<&'static str> {
     if pending_install.github.is_some() {
         steps.push("github");
     }
+    if pending_install.gitlab.is_some() {
+        steps.push("gitlab");
+    }
     steps
 }
 
@@ -2006,6 +2316,25 @@ fn redacted_github(pending_install: &PendingInstall) -> serde_json::Value {
                 "app_name": github.app_name,
                 "slug": github.slug,
                 "allowed_username": github.allowed_username,
+            }),
+        },
+    )
+}
+
+fn redacted_gitlab(pending_install: &PendingInstall) -> serde_json::Value {
+    pending_install.gitlab.as_ref().map_or_else(
+        || serde_json::Value::Null,
+        |gitlab| match gitlab {
+            GitlabInstallState::Token(gitlab) => serde_json::json!({
+                "strategy": "token",
+                "base_url": gitlab.base_url,
+            }),
+            GitlabInstallState::App(gitlab) => serde_json::json!({
+                "strategy": "app",
+                "base_url": gitlab.base_url,
+                "client_id": gitlab.client_id,
+                "allowed_usernames": gitlab.allowed_usernames,
+                "allowed_groups": gitlab.allowed_groups,
             }),
         },
     )
@@ -2062,7 +2391,7 @@ fn build_github_app_manifest(
             "issues": "write",
             "emails": "read"
         },
-        "default_events": []
+        "default_events": ["issues"]
     })
 }
 
@@ -2228,6 +2557,42 @@ async fn validate_github_token(state: &InstallAppState, token: &str) -> anyhow::
     Ok(body.login)
 }
 
+fn validate_install_gitlab_base_url(raw: &str) -> anyhow::Result<String> {
+    let url = parse_install_upstream_url(raw)?;
+    if url.scheme() == "http" {
+        let host = url.host_str().unwrap_or_default();
+        let local_or_test = matches!(host, "localhost" | "127.0.0.1" | "::1")
+            || host.ends_with(".localhost")
+            || host.ends_with(".test");
+        if !local_or_test {
+            bail!("GitLab base_url must use https unless it points to localhost or a test host");
+        }
+    }
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+async fn validate_gitlab_token(base_url: &str, token: &str) -> anyhow::Result<String> {
+    let base_url = validate_install_gitlab_base_url(base_url)?;
+    let base = fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url)
+        .map_err(|err| anyhow!("GitLab base_url is invalid: {err}"))?;
+    let client = install_http_client_for_url(base.url.as_str())?;
+    let response = client
+        .get(fabro_gitlab::oauth::user_url(&base))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(anyhow::Error::new)?;
+    if !response.status().is_success() {
+        bail!("GitLab returned {}", response.status());
+    }
+    let body: GitlabUserResponse = response
+        .json()
+        .await
+        .context("Failed to parse GitLab user response")?;
+    Ok(body.username)
+}
+
 async fn exchange_github_app_manifest_code(
     state: &InstallAppState,
     code: &str,
@@ -2276,8 +2641,10 @@ async fn write_artifact_store_metadata(
     settings: &ServerSettings,
     storage_dir: &Path,
 ) -> anyhow::Result<()> {
+    use fabro_types::settings::interp::InterpString;
+
     let mut settings = settings.clone();
-    settings.server.storage.root = storage_dir.display().to_string();
+    settings.server.storage.root = InterpString::parse(&storage_dir.display().to_string());
     let (object_store, prefix) = serve::build_artifact_object_store(&settings.server)?;
     let artifact_store = ArtifactStore::new(object_store, prefix);
     artifact_store.write_metadata(FABRO_VERSION).await?;
@@ -2334,11 +2701,16 @@ async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
 mod tests {
     use std::collections::HashMap;
     use std::io;
+    use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
 
+    use axum::body::{Body, to_bytes};
     use axum::extract::{Query, State};
-    use axum::http::{HeaderMap, StatusCode};
+    use axum::http::{HeaderMap, Request, StatusCode, header};
+    use axum::routing::post;
+    use axum::{Json, Router};
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use fabro_config::{Storage, envfile};
@@ -2348,16 +2720,19 @@ mod tests {
     use fabro_vault::SecretType as VaultSecretType;
     use object_store::Error as ObjectStoreError;
     use serde_json::json;
+    use tower::ServiceExt;
 
     use super::{
         DEFAULT_INSTALL_GITHUB_API_BASE_URL, GitHubAppOwner, GithubAppInstall, GithubInstallState,
-        InstallAppState, InstallAwsCredentialPair, InstallFinishGuard,
-        InstallObjectStoreCredentialMode, InstallObjectStoreInput, InstallObjectStoreProvider,
-        InstallObjectStoreState, InstallSandboxProviderState, InstallSandboxState,
-        InstallTokenQuery, LlmProvidersInput, PendingInstall, ServerConfigInput, ServerSecrets,
-        classify_object_store_validation_error, detect_canonical_url, install_object_store_lookup,
-        lock_unpoisoned, post_install_finish, provider_base_url_override,
-        resolve_install_object_store_state, token_is_valid, write_artifact_store_metadata,
+        GithubTokenInput, GitlabAppInstall, GitlabInstallState, GitlabTokenInput, InstallAppState,
+        InstallAwsCredentialPair, InstallFinishGuard, InstallObjectStoreCredentialMode,
+        InstallObjectStoreInput, InstallObjectStoreProvider, InstallObjectStoreState,
+        InstallSandboxProviderState, InstallSandboxState, InstallTokenQuery, LlmProvidersInput,
+        PendingGithubApp, PendingInstall, ServerConfigInput, ServerSecrets,
+        build_github_app_manifest, build_install_router, classify_object_store_validation_error,
+        detect_canonical_url, install_object_store_lookup, lock_unpoisoned, post_install_finish,
+        provider_base_url_override, resolve_install_object_store_state, token_is_valid,
+        write_artifact_store_metadata,
     };
 
     #[test]
@@ -2420,6 +2795,226 @@ mod tests {
         assert!(InstallFinishGuard::try_acquire(Arc::clone(&flag)).is_none());
         drop(first);
         assert!(InstallFinishGuard::try_acquire(flag).is_some());
+    }
+
+    #[tokio::test]
+    async fn install_gitlab_token_test_calls_api_user() {
+        let gitlab = twin_gitlab::TestGitLabServer::start().await;
+        gitlab.add_user("automation", "Automation", "bot@example.test");
+        let app = build_install_router(InstallAppState::for_test("install-token"));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/install/gitlab/token/test?token=install-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "base_url": gitlab.base_url(),
+                            "token": gitlab.automation_token(),
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn install_gitlab_app_records_redacted_session_state() {
+        let gitlab = twin_gitlab::TestGitLabServer::start().await;
+        gitlab.add_user("automation", "Automation", "bot@example.test");
+        let app = build_install_router(InstallAppState::for_test("install-token"));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/install/gitlab/app?token=install-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "base_url": gitlab.base_url(),
+                            "client_id": "  gitlab-client  ",
+                            "client_secret": "gitlab-client-secret",
+                            "token": gitlab.automation_token(),
+                            "allowed_usernames": [" automation ", " "],
+                            "allowed_groups": [" ipt/platform "],
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/install/session?token=install-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["completed_steps"], json!(["gitlab"]));
+        assert_eq!(value["gitlab"]["strategy"], "app");
+        assert_eq!(value["gitlab"]["base_url"], gitlab.base_url());
+        assert_eq!(value["gitlab"]["client_id"], "gitlab-client");
+        assert_eq!(value["gitlab"]["allowed_usernames"], json!(["automation"]));
+        assert_eq!(value["gitlab"]["allowed_groups"], json!(["ipt/platform"]));
+        assert!(value["gitlab"].get("token").is_none());
+        assert!(value["gitlab"].get("client_secret").is_none());
+    }
+
+    #[tokio::test]
+    async fn install_gitlab_token_clears_existing_github_source_control() {
+        let gitlab = twin_gitlab::TestGitLabServer::start().await;
+        gitlab.add_user("automation", "Automation", "bot@example.test");
+        let state = InstallAppState::for_test("install-token");
+        {
+            let mut pending = lock_unpoisoned(&state.pending_install, "install session");
+            pending.github = Some(GithubInstallState::Token(GithubTokenInput {
+                token:    "github-token".to_string(),
+                username: "octocat".to_string(),
+            }));
+            pending.pending_github_app = Some(PendingGithubApp {
+                state:            "state".to_string(),
+                owner:            GitHubAppOwner::Personal,
+                app_name:         "Fabro".to_string(),
+                allowed_username: "octocat".to_string(),
+                expires_at:       Instant::now() + Duration::from_secs(60),
+            });
+        }
+        let app = build_install_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/install/gitlab/token?token=install-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "base_url": gitlab.base_url(),
+                            "token": gitlab.automation_token(),
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let pending = lock_unpoisoned(&state.pending_install, "install session");
+        assert!(pending.github.is_none());
+        assert!(pending.pending_github_app.is_none());
+        assert!(matches!(pending.gitlab, Some(GitlabInstallState::Token(_))));
+    }
+
+    #[tokio::test]
+    async fn install_github_token_clears_existing_gitlab_source_control() {
+        let state = InstallAppState::for_test("install-token");
+        {
+            let mut pending = lock_unpoisoned(&state.pending_install, "install session");
+            pending.gitlab = Some(GitlabInstallState::Token(GitlabTokenInput {
+                base_url: "https://gitlab.example.com".to_string(),
+                token:    "gitlab-token".to_string(),
+            }));
+        }
+        let app = build_install_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/install/github/token?token=install-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "token": "github-token",
+                            "username": "octocat",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let pending = lock_unpoisoned(&state.pending_install, "install session");
+        assert!(pending.gitlab.is_none());
+        assert!(matches!(pending.github, Some(GithubInstallState::Token(_))));
+    }
+
+    #[tokio::test]
+    async fn install_github_app_redirect_clears_existing_gitlab_source_control() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let conversion_server = Router::new().route(
+            "/app-manifests/abc_123/conversions",
+            post(|| async {
+                Json(json!({
+                    "id": 12345,
+                    "slug": "fabro-test",
+                    "client_id": "Iv1.test",
+                    "client_secret": "github-client-secret",
+                    "webhook_secret": "github-webhook-secret",
+                    "pem": "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+                }))
+            }),
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, conversion_server).await.unwrap();
+        });
+
+        let state = InstallAppState::for_test("install-token").with_github_api_base_url(base_url);
+        {
+            let mut pending = lock_unpoisoned(&state.pending_install, "install session");
+            pending.gitlab = Some(GitlabInstallState::Token(GitlabTokenInput {
+                base_url: "https://gitlab.example.com".to_string(),
+                token:    "gitlab-token".to_string(),
+            }));
+            pending.pending_github_app = Some(PendingGithubApp {
+                state:            "state".to_string(),
+                owner:            GitHubAppOwner::Personal,
+                app_name:         "Fabro".to_string(),
+                allowed_username: "octocat".to_string(),
+                expires_at:       Instant::now() + Duration::from_secs(60),
+            });
+        }
+        let app = build_install_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/install/github/app/redirect?state=state&code=abc_123")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+        let pending = lock_unpoisoned(&state.pending_install, "install session");
+        assert!(pending.gitlab.is_none());
+        assert!(pending.pending_github_app.is_none());
+        assert!(matches!(pending.github, Some(GithubInstallState::App(_))));
     }
 
     #[tokio::test]
@@ -2534,6 +3129,31 @@ mod tests {
     }
 
     #[test]
+    fn build_github_app_manifest_includes_callback_urls_setup_url_and_events() {
+        let manifest = build_github_app_manifest(
+            "Fabro-test",
+            "https://install.example.com/callback",
+            "https://app.example.com/auth/callback/github",
+            "https://app.example.com/setup",
+        );
+
+        assert_eq!(manifest["url"], json!("https://fabro.sh"));
+        assert_eq!(
+            manifest["redirect_url"],
+            json!("https://install.example.com/callback"),
+        );
+        assert_eq!(
+            manifest["callback_urls"],
+            json!(["https://app.example.com/auth/callback/github"]),
+        );
+        assert_eq!(
+            manifest["setup_url"],
+            json!("https://app.example.com/setup")
+        );
+        assert_eq!(manifest["default_events"], json!(["issues"]));
+    }
+
+    #[test]
     fn install_provider_base_url_falls_back_to_catalog_base_url() {
         let state = InstallAppState::for_test("expected");
         let catalog = Catalog::builtin();
@@ -2559,6 +3179,184 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn finish_with_gitlab_app_writes_settings_and_runtime_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let config_path = dir.path().join("settings.toml");
+        let server_env_path = storage.runtime_directory().env_path();
+        envfile::write_env_file(
+            &server_env_path,
+            &HashMap::from([
+                (
+                    EnvVars::GITLAB_TOKEN.to_string(),
+                    "stale-gitlab-token".to_string(),
+                ),
+                (
+                    EnvVars::GITLAB_APP_CLIENT_SECRET.to_string(),
+                    "stale-gitlab-client-secret".to_string(),
+                ),
+                (
+                    EnvVars::GITHUB_TOKEN.to_string(),
+                    "stale-github-token".to_string(),
+                ),
+            ]),
+        )
+        .unwrap();
+
+        let mut stale_vault = fabro_vault::Vault::load(storage.secrets_path()).unwrap();
+        stale_vault
+            .set(
+                EnvVars::GITHUB_TOKEN,
+                "stale-github-token",
+                VaultSecretType::Token,
+                None,
+            )
+            .unwrap();
+
+        let state = InstallAppState::for_test_with_paths("install-token", dir.path(), &config_path);
+        {
+            let mut pending = lock_unpoisoned(&state.pending_install, "install session");
+            populate_finish_prerequisites(&mut pending, dir.path());
+            pending.gitlab = Some(GitlabInstallState::App(GitlabAppInstall {
+                base_url:          "https://gitlab.example.com/gitlab".to_string(),
+                client_id:         "gitlab-client".to_string(),
+                client_secret:     "gitlab-client-secret".to_string(),
+                token:             "gitlab-token".to_string(),
+                allowed_usernames: vec!["alice".to_string()],
+                allowed_groups:    vec!["platform/fabro-admins".to_string()],
+            }));
+        }
+
+        let response = post_install_finish(
+            State(state),
+            HeaderMap::new(),
+            Query(InstallTokenQuery {
+                token: Some("install-token".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let settings = std::fs::read_to_string(&config_path).unwrap();
+        let settings: toml::Value = toml::from_str(&settings).unwrap();
+        assert_eq!(
+            settings["server"]["integrations"]["gitlab"]["strategy"].as_str(),
+            Some("app")
+        );
+        assert_eq!(
+            settings["server"]["integrations"]["gitlab"]["base_url"].as_str(),
+            Some("https://gitlab.example.com/gitlab")
+        );
+        assert_eq!(
+            settings["server"]["integrations"]["gitlab"]["client_id"].as_str(),
+            Some("gitlab-client")
+        );
+        assert_eq!(
+            settings["server"]["auth"]["gitlab"]["allowed_usernames"][0].as_str(),
+            Some("alice")
+        );
+        assert_eq!(
+            settings["server"]["auth"]["gitlab"]["allowed_groups"][0].as_str(),
+            Some("platform/fabro-admins")
+        );
+
+        let server_env = envfile::read_env_file(&server_env_path).unwrap();
+        assert!(server_env.contains_key(EnvVars::SESSION_SECRET));
+        assert!(server_env.contains_key(EnvVars::FABRO_DEV_TOKEN));
+        assert!(!server_env.contains_key(EnvVars::GITLAB_TOKEN));
+        assert!(!server_env.contains_key(EnvVars::GITLAB_APP_CLIENT_SECRET));
+        assert!(!server_env.contains_key(EnvVars::GITHUB_TOKEN));
+
+        let vault = fabro_vault::Vault::load(storage.secrets_path()).unwrap();
+        assert_eq!(vault.get(EnvVars::GITHUB_TOKEN), None);
+        assert_eq!(vault.get(EnvVars::GITLAB_TOKEN), Some("gitlab-token"));
+        assert_eq!(
+            vault.get(EnvVars::GITLAB_APP_CLIENT_SECRET),
+            Some("gitlab-client-secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn finish_with_gitlab_token_removes_stale_gitlab_app_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let config_path = dir.path().join("settings.toml");
+        let server_env_path = storage.runtime_directory().env_path();
+        let mut stale_vault = fabro_vault::Vault::load(storage.secrets_path()).unwrap();
+        stale_vault
+            .set(
+                EnvVars::GITLAB_APP_CLIENT_SECRET,
+                "stale-client-secret",
+                VaultSecretType::Token,
+                None,
+            )
+            .unwrap();
+
+        let state = InstallAppState::for_test_with_paths("install-token", dir.path(), &config_path);
+        {
+            let mut pending = lock_unpoisoned(&state.pending_install, "install session");
+            populate_finish_prerequisites(&mut pending, dir.path());
+            pending.gitlab = Some(GitlabInstallState::Token(GitlabTokenInput {
+                base_url: "https://gitlab.example.com".to_string(),
+                token:    "gitlab-token".to_string(),
+            }));
+        }
+
+        let response = post_install_finish(
+            State(state),
+            HeaderMap::new(),
+            Query(InstallTokenQuery {
+                token: Some("install-token".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let settings = std::fs::read_to_string(&config_path).unwrap();
+        let settings: toml::Value = toml::from_str(&settings).unwrap();
+        assert_eq!(
+            settings["server"]["integrations"]["gitlab"]["strategy"].as_str(),
+            Some("token")
+        );
+        assert_eq!(
+            settings["server"]["integrations"]["gitlab"]["base_url"].as_str(),
+            Some("https://gitlab.example.com")
+        );
+        assert!(
+            settings
+                .get("server")
+                .and_then(toml::Value::as_table)
+                .and_then(|server| server.get("auth"))
+                .and_then(toml::Value::as_table)
+                .and_then(|auth| auth.get("gitlab"))
+                .is_none()
+        );
+
+        let server_env = envfile::read_env_file(&server_env_path).unwrap();
+        assert!(server_env.contains_key(EnvVars::FABRO_DEV_TOKEN));
+
+        let vault = fabro_vault::Vault::load(storage.secrets_path()).unwrap();
+        assert_eq!(vault.get(EnvVars::GITLAB_TOKEN), Some("gitlab-token"));
+        assert_eq!(vault.get(EnvVars::GITLAB_APP_CLIENT_SECRET), None);
+    }
+
+    fn populate_finish_prerequisites(pending: &mut PendingInstall, dir: &Path) {
+        pending.server = Some(ServerConfigInput {
+            canonical_url: "https://fabro.example".to_string(),
+        });
+        pending.object_store = Some(InstallObjectStoreState::Local {
+            root: dir.join("runs").display().to_string(),
+        });
+        pending.sandbox = Some(InstallSandboxState {
+            provider:    InstallSandboxProviderState::Docker,
+            allow_local: true,
+        });
+        pending.llm = Some(LlmProvidersInput {
+            providers: Vec::new(),
+        });
+    }
+
+    #[tokio::test]
     async fn write_artifact_store_metadata_creates_marker_in_overridden_storage_root() {
         use object_store::path::Path as ObjectPath;
 
@@ -2578,7 +3376,8 @@ methods = ["dev-token"]
             .unwrap();
 
         let mut overridden = settings.clone();
-        overridden.server.storage.root = dir.path().display().to_string();
+        overridden.server.storage.root =
+            fabro_types::settings::interp::InterpString::parse(&dir.path().display().to_string());
         let (object_store, prefix) =
             crate::serve::build_artifact_object_store(&overridden.server).unwrap();
         let marker = if prefix.is_empty() {

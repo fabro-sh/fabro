@@ -17,6 +17,7 @@ let teardownReactTestEnv: (() => void) | undefined;
 
 mock.module("../lib/queries", () => ({
   useServerSettings: () => ({ data: serverSettings }),
+  useSystemIntegrations: () => ({ data: undefined }),
   useSystemInfo: () => ({ data: systemInfo }),
   useSystemResources: () => ({ data: systemResources }),
 }));

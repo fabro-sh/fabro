@@ -1,13 +1,14 @@
 //! Sparse `[server]` settings layer definitions.
 
 use fabro_types::settings::server::{
-    GithubIntegrationStrategy, LogDestination, ObjectStoreProvider, ServerAuthMethod,
-    WebhookStrategy,
+    GithubIntegrationStrategy, GitlabIntegrationStrategy, LogDestination, ObjectStoreProvider,
+    ServerAuthMethod, WebhookStrategy,
 };
 use fabro_types::settings::{Duration, InterpString};
 use serde::{Deserialize, Serialize};
 
 use super::LogFilter;
+use super::combine::Combine;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
@@ -82,6 +83,8 @@ pub struct ServerAuthLayer {
     pub methods: Option<Vec<ServerAuthMethod>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github:  Option<ServerAuthGithubLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitlab:  Option<ServerAuthGitlabLayer>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -89,6 +92,15 @@ pub struct ServerAuthLayer {
 pub struct ServerAuthGithubLayer {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_usernames: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(default, deny_unknown_fields)]
+pub struct ServerAuthGitlabLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_usernames: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_groups:    Option<Vec<String>>,
 }
 
 /// `[server.sandbox]` — server-owned sandbox provider policy.
@@ -205,6 +217,8 @@ pub struct ServerIntegrationsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<GithubIntegrationLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitlab: Option<GitlabIntegrationLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack:  Option<SlackIntegrationLayer>,
 }
 
@@ -225,6 +239,31 @@ pub struct GithubIntegrationLayer {
     pub slug:      Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhooks:  Option<IntegrationWebhooksLayer>,
+}
+
+/// `[server.integrations.gitlab]` — GitLab token or OAuth app integration.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitlabIntegrationLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled:   Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy:  Option<GitlabIntegrationStrategy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url:  Option<InterpString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<InterpString>,
+}
+
+impl Combine for GitlabIntegrationLayer {
+    fn combine(self, other: Self) -> Self {
+        Self {
+            enabled:   self.enabled.or(other.enabled),
+            strategy:  self.strategy.or(other.strategy),
+            base_url:  self.base_url.or(other.base_url),
+            client_id: self.client_id.or(other.client_id),
+        }
+    }
 }
 
 /// `[server.integrations.slack]` — Slack workspace credentials and defaults.

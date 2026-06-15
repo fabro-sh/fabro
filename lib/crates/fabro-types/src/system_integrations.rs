@@ -28,6 +28,7 @@ pub struct SystemIntegrationStatus {
 #[strum(serialize_all = "snake_case")]
 pub enum IntegrationProvider {
     Github,
+    Gitlab,
     Slack,
 }
 

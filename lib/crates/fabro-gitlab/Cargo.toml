@@ -1,0 +1,25 @@
+[package]
+name = "fabro-gitlab"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "GitLab API helpers for Fabro"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+fabro-http.workspace = true
+fabro-types = { path = "../fabro-types" }
+percent-encoding.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true

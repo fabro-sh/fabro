@@ -1677,11 +1677,7 @@ mod tests {
             tool_call_id:       None,
             actor:              None,
             body:               EventBody::PullRequestLinked(PullRequestLinkedProps {
-                pull_request: crate::PullRequestLink {
-                    owner:  "acme".to_string(),
-                    repo:   "widgets".to_string(),
-                    number: 42,
-                },
+                pull_request: crate::PullRequestLink::github("acme", "widgets", 42),
             }),
         };
 
@@ -1714,11 +1710,7 @@ mod tests {
             tool_call_id:       None,
             actor:              None,
             body:               EventBody::PullRequestUnlinked(PullRequestUnlinkedProps {
-                pull_request: crate::PullRequestLink {
-                    owner:  "acme".to_string(),
-                    repo:   "widgets".to_string(),
-                    number: 42,
-                },
+                pull_request: crate::PullRequestLink::github("acme", "widgets", 42),
             }),
         };
 
