@@ -7,11 +7,17 @@ priority = 20
 enabled = false
 
 [providers.bedrock.auth]
-# An explicit Bedrock API key wins; SigV4 (the AWS default credential
+# An explicit Bedrock API key wins (from the process env, or the server
+# vault via `fabro secret set AWS_BEARER_TOKEN_BEDROCK`, matching every
+# other provider's env-then-vault order); SigV4 (the AWS default credential
 # chain, resolved at request time) is the fallback. `aws_sigv4` always
 # resolves, which is why this provider ships disabled: enabling it is the
 # operator's statement that AWS credentials are expected to work.
-credentials = ["env:AWS_BEARER_TOKEN_BEDROCK", "aws_sigv4"]
+credentials = [
+    "env:AWS_BEARER_TOKEN_BEDROCK",
+    "vault:AWS_BEARER_TOKEN_BEDROCK",
+    "aws_sigv4",
+]
 
 # To enable Bedrock, add the following to ~/.fabro/settings.toml:
 #
@@ -159,7 +165,10 @@ agent_profile = "openai"
 
 [models."amazon.nova-2-lite".limits]
 context_window = 1000000
-max_output = 65536
+# Bedrock caps Nova output at 65535 (2^16 - 1); 65536 trips
+# "maximum tokens exceeds the model limit of 65535" since the prompt handler
+# defaults max_tokens to max_output.
+max_output = 65535
 
 [models."amazon.nova-2-lite".features]
 tools = true
@@ -248,21 +257,23 @@ reasoning = true
 input_cost_per_mtok = 0.62
 output_cost_per_mtok = 1.85
 
-[models."qwen.qwen3-coder-next"]
-provider = "bedrock"
-display_name = "Qwen3 Coder Next (Bedrock)"
-family = "qwen3"
-billing_policy = "openai"
-agent_profile = "openai"
-
-[models."qwen.qwen3-coder-next".limits]
-context_window = 256000
-max_output = 16384
-
-[models."qwen.qwen3-coder-next".features]
-tools = true
-vision = false
-reasoning = false
+# Qwen3 Coder Next: omitted pending a verified Bedrock model/inference-profile
+# id. The fabro id is not itself a valid Bedrock identifier (Converse returns
+# "The provided model identifier is invalid"), so this row needs an explicit
+# `api_id` confirmed against `aws bedrock list-inference-profiles` before it
+# ships. Re-add with:
+#   [models."qwen.qwen3-coder-next"]
+#   provider = "bedrock"
+#   api_id = "<verified bedrock id>"
+#   display_name = "Qwen3 Coder Next (Bedrock)"
+#   family = "qwen3"
+#   billing_policy = "openai"
+#   agent_profile = "openai"
+#   [models."qwen.qwen3-coder-next".limits]
+#   context_window = 256000
+#   max_output = 16384
+#   [models."qwen.qwen3-coder-next".features]
+#   tools = true
 
 [models."moonshotai.kimi-k2.5"]
 provider = "bedrock"

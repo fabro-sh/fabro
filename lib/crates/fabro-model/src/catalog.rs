@@ -2007,9 +2007,11 @@ enabled = true
             provider.base_url.as_deref(),
             Some("https://bedrock-runtime.us-east-1.amazonaws.com")
         );
-        // Bearer key first, SigV4 chain as the fallback.
+        // Bearer key first (env then vault, like every other provider), SigV4
+        // chain as the fallback.
         assert_eq!(provider.auth.as_ref().unwrap().credentials, vec![
             CredentialRef::Env("AWS_BEARER_TOKEN_BEDROCK".to_string()),
+            CredentialRef::Vault("AWS_BEARER_TOKEN_BEDROCK".to_string()),
             CredentialRef::AwsSigv4,
         ]);
 
