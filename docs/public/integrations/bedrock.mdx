@@ -7,8 +7,17 @@ description: "Route Fabro models through Amazon Bedrock with SigV4 or API-key au
 
 ## Prerequisites
 
-- An AWS account with [Bedrock model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) granted for the models you want
+- An AWS account with [Bedrock model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) granted for the models you want (see [Model access and approvals](#model-access-and-approvals))
 - Either a [Bedrock API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html) or working AWS credentials (environment keys, profile, IMDS, IRSA, SSO)
+
+## Model access and approvals
+
+Access is granted per Region and varies by model family — enabling the provider in Fabro is necessary but not sufficient.
+
+- **IAM.** Converse and ConverseStream have no dedicated IAM actions; they're authorized by `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream`. A Bedrock API key additionally needs `bedrock:CallWithBearerToken`.
+- **Anthropic (Claude) models** require a one-time use-case submission in the Bedrock console (**Model access**) before first use, and the grant is **per Region** — approval in `us-east-1` does not cover `us-east-2`. An un-approved Region returns `AccessDeniedException`.
+- **Third-party models** (OpenAI gpt-oss, DeepSeek, Qwen, Moonshot, Z.AI, MiniMax, NVIDIA) auto-enable on first call, which needs `aws-marketplace:Subscribe` and `aws-marketplace:ViewSubscriptions` on the calling principal. The first call may take a moment while the subscription activates.
+- **Claude Fable 5 / Mythos-class** models additionally require opting into data sharing via the [Data Retention API](https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html) (`provider_data_share`, 30-day retention) **before** they can be invoked. With the account/project on the `default` retention mode, Converse rejects the request with *"data retention mode 'default' is not available for this model."*
 
 ## Enable the provider
 
@@ -40,8 +49,19 @@ export AWS_BEARER_TOKEN_BEDROCK=bedrock-api-key-...
 
 ```toml
 [llm.providers.bedrock.auth]
-credentials = ["env:AWS_BEARER_TOKEN_BEDROCK", "aws_sigv4"]
+credentials = ["env:AWS_BEARER_TOKEN_BEDROCK", "vault:AWS_BEARER_TOKEN_BEDROCK", "aws_sigv4"]
 ```
+
+The key resolves from the process environment first, then the server vault (`fabro secret set`), then falls back to SigV4 — so on a server, prefer `secret set`. To select a non-default AWS profile for SigV4, set `AWS_PROFILE` (it, and the rest of the AWS credential-chain variables, are passed through to workflow workers).
+
+<Warning>
+**Bearer-vs-SigV4 precedence.** Because the bearer key is tried before SigV4, setting `AWS_BEARER_TOKEN_BEDROCK` makes the `bedrock` (Converse) provider authenticate with that key too — not just the `bedrock-openai` mantle provider below. If your key is valid only for mantle (it lacks `bedrock:InvokeModel*` on the runtime), every Converse model then fails with *"Authentication failed."* To run Converse models on SigV4 while using a mantle-only bearer key for GPT-5.x, pin the Converse provider to SigV4 explicitly:
+
+```toml
+[llm.providers.bedrock.auth]
+credentials = ["aws_sigv4"]
+```
+</Warning>
 
 ## Included models
 
@@ -52,12 +72,12 @@ The built-in catalog curates Converse-capable models, using cross-region inferen
 | `us.anthropic.claude-sonnet-4-6` | Provider default; Anthropic cache billing |
 | `us.anthropic.claude-opus-4-8` | Anthropic cache billing |
 | `us.anthropic.claude-haiku-4-5` | Provider small default |
-| `us.anthropic.claude-fable-5` | Frontier; sampling params pinned by Bedrock (Fabro drops `temperature`/`top_p` automatically); requires the account-level `provider_data_share` opt-in |
+| `us.anthropic.claude-fable-5` | Frontier; sampling params pinned by Bedrock (Fabro drops `temperature`/`top_p` automatically); requires the account-level `provider_data_share` data-sharing opt-in (see [Model access](#model-access-and-approvals)) |
 | `openai.gpt-oss-120b`, `openai.gpt-oss-20b` | OpenAI open-weights |
 | `amazon.nova-2-lite` | Vision |
 | `meta.llama4-maverick` | Vision |
 | `mistral.mistral-large-3`, `mistral.devstral-2` | |
-| `deepseek.v3-2`, `qwen.qwen3-coder-next` | |
+| `deepseek.v3-2` | |
 | `moonshotai.kimi-k2.5`, `zai.glm-5` | |
 | `minimax.minimax-m2.5`, `nvidia.nemotron-3-super` | |
 
@@ -114,9 +134,17 @@ Bedrock-specific request fields pass through verbatim via `provider_options.bedr
 
 **"no AWS credentials provider found"** — Neither an API key nor any AWS chain source resolved. Set `AWS_BEARER_TOKEN_BEDROCK`, or configure standard AWS credentials.
 
-**`AccessDeniedException` / 403** — The IAM principal lacks `bedrock:InvokeModel*` for the model, or model access has not been granted in the Bedrock console for your Region.
+**`AccessDeniedException` / 403** — The IAM principal lacks `bedrock:InvokeModel*` for the model, or model access has not been granted in the Bedrock console for your Region (Claude needs the per-Region use-case approval; third-party models need `aws-marketplace:Subscribe`).
+
+**"Authentication failed: Please make sure your API Key is valid."** — A Bedrock API key was sent but rejected by the runtime. Common cause: a mantle-scoped key used against Converse — see the bearer-vs-SigV4 [warning above](#configure-credentials). Verify the key is valid for `bedrock-runtime` in this Region, or pin Converse to `aws_sigv4`.
+
+**"data retention mode 'default' is not available for this model"** — Fable 5 / Mythos-class models require opting into data sharing first; see [Model access and approvals](#model-access-and-approvals).
+
+**"The provided model identifier is invalid"** — The wire id sent to Bedrock isn't a recognized model or inference-profile id. Set an explicit `api_id` (from `aws bedrock list-inference-profiles`) on the model entry.
 
 **`ValidationException` mentioning on-demand throughput** — The model requires an inference-profile id; use the `us.`/`global.`-prefixed id from the catalog rather than the bare model id.
+
+**`ValidationException` mentioning maximum tokens** — The requested `max_tokens` exceeds the model's per-request output cap; lower the model's `max_output` to the documented limit.
 
 **`ThrottlingException`** — Account-level Bedrock quota; consider cross-region inference profiles or a quota increase.
 
