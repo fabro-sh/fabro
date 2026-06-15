@@ -147,18 +147,20 @@ client_id = "Iv1.test"
     let now = chrono::Utc::now();
     auth_tokens
         .insert_refresh_token(RefreshToken {
-            token_hash:   hash_refresh_secret("integration-refresh"),
-            chain_id:     Uuid::new_v4(),
-            identity:     fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
-            login:        "octocat".to_string(),
-            name:         "The Octocat".to_string(),
-            email:        "octocat@example.com".to_string(),
-            avatar_url:   String::new(),
-            issued_at:    now,
-            expires_at:   now + chrono::Duration::days(30),
-            last_used_at: now,
-            used:         false,
-            user_agent:   "fabro-cli/it".to_string(),
+            token_hash:              hash_refresh_secret("integration-refresh"),
+            chain_id:                Uuid::new_v4(),
+            identity:                fabro_types::IdpIdentity::new("https://github.com", "12345")
+                .unwrap(),
+            login:                   "octocat".to_string(),
+            name:                    "The Octocat".to_string(),
+            email:                   "octocat@example.com".to_string(),
+            avatar_url:              String::new(),
+            gitlab_group_authorized: false,
+            issued_at:               now,
+            expires_at:              now + chrono::Duration::days(30),
+            last_used_at:            now,
+            used:                    false,
+            user_agent:              "fabro-cli/it".to_string(),
         })
         .await
         .unwrap();

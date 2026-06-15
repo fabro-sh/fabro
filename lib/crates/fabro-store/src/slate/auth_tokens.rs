@@ -14,19 +14,25 @@ const REPLAY_REVOCATION_TTL_SECONDS: i64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefreshToken {
-    pub token_hash:   [u8; 32],
-    pub chain_id:     Uuid,
-    pub identity:     IdpIdentity,
-    pub login:        String,
-    pub name:         String,
-    pub email:        String,
+    pub token_hash:              [u8; 32],
+    pub chain_id:                Uuid,
+    pub identity:                IdpIdentity,
+    pub login:                   String,
+    pub name:                    String,
+    pub email:                   String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub avatar_url:   String,
-    pub issued_at:    DateTime<Utc>,
-    pub expires_at:   DateTime<Utc>,
-    pub last_used_at: DateTime<Utc>,
-    pub used:         bool,
-    pub user_agent:   String,
+    pub avatar_url:              String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub gitlab_group_authorized: bool,
+    pub issued_at:               DateTime<Utc>,
+    pub expires_at:              DateTime<Utc>,
+    pub last_used_at:            DateTime<Utc>,
+    pub used:                    bool,
+    pub user_agent:              String,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Record for RefreshToken {
@@ -234,6 +240,7 @@ mod tests {
             name: "The Octocat".to_string(),
             email: "octocat@example.com".to_string(),
             avatar_url: String::new(),
+            gitlab_group_authorized: false,
             issued_at: now,
             expires_at: now + ChronoDuration::days(30),
             last_used_at: now,

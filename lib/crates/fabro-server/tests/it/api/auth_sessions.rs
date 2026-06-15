@@ -128,6 +128,7 @@ fn refresh_token(hash: [u8; 32], chain_id: Uuid) -> RefreshToken {
         name: "The Octocat".to_string(),
         email: "octocat@example.com".to_string(),
         avatar_url: String::new(),
+        gitlab_group_authorized: false,
         issued_at: now - chrono::Duration::days(1),
         expires_at: now + chrono::Duration::days(30),
         last_used_at: now,

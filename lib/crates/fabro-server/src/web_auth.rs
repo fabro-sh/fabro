@@ -1801,18 +1801,19 @@ client_id = "gitlab-client-id"
             .await
             .unwrap()
             .insert_refresh_token(RefreshToken {
-                token_hash:   [7; 32],
-                chain_id:     Uuid::new_v4(),
-                identity:     identity.clone(),
-                login:        "alice".to_string(),
-                name:         "Alice Example".to_string(),
-                email:        "alice@example.test".to_string(),
-                avatar_url:   String::new(),
-                issued_at:    now,
-                expires_at:   now + chrono::Duration::days(30),
-                last_used_at: now,
-                used:         false,
-                user_agent:   "fabro-cli/0.1".to_string(),
+                token_hash:              [7; 32],
+                chain_id:                Uuid::new_v4(),
+                identity:                identity.clone(),
+                login:                   "alice".to_string(),
+                name:                    "Alice Example".to_string(),
+                email:                   "alice@example.test".to_string(),
+                avatar_url:              String::new(),
+                gitlab_group_authorized: false,
+                issued_at:               now,
+                expires_at:              now + chrono::Duration::days(30),
+                last_used_at:            now,
+                used:                    false,
+                user_agent:              "fabro-cli/0.1".to_string(),
             })
             .await
             .unwrap();

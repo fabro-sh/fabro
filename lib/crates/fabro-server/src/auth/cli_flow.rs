@@ -493,19 +493,23 @@ async fn token(
     let refresh_expires_at = now + chrono::Duration::days(REFRESH_TOKEN_TTL_DAYS);
     let refresh_secret = random_secret();
     let refresh_token = format!("{REFRESH_TOKEN_PREFIX}{refresh_secret}");
+    let gitlab_group_authorized = entry.authorization_validated
+        && auth_method_for_identity(state.as_ref(), &entry.identity) == AuthMethod::Gitlab
+        && !login_allowed(state.as_ref(), &entry.identity, &entry.login);
     let refresh_row = RefreshToken {
-        token_hash:   hash_refresh_secret(&refresh_secret),
-        chain_id:     uuid::Uuid::new_v4(),
-        identity:     entry.identity.clone(),
-        login:        entry.login.clone(),
-        name:         entry.name.clone(),
-        email:        entry.email.clone(),
-        avatar_url:   entry.avatar_url.clone(),
-        issued_at:    now,
-        expires_at:   refresh_expires_at,
+        token_hash: hash_refresh_secret(&refresh_secret),
+        chain_id: uuid::Uuid::new_v4(),
+        identity: entry.identity.clone(),
+        login: entry.login.clone(),
+        name: entry.name.clone(),
+        email: entry.email.clone(),
+        avatar_url: entry.avatar_url.clone(),
+        gitlab_group_authorized,
+        issued_at: now,
+        expires_at: refresh_expires_at,
         last_used_at: now,
-        used:         false,
-        user_agent:   sanitize_user_agent(request_user_agent(&headers)),
+        used: false,
+        user_agent: sanitize_user_agent(request_user_agent(&headers)),
     };
     let auth_tokens = match state.store_ref().refresh_tokens().await {
         Ok(store) => store,
@@ -675,7 +679,7 @@ async fn refresh(
         ConsumeOutcome::Rotated(old, new_row) => (old, *new_row),
     };
 
-    if !login_allowed(state.as_ref(), &old.identity, &old.login) {
+    if !old.gitlab_group_authorized && !login_allowed(state.as_ref(), &old.identity, &old.login) {
         auth_slot.replace(RequestAuthContext::invalid());
         if let Err(err) = auth_tokens.delete_chain(old.chain_id).await {
             warn!(error = %err, chain_id = %old.chain_id, "Failed to revoke deauthorized refresh token chain");
@@ -1103,19 +1107,21 @@ fn next_refresh_row(
     let fallback_identity = fabro_types::IdpIdentity::new("https://github.com", "0")
         .expect("static identity should be valid");
     RefreshToken {
-        token_hash:   hash_refresh_secret(next_secret),
-        chain_id:     existing.map_or_else(uuid::Uuid::new_v4, |token| token.chain_id),
-        identity:     existing
+        token_hash:              hash_refresh_secret(next_secret),
+        chain_id:                existing.map_or_else(uuid::Uuid::new_v4, |token| token.chain_id),
+        identity:                existing
             .map_or_else(|| fallback_identity.clone(), |token| token.identity.clone()),
-        login:        existing.map_or_else(String::new, |token| token.login.clone()),
-        name:         existing.map_or_else(String::new, |token| token.name.clone()),
-        email:        existing.map_or_else(String::new, |token| token.email.clone()),
-        avatar_url:   existing.map_or_else(String::new, |token| token.avatar_url.clone()),
-        issued_at:    now,
-        expires_at:   now + chrono::Duration::days(REFRESH_TOKEN_TTL_DAYS),
-        last_used_at: now,
-        used:         false,
-        user_agent:   user_agent.to_string(),
+        login:                   existing.map_or_else(String::new, |token| token.login.clone()),
+        name:                    existing.map_or_else(String::new, |token| token.name.clone()),
+        email:                   existing.map_or_else(String::new, |token| token.email.clone()),
+        avatar_url:              existing
+            .map_or_else(String::new, |token| token.avatar_url.clone()),
+        gitlab_group_authorized: existing.is_some_and(|token| token.gitlab_group_authorized),
+        issued_at:               now,
+        expires_at:              now + chrono::Duration::days(REFRESH_TOKEN_TTL_DAYS),
+        last_used_at:            now,
+        used:                    false,
+        user_agent:              user_agent.to_string(),
     }
 }
 
@@ -1693,38 +1699,40 @@ client_id = "gitlab-client-id"
     fn refresh_row(secret: &str) -> RefreshToken {
         let now = chrono::Utc::now();
         RefreshToken {
-            token_hash:   hash_refresh_secret(secret),
-            chain_id:     Uuid::new_v4(),
-            identity:     fabro_types::IdpIdentity::new("https://github.com", "12345")
+            token_hash:              hash_refresh_secret(secret),
+            chain_id:                Uuid::new_v4(),
+            identity:                fabro_types::IdpIdentity::new("https://github.com", "12345")
                 .expect("identity should be valid"),
-            login:        "octocat".to_string(),
-            name:         "The Octocat".to_string(),
-            email:        "octocat@example.com".to_string(),
-            avatar_url:   "https://example.com/octocat.png".to_string(),
-            issued_at:    now,
-            expires_at:   now + chrono::Duration::days(30),
-            last_used_at: now,
-            used:         false,
-            user_agent:   "fabro-test".to_string(),
+            login:                   "octocat".to_string(),
+            name:                    "The Octocat".to_string(),
+            email:                   "octocat@example.com".to_string(),
+            avatar_url:              "https://example.com/octocat.png".to_string(),
+            gitlab_group_authorized: false,
+            issued_at:               now,
+            expires_at:              now + chrono::Duration::days(30),
+            last_used_at:            now,
+            used:                    false,
+            user_agent:              "fabro-test".to_string(),
         }
     }
 
     fn gitlab_refresh_row(secret: &str) -> RefreshToken {
         let now = chrono::Utc::now();
         RefreshToken {
-            token_hash:   hash_refresh_secret(secret),
-            chain_id:     Uuid::new_v4(),
-            identity:     fabro_types::IdpIdentity::new("https://gitlab.example", "bob")
+            token_hash:              hash_refresh_secret(secret),
+            chain_id:                Uuid::new_v4(),
+            identity:                fabro_types::IdpIdentity::new("https://gitlab.example", "bob")
                 .expect("identity should be valid"),
-            login:        "bob".to_string(),
-            name:         "Bob Example".to_string(),
-            email:        "bob@example.test".to_string(),
-            avatar_url:   String::new(),
-            issued_at:    now,
-            expires_at:   now + chrono::Duration::days(30),
-            last_used_at: now,
-            used:         false,
-            user_agent:   "fabro-test".to_string(),
+            login:                   "bob".to_string(),
+            name:                    "Bob Example".to_string(),
+            email:                   "bob@example.test".to_string(),
+            avatar_url:              String::new(),
+            gitlab_group_authorized: true,
+            issued_at:               now,
+            expires_at:              now + chrono::Duration::days(30),
+            last_used_at:            now,
+            used:                    false,
+            user_agent:              "fabro-test".to_string(),
         }
     }
 
@@ -2710,7 +2718,7 @@ client_id = "gitlab-client-id"
     }
 
     #[tokio::test]
-    async fn refresh_denies_gitlab_group_authorized_session_without_username_allowlist() {
+    async fn refresh_allows_gitlab_group_authorized_session_without_username_allowlist() {
         let (app, state) = test_router_with_auth_mode(
             gitlab_group_settings("https://fabro.example"),
             gitlab_auth_mode(),
@@ -2737,11 +2745,22 @@ client_id = "gitlab-client-id"
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(response.status(), StatusCode::OK);
         let body: serde_json::Value =
             serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
-        assert_eq!(body["error"], "unauthorized");
+        assert_eq!(body["subject"]["login"], "bob");
+
+        let rotated_secret = body["refresh_token"]
+            .as_str()
+            .and_then(|token| token.strip_prefix(auth::REFRESH_TOKEN_PREFIX))
+            .expect("response should include a refresh token");
+        let rotated = auth_tokens
+            .find_refresh_token(&hash_refresh_secret(rotated_secret))
+            .await
+            .unwrap()
+            .expect("rotated refresh token should be stored");
+        assert!(rotated.gitlab_group_authorized);
     }
 
     #[tokio::test]
