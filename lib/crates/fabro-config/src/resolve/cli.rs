@@ -47,13 +47,13 @@ fn resolve_target(
 ) -> Option<CliTargetSettings> {
     match target {
         Some(CliTargetLayer::Http { url }) => {
-            super::warn_if_demoted_template("cli.target.http.url", url.as_deref());
+            super::warn_if_demoted_template("cli.target.url", url.as_deref());
             Some(CliTargetSettings::Http {
                 url: require_string(url.as_ref(), "cli.target.url", errors),
             })
         }
         Some(CliTargetLayer::Unix { path }) => {
-            super::warn_if_demoted_template("cli.target.unix.path", path.as_deref());
+            super::warn_if_demoted_template("cli.target.path", path.as_deref());
             Some(CliTargetSettings::Unix {
                 path: require_string(path.as_ref(), "cli.target.path", errors),
             })
@@ -80,8 +80,8 @@ fn resolve_exec(exec: Option<&CliExecLayer>) -> CliExecSettings {
             .prevent_idle_sleep
             .expect("defaults.toml should provide cli.exec.prevent_idle_sleep"),
         model:              CliExecModelSettings {
-            provider: exec.model.as_ref().and_then(|model| model.provider.clone()),
-            name:     exec.model.as_ref().and_then(|model| model.name.clone()),
+            provider: model.and_then(|model| model.provider.clone()),
+            name:     model.and_then(|model| model.name.clone()),
         },
         agent:              CliExecAgentSettings {
             permissions: exec.agent.as_ref().and_then(|agent| agent.permissions),
