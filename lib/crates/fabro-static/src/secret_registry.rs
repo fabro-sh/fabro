@@ -17,6 +17,7 @@ const BOOTSTRAP_SECRETS: &[&str] = &[
 const OPTIONAL_VAULT_SECRETS: &[&str] = &[
     EnvVars::ANTHROPIC_API_KEY,
     EnvVars::AWS_BEARER_TOKEN_BEDROCK,
+    EnvVars::BEDROCK_API_KEY,
     EnvVars::BRAVE_SEARCH_API_KEY,
     EnvVars::FABRO_SLACK_APP_TOKEN,
     EnvVars::FABRO_SLACK_BOT_TOKEN,
@@ -88,6 +89,7 @@ mod tests {
             EnvVars::BRAVE_SEARCH_API_KEY,
             EnvVars::ANTHROPIC_API_KEY,
             EnvVars::AWS_BEARER_TOKEN_BEDROCK,
+            EnvVars::BEDROCK_API_KEY,
             EnvVars::GEMINI_API_KEY,
             EnvVars::INCEPTION_API_KEY,
             EnvVars::KIMI_API_KEY,

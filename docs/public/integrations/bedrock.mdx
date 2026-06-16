@@ -37,10 +37,12 @@ The SigV4 signing region is derived from `base_url` — change it to your Region
 
 Two auth modes, tried in order:
 
-**Bedrock API key** (simplest): store the key and Fabro sends it as a bearer token.
+**Bedrock API key** (simplest): store the key and Fabro sends it as a bearer token. The key is read from either `AWS_BEARER_TOKEN_BEDROCK` (AWS's canonical name, also honored by the AWS SDKs and CLI) or `BEDROCK_API_KEY` (Fabro's `<PROVIDER>_API_KEY` convention) — use whichever you prefer.
 
 ```bash
 fabro secret set AWS_BEARER_TOKEN_BEDROCK bedrock-api-key-...
+# or, equivalently
+fabro secret set BEDROCK_API_KEY bedrock-api-key-...
 # or for standalone local runs
 export AWS_BEARER_TOKEN_BEDROCK=bedrock-api-key-...
 ```
@@ -49,10 +51,10 @@ export AWS_BEARER_TOKEN_BEDROCK=bedrock-api-key-...
 
 ```toml
 [llm.providers.bedrock.auth]
-credentials = ["env:AWS_BEARER_TOKEN_BEDROCK", "vault:AWS_BEARER_TOKEN_BEDROCK", "aws_sigv4"]
+credentials = ["env:AWS_BEARER_TOKEN_BEDROCK", "env:BEDROCK_API_KEY", "vault:AWS_BEARER_TOKEN_BEDROCK", "vault:BEDROCK_API_KEY", "aws_sigv4"]
 ```
 
-The key resolves from the process environment first, then the server vault (`fabro secret set`), then falls back to SigV4 — so on a server, prefer `secret set`. To select a non-default AWS profile for SigV4, set `AWS_PROFILE` (it, and the rest of the AWS credential-chain variables, are passed through to workflow workers).
+The key resolves from the process environment first (either name), then the server vault (`fabro secret set`), then falls back to SigV4 — so on a server, prefer `secret set`. To select a non-default AWS profile for SigV4, set `AWS_PROFILE` (it, and the rest of the AWS credential-chain variables, are passed through to workflow workers).
 
 <Warning>
 **Bearer-vs-SigV4 precedence.** Because the bearer key is tried before SigV4, setting `AWS_BEARER_TOKEN_BEDROCK` makes the `bedrock` (Converse) provider authenticate with that key too — not just the `bedrock-openai` mantle provider below. If your key is valid only for mantle (it lacks `bedrock:InvokeModel*` on the runtime), every Converse model then fails with *"Authentication failed."* To run Converse models on SigV4 while using a mantle-only bearer key for GPT-5.x, pin the Converse provider to SigV4 explicitly:
@@ -132,7 +134,7 @@ Bedrock-specific request fields pass through verbatim via `provider_options.bedr
 
 ## Troubleshooting
 
-**"no AWS credentials provider found"** — Neither an API key nor any AWS chain source resolved. Set `AWS_BEARER_TOKEN_BEDROCK`, or configure standard AWS credentials.
+**"no AWS credentials provider found"** — Neither an API key nor any AWS chain source resolved. Set `AWS_BEARER_TOKEN_BEDROCK` (or `BEDROCK_API_KEY`), or configure standard AWS credentials.
 
 **`AccessDeniedException` / 403** — The IAM principal lacks `bedrock:InvokeModel*` for the model, or model access has not been granted in the Bedrock console for your Region (Claude needs the per-Region use-case approval; third-party models need `aws-marketplace:Subscribe`).
 

@@ -8,14 +8,19 @@ enabled = false
 
 [providers.bedrock.auth]
 # An explicit Bedrock API key wins (from the process env, or the server
-# vault via `fabro secret set AWS_BEARER_TOKEN_BEDROCK`, matching every
-# other provider's env-then-vault order); SigV4 (the AWS default credential
-# chain, resolved at request time) is the fallback. `aws_sigv4` always
-# resolves, which is why this provider ships disabled: enabling it is the
-# operator's statement that AWS credentials are expected to work.
+# vault via `fabro secret set <name>`, matching every other provider's
+# env-then-vault order); SigV4 (the AWS default credential chain, resolved
+# at request time) is the fallback. `aws_sigv4` always resolves, which is
+# why this provider ships disabled: enabling it is the operator's statement
+# that AWS credentials are expected to work. The key is read from either
+# `AWS_BEARER_TOKEN_BEDROCK` (the AWS-canonical name, also honored by the
+# AWS SDKs/CLI) or `BEDROCK_API_KEY` (Fabro's `<PROVIDER>_API_KEY`
+# convention); the env names are checked before the vault.
 credentials = [
     "env:AWS_BEARER_TOKEN_BEDROCK",
+    "env:BEDROCK_API_KEY",
     "vault:AWS_BEARER_TOKEN_BEDROCK",
+    "vault:BEDROCK_API_KEY",
     "aws_sigv4",
 ]
 
@@ -26,8 +31,8 @@ credentials = [
 # base_url = "https://bedrock-runtime.<your-region>.amazonaws.com"
 #
 # The signing region is derived from the base_url. Authenticate with
-# either a Bedrock API key (AWS_BEARER_TOKEN_BEDROCK) or any AWS default
-# credential chain source (env keys, profile, IMDS, IRSA, SSO).
+# either a Bedrock API key (AWS_BEARER_TOKEN_BEDROCK or BEDROCK_API_KEY) or
+# any AWS default credential chain source (env keys, profile, IMDS, IRSA, SSO).
 #
 # Model ids use cross-region inference profiles (`us.` / `global.`
 # prefixes) where on-demand access requires them. Pricing rows are

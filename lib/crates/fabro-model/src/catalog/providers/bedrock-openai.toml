@@ -7,7 +7,12 @@ priority = 19
 enabled = false
 
 [providers.bedrock-openai.auth]
-credentials = ["env:AWS_BEARER_TOKEN_BEDROCK", "vault:AWS_BEARER_TOKEN_BEDROCK"]
+credentials = [
+    "env:AWS_BEARER_TOKEN_BEDROCK",
+    "env:BEDROCK_API_KEY",
+    "vault:AWS_BEARER_TOKEN_BEDROCK",
+    "vault:BEDROCK_API_KEY",
+]
 
 # OpenAI's frontier models on Bedrock (GPT-5.5/5.4) are served ONLY by the
 # bedrock-mantle endpoint's OpenAI Responses API — they are not reachable

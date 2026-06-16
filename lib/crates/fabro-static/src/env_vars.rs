@@ -42,6 +42,7 @@ impl EnvVars {
     pub const ANTHROPIC_API_KEY: &'static str = "ANTHROPIC_API_KEY";
     pub const AWS_BEARER_TOKEN_BEDROCK: &'static str = "AWS_BEARER_TOKEN_BEDROCK";
     pub const ANTHROPIC_BASE_URL: &'static str = "ANTHROPIC_BASE_URL";
+    pub const BEDROCK_API_KEY: &'static str = "BEDROCK_API_KEY";
     pub const BRAVE_SEARCH_API_KEY: &'static str = "BRAVE_SEARCH_API_KEY";
     pub const CHATGPT_ACCOUNT_ID: &'static str = "CHATGPT_ACCOUNT_ID";
     pub const GEMINI_API_KEY: &'static str = "GEMINI_API_KEY";
@@ -184,6 +185,7 @@ mod tests {
             EnvVars::ANTHROPIC_API_KEY,
             EnvVars::ANTHROPIC_BASE_URL,
             EnvVars::AWS_BEARER_TOKEN_BEDROCK,
+            EnvVars::BEDROCK_API_KEY,
             EnvVars::BRAVE_SEARCH_API_KEY,
             EnvVars::CHATGPT_ACCOUNT_ID,
             EnvVars::GEMINI_API_KEY,

@@ -23,7 +23,8 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     // AWS chain on every request so STS/SSO/IRSA sessions can refresh, which
     // means the chain's *inputs* must survive `env_clear()` in the worker, not
     // a snapshot taken at launch. We pass the identity surface only (static
-    // keys, session token, the Bedrock bearer key, profile/region selectors,
+    // keys, session token, the Bedrock bearer key under either accepted name,
+    // profile/region selectors,
     // and the web-identity/ECS role vars); HOME already carries the shared
     // `~/.aws` config + SSO cache. Endpoint/metadata overrides
     // (AWS_ENDPOINT_*, AWS_METADATA_ENDPOINT, AWS_IMDSV1_FALLBACK) are
@@ -33,6 +34,7 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::AWS_SECRET_ACCESS_KEY,
     EnvVars::AWS_SESSION_TOKEN,
     EnvVars::AWS_BEARER_TOKEN_BEDROCK,
+    EnvVars::BEDROCK_API_KEY,
     EnvVars::AWS_PROFILE,
     EnvVars::AWS_REGION,
     EnvVars::AWS_DEFAULT_REGION,
