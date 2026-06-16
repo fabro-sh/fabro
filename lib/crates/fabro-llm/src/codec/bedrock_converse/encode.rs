@@ -4,7 +4,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map, Value, json};
 
-use crate::codec::{CodecCtx, EncodedRequest, extract_system_prompt};
+use crate::codec::{CodecCtx, EncodedRequest, extract_system_prompt, merge_named_provider_options};
 use crate::error::Error;
 use crate::types::{ContentPart, Message, Request, Role, ToolChoice};
 
@@ -226,13 +226,28 @@ fn encode_content_part(part: &ContentPart) -> Option<Value> {
     }
 }
 
-/// `image/png` → `png`; missing/odd media types fall back to `default`.
-fn media_format(media_type: Option<&str>, default: &str) -> String {
-    media_type
-        .and_then(|m| m.split('/').next_back())
-        .filter(|s| !s.is_empty())
-        .unwrap_or(default)
-        .to_string()
+/// Convert common MIME types into Bedrock's media `format` enum values.
+fn media_format<'a>(media_type: Option<&str>, default: &'a str) -> &'a str {
+    match media_type {
+        Some("image/png") => "png",
+        Some("image/jpeg" | "image/jpg") => "jpeg",
+        Some("image/gif") => "gif",
+        Some("image/webp") => "webp",
+        Some("application/pdf") => "pdf",
+        Some("text/plain") => "txt",
+        Some("text/markdown") => "md",
+        Some("text/html") => "html",
+        Some("text/csv") => "csv",
+        Some(
+            "application/msword"
+            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ) => "docx",
+        Some(
+            "application/vnd.ms-excel"
+            | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ) => "xlsx",
+        _ => default,
+    }
 }
 
 fn encode_tool_config(request: &Request, caching: bool) -> Option<Value> {
@@ -302,18 +317,18 @@ fn tool_input_schema(parameters: &Value) -> Value {
 /// `cachePoint` at the end of the second-to-last user message, so the prior
 /// turns stay cached while the newest turn streams.
 fn apply_cache_point_to_conversation_prefix(messages: &mut [Value]) {
-    let user_indices: Vec<usize> = messages
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| m.get("role").and_then(Value::as_str) == Some("user"))
-        .map(|(i, _)| i)
-        .collect();
-
-    if user_indices.len() < 2 {
-        return;
+    let mut previous_user = None;
+    let mut last_user = None;
+    for (index, message) in messages.iter().enumerate() {
+        if message.get("role").and_then(Value::as_str) == Some("user") {
+            previous_user = last_user;
+            last_user = Some(index);
+        }
     }
 
-    let target = user_indices[user_indices.len() - 2];
+    let Some(target) = previous_user else {
+        return;
+    };
     if let Some(content) = messages[target]
         .get_mut("content")
         .and_then(Value::as_array_mut)
@@ -327,18 +342,7 @@ fn apply_cache_point_to_conversation_prefix(messages: &mut [Value]) {
 /// codec). This is the passthrough for `additionalModelRequestFields`,
 /// `guardrailConfig`, `serviceTier`, and other Converse extensions.
 fn merge_provider_options(body: &mut Value, provider_options: Option<&Value>, provider_name: &str) {
-    let Some(opts) = provider_options.and_then(|opts| opts.get(provider_name)) else {
-        return;
-    };
-    let Some(body_map) = body.as_object_mut() else {
-        return;
-    };
-    let Some(opts_map) = opts.as_object() else {
-        return;
-    };
-    for (key, value) in opts_map {
-        body_map.insert(key.clone(), value.clone());
-    }
+    merge_named_provider_options(body, provider_options, provider_name);
 }
 
 #[cfg(test)]
@@ -535,6 +539,14 @@ mod tests {
         let block = &encoded.body["messages"][0]["content"][0]["reasoningContent"]["reasoningText"];
         assert_eq!(block["text"], "prior thoughts");
         assert_eq!(block["signature"], "sig-1");
+    }
+
+    #[test]
+    fn media_format_maps_common_mime_types_to_bedrock_formats() {
+        assert_eq!(media_format(Some("image/jpeg"), "png"), "jpeg");
+        assert_eq!(media_format(Some("text/plain"), "pdf"), "txt");
+        assert_eq!(media_format(Some("text/markdown"), "pdf"), "md");
+        assert_eq!(media_format(Some("application/octet-stream"), "pdf"), "pdf");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use super::translate;
 use super::wire::ApiRequest;
-use crate::codec::{CodecCtx, EncodedRequest};
+use crate::codec::{CodecCtx, EncodedRequest, merge_named_provider_options};
 
 /// Build the Chat Completions request for `ctx.request`. `stream` toggles the
 /// `stream` body field. The body is assembled as a `serde_json::Value` so
@@ -63,19 +63,7 @@ pub(super) fn merge_provider_options(
     provider_options: Option<&serde_json::Value>,
     provider_name: &str,
 ) {
-    let Some(opts) = provider_options.and_then(|opts| opts.get(provider_name)) else {
-        return;
-    };
-    let Some(body_map) = body.as_object_mut() else {
-        return;
-    };
-    let Some(opts_map) = opts.as_object() else {
-        return;
-    };
-
-    for (key, value) in opts_map {
-        body_map.insert(key.clone(), value.clone());
-    }
+    merge_named_provider_options(body, provider_options, provider_name);
 }
 
 #[cfg(test)]

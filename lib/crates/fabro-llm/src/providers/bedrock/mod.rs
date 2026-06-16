@@ -9,7 +9,7 @@
 pub(crate) mod eventstream;
 pub(crate) mod sigv4;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +22,8 @@ use tokio::sync::OnceCell;
 use tokio::time;
 
 use crate::adapter_registry::AdapterConfig;
+#[cfg(test)]
+use crate::adapter_registry::AdapterKindOptions;
 use crate::attachments::{self, AttachmentPolicy};
 use crate::codec::bedrock_converse::BedrockConverse;
 use crate::codec::{Codec, CodecCtx, CodecParams, EncodedRequest, RawEvent, StreamDecoder};
@@ -61,8 +63,16 @@ pub(crate) fn build(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, E
         })?;
     let adapter = match config.auth_header {
         Some(ApiKeyHeader::AwsSigv4) => Adapter::new_sigv4(base_url)?,
-        Some(ApiKeyHeader::Bearer(token) | ApiKeyHeader::Custom { value: token, .. }) => {
-            Adapter::new_api_key(token, base_url)?
+        Some(ApiKeyHeader::Bearer(token)) => Adapter::new_api_key(token, base_url)?,
+        Some(ApiKeyHeader::Custom { name, .. }) => {
+            return Err(Error::Configuration {
+                message: format!(
+                    "bedrock provider '{}' does not support custom auth header '{}' (use bearer \
+                     credentials or aws_sigv4)",
+                    config.provider_id, name
+                ),
+                source:  None,
+            });
         }
         None => {
             return Err(Error::Configuration {
@@ -76,6 +86,9 @@ pub(crate) fn build(config: AdapterConfig) -> Result<Arc<dyn ProviderAdapter>, E
         }
     };
     let mut adapter = adapter.with_name(config.provider_id);
+    if !config.extra_headers.is_empty() {
+        adapter = adapter.with_default_headers(config.extra_headers);
+    }
     if let Some(catalog) = config.catalog {
         adapter = adapter.with_catalog(catalog);
     }
@@ -133,6 +146,12 @@ impl Adapter {
     }
 
     #[must_use]
+    pub fn with_default_headers(mut self, headers: HashMap<String, String>) -> Self {
+        self.http = self.http.with_default_headers(headers);
+        self
+    }
+
+    #[must_use]
     pub fn with_timeout(self, timeout: AdapterTimeout) -> Self {
         Self {
             http: self.http.with_timeout(timeout),
@@ -182,6 +201,9 @@ impl Adapter {
         for (key, value) in &self.http.default_headers {
             req = req.header(key, value);
         }
+        for (key, value) in &encoded.headers {
+            req = req.header(key, value);
+        }
 
         req = match &self.auth {
             BedrockAuth::ApiKey(token) => req.bearer_auth(token).body(body),
@@ -189,7 +211,7 @@ impl Adapter {
                 let signer = cell
                     .get_or_try_init(Sigv4Signer::from_default_chain)
                     .await?;
-                signer.sign_post(req, &self.region, &url, &body).await?
+                signer.sign_post(req, &self.region, &url, body).await?
             }
         };
 
@@ -378,11 +400,12 @@ fn region_from_base_url(base_url: &str) -> Result<String, Error> {
         ),
         source:  None,
     };
-    let host = base_url
-        .strip_prefix("https://")
-        .or_else(|| base_url.strip_prefix("http://"))
-        .unwrap_or(base_url);
-    let host = host.split('/').next().unwrap_or(host);
+    #[expect(
+        clippy::disallowed_types,
+        reason = "Bedrock region derivation needs URL host parsing; the raw URL is not logged or rendered."
+    )]
+    let parsed = fabro_http::Url::parse(base_url).map_err(|_| invalid())?;
+    let host = parsed.host_str().ok_or_else(invalid)?;
     let rest = host
         .strip_prefix("bedrock-runtime-fips.")
         .or_else(|| host.strip_prefix("bedrock-runtime."))
@@ -473,10 +496,17 @@ mod tests {
             "https://example.com",
             "https://bedrock.us-east-1.amazonaws.com",
             "https://bedrock-runtime.amazonaws.com",
-            "https://bedrock-runtime.UPPER.amazonaws.com",
         ] {
             assert!(region_from_base_url(url).is_err(), "{url}");
         }
+    }
+
+    #[test]
+    fn region_normalizes_hostname_case() {
+        assert_eq!(
+            region_from_base_url("https://bedrock-runtime.US-EAST-1.amazonaws.com").unwrap(),
+            "us-east-1"
+        );
     }
 
     #[tokio::test]
@@ -509,6 +539,55 @@ mod tests {
         assert_eq!(response.finish_reason, FinishReason::Stop);
         assert_eq!(response.usage.input_tokens, 8);
         assert_eq!(response.provider, "bedrock");
+    }
+
+    #[tokio::test]
+    async fn complete_applies_default_headers() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/model/m/converse")
+                .header("x-fabro-test", "present");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}},
+                    "stopReason": "end_turn",
+                    "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}
+                }));
+        });
+
+        let adapter = test_adapter(&server).with_default_headers(HashMap::from([(
+            "x-fabro-test".to_string(),
+            "present".to_string(),
+        )]));
+        let response = adapter.complete(&make_request("m")).await.unwrap();
+
+        mock.assert();
+        assert_eq!(response.text(), "ok");
+    }
+
+    #[test]
+    fn factory_rejects_custom_auth_header() {
+        let result = build(AdapterConfig {
+            provider_id:   "bedrock".to_string(),
+            auth_header:   Some(ApiKeyHeader::Custom {
+                name:  "x-api-key".to_string(),
+                value: "secret".to_string(),
+            }),
+            base_url:      Some("https://bedrock-runtime.us-east-1.amazonaws.com".to_string()),
+            extra_headers: HashMap::new(),
+            kind_options:  AdapterKindOptions::None,
+            catalog:       None,
+        });
+
+        let Err(err) = result else {
+            panic!("expected custom auth header to be rejected");
+        };
+        assert!(
+            err.to_string()
+                .contains("does not support custom auth header")
+        );
     }
 
     #[tokio::test]

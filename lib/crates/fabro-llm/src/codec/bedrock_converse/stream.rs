@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use super::decode::{map_stop_reason, token_counts_from_usage};
-use crate::codec::{CodecCtx, RawEvent, StreamDecoder};
+use crate::codec::{CodecCtx, RawEvent, StreamDecoder, parse_tool_arguments_or_empty};
 use crate::error::Error;
 use crate::types::{
     ContentPart, FinishReason, Message, RateLimitInfo, Response, Role, StreamEvent, ThinkingData,
@@ -222,11 +222,7 @@ impl ConverseStreamDecoder {
                 // the buffer empty; canonically that is an empty object, not
                 // null (matching the anthropic/openai codecs, and what Bedrock
                 // wants back on re-encode).
-                let arguments = if input.trim().is_empty() {
-                    serde_json::json!({})
-                } else {
-                    serde_json::from_str(&input).unwrap_or(Value::Null)
-                };
+                let arguments = parse_tool_arguments_or_empty(&input);
                 let mut tool_call = ToolCall::new(&id, &name, arguments);
                 tool_call.raw_arguments = Some(input);
                 self.parts.push(ContentPart::ToolCall(tool_call.clone()));

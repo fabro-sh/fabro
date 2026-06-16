@@ -176,9 +176,8 @@ pub struct CostRates {
 /// `Vault`/`Env` reference a stored secret resolved to an auth header.
 /// `AwsSigv4` is an opaque source: the credential comes from the AWS default
 /// credential chain and the request is SigV4-signed rather than carrying a
-/// static secret. Folding this into the credential list (instead of a separate
-/// `scheme` field) keeps the "where do credentials come from" decision in one
-/// place and makes invalid combinations unrepresentable.
+/// static secret. It is only valid on Bedrock providers, which catalog
+/// validation enforces before adapter construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(into = "String", try_from = "String")]
 pub enum CredentialRef {
@@ -616,6 +615,13 @@ pub enum CatalogBuildError {
     },
     #[error("provider '{provider}' API-key auth must declare at least one credential")]
     EmptyApiKeyCredentials { provider: ProviderId },
+    #[error(
+        "provider '{provider}' uses aws_sigv4 credentials, but adapter '{adapter}' does not support SigV4"
+    )]
+    UnsupportedAwsSigv4Credential {
+        provider: ProviderId,
+        adapter:  AdapterKind,
+    },
     #[error("provider identifier '{identifier}' is declared by both '{first}' and '{second}'")]
     DuplicateProviderIdentifier {
         identifier: String,
@@ -1355,7 +1361,7 @@ fn build_providers(
         let codec = resolve_provider_codec(&provider_id, adapter, settings.codec)?;
         let agent_profile = settings.agent_profile.unwrap_or(defaults.agent_profile);
         let auth = settings.auth.clone();
-        validate_provider_auth(&provider_id, auth.as_ref())?;
+        validate_provider_auth(&provider_id, adapter, auth.as_ref())?;
 
         providers.push(CatalogProvider {
             id: provider_id,
@@ -1441,12 +1447,25 @@ fn resolve_model_codec(
 
 fn validate_provider_auth(
     provider: &ProviderId,
+    adapter: AdapterKind,
     auth: Option<&ProviderAuthConfig>,
 ) -> Result<(), CatalogBuildError> {
     match auth {
         Some(auth) if auth.credentials.is_empty() => {
             Err(CatalogBuildError::EmptyApiKeyCredentials {
                 provider: provider.clone(),
+            })
+        }
+        Some(auth)
+            if adapter != AdapterKind::Bedrock
+                && auth
+                    .credentials
+                    .iter()
+                    .any(|credential| matches!(credential, CredentialRef::AwsSigv4)) =>
+        {
+            Err(CatalogBuildError::UnsupportedAwsSigv4Credential {
+                provider: provider.clone(),
+                adapter,
             })
         }
         _ => Ok(()),
@@ -3805,6 +3824,23 @@ credentials = []
             Catalog::from_settings(&empty_api_key_credentials).unwrap_err(),
             CatalogBuildError::EmptyApiKeyCredentials { provider }
                 if provider == ProviderId::new("test")
+        ));
+
+        let sigv4_on_openai = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.test.auth]
+credentials = ["aws_sigv4"]
+"#,
+        );
+        assert!(matches!(
+            Catalog::from_settings(&sigv4_on_openai).unwrap_err(),
+            CatalogBuildError::UnsupportedAwsSigv4Credential { provider, adapter }
+                if provider == ProviderId::new("test") && adapter == AdapterKind::OpenAi
         ));
     }
 

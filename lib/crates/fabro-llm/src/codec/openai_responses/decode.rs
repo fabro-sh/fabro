@@ -3,7 +3,7 @@
 use serde::Deserialize;
 
 use super::wire::{ApiResponse, ApiUsage, InputTokensResponse};
-use crate::codec::CodecCtx;
+use crate::codec::{CodecCtx, parse_tool_arguments_or_empty};
 use crate::error::Error;
 use crate::types::{
     ContentPart, FinishReason, Message, RateLimitInfo, Response, Role, TokenCounts, ToolCall,
@@ -75,7 +75,7 @@ pub(super) fn tool_call_from_item(item: &serde_json::Value, custom: bool) -> Too
             .get("arguments")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("{}");
-        let arguments = serde_json::from_str(args_str).unwrap_or_else(|_| serde_json::json!({}));
+        let arguments = parse_tool_arguments_or_empty(args_str);
         let mut tc = ToolCall::new(call_id, name, arguments);
         tc.raw_arguments = Some(args_str.to_string());
         tc

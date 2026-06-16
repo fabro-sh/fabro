@@ -7,7 +7,7 @@
 
 use super::SYNTHETIC_TOOL_NAME;
 use super::decode::{convert_synthetic_tool_to_text, map_finish_reason, refusal_error};
-use crate::codec::{RawEvent, StreamDecoder};
+use crate::codec::{RawEvent, StreamDecoder, parse_tool_arguments_or_empty};
 use crate::error::{Error, ProviderErrorDetail, ProviderErrorKind};
 use crate::types::{
     ContentPart, FinishReason, Message, RateLimitInfo, Response, Role, StreamEvent, ThinkingData,
@@ -253,8 +253,7 @@ impl SseAccumulator {
             }
             Some(ContentBlockKind::ToolUse { id, name }) => {
                 let raw_args = std::mem::take(&mut self.current_tool_args);
-                let arguments =
-                    serde_json::from_str(&raw_args).unwrap_or_else(|_| serde_json::json!({}));
+                let arguments = parse_tool_arguments_or_empty(&raw_args);
                 let mut tool_call = ToolCall::new(id, name, arguments);
                 tool_call.raw_arguments = Some(raw_args);
                 self.content_parts

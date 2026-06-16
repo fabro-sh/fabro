@@ -23,18 +23,17 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     // AWS chain on every request so STS/SSO/IRSA sessions can refresh, which
     // means the chain's *inputs* must survive `env_clear()` in the worker, not
     // a snapshot taken at launch. We pass the identity surface only (static
-    // keys, session token, the Bedrock bearer key under either accepted name,
-    // profile/region selectors,
-    // and the web-identity/ECS role vars); HOME already carries the shared
+    // keys, session token, profile/region selectors, and the web-identity/ECS
+    // role vars); HOME already carries the shared
     // `~/.aws` config + SSO cache. Endpoint/metadata overrides
     // (AWS_ENDPOINT_*, AWS_METADATA_ENDPOINT, AWS_IMDSV1_FALLBACK) are
     // deliberately excluded — they belong to the server's S3 path, not to the
-    // worker's outbound model calls.
+    // worker's outbound model calls. Bedrock bearer API keys are optional LLM
+    // provider secrets, so server workers read them through the vault rather
+    // than inheriting process env.
     EnvVars::AWS_ACCESS_KEY_ID,
     EnvVars::AWS_SECRET_ACCESS_KEY,
     EnvVars::AWS_SESSION_TOKEN,
-    EnvVars::AWS_BEARER_TOKEN_BEDROCK,
-    EnvVars::BEDROCK_API_KEY,
     EnvVars::AWS_PROFILE,
     EnvVars::AWS_REGION,
     EnvVars::AWS_DEFAULT_REGION,
@@ -122,6 +121,7 @@ mod tests {
             ("AWS_SECRET_ACCESS_KEY".to_string(), "secret".to_string()),
             ("AWS_SESSION_TOKEN".to_string(), "session".to_string()),
             ("AWS_BEARER_TOKEN_BEDROCK".to_string(), "bearer".to_string()),
+            ("BEDROCK_API_KEY".to_string(), "alias-bearer".to_string()),
             ("AWS_REGION".to_string(), "us-east-2".to_string()),
             ("SESSION_SECRET".to_string(), "leak".to_string()),
             ("FABRO_JWT_PRIVATE_KEY".to_string(), "leak".to_string()),
@@ -170,13 +170,11 @@ mod tests {
             Some("session")
         );
         assert_eq!(
-            actual.get("AWS_BEARER_TOKEN_BEDROCK").map(String::as_str),
-            Some("bearer")
-        );
-        assert_eq!(
             actual.get("AWS_REGION").map(String::as_str),
             Some("us-east-2")
         );
+        assert!(!actual.contains_key("AWS_BEARER_TOKEN_BEDROCK"));
+        assert!(!actual.contains_key("BEDROCK_API_KEY"));
         assert!(!actual.contains_key("FABRO_LOG_DESTINATION"));
         assert_eq!(
             actual.get("FABRO_DEV_TOKEN").map(String::as_str),

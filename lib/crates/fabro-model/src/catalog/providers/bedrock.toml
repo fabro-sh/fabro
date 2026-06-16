@@ -41,9 +41,9 @@ credentials = [
 # ---------- Anthropic Claude ----------
 #
 # Claude bills Anthropic-style cache reads/writes, so these rows override
-# the provider's billing default. Claude Fable 5 is deliberately absent:
-# its Bedrock deployment pins sampling parameters (temperature must be
-# unset) that the Converse route does not gate yet — a named follow-up.
+# the provider's billing default. Claude Fable 5 appears at the end of this
+# file because its Bedrock deployment pins sampling parameters and requires an
+# extra data-sharing opt-in.
 
 [models."us.anthropic.claude-sonnet-4-6"]
 provider = "bedrock"

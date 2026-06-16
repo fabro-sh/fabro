@@ -144,7 +144,7 @@ impl Sigv4Signer {
         mut req: fabro_http::RequestBuilder,
         region: &str,
         url: &str,
-        body: &[u8],
+        body: Vec<u8>,
     ) -> Result<fabro_http::RequestBuilder, Error> {
         let credentials = self.current_credentials().await?;
         let now = SystemTime::now()
@@ -155,11 +155,11 @@ impl Sigv4Signer {
             })?
             .as_secs();
         for (name, value) in
-            Self::signed_headers(&credentials, region, SERVICE, "POST", url, body, now)?
+            Self::signed_headers(&credentials, region, SERVICE, "POST", url, &body, now)?
         {
             req = req.header(name, value);
         }
-        Ok(req.body(body.to_vec()))
+        Ok(req.body(body))
     }
 }
 
