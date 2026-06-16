@@ -406,17 +406,18 @@ impl CredentialResolver {
                     .ok_or_else(|| ResolveError::NotConfigured(provider_id.clone()))?;
                 let auth_header = auth_header_for_catalog_provider(provider, key.clone())?;
                 let mut cred = ApiCredential {
-                    provider:      provider_id.clone(),
-                    auth_header:   Some(auth_header),
-                    extra_headers: HashMap::new(),
-                    base_url:      None,
-                    codex_mode:    false,
-                    org_id:        None,
-                    project_id:    None,
+                    provider: provider_id.clone(),
+                    auth_header: Some(auth_header),
+                    extra_headers: self.resolved_extra_headers_for_catalog(
+                        vault,
+                        provider_id,
+                        catalog,
+                    )?,
+                    base_url,
+                    codex_mode: false,
+                    org_id: None,
+                    project_id: None,
                 };
-                cred.base_url = base_url;
-                cred.extra_headers =
-                    self.resolved_extra_headers_for_catalog(vault, provider_id, catalog)?;
                 if provider_id == &ProviderId::openai() {
                     apply_openai_api_env_context(&mut cred, &*self.env_lookup);
                 }
