@@ -21,12 +21,7 @@ pub(crate) fn require_interp(
     path: &str,
     errors: &mut Vec<ResolveError>,
 ) -> InterpString {
-    value.cloned().unwrap_or_else(|| {
-        errors.push(ResolveError::Missing {
-            path: path.to_string(),
-        });
-        InterpString::parse("")
-    })
+    require_value(value, path, errors, || InterpString::parse(""))
 }
 
 pub(crate) fn require_string(
@@ -34,11 +29,20 @@ pub(crate) fn require_string(
     path: &str,
     errors: &mut Vec<ResolveError>,
 ) -> String {
+    require_value(value, path, errors, String::new)
+}
+
+fn require_value<T: Clone>(
+    value: Option<&T>,
+    path: &str,
+    errors: &mut Vec<ResolveError>,
+    missing: impl FnOnce() -> T,
+) -> T {
     value.cloned().unwrap_or_else(|| {
         errors.push(ResolveError::Missing {
             path: path.to_string(),
         });
-        String::new()
+        missing()
     })
 }
 
@@ -77,13 +81,20 @@ pub(crate) fn default_interp(path: impl AsRef<std::path::Path>) -> InterpString 
 /// String pass itself is retired in a later slice. Unclaimed `{{ ... }}` text
 /// (jq programs, Go templates) never interpolated and does not warn.
 pub(crate) fn warn_if_demoted_template(field: &str, value: Option<&str>) {
-    if value.is_some_and(|value| !InterpString::parse(value).is_literal()) {
-        tracing::warn!(
-            field = %field,
-            "this field no longer interpolates template tokens and uses the value literally; it \
-             was demoted to a plain string in the interpolation unification"
-        );
+    let Some(value) = value else {
+        return;
+    };
+    if !tracing::enabled!(tracing::Level::WARN) || !value.contains("{{") {
+        return;
     }
+    if InterpString::parse(value).is_literal() {
+        return;
+    }
+    tracing::warn!(
+        field = %field,
+        "this field no longer interpolates template tokens and uses the value literally; it \
+         was demoted to a plain string in the interpolation unification"
+    );
 }
 
 #[cfg(test)]

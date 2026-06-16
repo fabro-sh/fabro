@@ -178,7 +178,11 @@ where
     if !may_reference_variable(value) {
         return Ok(());
     }
-    *value = InterpString::substitute_variables_in_str(value, lookup)?;
+    if let std::borrow::Cow::Owned(substituted) =
+        InterpString::substitute_variables_in_str_cow(value, lookup)?
+    {
+        *value = substituted;
+    }
     Ok(())
 }
 

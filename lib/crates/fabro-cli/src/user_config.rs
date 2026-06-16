@@ -11,7 +11,7 @@ use fabro_config::{
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::CliTargetSettings;
 use fabro_types::settings::server::LogDestination;
-use fabro_types::settings::{CliNamespace, InterpString, RunNamespace};
+use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{ServerSettings, UserSettings};
 use fabro_util::error::SharedError;
 use fabro_util::version::FABRO_VERSION;
@@ -220,21 +220,12 @@ fn value_at_path<'a>(document: &'a toml::Value, path: &[&str]) -> Option<&'a tom
     Some(current)
 }
 
-/// Pull the resolved CLI target configuration out of `[cli.target]`.
-/// Returns either an http(s) URL or a unix socket path.
-fn cli_target_from_settings(settings: &CliNamespace) -> Option<String> {
-    let target = settings.target.as_ref()?;
-    match target {
-        CliTargetSettings::Http { url } => Some(url.clone()),
-        CliTargetSettings::Unix { path } => Some(path.clone()),
-    }
-}
-
 fn configured_server_target(settings: &UserSettings) -> Result<Option<ServerTarget>> {
-    let Some(value) = cli_target_from_settings(&settings.cli) else {
-        return Ok(None);
-    };
-    parse_server_target(&value).map(Some)
+    match settings.cli.target.as_ref() {
+        Some(CliTargetSettings::Http { url }) => ServerTarget::http_url(url).map(Some),
+        Some(CliTargetSettings::Unix { path }) => ServerTarget::unix_socket_path(path).map(Some),
+        None => Ok(None),
+    }
 }
 
 pub(crate) fn default_server_target() -> ServerTarget {

@@ -527,7 +527,6 @@ async fn build_preflight_report(
         &mut checks,
         graph,
         &resolved_run,
-        &configured_providers,
         catalog.as_ref(),
         llm_result,
     )
@@ -987,12 +986,16 @@ async fn run_llm_check(
     checks: &mut Vec<CheckResult>,
     graph: &Graph,
     settings: &RunNamespace,
-    configured_providers: &[ProviderId],
     catalog: &Catalog,
     llm_result: Result<LlmClientResult>,
 ) -> bool {
-    let (model, provider) = resolve_model_provider(settings, graph, configured_providers, catalog);
-    let default_provider = provider.as_deref().unwrap_or("anthropic");
+    let model = settings
+        .model
+        .name
+        .as_deref()
+        .unwrap_or_else(|| catalog.default_for_configured_ids(&[]).id.as_str());
+    let provider = settings.model.provider.as_deref();
+    let default_provider = provider.unwrap_or("anthropic");
     let mut model_providers = std::collections::BTreeSet::new();
     let mut has_llm_nodes = false;
 
@@ -1001,7 +1004,7 @@ async fn run_llm_check(
             continue;
         }
         has_llm_nodes = true;
-        let node_model = node.model().unwrap_or(&model);
+        let node_model = node.model().unwrap_or(model);
         let node_provider = node.provider().unwrap_or(default_provider);
         let (resolved_model, resolved_provider) = if let Some(info) = catalog.get(node_model) {
             (info.id.clone(), info.provider.to_string())
@@ -1140,29 +1143,6 @@ fn canonical_provider_id(catalog: &Catalog, provider_name: &str) -> ProviderId {
     catalog
         .provider(&provider_id)
         .map_or(provider_id, |provider| provider.id.clone())
-}
-
-fn resolve_model_provider(
-    settings: &RunNamespace,
-    _graph: &Graph,
-    configured_providers: &[ProviderId],
-    catalog: &Catalog,
-) -> (String, Option<String>) {
-    let provider = settings.model.provider.clone();
-    let model = settings.model.name.clone().unwrap_or_else(|| {
-        catalog
-            .default_for_configured_ids(configured_providers)
-            .id
-            .clone()
-    });
-
-    match catalog.get(&model) {
-        Some(info) => (
-            info.id.clone(),
-            provider.or(Some(info.provider.to_string())),
-        ),
-        None => (model, provider),
-    }
 }
 
 async fn run_github_token_check(

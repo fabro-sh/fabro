@@ -15,6 +15,7 @@
 //! the value, via [`InterpString::resolve_with`]. Provenance tracking lets
 //! outward-facing renderers redact env- and secret-sourced values uniformly.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use serde::de::{self, Visitor};
@@ -391,16 +392,26 @@ impl InterpString {
     where
         F: FnMut(&str) -> Option<String>,
     {
+        Self::substitute_variables_in_str_cow(value, lookup).map(Cow::into_owned)
+    }
+
+    pub(crate) fn substitute_variables_in_str_cow<F>(
+        value: &str,
+        lookup: F,
+    ) -> Result<Cow<'_, str>, ResolveError>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
         let parsed = Self::parse(value);
         if !parsed.references(Namespace::Vars) {
-            return Ok(value.to_owned());
+            return Ok(Cow::Borrowed(value));
         }
         #[expect(
             clippy::disallowed_methods,
             reason = "canonical raw-source round-trip for String-typed settings fields whose \
                       remaining tokens resolve downstream"
         )]
-        Ok(parsed.substitute_variables(lookup)?.as_source())
+        Ok(Cow::Owned(parsed.substitute_variables(lookup)?.as_source()))
     }
 }
 
