@@ -3542,6 +3542,16 @@ async fn append_worker_exit_failure(
         return;
     }
 
+    if matches!(state.status, RunStatus::Runnable) {
+        if let Err(err) =
+            workflow_event::append_event(run_store, &run_id, &workflow_event::Event::RunStarting)
+                .await
+        {
+            tracing::warn!(run_id = %run_id, error = %err, "Failed to append worker start transition");
+            return;
+        }
+    }
+
     let (error, reason) = failure_for_incomplete_run(
         state.pending_control,
         format!(

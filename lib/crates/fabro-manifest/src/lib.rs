@@ -771,6 +771,10 @@ fn build_git_context(
 
 fn configured_repo_origin_url(settings: &WorkflowSettings) -> Option<String> {
     let scm = &settings.run.scm;
+    if let Some(origin_url) = scm.origin_url.as_ref().map(InterpString::as_source) {
+        let normalized = fabro_github::normalize_repo_origin_url(&origin_url);
+        return (!normalized.is_empty()).then_some(normalized);
+    }
     if !scm
         .provider
         .as_deref()
@@ -1648,6 +1652,62 @@ repository = "target"
         assert_eq!(git.push_outcome, PreRunPushOutcome::SkippedRemoteMismatch {
             remote:          "https://github.com/user/forked-target".to_string(),
             repo_origin_url: "https://github.com/example/target".to_string(),
+        });
+    }
+
+    #[test]
+    fn build_manifest_git_uses_explicit_configured_origin_url() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path();
+
+        init_git_repo(
+            workspace,
+            "feature",
+            "https://github.com/user/forked-target.git",
+        );
+
+        let workflow_dir = workspace.join(".fabro/workflows/demo");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::write(
+            workspace.join(".fabro/project.toml"),
+            r#"_version = 1
+
+[run.scm]
+provider = "gitlab"
+origin_url = "https://gitlab.example.com/root/agentic-factory-prisma.git"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r"digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: workspace.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let git = built
+            .manifest
+            .git
+            .expect("manifest git info should be detected");
+        assert_eq!(
+            git.origin_url,
+            "https://gitlab.example.com/root/agentic-factory-prisma"
+        );
+        assert_eq!(git.push_outcome, PreRunPushOutcome::SkippedRemoteMismatch {
+            remote:          "https://github.com/user/forked-target".to_string(),
+            repo_origin_url: "https://gitlab.example.com/root/agentic-factory-prisma".to_string(),
         });
     }
 

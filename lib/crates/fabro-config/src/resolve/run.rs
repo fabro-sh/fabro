@@ -516,6 +516,7 @@ fn resolve_scm(scm: Option<&RunScmLayer>) -> RunScmSettings {
 
     RunScmSettings {
         provider:   scm.provider.clone(),
+        origin_url: scm.origin_url.clone(),
         owner:      scm.owner.clone(),
         repository: scm.repository.clone(),
         github:     scm.github.as_ref().map(|_| ScmGitHubSettings {}),

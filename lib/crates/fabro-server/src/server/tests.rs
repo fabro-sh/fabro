@@ -3930,6 +3930,31 @@ async fn create_durable_run_with_events(
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_exit_before_starting_persists_terminal_failure() {
+    let state = test_app_state();
+    let run_id = RunId::new();
+    let run_store = state.store.create_run(&run_id).await.unwrap();
+    append_default_run_created(&run_store, run_id).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
+
+    append_worker_exit_failure(&run_store, run_id, &WorkerExit {
+        success: false,
+        detail:  "exited with status 1".to_string(),
+    })
+    .await;
+
+    let state = run_store.state().await.unwrap();
+    assert_eq!(state.status, RunStatus::Failed {
+        reason: FailureReason::Terminated,
+    });
+}
+
 fn stage_started_event(node_id: &str, handler_type: &str) -> workflow_event::Event {
     workflow_event::Event::StageStarted {
         node_id:      node_id.to_string(),

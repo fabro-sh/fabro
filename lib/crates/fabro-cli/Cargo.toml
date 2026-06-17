@@ -25,6 +25,7 @@ fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
 fabro-oauth = { path = "../fabro-oauth" }
 fabro-github = { path = "../fabro-github" }
+fabro-gitlab = { path = "../fabro-gitlab" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-dump = { path = "../fabro-dump" }
 fabro-hooks = { path = "../fabro-hooks" }

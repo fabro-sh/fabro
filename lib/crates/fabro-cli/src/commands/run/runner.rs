@@ -17,12 +17,13 @@ use fabro_interview::{
 };
 use fabro_model::Catalog;
 use fabro_server::run_tool_manifest;
+use fabro_static::EnvVars;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_tool::fabro_client::ClientBackend;
 use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{
     ArtifactUpload, EventBody, FailureReason, Principal, RunBlobId, RunEvent, RunId,
-    WorkflowSettings,
+    ServerSettings, WorkflowSettings,
 };
 use fabro_vault::Vault;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
@@ -138,12 +139,29 @@ pub(crate) async fn execute(
         control_manager.wait_for_first_connection().await?;
     }
     let vault = load_worker_vault(storage_dir.as_deref())?;
+    let server_settings = ServerSettingsBuilder::load_default().ok();
+    let worker_gitlab = {
+        let vault_guard = match &vault {
+            Some(arc) => Some(arc.read().await),
+            None => None,
+        };
+        build_worker_gitlab_services(
+            &run_spec.settings,
+            run_spec.repo_origin_url(),
+            server_settings.as_ref(),
+            vault_guard.as_deref(),
+        )?
+    };
     let github_app = {
         let vault_guard = match &vault {
             Some(arc) => Some(arc.read().await),
             None => None,
         };
-        maybe_build_github_credentials(&run_spec.settings, vault_guard.as_deref())?
+        maybe_build_github_credentials(
+            &run_spec.settings,
+            vault_guard.as_deref(),
+            worker_gitlab.gitlab.is_some(),
+        )?
     };
     let services = StartServices {
         run_id,
@@ -165,8 +183,8 @@ pub(crate) async fn execute(
         artifact_sink,
         run_control: Some(run_control),
         github_app,
-        gitlab: None,
-        gitlab_token: None,
+        gitlab: worker_gitlab.gitlab,
+        gitlab_token: worker_gitlab.gitlab_token,
         github_permissions: run_spec
             .settings
             .run
@@ -1112,6 +1130,7 @@ fn stamp_system_worker(mut event: RunEvent) -> RunEvent {
 fn maybe_build_github_credentials(
     settings: &WorkflowSettings,
     vault: Option<&fabro_vault::Vault>,
+    gitlab_origin_configured: bool,
 ) -> Result<Option<fabro_github::GitHubCredentials>> {
     let resolved_run = &settings.run;
     let resolved_server = ServerSettingsBuilder::load_default().ok();
@@ -1122,7 +1141,7 @@ fn maybe_build_github_credentials(
     let app_id = server_ns.and_then(|server| server.integrations.github.app_id.clone());
     let app_slug = server_ns.and_then(|server| server.integrations.github.slug.clone());
 
-    if requires_github_credentials(resolved_run) {
+    if requires_github_credentials(resolved_run, gitlab_origin_configured) {
         return build_github_credentials(strategy, app_id.as_deref(), app_slug.as_deref(), vault);
     }
 
@@ -1142,6 +1161,64 @@ fn maybe_build_github_credentials(
     Ok(None)
 }
 
+struct WorkerGitlabServices {
+    gitlab:       Option<fabro_sandbox::GitLabSandboxConfig>,
+    gitlab_token: Option<String>,
+}
+
+fn build_worker_gitlab_services(
+    settings: &WorkflowSettings,
+    origin_url: Option<&str>,
+    server_settings: Option<&ServerSettings>,
+    vault: Option<&fabro_vault::Vault>,
+) -> Result<WorkerGitlabServices> {
+    let gitlab_settings = server_settings.map(|settings| &settings.server.integrations.gitlab);
+    let gitlab = match (gitlab_settings, origin_url) {
+        (Some(gitlab), Some(origin_url)) if gitlab.enabled => match gitlab.base_url.as_ref() {
+            Some(base_url) => {
+                let base_url =
+                    fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url.as_source())
+                        .map_err(|err| anyhow!("Invalid GitLab base URL: {err}"))?;
+                if fabro_gitlab::repository::parse_origin(&base_url, origin_url).is_ok() {
+                    let token = vault
+                        .and_then(|vault| vault.get(EnvVars::GITLAB_TOKEN))
+                        .map(str::trim)
+                        .filter(|token| !token.is_empty())
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "{} is required to clone GitLab repositories",
+                                EnvVars::GITLAB_TOKEN
+                            )
+                        })?;
+                    Some(fabro_sandbox::GitLabSandboxConfig {
+                        base_url,
+                        credentials: fabro_gitlab::GitLabCredentials::Token(token),
+                    })
+                } else {
+                    None
+                }
+            }
+            None => None,
+        },
+        _ => None,
+    };
+    let gitlab_token = if settings.run.integrations.gitlab.token {
+        vault
+            .and_then(|vault| vault.get(EnvVars::GITLAB_TOKEN))
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(str::to_string)
+    } else {
+        None
+    };
+
+    Ok(WorkerGitlabServices {
+        gitlab,
+        gitlab_token,
+    })
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "CLI worker InterpString resolution facade for {{ env.* }} values."
@@ -1154,11 +1231,13 @@ fn process_env_var(name: &str) -> Option<String> {
 /// a clone-based sandbox in non-dry-run mode will need credentials to
 /// pull the repository. Pull-request-driven credential acquisition is
 /// handled separately by the caller as a soft fallback.
-fn requires_github_credentials(run: &RunNamespace) -> bool {
+fn requires_github_credentials(run: &RunNamespace, gitlab_origin_configured: bool) -> bool {
     if run.integrations.github.is_token_requested() {
         return true;
     }
-    run.execution.mode != RunMode::DryRun && run.environment.provider.is_clone_based()
+    run.execution.mode != RunMode::DryRun
+        && run.environment.provider.is_clone_based()
+        && !gitlab_origin_configured
 }
 
 fn install_signal_handlers(
@@ -1753,6 +1832,49 @@ mod tests {
         assert!(credential.contains("vault-key"));
     }
 
+    #[test]
+    fn worker_gitlab_services_resolve_for_matching_origin_and_requested_token() {
+        let mut settings = fabro_types::WorkflowSettings::default();
+        settings.run.integrations.gitlab.token = true;
+
+        let mut server = fabro_types::ServerSettings {
+            server: fabro_types::settings::ServerNamespace {
+                listen:       Default::default(),
+                api:          Default::default(),
+                web:          Default::default(),
+                auth:         Default::default(),
+                sandbox:      Default::default(),
+                storage:      Default::default(),
+                artifacts:    Default::default(),
+                slatedb:      Default::default(),
+                scheduler:    Default::default(),
+                logging:      Default::default(),
+                integrations: Default::default(),
+            },
+        };
+        server.server.integrations.gitlab.enabled = true;
+        server.server.integrations.gitlab.base_url = Some(
+            fabro_types::settings::InterpString::parse("https://gitlab.example.com"),
+        );
+
+        let temp = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(temp.path().join("vault.json")).unwrap();
+        vault
+            .set("GITLAB_TOKEN", "glpat-test", SecretType::Token, None)
+            .unwrap();
+
+        let services = super::build_worker_gitlab_services(
+            &settings,
+            Some("https://gitlab.example.com/root/agentic-factory-prisma"),
+            Some(&server),
+            Some(&vault),
+        )
+        .expect("GitLab worker services should resolve");
+
+        assert!(services.gitlab.is_some());
+        assert_eq!(services.gitlab_token.as_deref(), Some("glpat-test"));
+    }
+
     mod requires_github_credentials_truth_table {
         //! Truth-table coverage for the worker-side credential gate.
         //! `InterpString` → `String` resolution is tested in `fabro-types`
@@ -1780,6 +1902,7 @@ mod tests {
                 .expect("test provider should parse");
             run.integrations = RunIntegrationsSettings {
                 github: RunIntegrationsGithubSettings { permissions },
+                ..RunIntegrationsSettings::default()
             };
             run
         }
@@ -1790,28 +1913,34 @@ mod tests {
             // Even with local sandbox + dry-run, non-empty permissions
             // force credential acquisition.
             let run = run_with(permissions, "local", RunMode::DryRun);
-            assert!(requires_github_credentials(&run));
+            assert!(requires_github_credentials(&run, true));
         }
 
         #[test]
         fn requires_github_credentials_for_clone_based_provider() {
             let run = run_with(HashMap::new(), "docker", RunMode::Normal);
-            assert!(requires_github_credentials(&run));
+            assert!(requires_github_credentials(&run, false));
 
             let daytona = run_with(HashMap::new(), "daytona", RunMode::Normal);
-            assert!(requires_github_credentials(&daytona));
+            assert!(requires_github_credentials(&daytona, false));
+        }
+
+        #[test]
+        fn skips_github_credentials_for_configured_gitlab_origin() {
+            let run = run_with(HashMap::new(), "docker", RunMode::Normal);
+            assert!(!requires_github_credentials(&run, true));
         }
 
         #[test]
         fn does_not_require_github_credentials_for_local_clean_run() {
             let run = run_with(HashMap::new(), "local", RunMode::Normal);
-            assert!(!requires_github_credentials(&run));
+            assert!(!requires_github_credentials(&run, false));
         }
 
         #[test]
         fn does_not_require_github_credentials_for_clone_provider_in_dry_run() {
             let run = run_with(HashMap::new(), "docker", RunMode::DryRun);
-            assert!(!requires_github_credentials(&run));
+            assert!(!requires_github_credentials(&run, false));
         }
     }
 }

@@ -546,6 +546,8 @@ pub struct RunScmLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner:      Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,

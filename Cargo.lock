@@ -2288,6 +2288,7 @@ dependencies = [
  "fabro-dump",
  "fabro-environment",
  "fabro-github",
+ "fabro-gitlab",
  "fabro-graphviz",
  "fabro-hooks",
  "fabro-http",

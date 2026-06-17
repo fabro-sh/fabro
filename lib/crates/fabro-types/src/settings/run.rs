@@ -103,8 +103,8 @@ impl RunNamespace {
             substitute_option(&mut slack.channel, &mut lookup)?;
         }
         substitute_map(&mut self.integrations.github.permissions, &mut lookup)?;
-        // run.scm.owner/repository were demoted and removed from this pass
-        // (D2): values stay literal.
+        // run.scm.origin_url/owner/repository were demoted and removed from
+        // this pass (D2): values stay literal.
         substitute_string_vec(&mut self.prepare.commands, &mut lookup)?;
         for mcp in self.agent.mcps.values_mut() {
             substitute_string(&mut mcp.name, &mut lookup)?;
@@ -1459,6 +1459,7 @@ impl HookDefinition {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunScmSettings {
     pub provider:   Option<String>,
+    pub origin_url: Option<String>,
     pub owner:      Option<String>,
     pub repository: Option<String>,
     pub github:     Option<ScmGitHubSettings>,
