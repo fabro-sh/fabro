@@ -14,6 +14,7 @@ use tracing::info;
 #[cfg(test)]
 use crate::auth::REFRESH_TOKEN_PREFIX;
 use crate::auth::{self, AuthErrorCode, JwtError, JwtSigningKey, KeyDeriveError};
+use crate::canonical_origin::effective_web_url;
 use crate::error::ApiError;
 use crate::interp::process_env_var;
 
@@ -138,13 +139,16 @@ fn resolve_jwt_issuer<F>(settings: &ServerNamespace, lookup: &F) -> String
 where
     F: Fn(&str) -> Option<String>,
 {
-    let web_url = lookup(EnvVars::FABRO_WEB_URL)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| settings.web.url.clone());
+    let web_url = effective_web_url(settings, lookup);
+    if !web_url.is_empty() {
+        return web_url;
+    }
 
-    Some(web_url)
+    settings
+        .api
+        .url
+        .clone()
         .filter(|value| !value.is_empty())
-        .or_else(|| settings.api.url.clone().filter(|value| !value.is_empty()))
         .unwrap_or_else(|| "fabro-server".to_string())
 }
 

@@ -12,7 +12,7 @@ pub(crate) fn resolve_canonical_origin(
     resolved: &ServerNamespace,
     env_lookup: &EnvLookup,
 ) -> Result<String, String> {
-    let value = effective_web_url(resolved, env_lookup);
+    let value = effective_web_url(resolved, |name| env_lookup(name));
     validate_public_url(&value).map_err(|_| canonical_origin_error(&value))
 }
 
@@ -22,8 +22,15 @@ pub(crate) fn resolve_canonical_origin(
 /// }}` tokens. Deployment-time late binding instead goes through the native
 /// `FABRO_WEB_URL` process-env read: the env override wins when set (and
 /// non-empty), otherwise the literal settings value is used.
-pub(crate) fn effective_web_url(resolved: &ServerNamespace, env_lookup: &EnvLookup) -> String {
-    env_lookup(EnvVars::FABRO_WEB_URL)
+///
+/// Generic over the lookup so both the `EnvLookup`-backed callers and
+/// `resolve_jwt_issuer` (which threads a bare `Fn`) share this one definition
+/// of the override precedence.
+pub(crate) fn effective_web_url(
+    resolved: &ServerNamespace,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> String {
+    lookup(EnvVars::FABRO_WEB_URL)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| resolved.web.url.clone())
 }

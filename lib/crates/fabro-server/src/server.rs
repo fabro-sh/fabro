@@ -1485,7 +1485,9 @@ impl AppState {
     }
 
     pub(crate) fn effective_web_url(&self) -> String {
-        effective_web_url(&self.server_settings().server, &self.env_lookup)
+        effective_web_url(&self.server_settings().server, |name| {
+            (self.env_lookup)(name)
+        })
     }
 
     pub(crate) fn canonical_origin(&self) -> Result<String, String> {

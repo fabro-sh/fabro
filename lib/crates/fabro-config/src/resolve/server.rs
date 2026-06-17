@@ -302,20 +302,17 @@ fn resolve_object_store(
             }
         }
         ObjectStoreProvider::S3 => {
-            let bucket = require_string(
-                s3.and_then(|s3| s3.bucket.as_ref()),
-                &format!("{path_prefix}.s3.bucket"),
-                errors,
-            );
-            let region = require_string(
-                s3.and_then(|s3| s3.region.as_ref()),
-                &format!("{path_prefix}.s3.region"),
-                errors,
-            );
+            let bucket_field = format!("{path_prefix}.s3.bucket");
+            let region_field = format!("{path_prefix}.s3.region");
+            let endpoint_field = format!("{path_prefix}.s3.endpoint");
+            let bucket =
+                require_string(s3.and_then(|s3| s3.bucket.as_ref()), &bucket_field, errors);
+            let region =
+                require_string(s3.and_then(|s3| s3.region.as_ref()), &region_field, errors);
             let endpoint = s3.and_then(|s3| s3.endpoint.clone());
-            warn_if_demoted_template(&format!("{path_prefix}.s3.bucket"), Some(bucket.as_str()));
-            warn_if_demoted_template(&format!("{path_prefix}.s3.region"), Some(region.as_str()));
-            warn_if_demoted_template(&format!("{path_prefix}.s3.endpoint"), endpoint.as_deref());
+            warn_if_demoted_template(&bucket_field, Some(bucket.as_str()));
+            warn_if_demoted_template(&region_field, Some(region.as_str()));
+            warn_if_demoted_template(&endpoint_field, endpoint.as_deref());
             ObjectStoreSettings::S3 {
                 bucket,
                 region,
