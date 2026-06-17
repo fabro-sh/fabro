@@ -165,6 +165,8 @@ pub(crate) async fn execute(
         artifact_sink,
         run_control: Some(run_control),
         github_app,
+        gitlab: None,
+        gitlab_token: None,
         github_permissions: run_spec
             .settings
             .run
