@@ -141,7 +141,7 @@ use crate::automation_materializer::{
     AutomationRunMaterializeError, AutomationRunMaterializeInput, AutomationRunMaterialized,
     AutomationRunMaterializer, GitRepoCache, ProductionAutomationRunMaterializer,
 };
-use crate::canonical_origin::{effective_web_url, resolve_canonical_origin};
+use crate::canonical_origin::{canonical_origin_from_effective_web_url, effective_web_url};
 use crate::error::ApiError;
 use crate::github_webhooks::{
     WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, parse_event_metadata, verify_signature,
@@ -1090,6 +1090,7 @@ pub struct AppState {
     manifest_run_defaults: RwLock<Arc<RunLayer>>,
     manifest_run_settings: RwLock<std::result::Result<RunNamespace, SharedError>>,
     pub(crate) server_settings: RwLock<Arc<ServerSettings>>,
+    effective_web_url: RwLock<String>,
     catalog: RwLock<Arc<Catalog>>,
     pub(crate) env_lookup: EnvLookup,
     pub(crate) github_api_base_url: String,
@@ -1485,13 +1486,14 @@ impl AppState {
     }
 
     pub(crate) fn effective_web_url(&self) -> String {
-        effective_web_url(&self.server_settings().server, |name| {
-            (self.env_lookup)(name)
-        })
+        self.effective_web_url
+            .read()
+            .expect("effective web url lock poisoned")
+            .clone()
     }
 
     pub(crate) fn canonical_origin(&self) -> Result<String, String> {
-        resolve_canonical_origin(&self.server_settings().server, &self.env_lookup)
+        canonical_origin_from_effective_web_url(&self.effective_web_url())
     }
 
     pub(crate) fn session_key(&self) -> Option<Key> {
@@ -1568,6 +1570,8 @@ impl AppState {
         } = resolved_settings;
         let server_settings = Arc::new(server_settings);
         let manifest_run_defaults = Arc::new(manifest_run_defaults);
+        let effective_web_url =
+            effective_web_url(&server_settings.server, |name| (self.env_lookup)(name));
         let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
             manifest_run_defaults.as_ref(),
             &self.environment_store,
@@ -1576,8 +1580,7 @@ impl AppState {
             Catalog::from_builtin_with_overrides(&llm_catalog_settings)
                 .context("building LLM model catalog")?,
         );
-        resolve_canonical_origin(&server_settings.server, &self.env_lookup)
-            .map_err(anyhow::Error::msg)?;
+        canonical_origin_from_effective_web_url(&effective_web_url).map_err(anyhow::Error::msg)?;
 
         *self
             .manifest_run_defaults
@@ -1591,6 +1594,10 @@ impl AppState {
             .server_settings
             .write()
             .expect("server settings lock poisoned") = server_settings;
+        *self
+            .effective_web_url
+            .write()
+            .expect("effective web url lock poisoned") = effective_web_url;
         *self.catalog.write().expect("catalog lock poisoned") = catalog;
         Ok(())
     }
@@ -2328,6 +2335,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         Arc::new(VaultCredentialSource::vault_only(Arc::clone(&vault)));
     let (global_event_tx, _) = broadcast::channel(4096);
     let current_server_settings = Arc::new(resolved_settings.server_settings);
+    let current_effective_web_url =
+        effective_web_url(&current_server_settings.server, |name| env_lookup(name));
     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
     let current_manifest_run_settings = resolve_manifest_run_settings_with_catalog(
         current_manifest_run_defaults.as_ref(),
@@ -2446,6 +2455,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
         manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
+        effective_web_url: RwLock::new(current_effective_web_url),
         catalog: RwLock::new(current_catalog),
         env_lookup: Arc::clone(&env_lookup),
         github_api_base_url,

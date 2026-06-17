@@ -168,7 +168,10 @@ fn log_destination_at_path(
         .map(Some)
 }
 
-fn storage_dir_from_document(document: &toml::Value, storage_dir: Option<&Path>) -> PathBuf {
+pub(crate) fn storage_dir_from_document(
+    document: &toml::Value,
+    storage_dir: Option<&Path>,
+) -> PathBuf {
     if let Some(dir) = storage_dir {
         return dir.to_path_buf();
     }

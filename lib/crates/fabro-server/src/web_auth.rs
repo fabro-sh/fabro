@@ -322,7 +322,9 @@ fn session_provider(auth_method: AuthMethod) -> &'static str {
 }
 
 fn session_cookie_secure(state: &AppState) -> bool {
-    state.effective_web_url().starts_with("https://")
+    state
+        .canonical_origin()
+        .is_ok_and(|web_url| web_url.starts_with("https://"))
 }
 
 fn redacted_url_for_log(url: &str) -> String {

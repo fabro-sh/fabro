@@ -498,10 +498,9 @@ async fn get_github_repo(
                         .into_response();
                 }
             };
-            let install_url = match github_settings.slug.as_deref() {
-                Some(slug) => format!("https://github.com/apps/{slug}/installations/new"),
-                None => format!("https://github.com/organizations/{owner}/settings/installations"),
-            };
+            let install_url = creds.installation_url(&owner).unwrap_or_else(|| {
+                format!("https://github.com/organizations/{owner}/settings/installations")
+            });
 
             let client = match state.http_client() {
                 Ok(http) => http,

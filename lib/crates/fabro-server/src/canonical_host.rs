@@ -257,7 +257,7 @@ url = "{web_url}"
 
     fn invalid_canonical_origin_state() -> Arc<AppState> {
         crate::test_support::test_app_state_with_env_lookup(
-            settings_with_web_url("{{ env.FABRO_WEB_URL }}"),
+            settings_with_web_url("http://valid.example.com"),
             RunLayer::default(),
             5,
             |_| Some("/relative".to_string()),

@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::io::ErrorKind;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -697,7 +696,7 @@ pub(crate) async fn create_run_from_manifest(
     create_input.submitted_manifest_bytes = Some(submitted_manifest_bytes);
     create_input.automation = automation;
 
-    let storage_root = PathBuf::from(&state.server_settings().server.storage.root);
+    let storage_root = state.server_storage_dir();
     let created = match Box::pin(operations::create(
         state.store.as_ref(),
         create_input,

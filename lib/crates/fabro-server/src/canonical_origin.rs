@@ -13,7 +13,11 @@ pub(crate) fn resolve_canonical_origin(
     env_lookup: &EnvLookup,
 ) -> Result<String, String> {
     let value = effective_web_url(resolved, |name| env_lookup(name));
-    validate_public_url(&value).map_err(|_| canonical_origin_error(&value))
+    canonical_origin_from_effective_web_url(&value)
+}
+
+pub(crate) fn canonical_origin_from_effective_web_url(value: &str) -> Result<String, String> {
+    validate_public_url(value).map_err(|_| canonical_origin_error(value))
 }
 
 /// The effective `server.web.url`.

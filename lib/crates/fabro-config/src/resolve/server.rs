@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
     ObjectStoreProvider, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
@@ -324,8 +326,11 @@ fn resolve_object_store(
 }
 
 fn object_store_default_root(storage_root: &str, domain: &str) -> String {
-    let root = storage_root.trim_end_matches('/');
-    format!("{root}/objects/{domain}")
+    Path::new(storage_root)
+        .join("objects")
+        .join(domain)
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegrationsSettings {

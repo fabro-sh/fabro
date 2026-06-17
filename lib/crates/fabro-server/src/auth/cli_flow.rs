@@ -770,12 +770,10 @@ fn github_auth_not_configured() -> Response {
     )
 }
 
-fn resolved_web_url(state: &AppState) -> Option<String> {
-    state.canonical_origin().ok()
-}
-
 fn session_cookie_secure(state: &AppState) -> bool {
-    resolved_web_url(state).is_some_and(|web_url| web_url.starts_with("https://"))
+    state
+        .canonical_origin()
+        .is_ok_and(|web_url| web_url.starts_with("https://"))
 }
 
 fn eligible_session(session: Option<&SessionCookie>) -> Option<&SessionCookie> {
@@ -810,7 +808,7 @@ fn confirm_resume_origin_is_valid(headers: &HeaderMap, state: &AppState) -> bool
     let Ok(origin) = origin.to_str() else {
         return false;
     };
-    let Some(web_url) = resolved_web_url(state) else {
+    let Ok(web_url) = state.canonical_origin() else {
         return false;
     };
     let Ok(origin_url) = Url::parse(origin) else {
