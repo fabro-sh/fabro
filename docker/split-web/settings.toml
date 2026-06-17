@@ -1,8 +1,10 @@
 _version = 1
 
+# server.web.url is provided at runtime by the FABRO_WEB_URL environment
+# variable (set in docker-compose.split-web.yaml), read natively by the server.
+# It overrides the default below, so no value is needed here.
 [server.web]
 enabled = true
-url = "{{ env.FABRO_WEB_URL }}"
 
 [server.auth]
 methods = ["dev-token"]

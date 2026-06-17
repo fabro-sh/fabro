@@ -79,10 +79,6 @@ provider = "not-a-provider"
     assert!(rendered.contains("run.environment.provider"));
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "test asserts the raw template source"
-)]
 #[test]
 fn namespace_resolvers_cover_root_level_settings_shape() {
     let source = r#"
@@ -115,7 +111,7 @@ name = "gpt-5"
         "resolved project settings should not expose deprecated directory"
     );
     assert_eq!(workflow_settings.workflow.graph, "graphs/workflow.dot");
-    assert_eq!(server.server.storage.root.as_source(), "/srv/fabro");
+    assert_eq!(server.server.storage.root, "/srv/fabro");
     assert_eq!(
         workflow_settings.run.model.provider.as_deref(),
         Some("openai")

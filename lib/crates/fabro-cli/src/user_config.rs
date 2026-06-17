@@ -9,9 +9,9 @@ use fabro_config::{
     CliLayer, LogFilter, ParseError, RunSettingsBuilder, ServerSettingsBuilder, UserSettingsBuilder,
 };
 use fabro_static::EnvVars;
+use fabro_types::settings::RunNamespace;
 use fabro_types::settings::cli::CliTargetSettings;
 use fabro_types::settings::server::LogDestination;
-use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{ServerSettings, UserSettings};
 use fabro_util::error::SharedError;
 use fabro_util::version::FABRO_VERSION;
@@ -36,7 +36,7 @@ pub(crate) fn load_resolved_settings(
 ) -> anyhow::Result<LoadedSettings> {
     let document = load_settings_document(config_path)?;
     let storage_override = storage_dir.map(Path::to_path_buf);
-    let storage_dir = storage_dir_from_document(&document, storage_dir)?;
+    let storage_dir = storage_dir_from_document(&document, storage_dir);
     let pre_tracing_config = pre_tracing_config_from_document(&document)?;
     let run_settings = load_run_settings(config_path).map_err(SharedError::new);
     let server_settings = load_server_settings(config_path)
@@ -168,19 +168,17 @@ fn log_destination_at_path(
         .map(Some)
 }
 
-fn storage_dir_from_document(
-    document: &toml::Value,
-    storage_dir: Option<&Path>,
-) -> anyhow::Result<PathBuf> {
-    storage_dir_from_document_with_lookup(document, storage_dir, &process_env_var)
-}
+fn storage_dir_from_document(document: &toml::Value, storage_dir: Option<&Path>) -> PathBuf {
+    if let Some(dir) = storage_dir {
+        return dir.to_path_buf();
+    }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "CLI settings loading owns the process-env facade for interpolation."
-)]
-fn process_env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
+    // `server.storage.root` is plain control-plane config and does not
+    // interpolate; the FABRO_STORAGE_DIR-backed `storage_dir` argument above is
+    // the deployment-time override.
+    let storage_root = string_at_path(document, &["server", "storage", "root"])
+        .unwrap_or_else(|| default_storage_dir().to_string_lossy().into_owned());
+    PathBuf::from(storage_root)
 }
 
 #[expect(
@@ -189,23 +187,6 @@ fn process_env_var(name: &str) -> Option<String> {
 )]
 fn process_env_var_os(name: &str) -> Option<std::ffi::OsString> {
     std::env::var_os(name)
-}
-
-fn storage_dir_from_document_with_lookup(
-    document: &toml::Value,
-    storage_dir: Option<&Path>,
-    lookup: &dyn Fn(&str) -> Option<String>,
-) -> anyhow::Result<PathBuf> {
-    if let Some(dir) = storage_dir {
-        return Ok(dir.to_path_buf());
-    }
-
-    let storage_root = string_at_path(document, &["server", "storage", "root"]).map_or_else(
-        || InterpString::parse(&default_storage_dir().to_string_lossy()),
-        |root| InterpString::parse(&root),
-    );
-    let resolved_root = storage_root.resolve(lookup)?;
-    Ok(PathBuf::from(resolved_root.value))
 }
 
 fn string_at_path(document: &toml::Value, path: &[&str]) -> Option<String> {
@@ -350,7 +331,7 @@ pub(crate) fn load_resolved_settings_from_toml(
 ) -> anyhow::Result<LoadedSettings> {
     let document: toml::Value = toml::from_str(source).context("failed to parse settings file")?;
     let storage_override = storage_dir.map(Path::to_path_buf);
-    let storage_dir = storage_dir_from_document(&document, storage_dir)?;
+    let storage_dir = storage_dir_from_document(&document, storage_dir);
     let pre_tracing_config = pre_tracing_config_from_document(&document)?;
     let run_settings = RunSettingsBuilder::from_toml_with_catalog(
         source,
@@ -560,7 +541,7 @@ url = "https://configured.example.com"
         let document = toml::Value::Table(toml::Table::new());
 
         assert_eq!(
-            storage_dir_from_document(&document, None).unwrap(),
+            storage_dir_from_document(&document, None),
             default_storage_dir()
         );
     }
@@ -578,13 +559,16 @@ root = "/srv/fabro"
         .expect("fixture should parse");
 
         assert_eq!(
-            storage_dir_from_document(&document, None).unwrap(),
+            storage_dir_from_document(&document, None),
             PathBuf::from("/srv/fabro")
         );
     }
 
     #[test]
-    fn storage_dir_resolves_env_interpolated_root() {
+    fn storage_dir_keeps_template_token_literal() {
+        // server.storage.root is plain control-plane config now: a `{{ env.* }}`
+        // token is used verbatim, never resolved. Deployment-time overrides go
+        // through the FABRO_STORAGE_DIR-backed `storage_dir` argument instead.
         let document: toml::Value = toml::from_str(
             r#"
 _version = 1
@@ -594,14 +578,10 @@ root = "{{ env.FABRO_STORAGE_ROOT }}"
 "#,
         )
         .expect("fixture should parse");
-        let temp = tempfile::tempdir().unwrap();
 
         assert_eq!(
-            storage_dir_from_document_with_lookup(&document, None, &|name| {
-                (name == "FABRO_STORAGE_ROOT").then(|| temp.path().display().to_string())
-            })
-            .unwrap(),
-            temp.path()
+            storage_dir_from_document(&document, None),
+            PathBuf::from("{{ env.FABRO_STORAGE_ROOT }}")
         );
     }
 
@@ -630,7 +610,7 @@ root = "/srv/fabro"
         .expect("settings document should load");
 
         assert_eq!(
-            storage_dir_from_document(&document, None).unwrap(),
+            storage_dir_from_document(&document, None),
             PathBuf::from("/srv/fabro")
         );
     }

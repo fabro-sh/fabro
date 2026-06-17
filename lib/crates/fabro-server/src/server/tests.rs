@@ -1056,18 +1056,18 @@ fn replace_settings_rejects_invalid_canonical_origin_and_keeps_previous_settings
         "ftp://fabro.example.com",
         "http://0.0.0.0:32276",
     ] {
+        // No FABRO_WEB_URL override: web.url is plain config now, so the
+        // invalid value is rejected from the settings literal and the kept
+        // previous settings stay valid.
         let state = test_app_state_with_env_lookup(
             canonical_origin_settings("http://valid.example.com"),
             RunLayer::default(),
             5,
-            {
-                let invalid = invalid.to_string();
-                move |name| (name == "FABRO_WEB_URL").then(|| invalid.clone())
-            },
+            |_| None,
         );
 
         let err = state
-            .replace_runtime_settings(resolved_runtime_settings_from_toml(
+            .replace_runtime_settings(resolved_runtime_settings_from_toml(&format!(
                 r#"
 _version = 1
 
@@ -1075,9 +1075,9 @@ _version = 1
 methods = ["dev-token"]
 
 [server.web]
-url = "{{ env.FABRO_WEB_URL }}"
+url = "{invalid}"
 "#,
-            ))
+            )))
             .expect_err("invalid canonical origin should be rejected");
         assert!(
             err.to_string()
@@ -1091,10 +1091,36 @@ url = "{{ env.FABRO_WEB_URL }}"
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "test asserts the raw template source"
-)]
+#[test]
+fn canonical_origin_prefers_fabro_web_url_env_override() {
+    // FABRO_WEB_URL is the native control-plane override; it wins over the
+    // plain `server.web.url` settings literal.
+    let state = test_app_state_with_env_lookup(
+        canonical_origin_settings("http://settings.example.com"),
+        RunLayer::default(),
+        5,
+        |name| (name == "FABRO_WEB_URL").then(|| "http://env.example.com".to_string()),
+    );
+
+    assert_eq!(state.canonical_origin().unwrap(), "http://env.example.com");
+}
+
+#[test]
+fn canonical_origin_uses_settings_literal_without_env_override() {
+    // Without FABRO_WEB_URL set, the plain `server.web.url` literal is used.
+    let state = test_app_state_with_env_lookup(
+        canonical_origin_settings("http://settings.example.com"),
+        RunLayer::default(),
+        5,
+        |_| None,
+    );
+
+    assert_eq!(
+        state.canonical_origin().unwrap(),
+        "http://settings.example.com"
+    );
+}
+
 #[test]
 fn replace_settings_updates_layer_and_typed_server_settings() {
     let state = test_app_state_with_options(
@@ -1150,10 +1176,7 @@ root = "/srv/new"
         .expect("valid settings should replace current state");
 
     assert_eq!(state.canonical_origin().unwrap(), "http://new.example.com");
-    assert_eq!(
-        state.server_settings().server.storage.root.as_source(),
-        "/srv/new"
-    );
+    assert_eq!(state.server_settings().server.storage.root, "/srv/new");
     assert_eq!(
         state
             .manifest_run_settings()

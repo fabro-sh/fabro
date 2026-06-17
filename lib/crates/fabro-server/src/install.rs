@@ -31,7 +31,6 @@ use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
-use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::settings::server::ObjectStoreSettings;
 use fabro_types::settings::{is_wildcard_host, validate_public_url_with_label};
@@ -1188,8 +1187,8 @@ fn object_store_validation_settings(
     match selection {
         InstallObjectStoreState::Local { .. } => None,
         InstallObjectStoreState::S3 { bucket, region, .. } => Some(ObjectStoreSettings::S3 {
-            bucket:     InterpString::parse(bucket),
-            region:     InterpString::parse(region),
+            bucket:     bucket.clone(),
+            region:     region.clone(),
             endpoint:   None,
             path_style: false,
         }),
@@ -2277,10 +2276,8 @@ async fn write_artifact_store_metadata(
     settings: &ServerSettings,
     storage_dir: &Path,
 ) -> anyhow::Result<()> {
-    use fabro_types::settings::interp::InterpString;
-
     let mut settings = settings.clone();
-    settings.server.storage.root = InterpString::parse(&storage_dir.display().to_string());
+    settings.server.storage.root = storage_dir.display().to_string();
     let (object_store, prefix) = serve::build_artifact_object_store(&settings.server)?;
     let artifact_store = ArtifactStore::new(object_store, prefix);
     artifact_store.write_metadata(FABRO_VERSION).await?;
@@ -2581,8 +2578,7 @@ methods = ["dev-token"]
             .unwrap();
 
         let mut overridden = settings.clone();
-        overridden.server.storage.root =
-            fabro_types::settings::interp::InterpString::parse(&dir.path().display().to_string());
+        overridden.server.storage.root = dir.path().display().to_string();
         let (object_store, prefix) =
             crate::serve::build_artifact_object_store(&overridden.server).unwrap();
         let marker = if prefix.is_empty() {

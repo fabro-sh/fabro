@@ -19,7 +19,6 @@ use fabro_model::Catalog;
 use fabro_server::run_tool_manifest;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_tool::fabro_client::ClientBackend;
-use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{
     ArtifactUpload, EventBody, FailureReason, Principal, RunBlobId, RunEvent, RunId,
@@ -1108,11 +1107,6 @@ fn stamp_system_worker(mut event: RunEvent) -> RunEvent {
     event
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "known leak: GitHub App id/slug passes unresolved; strict resolution scheduled in the \
-              interpolation unification (Phase 2)"
-)]
 fn maybe_build_github_credentials(
     settings: &WorkflowSettings,
     vault: Option<&fabro_vault::Vault>,
@@ -1123,12 +1117,8 @@ fn maybe_build_github_credentials(
     let strategy = server_ns
         .map(|server| server.integrations.github.strategy)
         .unwrap_or_default();
-    let app_id = server_ns
-        .and_then(|server| server.integrations.github.app_id.as_ref())
-        .map(InterpString::as_source);
-    let app_slug = server_ns
-        .and_then(|server| server.integrations.github.slug.as_ref())
-        .map(InterpString::as_source);
+    let app_id = server_ns.and_then(|server| server.integrations.github.app_id.clone());
+    let app_slug = server_ns.and_then(|server| server.integrations.github.slug.clone());
 
     if requires_github_credentials(resolved_run) {
         return build_github_credentials(strategy, app_id.as_deref(), app_slug.as_deref(), vault);

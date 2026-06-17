@@ -138,22 +138,13 @@ fn resolve_jwt_issuer<F>(settings: &ServerNamespace, lookup: &F) -> String
 where
     F: Fn(&str) -> Option<String>,
 {
-    settings
-        .web
-        .url
-        .resolve(|name| lookup(name))
-        .ok()
-        .map(|resolved| resolved.value)
+    let web_url = lookup(EnvVars::FABRO_WEB_URL)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| settings.web.url.clone());
+
+    Some(web_url)
         .filter(|value| !value.is_empty())
-        .or_else(|| {
-            settings
-                .api
-                .url
-                .as_ref()
-                .and_then(|url| url.resolve(|name| lookup(name)).ok())
-                .map(|resolved| resolved.value)
-                .filter(|value| !value.is_empty())
-        })
+        .or_else(|| settings.api.url.clone().filter(|value| !value.is_empty()))
         .unwrap_or_else(|| "fabro-server".to_string())
 }
 

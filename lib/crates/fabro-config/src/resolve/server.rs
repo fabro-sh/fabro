@@ -1,4 +1,3 @@
-use fabro_types::settings::InterpString;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
     ObjectStoreProvider, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
@@ -10,7 +9,10 @@ use fabro_types::settings::server::{
 };
 use fabro_util::Home;
 
-use super::{ResolveError, default_interp, parse_socket_addr, require_interp};
+use super::{
+    ResolveError, default_string, parse_socket_addr, require_interp, require_string,
+    warn_if_demoted_template,
+};
 use crate::user::default_storage_dir;
 use crate::{
     IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer,
@@ -27,11 +29,12 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
     let integrations = resolve_integrations(layer.integrations.as_ref());
     validate_github_webhook_strategy(&integrations, layer.api.as_ref(), errors);
 
+    let api_url = layer.api.as_ref().and_then(|api| api.url.clone());
+    warn_if_demoted_template("server.api.url", api_url.as_deref());
+
     ServerNamespace {
         listen,
-        api: ServerApiSettings {
-            url: layer.api.as_ref().and_then(|api| api.url.clone()),
-        },
+        api: ServerApiSettings { url: api_url },
         web,
         auth,
         sandbox: resolve_sandbox(layer.sandbox.as_ref()),
@@ -87,10 +90,10 @@ fn resolve_sandbox_provider(
 }
 
 fn resolve_storage(layer: Option<&ServerStorageLayer>) -> ServerStorageSettings {
+    let root = layer.and_then(|storage| storage.root.as_deref());
+    warn_if_demoted_template("server.storage.root", root);
     ServerStorageSettings {
-        root: layer
-            .and_then(|storage| storage.root.clone())
-            .unwrap_or_else(|| default_interp(default_storage_dir())),
+        root: root.map_or_else(|| default_string(default_storage_dir()), str::to_owned),
     }
 }
 
@@ -100,13 +103,16 @@ fn resolve_listen(
 ) -> ServerListenSettings {
     match layer {
         None => ServerListenSettings::Unix {
-            path: default_interp(Home::from_env().socket_path()),
+            path: default_string(Home::from_env().socket_path()),
         },
-        Some(ServerListenLayer::Unix { path }) => ServerListenSettings::Unix {
-            path: path
-                .clone()
-                .unwrap_or_else(|| default_interp(Home::from_env().socket_path())),
-        },
+        Some(ServerListenLayer::Unix { path }) => {
+            warn_if_demoted_template("server.listen.path", path.as_deref());
+            ServerListenSettings::Unix {
+                path: path
+                    .clone()
+                    .unwrap_or_else(|| default_string(Home::from_env().socket_path())),
+            }
+        }
         Some(ServerListenLayer::Tcp { address }) => {
             let address = parse_socket_addr(
                 &require_interp(address.as_ref(), "server.listen.address", errors),
@@ -121,14 +127,17 @@ fn resolve_listen(
 fn resolve_web(layer: Option<&ServerWebLayer>) -> ServerWebSettings {
     let layer = layer.expect("defaults.toml should provide server.web defaults");
 
+    let url = layer
+        .url
+        .clone()
+        .expect("defaults.toml should provide server.web.url");
+    warn_if_demoted_template("server.web.url", Some(url.as_str()));
+
     ServerWebSettings {
         enabled: layer
             .enabled
             .expect("defaults.toml should provide server.web.enabled"),
-        url:     layer
-            .url
-            .clone()
-            .expect("defaults.toml should provide server.web.url"),
+        url,
     }
 }
 
@@ -207,18 +216,21 @@ fn validate_github_webhook_strategy(
 
 fn resolve_artifacts(
     layer: Option<&ServerArtifactsLayer>,
-    storage_root: &InterpString,
+    storage_root: &str,
     errors: &mut Vec<ResolveError>,
 ) -> ServerArtifactsSettings {
     let provider = layer
         .and_then(|artifacts| artifacts.provider)
         .expect("defaults.toml should provide server.artifacts.provider");
 
+    let prefix = layer
+        .and_then(|artifacts| artifacts.prefix.clone())
+        .expect("defaults.toml should provide server.artifacts.prefix");
+    warn_if_demoted_template("server.artifacts.prefix", Some(prefix.as_str()));
+
     ServerArtifactsSettings {
-        prefix: layer
-            .and_then(|artifacts| artifacts.prefix.clone())
-            .expect("defaults.toml should provide server.artifacts.prefix"),
-        store:  resolve_object_store(
+        prefix,
+        store: resolve_object_store(
             provider,
             layer.and_then(|artifacts| artifacts.local.as_ref()),
             layer.and_then(|artifacts| artifacts.s3.as_ref()),
@@ -231,7 +243,7 @@ fn resolve_artifacts(
 
 fn resolve_slatedb(
     layer: Option<&ServerSlateDbLayer>,
-    storage_root: &InterpString,
+    storage_root: &str,
     errors: &mut Vec<ResolveError>,
 ) -> ServerSlateDbSettings {
     let provider = layer
@@ -250,10 +262,13 @@ fn resolve_slatedb(
         );
     }
 
+    let prefix = layer
+        .and_then(|slatedb| slatedb.prefix.clone())
+        .expect("defaults.toml should provide server.slatedb.prefix");
+    warn_if_demoted_template("server.slatedb.prefix", Some(prefix.as_str()));
+
     ServerSlateDbSettings {
-        prefix: layer
-            .and_then(|slatedb| slatedb.prefix.clone())
-            .expect("defaults.toml should provide server.slatedb.prefix"),
+        prefix,
         store: resolve_object_store(
             provider,
             layer.and_then(|slatedb| slatedb.local.as_ref()),
@@ -274,59 +289,70 @@ fn resolve_object_store(
     provider: ObjectStoreProvider,
     local: Option<&ObjectStoreLocalLayer>,
     s3: Option<&ObjectStoreS3Layer>,
-    storage_root: &InterpString,
+    storage_root: &str,
     path_prefix: &str,
     errors: &mut Vec<ResolveError>,
 ) -> ObjectStoreSettings {
     match provider {
-        ObjectStoreProvider::Local => ObjectStoreSettings::Local {
-            root: local
-                .and_then(|local| local.root.clone())
-                .unwrap_or_else(|| storage_root.clone()),
-        },
+        ObjectStoreProvider::Local => {
+            let root = local.and_then(|local| local.root.as_deref());
+            warn_if_demoted_template(&format!("{path_prefix}.local.root"), root);
+            ObjectStoreSettings::Local {
+                root: root.map_or_else(|| storage_root.to_owned(), str::to_owned),
+            }
+        }
         ObjectStoreProvider::S3 => {
-            let bucket = require_interp(
+            let bucket = require_string(
                 s3.and_then(|s3| s3.bucket.as_ref()),
                 &format!("{path_prefix}.s3.bucket"),
                 errors,
             );
-            let region = require_interp(
+            let region = require_string(
                 s3.and_then(|s3| s3.region.as_ref()),
                 &format!("{path_prefix}.s3.region"),
                 errors,
             );
+            let endpoint = s3.and_then(|s3| s3.endpoint.clone());
+            warn_if_demoted_template(&format!("{path_prefix}.s3.bucket"), Some(bucket.as_str()));
+            warn_if_demoted_template(&format!("{path_prefix}.s3.region"), Some(region.as_str()));
+            warn_if_demoted_template(&format!("{path_prefix}.s3.endpoint"), endpoint.as_deref());
             ObjectStoreSettings::S3 {
                 bucket,
                 region,
-                endpoint: s3.and_then(|s3| s3.endpoint.clone()),
+                endpoint,
                 path_style: s3.and_then(|s3| s3.path_style).unwrap_or(false),
             }
         }
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "derives sibling default paths in source form; the result is re-parsed as an \
-              InterpString and resolves at consumption"
-)]
-fn object_store_default_root(storage_root: &InterpString, domain: &str) -> InterpString {
-    let root = storage_root.as_source();
-    let root = root.trim_end_matches('/');
-    InterpString::parse(&format!("{root}/objects/{domain}"))
+fn object_store_default_root(storage_root: &str, domain: &str) -> String {
+    let root = storage_root.trim_end_matches('/');
+    format!("{root}/objects/{domain}")
 }
 
 fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegrationsSettings {
     ServerIntegrationsSettings {
         github: layer
             .and_then(|integrations| integrations.github.as_ref())
-            .map(|github| GithubIntegrationSettings {
-                enabled:   github.enabled.unwrap_or(true),
-                strategy:  github.strategy.unwrap_or_default(),
-                app_id:    github.app_id.clone(),
-                client_id: github.client_id.clone(),
-                slug:      github.slug.clone(),
-                webhooks:  github.webhooks.as_ref().map(resolve_github_webhooks),
+            .map(|github| {
+                warn_if_demoted_template(
+                    "server.integrations.github.app_id",
+                    github.app_id.as_deref(),
+                );
+                warn_if_demoted_template(
+                    "server.integrations.github.client_id",
+                    github.client_id.as_deref(),
+                );
+                warn_if_demoted_template("server.integrations.github.slug", github.slug.as_deref());
+                GithubIntegrationSettings {
+                    enabled:   github.enabled.unwrap_or(true),
+                    strategy:  github.strategy.unwrap_or_default(),
+                    app_id:    github.app_id.clone(),
+                    client_id: github.client_id.clone(),
+                    slug:      github.slug.clone(),
+                    webhooks:  github.webhooks.as_ref().map(resolve_github_webhooks),
+                }
             })
             .unwrap_or_default(),
         slack:  layer

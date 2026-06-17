@@ -20,7 +20,6 @@ use super::super::{
     counts_toward_scheduler_capacity, delete_run_internal, diagnostics, get, post,
     resource_sampler, spawn_blocking, system_sandbox_provider, to_i64,
 };
-use crate::interp::resolve_interp;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -52,14 +51,8 @@ async fn get_server_settings(_auth: RequiredUser, State(state): State<Arc<AppSta
         .into_response()
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "known leak: server.web.url passes unresolved; strict resolution scheduled in the \
-              interpolation unification (Phase 2)"
-)]
 async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     let manifest_run_settings = state.manifest_run_settings();
-    let server_settings = state.server_settings();
     let (total_runs, active_runs, scheduler_slots_used) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         let active = runs
@@ -85,7 +78,7 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
 
     let response = SystemInfoResponse {
         version:          Some(FABRO_VERSION.to_string()),
-        server_url:       Some(server_settings.server.web.url.as_source()),
+        server_url:       Some(state.effective_web_url()),
         git_sha:          option_env!("FABRO_GIT_SHA").map(str::to_string),
         build_date:       option_env!("FABRO_BUILD_DATE").map(str::to_string),
         profile:          option_env!("FABRO_BUILD_PROFILE").map(str::to_string),
@@ -132,10 +125,10 @@ fn github_integration_status(
         .to_string(),
     );
     if let Some(slug) = settings.slug.as_ref() {
-        metadata.insert("slug".to_string(), display_interp(state, slug));
+        metadata.insert("slug".to_string(), slug.clone());
     }
     if let Some(app_id) = settings.app_id.as_ref() {
-        metadata.insert("app_id".to_string(), display_interp(state, app_id));
+        metadata.insert("app_id".to_string(), app_id.clone());
     }
 
     if !settings.enabled {
@@ -186,6 +179,10 @@ fn github_integration_status(
         missing,
         metadata,
     )
+}
+
+fn display_interp(state: &AppState, value: &InterpString) -> String {
+    value.resolve_or_source(|name| (state.env_lookup)(name))
 }
 
 fn slack_integration_status(state: &AppState) -> SystemIntegrationStatus {
@@ -279,10 +276,6 @@ fn missing_vault_secret(state: &AppState, name: &str) -> bool {
         .as_deref()
         .map(str::trim)
         .is_none_or(str::is_empty)
-}
-
-fn display_interp(state: &AppState, value: &InterpString) -> String {
-    value.resolve_or_source(|name| (state.env_lookup)(name))
 }
 
 async fn get_system_resources(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
@@ -475,16 +468,12 @@ async fn get_github_repo(
     let base_url = fabro_github::github_api_base_url();
     let (token, client) = match github_settings.strategy {
         GithubIntegrationStrategy::App => {
-            let Some(app_id) = github_settings.app_id.as_ref() else {
+            if github_settings.app_id.is_none() {
                 return ApiError::new(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "server.integrations.github.app_id is not configured",
                 )
                 .into_response();
-            };
-            if let Err(err) = resolve_interp(app_id) {
-                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
-                    .into_response();
             }
             let creds = match state.github_credentials(github_settings) {
                 Ok(Some(fabro_github::GitHubCredentials::App(creds))) => creds,
@@ -509,14 +498,8 @@ async fn get_github_repo(
                         .into_response();
                 }
             };
-            let install_url = match github_settings.slug.as_ref() {
-                Some(slug) => match resolve_interp(slug) {
-                    Ok(slug) => format!("https://github.com/apps/{slug}/installations/new"),
-                    Err(err) => {
-                        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
-                            .into_response();
-                    }
-                },
+            let install_url = match github_settings.slug.as_deref() {
+                Some(slug) => format!("https://github.com/apps/{slug}/installations/new"),
                 None => format!("https://github.com/organizations/{owner}/settings/installations"),
             };
 

@@ -3,7 +3,6 @@
     reason = "sync test fixture setup and raw template source assertions; not on a Tokio path"
 )]
 
-use fabro_types::settings::InterpString;
 use fabro_types::settings::server::{
     GithubIntegrationStrategy, LogDestination, ObjectStoreSettings, ServerAuthMethod,
     ServerListenSettings, ServerNamespace,
@@ -61,20 +60,17 @@ fn resolves_server_defaults_from_empty_settings() {
     let settings = resolve_server(&empty_settings_with_auth_methods());
 
     assert_eq!(
-        settings.storage.root.as_source(),
+        settings.storage.root,
         default_storage_dir().to_string_lossy()
     );
     assert!(settings.web.enabled);
-    assert_eq!(settings.web.url.as_source(), "http://localhost:3000");
+    assert_eq!(settings.web.url, "http://localhost:3000");
     assert_eq!(settings.scheduler.max_concurrent_runs, 5);
     assert_eq!(settings.logging.destination, LogDestination::File);
 
     match settings.listen {
         ServerListenSettings::Unix { path } => {
-            assert_eq!(
-                path.as_source(),
-                Home::from_env().socket_path().to_string_lossy()
-            );
+            assert_eq!(path, Home::from_env().socket_path().to_string_lossy());
         }
         ServerListenSettings::Tcp { .. } => panic!("expected default listen transport to be unix"),
     }
@@ -82,7 +78,7 @@ fn resolves_server_defaults_from_empty_settings() {
     match settings.artifacts.store {
         ObjectStoreSettings::Local { root } => {
             assert_eq!(
-                root.as_source(),
+                root,
                 default_storage_dir()
                     .join("objects")
                     .join("artifacts")
@@ -91,12 +87,12 @@ fn resolves_server_defaults_from_empty_settings() {
         }
         ObjectStoreSettings::S3 { .. } => panic!("expected local artifact store by default"),
     }
-    assert_eq!(settings.artifacts.prefix.as_source(), "");
+    assert_eq!(settings.artifacts.prefix, "");
 
     match settings.slatedb.store {
         ObjectStoreSettings::Local { root } => {
             assert_eq!(
-                root.as_source(),
+                root,
                 default_storage_dir()
                     .join("objects")
                     .join("slatedb")
@@ -278,7 +274,7 @@ root = "/srv/fabro"
     let context = fabro_config::ServerSettingsBuilder::from_layer(&settings)
         .expect("settings should resolve");
 
-    assert_eq!(context.server.storage.root.as_source(), "/srv/fabro");
+    assert_eq!(context.server.storage.root, "/srv/fabro");
 }
 
 #[test]
@@ -301,7 +297,7 @@ root = "/srv/from-home"
     with_var("FABRO_HOME", Some(home.path()), || {
         let settings =
             fabro_config::ServerSettingsBuilder::load_default().expect("settings should resolve");
-        assert_eq!(settings.server.storage.root.as_source(), "/srv/from-home");
+        assert_eq!(settings.server.storage.root, "/srv/from-home");
     });
 }
 
@@ -367,22 +363,22 @@ slug = "fabro-app"
 
     match settings.listen {
         ServerListenSettings::Unix { path } => {
-            assert_eq!(path, InterpString::parse("{{ env.FABRO_SOCKET }}"));
+            assert_eq!(path, "{{ env.FABRO_SOCKET }}");
         }
         ServerListenSettings::Tcp { .. } => panic!("expected unix listen transport"),
     }
 
     assert_eq!(
-        settings.integrations.github.app_id,
-        Some(InterpString::parse("{{ env.GITHUB_APP_ID }}"))
+        settings.integrations.github.app_id.as_deref(),
+        Some("{{ env.GITHUB_APP_ID }}")
     );
     assert_eq!(
-        settings.integrations.github.client_id,
-        Some(InterpString::parse("{{ env.GITHUB_CLIENT_ID }}"))
+        settings.integrations.github.client_id.as_deref(),
+        Some("{{ env.GITHUB_CLIENT_ID }}")
     );
     assert_eq!(
-        settings.integrations.github.slug,
-        Some(InterpString::parse("fabro-app"))
+        settings.integrations.github.slug.as_deref(),
+        Some("fabro-app")
     );
 }
 
@@ -522,7 +518,7 @@ fn resolve_storage_root_defaults_with_minimal_server_auth_methods() {
     let settings = ServerSettingsBuilder::from_layer(&empty_settings_with_auth_methods())
         .expect("default server settings should resolve");
     assert_eq!(
-        settings.server.storage.root.as_source(),
+        settings.server.storage.root,
         default_storage_dir().to_string_lossy()
     );
 }
@@ -540,11 +536,14 @@ root = "/srv/fabro"
     let settings =
         ServerSettingsBuilder::from_layer(&file).expect("server settings should resolve");
 
-    assert_eq!(settings.server.storage.root.as_source(), "/srv/fabro");
+    assert_eq!(settings.server.storage.root, "/srv/fabro");
 }
 
 #[test]
-fn resolve_storage_root_preserves_env_interpolation() {
+fn resolve_storage_root_keeps_template_token_literal() {
+    // `server.storage.root` is plain control-plane config now: a `{{ env.* }}`
+    // token is stored verbatim and never interpolated (deployment-time
+    // overrides go through FABRO_STORAGE_DIR, not a settings token).
     let file = parse(
         r#"
 _version = 1
@@ -556,10 +555,7 @@ root = "{{ env.FABRO_STORAGE_ROOT }}"
     let settings =
         ServerSettingsBuilder::from_layer(&file).expect("server settings should resolve");
 
-    assert_eq!(
-        settings.server.storage.root,
-        InterpString::parse("{{ env.FABRO_STORAGE_ROOT }}")
-    );
+    assert_eq!(settings.server.storage.root, "{{ env.FABRO_STORAGE_ROOT }}");
 }
 
 #[test]

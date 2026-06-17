@@ -4,8 +4,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::settings::{
-    CliNamespace, InterpString, ObjectStoreSettings, ProjectNamespace, RunNamespace,
-    ServerNamespace, WorkflowNamespace,
+    CliNamespace, ObjectStoreSettings, ProjectNamespace, RunNamespace, ServerNamespace,
+    WorkflowNamespace,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -16,7 +16,7 @@ pub struct ServerSettings {
 impl ServerSettings {
     #[must_use]
     pub fn with_storage_override(mut self, path: &Path) -> Self {
-        self.server.storage.root = InterpString::parse(&path.display().to_string());
+        self.server.storage.root = path.display().to_string();
         override_local_object_store_root(&mut self.server.artifacts.store, path, "artifacts");
         override_local_object_store_root(&mut self.server.slatedb.store, path, "slatedb");
         self
@@ -31,13 +31,11 @@ fn override_local_object_store_root(
     let ObjectStoreSettings::Local { root } = store else {
         return;
     };
-    *root = InterpString::parse(
-        &storage_root
-            .join("objects")
-            .join(domain)
-            .display()
-            .to_string(),
-    );
+    *root = storage_root
+        .join("objects")
+        .join(domain)
+        .display()
+        .to_string();
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

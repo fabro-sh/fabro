@@ -21,7 +21,6 @@ use tracing::{debug, error, info, warn};
 
 use crate::auth::{GithubEndpoints, browser_shell};
 use crate::error::ApiError;
-use crate::interp::process_env_var;
 use crate::jwt_auth::{AuthMode, auth_method_name, dev_token_matches};
 use crate::principal_middleware::{
     RequestAuth, RequestAuthContext, UserProfile, require_authenticated_user,
@@ -323,13 +322,7 @@ fn session_provider(auth_method: AuthMethod) -> &'static str {
 }
 
 fn session_cookie_secure(state: &AppState) -> bool {
-    state
-        .server_settings()
-        .server
-        .web
-        .url
-        .resolve(process_env_var)
-        .is_ok_and(|resolved| resolved.value.starts_with("https://"))
+    state.effective_web_url().starts_with("https://")
 }
 
 fn redacted_url_for_log(url: &str) -> String {
@@ -443,16 +436,7 @@ async fn login_github(
             json!({"error": "GitHub App client_id is not configured"}),
         );
     };
-    let client_id = match state.resolve_interp(client_id) {
-        Ok(client_id) => client_id,
-        Err(err) => {
-            warn!(error = %err, "OAuth login failed: client_id could not be resolved");
-            return json_response(
-                StatusCode::CONFLICT,
-                json!({"error": format!("GitHub App client_id could not be resolved: {err}")}),
-            );
-        }
-    };
+    let client_id = client_id.clone();
     let web_url = match state.canonical_origin() {
         Ok(web_url) => web_url,
         Err(err) => {
@@ -590,16 +574,7 @@ async fn callback_github(
             json!({"error": "GitHub App client_id is not configured"}),
         );
     };
-    let client_id = match state.resolve_interp(client_id) {
-        Ok(client_id) => client_id,
-        Err(err) => {
-            error!(error = %err, "OAuth callback failed: client_id could not be resolved");
-            return json_response(
-                StatusCode::CONFLICT,
-                json!({"error": format!("GitHub App client_id could not be resolved: {err}")}),
-            );
-        }
-    };
+    let client_id = client_id.clone();
     let Some(client_secret) = state.vault_secret(EnvVars::GITHUB_APP_CLIENT_SECRET) else {
         error!("OAuth callback failed: GITHUB_APP_CLIENT_SECRET not configured");
         return json_response(

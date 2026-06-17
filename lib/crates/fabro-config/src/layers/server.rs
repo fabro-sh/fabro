@@ -46,7 +46,7 @@ pub enum ServerListenLayer {
     },
     Unix {
         #[serde(default)]
-        path: Option<InterpString>,
+        path: Option<String>,
     },
 }
 
@@ -57,7 +57,7 @@ pub enum ServerListenLayer {
 #[serde(deny_unknown_fields)]
 pub struct ServerApiLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url: Option<InterpString>,
+    pub url: Option<String>,
 }
 
 /// `[server.web]` — web surface settings.
@@ -67,7 +67,7 @@ pub struct ServerWebLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url:     Option<InterpString>,
+    pub url:     Option<String>,
 }
 
 /// `[server.auth]` — cohesive server auth surface.
@@ -122,7 +122,7 @@ pub struct ServerSandboxProviderLayer {
 #[serde(deny_unknown_fields)]
 pub struct ServerStorageLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root: Option<InterpString>,
+    pub root: Option<String>,
 }
 
 /// `[server.artifacts]` — object-store-backed artifact storage.
@@ -132,7 +132,7 @@ pub struct ServerArtifactsLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<ObjectStoreProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix:   Option<InterpString>,
+    pub prefix:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local:    Option<ObjectStoreLocalLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -146,7 +146,7 @@ pub struct ServerSlateDbLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider:       Option<ObjectStoreProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix:         Option<InterpString>,
+    pub prefix:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flush_interval: Option<Duration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -163,18 +163,18 @@ pub struct ObjectStoreLocalLayer {
     /// Overrides the default root, which otherwise falls back to
     /// `{server.storage.root}/objects/{domain}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root: Option<InterpString>,
+    pub root: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObjectStoreS3Layer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bucket:     Option<InterpString>,
+    pub bucket:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub region:     Option<InterpString>,
+    pub region:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub endpoint:   Option<InterpString>,
+    pub endpoint:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path_style: Option<bool>,
 }
@@ -218,11 +218,11 @@ pub struct GithubIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strategy:  Option<GithubIntegrationStrategy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub app_id:    Option<InterpString>,
+    pub app_id:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id: Option<InterpString>,
+    pub client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slug:      Option<InterpString>,
+    pub slug:      Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhooks:  Option<IntegrationWebhooksLayer>,
 }

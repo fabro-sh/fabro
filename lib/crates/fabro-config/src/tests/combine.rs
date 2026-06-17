@@ -315,9 +315,6 @@ bucket = "higher-bucket"
 
     let merged = higher.combine(lower);
     let s3 = merged.server.unwrap().artifacts.unwrap().s3.unwrap();
-    assert_eq!(
-        s3.bucket.map(|bucket| bucket.as_source()),
-        Some("higher-bucket".to_string())
-    );
+    assert_eq!(s3.bucket, Some("higher-bucket".to_string()));
     assert_eq!(s3.region, None);
 }

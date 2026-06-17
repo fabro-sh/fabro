@@ -9,7 +9,6 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::Storage;
 use fabro_types::RunId;
-use fabro_types::settings::interp::InterpString;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
@@ -40,8 +39,7 @@ fn temp_storage_settings() -> (tempfile::TempDir, TestAppSettings, PathBuf) {
     let temp = tempdir().expect("tempdir should create");
     let mut settings = test_settings();
     let storage_dir = temp.path().join("storage");
-    settings.server_settings.server.storage.root =
-        InterpString::parse(&storage_dir.to_string_lossy());
+    settings.server_settings.server.storage.root = storage_dir.to_string_lossy().into_owned();
     (temp, settings, storage_dir)
 }
 
@@ -114,14 +112,10 @@ async fn load_questions(app: &axum::Router, run_id: &str) -> serde_json::Value {
     .await
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "test asserts the raw template source"
-)]
 #[tokio::test]
 async fn get_system_info_returns_runtime_fields() {
     let (_temp, settings, expected_storage_dir) = temp_storage_settings();
-    let configured_server_url = settings.server_settings.server.web.url.as_source();
+    let configured_server_url = settings.server_settings.server.web.url.clone();
     let app =
         fabro_server::test_support::build_test_router(test_app_state_with_options(settings, 5));
 

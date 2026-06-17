@@ -69,8 +69,8 @@ pub(crate) fn parse_socket_addr(
     }
 }
 
-pub(crate) fn default_interp(path: impl AsRef<std::path::Path>) -> InterpString {
-    InterpString::parse(&path.as_ref().to_string_lossy())
+pub(crate) fn default_string(path: impl AsRef<std::path::Path>) -> String {
+    path.as_ref().to_string_lossy().into_owned()
 }
 
 /// Warn when a field demoted out of the interpolation set (D2) still contains

@@ -70,36 +70,27 @@ pub enum ServerListenSettings {
         address: SocketAddr,
     },
     Unix {
-        path: InterpString,
+        path: String,
     },
 }
 
 impl Default for ServerListenSettings {
     fn default() -> Self {
         Self::Unix {
-            path: InterpString::parse(""),
+            path: String::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerApiSettings {
-    pub url: Option<InterpString>,
+    pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerWebSettings {
     pub enabled: bool,
-    pub url:     InterpString,
-}
-
-impl Default for ServerWebSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            url:     InterpString::parse(""),
-        }
-    }
+    pub url:     String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,37 +151,20 @@ impl Default for ServerSandboxProviderSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerStorageSettings {
-    pub root: InterpString,
+    pub root: String,
 }
 
-impl Default for ServerStorageSettings {
-    fn default() -> Self {
-        Self {
-            root: InterpString::parse(""),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerArtifactsSettings {
-    pub prefix: InterpString,
+    pub prefix: String,
     pub store:  ObjectStoreSettings,
-}
-
-impl Default for ServerArtifactsSettings {
-    fn default() -> Self {
-        Self {
-            prefix: InterpString::parse(""),
-            store:  ObjectStoreSettings::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerSlateDbSettings {
-    pub prefix:         InterpString,
+    pub prefix:         String,
     pub store:          ObjectStoreSettings,
     #[serde(
         serialize_with = "serialize_std_duration",
@@ -203,7 +177,7 @@ pub struct ServerSlateDbSettings {
 impl Default for ServerSlateDbSettings {
     fn default() -> Self {
         Self {
-            prefix:         InterpString::parse(""),
+            prefix:         String::new(),
             store:          ObjectStoreSettings::default(),
             flush_interval: StdDuration::ZERO,
             disk_cache:     false,
@@ -215,12 +189,12 @@ impl Default for ServerSlateDbSettings {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ObjectStoreSettings {
     Local {
-        root: InterpString,
+        root: String,
     },
     S3 {
-        bucket:     InterpString,
-        region:     InterpString,
-        endpoint:   Option<InterpString>,
+        bucket:     String,
+        region:     String,
+        endpoint:   Option<String>,
         path_style: bool,
     },
 }
@@ -228,7 +202,7 @@ pub enum ObjectStoreSettings {
 impl Default for ObjectStoreSettings {
     fn default() -> Self {
         Self::Local {
-            root: InterpString::parse(""),
+            root: String::new(),
         }
     }
 }
@@ -275,9 +249,9 @@ pub struct ServerIntegrationsSettings {
 pub struct GithubIntegrationSettings {
     pub enabled:   bool,
     pub strategy:  GithubIntegrationStrategy,
-    pub app_id:    Option<InterpString>,
-    pub client_id: Option<InterpString>,
-    pub slug:      Option<InterpString>,
+    pub app_id:    Option<String>,
+    pub client_id: Option<String>,
+    pub slug:      Option<String>,
     pub webhooks:  Option<IntegrationWebhooksSettings>,
 }
 
