@@ -23,3 +23,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 url.workspace = true
+
+[dev-dependencies]
+httpmock = "0.8"
+tokio = { workspace = true, features = ["macros"] }
