@@ -19,7 +19,9 @@ pub(crate) fn resolve_startup(
 ) -> anyhow::Result<(AuthMode, ServerSecrets)> {
     let server_secrets = ServerSecrets::load(env_path, env_entries)?;
     let auth_secret_lookup = |name: &str| match name {
-        EnvVars::GITHUB_APP_CLIENT_SECRET => vault.get(name).map(str::to_string),
+        EnvVars::GITHUB_APP_CLIENT_SECRET | EnvVars::GITLAB_APP_CLIENT_SECRET => {
+            vault.get(name).map(str::to_string)
+        }
         _ => server_secrets.get(name),
     };
     let auth_mode = resolve_auth_mode_with_lookup(settings, auth_secret_lookup)?;
@@ -270,6 +272,51 @@ client_id = "Iv1.test"
             &vault,
         )
         .expect("github client secret in vault should satisfy startup");
+    }
+
+    #[test]
+    fn validate_startup_accepts_gitlab_client_secret_from_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = HashMap::from([(
+            EnvVars::SESSION_SECRET.to_string(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+        )]);
+        let settings = ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = ["root"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "https://gitlab.example.test"
+client_id = "gitlab-client-id"
+"#,
+        )
+        .unwrap()
+        .server;
+        let mut vault = empty_vault(&dir);
+        vault
+            .set(
+                EnvVars::GITLAB_APP_CLIENT_SECRET,
+                "vault-client-secret",
+                SecretType::Token,
+                None,
+            )
+            .unwrap();
+
+        validate_startup(
+            dir.path().join("server.env").as_path(),
+            env,
+            &settings,
+            &vault,
+        )
+        .expect("gitlab client secret in vault should satisfy startup");
     }
 
     #[test]

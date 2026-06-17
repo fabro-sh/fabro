@@ -5,10 +5,12 @@ use crate::repository::GitLabBaseUrl;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GitLabUser {
-    pub id:       u64,
-    pub username: String,
-    pub name:     Option<String>,
-    pub email:    Option<String>,
+    pub id:         u64,
+    pub username:   String,
+    pub name:       Option<String>,
+    pub email:      Option<String>,
+    #[serde(default)]
+    pub avatar_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -58,6 +60,11 @@ pub fn token_url(base: &GitLabBaseUrl) -> Url {
 #[must_use]
 pub fn user_url(base: &GitLabBaseUrl) -> Url {
     base.api_url("user")
+}
+
+#[must_use]
+pub fn user_detail_url(base: &GitLabBaseUrl, user_id: u64) -> Url {
+    base.api_url(&format!("users/{user_id}"))
 }
 
 #[must_use]
