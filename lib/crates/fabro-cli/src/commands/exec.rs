@@ -281,6 +281,14 @@ impl ProviderAdapter for AuthenticatedFabroServerAdapter {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "exec-boundary MCP transport InterpString resolution facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResult<()> {
     use fabro_agent::cli::PermissionLevel as AgentPermissionLevel;
     use fabro_types::settings::run::AgentPermissions;
@@ -312,6 +320,21 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     } else {
         cli.exec.agent.mcps.values().cloned().collect()
     };
+    // Resolve `{{ env.* }}` in MCP transport config at the exec boundary,
+    // against the CLI process env — the mirror of the `fabro run` worker
+    // boundary in `fabro_workflow::operations::start::runtime_mcp_server`.
+    // Both consumers read the same source-form settings; missing env is a hard
+    // error (D3) and reserved secrets/inputs tokens surface loudly rather than
+    // leaking.
+    let mcp_servers = mcp_servers
+        .into_iter()
+        .map(|settings| {
+            let name = settings.name.clone();
+            settings
+                .resolve_transport_env(process_env_var)
+                .with_context(|| format!("failed to resolve MCP server {name:?}"))
+        })
+        .collect::<AnyResult<Vec<_>>>()?;
     if let Some(target) = server_target {
         tracing::info!(transport = "server", "Agent session starting");
         let provider_name = args

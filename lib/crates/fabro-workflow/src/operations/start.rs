@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use fabro_auth::{CredentialSource, EnvCredentialSource, VaultCredentialSource};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_llm::client::Client as LlmClient;
-use fabro_mcp::config::{McpServerSettings, McpTransport};
+use fabro_mcp::config::McpServerSettings;
 use fabro_model::{Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::from_environment::{
@@ -15,13 +15,11 @@ use fabro_sandbox::from_environment::{
 };
 use fabro_sandbox::{DockerSandboxOptions, SandboxSpec};
 use fabro_static::EnvVars;
-use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
     ApprovalMode, HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
     HookType as ResolvedHookType, McpServerSettings as ResolvedMcpServerSettings,
-    McpTransport as ResolvedMcpTransport, PullRequestSettings, RunMode,
-    RunModelSettings as ResolvedRunModelSettings, RunNamespace as ResolvedRunSettings,
-    TlsMode as ResolvedTlsMode,
+    PullRequestSettings, RunMode, RunModelSettings as ResolvedRunModelSettings,
+    RunNamespace as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
 };
 use fabro_types::settings::{ModelRegistry, ResolvedModelRef};
 use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
@@ -670,88 +668,26 @@ impl ModelRegistry for CatalogModelRegistry<'_> {
 
 /// Build the launch-time MCP config from resolved settings, resolving any
 /// `{{ env.* }}` tokens in the transport (`command`/`url`/`env`/`headers`)
-/// against the host process environment.
+/// against the worker process environment — the run boundary where the MCP is
+/// actually launched.
 ///
-/// MCP transport strings are carried in source form out of the config resolve
-/// layer so that `fabro validate` stays portable (it never requires env to be
-/// set). Their env tokens resolve here, at the run boundary where the MCP is
-/// actually launched. A referenced env var that is unset is a hard error — no
-/// fallback to the unresolved source.
+/// The resolution itself lives on the type
+/// ([`McpServerSettings::resolve_transport_env`]) so `fabro run` (here) and
+/// `fabro exec` share one resolver; this wrapper just adds the server name to
+/// the error. MCP transport strings are carried in source form out of the
+/// config resolve layer so `fabro validate` stays portable (it never requires
+/// env to be set), and a referenced env var that is unset is a hard error —
+/// no fallback to the unresolved source.
 fn runtime_mcp_server(
     settings: &ResolvedMcpServerSettings,
     env_lookup: impl Fn(&str) -> Option<String> + Copy,
 ) -> Result<McpServerSettings, Error> {
-    let name = settings.name.as_str();
-    let transport = match &settings.transport {
-        ResolvedMcpTransport::Stdio { command, env } => McpTransport::Stdio {
-            command: resolve_mcp_strings(name, command, env_lookup)?,
-            env:     resolve_mcp_env(name, env, env_lookup)?,
-        },
-        ResolvedMcpTransport::Http {
-            protocol,
-            url,
-            headers,
-        } => McpTransport::Http {
-            protocol: *protocol,
-            url:      resolve_mcp_string(name, url, env_lookup)?,
-            headers:  resolve_mcp_env(name, headers, env_lookup)?,
-        },
-        ResolvedMcpTransport::Sandbox {
-            protocol,
-            command,
-            port,
-            env,
-        } => McpTransport::Sandbox {
-            protocol: *protocol,
-            command:  resolve_mcp_strings(name, command, env_lookup)?,
-            port:     *port,
-            env:      resolve_mcp_env(name, env, env_lookup)?,
-        },
-    };
-    Ok(McpServerSettings {
-        name: settings.name.clone(),
-        transport,
-        current_dir: None,
-        clear_env: false,
-        startup_timeout_secs: settings.startup_timeout_secs,
-        tool_timeout_secs: settings.tool_timeout_secs,
+    settings.resolve_transport_env(env_lookup).map_err(|err| {
+        Error::engine(format!(
+            "failed to resolve MCP server {:?}: {err}",
+            settings.name
+        ))
     })
-}
-
-/// Resolve `{{ env.* }}` tokens in one MCP transport string at the run
-/// boundary. Missing env is a hard error (D3); reserved `secrets`/`inputs`
-/// tokens, which have no resolver here, surface as the same loud error rather
-/// than passing through.
-fn resolve_mcp_string(
-    name: &str,
-    value: &str,
-    env_lookup: impl Fn(&str) -> Option<String>,
-) -> Result<String, Error> {
-    InterpString::parse(value)
-        .resolve(env_lookup)
-        .map(|resolved| resolved.value)
-        .map_err(|err| Error::engine(format!("failed to resolve MCP server {name:?}: {err}")))
-}
-
-fn resolve_mcp_strings(
-    name: &str,
-    values: &[String],
-    env_lookup: impl Fn(&str) -> Option<String> + Copy,
-) -> Result<Vec<String>, Error> {
-    values
-        .iter()
-        .map(|value| resolve_mcp_string(name, value, env_lookup))
-        .collect()
-}
-
-fn resolve_mcp_env(
-    name: &str,
-    env: &HashMap<String, String>,
-    env_lookup: impl Fn(&str) -> Option<String> + Copy,
-) -> Result<HashMap<String, String>, Error> {
-    env.iter()
-        .map(|(key, value)| Ok((key.clone(), resolve_mcp_string(name, value, env_lookup)?)))
-        .collect()
 }
 
 fn runtime_hook_definition(definition: &ResolvedHookDefinition) -> fabro_hooks::HookDefinition {
@@ -1179,8 +1115,9 @@ mod tests {
         EnvironmentImageLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer, RunCloneLayer,
         RunEnvironmentLayer, RunExecutionLayer, RunLayer, StickyMap, WorkflowSettingsBuilder,
     };
+    use fabro_mcp::config::McpTransport;
     use fabro_store::Database;
-    use fabro_types::settings::run::RunMode;
+    use fabro_types::settings::run::{McpTransport as ResolvedMcpTransport, RunMode};
     use fabro_types::settings::{InterpString, ModelRef};
     use fabro_types::{
         BilledModelUsage, ManifestPath, StageTiming, WorkflowSettings, fixtures, test_support,

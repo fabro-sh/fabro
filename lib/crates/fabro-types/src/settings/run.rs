@@ -1075,6 +1075,236 @@ impl McpServerSettings {
     pub fn tool_timeout(&self) -> StdDuration {
         StdDuration::from_secs(self.tool_timeout_secs)
     }
+
+    /// Resolve `{{ env.* }}` tokens in this server's transport strings
+    /// (`command`/`args`/`url`/`env`/`headers`) against `env_lookup`,
+    /// returning a copy with the tokens replaced and every other field
+    /// preserved.
+    ///
+    /// This is the late, use-time half of MCP interpolation, the counterpart
+    /// to [`substitute_mcp_transport`]: `{{ vars.* }}` are substituted
+    /// earlier, server-side, while `{{ env.* }}` resolve here — in whichever
+    /// process actually launches the server (the run worker for `fabro run`,
+    /// the CLI process for `fabro exec`). Carrying the source form out of the
+    /// config resolve layer keeps `fabro validate` portable (it never requires
+    /// env to be set).
+    ///
+    /// A referenced env var that is unset is a hard error — no fallback to the
+    /// unresolved source. Reserved `secrets`/`inputs` tokens have no lookup
+    /// here and surface as a loud [`ResolveErrorKind::Unavailable`] error
+    /// rather than passing through as literal text.
+    pub fn resolve_transport_env(
+        &self,
+        env_lookup: impl Fn(&str) -> Option<String> + Copy,
+    ) -> Result<Self, ResolveError> {
+        let transport = match &self.transport {
+            McpTransport::Stdio { command, env } => McpTransport::Stdio {
+                command: resolve_env_strings(command, env_lookup)?,
+                env:     resolve_env_map(env, env_lookup)?,
+            },
+            McpTransport::Http {
+                protocol,
+                url,
+                headers,
+            } => McpTransport::Http {
+                protocol: *protocol,
+                url:      resolve_env_string(url, env_lookup)?,
+                headers:  resolve_env_map(headers, env_lookup)?,
+            },
+            McpTransport::Sandbox {
+                protocol,
+                command,
+                port,
+                env,
+            } => McpTransport::Sandbox {
+                protocol: *protocol,
+                command:  resolve_env_strings(command, env_lookup)?,
+                port:     *port,
+                env:      resolve_env_map(env, env_lookup)?,
+            },
+        };
+        Ok(Self {
+            name: self.name.clone(),
+            transport,
+            current_dir: self.current_dir.clone(),
+            clear_env: self.clear_env,
+            startup_timeout_secs: self.startup_timeout_secs,
+            tool_timeout_secs: self.tool_timeout_secs,
+        })
+    }
+}
+
+/// Resolve `{{ env.* }}` tokens in one MCP transport string. A literal value
+/// (no tokens) round-trips unchanged.
+fn resolve_env_string(
+    value: &str,
+    env_lookup: impl Fn(&str) -> Option<String>,
+) -> Result<String, ResolveError> {
+    Ok(InterpString::parse(value).resolve(env_lookup)?.value)
+}
+
+fn resolve_env_strings(
+    values: &[String],
+    env_lookup: impl Fn(&str) -> Option<String> + Copy,
+) -> Result<Vec<String>, ResolveError> {
+    values
+        .iter()
+        .map(|value| resolve_env_string(value, env_lookup))
+        .collect()
+}
+
+fn resolve_env_map(
+    map: &HashMap<String, String>,
+    env_lookup: impl Fn(&str) -> Option<String> + Copy,
+) -> Result<HashMap<String, String>, ResolveError> {
+    map.iter()
+        .map(|(key, value)| Ok((key.clone(), resolve_env_string(value, env_lookup)?)))
+        .collect()
+}
+
+#[cfg(test)]
+mod resolve_transport_env_tests {
+    use std::collections::HashMap;
+
+    use super::super::interp::ResolveErrorKind;
+    use super::{McpHttpProtocol, McpServerSettings, McpTransport, Namespace};
+
+    fn env_lookup(
+        pairs: &'static [(&'static str, &'static str)],
+    ) -> impl Fn(&str) -> Option<String> + Copy {
+        move |name| {
+            pairs
+                .iter()
+                .find_map(|(key, value)| (*key == name).then(|| (*value).to_string()))
+        }
+    }
+
+    #[test]
+    fn literal_transport_passes_through() {
+        let settings = McpServerSettings {
+            name: "baseline".to_string(),
+            transport: McpTransport::Stdio {
+                command: vec!["python".to_string(), "server.py".to_string()],
+                env:     HashMap::from([("TOKEN".to_string(), "literal-value".to_string())]),
+            },
+            ..McpServerSettings::default()
+        };
+
+        let resolved = settings.resolve_transport_env(env_lookup(&[])).unwrap();
+
+        let McpTransport::Stdio { command, env } = resolved.transport else {
+            panic!("expected stdio transport");
+        };
+        assert_eq!(command, vec!["python".to_string(), "server.py".to_string()]);
+        assert_eq!(env.get("TOKEN").map(String::as_str), Some("literal-value"));
+    }
+
+    #[test]
+    fn stdio_command_and_env_resolve() {
+        let settings = McpServerSettings {
+            name: "gemini".to_string(),
+            transport: McpTransport::Stdio {
+                command: vec!["python".to_string(), "{{ env.SERVER_PATH }}".to_string()],
+                env:     HashMap::from([(
+                    "GEMINI_API_KEY".to_string(),
+                    "{{ env.GEMINI_API_KEY }}".to_string(),
+                )]),
+            },
+            ..McpServerSettings::default()
+        };
+
+        let resolved = settings
+            .resolve_transport_env(env_lookup(&[
+                ("SERVER_PATH", "/srv/mcp.py"),
+                ("GEMINI_API_KEY", "real-key"),
+            ]))
+            .unwrap();
+
+        let McpTransport::Stdio { command, env } = resolved.transport else {
+            panic!("expected stdio transport");
+        };
+        assert_eq!(command, vec![
+            "python".to_string(),
+            "/srv/mcp.py".to_string()
+        ]);
+        assert_eq!(
+            env.get("GEMINI_API_KEY").map(String::as_str),
+            Some("real-key")
+        );
+    }
+
+    #[test]
+    fn http_url_and_headers_resolve() {
+        let settings = McpServerSettings {
+            name: "remote".to_string(),
+            transport: McpTransport::Http {
+                protocol: McpHttpProtocol::default(),
+                url:      "https://{{ env.MCP_HOST }}/mcp".to_string(),
+                headers:  HashMap::from([(
+                    "Authorization".to_string(),
+                    "Bearer {{ env.MCP_TOKEN }}".to_string(),
+                )]),
+            },
+            ..McpServerSettings::default()
+        };
+
+        let resolved = settings
+            .resolve_transport_env(env_lookup(&[
+                ("MCP_HOST", "mcp.example"),
+                ("MCP_TOKEN", "abc123"),
+            ]))
+            .unwrap();
+
+        let McpTransport::Http { url, headers, .. } = resolved.transport else {
+            panic!("expected http transport");
+        };
+        assert_eq!(url, "https://mcp.example/mcp");
+        assert_eq!(
+            headers.get("Authorization").map(String::as_str),
+            Some("Bearer abc123")
+        );
+    }
+
+    #[test]
+    fn missing_env_is_hard_error() {
+        let settings = McpServerSettings {
+            name: "gemini".to_string(),
+            transport: McpTransport::Stdio {
+                command: vec!["python".to_string()],
+                env:     HashMap::from([(
+                    "GEMINI_API_KEY".to_string(),
+                    "{{ env.GEMINI_API_KEY }}".to_string(),
+                )]),
+            },
+            ..McpServerSettings::default()
+        };
+
+        let err = settings.resolve_transport_env(env_lookup(&[])).unwrap_err();
+
+        assert_eq!(err.namespace, Namespace::Env);
+        assert_eq!(err.name, "GEMINI_API_KEY");
+        assert_eq!(err.kind, ResolveErrorKind::Missing);
+    }
+
+    #[test]
+    fn reserved_secret_token_is_unavailable_not_leaked() {
+        let settings = McpServerSettings {
+            name: "vaulted".to_string(),
+            transport: McpTransport::Stdio {
+                command: vec!["python".to_string()],
+                env:     HashMap::from([(
+                    "API_KEY".to_string(),
+                    "{{ secrets.API_KEY }}".to_string(),
+                )]),
+            },
+            ..McpServerSettings::default()
+        };
+
+        let err = settings.resolve_transport_env(env_lookup(&[])).unwrap_err();
+
+        assert_eq!(err.namespace, Namespace::Secrets);
+        assert_eq!(err.kind, ResolveErrorKind::Unavailable);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
