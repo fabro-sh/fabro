@@ -5,14 +5,14 @@ use std::sync::Arc;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_template::{
     TemplateContext, TemplateError, TemplateRenderMode, TemplateSource, TemplateSourceOrigin,
-    TemplateStore, references_top_level_variable, render_named_with_origin, render_source,
+    TemplateStore,
 };
 use fabro_util::error::collect_chain;
 use fabro_validate::{Diagnostic, Severity};
 
 use super::Transform;
 use crate::error::Error;
-use crate::pipeline::types::TEMPLATE_UNDEFINED_VARIABLE_RULE;
+use crate::pipeline::types::{GOAL_SELF_REFERENCE_RULE, TEMPLATE_UNDEFINED_VARIABLE_RULE};
 use crate::static_reference::{
     AttributeScope, ReferenceKind, reference_kind_for_attribute, validate_static_reference,
 };
@@ -67,7 +67,7 @@ impl TemplateRenderStore {
             None => self.source.clone(),
         };
         text.clone_into(&mut source.content);
-        render_source(&source, ctx, Arc::clone(&self.store), mode)
+        fabro_template::render_source(&source, ctx, Arc::clone(&self.store), mode)
     }
 }
 
@@ -158,31 +158,42 @@ pub(crate) fn render_template_for_target(
     target: &TemplateRenderTarget,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<String, Error> {
-    let source_name = target.template_source_name();
-    let render_with_mode = |mode| match target.template_store.as_ref() {
+    match render_mode {
+        RenderMode::Strict => {
+            render_template_with_mode(text, ctx, TemplateRenderMode::Strict, target)
+                .map_err(|err| template_error_for_target(target, err))
+        }
+        RenderMode::Structural => {
+            match render_template_with_mode(text, ctx, TemplateRenderMode::Strict, target) {
+                Ok(rendered) => Ok(rendered),
+                Err(err @ TemplateError::UndefinedVariable { .. }) => {
+                    diagnostics.push(template_diagnostic(&err, target));
+                    render_template_with_mode(text, ctx, TemplateRenderMode::Lenient, target)
+                        .map_err(|err| template_error_for_target(target, err))
+                }
+                Err(err) => Err(template_error_for_target(target, err)),
+            }
+        }
+    }
+}
+
+fn render_template_with_mode(
+    text: &str,
+    ctx: &TemplateContext,
+    mode: TemplateRenderMode,
+    target: &TemplateRenderTarget,
+) -> Result<String, TemplateError> {
+    match target.template_store.as_ref() {
         Some(template_store) => {
             template_store.render(text, ctx, mode, target.source_origin.as_ref())
         }
-        None => render_named_with_origin(
-            source_name.clone(),
+        None => fabro_template::render_named_with_origin(
+            target.template_source_name(),
             text,
             ctx,
             mode,
             target.source_origin.as_ref(),
         ),
-    };
-    match render_mode {
-        RenderMode::Strict => render_with_mode(TemplateRenderMode::Strict)
-            .map_err(|err| template_error_for_target(target, err)),
-        RenderMode::Structural => match render_with_mode(TemplateRenderMode::Strict) {
-            Ok(rendered) => Ok(rendered),
-            Err(err @ TemplateError::UndefinedVariable { .. }) => {
-                diagnostics.push(template_diagnostic(&err, target));
-                render_with_mode(TemplateRenderMode::Lenient)
-                    .map_err(|err| template_error_for_target(target, err))
-            }
-            Err(err) => Err(template_error_for_target(target, err)),
-        },
     }
 }
 
@@ -225,12 +236,6 @@ fn template_diagnostic(error: &TemplateError, target: &TemplateRenderTarget) -> 
 
 const DETEMPLATED_ATTRIBUTE_RULE: &str = "detemplated_attribute";
 
-/// True when `text` contains MiniJinja template syntax (`{{ … }}` or
-/// `{% … %}`).
-fn contains_template_syntax(text: &str) -> bool {
-    text.contains("{{") || text.contains("{%")
-}
-
 /// Warning emitted when an attribute that is no longer a template still
 /// contains template syntax — the syntax is now treated as literal text.
 fn detemplated_attribute_diagnostic(attr_name: &str, target: &TemplateRenderTarget) -> Diagnostic {
@@ -253,12 +258,14 @@ fn detemplated_attribute_diagnostic(attr_name: &str, target: &TemplateRenderTarg
     }
 }
 
-const GOAL_SELF_REFERENCE_RULE: &str = "goal_self_reference";
-
 /// Error emitted when the graph `goal` references `{{ goal }}` — a goal cannot
 /// reference itself (D12). Prompts may reference the rendered goal; the goal
 /// renders without `goal` in scope, so a self-reference is always a mistake.
-fn goal_self_reference_diagnostic(target: &TemplateRenderTarget) -> Diagnostic {
+fn goal_self_reference_diagnostic(
+    target: &TemplateRenderTarget,
+    error: Option<&TemplateError>,
+) -> Diagnostic {
+    let location = error.map(TemplateError::location).unwrap_or_default();
     Diagnostic {
         rule: GOAL_SELF_REFERENCE_RULE.to_owned(),
         severity: Severity::Error,
@@ -273,7 +280,11 @@ fn goal_self_reference_diagnostic(target: &TemplateRenderTarget) -> Diagnostic {
              goal instead"
                 .to_string(),
         ),
-        source_path: target.source_name.clone(),
+        source_path: location.source_name.or_else(|| target.source_name.clone()),
+        line: location.line,
+        column: location.column,
+        span_start: location.span_start,
+        span_len: location.span_len,
         ..Diagnostic::default()
     }
 }
@@ -313,12 +324,32 @@ impl TemplateTransform {
         // D12: the goal renders with no `goal` in scope, so it cannot reference
         // itself. Flag the self-reference with a friendly diagnostic before the
         // render would otherwise produce a generic "undefined variable `goal`".
-        if references_top_level_variable(goal, "goal") {
-            diagnostics.push(goal_self_reference_diagnostic(&target));
-            return Ok(String::new());
+        if fabro_template::references_top_level_variable(goal, "goal") {
+            let location_error = self.goal_self_reference_location(goal, &target);
+            diagnostics.push(goal_self_reference_diagnostic(
+                &target,
+                location_error.as_ref(),
+            ));
+            return Ok(goal.to_string());
         }
         let ctx = TemplateContext::new().with_inputs(self.inputs.clone());
         render_template_for_target(goal, &ctx, self.render_mode, &target, diagnostics)
+    }
+
+    fn goal_self_reference_location(
+        &self,
+        goal: &str,
+        target: &TemplateRenderTarget,
+    ) -> Option<TemplateError> {
+        let ctx = TemplateContext::new().with_inputs(self.inputs.clone());
+        match render_template_with_mode(goal, &ctx, TemplateRenderMode::Strict, target) {
+            Err(err @ TemplateError::UndefinedVariable { .. })
+                if err.expression() == Some("goal") =>
+            {
+                Some(err)
+            }
+            _ => None,
+        }
     }
 
     fn render_attrs(
@@ -353,7 +384,7 @@ impl TemplateTransform {
                     // `prompt` is the only templated node attribute.
                     *text =
                         render_template_for_target(text, ctx, render_mode, &target, diagnostics)?;
-                } else if contains_template_syntax(text) {
+                } else if fabro_template::contains_template_syntax(text) {
                     // Every other attribute is no longer a template (`label`,
                     // `model`, `provider`, `speed`, `condition`, edge `label`,
                     // …): leave it literal and warn so authors can migrate.
@@ -566,6 +597,9 @@ mod tests {
 
     #[test]
     fn template_transform_rejects_goal_self_reference() {
+        let source = r#"digraph Test {
+            graph [goal="Improve on {{ goal }}"]
+        }"#;
         let mut graph = Graph::new("test");
         graph.attrs.insert(
             "goal".to_string(),
@@ -578,8 +612,13 @@ mod tests {
         );
         graph.nodes.insert("plan".to_string(), node);
 
-        let transform = TemplateTransform::new(HashMap::new());
-        let (_graph, diagnostics) = transform.apply_with_diagnostics(graph).unwrap();
+        let transform = TemplateTransform {
+            inputs:      HashMap::new(),
+            source_name: Some("workflow.fabro".to_string()),
+            source_text: Some(source.to_string()),
+            render_mode: RenderMode::Structural,
+        };
+        let (graph, diagnostics) = transform.apply_with_diagnostics(graph).unwrap();
 
         let self_ref: Vec<_> = diagnostics
             .iter()
@@ -592,6 +631,13 @@ mod tests {
         );
         assert_eq!(self_ref[0].severity, Severity::Error);
         assert!(self_ref[0].message.contains("cannot reference itself"));
+        assert_eq!(self_ref[0].source_path.as_deref(), Some("workflow.fabro"));
+        assert_eq!(self_ref[0].line, Some(2));
+        assert!(self_ref[0].span_start.is_some());
+        assert_eq!(
+            graph.attrs.get("goal").and_then(AttrValue::as_str),
+            Some("Improve on {{ goal }}")
+        );
     }
 
     #[test]

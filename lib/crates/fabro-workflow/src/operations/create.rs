@@ -430,7 +430,7 @@ mod tests {
 
     use super::*;
     use crate::operations::{ValidateInput, validate};
-    use crate::pipeline::types::TEMPLATE_UNDEFINED_VARIABLE_RULE;
+    use crate::pipeline::types::{GOAL_SELF_REFERENCE_RULE, TEMPLATE_UNDEFINED_VARIABLE_RULE};
     use crate::workflow_bundle::BundledWorkflow;
     fn memory_store() -> Arc<Database> {
         Arc::new(Database::new(
@@ -513,14 +513,18 @@ mod tests {
             validated.has_errors(),
             "goal self-reference should fail validation"
         );
-        assert!(
-            validated
-                .diagnostics()
-                .iter()
-                .any(|d| d.message.contains("cannot reference itself")),
-            "expected a goal self-reference diagnostic, got: {:?}",
+        let self_ref: Vec<_> = validated
+            .diagnostics()
+            .iter()
+            .filter(|d| d.rule == GOAL_SELF_REFERENCE_RULE)
+            .collect();
+        assert_eq!(
+            self_ref.len(),
+            1,
+            "expected one goal self-reference diagnostic, got: {:?}",
             validated.diagnostics()
         );
+        assert_eq!(self_ref[0].severity, Severity::Error);
     }
 
     #[test]

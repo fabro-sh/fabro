@@ -531,14 +531,11 @@ pub fn contains_template_syntax(template: &str) -> bool {
 /// errors surface through the normal render path with proper diagnostics.
 #[must_use]
 pub fn references_top_level_variable(template: &str, name: &str) -> bool {
-    if is_plain_text(template) {
+    if is_plain_text(template) || !template.contains(name) {
         return false;
     }
     let mut env = Environment::new();
-    if env
-        .add_template_owned("__variable_scan__", template.to_owned())
-        .is_err()
-    {
+    if env.add_template("__variable_scan__", template).is_err() {
         return false;
     }
     env.get_template("__variable_scan__")
@@ -829,6 +826,10 @@ mod tests {
         ));
         assert!(!references_top_level_variable(
             "plain text, no goal token",
+            "goal"
+        ));
+        assert!(!references_top_level_variable(
+            "{# {{ goal }} is commented out #}",
             "goal"
         ));
     }

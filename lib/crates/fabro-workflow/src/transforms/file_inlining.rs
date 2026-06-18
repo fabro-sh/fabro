@@ -12,8 +12,7 @@ use crate::error::Error;
 use crate::file_resolver::{FileResolver, FileResolverTemplateStore, ResolvedFile};
 use crate::static_reference::{ReferenceKind, validate_static_reference};
 use crate::transforms::variable_expansion::{
-    RenderMode, TemplateRenderStore, TemplateRenderTarget, TemplateTransform,
-    render_template_for_target,
+    RenderMode, TemplateRenderStore, TemplateRenderTarget, render_template_for_target,
 };
 
 /// Resolve a potential `@path` file reference.
@@ -179,17 +178,10 @@ impl FileInliningTransform {
 
         let resolved_goal = match &self.goal_override {
             Some(goal) => goal.clone(),
-            // Resolve the goal only to seed the prompt render context here; the
-            // later `TemplateTransform` pass re-resolves the same goal and is the
-            // canonical emitter of goal diagnostics (e.g. self-reference), so
-            // discard this pass's copy to avoid double-reporting.
-            None => TemplateTransform {
-                inputs:      self.inputs.clone(),
-                source_name: self.source_name.clone(),
-                source_text: self.source_text.clone(),
-                render_mode: self.render_mode,
-            }
-            .resolved_goal(&graph, &mut Vec::new())?,
+            // `inline_graph_goal` has already rendered inputs and inlined any
+            // goal file reference for prompt context. The later TemplateTransform
+            // pass owns canonical goal validation diagnostics.
+            None => graph.goal().to_string(),
         };
         let ctx = TemplateContext::new()
             .with_goal(resolved_goal)

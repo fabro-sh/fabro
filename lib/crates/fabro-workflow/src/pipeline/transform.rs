@@ -91,6 +91,7 @@ mod tests {
     use super::*;
     use crate::file_resolver::FilesystemFileResolver;
     use crate::pipeline::parse::parse;
+    use crate::pipeline::types::GOAL_SELF_REFERENCE_RULE;
 
     fn write_file(path: &Path, contents: &str) {
         if let Some(parent) = path.parent() {
@@ -240,8 +241,8 @@ mod tests {
 
     #[test]
     fn transform_reports_goal_self_reference_once_across_passes() {
-        // The goal is resolved by both FileInlining and TemplateTransform; the
-        // self-reference must be reported exactly once (D12 dedup).
+        // FileInlining renders the goal for prompt context, but TemplateTransform
+        // is the only pass that should emit the self-reference diagnostic.
         let dir = tempfile::tempdir().unwrap();
         let parsed = parse(
             r#"digraph Test {
@@ -267,7 +268,7 @@ mod tests {
         let self_ref = transformed
             .diagnostics
             .iter()
-            .filter(|d| d.message.contains("cannot reference itself"))
+            .filter(|d| d.rule == GOAL_SELF_REFERENCE_RULE)
             .count();
         assert_eq!(
             self_ref, 1,

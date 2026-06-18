@@ -50,6 +50,9 @@ pub struct Transformed {
 /// Lint rule name attached to diagnostics for undefined template variables.
 pub const TEMPLATE_UNDEFINED_VARIABLE_RULE: &str = "template_undefined_variable";
 
+/// Lint rule name attached to diagnostics for graph goal self-references.
+pub(crate) const GOAL_SELF_REFERENCE_RULE: &str = "goal_self_reference";
+
 /// Output of the VALIDATE phase. Always produced (even with errors).
 /// Caller inspects diagnostics and decides whether to proceed.
 /// Graph is read-only — use accessors, not direct field access.
