@@ -21,7 +21,7 @@ import type { PullRequestDetails } from './pull-request-details';
 import type { PullRequestLink } from './pull-request-link';
 
 /**
- * Stored pull request link plus optional live GitHub details.
+ * Stored pull request or merge request link plus optional live provider details.
  */
 export interface PullRequest {
     'link': PullRequestLink;

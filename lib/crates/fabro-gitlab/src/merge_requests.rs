@@ -442,8 +442,8 @@ pub fn to_pull_request_details(
         merged,
         merged_at: mr.merged_at,
         mergeable,
-        additions: 0,
-        deletions: 0,
+        additions: None,
+        deletions: None,
         changed_files,
         author: PullRequestUser {
             login: mr
@@ -476,7 +476,10 @@ mod tests {
     use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
 
-    use super::{CreateMergeRequestRequest, create_merge_request, parse_changes_count};
+    use super::{
+        CreateMergeRequestRequest, create_merge_request, parse_changes_count,
+        to_pull_request_details,
+    };
     use crate::repository::{GitLabBaseUrl, parse_origin};
     use crate::{GitLabContext, GitLabCredentials};
 
@@ -500,6 +503,19 @@ mod tests {
         .unwrap();
 
         assert_eq!(body["draft"], true);
+    }
+
+    #[test]
+    fn maps_merge_request_without_line_stats() {
+        let base = GitLabBaseUrl::parse("https://gitlab.example").unwrap();
+        let repo = parse_origin(&base, "https://gitlab.example/platform/tools/fabro.git").unwrap();
+        let mr = serde_json::from_value(merge_request_response(7)).unwrap();
+
+        let details = to_pull_request_details(&repo, mr);
+
+        assert_eq!(details.changed_files, 1);
+        assert_eq!(details.additions, None);
+        assert_eq!(details.deletions, None);
     }
 
     fn merge_request_response(iid: u64) -> serde_json::Value {

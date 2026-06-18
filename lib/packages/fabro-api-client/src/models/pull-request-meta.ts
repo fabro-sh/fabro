@@ -21,7 +21,7 @@ import type { PullRequestDetailsStatus } from './pull-request-details-status';
 import type { PullRequestDetailsUnavailableReason } from './pull-request-details-unavailable-reason';
 
 /**
- * Metadata for live GitHub detail retrieval.
+ * Metadata for live provider detail retrieval.
  */
 export interface PullRequestMeta {
     'details_status': PullRequestDetailsStatus;

@@ -15,7 +15,7 @@
 
 
 /**
- * GitHub user summary for a pull request.
+ * Provider user summary for a pull request or merge request.
  */
 export interface PullRequestUser {
     'login': string;

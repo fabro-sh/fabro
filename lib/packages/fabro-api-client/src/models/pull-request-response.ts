@@ -21,7 +21,7 @@ import type { PullRequest } from './pull-request';
 import type { PullRequestMeta } from './pull-request-meta';
 
 /**
- * Pull request link and optional live GitHub details for a run.
+ * Pull request or merge request link and optional live provider details for a run.
  */
 export interface PullRequestResponse {
     'data': PullRequest;

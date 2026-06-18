@@ -2157,6 +2157,17 @@ mod tests {
         }"#
     }
 
+    #[test]
+    fn github_pull_request_details_keep_line_stats() {
+        let detail: fabro_types::pull_request::PullRequestGithubDetail =
+            serde_json::from_str(mock_pr_json()).unwrap();
+        let details: fabro_types::pull_request::PullRequestDetails = detail.into();
+
+        assert_eq!(details.additions, Some(10));
+        assert_eq!(details.deletions, Some(3));
+        assert_eq!(details.changed_files, 2);
+    }
+
     #[tokio::test]
     async fn get_pr_success() {
         let mock = MockHttpClient::new()

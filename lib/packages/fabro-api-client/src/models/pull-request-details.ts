@@ -21,7 +21,7 @@ import type { PullRequestDetailsTimestamps } from './pull-request-details-timest
 import type { PullRequestUser } from './pull-request-user';
 
 /**
- * Live pull request fields retrieved successfully from GitHub.
+ * Live provider pull request or merge request fields retrieved successfully.
  */
 export interface PullRequestDetails {
     'title': string;
@@ -31,8 +31,14 @@ export interface PullRequestDetails {
     'merged': boolean;
     'merged_at'?: string | null;
     'mergeable'?: boolean | null;
-    'additions': number;
-    'deletions': number;
+    /**
+     * Lines added when the provider reports reliable line stats; `null` when unknown.
+     */
+    'additions': number | null;
+    /**
+     * Lines deleted when the provider reports reliable line stats; `null` when unknown.
+     */
+    'deletions': number | null;
     'changed_files': number;
     'author': PullRequestUser;
     'head_branch': string;

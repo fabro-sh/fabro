@@ -15,7 +15,7 @@
 
 
 /**
- * Why live GitHub pull request details are unavailable.
+ * Why live provider pull request or merge request details are unavailable.
  */
 
 export const PullRequestDetailsUnavailableReason = {

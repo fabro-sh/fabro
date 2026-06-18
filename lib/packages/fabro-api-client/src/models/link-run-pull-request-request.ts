@@ -15,11 +15,11 @@
 
 
 /**
- * Request body for linking an existing GitHub pull request to a run.
+ * Request body for linking an existing pull request or merge request to a run.
  */
 export interface LinkRunPullRequestRequest {
     /**
-     * GitHub pull request URL to associate with the run. Must use the form `https://github.com/{owner}/{repo}/pull/{number}`.
+     * Pull request or merge request URL to associate with the run. Supports GitHub PR URLs and GitLab MR URLs.
      */
     'html_url': string;
 }

@@ -15,7 +15,7 @@
 
 
 /**
- * Whether live GitHub pull request details are present.
+ * Whether live provider pull request or merge request details are present.
  */
 
 export const PullRequestDetailsStatus = {

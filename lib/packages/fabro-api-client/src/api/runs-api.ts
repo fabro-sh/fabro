@@ -585,7 +585,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Returns the stored pull request record for a run plus live GitHub details when available.
+         * Returns the stored pull request or merge request record for a run plus live provider details when available.
          * @summary Get Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -710,7 +710,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+         * Links or replaces the pull request or merge request association for a run without modifying the remote review.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest
@@ -1702,7 +1702,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the stored pull request record for a run plus live GitHub details when available.
+         * Returns the stored pull request or merge request record for a run plus live provider details when available.
          * @summary Get Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1742,7 +1742,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+         * Links or replaces the pull request or merge request association for a run without modifying the remote review.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest
@@ -2134,7 +2134,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.forkRun(id, forkRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the stored pull request record for a run plus live GitHub details when available.
+         * Returns the stored pull request or merge request record for a run plus live provider details when available.
          * @summary Get Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -2165,7 +2165,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.linkRunParent(id, updateRunParentRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+         * Links or replaces the pull request or merge request association for a run without modifying the remote review.
          * @summary Link Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest
@@ -2510,7 +2510,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Returns the stored pull request record for a run plus live GitHub details when available.
+     * Returns the stored pull request or merge request record for a run plus live provider details when available.
      * @summary Get Run Pull Request
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
@@ -2544,7 +2544,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+     * Links or replaces the pull request or merge request association for a run without modifying the remote review.
      * @summary Link Run Pull Request
      * @param {string} id Unique run identifier (ULID).
      * @param {LinkRunPullRequestRequest} linkRunPullRequestRequest

@@ -15,7 +15,7 @@
 
 
 /**
- * GitHub merge method for a pull request.
+ * Merge method for a pull request or merge request.
  */
 
 export const MergeMethod = {

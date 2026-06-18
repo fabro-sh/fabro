@@ -151,6 +151,50 @@ fn pull_request_response_json_matches_openapi_shape() {
     assert_eq!(serde_json::to_value(detail).unwrap(), fixture);
 }
 
+#[test]
+fn pull_request_response_json_allows_unknown_line_stats() {
+    let fixture = json!({
+        "data": {
+            "link": {
+                "provider": "gitlab",
+                "owner_path": "platform/tools",
+                "repo": "fabro",
+                "number": 5,
+                "html_url": "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/5"
+            },
+            "details": {
+                "title": "Move MR commands server-side",
+                "body": "Detailed description",
+                "state": "opened",
+                "draft": false,
+                "merged": false,
+                "merged_at": null,
+                "mergeable": null,
+                "additions": null,
+                "deletions": null,
+                "changed_files": 5,
+                "author": {
+                    "login": "root"
+                },
+                "head_branch": "fabro/run/demo",
+                "base_branch": "main",
+                "timestamps": {
+                    "created_at": "2026-04-23T15:40:00Z",
+                    "updated_at": "2026-04-23T15:45:00Z"
+                }
+            }
+        },
+        "meta": {
+            "details_status": "available"
+        }
+    });
+
+    let detail: PullRequestResponse =
+        serde_json::from_value(fixture.clone()).expect("response should deserialize");
+
+    assert_eq!(serde_json::to_value(detail).unwrap(), fixture);
+}
+
 fn assert_same_type_as_pull_request<T: 'static>(_: &T) {
     assert_eq!(
         TypeId::of::<T>(),

@@ -2778,7 +2778,7 @@ paths:
       operationId: linkRunPullRequest
       tags: [Runs]
       summary: Link Run Pull Request
-      description: Links or replaces the GitHub pull request association for a run without modifying the remote pull request.
+      description: Links or replaces the pull request or merge request association for a run without modifying the remote review.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -2839,7 +2839,7 @@ paths:
       operationId: getRunPullRequest
       tags: [Runs]
       summary: Get Run Pull Request
-      description: Returns the stored pull request record for a run plus live GitHub details when available.
+      description: Returns the stored pull request or merge request record for a run plus live provider details when available.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -11453,7 +11453,7 @@ components:
           format: uri
 
     PullRequest:
-      description: Stored pull request link plus optional live GitHub details.
+      description: Stored pull request or merge request link plus optional live provider details.
       type: object
       required:
         - link
@@ -11466,7 +11466,7 @@ components:
             - type: "null"
 
     PullRequestMeta:
-      description: Metadata for live GitHub detail retrieval.
+      description: Metadata for live provider detail retrieval.
       type: object
       required:
         - details_status
@@ -11479,7 +11479,7 @@ components:
             - type: "null"
 
     PullRequestResponse:
-      description: Pull request link and optional live GitHub details for a run.
+      description: Pull request or merge request link and optional live provider details for a run.
       type: object
       required:
         - data
@@ -11491,14 +11491,14 @@ components:
           $ref: "#/components/schemas/PullRequestMeta"
 
     PullRequestDetailsStatus:
-      description: Whether live GitHub pull request details are present.
+      description: Whether live provider pull request or merge request details are present.
       type: string
       enum:
         - available
         - unavailable
 
     PullRequestDetailsUnavailableReason:
-      description: Why live GitHub pull request details are unavailable.
+      description: Why live provider pull request or merge request details are unavailable.
       type: string
       enum:
         - integration_unavailable
@@ -11506,7 +11506,7 @@ components:
         - fetch_failed
 
     PullRequestUser:
-      description: GitHub user summary for a pull request.
+      description: Provider user summary for a pull request or merge request.
       type: object
       required:
         - login
@@ -11526,7 +11526,7 @@ components:
           example: fabro/run/demo
 
     PullRequestDetails:
-      description: Live pull request fields retrieved successfully from GitHub.
+      description: Live provider pull request or merge request fields retrieved successfully.
       type: object
       required:
         - title
@@ -11564,10 +11564,12 @@ components:
           type: ["boolean", "null"]
           example: true
         additions:
-          type: integer
+          type: ["integer", "null"]
+          description: Lines added when the provider reports reliable line stats; `null` when unknown.
           example: 234
         deletions:
-          type: integer
+          type: ["integer", "null"]
+          description: Lines deleted when the provider reports reliable line stats; `null` when unknown.
           example: 67
         changed_files:
           type: integer
@@ -11607,7 +11609,7 @@ components:
           example: claude-sonnet-4-6
 
     LinkRunPullRequestRequest:
-      description: Request body for linking an existing GitHub pull request to a run.
+      description: Request body for linking an existing pull request or merge request to a run.
       type: object
       required:
         - html_url
@@ -11615,11 +11617,11 @@ components:
         html_url:
           type: string
           format: uri
-          description: GitHub pull request URL to associate with the run. Must use the form `https://github.com/{owner}/{repo}/pull/{number}`.
+          description: Pull request or merge request URL to associate with the run. Supports GitHub PR URLs and GitLab MR URLs.
           example: https://github.com/fabro-sh/fabro/pull/123
 
     MergeMethod:
-      description: GitHub merge method for a pull request.
+      description: Merge method for a pull request or merge request.
       type: string
       enum:
         - merge

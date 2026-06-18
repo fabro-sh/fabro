@@ -203,7 +203,7 @@ fn github_html_url(owner_path: &str, repo: &str, number: u64) -> String {
     format!("https://github.com/{owner_path}/{repo}/pull/{number}")
 }
 
-/// Stored pull request link plus optional live GitHub details.
+/// Stored pull request link plus optional live provider details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequest {
     pub link:    PullRequestLink,
@@ -246,13 +246,13 @@ pub enum PullRequestDetailsUnavailableReason {
     FetchFailed,
 }
 
-/// GitHub user summary for a pull request.
+/// Provider user summary for a pull request or merge request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequestUser {
     pub login: String,
 }
 
-/// Git reference summary for a pull request.
+/// Git reference summary for a pull request or merge request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequestRef {
     #[serde(rename = "ref")]
@@ -283,8 +283,8 @@ pub struct PullRequestGithubDetail {
     pub updated_at:    String,
 }
 
-/// Live GitHub pull request fields returned only after a successful GitHub API
-/// fetch.
+/// Live provider pull request fields returned only after a successful provider
+/// API fetch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequestDetails {
     pub title:         String,
@@ -294,8 +294,8 @@ pub struct PullRequestDetails {
     pub merged:        bool,
     pub merged_at:     Option<String>,
     pub mergeable:     Option<bool>,
-    pub additions:     u64,
-    pub deletions:     u64,
+    pub additions:     Option<u64>,
+    pub deletions:     Option<u64>,
     pub changed_files: u64,
     pub author:        PullRequestUser,
     pub head_branch:   String,
@@ -313,8 +313,8 @@ impl From<PullRequestGithubDetail> for PullRequestDetails {
             merged:        detail.merged,
             merged_at:     detail.merged_at,
             mergeable:     detail.mergeable,
-            additions:     detail.additions,
-            deletions:     detail.deletions,
+            additions:     Some(detail.additions),
+            deletions:     Some(detail.deletions),
             changed_files: detail.changed_files,
             author:        detail.user,
             head_branch:   detail.head.ref_name,
