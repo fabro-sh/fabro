@@ -1,17 +1,19 @@
 //! Interpolation for config strings.
 //!
 //! An [`InterpString`] field may contain narrow `{{ <namespace>.NAME }}`
-//! tokens — no template logic — drawn from the four [`Namespace`]s: `env`,
-//! `vars`, `secrets`, and `inputs`. Which namespaces actually resolve is
-//! scope-determined by the caller through [`ResolveCtx`]: server-scope
-//! settings provide `env` (and eventually `secrets`), run-scope settings
-//! additionally provide `vars` and `inputs`. A token whose namespace is not
-//! available in the resolution context fails loudly instead of passing
-//! through as literal text.
+//! tokens — no template logic. Three [`Namespace`]s resolve here: `env`,
+//! `vars`, and `secrets`. `inputs` is **template-only** (D12): it is a
+//! recognized namespace so an `{{ inputs.* }}` token fails loudly with a clear
+//! message instead of passing through as literal text, but it never resolves
+//! in an `InterpString` field — it belongs in prompts and goals. Which of the
+//! resolvable namespaces actually apply is scope-determined by the caller
+//! through [`ResolveCtx`]: server-scope settings provide `env` (and eventually
+//! `secrets`), run-scope settings additionally provide `vars`. A token whose
+//! namespace is not available in the resolution context fails loudly.
 //!
-//! Resolution timing is split: `vars`/`inputs` substitute early (server-side,
-//! at run creation) via [`InterpString::substitute_with`], while
-//! `env`/`secrets` resolve late, at consumption time in the process that owns
+//! Resolution timing is split: `vars` substitutes early (server-side, at run
+//! creation) via [`InterpString::substitute_with`], while `env`/`secrets`
+//! resolve late, at consumption time in the process that owns
 //! the value, via [`InterpString::resolve_with`]. Provenance tracking lets
 //! outward-facing renderers redact env- and secret-sourced values uniformly.
 
@@ -114,7 +116,6 @@ pub struct ResolveCtx<'a> {
     env:     Option<LookupFn<'a>>,
     vars:    Option<LookupFn<'a>>,
     secrets: Option<LookupFn<'a>>,
-    inputs:  Option<LookupFn<'a>>,
 }
 
 type LookupFn<'a> = Box<dyn FnMut(&str) -> Option<String> + 'a>;
@@ -143,18 +144,16 @@ impl<'a> ResolveCtx<'a> {
         self
     }
 
-    #[must_use]
-    pub fn with_inputs(mut self, lookup: impl FnMut(&str) -> Option<String> + 'a) -> Self {
-        self.inputs = Some(Box::new(lookup));
-        self
-    }
-
     fn lookup_for(&mut self, namespace: Namespace) -> Option<&mut LookupFn<'a>> {
         match namespace {
             Namespace::Env => self.env.as_mut(),
             Namespace::Vars => self.vars.as_mut(),
             Namespace::Secrets => self.secrets.as_mut(),
-            Namespace::Inputs => self.inputs.as_mut(),
+            // `inputs` is template-only (D12): an `InterpString` resolve context
+            // never provides it, so an `{{ inputs.* }}` token is always
+            // unavailable here. `substitute_with` still preserves the token so a
+            // goal (an `InterpString` that feeds a template) can forward it.
+            Namespace::Inputs => None,
         }
     }
 }
@@ -506,12 +505,22 @@ impl fmt::Display for ResolveError {
                 "{noun} {:?} referenced by {{{{ {namespace}.{} }}}} is not set",
                 self.name, self.name
             ),
-            ResolveErrorKind::Unavailable => write!(
-                f,
-                "{noun} {:?} referenced by {{{{ {namespace}.{} }}}} is not supported in this \
-                 interpolation context",
-                self.name, self.name
-            ),
+            ResolveErrorKind::Unavailable => match namespace {
+                // `inputs` is template-only (D12): it never resolves in an
+                // `InterpString` field. Point the user at where it works.
+                Namespace::Inputs => write!(
+                    f,
+                    "{{{{ inputs.{} }}}} is only available in prompts and goals, not in \
+                     command, script, header, env, or URL fields",
+                    self.name
+                ),
+                _ => write!(
+                    f,
+                    "{noun} {:?} referenced by {{{{ {namespace}.{} }}}} is not supported in \
+                     this interpolation context",
+                    self.name, self.name
+                ),
+            },
         }
     }
 }
@@ -806,15 +815,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_with_inputs_substitutes_without_provenance() {
+    fn resolve_with_rejects_inputs_as_template_only() {
+        // D12: `inputs` is template-only. An `{{ inputs.* }}` token never
+        // resolves in an `InterpString` field — it fails loudly, pointing the
+        // user at prompts and goals.
         let s = InterpString::parse("run-{{ inputs.ticket-id }}");
 
-        let resolved = s
-            .resolve_with(&mut ResolveCtx::new().with_inputs(lookup_from(&[("ticket-id", "1234")])))
-            .unwrap();
+        let err = s.resolve_with(&mut ResolveCtx::new()).unwrap_err();
 
-        assert_eq!(resolved.value, "run-1234");
-        assert_eq!(resolved.provenance, Provenance::Literal);
+        assert_eq!(err.namespace, Namespace::Inputs);
+        assert_eq!(err.kind, ResolveErrorKind::Unavailable);
+        assert!(
+            err.to_string()
+                .contains("only available in prompts and goals"),
+            "unexpected message: {err}"
+        );
     }
 
     #[test]
