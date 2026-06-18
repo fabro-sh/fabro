@@ -212,6 +212,20 @@ fn prompt_input(prompt: &str) -> Result<String> {
         .interact_on(&Term::stderr())?)
 }
 
+fn prompt_input_default(prompt: &str, default: &str) -> Result<String> {
+    Ok(dialoguer::Input::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt)
+        .default(default.to_string())
+        .interact_on(&Term::stderr())?)
+}
+
+fn prompt_input_optional(prompt: &str) -> Result<String> {
+    Ok(dialoguer::Input::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt)
+        .allow_empty(true)
+        .interact_on(&Term::stderr())?)
+}
+
 fn prompt_select(prompt: &str, items: &[String], default: usize) -> Result<usize> {
     Ok(Select::with_theme(&ColorfulTheme::default())
         .with_prompt(prompt)
@@ -225,6 +239,14 @@ fn prompt_multiselect(prompt: &str, items: &[String]) -> Result<Vec<usize>> {
         .with_prompt(prompt)
         .items(items)
         .interact_on(&Term::stderr())?)
+}
+
+fn parse_comma_separated_prompt_values(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 impl InstallNonInteractiveArgs {
@@ -335,7 +357,7 @@ enum GitHubInstallSelection {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum GitLabInstallSelection {
     Token {
         base_url: String,
@@ -422,6 +444,15 @@ trait InstallInputSource {
     async fn choose_server_config(&self, config_exists: bool) -> Result<ServerConfigSelection>;
 
     async fn should_run_doctor(&self) -> Result<bool>;
+}
+
+#[async_trait]
+trait GitLabInteractiveInstallInputSource {
+    async fn choose_gitlab_install(
+        &self,
+        s: &Styles,
+        printer: Printer,
+    ) -> Result<GitLabInstallSelection>;
 }
 
 struct InteractiveInstallInputSource;
@@ -588,6 +619,81 @@ impl InstallInputSource for InteractiveInstallInputSource {
 
     async fn should_run_doctor(&self) -> Result<bool> {
         spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true)).await?
+    }
+}
+
+#[async_trait]
+impl GitLabInteractiveInstallInputSource for InteractiveInstallInputSource {
+    async fn choose_gitlab_install(
+        &self,
+        _s: &Styles,
+        printer: Printer,
+    ) -> Result<GitLabInstallSelection> {
+        let base_url_raw =
+            spawn_blocking(|| prompt_input_default("GitLab base URL", "https://gitlab.com"))
+                .await??;
+        let base_url = validate_install_gitlab_base_url(base_url_raw.trim())?;
+
+        let strategy_options = vec![
+            "Token - repository automation only".to_string(),
+            "OAuth app - browser login plus repository automation".to_string(),
+        ];
+        let strategy = spawn_blocking({
+            let options = strategy_options.clone();
+            move || prompt_select("How should Fabro authenticate with GitLab?", &options, 0)
+        })
+        .await??;
+
+        let token = spawn_blocking(|| prompt_password("GitLab automation token")).await??;
+        let username = validate_gitlab_token(&base_url, token.trim()).await?;
+
+        match strategy {
+            0 => Ok(GitLabInstallSelection::Token {
+                base_url,
+                token,
+                username,
+            }),
+            1 => {
+                let client_id =
+                    spawn_blocking(|| prompt_input("GitLab OAuth application client ID")).await??;
+                let client_secret =
+                    spawn_blocking(|| prompt_password("GitLab OAuth application client secret"))
+                        .await??;
+                let allowed_usernames_raw = spawn_blocking({
+                    let username = username.clone();
+                    move || prompt_input_default("Allowed GitLab usernames", &username)
+                })
+                .await??;
+                let allowed_groups_raw = spawn_blocking(|| {
+                    prompt_input_optional("Allowed GitLab groups (comma-separated, optional)")
+                })
+                .await??;
+                let allowed_usernames = parse_comma_separated_prompt_values(&allowed_usernames_raw);
+                let allowed_groups = parse_comma_separated_prompt_values(&allowed_groups_raw);
+                anyhow::ensure!(
+                    !allowed_usernames.is_empty() || !allowed_groups.is_empty(),
+                    "GitLab app install requires at least one allowed username or group"
+                );
+
+                fabro_util::printerr!(
+                    printer,
+                    "  GitLab OAuth login will allow {} username(s) and {} group(s)",
+                    allowed_usernames.len(),
+                    allowed_groups.len()
+                );
+
+                Ok(GitLabInstallSelection::App {
+                    base_url,
+                    client_id: client_id.trim().to_string(),
+                    client_secret,
+                    token,
+                    username,
+                    allowed_usernames,
+                    allowed_groups,
+                })
+            }
+            _ => unreachable!("prompt_select returned an out-of-range index"),
+        }
     }
 }
 
@@ -978,12 +1084,28 @@ async fn choose_install_github_selection(
 async fn choose_install_gitlab_selection(
     install_args: &InstallArgs,
     gitlab_args: &InstallGitlabArgs,
+    s: &Styles,
+    printer: Printer,
 ) -> Result<GitLabInstallSelection> {
+    let input = InteractiveInstallInputSource;
+    choose_install_gitlab_selection_with_source(install_args, gitlab_args, &input, s, printer).await
+}
+
+async fn choose_install_gitlab_selection_with_source<S>(
+    install_args: &InstallArgs,
+    gitlab_args: &InstallGitlabArgs,
+    input: &S,
+    s: &Styles,
+    printer: Printer,
+) -> Result<GitLabInstallSelection>
+where
+    S: GitLabInteractiveInstallInputSource + Sync + ?Sized,
+{
     validate_install_gitlab_non_interactive(gitlab_args, install_args.non_interactive)?;
-    anyhow::ensure!(
-        install_args.non_interactive,
-        "interactive `fabro install gitlab` is not implemented yet; rerun with --non-interactive"
-    );
+
+    if !install_args.non_interactive {
+        return input.choose_gitlab_install(s, printer).await;
+    }
 
     let base_url = validate_install_gitlab_base_url(
         gitlab_args
@@ -2027,7 +2149,7 @@ async fn run_install_gitlab_inner(
     let mut doc: toml::Value = toml::from_str(&existing_config_contents)
         .context("failed to parse existing settings.toml")?;
 
-    let selection = choose_install_gitlab_selection(args, gitlab_args).await?;
+    let selection = choose_install_gitlab_selection(args, gitlab_args, &s, printer).await?;
     let server_env_set = Vec::new();
     let mut server_env_remove = Vec::new();
     let mut vault_set = Vec::new();
@@ -2591,6 +2713,24 @@ mod tests {
             web_url: default_web_url(),
             non_interactive,
             scripted,
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestGitLabInteractiveInputSource {
+        selection: GitLabInstallSelection,
+        called:    Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl GitLabInteractiveInstallInputSource for TestGitLabInteractiveInputSource {
+        async fn choose_gitlab_install(
+            &self,
+            _s: &Styles,
+            _printer: Printer,
+        ) -> Result<GitLabInstallSelection> {
+            self.called.store(true, Ordering::SeqCst);
+            Ok(self.selection.clone())
         }
     }
 
@@ -4027,6 +4167,79 @@ root = "{}"
     fn non_interactive_install_usage_documents_skip_llm() {
         let usage = non_interactive_install_usage();
         assert!(usage.contains("--skip-llm"));
+    }
+
+    #[tokio::test]
+    async fn choose_install_gitlab_selection_uses_interactive_source_without_scripted_flags() {
+        let called = Arc::new(AtomicBool::new(false));
+        let expected = GitLabInstallSelection::Token {
+            base_url: "https://gitlab.example.com".to_string(),
+            token:    "gitlab-token".to_string(),
+            username: "automation".to_string(),
+        };
+        let source = TestGitLabInteractiveInputSource {
+            selection: expected.clone(),
+            called:    Arc::clone(&called),
+        };
+        let s = Styles::detect_stderr();
+
+        let actual = choose_install_gitlab_selection_with_source(
+            &install_args(false, InstallNonInteractiveArgs::default()),
+            &InstallGitlabArgs::default(),
+            &source,
+            &s,
+            Printer::Quiet,
+        )
+        .await
+        .expect("interactive gitlab install should use input source");
+
+        assert_eq!(actual, expected);
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn choose_install_gitlab_selection_rejects_scripted_flags_without_non_interactive() {
+        let called = Arc::new(AtomicBool::new(false));
+        let source = TestGitLabInteractiveInputSource {
+            selection: GitLabInstallSelection::Token {
+                base_url: "https://gitlab.example.com".to_string(),
+                token:    "gitlab-token".to_string(),
+                username: "automation".to_string(),
+            },
+            called:    Arc::clone(&called),
+        };
+        let s = Styles::detect_stderr();
+
+        let err = choose_install_gitlab_selection_with_source(
+            &install_args(false, InstallNonInteractiveArgs::default()),
+            &InstallGitlabArgs {
+                strategy: Some(InstallGitLabStrategyArg::Token),
+                ..InstallGitlabArgs::default()
+            },
+            &source,
+            &s,
+            Printer::Quiet,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--strategy requires --non-interactive")
+        );
+        assert!(!called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn parse_comma_separated_prompt_values_trims_and_drops_empty_entries() {
+        assert_eq!(
+            parse_comma_separated_prompt_values(" alice, ,platform/fabro-admins, bob "),
+            vec![
+                "alice".to_string(),
+                "platform/fabro-admins".to_string(),
+                "bob".to_string(),
+            ]
+        );
     }
 
     #[test]

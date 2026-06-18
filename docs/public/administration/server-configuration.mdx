@@ -340,7 +340,13 @@ client_id = "..."
 
 GitLab app mode requires `GITLAB_APP_CLIENT_SECRET` and `GITLAB_TOKEN` in the server vault. This differs from GitHub app mode: Fabro uses GitLab OAuth for human identity, but repository work still uses the configured automation token.
 
-You can reconfigure GitLab from an existing local install with the CLI:
+You can reconfigure GitLab from an existing local install with interactive prompts:
+
+```bash
+fabro install gitlab
+```
+
+For scripted environments, pass the GitLab inputs non-interactively:
 
 ```bash
 fabro install gitlab --non-interactive \
