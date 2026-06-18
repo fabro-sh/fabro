@@ -678,8 +678,9 @@ fn resolve_docker_config(settings: &RunNamespace) -> DockerSandboxOptions {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct GitRemoteRefCheck {
-    origin_url: String,
-    branch:     Option<String>,
+    origin_url:   String,
+    branch:       Option<String>,
+    extra_header: Option<String>,
 }
 
 fn clone_disabled_for_provider(provider: SandboxProviderKind, resolved_run: &RunNamespace) -> bool {
@@ -800,35 +801,44 @@ where
         return true;
     };
 
-    let origin_url = fabro_github::normalize_repo_origin_url(&git.origin_url);
-    if let Err(err) = fabro_github::parse_github_owner_repo(&origin_url) {
-        if let Some(gitlab) = gitlab {
-            if fabro_gitlab::repository::parse_origin(&gitlab.base_url, &git.origin_url).is_ok() {
+    let github_origin_url = fabro_github::normalize_repo_origin_url(&git.origin_url);
+    let request = if let Err(err) = fabro_github::parse_github_owner_repo(&github_origin_url) {
+        match gitlab.and_then(|gitlab| {
+            fabro_gitlab::repository::parse_origin(&gitlab.base_url, &git.origin_url)
+                .ok()
+                .map(|repo| (gitlab, repo))
+        }) {
+            Some((gitlab, repo)) => {
+                let fabro_gitlab::GitLabCredentials::Token(token) = &gitlab.credentials;
+                GitRemoteRefCheck {
+                    origin_url:   repo.clean_origin_url,
+                    branch:       Some(git.branch.clone())
+                        .filter(|branch| !branch.trim().is_empty()),
+                    extra_header: Some(format!(
+                        "Authorization: {}",
+                        fabro_gitlab::basic_auth_header_value(token)
+                    )),
+                }
+            }
+            None => {
                 checks.push(CheckResult {
                     name:        "Repository Access".into(),
-                    status:      CheckStatus::Pass,
-                    summary:     "configured GitLab origin".into(),
-                    details:     vec![CheckDetail::new(format!("Origin: {}", git.origin_url))],
-                    remediation: None,
+                    status:      CheckStatus::Error,
+                    summary:     "failed".into(),
+                    details:     vec![CheckDetail::new(format!("Origin: {github_origin_url}"))],
+                    remediation: Some(format!(
+                        "Clone-based sandboxes currently support GitHub repository origins only: {err}"
+                    )),
                 });
-                return true;
+                return false;
             }
         }
-        checks.push(CheckResult {
-            name:        "Repository Access".into(),
-            status:      CheckStatus::Error,
-            summary:     "failed".into(),
-            details:     vec![CheckDetail::new(format!("Origin: {origin_url}"))],
-            remediation: Some(format!(
-                "Clone-based sandboxes currently support GitHub repository origins only: {err}"
-            )),
-        });
-        return false;
-    }
-
-    let request = GitRemoteRefCheck {
-        origin_url,
-        branch: Some(git.branch.clone()).filter(|branch| !branch.trim().is_empty()),
+    } else {
+        GitRemoteRefCheck {
+            origin_url:   github_origin_url,
+            branch:       Some(git.branch.clone()).filter(|branch| !branch.trim().is_empty()),
+            extra_header: None,
+        }
     };
     let details = repository_access_details(&request);
 
@@ -876,12 +886,11 @@ async fn check_git_remote_ref(
         .map_or(request.origin_url.as_str(), |url| url.as_raw_url().as_str());
 
     let mut command = Command::new("git");
-    command.env("GIT_TERMINAL_PROMPT", "0").args([
-        "ls-remote",
-        "--heads",
-        "--exit-code",
-        remote_url,
-    ]);
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    if let Some(header) = request.extra_header.as_ref() {
+        command.args(["-c", &format!("http.extraHeader={header}")]);
+    }
+    command.args(["ls-remote", "--heads", "--exit-code", remote_url]);
     if let Some(branch) = request.branch.as_ref() {
         command.arg(branch);
     }
@@ -904,7 +913,11 @@ async fn check_git_remote_ref(
     } else {
         format!("git ls-remote exited with status {}", output.status)
     };
-    Err(redact_auth_url(&message, auth_url.as_ref()))
+    let mut message = redact_auth_url(&message, auth_url.as_ref());
+    if let Some(header) = request.extra_header.as_ref() {
+        message = message.replace(header, "<redacted>");
+    }
+    Err(message)
 }
 
 fn preflight_sandbox_spec(
@@ -1720,7 +1733,7 @@ provider = "local"
     }
 
     #[tokio::test]
-    async fn repository_access_check_accepts_configured_gitlab_origin_without_remote_probe() {
+    async fn repository_access_check_probes_configured_gitlab_branch() {
         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
             SandboxProviderKind::Docker,
             true,
@@ -1750,11 +1763,18 @@ provider = "local"
         .await;
 
         assert!(ok);
-        assert!(calls.lock().unwrap().is_empty());
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].origin_url, "https://gitlab.com/acme/widgets");
+        assert_eq!(calls[0].branch.as_deref(), Some("main"));
+        assert_eq!(
+            calls[0].extra_header.as_deref(),
+            Some("Authorization: Basic b2F1dGgyOmdscGF0LXRlc3Q=")
+        );
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].name, "Repository Access");
         assert_eq!(checks[0].status, CheckStatus::Pass);
-        assert_eq!(checks[0].summary, "configured GitLab origin");
+        assert_eq!(checks[0].summary, "reachable");
     }
 
     #[tokio::test]
@@ -1787,8 +1807,9 @@ provider = "local"
 
         assert!(ok);
         assert_eq!(calls.lock().unwrap().as_slice(), [GitRemoteRefCheck {
-            origin_url: "https://github.com/acme/widgets".to_string(),
-            branch:     Some("feature/demo".to_string()),
+            origin_url:   "https://github.com/acme/widgets".to_string(),
+            branch:       Some("feature/demo".to_string()),
+            extra_header: None,
         }]);
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].name, "Repository Access");
@@ -1825,6 +1846,45 @@ provider = "local"
                 .as_deref()
                 .unwrap_or_default()
                 .contains("remote branch not found")
+        );
+    }
+
+    #[tokio::test]
+    async fn repository_access_check_surfaces_gitlab_remote_probe_failure() {
+        let (prepared, resolved) = prepared_and_resolved_for_sandbox(
+            SandboxProviderKind::Docker,
+            true,
+            Some(git_context("https://gitlab.com/acme/widgets", "missing")),
+        );
+        let gitlab = fabro_sandbox::GitLabSandboxConfig {
+            base_url:    fabro_gitlab::repository::GitLabBaseUrl::parse("https://gitlab.com")
+                .unwrap(),
+            credentials: fabro_gitlab::GitLabCredentials::Token("glpat-test".to_string()),
+        };
+        let mut checks = Vec::new();
+
+        let ok = run_repository_access_check_with(
+            &mut checks,
+            SandboxProviderKind::Docker,
+            &prepared,
+            &resolved,
+            None,
+            Some(&gitlab),
+            |_request, _github_app| async { Err("GitLab branch not found".to_string()) },
+        )
+        .await;
+
+        assert!(!ok);
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].name, "Repository Access");
+        assert_eq!(checks[0].status, CheckStatus::Error);
+        assert_eq!(checks[0].summary, "failed");
+        assert!(
+            checks[0]
+                .remediation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("GitLab branch not found")
         );
     }
 
