@@ -1124,12 +1124,8 @@ impl McpServerSettings {
             },
         };
         Ok(Self {
-            name: self.name.clone(),
             transport,
-            current_dir: self.current_dir.clone(),
-            clear_env: self.clear_env,
-            startup_timeout_secs: self.startup_timeout_secs,
-            tool_timeout_secs: self.tool_timeout_secs,
+            ..self.clone()
         })
     }
 }

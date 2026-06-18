@@ -329,10 +329,9 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     let mcp_servers = mcp_servers
         .into_iter()
         .map(|settings| {
-            let name = settings.name.clone();
             settings
                 .resolve_transport_env(process_env_var)
-                .with_context(|| format!("failed to resolve MCP server {name:?}"))
+                .with_context(|| format!("failed to resolve MCP server {:?}", settings.name))
         })
         .collect::<AnyResult<Vec<_>>>()?;
     if let Some(target) = server_target {
