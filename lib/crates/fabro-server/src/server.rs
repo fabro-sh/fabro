@@ -53,6 +53,7 @@ use fabro_automation::AutomationStore;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{RunLayer, Storage, WorkflowSettingsBuilder};
 use fabro_environment::EnvironmentStore;
+use fabro_gitlab::repository::{self as gitlab_repository, GitLabBaseUrl};
 use fabro_interview::{
     Answer, AnswerSubmission, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
 };
@@ -90,13 +91,13 @@ use fabro_types::BlockedReason;
 use fabro_types::settings::RunNamespace;
 use fabro_types::settings::run::{NotificationRouteSettings, RunMode};
 use fabro_types::settings::server::{
-    GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination,
+    GithubIntegrationSettings, GithubIntegrationStrategy, GitlabIntegrationSettings, LogDestination,
 };
 use fabro_types::{
     AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
-    PairMessageId, PairTarget, PendingReason, Principal, PullRequestLink, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, RunRunnableSource, SandboxProviderKind, ServerSettings,
-    SessionCapability, StageModelUsage,
+    PairMessageId, PairTarget, PendingReason, Principal, PullRequestLink, QuestionType,
+    RepositoryProvider, RunBlobId, RunControlAction, RunEvent, RunId, RunRunnableSource,
+    SandboxProviderKind, ServerSettings, SessionCapability, StageModelUsage,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -1195,6 +1196,36 @@ impl AskFabroReadiness {
     }
 }
 
+fn decorate_repository_provider_for_gitlab(
+    mut run: fabro_types::Run,
+    gitlab: &GitlabIntegrationSettings,
+) -> fabro_types::Run {
+    let Some(repository) = run.repository.as_mut() else {
+        return run;
+    };
+    if repository.provider == RepositoryProvider::Gitlab {
+        return run;
+    }
+    if !gitlab.enabled {
+        return run;
+    }
+    let Some(base_url) = gitlab.base_url.as_ref() else {
+        return run;
+    };
+    let Ok(base_url) = GitLabBaseUrl::parse(&base_url.as_source()) else {
+        return run;
+    };
+    let Some(origin_url) = repository.origin_url.as_deref() else {
+        return run;
+    };
+
+    if gitlab_repository::parse_origin(&base_url, origin_url).is_ok() {
+        repository.provider = RepositoryProvider::Gitlab;
+    }
+
+    run
+}
+
 struct PullRequestCreateGuard {
     locks:  PullRequestCreateLocks,
     run_id: RunId,
@@ -1402,6 +1433,11 @@ impl AppState {
     }
 
     pub(crate) async fn decorate_run_summary(&self, run: fabro_types::Run) -> fabro_types::Run {
+        let server_settings = self.server_settings();
+        let run = decorate_repository_provider_for_gitlab(
+            run,
+            &server_settings.server.integrations.gitlab,
+        );
         self.ask_fabro_readiness().await.decorate(run)
     }
 
@@ -1409,8 +1445,11 @@ impl AppState {
         &self,
         runs: Vec<fabro_types::Run>,
     ) -> Vec<fabro_types::Run> {
+        let server_settings = self.server_settings();
+        let gitlab = &server_settings.server.integrations.gitlab;
         let readiness = self.ask_fabro_readiness().await;
         runs.into_iter()
+            .map(|run| decorate_repository_provider_for_gitlab(run, gitlab))
             .map(|run| readiness.decorate(run))
             .collect()
     }

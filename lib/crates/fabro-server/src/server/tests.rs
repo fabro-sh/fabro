@@ -160,6 +160,158 @@ fn run_json_archived(run: &serde_json::Value) -> bool {
     run["lifecycle"]["archived"].as_bool().unwrap_or(false)
 }
 
+fn test_gitlab_settings(
+    base_url: &str,
+) -> fabro_types::settings::server::GitlabIntegrationSettings {
+    fabro_types::settings::server::GitlabIntegrationSettings {
+        enabled: true,
+        base_url: Some(fabro_types::settings::InterpString::parse(base_url)),
+        ..Default::default()
+    }
+}
+
+fn test_run_with_repository(
+    origin_url: &str,
+    provider: fabro_types::RepositoryProvider,
+) -> fabro_types::Run {
+    let now = Utc::now();
+    fabro_types::Run {
+        id:               fabro_types::RunId::new(),
+        parent_id:        None,
+        children_count:   0,
+        title:            "Test run".to_string(),
+        goal:             "Test run".to_string(),
+        workflow:         fabro_types::WorkflowRef {
+            slug:       None,
+            name:       Some("test".to_string()),
+            graph_name: None,
+            node_count: 0,
+            edge_count: 0,
+        },
+        automation:       None,
+        source_context:   None,
+        repository:       Some(fabro_types::RepositoryRef {
+            name: "root/agentic-factory-prisma".to_string(),
+            origin_url: Some(origin_url.to_string()),
+            provider,
+        }),
+        created_by:       None,
+        origin:           fabro_types::RunOrigin::default(),
+        labels:           HashMap::new(),
+        lifecycle:        fabro_types::RunLifecycle {
+            status:          RunStatus::Submitted,
+            approval:        None,
+            pending_control: None,
+            queue_position:  None,
+            error:           None,
+            archived:        false,
+            archived_at:     None,
+        },
+        sandbox:          None,
+        models:           Vec::new(),
+        source_directory: None,
+        timestamps:       fabro_types::RunTimestamps {
+            created_at:    now,
+            started_at:    None,
+            last_event_at: None,
+            completed_at:  None,
+        },
+        timing:           None,
+        billing:          None,
+        size:             fabro_types::RunSize::default(),
+        ask_fabro:        fabro_types::AskFabro::default(),
+        diff:             None,
+        pull_request:     None,
+        current_question: None,
+        superseded_by:    None,
+        retried_from:     None,
+        links:            fabro_types::RunLinks { web: None },
+    }
+}
+
+#[test]
+fn decorates_self_managed_gitlab_repository_provider_from_configured_base_url() {
+    let gitlab = test_gitlab_settings(
+        "https://ipt-fabro-gitlab-ch.purpletree-1e94316c.switzerlandnorth.azurecontainerapps.io",
+    );
+    let run = test_run_with_repository(
+        "https://ipt-fabro-gitlab-ch.purpletree-1e94316c.switzerlandnorth.azurecontainerapps.io/root/agentic-factory-prisma",
+        fabro_types::RepositoryProvider::Git,
+    );
+
+    let decorated = decorate_repository_provider_for_gitlab(run, &gitlab);
+
+    assert_eq!(
+        decorated.repository.as_ref().map(|repo| repo.provider),
+        Some(fabro_types::RepositoryProvider::Gitlab)
+    );
+}
+
+#[test]
+fn leaves_generic_git_repository_provider_when_origin_does_not_match_gitlab_base_url() {
+    let gitlab = test_gitlab_settings("https://gitlab.ipt.example");
+    let run = test_run_with_repository(
+        "https://git.example.com/root/agentic-factory-prisma",
+        fabro_types::RepositoryProvider::Git,
+    );
+
+    let decorated = decorate_repository_provider_for_gitlab(run, &gitlab);
+
+    assert_eq!(
+        decorated.repository.as_ref().map(|repo| repo.provider),
+        Some(fabro_types::RepositoryProvider::Git)
+    );
+}
+
+#[test]
+fn leaves_generic_git_repository_provider_when_gitlab_integration_is_disabled() {
+    let mut gitlab = test_gitlab_settings("https://gitlab.ipt.example");
+    gitlab.enabled = false;
+    let run = test_run_with_repository(
+        "https://gitlab.ipt.example/root/agentic-factory-prisma",
+        fabro_types::RepositoryProvider::Git,
+    );
+
+    let decorated = decorate_repository_provider_for_gitlab(run, &gitlab);
+
+    assert_eq!(
+        decorated.repository.as_ref().map(|repo| repo.provider),
+        Some(fabro_types::RepositoryProvider::Git)
+    );
+}
+
+#[test]
+fn decorates_self_managed_gitlab_repository_provider_with_relative_url_prefix() {
+    let gitlab = test_gitlab_settings("https://gitlab.ipt.example/gitlab");
+    let run = test_run_with_repository(
+        "https://gitlab.ipt.example/gitlab/platform/tools/fabro.git",
+        fabro_types::RepositoryProvider::Git,
+    );
+
+    let decorated = decorate_repository_provider_for_gitlab(run, &gitlab);
+
+    assert_eq!(
+        decorated.repository.as_ref().map(|repo| repo.provider),
+        Some(fabro_types::RepositoryProvider::Gitlab)
+    );
+}
+
+#[test]
+fn does_not_decorate_gitlab_repository_provider_for_sibling_relative_url_prefix() {
+    let gitlab = test_gitlab_settings("https://gitlab.ipt.example/gitlab");
+    let run = test_run_with_repository(
+        "https://gitlab.ipt.example/gitlab2/platform/tools/fabro.git",
+        fabro_types::RepositoryProvider::Git,
+    );
+
+    let decorated = decorate_repository_provider_for_gitlab(run, &gitlab);
+
+    assert_eq!(
+        decorated.repository.as_ref().map(|repo| repo.provider),
+        Some(fabro_types::RepositoryProvider::Git)
+    );
+}
+
 async fn mock_daytona_auth_probe(server: &MockServer) -> httpmock::Mock<'_> {
     server
         .mock_async(|when, then| {
