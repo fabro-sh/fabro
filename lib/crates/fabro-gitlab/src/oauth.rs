@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::repository::GitLabBaseUrl;
+use crate::repository::{GitLabBaseUrl, encode_path_segment};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GitLabUser {
@@ -80,6 +80,6 @@ pub fn groups_url(base: &GitLabBaseUrl, page: u32) -> Url {
 pub fn group_member_url(base: &GitLabBaseUrl, group_path: &str, user_id: u64) -> Url {
     base.api_url(&format!(
         "groups/{}/members/all/{user_id}",
-        crate::repository::encode_path_segment(group_path)
+        encode_path_segment(group_path)
     ))
 }

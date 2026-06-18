@@ -28,6 +28,7 @@ fn help() {
 
     Commands:
       github  Configure GitHub integration (token or GitHub App)
+      gitlab  Configure GitLab integration (token or OAuth app)
       help    Print this message or the help of the given subcommand(s)
 
     Options:
@@ -72,11 +73,75 @@ fn github_help() {
 }
 
 #[test]
+fn gitlab_help() {
+    let context = test_context!();
+    let mut cmd = context.install();
+    cmd.args(["gitlab", "--help"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Configure GitLab integration (token or OAuth app)
+
+    Usage: fabro install gitlab [OPTIONS]
+
+    Options:
+          --json
+              Output as JSON [env: FABRO_JSON=]
+          --strategy <STRATEGY>
+              GitLab authentication strategy (requires --non-interactive) [possible values: token, app]
+          --base-url <BASE_URL>
+              GitLab base URL, for example https://gitlab.com or https://gitlab.example.com
+          --debug
+              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --client-id <CLIENT_ID>
+              GitLab OAuth application client ID (app only, requires --non-interactive)
+          --no-upgrade-check
+              Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --non-interactive
+              Run install without prompts; use hidden scripted flags for inputs
+          --allowed-username <ALLOWED_USERNAMES>
+              GitLab username allowed to log in (app only, repeatable)
+          --quiet
+              Suppress non-essential output [env: FABRO_QUIET=]
+          --allowed-group <ALLOWED_GROUPS>
+              GitLab group full path allowed to log in (app only, repeatable)
+          --verbose
+              Enable verbose output [env: FABRO_VERBOSE=]
+          --token-stdin
+              Read the GitLab token from stdin
+          --token-env <TOKEN_ENV>
+              Read the GitLab token from this environment variable
+          --client-secret-stdin
+              Read the GitLab OAuth client secret from stdin (app only)
+          --client-secret-env <CLIENT_SECRET_ENV>
+              Read the GitLab OAuth client secret from this environment variable (app only)
+      -h, --help
+              Print help
+    ----- stderr -----
+    ");
+}
+
+#[test]
 fn install_json_requires_non_interactive() {
     let context = test_context!();
     let output = context
         .command()
         .args(["--json", "install"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--json is only supported for install with --non-interactive"));
+}
+
+#[test]
+fn install_gitlab_json_requires_non_interactive() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .args(["--json", "install", "gitlab"])
         .output()
         .expect("command should run");
 
@@ -609,6 +674,404 @@ fn github_non_interactive_requires_strategy() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("install github --non-interactive requires --strategy"));
+}
+
+#[test]
+fn gitlab_requires_prior_install() {
+    let context = test_context!();
+    std::fs::remove_file(context.home_dir.join(".fabro/settings.toml")).unwrap();
+    let output = context
+        .command()
+        .args(["install", "gitlab"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("No settings.toml found. Run `fabro install` first."));
+}
+
+#[test]
+fn gitlab_scripted_flags_require_non_interactive() {
+    let context = test_context!();
+    context.write_home(".fabro/settings.toml", "_version = 1\n");
+
+    let output = context
+        .command()
+        .args(["install", "gitlab", "--strategy", "token"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--strategy requires --non-interactive"));
+}
+
+#[test]
+fn gitlab_non_interactive_requires_strategy() {
+    let context = test_context!();
+    context.write_home(".fabro/settings.toml", "_version = 1\n");
+
+    let output = context
+        .command()
+        .args(["install", "gitlab", "--non-interactive"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("install gitlab --non-interactive requires --strategy"));
+}
+
+#[test]
+fn gitlab_token_requires_base_url_and_token_source() {
+    let context = test_context!();
+    context.write_home(".fabro/settings.toml", "_version = 1\n");
+
+    let output = context
+        .command()
+        .args([
+            "install",
+            "gitlab",
+            "--non-interactive",
+            "--strategy",
+            "token",
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("install gitlab token strategy requires --base-url"));
+}
+
+#[test]
+fn gitlab_non_interactive_token_reconfigures_existing_app_install() {
+    let mut context = test_context!();
+    let storage_dir = context.home_dir.join("gitlab-install-storage");
+    context.manage_storage_dir(&storage_dir);
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token", "gitlab"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+allowed_groups = ["platform/fabro-admins"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "https://gitlab.old.example"
+client_id = "gitlab-client"
+
+[project.metadata]
+mode = "keep-me"
+"#,
+            storage_dir.display()
+        ),
+    );
+
+    let server_env_path = Storage::new(&storage_dir).runtime_directory().env_path();
+    envfile::write_env_file(
+        &server_env_path,
+        &std::collections::HashMap::from([
+            (
+                "GITLAB_APP_CLIENT_SECRET".to_string(),
+                "client-secret".to_string(),
+            ),
+            ("KEEP_ME".to_string(), "1".to_string()),
+        ]),
+    )
+    .unwrap();
+    let mut stale_vault = Vault::load(Storage::new(&storage_dir).secrets_path()).unwrap();
+    stale_vault
+        .set(
+            "GITLAB_APP_CLIENT_SECRET",
+            "client-secret",
+            SecretType::Token,
+            None,
+        )
+        .unwrap();
+
+    let gitlab = httpmock::MockServer::start();
+    gitlab.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/api/v4/user")
+            .header("authorization", "Bearer glpat-new-token");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"username":"alice"}"#);
+    });
+
+    let output = context
+        .command()
+        .env("GITLAB_TOKEN_FOR_INSTALL", "glpat-new-token")
+        .args([
+            "install",
+            "gitlab",
+            "--non-interactive",
+            "--strategy",
+            "token",
+            "--base-url",
+            &gitlab.base_url(),
+            "--token-env",
+            "GITLAB_TOKEN_FOR_INSTALL",
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success(), "{output:?}");
+
+    let settings = std::fs::read_to_string(context.home_dir.join(".fabro/settings.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&settings).unwrap();
+    let gitlab_settings = parsed
+        .get("server")
+        .and_then(toml::Value::as_table)
+        .and_then(|server| server.get("integrations"))
+        .and_then(toml::Value::as_table)
+        .and_then(|integrations| integrations.get("gitlab"))
+        .and_then(toml::Value::as_table)
+        .expect("server.integrations.gitlab should exist");
+    assert_eq!(
+        gitlab_settings
+            .get("enabled")
+            .and_then(toml::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        gitlab_settings
+            .get("strategy")
+            .and_then(toml::Value::as_str),
+        Some("token")
+    );
+    assert_eq!(
+        gitlab_settings
+            .get("base_url")
+            .and_then(toml::Value::as_str),
+        Some(gitlab.base_url().as_str())
+    );
+    assert!(!gitlab_settings.contains_key("client_id"));
+
+    let auth = parsed
+        .get("server")
+        .and_then(toml::Value::as_table)
+        .and_then(|server| server.get("auth"))
+        .and_then(toml::Value::as_table)
+        .expect("server.auth should exist");
+    let methods = auth
+        .get("methods")
+        .and_then(toml::Value::as_array)
+        .expect("server.auth.methods should exist");
+    assert_eq!(
+        methods
+            .iter()
+            .map(|value| value.as_str().expect("auth method should be a string"))
+            .collect::<Vec<_>>(),
+        vec!["dev-token"]
+    );
+    assert!(auth.get("gitlab").is_none());
+
+    assert_eq!(
+        parsed
+            .get("project")
+            .and_then(toml::Value::as_table)
+            .and_then(|project| project.get("metadata"))
+            .and_then(toml::Value::as_table)
+            .and_then(|metadata| metadata.get("mode"))
+            .and_then(toml::Value::as_str),
+        Some("keep-me")
+    );
+
+    let server_env = envfile::read_env_file(&server_env_path).unwrap();
+    assert!(!server_env.contains_key("GITLAB_APP_CLIENT_SECRET"));
+    assert_eq!(server_env.get("KEEP_ME").map(String::as_str), Some("1"));
+
+    let vault = Vault::load(Storage::new(&storage_dir).secrets_path()).unwrap();
+    assert_eq!(vault.get("GITLAB_TOKEN"), Some("glpat-new-token"));
+    assert_eq!(vault.get("GITLAB_APP_CLIENT_SECRET"), None);
+    assert_eq!(
+        vault
+            .get_entry("GITLAB_TOKEN")
+            .map(|entry| entry.secret_type),
+        Some(SecretType::Token)
+    );
+}
+
+#[test]
+fn gitlab_non_interactive_app_reconfigures_existing_token_install() {
+    let mut context = test_context!();
+    let storage_dir = context.home_dir.join("gitlab-app-install-storage");
+    context.manage_storage_dir(&storage_dir);
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            r#"
+_version = 1
+
+[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "https://gitlab.old.example"
+
+[project.metadata]
+mode = "keep-me"
+"#,
+            storage_dir.display()
+        ),
+    );
+
+    let server_env_path = Storage::new(&storage_dir).runtime_directory().env_path();
+    envfile::write_env_file(
+        &server_env_path,
+        &std::collections::HashMap::from([
+            ("GITLAB_TOKEN".to_string(), "stale-env-token".to_string()),
+            ("KEEP_ME".to_string(), "1".to_string()),
+        ]),
+    )
+    .unwrap();
+
+    let gitlab = httpmock::MockServer::start();
+    gitlab.mock(|when, then| {
+        when.method(httpmock::Method::GET)
+            .path("/api/v4/user")
+            .header("authorization", "Bearer glpat-app-token");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"username":"alice"}"#);
+    });
+
+    let output = context
+        .command()
+        .env("GITLAB_TOKEN_FOR_INSTALL", "glpat-app-token")
+        .env("GITLAB_CLIENT_SECRET_FOR_INSTALL", "oauth-secret")
+        .args([
+            "install",
+            "gitlab",
+            "--non-interactive",
+            "--strategy",
+            "app",
+            "--base-url",
+            &gitlab.base_url(),
+            "--client-id",
+            "gitlab-client",
+            "--client-secret-env",
+            "GITLAB_CLIENT_SECRET_FOR_INSTALL",
+            "--token-env",
+            "GITLAB_TOKEN_FOR_INSTALL",
+            "--allowed-username",
+            "alice",
+            "--allowed-group",
+            "platform/fabro-admins",
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success(), "{output:?}");
+
+    let settings = std::fs::read_to_string(context.home_dir.join(".fabro/settings.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&settings).unwrap();
+    let gitlab_settings = parsed
+        .get("server")
+        .and_then(toml::Value::as_table)
+        .and_then(|server| server.get("integrations"))
+        .and_then(toml::Value::as_table)
+        .and_then(|integrations| integrations.get("gitlab"))
+        .and_then(toml::Value::as_table)
+        .expect("server.integrations.gitlab should exist");
+    assert_eq!(
+        gitlab_settings
+            .get("enabled")
+            .and_then(toml::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        gitlab_settings
+            .get("strategy")
+            .and_then(toml::Value::as_str),
+        Some("app")
+    );
+    assert_eq!(
+        gitlab_settings
+            .get("base_url")
+            .and_then(toml::Value::as_str),
+        Some(gitlab.base_url().as_str())
+    );
+    assert_eq!(
+        gitlab_settings
+            .get("client_id")
+            .and_then(toml::Value::as_str),
+        Some("gitlab-client")
+    );
+
+    let auth = parsed
+        .get("server")
+        .and_then(toml::Value::as_table)
+        .and_then(|server| server.get("auth"))
+        .and_then(toml::Value::as_table)
+        .expect("server.auth should exist");
+    let methods = auth
+        .get("methods")
+        .and_then(toml::Value::as_array)
+        .expect("server.auth.methods should exist");
+    assert_eq!(
+        methods
+            .iter()
+            .map(|value| value.as_str().expect("auth method should be a string"))
+            .collect::<Vec<_>>(),
+        vec!["dev-token", "gitlab"]
+    );
+    let gitlab_auth = auth
+        .get("gitlab")
+        .and_then(toml::Value::as_table)
+        .expect("server.auth.gitlab should exist");
+    assert_eq!(
+        gitlab_auth
+            .get("allowed_usernames")
+            .and_then(toml::Value::as_array)
+            .expect("allowed usernames should exist")
+            .iter()
+            .map(|value| value.as_str().expect("username should be a string"))
+            .collect::<Vec<_>>(),
+        vec!["alice"]
+    );
+    assert_eq!(
+        gitlab_auth
+            .get("allowed_groups")
+            .and_then(toml::Value::as_array)
+            .expect("allowed groups should exist")
+            .iter()
+            .map(|value| value.as_str().expect("group should be a string"))
+            .collect::<Vec<_>>(),
+        vec!["platform/fabro-admins"]
+    );
+
+    let server_env = envfile::read_env_file(&server_env_path).unwrap();
+    assert!(!server_env.contains_key("GITLAB_TOKEN"));
+    assert_eq!(server_env.get("KEEP_ME").map(String::as_str), Some("1"));
+
+    let vault = Vault::load(Storage::new(&storage_dir).secrets_path()).unwrap();
+    assert_eq!(vault.get("GITLAB_TOKEN"), Some("glpat-app-token"));
+    assert_eq!(vault.get("GITLAB_APP_CLIENT_SECRET"), Some("oauth-secret"));
+    assert_eq!(
+        vault
+            .get_entry("GITLAB_APP_CLIENT_SECRET")
+            .map(|entry| entry.secret_type),
+        Some(SecretType::Token)
+    );
 }
 
 #[test]

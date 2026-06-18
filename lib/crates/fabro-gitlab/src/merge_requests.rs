@@ -492,7 +492,7 @@ mod tests {
         CreateMergeRequestRequest, create_merge_request, parse_changes_count,
         to_pull_request_details,
     };
-    use crate::repository::{GitLabBaseUrl, parse_origin};
+    use crate::repository::{GitLabBaseUrl, GitLabRepository, parse_origin};
     use crate::{GitLabContext, GitLabCredentials};
 
     #[test]
@@ -558,9 +558,7 @@ mod tests {
         })
     }
 
-    fn test_gitlab_context(
-        server: &MockServer,
-    ) -> (GitLabContext, crate::repository::GitLabRepository) {
+    fn test_gitlab_context(server: &MockServer) -> (GitLabContext, GitLabRepository) {
         let base = GitLabBaseUrl::parse(&server.base_url()).unwrap();
         let repo = parse_origin(
             &base,

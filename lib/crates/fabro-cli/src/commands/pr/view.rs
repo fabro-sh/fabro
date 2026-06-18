@@ -45,13 +45,19 @@ pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) ->
     if let Some(details) = github_details {
         let head_branch = &details.head_branch;
         let base_branch = &details.base_branch;
+        let additions = details
+            .additions
+            .map_or_else(|| "unknown".to_string(), |value| value.to_string());
+        let deletions = details
+            .deletions
+            .map_or_else(|| "unknown".to_string(), |value| value.to_string());
         fabro_util::printout!(printer, "Branch:  {head_branch} -> {base_branch}");
         fabro_util::printout!(printer, "Author:  {}", details.author.login);
         fabro_util::printout!(
             printer,
             "Changes: +{} -{} ({} files)",
-            details.additions,
-            details.deletions,
+            additions,
+            deletions,
             details.changed_files
         );
     }

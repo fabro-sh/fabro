@@ -63,8 +63,7 @@ pub(crate) async fn group_member(
                 .users
                 .values()
                 .find(|user| user.id == user_id)
-                .map(|user| user.username.clone())
-                .unwrap_or_else(|| format!("user-{user_id}")),
+                .map_or_else(|| format!("user-{user_id}"), |user| user.username.clone()),
         }))
         .into_response()
     } else {
@@ -82,7 +81,7 @@ pub(crate) async fn projects(
     };
     let state = state.lock();
 
-    let search = query.get("search").map(String::as_str).unwrap_or("");
+    let search = query.get("search").map_or("", String::as_str);
     let per_page = query
         .get("per_page")
         .and_then(|value| value.parse::<usize>().ok())

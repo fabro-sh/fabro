@@ -23,6 +23,10 @@ pub struct AuthCode {
     pub expires_at:              DateTime<Utc>,
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if callbacks receive references"
+)]
 fn is_false(value: &bool) -> bool {
     !value
 }

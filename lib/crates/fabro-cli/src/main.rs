@@ -765,6 +765,80 @@ destination = "{destination}"
     }
 
     #[test]
+    fn parse_install_gitlab_non_interactive_accepts_token_strategy() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "install",
+            "gitlab",
+            "--non-interactive",
+            "--strategy",
+            "token",
+            "--base-url",
+            "https://gitlab.ipt.example",
+        ])
+        .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::Install {
+                args,
+                command: Some(args::InstallCommand::Gitlab(gitlab_args)),
+            } => {
+                assert!(args.non_interactive);
+                assert_eq!(
+                    gitlab_args.strategy,
+                    Some(args::InstallGitLabStrategyArg::Token)
+                );
+                assert_eq!(
+                    gitlab_args.base_url.as_deref(),
+                    Some("https://gitlab.ipt.example")
+                );
+                assert!(gitlab_args.client_id.is_none());
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_install_gitlab_non_interactive_accepts_app_strategy() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "install",
+            "gitlab",
+            "--non-interactive",
+            "--strategy",
+            "app",
+            "--base-url",
+            "https://gitlab.ipt.example",
+            "--client-id",
+            "gitlab-client",
+            "--allowed-username",
+            "alice",
+            "--allowed-group",
+            "platform/fabro-admins",
+        ])
+        .expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::Install {
+                args,
+                command: Some(args::InstallCommand::Gitlab(gitlab_args)),
+            } => {
+                assert!(args.non_interactive);
+                assert_eq!(
+                    gitlab_args.strategy,
+                    Some(args::InstallGitLabStrategyArg::App)
+                );
+                assert_eq!(
+                    gitlab_args.base_url.as_deref(),
+                    Some("https://gitlab.ipt.example")
+                );
+                assert_eq!(gitlab_args.client_id.as_deref(), Some("gitlab-client"));
+                assert_eq!(gitlab_args.allowed_usernames, vec!["alice"]);
+                assert_eq!(gitlab_args.allowed_groups, vec!["platform/fabro-admins"]);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
     fn pre_tracing_bootstrap_uses_server_sink_for_server_start_foreground() {
         let storage_dir = tempfile::tempdir().unwrap();
         let config_dir = tempfile::tempdir().unwrap();

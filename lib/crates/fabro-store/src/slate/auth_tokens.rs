@@ -31,6 +31,10 @@ pub struct RefreshToken {
     pub user_agent:              String,
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if callbacks receive references"
+)]
 fn is_false(value: &bool) -> bool {
     !*value
 }

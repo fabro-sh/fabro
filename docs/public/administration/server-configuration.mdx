@@ -317,6 +317,52 @@ Fabro always serves the GitHub webhook handler at `POST /api/v1/webhooks/github`
 
 Incoming webhooks are authenticated only by GitHub's `X-Hub-Signature-256` HMAC signature, not by Fabro's bearer/session auth.
 
+### `[server.integrations.gitlab]` section
+
+Configure GitLab integration auth. `strategy = "token"` uses the vault secret `GITLAB_TOKEN` for clone, push, branch checks, and merge request operations. `strategy = "app"` enables GitLab OAuth login and also requires `GITLAB_TOKEN` for repository automation.
+
+```toml title="settings.toml"
+[server.integrations.gitlab]
+enabled = true
+strategy = "token"
+base_url = "https://gitlab.example.com"
+```
+
+For GitLab app mode, set `strategy = "app"` and include `base_url` and `client_id`:
+
+```toml title="settings.toml"
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "https://gitlab.example.com"
+client_id = "..."
+```
+
+GitLab app mode requires `GITLAB_APP_CLIENT_SECRET` and `GITLAB_TOKEN` in the server vault. This differs from GitHub app mode: Fabro uses GitLab OAuth for human identity, but repository work still uses the configured automation token.
+
+You can reconfigure GitLab from an existing local install with the CLI:
+
+```bash
+fabro install gitlab --non-interactive \
+  --strategy token \
+  --base-url https://gitlab.example.com \
+  --token-env GITLAB_TOKEN
+```
+
+For GitLab OAuth login, provide the OAuth application values and at least one allowed user or group:
+
+```bash
+fabro install gitlab --non-interactive \
+  --strategy app \
+  --base-url https://gitlab.example.com \
+  --client-id "$GITLAB_CLIENT_ID" \
+  --client-secret-env GITLAB_APP_CLIENT_SECRET \
+  --token-env GITLAB_TOKEN \
+  --allowed-group platform/fabro-admins
+```
+
+The `base_url` may point to a self-hosted GitLab instance. `http://` is accepted only for localhost and test hosts; production self-hosted instances should use `https://`.
+
 ### `[run.checkpoint]` section
 
 Configure checkpoint behavior for all runs.

@@ -1383,6 +1383,7 @@ impl Commands {
             Self::Install { command, .. } => match command {
                 None => "install",
                 Some(InstallCommand::Github(_)) => "install github",
+                Some(InstallCommand::Gitlab(_)) => "install gitlab",
             },
             Self::Uninstall(_) => "uninstall",
             Self::Auth(ns) => match &ns.command {
@@ -1692,10 +1693,20 @@ pub(crate) enum InstallGitHubStrategyArg {
     App,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum InstallGitLabStrategyArg {
+    #[value(name = "token")]
+    Token,
+    App,
+}
+
 #[derive(Subcommand, Debug, Clone)]
 pub(crate) enum InstallCommand {
     /// Configure GitHub integration (token or GitHub App)
     Github(InstallGithubArgs),
+
+    /// Configure GitLab integration (token or OAuth app)
+    Gitlab(InstallGitlabArgs),
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -1708,6 +1719,48 @@ pub(crate) struct InstallGithubArgs {
     /// --non-interactive)
     #[arg(long)]
     pub(crate) owner: Option<String>,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct InstallGitlabArgs {
+    /// GitLab authentication strategy (requires --non-interactive)
+    #[arg(long)]
+    pub(crate) strategy: Option<InstallGitLabStrategyArg>,
+
+    /// GitLab base URL, for example https://gitlab.com or
+    /// https://gitlab.example.com
+    #[arg(long)]
+    pub(crate) base_url: Option<String>,
+
+    /// GitLab OAuth application client ID (app only, requires
+    /// --non-interactive)
+    #[arg(long)]
+    pub(crate) client_id: Option<String>,
+
+    /// GitLab username allowed to log in (app only, repeatable)
+    #[arg(long = "allowed-username")]
+    pub(crate) allowed_usernames: Vec<String>,
+
+    /// GitLab group full path allowed to log in (app only, repeatable)
+    #[arg(long = "allowed-group")]
+    pub(crate) allowed_groups: Vec<String>,
+
+    /// Read the GitLab token from stdin
+    #[arg(long, conflicts_with = "token_env")]
+    pub(crate) token_stdin: bool,
+
+    /// Read the GitLab token from this environment variable
+    #[arg(long)]
+    pub(crate) token_env: Option<String>,
+
+    /// Read the GitLab OAuth client secret from stdin (app only)
+    #[arg(long, conflicts_with = "client_secret_env")]
+    pub(crate) client_secret_stdin: bool,
+
+    /// Read the GitLab OAuth client secret from this environment variable (app
+    /// only)
+    #[arg(long)]
+    pub(crate) client_secret_env: Option<String>,
 }
 
 #[derive(Args, Debug, Clone, Default)]

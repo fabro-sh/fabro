@@ -1311,6 +1311,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use fabro_types::pull_request::{PullRequestDetails, PullRequestGithubDetail};
+    use httpmock::Method::{GET, POST};
+    use httpmock::MockServer;
     use tracing::{debug, subscriber};
     use tracing_subscriber::fmt::{self as tracing_fmt, MakeWriter};
     use tracing_subscriber::prelude::*;
@@ -2159,9 +2162,8 @@ mod tests {
 
     #[test]
     fn github_pull_request_details_keep_line_stats() {
-        let detail: fabro_types::pull_request::PullRequestGithubDetail =
-            serde_json::from_str(mock_pr_json()).unwrap();
-        let details: fabro_types::pull_request::PullRequestDetails = detail.into();
+        let detail: PullRequestGithubDetail = serde_json::from_str(mock_pr_json()).unwrap();
+        let details: PullRequestDetails = detail.into();
 
         assert_eq!(details.additions, Some(10));
         assert_eq!(details.deletions, Some(3));

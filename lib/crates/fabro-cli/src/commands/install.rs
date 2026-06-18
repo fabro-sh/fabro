@@ -4,6 +4,7 @@
 )]
 
 use std::future::Future;
+use std::io::Read as _;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
@@ -28,11 +29,12 @@ use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
 use fabro_config::{Storage, UserSettingsBuilder, envfile};
 use fabro_install::{
-    GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, InstallListenConfig, InstallPersistencePlan,
-    PendingDevTokenWrite, PendingSettingsWrite, VaultSecretWrite,
+    GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, GITLAB_APP_VAULT_KEYS,
+    GITLAB_INSTALL_SECRET_KEYS, GitlabAppInstallSettings, InstallListenConfig,
+    InstallPersistencePlan, PendingDevTokenWrite, PendingSettingsWrite, VaultSecretWrite,
     merge_server_settings as merge_server_settings_impl, prepare_dev_token_write_for_install,
     restore_optional_file, rollback_dev_token_write, write_github_app_settings,
-    write_token_settings,
+    write_gitlab_app_settings, write_gitlab_token_settings, write_token_settings,
 };
 use fabro_model::catalog::CatalogProvider;
 use fabro_model::{Catalog, CredentialRef, ProviderId};
@@ -58,8 +60,8 @@ use super::doctor;
 #[cfg(test)]
 use crate::args::default_web_url;
 use crate::args::{
-    DoctorArgs, InstallArgs, InstallCommand, InstallGitHubStrategyArg, InstallGithubArgs,
-    InstallNonInteractiveArgs, ServerTargetArgs,
+    DoctorArgs, InstallArgs, InstallCommand, InstallGitHubStrategyArg, InstallGitLabStrategyArg,
+    InstallGithubArgs, InstallGitlabArgs, InstallNonInteractiveArgs, ServerTargetArgs,
 };
 use crate::command_context::CommandContext;
 use crate::commands::server::{start, stop};
@@ -330,6 +332,24 @@ enum GitHubInstallSelection {
     App {
         owner:    GitHubAppOwner,
         username: Option<String>,
+    },
+}
+
+#[derive(Debug)]
+enum GitLabInstallSelection {
+    Token {
+        base_url: String,
+        token:    String,
+        username: String,
+    },
+    App {
+        base_url:          String,
+        client_id:         String,
+        client_secret:     String,
+        token:             String,
+        username:          String,
+        allowed_usernames: Vec<String>,
+        allowed_groups:    Vec<String>,
     },
 }
 
@@ -677,6 +697,27 @@ impl NonInteractiveInstallInputSource {
     }
 }
 
+enum SecretInputSource {
+    Stdin,
+    EnvVar(String),
+}
+
+impl SecretInputSource {
+    fn read(self, label: &str) -> Result<String> {
+        match self {
+            Self::Stdin => {
+                let mut value = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut value)
+                    .with_context(|| format!("failed to read {label} from stdin"))?;
+                Ok(value.trim_end_matches(['\r', '\n']).to_string())
+            }
+            Self::EnvVar(name) => std::env::var(&name)
+                .with_context(|| format!("{label} environment variable {name} is not set")),
+        }
+    }
+}
+
 #[async_trait]
 impl InstallInputSource for NonInteractiveInstallInputSource {
     async fn collect_llm_selection(
@@ -781,6 +822,128 @@ fn validate_install_github_non_interactive(
     Ok(())
 }
 
+fn validate_install_gitlab_non_interactive(
+    gitlab_args: &InstallGitlabArgs,
+    non_interactive: bool,
+) -> Result<()> {
+    if !non_interactive {
+        if gitlab_args.strategy.is_some() {
+            bail!("--strategy requires --non-interactive");
+        }
+        if gitlab_args.base_url.is_some() {
+            bail!("--base-url requires --non-interactive");
+        }
+        if gitlab_args.client_id.is_some() {
+            bail!("--client-id requires --non-interactive");
+        }
+        if !gitlab_args.allowed_usernames.is_empty() {
+            bail!("--allowed-username requires --non-interactive");
+        }
+        if !gitlab_args.allowed_groups.is_empty() {
+            bail!("--allowed-group requires --non-interactive");
+        }
+        if gitlab_args.token_stdin || gitlab_args.token_env.is_some() {
+            bail!("--token-stdin and --token-env require --non-interactive");
+        }
+        if gitlab_args.client_secret_stdin || gitlab_args.client_secret_env.is_some() {
+            bail!("--client-secret-stdin and --client-secret-env require --non-interactive");
+        }
+        return Ok(());
+    }
+
+    match gitlab_args.strategy {
+        Some(InstallGitLabStrategyArg::Token) => {
+            anyhow::ensure!(
+                gitlab_args.base_url.is_some(),
+                "install gitlab token strategy requires --base-url"
+            );
+            anyhow::ensure!(
+                gitlab_args.token_stdin ^ gitlab_args.token_env.is_some(),
+                "install gitlab token strategy requires exactly one of --token-stdin or --token-env"
+            );
+            anyhow::ensure!(
+                gitlab_args.client_id.is_none()
+                    && gitlab_args.allowed_usernames.is_empty()
+                    && gitlab_args.allowed_groups.is_empty()
+                    && !gitlab_args.client_secret_stdin
+                    && gitlab_args.client_secret_env.is_none(),
+                "GitLab app options are only supported with --strategy app"
+            );
+        }
+        Some(InstallGitLabStrategyArg::App) => {
+            anyhow::ensure!(
+                gitlab_args.base_url.is_some(),
+                "install gitlab app strategy requires --base-url"
+            );
+            anyhow::ensure!(
+                gitlab_args.client_id.is_some(),
+                "install gitlab app strategy requires --client-id"
+            );
+            anyhow::ensure!(
+                gitlab_args.token_stdin ^ gitlab_args.token_env.is_some(),
+                "install gitlab app strategy requires exactly one of --token-stdin or --token-env"
+            );
+            anyhow::ensure!(
+                gitlab_args.client_secret_stdin ^ gitlab_args.client_secret_env.is_some(),
+                "install gitlab app strategy requires exactly one of --client-secret-stdin or --client-secret-env"
+            );
+            anyhow::ensure!(
+                !gitlab_args.allowed_usernames.is_empty() || !gitlab_args.allowed_groups.is_empty(),
+                "install gitlab app strategy requires at least one --allowed-username or --allowed-group"
+            );
+        }
+        None => bail!("install gitlab --non-interactive requires --strategy"),
+    }
+
+    Ok(())
+}
+
+fn validate_install_gitlab_base_url(raw: &str) -> Result<String> {
+    let url = fabro_http::Url::parse(raw).context("GitLab base_url is invalid")?;
+    anyhow::ensure!(
+        matches!(url.scheme(), "http" | "https"),
+        "GitLab base_url must use http or https"
+    );
+    if url.scheme() == "http" {
+        let host = url.host_str().unwrap_or_default();
+        let local_or_test = matches!(host, "localhost" | "127.0.0.1" | "::1")
+            || host.ends_with(".localhost")
+            || host.ends_with(".test");
+        anyhow::ensure!(
+            local_or_test,
+            "GitLab base_url must use https unless it points to localhost or a test host"
+        );
+    }
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct GitlabUserResponse {
+    username: String,
+}
+
+async fn validate_gitlab_token(base_url: &str, token: &str) -> Result<String> {
+    let base_url = validate_install_gitlab_base_url(base_url)?;
+    let base = fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url)
+        .map_err(|err| anyhow::anyhow!("GitLab base_url is invalid: {err}"))?;
+    let client = fabro_http::http_client()?;
+    let response = client
+        .get(fabro_gitlab::oauth::user_url(&base))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(anyhow::Error::new)?;
+    if !response.status().is_success() {
+        bail!("GitLab returned {}", response.status());
+    }
+    let body: GitlabUserResponse = response
+        .json()
+        .await
+        .context("Failed to parse GitLab user response")?;
+    Ok(body.username)
+}
+
 async fn choose_install_github_selection(
     install_args: &InstallArgs,
     github_args: &InstallGithubArgs,
@@ -809,6 +972,65 @@ async fn choose_install_github_selection(
             username: best_effort_github_username().await,
         }),
         None => bail!("install github --non-interactive requires --strategy"),
+    }
+}
+
+async fn choose_install_gitlab_selection(
+    install_args: &InstallArgs,
+    gitlab_args: &InstallGitlabArgs,
+) -> Result<GitLabInstallSelection> {
+    validate_install_gitlab_non_interactive(gitlab_args, install_args.non_interactive)?;
+    anyhow::ensure!(
+        install_args.non_interactive,
+        "interactive `fabro install gitlab` is not implemented yet; rerun with --non-interactive"
+    );
+
+    let base_url = validate_install_gitlab_base_url(
+        gitlab_args
+            .base_url
+            .as_deref()
+            .context("install gitlab requires --base-url")?,
+    )?;
+    let token_source = if gitlab_args.token_stdin {
+        SecretInputSource::Stdin
+    } else if let Some(name) = &gitlab_args.token_env {
+        SecretInputSource::EnvVar(name.clone())
+    } else {
+        bail!("install gitlab requires exactly one of --token-stdin or --token-env");
+    };
+    let token = token_source.read("GitLab token")?;
+    let username = validate_gitlab_token(&base_url, &token).await?;
+
+    match gitlab_args.strategy {
+        Some(InstallGitLabStrategyArg::Token) => Ok(GitLabInstallSelection::Token {
+            base_url,
+            token,
+            username,
+        }),
+        Some(InstallGitLabStrategyArg::App) => {
+            let client_secret_source = if gitlab_args.client_secret_stdin {
+                SecretInputSource::Stdin
+            } else if let Some(name) = &gitlab_args.client_secret_env {
+                SecretInputSource::EnvVar(name.clone())
+            } else {
+                bail!(
+                    "install gitlab app strategy requires exactly one of --client-secret-stdin or --client-secret-env"
+                );
+            };
+            Ok(GitLabInstallSelection::App {
+                base_url,
+                client_id: gitlab_args
+                    .client_id
+                    .clone()
+                    .context("install gitlab app strategy requires --client-id")?,
+                client_secret: client_secret_source.read("GitLab OAuth client secret")?,
+                token,
+                username,
+                allowed_usernames: gitlab_args.allowed_usernames.clone(),
+                allowed_groups: gitlab_args.allowed_groups.clone(),
+            })
+        }
+        None => bail!("install gitlab --non-interactive requires --strategy"),
     }
 }
 
@@ -1345,7 +1567,7 @@ async fn persist_install_outputs(
     .await
 }
 
-struct PendingGitHubInstallWrite<'a> {
+struct PendingSourceControlInstallWrite<'a> {
     settings_write:    PendingSettingsWrite<'a>,
     server_env_set:    Vec<(String, String)>,
     server_env_remove: Vec<&'static str>,
@@ -1353,9 +1575,9 @@ struct PendingGitHubInstallWrite<'a> {
     vault_remove:      Vec<&'static str>,
 }
 
-fn persist_github_install_changes(
+fn persist_source_control_install_changes(
     storage_dir: &Path,
-    writes: &PendingGitHubInstallWrite<'_>,
+    writes: &PendingSourceControlInstallWrite<'_>,
 ) -> Result<()> {
     let server_env_path = Storage::new(storage_dir).runtime_directory().env_path();
     let previous_server_env = std::fs::read_to_string(&server_env_path).ok();
@@ -1503,7 +1725,7 @@ async fn restart_server_after_install(
     .await
 }
 
-async fn maybe_restart_server_after_github_install(
+async fn maybe_restart_server_after_source_control_install(
     storage_dir: &Path,
     config_path: &Path,
     server_was_running: bool,
@@ -1559,6 +1781,9 @@ pub(crate) async fn execute(
         None => run_install(args, ctx).await,
         Some(InstallCommand::Github(github_args)) => {
             run_install_github_command(args, &github_args, ctx).await
+        }
+        Some(InstallCommand::Gitlab(gitlab_args)) => {
+            run_install_gitlab_command(args, &gitlab_args, ctx).await
         }
     }
 }
@@ -1688,7 +1913,7 @@ async fn run_install_github_inner(
     }
 
     let settings_toml = toml::to_string_pretty(&doc)?;
-    persist_github_install_changes(&storage_dir, &PendingGitHubInstallWrite {
+    persist_source_control_install_changes(&storage_dir, &PendingSourceControlInstallWrite {
         settings_write: PendingSettingsWrite {
             path:              &config_path,
             contents:          settings_toml.as_str(),
@@ -1700,9 +1925,194 @@ async fn run_install_github_inner(
         vault_remove,
     })?;
 
-    if let Some(restart_outcome) =
-        maybe_restart_server_after_github_install(&storage_dir, &config_path, server_was_running)
-            .await
+    if let Some(restart_outcome) = maybe_restart_server_after_source_control_install(
+        &storage_dir,
+        &config_path,
+        server_was_running,
+    )
+    .await
+    {
+        match restart_outcome {
+            InstallServerRestartOutcome::Started(bind) => {
+                fabro_util::printerr!(
+                    printer,
+                    "  {} Server running at http://{}",
+                    s.green.apply_to("✔"),
+                    bind
+                );
+                let methods = fabro_config::ServerSettingsBuilder::from_toml(&settings_toml)
+                    .ok()
+                    .map(|settings| settings.server.auth.methods)
+                    .unwrap_or_default();
+                let token = methods
+                    .contains(&ServerAuthMethod::DevToken)
+                    .then(|| {
+                        dev_token::read_dev_token_file(
+                            &Storage::new(&storage_dir)
+                                .runtime_directory()
+                                .dev_token_path(),
+                        )
+                    })
+                    .flatten();
+                print_auth_status(&methods, token.as_deref(), &s, printer);
+                fabro_util::printerr!(printer, "");
+            }
+            InstallServerRestartOutcome::Failed(err) => {
+                fabro_util::printerr!(
+                    printer,
+                    "  {} Failed to restart server: {err}",
+                    s.yellow.apply_to("Warning:")
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_install_gitlab_command(
+    args: &InstallArgs,
+    gitlab_args: &InstallGitlabArgs,
+    ctx: &CommandContext,
+) -> Result<()> {
+    let json = ctx.json_output();
+    if ctx.explicit_json_requested() && !args.non_interactive {
+        bail!("--json is only supported for install with --non-interactive");
+    }
+
+    let result = Box::pin(run_install_gitlab_inner(
+        args,
+        gitlab_args,
+        json,
+        ctx.printer(),
+    ))
+    .await;
+    if json {
+        let emit_result = match &result {
+            Ok(()) => emit_install_json_event(&install_complete_event()),
+            Err(err) => emit_install_json_event(&install_error_event(&err.to_string())),
+        };
+        if result.is_ok() {
+            emit_result?;
+        }
+    }
+
+    result
+}
+
+async fn run_install_gitlab_inner(
+    args: &InstallArgs,
+    gitlab_args: &InstallGitlabArgs,
+    json_output: bool,
+    printer: Printer,
+) -> Result<()> {
+    validate_install_gitlab_non_interactive(gitlab_args, args.non_interactive)?;
+
+    let s = Styles::detect_stderr();
+    let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
+    let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
+    if !config_path.exists() {
+        bail!("No settings.toml found. Run `fabro install` first.");
+    }
+
+    let existing_config_contents =
+        std::fs::read_to_string(&config_path).context("failed to read existing settings.toml")?;
+    let storage_dir = args
+        .storage_dir
+        .clone_path()
+        .or_else(|| local_server::storage_dir_from_toml(&existing_config_contents).ok())
+        .unwrap_or_else(default_storage_dir);
+    let server_was_running =
+        ServerDaemon::load_running(&Storage::new(&storage_dir).runtime_directory())?.is_some();
+    let mut doc: toml::Value = toml::from_str(&existing_config_contents)
+        .context("failed to parse existing settings.toml")?;
+
+    let selection = choose_install_gitlab_selection(args, gitlab_args).await?;
+    let server_env_set = Vec::new();
+    let mut server_env_remove = Vec::new();
+    let mut vault_set = Vec::new();
+    let mut vault_remove = Vec::new();
+
+    match selection {
+        GitLabInstallSelection::Token {
+            base_url,
+            token,
+            username,
+        } => {
+            write_gitlab_token_settings(&mut doc, &base_url)?;
+            vault_set.push(VaultSecretWrite {
+                name:        fabro_static::EnvVars::GITLAB_TOKEN.to_string(),
+                value:       token,
+                secret_type: VaultSecretType::Token,
+                description: None,
+            });
+            server_env_remove.extend(GITLAB_INSTALL_SECRET_KEYS.iter().copied());
+            vault_remove.extend(GITLAB_APP_VAULT_KEYS.iter().copied());
+            if !json_output {
+                fabro_util::printerr!(
+                    printer,
+                    "  {} GitLab token configured for {username}",
+                    s.green.apply_to("✔")
+                );
+            }
+        }
+        GitLabInstallSelection::App {
+            base_url,
+            client_id,
+            client_secret,
+            token,
+            username,
+            allowed_usernames,
+            allowed_groups,
+        } => {
+            write_gitlab_app_settings(&mut doc, GitlabAppInstallSettings {
+                base_url,
+                client_id,
+                allowed_usernames,
+                allowed_groups,
+            })?;
+            vault_set.push(VaultSecretWrite {
+                name:        fabro_static::EnvVars::GITLAB_TOKEN.to_string(),
+                value:       token,
+                secret_type: VaultSecretType::Token,
+                description: None,
+            });
+            vault_set.push(VaultSecretWrite {
+                name:        fabro_static::EnvVars::GITLAB_APP_CLIENT_SECRET.to_string(),
+                value:       client_secret,
+                secret_type: VaultSecretType::Token,
+                description: None,
+            });
+            server_env_remove.extend(GITLAB_INSTALL_SECRET_KEYS.iter().copied());
+            if !json_output {
+                fabro_util::printerr!(
+                    printer,
+                    "  {} GitLab app configured for {username}",
+                    s.green.apply_to("✔")
+                );
+            }
+        }
+    }
+
+    let settings_toml = toml::to_string_pretty(&doc)?;
+    persist_source_control_install_changes(&storage_dir, &PendingSourceControlInstallWrite {
+        settings_write: PendingSettingsWrite {
+            path:              &config_path,
+            contents:          settings_toml.as_str(),
+            previous_contents: Some(existing_config_contents.as_str()),
+        },
+        server_env_set,
+        server_env_remove,
+        vault_set,
+        vault_remove,
+    })?;
+
+    if let Some(restart_outcome) = maybe_restart_server_after_source_control_install(
+        &storage_dir,
+        &config_path,
+        server_was_running,
+    )
+    .await
     {
         match restart_outcome {
             InstallServerRestartOutcome::Started(bind) => {
@@ -3252,7 +3662,7 @@ client_id = "client-id"
         let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
         std::fs::write(&settings_path, "before").unwrap();
 
-        persist_github_install_changes(dir.path(), &PendingGitHubInstallWrite {
+        persist_source_control_install_changes(dir.path(), &PendingSourceControlInstallWrite {
             settings_write:    PendingSettingsWrite {
                 path:              &settings_path,
                 contents:          "after",
@@ -3315,7 +3725,7 @@ client_id = "client-id"
         let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
         std::fs::write(&settings_path, "before").unwrap();
 
-        persist_github_install_changes(dir.path(), &PendingGitHubInstallWrite {
+        persist_source_control_install_changes(dir.path(), &PendingSourceControlInstallWrite {
             settings_write:    PendingSettingsWrite {
                 path:              &settings_path,
                 contents:          "after",
@@ -3408,22 +3818,23 @@ client_id = "client-id"
         let settings_path = dir.path().join(SETTINGS_CONFIG_FILENAME);
         std::fs::write(&settings_path, "before").unwrap();
 
-        let result = persist_github_install_changes(dir.path(), &PendingGitHubInstallWrite {
-            settings_write:    PendingSettingsWrite {
-                path:              &settings_path,
-                contents:          "after",
-                previous_contents: Some("before"),
-            },
-            server_env_set:    Vec::new(),
-            server_env_remove: vec![GITHUB_APP_PRIVATE_KEY_KEY, GITHUB_APP_CLIENT_SECRET_KEY],
-            vault_set:         vec![VaultSecretWrite {
-                name:        "bad-secret-name".to_string(),
-                value:       "token".to_string(),
-                secret_type: VaultSecretType::Token,
-                description: None,
-            }],
-            vault_remove:      Vec::new(),
-        });
+        let result =
+            persist_source_control_install_changes(dir.path(), &PendingSourceControlInstallWrite {
+                settings_write:    PendingSettingsWrite {
+                    path:              &settings_path,
+                    contents:          "after",
+                    previous_contents: Some("before"),
+                },
+                server_env_set:    Vec::new(),
+                server_env_remove: vec![GITHUB_APP_PRIVATE_KEY_KEY, GITHUB_APP_CLIENT_SECRET_KEY],
+                vault_set:         vec![VaultSecretWrite {
+                    name:        "bad-secret-name".to_string(),
+                    value:       "token".to_string(),
+                    secret_type: VaultSecretType::Token,
+                    description: None,
+                }],
+                vault_remove:      Vec::new(),
+            });
 
         assert!(result.is_err());
         let server_env = envfile::read_env_file(&server_env_path).unwrap();
