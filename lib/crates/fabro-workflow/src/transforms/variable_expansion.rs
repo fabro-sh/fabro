@@ -259,8 +259,8 @@ fn detemplated_attribute_diagnostic(attr_name: &str, target: &TemplateRenderTarg
 }
 
 /// Error emitted when the graph `goal` references `{{ goal }}` — a goal cannot
-/// reference itself (D12). Prompts may reference the rendered goal; the goal
-/// renders without `goal` in scope, so a self-reference is always a mistake.
+/// reference itself. Prompts may reference the rendered goal; the goal renders
+/// without `goal` in scope, so a self-reference is always a mistake.
 fn goal_self_reference_diagnostic(
     target: &TemplateRenderTarget,
     error: Option<&TemplateError>,
@@ -321,7 +321,7 @@ impl TemplateTransform {
         }
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
             .with_source_origin(self.source_text.as_deref(), goal);
-        // D12: the goal renders with no `goal` in scope, so it cannot reference
+        // The goal renders with no `goal` in scope, so it cannot reference
         // itself. Flag the self-reference with a friendly diagnostic before the
         // render would otherwise produce a generic "undefined variable `goal`".
         if fabro_template::references_top_level_variable(goal, "goal") {

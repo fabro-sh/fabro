@@ -526,9 +526,9 @@ pub fn contains_template_syntax(template: &str) -> bool {
 
 /// Whether `template` references `name` as a top-level variable.
 ///
-/// Used by the goal self-reference lint (D12): a graph `goal` may not reference
-/// `{{ goal }}`. Returns `false` for templates that fail to parse — syntax
-/// errors surface through the normal render path with proper diagnostics.
+/// Used by the goal self-reference lint: a graph `goal` may not reference
+/// itself. Returns `false` for templates that fail to parse — syntax errors
+/// surface through the normal render path with proper diagnostics.
 #[must_use]
 pub fn references_top_level_variable(template: &str, name: &str) -> bool {
     if is_plain_text(template) || !template.contains(name) {

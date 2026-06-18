@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_goal_self_reference() {
-        // D12: a goal can't reference itself; a prompt can reference the goal.
+        // A goal can't reference itself; a prompt can reference the goal.
         let dot = r#"digraph Test {
             graph [goal="Refine {{ goal }}"]
             start [shape=Mdiamond]
