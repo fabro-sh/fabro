@@ -233,16 +233,51 @@ fn substitute_mcp_transport<F>(
 where
     F: FnMut(&str) -> Option<String>,
 {
+    visit_mcp_transport_strings(transport, &mut |value| {
+        substitute_string(value, &mut *lookup)
+    })
+}
+
+fn visit_mcp_transport_strings<F>(
+    transport: &mut McpTransport,
+    visitor: &mut F,
+) -> Result<(), ResolveError>
+where
+    F: FnMut(&mut String) -> Result<(), ResolveError>,
+{
     match transport {
         McpTransport::Stdio { command, env } | McpTransport::Sandbox { command, env, .. } => {
-            substitute_string_vec(command, lookup)?;
-            substitute_string_map(env, lookup)
+            visit_string_vec(command, visitor)?;
+            visit_string_map(env, visitor)
         }
         McpTransport::Http { url, headers, .. } => {
-            substitute_string(url, lookup)?;
-            substitute_string_map(headers, lookup)
+            visitor(url)?;
+            visit_string_map(headers, visitor)
         }
     }
+}
+
+fn visit_string_vec<F>(values: &mut [String], visitor: &mut F) -> Result<(), ResolveError>
+where
+    F: FnMut(&mut String) -> Result<(), ResolveError>,
+{
+    for value in values {
+        visitor(value)?;
+    }
+    Ok(())
+}
+
+fn visit_string_map<F>(
+    values: &mut HashMap<String, String>,
+    visitor: &mut F,
+) -> Result<(), ResolveError>
+where
+    F: FnMut(&mut String) -> Result<(), ResolveError>,
+{
+    for value in values.values_mut() {
+        visitor(value)?;
+    }
+    Ok(())
 }
 
 fn substitute_environment<F>(
@@ -1095,67 +1130,27 @@ impl McpServerSettings {
     /// rather than passing through as literal text.
     pub fn resolve_transport_env(
         &self,
-        env_lookup: impl Fn(&str) -> Option<String> + Copy,
+        mut env_lookup: impl FnMut(&str) -> Option<String>,
     ) -> Result<Self, ResolveError> {
-        let transport = match &self.transport {
-            McpTransport::Stdio { command, env } => McpTransport::Stdio {
-                command: resolve_env_strings(command, env_lookup)?,
-                env:     resolve_env_map(env, env_lookup)?,
-            },
-            McpTransport::Http {
-                protocol,
-                url,
-                headers,
-            } => McpTransport::Http {
-                protocol: *protocol,
-                url:      resolve_env_string(url, env_lookup)?,
-                headers:  resolve_env_map(headers, env_lookup)?,
-            },
-            McpTransport::Sandbox {
-                protocol,
-                command,
-                port,
-                env,
-            } => McpTransport::Sandbox {
-                protocol: *protocol,
-                command:  resolve_env_strings(command, env_lookup)?,
-                port:     *port,
-                env:      resolve_env_map(env, env_lookup)?,
-            },
-        };
-        Ok(Self {
-            transport,
-            ..self.clone()
-        })
+        let mut resolved = self.clone();
+        visit_mcp_transport_strings(&mut resolved.transport, &mut |value| {
+            resolve_env_string(value, &mut env_lookup)
+        })?;
+        Ok(resolved)
     }
 }
 
 /// Resolve `{{ env.* }}` tokens in one MCP transport string. A literal value
 /// (no tokens) round-trips unchanged.
 fn resolve_env_string(
-    value: &str,
-    env_lookup: impl Fn(&str) -> Option<String>,
-) -> Result<String, ResolveError> {
-    Ok(InterpString::parse(value).resolve(env_lookup)?.value)
-}
-
-fn resolve_env_strings(
-    values: &[String],
-    env_lookup: impl Fn(&str) -> Option<String> + Copy,
-) -> Result<Vec<String>, ResolveError> {
-    values
-        .iter()
-        .map(|value| resolve_env_string(value, env_lookup))
-        .collect()
-}
-
-fn resolve_env_map(
-    map: &HashMap<String, String>,
-    env_lookup: impl Fn(&str) -> Option<String> + Copy,
-) -> Result<HashMap<String, String>, ResolveError> {
-    map.iter()
-        .map(|(key, value)| Ok((key.clone(), resolve_env_string(value, env_lookup)?)))
-        .collect()
+    value: &mut String,
+    env_lookup: &mut impl FnMut(&str) -> Option<String>,
+) -> Result<(), ResolveError> {
+    if !value.contains("{{") {
+        return Ok(());
+    }
+    *value = InterpString::parse(value).resolve(&mut *env_lookup)?.value;
+    Ok(())
 }
 
 #[cfg(test)]

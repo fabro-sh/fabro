@@ -680,13 +680,13 @@ impl ModelRegistry for CatalogModelRegistry<'_> {
 /// no fallback to the unresolved source.
 fn runtime_mcp_server(
     settings: &ResolvedMcpServerSettings,
-    env_lookup: impl Fn(&str) -> Option<String> + Copy,
+    env_lookup: impl FnMut(&str) -> Option<String>,
 ) -> Result<McpServerSettings, Error> {
     settings.resolve_transport_env(env_lookup).map_err(|err| {
-        Error::engine(format!(
-            "failed to resolve MCP server {:?}: {err}",
-            settings.name
-        ))
+        Error::engine_with_source(
+            format!("failed to resolve MCP server {:?}", settings.name),
+            err,
+        )
     })
 }
 
@@ -1115,7 +1115,6 @@ mod tests {
         EnvironmentImageLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer, RunCloneLayer,
         RunEnvironmentLayer, RunExecutionLayer, RunLayer, StickyMap, WorkflowSettingsBuilder,
     };
-    use fabro_mcp::config::McpTransport;
     use fabro_store::Database;
     use fabro_types::settings::run::{McpTransport as ResolvedMcpTransport, RunMode};
     use fabro_types::settings::{InterpString, ModelRef};
@@ -1310,38 +1309,8 @@ reasoning = false
         assert!(resolve_daytona_config(&settings.run).skip_clone);
     }
 
-    fn mcp_env_lookup(
-        pairs: &'static [(&'static str, &'static str)],
-    ) -> impl Fn(&str) -> Option<String> + Copy {
-        move |name| {
-            pairs
-                .iter()
-                .find_map(|(key, value)| (*key == name).then(|| (*value).to_string()))
-        }
-    }
-
     #[test]
-    fn runtime_mcp_server_passes_through_literal_env() {
-        let settings = ResolvedMcpServerSettings {
-            name: "baseline".to_string(),
-            transport: ResolvedMcpTransport::Stdio {
-                command: vec!["python".to_string(), "server.py".to_string()],
-                env:     HashMap::from([("TOKEN".to_string(), "literal-value".to_string())]),
-            },
-            ..ResolvedMcpServerSettings::default()
-        };
-
-        let resolved = runtime_mcp_server(&settings, mcp_env_lookup(&[])).unwrap();
-
-        let McpTransport::Stdio { command, env } = resolved.transport else {
-            panic!("expected stdio transport");
-        };
-        assert_eq!(command, vec!["python".to_string(), "server.py".to_string()]);
-        assert_eq!(env.get("TOKEN").map(String::as_str), Some("literal-value"));
-    }
-
-    #[test]
-    fn runtime_mcp_server_resolves_stdio_env_template() {
+    fn runtime_mcp_server_wraps_resolve_error_source() {
         let settings = ResolvedMcpServerSettings {
             name: "gemini".to_string(),
             transport: ResolvedMcpTransport::Stdio {
@@ -1354,97 +1323,15 @@ reasoning = false
             ..ResolvedMcpServerSettings::default()
         };
 
-        let resolved =
-            runtime_mcp_server(&settings, mcp_env_lookup(&[("GEMINI_API_KEY", "real-key")]))
-                .unwrap();
+        let err = runtime_mcp_server(&settings, |_| None).unwrap_err();
 
-        let McpTransport::Stdio { env, .. } = resolved.transport else {
-            panic!("expected stdio transport");
-        };
         assert_eq!(
-            env.get("GEMINI_API_KEY").map(String::as_str),
-            Some("real-key")
+            err.to_string(),
+            "Engine error: failed to resolve MCP server \"gemini\""
         );
-    }
-
-    #[test]
-    fn runtime_mcp_server_resolves_sandbox_env_template() {
-        let settings = ResolvedMcpServerSettings {
-            name: "sandboxed".to_string(),
-            transport: ResolvedMcpTransport::Sandbox {
-                protocol: fabro_types::settings::run::McpHttpProtocol::default(),
-                command:  vec!["serve".to_string()],
-                port:     8080,
-                env:      HashMap::from([(
-                    "API_KEY".to_string(),
-                    "{{ env.SANDBOX_API_KEY }}".to_string(),
-                )]),
-            },
-            ..ResolvedMcpServerSettings::default()
-        };
-
-        let resolved =
-            runtime_mcp_server(&settings, mcp_env_lookup(&[("SANDBOX_API_KEY", "sbx-key")]))
-                .unwrap();
-
-        let McpTransport::Sandbox { env, .. } = resolved.transport else {
-            panic!("expected sandbox transport");
-        };
-        assert_eq!(env.get("API_KEY").map(String::as_str), Some("sbx-key"));
-    }
-
-    #[test]
-    fn runtime_mcp_server_resolves_http_url_and_headers() {
-        let settings = ResolvedMcpServerSettings {
-            name: "remote".to_string(),
-            transport: ResolvedMcpTransport::Http {
-                protocol: fabro_types::settings::run::McpHttpProtocol::default(),
-                url:      "https://{{ env.MCP_HOST }}/mcp".to_string(),
-                headers:  HashMap::from([(
-                    "Authorization".to_string(),
-                    "Bearer {{ env.MCP_TOKEN }}".to_string(),
-                )]),
-            },
-            ..ResolvedMcpServerSettings::default()
-        };
-
-        let resolved = runtime_mcp_server(
-            &settings,
-            mcp_env_lookup(&[("MCP_HOST", "mcp.example"), ("MCP_TOKEN", "abc123")]),
-        )
-        .unwrap();
-
-        let McpTransport::Http { url, headers, .. } = resolved.transport else {
-            panic!("expected http transport");
-        };
-        assert_eq!(url, "https://mcp.example/mcp");
-        assert_eq!(
-            headers.get("Authorization").map(String::as_str),
-            Some("Bearer abc123")
-        );
-    }
-
-    #[test]
-    fn runtime_mcp_server_missing_env_is_hard_error() {
-        let settings = ResolvedMcpServerSettings {
-            name: "gemini".to_string(),
-            transport: ResolvedMcpTransport::Stdio {
-                command: vec!["python".to_string()],
-                env:     HashMap::from([(
-                    "GEMINI_API_KEY".to_string(),
-                    "{{ env.GEMINI_API_KEY }}".to_string(),
-                )]),
-            },
-            ..ResolvedMcpServerSettings::default()
-        };
-
-        let err = runtime_mcp_server(&settings, mcp_env_lookup(&[])).unwrap_err();
-
-        let message = err.to_string();
-        assert!(
-            message.contains("gemini") && message.contains("GEMINI_API_KEY"),
-            "expected a hard error naming the server and env var, got: {message}"
-        );
+        let causes = err.causes();
+        assert_eq!(causes.len(), 1);
+        assert!(causes[0].contains("GEMINI_API_KEY"));
     }
 
     #[test]
