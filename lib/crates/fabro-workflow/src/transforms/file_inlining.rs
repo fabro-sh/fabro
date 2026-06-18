@@ -179,13 +179,17 @@ impl FileInliningTransform {
 
         let resolved_goal = match &self.goal_override {
             Some(goal) => goal.clone(),
+            // Resolve the goal only to seed the prompt render context here; the
+            // later `TemplateTransform` pass re-resolves the same goal and is the
+            // canonical emitter of goal diagnostics (e.g. self-reference), so
+            // discard this pass's copy to avoid double-reporting.
             None => TemplateTransform {
                 inputs:      self.inputs.clone(),
                 source_name: self.source_name.clone(),
                 source_text: self.source_text.clone(),
                 render_mode: self.render_mode,
             }
-            .resolved_goal(&graph, &mut diagnostics)?,
+            .resolved_goal(&graph, &mut Vec::new())?,
         };
         let ctx = TemplateContext::new()
             .with_goal(resolved_goal)

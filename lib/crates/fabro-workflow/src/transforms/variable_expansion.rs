@@ -5,7 +5,7 @@ use std::sync::Arc;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_template::{
     TemplateContext, TemplateError, TemplateRenderMode, TemplateSource, TemplateSourceOrigin,
-    TemplateStore, render_named_with_origin, render_source,
+    TemplateStore, references_top_level_variable, render_named_with_origin, render_source,
 };
 use fabro_util::error::collect_chain;
 use fabro_validate::{Diagnostic, Severity};
@@ -253,6 +253,31 @@ fn detemplated_attribute_diagnostic(attr_name: &str, target: &TemplateRenderTarg
     }
 }
 
+const GOAL_SELF_REFERENCE_RULE: &str = "goal_self_reference";
+
+/// Error emitted when the graph `goal` references `{{ goal }}` — a goal cannot
+/// reference itself (D12). Prompts may reference the rendered goal; the goal
+/// renders without `goal` in scope, so a self-reference is always a mistake.
+fn goal_self_reference_diagnostic(target: &TemplateRenderTarget) -> Diagnostic {
+    Diagnostic {
+        rule: GOAL_SELF_REFERENCE_RULE.to_owned(),
+        severity: Severity::Error,
+        message: format!(
+            "the graph `goal` cannot reference itself (`{{{{ goal }}}}`) in {}",
+            target.owner
+        ),
+        node_id: target.node_id.clone(),
+        edge: target.edge.clone(),
+        fix: Some(
+            "remove the `{{ goal }}` reference from the goal; a node `prompt` can reference the \
+             goal instead"
+                .to_string(),
+        ),
+        source_path: target.source_name.clone(),
+        ..Diagnostic::default()
+    }
+}
+
 /// Expands `{{ goal }}` / `{{ inputs.* }}` across all string attributes.
 pub struct TemplateTransform {
     pub inputs:      HashMap<String, toml::Value>,
@@ -283,9 +308,16 @@ impl TemplateTransform {
                 .map_err(|error| Error::Validation(error.to_string()))?;
             return Ok(goal.to_string());
         }
-        let ctx = TemplateContext::for_input_scan(self.inputs.clone());
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
             .with_source_origin(self.source_text.as_deref(), goal);
+        // D12: the goal renders with no `goal` in scope, so it cannot reference
+        // itself. Flag the self-reference with a friendly diagnostic before the
+        // render would otherwise produce a generic "undefined variable `goal`".
+        if references_top_level_variable(goal, "goal") {
+            diagnostics.push(goal_self_reference_diagnostic(&target));
+            return Ok(String::new());
+        }
+        let ctx = TemplateContext::new().with_inputs(self.inputs.clone());
         render_template_for_target(goal, &ctx, self.render_mode, &target, diagnostics)
     }
 
@@ -530,6 +562,36 @@ mod tests {
             .and_then(AttrValue::as_str)
             .unwrap();
         assert_eq!(prompt, "Goal: ");
+    }
+
+    #[test]
+    fn template_transform_rejects_goal_self_reference() {
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Improve on {{ goal }}".to_string()),
+        );
+        let mut node = Node::new("plan");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Work: {{ goal }}".to_string()),
+        );
+        graph.nodes.insert("plan".to_string(), node);
+
+        let transform = TemplateTransform::new(HashMap::new());
+        let (_graph, diagnostics) = transform.apply_with_diagnostics(graph).unwrap();
+
+        let self_ref: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.rule == GOAL_SELF_REFERENCE_RULE)
+            .collect();
+        assert_eq!(
+            self_ref.len(),
+            1,
+            "expected one goal_self_reference diagnostic"
+        );
+        assert_eq!(self_ref[0].severity, Severity::Error);
+        assert!(self_ref[0].message.contains("cannot reference itself"));
     }
 
     #[test]

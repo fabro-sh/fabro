@@ -524,6 +524,27 @@ pub fn contains_template_syntax(template: &str) -> bool {
     template.contains("{{") || template.contains("{%") || template.contains("{#")
 }
 
+/// Whether `template` references `name` as a top-level variable.
+///
+/// Used by the goal self-reference lint (D12): a graph `goal` may not reference
+/// `{{ goal }}`. Returns `false` for templates that fail to parse — syntax
+/// errors surface through the normal render path with proper diagnostics.
+#[must_use]
+pub fn references_top_level_variable(template: &str, name: &str) -> bool {
+    if is_plain_text(template) {
+        return false;
+    }
+    let mut env = Environment::new();
+    if env
+        .add_template_owned("__variable_scan__", template.to_owned())
+        .is_err()
+    {
+        return false;
+    }
+    env.get_template("__variable_scan__")
+        .is_ok_and(|tmpl| tmpl.undeclared_variables(false).contains(name))
+}
+
 /// Returns `true` when the string contains no MiniJinja delimiters and can
 /// be returned as-is without paying for a full template parse+render cycle.
 fn is_plain_text(template: &str) -> bool {
@@ -796,6 +817,20 @@ mod tests {
         let rendered = render("Goal: {{ goal }}", &ctx).unwrap();
 
         assert_eq!(rendered, "Goal: Fix bugs");
+    }
+
+    #[test]
+    fn references_top_level_variable_detects_goal_self_reference() {
+        assert!(references_top_level_variable("Do {{ goal }} now", "goal"));
+        assert!(references_top_level_variable("{{ goal.title }}", "goal"));
+        assert!(!references_top_level_variable(
+            "Fix {{ inputs.bug }}",
+            "goal"
+        ));
+        assert!(!references_top_level_variable(
+            "plain text, no goal token",
+            "goal"
+        ));
     }
 
     #[test]

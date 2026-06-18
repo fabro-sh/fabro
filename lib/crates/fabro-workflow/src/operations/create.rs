@@ -498,6 +498,32 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_goal_self_reference() {
+        // D12: a goal can't reference itself; a prompt can reference the goal.
+        let dot = r#"digraph Test {
+            graph [goal="Refine {{ goal }}"]
+            start [shape=Mdiamond]
+            work [prompt="Work on {{ goal }}"]
+            exit [shape=Msquare]
+            start -> work -> exit
+        }"#;
+        let validated = validate_dot(dot, WorkflowSettings::default());
+
+        assert!(
+            validated.has_errors(),
+            "goal self-reference should fail validation"
+        );
+        assert!(
+            validated
+                .diagnostics()
+                .iter()
+                .any(|d| d.message.contains("cannot reference itself")),
+            "expected a goal self-reference diagnostic, got: {:?}",
+            validated.diagnostics()
+        );
+    }
+
+    #[test]
     fn validate_with_unbound_inputs_warns_but_succeeds() {
         let dot = r#"digraph Test {
             graph [goal="Build feature"]

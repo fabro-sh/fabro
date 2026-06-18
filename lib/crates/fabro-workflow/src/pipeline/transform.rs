@@ -237,4 +237,41 @@ mod tests {
             Some(&AttrValue::String("claude-sonnet-4-6".into()))
         );
     }
+
+    #[test]
+    fn transform_reports_goal_self_reference_once_across_passes() {
+        // The goal is resolved by both FileInlining and TemplateTransform; the
+        // self-reference must be reported exactly once (D12 dedup).
+        let dir = tempfile::tempdir().unwrap();
+        let parsed = parse(
+            r#"digraph Test {
+                graph [goal="Improve on {{ goal }}"]
+                start [shape=Mdiamond]
+                work [prompt="Do the work"]
+                exit [shape=Msquare]
+                start -> work -> exit
+            }"#,
+        )
+        .unwrap();
+        let transformed = transform(parsed, &TransformOptions {
+            current_dir:       Some(dir.path().to_path_buf()),
+            file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
+            inputs:            HashMap::new(),
+            source_name:       None,
+            render_mode:       crate::operations::RenderMode::Structural,
+            custom_transforms: vec![],
+            catalog:           test_catalog(),
+        })
+        .unwrap();
+
+        let self_ref = transformed
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("cannot reference itself"))
+            .count();
+        assert_eq!(
+            self_ref, 1,
+            "goal self-reference should be reported exactly once across transform passes"
+        );
+    }
 }
