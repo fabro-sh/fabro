@@ -68,15 +68,6 @@ pub fn user_detail_url(base: &GitLabBaseUrl, user_id: u64) -> Url {
 }
 
 #[must_use]
-pub fn groups_url(base: &GitLabBaseUrl, page: u32) -> Url {
-    let mut url = base.api_url("groups");
-    url.query_pairs_mut()
-        .append_pair("page", &page.to_string())
-        .append_pair("per_page", "100");
-    url
-}
-
-#[must_use]
 pub fn group_member_url(base: &GitLabBaseUrl, group_path: &str, user_id: u64) -> Url {
     base.api_url(&format!(
         "groups/{}/members/all/{user_id}",

@@ -4,7 +4,7 @@ use fabro_types::pull_request::{
 use fabro_types::settings::run::MergeStrategy;
 use serde::{Deserialize, Serialize};
 
-use crate::repository::{GitLabBaseUrl, GitLabRepository, encode_path_segment};
+use crate::repository::{GitLabBaseUrl, GitLabRepository};
 use crate::{GitLabContext, GitLabCredentials, GitLabError, Result};
 
 #[derive(Debug, Serialize)]
@@ -61,43 +61,6 @@ impl CloseMergeRequestRequest {
     pub const CLOSE: Self = Self {
         state_event: "close",
     };
-}
-
-#[must_use]
-pub fn merge_requests_url(base: &GitLabBaseUrl, repo: &GitLabRepository) -> String {
-    base.api_url(&format!(
-        "projects/{}/merge_requests",
-        repo.encoded_project_id
-    ))
-    .to_string()
-}
-
-#[must_use]
-pub fn merge_request_url(base: &GitLabBaseUrl, repo: &GitLabRepository, iid: u64) -> String {
-    base.api_url(&format!(
-        "projects/{}/merge_requests/{iid}",
-        repo.encoded_project_id
-    ))
-    .to_string()
-}
-
-#[must_use]
-pub fn merge_url(base: &GitLabBaseUrl, repo: &GitLabRepository, iid: u64) -> String {
-    base.api_url(&format!(
-        "projects/{}/merge_requests/{iid}/merge",
-        repo.encoded_project_id
-    ))
-    .to_string()
-}
-
-#[must_use]
-pub fn branch_url(base: &GitLabBaseUrl, repo: &GitLabRepository, branch: &str) -> String {
-    let branch = encode_path_segment(branch);
-    base.api_url(&format!(
-        "projects/{}/repository/branches/{branch}",
-        repo.encoded_project_id
-    ))
-    .to_string()
 }
 
 fn http_client(ctx: &GitLabContext) -> Result<fabro_http::HttpClient> {
