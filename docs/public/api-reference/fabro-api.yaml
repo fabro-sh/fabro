@@ -2711,7 +2711,7 @@ paths:
       operationId: createRunPullRequest
       tags: [Runs]
       summary: Create Run Pull Request
-      description: Creates a pull request for a completed run on GitHub and persists the record on the server.
+      description: Creates a pull request for a completed run and persists the record on the server.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -2757,7 +2757,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
-          description: GitHub rejected the pull request creation request
+          description: Pull request provider rejected the creation request
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2766,7 +2766,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: GitHub integration is unavailable on the server
+          description: Pull request provider integration is unavailable on the server
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2864,7 +2864,7 @@ paths:
       operationId: mergeRunPullRequest
       tags: [Runs]
       summary: Merge Run Pull Request
-      description: Merges the stored pull request for a run on GitHub.
+      description: Merges the stored pull request for a run.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -2899,7 +2899,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
-          description: GitHub rejected the merge request
+          description: Pull request provider rejected the merge request
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2908,7 +2908,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: GitHub integration is unavailable on the server
+          description: Pull request provider integration is unavailable on the server
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2922,7 +2922,7 @@ paths:
       operationId: closeRunPullRequest
       tags: [Runs]
       summary: Close Run Pull Request
-      description: Closes the stored pull request for a run on GitHub.
+      description: Closes the stored pull request for a run.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -2951,7 +2951,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "502":
-          description: GitHub rejected the close request
+          description: Pull request provider rejected the close request
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2960,7 +2960,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: GitHub integration is unavailable on the server
+          description: Pull request provider integration is unavailable on the server
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"

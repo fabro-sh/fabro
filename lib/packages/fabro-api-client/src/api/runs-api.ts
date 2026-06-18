@@ -328,7 +328,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Closes the stored pull request for a run on GitHub.
+         * Closes the stored pull request for a run.
          * @summary Close Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -409,7 +409,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Creates a pull request for a completed run on GitHub and persists the record on the server.
+         * Creates a pull request for a completed run and persists the record on the server.
          * @summary Create Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {CreateRunPullRequestRequest} createRunPullRequestRequest
@@ -826,7 +826,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Merges the stored pull request for a run on GitHub.
+         * Merges the stored pull request for a run.
          * @summary Merge Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {MergeRunPullRequestRequest} mergeRunPullRequestRequest
@@ -1620,7 +1620,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Closes the stored pull request for a run on GitHub.
+         * Closes the stored pull request for a run.
          * @summary Close Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1646,7 +1646,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a pull request for a completed run on GitHub and persists the record on the server.
+         * Creates a pull request for a completed run and persists the record on the server.
          * @summary Create Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {CreateRunPullRequestRequest} createRunPullRequestRequest
@@ -1775,7 +1775,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Merges the stored pull request for a run on GitHub.
+         * Merges the stored pull request for a run.
          * @summary Merge Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {MergeRunPullRequestRequest} mergeRunPullRequestRequest
@@ -2070,7 +2070,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.cancelRun(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Closes the stored pull request for a run on GitHub.
+         * Closes the stored pull request for a run.
          * @summary Close Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -2090,7 +2090,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.createRun(runManifest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a pull request for a completed run on GitHub and persists the record on the server.
+         * Creates a pull request for a completed run and persists the record on the server.
          * @summary Create Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {CreateRunPullRequestRequest} createRunPullRequestRequest
@@ -2192,7 +2192,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.listRuns(pageLimit, pageOffset, includeArchived, parentId, status, sort, direction, options).then((request) => request(axios, basePath));
         },
         /**
-         * Merges the stored pull request for a run on GitHub.
+         * Merges the stored pull request for a run.
          * @summary Merge Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {MergeRunPullRequestRequest} mergeRunPullRequestRequest
@@ -2440,7 +2440,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Closes the stored pull request for a run on GitHub.
+     * Closes the stored pull request for a run.
      * @summary Close Run Pull Request
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
@@ -2462,7 +2462,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Creates a pull request for a completed run on GitHub and persists the record on the server.
+     * Creates a pull request for a completed run and persists the record on the server.
      * @summary Create Run Pull Request
      * @param {string} id Unique run identifier (ULID).
      * @param {CreateRunPullRequestRequest} createRunPullRequestRequest
@@ -2573,7 +2573,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Merges the stored pull request for a run on GitHub.
+     * Merges the stored pull request for a run.
      * @summary Merge Run Pull Request
      * @param {string} id Unique run identifier (ULID).
      * @param {MergeRunPullRequestRequest} mergeRunPullRequestRequest
