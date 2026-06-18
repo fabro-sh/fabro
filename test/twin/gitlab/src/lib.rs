@@ -110,4 +110,60 @@ mod tests {
             format!("{}/platform/tools/fabro", server.base_url())
         );
     }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This twin contract test must explicitly prove local reqwest clients disable proxy discovery."
+    )]
+    #[tokio::test]
+    async fn fetches_project_by_numeric_id() {
+        let server = TestGitLabServer::start().await;
+        server.add_project_with_id(42, "platform/tools/fabro", "main", &["feature/fabro"]);
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let response = client
+            .get(format!("{}/api/v4/projects/42", server.base_url()))
+            .bearer_auth(server.automation_token())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let value: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(value["id"], 42);
+        assert_eq!(value["path_with_namespace"], "platform/tools/fabro");
+        assert_eq!(value["default_branch"], "main");
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This twin contract test must explicitly prove local reqwest clients disable proxy discovery."
+    )]
+    #[tokio::test]
+    async fn searches_projects_with_offset_pagination() {
+        let server = TestGitLabServer::start().await;
+        server.add_project_with_id(10, "acme/tools/fabro-helper", "main", &[]);
+        server.add_project_with_id(42, "platform/tools/fabro", "main", &[]);
+        server.add_project_with_id(99, "platform/archive/other", "main", &[]);
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let response = client
+            .get(format!("{}/api/v4/projects", server.base_url()))
+            .bearer_auth(server.automation_token())
+            .query(&[
+                ("simple", "true"),
+                ("per_page", "1"),
+                ("page", "2"),
+                ("search", "fabro"),
+            ])
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let values: Vec<serde_json::Value> = response.json().await.unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0]["id"], 42);
+        assert_eq!(values[0]["path_with_namespace"], "platform/tools/fabro");
+    }
 }

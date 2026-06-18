@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -7,7 +9,7 @@ use percent_encoding::percent_decode_str;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::state::{GitLabUserFixture, MergeRequestFixture, SharedGitLabState};
+use crate::state::{GitLabState, GitLabUserFixture, MergeRequestFixture, SharedGitLabState};
 
 type AppState = (SharedGitLabState, String);
 
@@ -68,6 +70,61 @@ pub(crate) async fn group_member(
     } else {
         not_found()
     }
+}
+
+pub(crate) async fn projects(
+    State(app_state): State<AppState>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let Some((state, _automation_token)) = authorize_project_request(&app_state, &headers) else {
+        return unauthorized();
+    };
+    let state = state.lock();
+
+    let search = query.get("search").map(String::as_str).unwrap_or("");
+    let per_page = query
+        .get("per_page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(20);
+    let page = query
+        .get("page")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
+
+    let mut projects = state
+        .projects
+        .values()
+        .filter(|project| {
+            search.is_empty()
+                || project.full_path.contains(search)
+                || project
+                    .full_path
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|repo| repo.contains(search))
+        })
+        .collect::<Vec<_>>();
+    projects.sort_by_key(|project| project.id);
+
+    let start = (page - 1) * per_page;
+    let body = projects
+        .into_iter()
+        .skip(start)
+        .take(per_page)
+        .map(|project| {
+            json!({
+                "id": project.id,
+                "path_with_namespace": project.full_path,
+                "default_branch": project.default_branch,
+                "web_url": format!("{}/{}", state.base_url, project.full_path),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Json(body).into_response()
 }
 
 pub(crate) async fn project_get(
@@ -177,9 +234,26 @@ fn decode_project_component(value: &str) -> String {
     percent_decode_str(value).decode_utf8_lossy().into_owned()
 }
 
-fn branch(state: &SharedGitLabState, project_id: &str, branch: &str) -> Response {
+fn resolve_project_path(state: &GitLabState, project_ref: &str) -> Option<String> {
+    if state.projects.contains_key(project_ref) {
+        return (!state.path_project_refs_404.contains(project_ref))
+            .then(|| project_ref.to_string());
+    }
+
+    let id = project_ref.parse::<u64>().ok()?;
+    state
+        .projects
+        .values()
+        .find(|project| project.id == id)
+        .map(|project| project.full_path.clone())
+}
+
+fn branch(state: &SharedGitLabState, project_ref: &str, branch: &str) -> Response {
     let state = state.lock();
-    let Some(project) = state.projects.get(project_id) else {
+    let Some(full_path) = resolve_project_path(&state, project_ref) else {
+        return not_found();
+    };
+    let Some(project) = state.projects.get(&full_path) else {
         return not_found();
     };
     if !project.branches.iter().any(|candidate| candidate == branch) {
@@ -194,14 +268,17 @@ fn branch(state: &SharedGitLabState, project_id: &str, branch: &str) -> Response
     .into_response()
 }
 
-fn project(state: &SharedGitLabState, project_id: &str) -> Response {
+fn project(state: &SharedGitLabState, project_ref: &str) -> Response {
     let state = state.lock();
-    let Some(project) = state.projects.get(project_id) else {
+    let Some(full_path) = resolve_project_path(&state, project_ref) else {
+        return not_found();
+    };
+    let Some(project) = state.projects.get(&full_path) else {
         return not_found();
     };
 
     Json(json!({
-        "id": project_id,
+        "id": project.id,
         "path_with_namespace": project.full_path,
         "default_branch": project.default_branch,
         "web_url": format!("{}/{}", state.base_url, project.full_path),
@@ -211,17 +288,20 @@ fn project(state: &SharedGitLabState, project_id: &str) -> Response {
 
 fn create_merge_request(
     state: &SharedGitLabState,
-    project_id: &str,
+    project_ref: &str,
     input: CreateMergeRequestInput,
 ) -> Response {
     let mut state = state.lock();
-    if !state.projects.contains_key(project_id) {
+    let Some(full_path) = resolve_project_path(&state, project_ref) else {
+        return not_found();
+    };
+    if !state.projects.contains_key(&full_path) {
         return not_found();
     }
 
     let iid = state.next_merge_request_iid;
     state.next_merge_request_iid += 1;
-    let web_url = format!("{}/{project_id}/-/merge_requests/{iid}", state.base_url);
+    let web_url = format!("{}/{full_path}/-/merge_requests/{iid}", state.base_url);
     let author = state
         .users
         .values()
@@ -241,44 +321,51 @@ fn create_merge_request(
         updated_at: NOW.to_string(),
         author: Some(author),
     };
-    let body = merge_request_json(project_id, &merge_request);
-    state
-        .merge_requests
-        .insert((project_id.to_string(), iid), merge_request);
+    let body = merge_request_json(&full_path, &merge_request);
+    state.merge_requests.insert((full_path, iid), merge_request);
 
     (StatusCode::CREATED, Json(body)).into_response()
 }
 
-fn get_merge_request(state: &SharedGitLabState, project_id: &str, iid: u64) -> Response {
+fn get_merge_request(state: &SharedGitLabState, project_ref: &str, iid: u64) -> Response {
     let state = state.lock();
-    let Some(merge_request) = state.merge_requests.get(&(project_id.to_string(), iid)) else {
+    let Some(full_path) = resolve_project_path(&state, project_ref) else {
+        return not_found();
+    };
+    let Some(merge_request) = state.merge_requests.get(&(full_path.clone(), iid)) else {
         return not_found();
     };
 
-    Json(merge_request_json(project_id, merge_request)).into_response()
+    Json(merge_request_json(&full_path, merge_request)).into_response()
 }
 
-fn merge_merge_request(state: &SharedGitLabState, project_id: &str, iid: u64) -> Response {
+fn merge_merge_request(state: &SharedGitLabState, project_ref: &str, iid: u64) -> Response {
     let mut state = state.lock();
-    let Some(merge_request) = state.merge_requests.get_mut(&(project_id.to_string(), iid)) else {
+    let Some(full_path) = resolve_project_path(&state, project_ref) else {
+        return not_found();
+    };
+    let Some(merge_request) = state.merge_requests.get_mut(&(full_path.clone(), iid)) else {
         return not_found();
     };
 
     merge_request.state = "merged".to_string();
     merge_request.merged_at = Some(NOW.to_string());
     merge_request.updated_at = NOW.to_string();
-    Json(merge_request_json(project_id, merge_request)).into_response()
+    Json(merge_request_json(&full_path, merge_request)).into_response()
 }
 
-fn close_merge_request(state: &SharedGitLabState, project_id: &str, iid: u64) -> Response {
+fn close_merge_request(state: &SharedGitLabState, project_ref: &str, iid: u64) -> Response {
     let mut state = state.lock();
-    let Some(merge_request) = state.merge_requests.get_mut(&(project_id.to_string(), iid)) else {
+    let Some(full_path) = resolve_project_path(&state, project_ref) else {
+        return not_found();
+    };
+    let Some(merge_request) = state.merge_requests.get_mut(&(full_path.clone(), iid)) else {
         return not_found();
     };
 
     merge_request.state = "closed".to_string();
     merge_request.updated_at = NOW.to_string();
-    Json(merge_request_json(project_id, merge_request)).into_response()
+    Json(merge_request_json(&full_path, merge_request)).into_response()
 }
 
 fn merge_request_json(_project_id: &str, merge_request: &MergeRequestFixture) -> Value {

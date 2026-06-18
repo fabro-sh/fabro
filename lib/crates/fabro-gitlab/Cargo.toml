@@ -27,3 +27,4 @@ url.workspace = true
 [dev-dependencies]
 httpmock = "0.8"
 tokio = { workspace = true, features = ["macros"] }
+twin-gitlab = { workspace = true }

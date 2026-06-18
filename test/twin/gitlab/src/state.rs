@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::http::StatusCode;
@@ -21,6 +21,7 @@ pub struct GitLabGroupFixture {
 
 #[derive(Debug, Clone)]
 pub struct GitLabProjectFixture {
+    pub id:             u64,
     pub full_path:      String,
     pub default_branch: String,
     pub branches:       Vec<String>,
@@ -48,6 +49,7 @@ pub(crate) struct GitLabState {
     pub groups:                 Vec<GitLabGroupFixture>,
     pub group_memberships:      HashMap<String, Vec<u64>>,
     pub projects:               HashMap<String, GitLabProjectFixture>,
+    pub path_project_refs_404:  HashSet<String>,
     pub merge_requests:         HashMap<(String, u64), MergeRequestFixture>,
     pub next_merge_request_iid: u64,
     pub groups_failure:         Option<StatusCode>,

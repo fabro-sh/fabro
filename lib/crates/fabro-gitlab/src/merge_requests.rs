@@ -152,41 +152,53 @@ async fn resolve_project_api_id(
     client: &fabro_http::HttpClient,
     repo: &GitLabRepository,
 ) -> Result<String> {
-    let resp = send(
-        client
-            .get(base.api_url("projects"))
-            .header("PRIVATE-TOKEN", token(ctx))
-            .query(&[
-                ("simple", "true"),
-                ("per_page", "100"),
-                ("search", repo.repo.as_str()),
-            ]),
-        "Failed to resolve GitLab project",
-    )
-    .await?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = response_text(resp).await;
-        return Err(GitLabError::Api(anyhow::anyhow!(
-            "Unexpected status {status} resolving GitLab project {}: {body}",
-            repo.full_path
-        )));
-    }
+    const PER_PAGE: &str = "100";
+    let mut page = 1_u32;
 
-    let projects = resp
-        .json::<Vec<GitLabProject>>()
-        .await
-        .map_err(|err| GitLabError::Api(anyhow::Error::new(err)))?;
-    projects
-        .into_iter()
-        .find(|project| project.path_with_namespace == repo.full_path)
-        .map(|project| project.id.to_string())
-        .ok_or_else(|| {
-            GitLabError::Api(anyhow::anyhow!(
+    loop {
+        let page_string = page.to_string();
+        let resp = send(
+            client
+                .get(base.api_url("projects"))
+                .header("PRIVATE-TOKEN", token(ctx))
+                .query(&[
+                    ("simple", "true"),
+                    ("per_page", PER_PAGE),
+                    ("page", page_string.as_str()),
+                    ("search", repo.repo.as_str()),
+                ]),
+            "Failed to resolve GitLab project",
+        )
+        .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = response_text(resp).await;
+            return Err(GitLabError::Api(anyhow::anyhow!(
+                "Unexpected status {status} resolving GitLab project {}: {body}",
+                repo.full_path
+            )));
+        }
+
+        let projects = resp
+            .json::<Vec<GitLabProject>>()
+            .await
+            .map_err(|err| GitLabError::Api(anyhow::Error::new(err)))?;
+        if let Some(project_id) = projects
+            .iter()
+            .find(|project| project.path_with_namespace == repo.full_path)
+            .map(|project| project.id.to_string())
+        {
+            return Ok(project_id);
+        }
+        if projects.is_empty() {
+            return Err(GitLabError::Api(anyhow::anyhow!(
                 "GitLab project {} was not found in project search results",
                 repo.full_path
-            ))
-        })
+            )));
+        }
+
+        page += 1;
+    }
 }
 
 async fn send_project_request(
@@ -605,6 +617,7 @@ mod tests {
                 .path("/api/v4/projects")
                 .query_param("simple", "true")
                 .query_param("per_page", "100")
+                .query_param("page", "1")
                 .query_param("search", "fabro")
                 .header("PRIVATE-TOKEN", "glpat-test");
             then.status(200).json_body(serde_json::json!([{
@@ -636,5 +649,145 @@ mod tests {
         lookup.assert();
         create.assert();
         assert_eq!(mr.iid, 7);
+    }
+
+    #[tokio::test]
+    async fn create_merge_request_project_id_fallback_searches_later_pages() {
+        let server = MockServer::start_async().await;
+        let primary = server.mock(|when, then| {
+            when.method(POST)
+                .path("/api/v4/projects/platform%2Ftools%2Ffabro/merge_requests")
+                .header("PRIVATE-TOKEN", "glpat-test");
+            then.status(404)
+                .json_body(serde_json::json!({ "error": "404 Not Found" }));
+        });
+        let first_page = server.mock(|when, then| {
+            when.method(GET)
+                .path("/api/v4/projects")
+                .query_param("simple", "true")
+                .query_param("per_page", "100")
+                .query_param("page", "1")
+                .query_param("search", "fabro")
+                .header("PRIVATE-TOKEN", "glpat-test");
+            then.status(200).json_body(serde_json::json!([{
+                "id": 11,
+                "path_with_namespace": "acme/tools/fabro-helper"
+            }]));
+        });
+        let second_page = server.mock(|when, then| {
+            when.method(GET)
+                .path("/api/v4/projects")
+                .query_param("simple", "true")
+                .query_param("per_page", "100")
+                .query_param("page", "2")
+                .query_param("search", "fabro")
+                .header("PRIVATE-TOKEN", "glpat-test");
+            then.status(200).json_body(serde_json::json!([{
+                "id": 42,
+                "path_with_namespace": "platform/tools/fabro"
+            }]));
+        });
+        let create = server.mock(|when, then| {
+            when.method(POST)
+                .path("/api/v4/projects/42/merge_requests")
+                .header("PRIVATE-TOKEN", "glpat-test");
+            then.status(201).json_body(merge_request_response(7));
+        });
+        let (ctx, repo) = test_gitlab_context(&server);
+
+        let mr = create_merge_request(&ctx, &repo, "main", "fabro/run-1", "Ship it", "Body", true)
+            .await
+            .unwrap();
+
+        primary.assert();
+        first_page.assert();
+        second_page.assert();
+        create.assert();
+        assert_eq!(mr.iid, 7);
+    }
+
+    #[tokio::test]
+    async fn create_merge_request_project_id_fallback_exhausts_project_search_pages() {
+        let server = MockServer::start_async().await;
+        let primary = server.mock(|when, then| {
+            when.method(POST)
+                .path("/api/v4/projects/platform%2Ftools%2Ffabro/merge_requests")
+                .header("PRIVATE-TOKEN", "glpat-test");
+            then.status(404)
+                .json_body(serde_json::json!({ "error": "404 Not Found" }));
+        });
+        let first_page = server.mock(|when, then| {
+            when.method(GET)
+                .path("/api/v4/projects")
+                .query_param("simple", "true")
+                .query_param("per_page", "100")
+                .query_param("page", "1")
+                .query_param("search", "fabro")
+                .header("PRIVATE-TOKEN", "glpat-test");
+            then.status(200).json_body(serde_json::json!([{
+                "id": 11,
+                "path_with_namespace": "acme/tools/fabro-helper"
+            }]));
+        });
+        let second_page = server.mock(|when, then| {
+            when.method(GET)
+                .path("/api/v4/projects")
+                .query_param("simple", "true")
+                .query_param("per_page", "100")
+                .query_param("page", "2")
+                .query_param("search", "fabro")
+                .header("PRIVATE-TOKEN", "glpat-test");
+            then.status(200).json_body(serde_json::json!([]));
+        });
+        let (ctx, repo) = test_gitlab_context(&server);
+
+        let err = create_merge_request(&ctx, &repo, "main", "fabro/run-1", "Ship it", "Body", true)
+            .await
+            .unwrap_err();
+
+        primary.assert();
+        first_page.assert();
+        second_page.assert();
+        let err = format!("{err:?}");
+        assert!(
+            err.contains(
+                "GitLab project platform/tools/fabro was not found in project search results"
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_merge_request_falls_back_to_numeric_project_id_against_twin_gitlab() {
+        let server = twin_gitlab::TestGitLabServer::start().await;
+        server.add_user("alice", "Alice Example", "alice@example.test");
+        server.add_project_with_id(10, "acme/tools/fabro-helper", "main", &[]);
+        server.add_project_with_id(42, "platform/tools/fabro", "main", &["fabro/run-1"]);
+        server.fail_project_path_refs_for("platform/tools/fabro");
+
+        let base = GitLabBaseUrl::parse(server.base_url()).unwrap();
+        let repo = parse_origin(
+            &base,
+            &format!("{}/platform/tools/fabro.git", server.base_url()),
+        )
+        .unwrap();
+        let ctx = GitLabContext {
+            credentials: GitLabCredentials::Token(server.automation_token().to_string()),
+            base_url:    base.url.clone(),
+            http_client: Some(fabro_http::test_http_client().unwrap()),
+        };
+
+        let mr = create_merge_request(&ctx, &repo, "main", "fabro/run-1", "Ship it", "Body", false)
+            .await
+            .unwrap();
+
+        assert_eq!(mr.iid, 1);
+        assert_eq!(
+            mr.web_url,
+            format!(
+                "{}/platform/tools/fabro/-/merge_requests/1",
+                server.base_url()
+            )
+        );
     }
 }

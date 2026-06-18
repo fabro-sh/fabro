@@ -43,6 +43,7 @@ impl TestGitLabServer {
                 "/api/v4/groups/{group_path}/members/all/{user_id}",
                 get(api::group_member),
             )
+            .route("/api/v4/projects", get(api::projects))
             .route("/api/v4/projects/{*path}", get(api::project_get))
             .route("/api/v4/projects/{*path}", post(api::project_post))
             .route("/api/v4/projects/{*path}", put(api::project_put))
@@ -108,6 +109,20 @@ impl TestGitLabServer {
     }
 
     pub fn add_project(&self, full_path: &str, default_branch: &str, branches: &[&str]) {
+        let id = {
+            let state = self.state.lock();
+            state.projects.len() as u64 + 1
+        };
+        self.add_project_with_id(id, full_path, default_branch, branches);
+    }
+
+    pub fn add_project_with_id(
+        &self,
+        id: u64,
+        full_path: &str,
+        default_branch: &str,
+        branches: &[&str],
+    ) {
         let mut all_branches = vec![default_branch.to_string()];
         for branch in branches {
             let branch = (*branch).to_string();
@@ -120,9 +135,17 @@ impl TestGitLabServer {
             .lock()
             .projects
             .insert(full_path.to_string(), GitLabProjectFixture {
-                full_path:      full_path.to_string(),
+                id,
+                full_path: full_path.to_string(),
                 default_branch: default_branch.to_string(),
-                branches:       all_branches,
+                branches: all_branches,
             });
+    }
+
+    pub fn fail_project_path_refs_for(&self, full_path: &str) {
+        self.state
+            .lock()
+            .path_project_refs_404
+            .insert(full_path.to_string());
     }
 }
