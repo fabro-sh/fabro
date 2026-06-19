@@ -188,6 +188,83 @@ fn pr_view_uses_server_pull_request_endpoint_and_renders_merged_state() {
 }
 
 #[test]
+fn pr_view_renders_gitlab_merge_request_label_and_state() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+
+    let resolve_mock = mock_resolved_run(&server, "nightly-build", &run_id);
+    let response_body = serde_json::json!({
+        "data": {
+            "link": {
+                "provider": "gitlab",
+                "owner_path": "platform/tools",
+                "repo": "fabro",
+                "number": 7,
+                "html_url": "https://gitlab.example/platform/tools/fabro/-/merge_requests/7"
+            },
+            "details": {
+                "title": "Map the constellations",
+                "body": "Detailed description",
+                "state": "open",
+                "draft": false,
+                "merged": false,
+                "merged_at": null,
+                "mergeable": true,
+                "additions": null,
+                "deletions": null,
+                "changed_files": 2,
+                "author": {
+                    "login": "testuser"
+                },
+                "head_branch": "fabro/run/demo",
+                "base_branch": "main",
+                "timestamps": {
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "updated_at": "2026-04-06T12:30:00Z"
+                }
+            }
+        },
+        "meta": {
+            "details_status": "available"
+        }
+    })
+    .to_string();
+    let detail_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/pull_request"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(response_body);
+    });
+
+    let mut cmd = context.command();
+    cmd.args([
+        "pr",
+        "view",
+        "--server",
+        &server.base_url(),
+        "nightly-build",
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    !7 Map the constellations
+    State:   open
+    URL:     https://gitlab.example/platform/tools/fabro/-/merge_requests/7
+    Branch:  fabro/run/demo -> main
+    Author:  testuser
+    Changes: +unknown -unknown (2 files)
+    ----- stderr -----
+    ");
+
+    resolve_mock.assert();
+    detail_mock.assert();
+}
+
+#[test]
 fn pr_view_renders_unavailable_details_reason() {
     let context = test_context!();
     let server = MockServer::start();

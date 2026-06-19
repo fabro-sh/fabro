@@ -417,10 +417,15 @@ pub fn to_pull_request_details(
         .unwrap_or(0);
     let merged = mr.state == "merged" || mr.merged_at.is_some();
 
+    let state = match mr.state.as_str() {
+        "opened" => "open".to_string(),
+        _ => mr.state,
+    };
+
     PullRequestDetails {
         title: mr.title,
         body: mr.description,
-        state: mr.state,
+        state,
         draft: mr.draft || mr.work_in_progress,
         merged,
         merged_at: mr.merged_at,
@@ -497,6 +502,7 @@ mod tests {
 
         let details = to_pull_request_details(&repo, mr);
 
+        assert_eq!(details.state, "open");
         assert_eq!(details.changed_files, 1);
         assert_eq!(details.additions, None);
         assert_eq!(details.deletions, None);

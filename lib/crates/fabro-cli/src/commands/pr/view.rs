@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fabro_types::PullRequestProvider;
 use tracing::info;
 
 use crate::args::PrViewArgs;
@@ -26,8 +27,9 @@ pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) ->
     }
 
     let printer = ctx.printer();
-    let title = github_details.map_or("Pull request", |details| details.title.as_str());
-    fabro_util::printout!(printer, "#{} {title}", pull_request.number);
+    let label = pull_request_label(pull_request.provider);
+    let title = github_details.map_or(label.name, |details| details.title.as_str());
+    fabro_util::printout!(printer, "{}{} {title}", label.prefix, pull_request.number);
     let state_display = if github_details.is_some_and(|details| details.merged) {
         "merged"
     } else if github_details.is_some_and(|details| details.draft) {
@@ -63,4 +65,22 @@ pub(super) async fn view_command(args: PrViewArgs, base_ctx: &CommandContext) ->
     }
 
     Ok(())
+}
+
+struct PullRequestLabel {
+    name:   &'static str,
+    prefix: &'static str,
+}
+
+fn pull_request_label(provider: PullRequestProvider) -> PullRequestLabel {
+    match provider {
+        PullRequestProvider::Github => PullRequestLabel {
+            name:   "Pull request",
+            prefix: "#",
+        },
+        PullRequestProvider::Gitlab => PullRequestLabel {
+            name:   "Merge request",
+            prefix: "!",
+        },
+    }
 }
