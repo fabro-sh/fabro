@@ -1000,7 +1000,7 @@ describe("RunDetail full-height child routes", () => {
     const numberSpan = links[0].findByType("span");
     expect(
       numberSpan.children.filter((child) => typeof child !== "object").join(""),
-    ).toBe("#17");
+    ).toBe("!17");
   });
 
   test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {

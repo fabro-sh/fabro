@@ -794,43 +794,52 @@ where
     };
 
     let github_origin_url = fabro_github::normalize_repo_origin_url(&git.origin_url);
-    let request = if let Err(err) = fabro_github::parse_github_owner_repo(&github_origin_url) {
-        if let Some((gitlab, repo)) = gitlab.and_then(|gitlab| {
-            gitlab_repository::parse_origin(&gitlab.base_url, &git.origin_url)
-                .ok()
-                .map(|repo| (gitlab, repo))
-        }) {
-            let fabro_gitlab::GitLabCredentials::Token(token) = &gitlab.credentials;
+    let (request, auth_for_probe) = match fabro_github::parse_github_owner_repo(&github_origin_url)
+    {
+        Ok(_) => (
             GitRemoteRefCheck {
-                origin_url:   repo.clean_origin_url,
+                origin_url:   github_origin_url,
                 branch:       Some(git.branch.clone()).filter(|branch| !branch.trim().is_empty()),
-                extra_header: Some(format!(
-                    "Authorization: {}",
-                    fabro_gitlab::basic_auth_header_value(token)
-                )),
-            }
-        } else {
-            checks.push(CheckResult {
-                name:        "Repository Access".into(),
-                status:      CheckStatus::Error,
-                summary:     "failed".into(),
-                details:     vec![CheckDetail::new(format!("Origin: {github_origin_url}"))],
-                remediation: Some(format!(
-                    "Clone-based sandboxes support GitHub origins and configured GitLab origins: {err}"
-                )),
-            });
-            return false;
-        }
-    } else {
-        GitRemoteRefCheck {
-            origin_url:   github_origin_url,
-            branch:       Some(git.branch.clone()).filter(|branch| !branch.trim().is_empty()),
-            extra_header: None,
+                extra_header: None,
+            },
+            github_app,
+        ),
+        Err(err) => {
+            let Some((gitlab, repo)) = gitlab.and_then(|gitlab| {
+                gitlab_repository::parse_origin(&gitlab.base_url, &git.origin_url)
+                    .ok()
+                    .map(|repo| (gitlab, repo))
+            }) else {
+                checks.push(CheckResult {
+                        name:        "Repository Access".into(),
+                        status:      CheckStatus::Error,
+                        summary:     "failed".into(),
+                        details:     vec![CheckDetail::new(format!("Origin: {github_origin_url}"))],
+                        remediation: Some(format!(
+                            "Clone-based sandboxes support GitHub origins and configured GitLab origins: {err}"
+                        )),
+                    });
+                return false;
+            };
+
+            let fabro_gitlab::GitLabCredentials::Token(token) = &gitlab.credentials;
+            (
+                GitRemoteRefCheck {
+                    origin_url:   repo.clean_origin_url,
+                    branch:       Some(git.branch.clone())
+                        .filter(|branch| !branch.trim().is_empty()),
+                    extra_header: Some(format!(
+                        "Authorization: {}",
+                        fabro_gitlab::basic_auth_header_value(token)
+                    )),
+                },
+                None,
+            )
         }
     };
     let details = repository_access_details(&request);
 
-    match check_remote_ref(request, github_app).await {
+    match check_remote_ref(request, auth_for_probe).await {
         Ok(()) => {
             checks.push(CheckResult {
                 name: "Repository Access".into(),
@@ -1737,6 +1746,54 @@ provider = "local"
         assert_eq!(checks[0].name, "Repository Access");
         assert_eq!(checks[0].status, CheckStatus::Pass);
         assert_eq!(checks[0].summary, "reachable");
+    }
+
+    #[tokio::test]
+    async fn repository_access_check_does_not_use_github_auth_for_gitlab_origin() {
+        let (prepared, resolved) = prepared_and_resolved_for_sandbox(
+            SandboxProviderKind::Docker,
+            true,
+            Some(git_context("https://gitlab.com/acme/widgets", "main")),
+        );
+        let gitlab = fabro_sandbox::GitLabSandboxConfig {
+            base_url:    gitlab_repository::GitLabBaseUrl::parse("https://gitlab.com").unwrap(),
+            credentials: fabro_gitlab::GitLabCredentials::Token("glpat-test".to_string()),
+        };
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let calls_for_check = Arc::clone(&calls);
+        let mut checks = Vec::new();
+
+        let ok = run_repository_access_check_with(
+            &mut checks,
+            SandboxProviderKind::Docker,
+            &prepared,
+            &resolved,
+            Some(fabro_github::GitHubCredentials::Pat(
+                "github-token".to_string(),
+            )),
+            Some(&gitlab),
+            move |request, github_app| {
+                calls_for_check
+                    .lock()
+                    .unwrap()
+                    .push((request, github_app.is_some()));
+                async { Ok(()) }
+            },
+        )
+        .await;
+
+        assert!(ok);
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0.origin_url, "https://gitlab.com/acme/widgets");
+        assert_eq!(
+            calls[0].0.extra_header.as_deref(),
+            Some("Authorization: Basic b2F1dGgyOmdscGF0LXRlc3Q=")
+        );
+        assert!(
+            !calls[0].1,
+            "GitLab repository probes must not attempt GitHub credential resolution"
+        );
     }
 
     #[tokio::test]

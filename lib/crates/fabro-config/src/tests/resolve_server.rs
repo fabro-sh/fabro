@@ -457,7 +457,7 @@ methods = ["gitlab"]
             .base_url
             .as_ref()
             .unwrap()
-            .as_source(),
+            .as_str(),
         "https://gitlab.ipt.example/gitlab"
     );
     assert_eq!(
@@ -467,7 +467,7 @@ methods = ["gitlab"]
             .client_id
             .as_ref()
             .unwrap()
-            .as_source(),
+            .as_str(),
         "gitlab-client"
     );
     assert!(settings.auth.gitlab.allowed_usernames.is_empty());

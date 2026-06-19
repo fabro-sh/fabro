@@ -2,6 +2,7 @@ import { formatDurationMs } from "../lib/format";
 import {
   BoardColumn,
   type Principal,
+  type PullRequestProvider,
   type Run,
   type RunSize,
   type RunStatus as ApiRunStatus,
@@ -27,6 +28,7 @@ export interface RunItem {
   lifecycleStatus?: RunStatus | null;
   lifecycleStatusLabel?: string;
   number?: number;
+  pullRequestProvider?: PullRequestProvider;
   pullRequestUrl?: string;
   additions?: number;
   deletions?: number;
@@ -100,6 +102,7 @@ export function mapRunListItem(item: Run): RunItem {
     lifecycleStatus,
     lifecycleStatusLabel: lifecycleStatusLabel(item.lifecycle.status, item.lifecycle.archived),
     number: item.pull_request?.number,
+    pullRequestProvider: item.pull_request?.provider,
     pullRequestUrl: item.pull_request?.html_url,
     elapsed: item.timing != null ? formatDurationMs(item.timing.wall_time_ms) : undefined,
     resources: undefined,

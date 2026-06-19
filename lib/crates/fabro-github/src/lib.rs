@@ -1312,8 +1312,6 @@ mod tests {
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use fabro_types::pull_request::{PullRequestDetails, PullRequestGithubDetail};
-    use httpmock::Method::{GET, POST};
-    use httpmock::MockServer;
     use tracing::{debug, subscriber};
     use tracing_subscriber::fmt::{self as tracing_fmt, MakeWriter};
     use tracing_subscriber::prelude::*;

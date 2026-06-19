@@ -27,6 +27,7 @@ describe("PullRequestChip", () => {
       renderer = TestRenderer.create(
         <PullRequestChip
           number={17}
+          provider="gitlab"
           url="https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17"
         />,
       );
@@ -37,6 +38,6 @@ describe("PullRequestChip", () => {
     expect(link.props.href).toBe(
       "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17",
     );
-    expect(rendered).toContain("#17");
+    expect(rendered).toContain("!17");
   });
 });

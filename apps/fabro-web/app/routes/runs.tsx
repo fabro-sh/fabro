@@ -315,6 +315,7 @@ function PrCard({
         {pr.pullRequestUrl && pr.number != null && (
           <PullRequestChip
             number={pr.number}
+            provider={pr.pullRequestProvider}
             url={pr.pullRequestUrl}
             className={`ml-auto inline-flex items-center gap-1 font-mono text-xs ${iconColor}`}
             iconClassName="size-3.5 shrink-0"

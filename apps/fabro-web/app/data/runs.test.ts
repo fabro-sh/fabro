@@ -77,10 +77,11 @@ describe("mapRunListItem", () => {
       title:         "Server supplied title",
       ...withStatus({ kind: "paused", prior_block: null }),
       pull_request: {
-        owner: "fabro-sh",
-        repo: "fabro",
-        number: 123,
-        html_url: "https://github.com/fabro-sh/fabro/pull/123",
+        provider:   "github",
+        owner_path: "fabro-sh",
+        repo:       "fabro",
+        number:     123,
+        html_url:   "https://github.com/fabro-sh/fabro/pull/123",
       },
     });
     const item = mapRunListItem(summary);
@@ -93,6 +94,7 @@ describe("mapRunListItem", () => {
     expect(item.column).toBe("running");
     expect(item.lifecycleStatus).toBe("paused");
     expect(item.number).toBe(123);
+    expect(item.pullRequestProvider).toBe("github");
     expect(item.pullRequestUrl).toBe("https://github.com/fabro-sh/fabro/pull/123");
   });
 
@@ -108,6 +110,7 @@ describe("mapRunListItem", () => {
     });
     const item = mapRunListItem(summary);
     expect(item.number).toBe(17);
+    expect(item.pullRequestProvider).toBe("gitlab");
     expect(item.pullRequestUrl).toBe(
       "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/17",
     );
@@ -124,10 +127,11 @@ describe("mapRunToRunItem", () => {
   test("maps canonical run summary to RunItem", () => {
     const summary = makeRun({
       pull_request: {
-        owner: "fabro-sh",
-        repo: "fabro",
-        number: 456,
-        html_url: "https://github.com/fabro-sh/fabro/pull/456",
+        provider:   "github",
+        owner_path: "fabro-sh",
+        repo:       "fabro",
+        number:     456,
+        html_url:   "https://github.com/fabro-sh/fabro/pull/456",
       },
     });
     const item = mapRunToRunItem(summary);
@@ -139,6 +143,7 @@ describe("mapRunToRunItem", () => {
     expect(item.elapsed).toBeDefined();
     expect(item.lifecycleStatus).toBe("running");
     expect(item.number).toBe(456);
+    expect(item.pullRequestProvider).toBe("github");
     expect(item.pullRequestUrl).toBe("https://github.com/fabro-sh/fabro/pull/456");
   });
 
@@ -154,6 +159,7 @@ describe("mapRunToRunItem", () => {
     });
     const item = mapRunToRunItem(summary);
     expect(item.number).toBe(18);
+    expect(item.pullRequestProvider).toBe("gitlab");
     expect(item.pullRequestUrl).toBe(
       "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/18",
     );

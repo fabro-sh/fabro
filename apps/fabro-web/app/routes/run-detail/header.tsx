@@ -12,6 +12,7 @@ import { Link } from "react-router";
 
 import { EditableRunTitle } from "../../components/editable-run-title";
 import { GitPullRequestIcon } from "../../components/icons";
+import { pullRequestDisplay } from "../../components/pull-request-chip";
 import { SizeChip } from "../../components/size-chip";
 import {
   HoverCard,
@@ -24,6 +25,7 @@ import {
 } from "../../components/ui";
 import type {
   PullRequestDetails,
+  PullRequestProvider,
   RepositoryRef,
   RunLifecycle,
   RunTiming,
@@ -186,7 +188,14 @@ export function RunDetailHeader({
         </div>
 
         {run.pullRequestUrl && run.number != null && (
-          <HoverCard content={<PullRequestPopover runId={runId} />}>
+          <HoverCard
+            content={
+              <PullRequestPopover
+                runId={runId}
+                provider={run.pullRequestProvider}
+              />
+            }
+          >
             <a
               href={run.pullRequestUrl}
               target="_blank"
@@ -194,7 +203,9 @@ export function RunDetailHeader({
               className={SECONDARY_BUTTON_CLASS}
             >
               <GitPullRequestIcon className="size-4 text-mint" />
-              <span className="font-mono">#{run.number}</span>
+              <span className="font-mono">
+                {`${pullRequestDisplay(run.pullRequestProvider).prefix}${run.number}`}
+              </span>
             </a>
           </HoverCard>
         )}
@@ -353,11 +364,18 @@ function prStateBadge(details: PullRequestDetails): { label: string; className: 
 }
 
 /** Fetches live PR details on hover — mounted only while the card is open. */
-function PullRequestPopover({ runId }: { runId: string }) {
+function PullRequestPopover({
+  runId,
+  provider,
+}: {
+  runId: string;
+  provider?: PullRequestProvider | null;
+}) {
   const prQuery = useRunPullRequest(runId);
   const response = prQuery.data;
   const details =
     response?.meta.details_status === "available" ? response.data.details : null;
+  const display = pullRequestDisplay(provider);
 
   let body: ReactNode;
   if (prQuery.isLoading) {
@@ -386,7 +404,7 @@ function PullRequestPopover({ runId }: { runId: string }) {
   }
   return (
     <>
-      <PopoverHeader>Pull request</PopoverHeader>
+      <PopoverHeader>{display.label}</PopoverHeader>
       {body}
     </>
   );
