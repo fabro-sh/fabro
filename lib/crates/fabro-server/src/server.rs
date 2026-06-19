@@ -972,9 +972,9 @@ async fn load_prior_slack_lifecycle_event_details(
             }
             EventBody::PullRequestCreated(props) => {
                 details.pull_request = Some(SlackLifecyclePullRequest {
-                    number: props.pr_number,
+                    number: props.pull_request.number,
                     title:  Some(props.title),
-                    url:    Some(props.pr_url),
+                    url:    Some(props.pull_request.html_url),
                 });
             }
             _ => {}

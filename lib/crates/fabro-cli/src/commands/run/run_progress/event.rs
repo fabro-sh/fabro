@@ -407,7 +407,7 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             message: props.message.clone(),
         }),
         EventBody::PullRequestCreated(props) => Some(ProgressEvent::PullRequestCreated {
-            pr_url: props.pr_url.clone(),
+            pr_url: props.pull_request.html_url().to_string(),
             draft:  props.draft,
         }),
         EventBody::PullRequestFailed(props) => Some(ProgressEvent::PullRequestFailed {
@@ -553,14 +553,11 @@ mod tests {
     #[test]
     fn round_trip_pull_request_created_without_stage_scope() {
         let event = Event::PullRequestCreated {
-            pr_url:      "https://github.com/acme/widgets/pull/42".into(),
-            pr_number:   42,
-            owner:       "acme".into(),
-            repo:        "widgets".into(),
-            base_branch: "main".into(),
-            head_branch: "fabro/run/42".into(),
-            title:       "Ship the server-side PR".into(),
-            draft:       true,
+            pull_request: fabro_types::PullRequestLink::github("acme", "widgets", 42),
+            base_branch:  "main".into(),
+            head_branch:  "fabro/run/42".into(),
+            title:        "Ship the server-side PR".into(),
+            draft:        true,
         };
 
         let stored = to_run_event(&fixtures::RUN_1, &event);

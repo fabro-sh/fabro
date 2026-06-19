@@ -718,14 +718,11 @@ pub enum Event {
         duration_ms: u64,
     },
     PullRequestCreated {
-        pr_url:      String,
-        pr_number:   u64,
-        owner:       String,
-        repo:        String,
-        base_branch: String,
-        head_branch: String,
-        title:       String,
-        draft:       bool,
+        pull_request: PullRequestLink,
+        base_branch:  String,
+        head_branch:  String,
+        title:        String,
+        draft:        bool,
     },
     PullRequestLinked {
         pull_request: PullRequestLink,
@@ -767,10 +764,7 @@ impl Event {
         draft: bool,
     ) -> Self {
         Self::PullRequestCreated {
-            pr_url: record.html_url().to_string(),
-            pr_number: record.number,
-            owner: record.owner_path.clone(),
-            repo: record.repo.clone(),
+            pull_request: record.clone(),
             base_branch: base_branch.to_string(),
             head_branch: head_branch.to_string(),
             title: title.to_string(),
@@ -1533,14 +1527,18 @@ impl Event {
                 debug!(node_id, duration_ms, "Agent ACP timed out");
             }
             Self::PullRequestCreated {
-                pr_url,
-                pr_number,
+                pull_request,
                 draft,
-                owner,
-                repo,
                 ..
             } => {
-                info!(pr_url = %pr_url, pr_number, draft, owner, repo, "Pull request created");
+                info!(
+                    pr_url = %pull_request.html_url(),
+                    pr_number = pull_request.number,
+                    draft,
+                    owner = %pull_request.owner_path,
+                    repo = %pull_request.repo,
+                    "Pull request created"
+                );
             }
             Self::PullRequestLinked { pull_request } => {
                 info!(

@@ -26,11 +26,11 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
-    InterviewQuestionRecord, Node, Outcome, Principal, QuestionType, RunBlobId, RunId, RunSpec,
-    SandboxProviderKind, StageContextWindowBreakdownItem, StageContextWindowCategory,
-    StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
-    StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
-    WorkflowSettings, fixtures, test_support,
+    InterviewQuestionRecord, Node, Outcome, Principal, PullRequestLink, QuestionType, RunBlobId,
+    RunId, RunSpec, SandboxProviderKind, StageContextWindowBreakdownItem,
+    StageContextWindowCategory, StageContextWindowCountMethod, StageContextWindowProjection,
+    StageContextWindowStaleness, StageContextWindowWarning, StageModelUsage, StageTiming,
+    SuccessReason, SystemActorKind, WorkflowSettings, fixtures, test_support,
 };
 use fabro_util::check_report::CheckStatus;
 use fabro_workflow::records::CheckpointExt;
@@ -4696,14 +4696,11 @@ channel = "#deploys"
         &run_store,
         &run_id,
         &workflow_event::Event::PullRequestCreated {
-            pr_url:      "https://github.com/fabro-sh/fabro/pull/42".to_string(),
-            pr_number:   42,
-            owner:       "fabro-sh".to_string(),
-            repo:        "fabro".to_string(),
-            base_branch: "main".to_string(),
-            head_branch: "fabro/run/test".to_string(),
-            title:       "Ship <prod> & notify".to_string(),
-            draft:       false,
+            pull_request: PullRequestLink::github("fabro-sh", "fabro", 42),
+            base_branch:  "main".to_string(),
+            head_branch:  "fabro/run/test".to_string(),
+            title:        "Ship <prod> & notify".to_string(),
+            draft:        false,
         },
     )
     .await
@@ -6419,12 +6416,11 @@ async fn create_run_with_pull_request_record(
     pr_number: u64,
     title: &str,
 ) {
+    let pull_request = PullRequestLink::from_github_url(pr_url).unwrap();
+    assert_eq!(pull_request.number, pr_number);
     create_durable_run_with_events(state, run_id, &[
         workflow_event::Event::PullRequestCreated {
-            pr_url: pr_url.to_string(),
-            pr_number,
-            owner: "acme".to_string(),
-            repo: "widgets".to_string(),
+            pull_request,
             base_branch: "main".to_string(),
             head_branch: "feature".to_string(),
             title: title.to_string(),
@@ -15697,14 +15693,11 @@ async fn list_runs_includes_live_metadata_from_run_state() {
             primary_repo_link: None,
         },
         workflow_event::Event::PullRequestCreated {
-            pr_url:      "https://github.com/acme/repo/pull/42".to_string(),
-            pr_number:   42,
-            owner:       "acme".to_string(),
-            repo:        "repo".to_string(),
-            base_branch: "main".to_string(),
-            head_branch: "fabro/run".to_string(),
-            title:       "Fix board metadata".to_string(),
-            draft:       false,
+            pull_request: PullRequestLink::github("acme", "repo", 42),
+            base_branch:  "main".to_string(),
+            head_branch:  "fabro/run".to_string(),
+            title:        "Fix board metadata".to_string(),
+            draft:        false,
         },
         workflow_event::Event::InterviewStarted {
             question_id:     "q-1".to_string(),

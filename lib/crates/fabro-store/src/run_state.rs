@@ -11,13 +11,12 @@ use fabro_types::{
     ActivatedSkill, AskFabro, BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination,
     Conclusion, EventBody, FailureCategory, FailureSignature, InterviewQuestionRecord,
     McpServerProjection, McpServerStatus, Outcome, PendingInterviewRecord, PendingReason,
-    PullRequestLink, RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary,
-    RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
-    RunProjection, RunSandbox, RunSandboxFailure, RunSandboxInstance, RunSandboxPlan,
-    RunSandboxRuntime, RunSize, RunSpec, RunStatus, RunTimestamps, SandboxProviderKind,
-    StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome, StageProjection,
-    StageState, StartRecord, SubAgentProjection, SubAgentStatus, TodoListKind, TodoListProjection,
-    TodoProjection, WorkflowRef, first_event_seq,
+    RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary, RunControlAction,
+    RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection,
+    RunSandbox, RunSandboxFailure, RunSandboxInstance, RunSandboxPlan, RunSandboxRuntime, RunSize,
+    RunSpec, RunStatus, RunTimestamps, SandboxProviderKind, StageCompletion, StageHandler, StageId,
+    StageModelUsage, StageOutcome, StageProjection, StageState, StartRecord, SubAgentProjection,
+    SubAgentStatus, TodoListKind, TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
 
@@ -293,20 +292,7 @@ impl RunProjectionReducer for RunProjection {
                 }));
             }
             EventBody::PullRequestCreated(props) => {
-                self.pull_request = Some(if props.pr_url.contains("/-/merge_requests/") {
-                    PullRequestLink::gitlab(
-                        props.owner.clone(),
-                        props.repo.clone(),
-                        props.pr_number,
-                        props.pr_url.clone(),
-                    )
-                } else {
-                    PullRequestLink::github(
-                        props.owner.clone(),
-                        props.repo.clone(),
-                        props.pr_number,
-                    )
-                });
+                self.pull_request = Some(props.pull_request.clone());
             }
             EventBody::PullRequestLinked(props) => {
                 self.pull_request = Some(props.pull_request.clone());
@@ -3415,14 +3401,11 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::PullRequestCreated(PullRequestCreatedProps {
-                    pr_url:      "https://github.com/fabro-sh/fabro/pull/123".to_string(),
-                    pr_number:   123,
-                    owner:       "fabro-sh".to_string(),
-                    repo:        "fabro".to_string(),
-                    base_branch: "main".to_string(),
-                    head_branch: "fabro/run/demo".to_string(),
-                    title:       "Add run PR chip".to_string(),
-                    draft:       false,
+                    pull_request: PullRequestLink::github("fabro-sh", "fabro", 123),
+                    base_branch:  "main".to_string(),
+                    head_branch:  "fabro/run/demo".to_string(),
+                    title:        "Add run PR chip".to_string(),
+                    draft:        false,
                 }),
                 None,
             ))
@@ -3452,16 +3435,16 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::PullRequestCreated(PullRequestCreatedProps {
-                    pr_url:
-                        "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/12"
-                            .to_string(),
-                    pr_number:   12,
-                    owner:       "platform/tools".to_string(),
-                    repo:        "fabro".to_string(),
-                    base_branch: "main".to_string(),
-                    head_branch: "fabro/run/demo".to_string(),
-                    title:       "Add MR chip".to_string(),
-                    draft:       false,
+                    pull_request: PullRequestLink::gitlab(
+                        "platform/tools",
+                        "fabro",
+                        12,
+                        "https://gitlab.ipt.example/platform/tools/fabro/-/merge_requests/12",
+                    ),
+                    base_branch:  "main".to_string(),
+                    head_branch:  "fabro/run/demo".to_string(),
+                    title:        "Add MR chip".to_string(),
+                    draft:        false,
                 }),
                 None,
             ))
@@ -3495,14 +3478,11 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::PullRequestCreated(PullRequestCreatedProps {
-                    pr_url:      github_pull_request.html_url().to_string(),
-                    pr_number:   github_pull_request.number,
-                    owner:       github_pull_request.owner_path.clone(),
-                    repo:        github_pull_request.repo.clone(),
-                    base_branch: "main".to_string(),
-                    head_branch: "fabro/run/demo".to_string(),
-                    title:       "Add run PR chip".to_string(),
-                    draft:       false,
+                    pull_request: github_pull_request.clone(),
+                    base_branch:  "main".to_string(),
+                    head_branch:  "fabro/run/demo".to_string(),
+                    title:        "Add run PR chip".to_string(),
+                    draft:        false,
                 }),
                 None,
             ))

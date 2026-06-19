@@ -1693,6 +1693,83 @@ mod tests {
     }
 
     #[test]
+    fn pull_request_created_serializes_provider_aware_link() {
+        let event = RunEvent {
+            id:                 "evt_pr_created".to_string(),
+            ts:                 DateTime::parse_from_rfc3339("2026-05-15T12:00:00.000Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            run_id:             fixtures::RUN_1,
+            node_id:            None,
+            node_label:         None,
+            stage_id:           None,
+            parallel_group_id:  None,
+            parallel_branch_id: None,
+            session_id:         None,
+            parent_session_id:  None,
+            tool_call_id:       None,
+            actor:              None,
+            body:               EventBody::PullRequestCreated(PullRequestCreatedProps {
+                pull_request: crate::PullRequestLink::gitlab(
+                    "platform/tools",
+                    "fabro",
+                    42,
+                    "https://gitlab.example/platform/tools/fabro/-/merge_requests/42",
+                ),
+                base_branch:  "main".to_string(),
+                head_branch:  "fabro/run/42".to_string(),
+                title:        "Ship GitLab support".to_string(),
+                draft:        true,
+            }),
+        };
+
+        let value = event.to_value().unwrap();
+        assert_eq!(value["event"], "pull_request.created");
+        assert_eq!(value["properties"]["pull_request"]["provider"], "gitlab");
+        assert_eq!(
+            value["properties"]["pull_request"]["html_url"],
+            "https://gitlab.example/platform/tools/fabro/-/merge_requests/42"
+        );
+        assert!(value["properties"].get("pr_url").is_none());
+    }
+
+    #[test]
+    fn pull_request_created_deserializes_legacy_gitlab_fields() {
+        let value = serde_json::json!({
+            "id": "evt_legacy_pr_created",
+            "ts": "2026-05-15T12:00:00.000Z",
+            "run_id": fixtures::RUN_1.to_string(),
+            "event": "pull_request.created",
+            "properties": {
+                "pr_url": "https://gitlab.example/platform/tools/fabro/-/merge_requests/42",
+                "pr_number": 42,
+                "owner": "platform/tools",
+                "repo": "fabro",
+                "base_branch": "main",
+                "head_branch": "fabro/run/42",
+                "title": "Ship GitLab support",
+                "draft": true
+            }
+        });
+
+        let parsed = RunEvent::from_value(value).unwrap();
+        let EventBody::PullRequestCreated(props) = parsed.body else {
+            panic!("expected pull_request.created");
+        };
+        assert_eq!(
+            props.pull_request.provider,
+            crate::PullRequestProvider::Gitlab
+        );
+        assert_eq!(props.pull_request.owner_path, "platform/tools");
+        assert_eq!(props.pull_request.repo, "fabro");
+        assert_eq!(props.pull_request.number, 42);
+        assert_eq!(
+            props.pull_request.html_url(),
+            "https://gitlab.example/platform/tools/fabro/-/merge_requests/42"
+        );
+    }
+
+    #[test]
     fn pull_request_unlinked_round_trips_json() {
         let event = RunEvent {
             id:                 "evt_pr_unlinked".to_string(),

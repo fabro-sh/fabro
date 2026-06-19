@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::ExecOutputTail;
@@ -252,16 +253,69 @@ pub struct AgentAcpTimedOutProps {
     pub duration_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PullRequestCreatedProps {
-    pub pr_url:      String,
-    pub pr_number:   u64,
-    pub owner:       String,
-    pub repo:        String,
-    pub base_branch: String,
-    pub head_branch: String,
-    pub title:       String,
-    pub draft:       bool,
+    pub pull_request: PullRequestLink,
+    pub base_branch:  String,
+    pub head_branch:  String,
+    pub title:        String,
+    pub draft:        bool,
+}
+
+impl<'de> Deserialize<'de> for PullRequestCreatedProps {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            #[serde(default)]
+            pull_request: Option<PullRequestLink>,
+            #[serde(default)]
+            pr_url:       Option<String>,
+            #[serde(default)]
+            pr_number:    Option<u64>,
+            #[serde(default)]
+            owner:        Option<String>,
+            #[serde(default)]
+            repo:         Option<String>,
+            base_branch:  String,
+            head_branch:  String,
+            title:        String,
+            draft:        bool,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let pull_request = if let Some(pull_request) = wire.pull_request {
+            pull_request
+        } else {
+            let pr_url = wire
+                .pr_url
+                .ok_or_else(|| D::Error::custom("missing pull request url"))?;
+            let pr_number = wire
+                .pr_number
+                .ok_or_else(|| D::Error::custom("missing pull request number"))?;
+            let owner = wire
+                .owner
+                .ok_or_else(|| D::Error::custom("missing pull request owner"))?;
+            let repo = wire
+                .repo
+                .ok_or_else(|| D::Error::custom("missing pull request repo"))?;
+            if pr_url.contains("/-/merge_requests/") {
+                PullRequestLink::gitlab(owner, repo, pr_number, pr_url)
+            } else {
+                PullRequestLink::github(owner, repo, pr_number)
+            }
+        };
+
+        Ok(Self {
+            pull_request,
+            base_branch: wire.base_branch,
+            head_branch: wire.head_branch,
+            title: wire.title,
+            draft: wire.draft,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

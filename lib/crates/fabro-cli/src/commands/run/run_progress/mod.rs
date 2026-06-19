@@ -1152,14 +1152,11 @@ mod tests {
             exec_output_tail: None,
         });
         emit(&mut ui, Event::PullRequestCreated {
-            pr_url:      "https://github.com/fabro-sh/fabro/pull/42".into(),
-            pr_number:   42,
-            owner:       "fabro-sh".into(),
-            repo:        "fabro".into(),
-            base_branch: "main".into(),
-            head_branch: "fabro/run/42".into(),
-            title:       "Ship the change".into(),
-            draft:       true,
+            pull_request: fabro_types::PullRequestLink::github("fabro-sh", "fabro", 42),
+            base_branch:  "main".into(),
+            head_branch:  "fabro/run/42".into(),
+            title:        "Ship the change".into(),
+            draft:        true,
         });
         emit(&mut ui, Event::PullRequestFailed {
             error: "auth token expired".into(),

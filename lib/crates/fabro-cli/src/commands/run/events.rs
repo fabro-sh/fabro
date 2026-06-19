@@ -754,7 +754,11 @@ fn format_event_pretty_value(envelope: &serde_json::Value, styles: &Styles) -> O
             ))
         }
         "pull_request.created" => {
-            let url = prop_str_field(envelope, "pr_url").unwrap_or("?");
+            let url = prop_field(envelope, "pull_request")
+                .and_then(|pull_request| pull_request.get("html_url"))
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| prop_str_field(envelope, "pr_url"))
+                .unwrap_or("?");
             let draft = prop_field(envelope, "draft")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
@@ -1146,6 +1150,18 @@ mod tests {
     #[test]
     fn pretty_pull_request_created() {
         let styles = no_color_styles();
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.created","properties":{"pull_request":{"provider":"github","owner_path":"owner","repo":"repo","number":42,"html_url":"https://github.com/owner/repo/pull/42"},"draft":false}}"#;
+        let result = format_event_pretty(line, &styles).unwrap();
+        assert!(result.contains("PR:"), "got: {result}");
+        assert!(
+            result.contains("https://github.com/owner/repo/pull/42"),
+            "got: {result}"
+        );
+    }
+
+    #[test]
+    fn pretty_pull_request_created_supports_legacy_url() {
+        let styles = no_color_styles();
         let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.created","properties":{"pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":false}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("PR:"), "got: {result}");
@@ -1158,7 +1174,7 @@ mod tests {
     #[test]
     fn pretty_pull_request_created_draft() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.created","properties":{"pr_url":"https://github.com/owner/repo/pull/42","pr_number":42,"draft":true}}"#;
+        let line = r#"{"ts":"2026-01-01T14:25:00Z","event":"pull_request.created","properties":{"pull_request":{"provider":"github","owner_path":"owner","repo":"repo","number":42,"html_url":"https://github.com/owner/repo/pull/42"},"draft":true}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("Draft PR:"), "got: {result}");
     }
