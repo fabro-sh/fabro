@@ -109,6 +109,14 @@ fn merge_url_for_project(base: &GitLabBaseUrl, project_id: &str, iid: u64) -> St
         .to_string()
 }
 
+fn gitlab_merge_squash_value(method: MergeStrategy) -> Result<bool> {
+    match method {
+        MergeStrategy::Merge => Ok(false),
+        MergeStrategy::Squash => Ok(true),
+        MergeStrategy::Rebase => Err(GitLabError::UnsupportedMergeStrategy { strategy: method }),
+    }
+}
+
 async fn resolve_project_api_id(
     ctx: &GitLabContext,
     base: &GitLabBaseUrl,
@@ -278,7 +286,7 @@ pub async fn merge_merge_request(
 ) -> Result<()> {
     let base = base_url(ctx)?;
     let client = http_client(ctx)?;
-    let squash = matches!(method, MergeStrategy::Squash);
+    let squash = gitlab_merge_squash_value(method)?;
     let resp = send_project_request(
         ctx,
         &base,
@@ -354,7 +362,7 @@ pub async fn enable_auto_merge(
 ) -> Result<()> {
     let base = base_url(ctx)?;
     let client = http_client(ctx)?;
-    let squash = matches!(method, MergeStrategy::Squash);
+    let squash = gitlab_merge_squash_value(method)?;
     let resp = send_project_request(
         ctx,
         &base,
@@ -448,11 +456,12 @@ fn parse_changes_count(value: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::settings::run::MergeStrategy;
     use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
 
     use super::{
-        CreateMergeRequestRequest, create_merge_request, parse_changes_count,
+        CreateMergeRequestRequest, create_merge_request, merge_merge_request, parse_changes_count,
         to_pull_request_details,
     };
     use crate::repository::{GitLabBaseUrl, GitLabRepository, parse_origin};
@@ -715,6 +724,22 @@ mod tests {
                 "GitLab project platform/tools/fabro was not found in project search results"
             ),
             "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_merge_request_rejects_rebase_before_calling_gitlab() {
+        let server = MockServer::start_async().await;
+        let (ctx, repo) = test_gitlab_context(&server);
+
+        let err = merge_merge_request(&ctx, &repo, 7, MergeStrategy::Rebase)
+            .await
+            .unwrap_err();
+
+        let err = err.to_string();
+        assert!(
+            err.contains("does not support rebase merge strategy"),
+            "got: {err}"
         );
     }
 

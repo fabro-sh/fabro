@@ -786,6 +786,9 @@ async fn merge_run_pull_request(
                 Err(fabro_gitlab::GitLabError::NotFound { .. }) => {
                     gitlab_pull_request_not_found_error(ctx.number).into_response()
                 }
+                Err(err @ fabro_gitlab::GitLabError::UnsupportedMergeStrategy { .. }) => {
+                    ApiError::new(StatusCode::BAD_REQUEST, err.to_string()).into_response()
+                }
                 Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
             }
         }

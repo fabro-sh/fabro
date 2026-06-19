@@ -10,6 +10,7 @@ pub mod repository;
 use std::fmt;
 
 use base64::engine::general_purpose::STANDARD;
+use fabro_types::settings::run::MergeStrategy;
 use url::Url;
 
 #[derive(Clone)]
@@ -68,6 +69,8 @@ pub enum GitLabError {
         resource: &'static str,
         iid:      u64,
     },
+    #[error("GitLab does not support {strategy} merge strategy")]
+    UnsupportedMergeStrategy { strategy: MergeStrategy },
     #[error("GitLab API request failed")]
     Api(#[source] anyhow::Error),
 }

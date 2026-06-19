@@ -9274,6 +9274,49 @@ async fn merge_run_pull_request_rejects_invalid_method() {
 }
 
 #[tokio::test]
+async fn merge_run_pull_request_rejects_gitlab_rebase_method() {
+    let gitlab = MockServer::start_async().await;
+    let state = create_github_gitlab_token_app_state(&gitlab.base_url());
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+
+    create_run_with_linked_pull_request_record(
+        &state,
+        run_id,
+        PullRequestLink::gitlab(
+            "platform/tools",
+            "fabro",
+            7,
+            &format!(
+                "{}/platform/tools/fabro/-/merge_requests/7",
+                gitlab.base_url()
+            ),
+        ),
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request/merge")))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "method": "rebase" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::BAD_REQUEST).await;
+
+    assert!(
+        body["errors"][0]["detail"]
+            .as_str()
+            .is_some_and(|message| message.contains("does not support rebase merge strategy")),
+        "{body:?}"
+    );
+}
+
+#[tokio::test]
 async fn merge_run_pull_request_returns_service_unavailable_without_github_credentials() {
     let (state, app, run_id) = pr_test_app(None, None);
 
