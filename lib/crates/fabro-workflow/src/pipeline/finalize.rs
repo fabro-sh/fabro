@@ -496,7 +496,7 @@ pub(crate) fn build_terminal_event(
         failure,
         timing,
         final_git_commit_sha,
-        final_patch,
+        final_patch: final_patch.clone(),
         diff_summary,
         billing,
     }
@@ -588,7 +588,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         conclusion.timing,
         artifact_count,
         options.last_git_sha.clone(),
-        final_patch,
+        final_patch.clone(),
         diff_summary,
         conclusion.billing.clone(),
     );
@@ -631,6 +631,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         graph,
         run_options,
         services,
+        final_patch,
     })
 }
 

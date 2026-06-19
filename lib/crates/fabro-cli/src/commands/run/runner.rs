@@ -9,6 +9,7 @@ use fabro_api::types::RunManifest;
 use fabro_client::ServerTarget;
 use fabro_config::user::active_settings_path;
 use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
+use fabro_gitlab::repository as gitlab_repository;
 use fabro_interview::{
     AnswerSubmission, ControlInterviewer, WORKER_CONTROL_INVALID_CURSOR_REASON,
     WORKER_CONTROL_PONG_TIMEOUT_REASON, WORKER_CONTROL_WS_LIVENESS_TIMEOUT,
@@ -1176,10 +1177,9 @@ fn build_worker_gitlab_services(
     let gitlab = match (gitlab_settings, origin_url) {
         (Some(gitlab), Some(origin_url)) if gitlab.enabled => match gitlab.base_url.as_ref() {
             Some(base_url) => {
-                let base_url =
-                    fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url.as_source())
-                        .map_err(|err| anyhow!("Invalid GitLab base URL: {err}"))?;
-                if fabro_gitlab::repository::parse_origin(&base_url, origin_url).is_ok() {
+                let base_url = gitlab_repository::GitLabBaseUrl::parse(base_url)
+                    .map_err(|err| anyhow!("Invalid GitLab base URL: {err}"))?;
+                if gitlab_repository::parse_origin(&base_url, origin_url).is_ok() {
                     let token = vault
                         .and_then(|vault| vault.get(EnvVars::GITLAB_TOKEN))
                         .map(str::trim)
@@ -1838,24 +1838,10 @@ mod tests {
         settings.run.integrations.gitlab.token = true;
 
         let mut server = fabro_types::ServerSettings {
-            server: fabro_types::settings::ServerNamespace {
-                listen:       Default::default(),
-                api:          Default::default(),
-                web:          Default::default(),
-                auth:         Default::default(),
-                sandbox:      Default::default(),
-                storage:      Default::default(),
-                artifacts:    Default::default(),
-                slatedb:      Default::default(),
-                scheduler:    Default::default(),
-                logging:      Default::default(),
-                integrations: Default::default(),
-            },
+            server: fabro_types::settings::ServerNamespace::test_default(),
         };
         server.server.integrations.gitlab.enabled = true;
-        server.server.integrations.gitlab.base_url = Some(
-            fabro_types::settings::InterpString::parse("https://gitlab.example.com"),
-        );
+        server.server.integrations.gitlab.base_url = Some("https://gitlab.example.com".to_string());
 
         let temp = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(temp.path().join("vault.json")).unwrap();

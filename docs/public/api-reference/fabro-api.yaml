@@ -219,11 +219,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   /install/object-store/test:
     post:
       operationId: testInstallObjectStore
@@ -5463,6 +5458,44 @@ paths:
               $ref: "#/components/headers/XRequestId"
           content:
             application/json:
+                schema:
+                  $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Playground ────────────────────────────────────────────────────────
+
+  /api/v1/playground/chat:
+    post:
+      operationId: createPlaygroundChat
+      tags: [Playground]
+      summary: Chat with the playground assistant
+      description: |
+        Drives a single turn of the playground chat that builds a workflow
+        graph incrementally. The server is stateless: each request includes
+        the full current draft, and the response streams text deltas plus a
+        single `write_workflow_file` tool call carrying the full new contents
+        of `workflow.fabro` for the client to parse, diff against its local
+        draft, and animate into the canvas.
+
+        Responses are always SSE. Frames use `event: stream_event` with a
+        JSON-serialized StreamEvent payload — see /api/v1/completions for the
+        StreamEvent shape. The tool call arrives on a `tool_call_end` event
+        with the tool name and parsed JSON arguments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePlaygroundChatRequest"
+      responses:
+        "200":
+          description: SSE stream of text deltas and tool calls.
+        "400":
+          description: Invalid request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
@@ -6614,7 +6647,6 @@ components:
         - network
         - lifecycle
         - labels
-        - volumes
         - env
       properties:
         id:
@@ -6628,6 +6660,10 @@ components:
           example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -6638,10 +6674,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -6659,7 +6691,6 @@ components:
         - network
         - lifecycle
         - labels
-        - volumes
         - env
       properties:
         id:
@@ -6668,6 +6699,10 @@ components:
           example: docker
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -6678,10 +6713,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -6698,11 +6729,14 @@ components:
         - network
         - lifecycle
         - labels
-        - volumes
         - env
       properties:
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentApiImageSettings"
         resources:
@@ -6713,10 +6747,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -8151,6 +8181,51 @@ components:
           $ref: "#/components/schemas/CompletionUsage"
         output:
           description: Parsed structured output when schema was provided.
+        cost_usd:
+          type: number
+          format: double
+          description: >
+            USD cost of the completion when known: estimated from catalog
+            prices unless the provider returned authoritative billing data.
+        cost_source:
+          $ref: "#/components/schemas/CostSource"
+
+    CostSource:
+      type: string
+      description: >
+        Whether `cost_usd` came from provider billing data (authoritative)
+        or catalog price estimation (estimated).
+      enum: [authoritative, estimated]
+
+    # ── Playground ────────────────────────────────────────────────────────
+
+    CreatePlaygroundChatRequest:
+      description: >
+        Body of POST /api/v1/playground/chat. The server is stateless across
+        turns: the browser owns the draft and submits it as the literal
+        `workflow.fabro` contents with every turn. The server embeds the
+        file in the model's system prompt and exposes a single
+        `write_workflow_file` tool that emits the full new contents of
+        `workflow.fabro`; the browser parses, diffs, and animates the
+        result.
+      type: object
+      required: [messages, workflow_fabro]
+      properties:
+        messages:
+          type: array
+          description: assistant-ui-style message history for the turn.
+          items:
+            $ref: "#/components/schemas/CompletionMessage"
+        workflow_fabro:
+          type: string
+          description: >
+            Full current `workflow.fabro` (Graphviz DOT) contents as
+            rendered by the client — a complete `digraph <name> { ... }`
+            block including the `start` / `exit` terminals. This is the
+            same format the model writes back via `write_workflow_file`.
+        model:
+          type: string
+          description: Model id or alias. Server picks the default if omitted.
 
     PaginatedSavedQueryList:
       description: Paginated list of saved queries.
@@ -9286,6 +9361,8 @@ components:
 
     RunProvenance:
       type: object
+      required:
+        - subject
       properties:
         server:
           oneOf:
@@ -9296,9 +9373,7 @@ components:
             - $ref: "#/components/schemas/RunClientProvenance"
             - type: "null"
         subject:
-          oneOf:
-            - $ref: "#/components/schemas/Principal"
-            - type: "null"
+          $ref: "#/components/schemas/Principal"
 
     Principal:
       oneOf:
@@ -10544,6 +10619,7 @@ components:
         - run_id
         - settings
         - graph
+        - provenance
       properties:
         run_id:
           type: string
@@ -10560,10 +10636,6 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AutomationRef"
             - type: "null"
-        source_context:
-          oneOf:
-            - $ref: "#/components/schemas/RunSourceContext"
-            - type: "null"
         source_directory:
           type: ["string", "null"]
         labels:
@@ -10571,9 +10643,7 @@ components:
           additionalProperties:
             type: string
         provenance:
-          oneOf:
-            - $ref: "#/components/schemas/RunProvenance"
-            - type: "null"
+          $ref: "#/components/schemas/RunProvenance"
         manifest_blob:
           type: ["string", "null"]
         definition_blob:
@@ -10880,18 +10950,12 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AutomationRef"
             - type: "null"
-        source_context:
-          oneOf:
-            - $ref: "#/components/schemas/RunSourceContext"
-            - type: "null"
         repository:
           oneOf:
             - $ref: "#/components/schemas/RepositoryRef"
             - type: "null"
         created_by:
-          oneOf:
-            - $ref: "#/components/schemas/Principal"
-            - type: "null"
+          $ref: "#/components/schemas/Principal"
         origin:
           $ref: "#/components/schemas/RunOrigin"
         labels:
@@ -10997,44 +11061,6 @@ components:
           type: ["string", "null"]
         trigger_id:
           type: ["string", "null"]
-
-    RunSourceContext:
-      description: External source object that caused or anchors a run.
-      oneOf:
-        - $ref: "#/components/schemas/GithubIssueRunSource"
-      discriminator:
-        propertyName: type
-        mapping:
-          github_issue: "#/components/schemas/GithubIssueRunSource"
-
-    GithubIssueRunSource:
-      type: object
-      additionalProperties: false
-      required:
-        - type
-        - repository
-        - issue_number
-        - issue_title
-        - issue_url
-      properties:
-        type:
-          type: string
-          enum: [github_issue]
-        repository:
-          type: string
-          example: owner/repo
-        issue_number:
-          type: integer
-          format: uint64
-          minimum: 0
-          example: 123
-        issue_title:
-          type: string
-          example: Fix production bug
-        issue_url:
-          type: string
-          format: uri
-          example: https://github.com/owner/repo/issues/123
 
     RunOrigin:
       type: object
@@ -13671,12 +13697,16 @@ components:
 
     RunEnvironmentSettings:
       type: object
-      required: [id, provider, image, resources, network, lifecycle, labels, volumes, env]
+      required: [id, provider, image, resources, network, lifecycle, labels, env]
       properties:
         id:
           type: string
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentImageSettings"
         resources:
@@ -13687,10 +13717,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -13698,10 +13724,14 @@ components:
 
     EnvironmentSettings:
       type: object
-      required: [provider, image, resources, network, lifecycle, labels, volumes, env]
+      required: [provider, image, resources, network, lifecycle, labels, env]
       properties:
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
+        cwd:
+          type: ["string", "null"]
+          description: Local-provider command working directory for this environment. Docker and Daytona ignore this value.
+          example: /srv/fabro/workspaces/team-a
         image:
           $ref: "#/components/schemas/EnvironmentImageSettings"
         resources:
@@ -13712,10 +13742,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -13773,17 +13799,6 @@ components:
         stop_on_terminal:
           type: boolean
         auto_stop:
-          type: ["string", "null"]
-
-    EnvironmentVolumeSettings:
-      type: object
-      required: [id, mount_path, subpath]
-      properties:
-        id:
-          type: string
-        mount_path:
-          type: string
-        subpath:
           type: ["string", "null"]
 
     DockerfileSource:

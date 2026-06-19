@@ -17,12 +17,11 @@ pub mod types {
     pub use fabro_automation::{
         Automation, AutomationDraft as CreateAutomationRequest,
         AutomationReplace as ReplaceAutomationRequest, AutomationTarget, AutomationTrigger,
-        GithubIssueTrigger as AutomationGithubIssueTrigger,
     };
     pub use fabro_environment::Environment;
     pub use fabro_model::{
-        Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef, ModelTestMode,
-        Provider, ReasoningEffort, ReasoningEffortFeature, Speed as BillingSpeed,
+        CostSource, Model, ModelCosts, ModelFeatures, ModelLimits, ModelRef as BillingModelRef,
+        ModelTestMode, Provider, ReasoningEffort, ReasoningEffortFeature, Speed as BillingSpeed,
     };
     pub use fabro_types::run_event::AgentSessionActivatedProps;
     pub use fabro_types::settings::ServerNamespace;
@@ -44,20 +43,21 @@ pub mod types {
         ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
         AgentToolCategory, AgentToolSource, AgentToolSummary, AgentToolsAvailableProps, AskFabro,
         AuthMethod, AutomationRef, BilledTokenCounts, CommandTermination, Conclusion,
-        CreateVariableRequest, DiffStats, DiffSummary, DirtyStatus, EventEnvelope, ExecOutputTail,
-        FailureCategory, FailureDetail, FailureSignature, GitContext, IdpIdentity,
-        IntegrationConnectionKind, IntegrationConnectionState, IntegrationConnectionStatus,
-        IntegrationProvider, IntegrationStatus, InterviewOption, InterviewQuestionRecord,
-        McpServerProjection, McpServerStatus, PairId, PairMessageId, PairMessageRecord,
+        ContentPart as CompletionContentPart, CreateVariableRequest, DiffStats, DiffSummary,
+        DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory, FailureDetail,
+        FailureSignature, GitContext, IdpIdentity, IntegrationConnectionKind,
+        IntegrationConnectionState, IntegrationConnectionStatus, IntegrationProvider,
+        IntegrationStatus, InterviewOption, InterviewQuestionRecord, McpServerProjection,
+        McpServerStatus, Message as CompletionMessage, PairId, PairMessageId, PairMessageRecord,
         PairMessageRequest, PairRecord, PairStartRequest, PairStatus, PairTarget,
         PairTranscriptEntry, PairTranscriptResponse, PendingInterviewRecord, PermissionLevel,
         PreRunPushOutcome, Principal, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
         PullRequestDetailsUnavailableReason, PullRequestLink, PullRequestMeta, PullRequestProvider,
-        PullRequestResponse, QuestionType, RepositoryRef, Run, RunApproval, RunApprovalState,
-        RunClientProvenance, RunEvent, RunEventDetailContentKind, RunEventDetailResponse,
-        RunFailure, RunPairStatusResponse, RunProjection, RunProvenance, RunRunnableSource,
-        RunSandbox, RunSandboxFailure, RunSandboxInstance, RunSandboxKind, RunSandboxPlan,
-        RunSandboxRuntime, RunServerProvenance, RunSize, RunSourceContext, SandboxDetails,
+        PullRequestResponse, QuestionType, RepositoryRef, Role as CompletionMessageRole, Run,
+        RunApproval, RunApprovalState, RunClientProvenance, RunEvent, RunEventDetailContentKind,
+        RunEventDetailResponse, RunFailure, RunPairStatusResponse, RunProjection, RunProvenance,
+        RunRunnableSource, RunSandbox, RunSandboxFailure, RunSandboxInstance, RunSandboxKind,
+        RunSandboxPlan, RunSandboxRuntime, RunServerProvenance, RunSize, SandboxDetails,
         SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxNetwork, SandboxNetworkPolicy,
         SandboxNetworkPolicyMode, SandboxProviderKind, SandboxProviderLookupError,
         SandboxResources, SandboxService, SandboxServiceListResponse, SandboxState,

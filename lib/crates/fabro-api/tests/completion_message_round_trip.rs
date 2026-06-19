@@ -6,7 +6,10 @@
 
 use std::any::{TypeId, type_name};
 
-use fabro_api::types::{ContentPart as ApiContentPart, Message as ApiMessage, Role as ApiRole};
+use fabro_api::types::{
+    CompletionContentPart as ApiContentPart, CompletionMessage as ApiMessage,
+    CompletionMessageRole as ApiRole,
+};
 use fabro_types::{ContentPart, Message, Role, ToolCall, ToolResult};
 use serde_json::json;
 

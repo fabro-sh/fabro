@@ -165,14 +165,7 @@ pub(crate) async fn print_run_summary_with_client(
         return Ok(());
     };
 
-    print_run_conclusion(
-        &conclusion,
-        run_id,
-        None,
-        pr_url.as_deref(),
-        styles,
-        printer,
-    );
+    print_run_conclusion(&conclusion, run_id, None, pr_url, styles, printer);
     let final_output =
         resolve_final_output_with_client(client, run_id, checkpoint.as_ref()).await?;
     print_final_output(final_output.as_deref(), styles, printer);

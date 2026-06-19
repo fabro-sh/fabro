@@ -53,6 +53,7 @@ tar = { workspace = true, optional = true }
 # daytona
 fabro-config = { path = "../fabro-config", optional = true }
 fabro-github = { path = "../fabro-github", optional = true }
+fabro-http = { workspace = true, optional = true }
 fabro-types = { path = "../fabro-types" }
 
 chrono = { workspace = true }

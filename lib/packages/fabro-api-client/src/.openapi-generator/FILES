@@ -58,6 +58,7 @@ models/auth-session-user.ts
 models/auth-session.ts
 models/auth-sessions-response.ts
 models/automation-api-trigger.ts
+models/automation-github-issue-trigger.ts
 models/automation-list-meta.ts
 models/automation-list-response.ts
 models/automation-ref.ts
@@ -155,6 +156,7 @@ models/git-author-settings.ts
 models/git-context.ts
 models/github-integration-settings.ts
 models/github-integration-strategy.ts
+models/gitlab-integration-settings.ts
 models/health-response.ts
 models/history-entry.ts
 models/hook-definition.ts
@@ -162,6 +164,7 @@ models/hook-event.ts
 models/idp-identity.ts
 models/index.ts
 models/install-finish-response.ts
+models/install-github-app-input.ts
 models/install-github-app-manifest-input.ts
 models/install-github-app-manifest-response.ts
 models/install-github-app-owner.ts
@@ -169,6 +172,9 @@ models/install-github-summary.ts
 models/install-github-token-input.ts
 models/install-github-token-test-input.ts
 models/install-github-token-test-response.ts
+models/install-gitlab-app-input.ts
+models/install-gitlab-summary.ts
+models/install-gitlab-token-input.ts
 models/install-llm-provider-input.ts
 models/install-llm-providers-input.ts
 models/install-llm-summary-providers-inner.ts
@@ -176,6 +182,8 @@ models/install-llm-summary.ts
 models/install-llm-test-input.ts
 models/install-llm-validation-response.ts
 models/install-object-store-input.ts
+models/install-object-store-local-input.ts
+models/install-object-store-s3-input.ts
 models/install-object-store-summary.ts
 models/install-object-store-validation-response.ts
 models/install-prefill.ts
@@ -273,6 +281,7 @@ models/preflight-workflow-summary.ts
 models/preview-url-request.ts
 models/preview-url-response.ts
 models/principal-agent.ts
+models/principal-anonymous.ts
 models/principal-slack.ts
 models/principal-system.ts
 models/principal-user.ts
@@ -295,6 +304,7 @@ models/pull-request-details-unavailable-reason.ts
 models/pull-request-details.ts
 models/pull-request-link.ts
 models/pull-request-meta.ts
+models/pull-request-provider.ts
 models/pull-request-ref.ts
 models/pull-request-response.ts
 models/pull-request-settings.ts
@@ -350,6 +360,7 @@ models/run-goal-file.ts
 models/run-goal-inline.ts
 models/run-goal.ts
 models/run-integrations-github-settings.ts
+models/run-integrations-gitlab-settings.ts
 models/run-integrations-settings.ts
 models/run-interviews-settings.ts
 models/run-lifecycle.ts
@@ -421,6 +432,7 @@ models/secret-type.ts
 models/server-api-settings.ts
 models/server-artifacts-settings.ts
 models/server-auth-github-settings.ts
+models/server-auth-gitlab-settings.ts
 models/server-auth-method.ts
 models/server-auth-settings.ts
 models/server-integrations-settings.ts

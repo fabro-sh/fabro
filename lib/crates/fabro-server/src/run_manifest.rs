@@ -13,6 +13,7 @@ use fabro_config::{
     MergeMap, RunLayer, SettingsLayer, WorkflowSettingsBuilder, parse_input_overrides,
     parse_labels,
 };
+use fabro_gitlab::repository as gitlab_repository;
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
@@ -27,7 +28,9 @@ use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
-use fabro_types::{ManifestPath, RunId, SandboxProviderKind, ServerSettings, WorkflowSettings};
+use fabro_types::{
+    ManifestPath, RunId, RunProvenance, SandboxProviderKind, ServerSettings, WorkflowSettings,
+};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;
@@ -193,6 +196,7 @@ pub(crate) fn validate_prepared_manifest(
 pub(crate) fn create_run_input(
     prepared: PreparedManifest,
     configured_providers: Vec<ProviderId>,
+    provenance: RunProvenance,
     web_url: Option<String>,
 ) -> CreateRunInput {
     CreateRunInput {
@@ -206,11 +210,10 @@ pub(crate) fn create_run_input(
         run_id: prepared.run_id,
         title: prepared.title,
         automation: None,
-        source_context: None,
         git: prepared.git,
         fork_source_ref: None,
         parent_id: prepared.parent_id,
-        provenance: None,
+        provenance,
         configured_providers,
         web_url,
     }
@@ -376,12 +379,7 @@ fn manifest_args_overrides(
 }
 
 fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) -> PathBuf {
-    let Some(work_dir) = settings
-        .run
-        .working_dir
-        .as_ref()
-        .map(InterpString::as_source)
-    else {
+    let Some(work_dir) = settings.run.working_dir.as_ref() else {
         return caller_cwd.to_path_buf();
     };
     let path = PathBuf::from(&work_dir);
@@ -718,9 +716,6 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
             {
                 warnings.push("local provider ignores resource limits".to_string());
             }
-            if !environment.volumes.is_empty() {
-                warnings.push("local provider ignores volume mounts".to_string());
-            }
             if !environment.labels.is_empty() {
                 warnings.push("local provider ignores labels".to_string());
             }
@@ -731,9 +726,6 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
         EnvironmentProvider::Docker => {
             if environment.resources.disk.is_some() {
                 warnings.push("docker provider ignores disk resource limits".to_string());
-            }
-            if !environment.volumes.is_empty() {
-                warnings.push("docker provider ignores volume mounts".to_string());
             }
             if !environment.labels.is_empty() {
                 warnings.push("docker provider ignores labels".to_string());
@@ -803,35 +795,31 @@ where
 
     let github_origin_url = fabro_github::normalize_repo_origin_url(&git.origin_url);
     let request = if let Err(err) = fabro_github::parse_github_owner_repo(&github_origin_url) {
-        match gitlab.and_then(|gitlab| {
-            fabro_gitlab::repository::parse_origin(&gitlab.base_url, &git.origin_url)
+        if let Some((gitlab, repo)) = gitlab.and_then(|gitlab| {
+            gitlab_repository::parse_origin(&gitlab.base_url, &git.origin_url)
                 .ok()
                 .map(|repo| (gitlab, repo))
         }) {
-            Some((gitlab, repo)) => {
-                let fabro_gitlab::GitLabCredentials::Token(token) = &gitlab.credentials;
-                GitRemoteRefCheck {
-                    origin_url:   repo.clean_origin_url,
-                    branch:       Some(git.branch.clone())
-                        .filter(|branch| !branch.trim().is_empty()),
-                    extra_header: Some(format!(
-                        "Authorization: {}",
-                        fabro_gitlab::basic_auth_header_value(token)
-                    )),
-                }
+            let fabro_gitlab::GitLabCredentials::Token(token) = &gitlab.credentials;
+            GitRemoteRefCheck {
+                origin_url:   repo.clean_origin_url,
+                branch:       Some(git.branch.clone()).filter(|branch| !branch.trim().is_empty()),
+                extra_header: Some(format!(
+                    "Authorization: {}",
+                    fabro_gitlab::basic_auth_header_value(token)
+                )),
             }
-            None => {
-                checks.push(CheckResult {
-                    name:        "Repository Access".into(),
-                    status:      CheckStatus::Error,
-                    summary:     "failed".into(),
-                    details:     vec![CheckDetail::new(format!("Origin: {github_origin_url}"))],
-                    remediation: Some(format!(
-                        "Clone-based sandboxes currently support GitHub repository origins only: {err}"
-                    )),
-                });
-                return false;
-            }
+        } else {
+            checks.push(CheckResult {
+                name:        "Repository Access".into(),
+                status:      CheckStatus::Error,
+                summary:     "failed".into(),
+                details:     vec![CheckDetail::new(format!("Origin: {github_origin_url}"))],
+                remediation: Some(format!(
+                    "Clone-based sandboxes currently support GitHub repository origins only: {err}"
+                )),
+            });
+            return false;
         }
     } else {
         GitRemoteRefCheck {
@@ -1226,11 +1214,7 @@ fn resolve_model_provider(
     configured_providers: &[ProviderId],
     catalog: &Catalog,
 ) -> (String, Option<String>) {
-    let provider = settings
-        .model
-        .provider
-        .as_ref()
-        .map(InterpString::as_source);
+    let provider = settings.model.provider.clone();
     let model = settings.model.name.as_ref().map_or_else(
         || {
             catalog
@@ -1238,7 +1222,7 @@ fn resolve_model_provider(
                 .id
                 .clone()
         },
-        InterpString::as_source,
+        Clone::clone,
     );
 
     match catalog.get(&model) {
@@ -1651,27 +1635,6 @@ enabled = {clone_enabled}
     }
 
     #[test]
-    fn runtime_daytona_config_preserves_volume_mounts() {
-        let settings = fabro_types::settings::run::RunEnvironmentSettings::from_environment(
-            "cloud".to_string(),
-            fabro_types::settings::run::EnvironmentSettings {
-                volumes: vec![fabro_types::settings::run::EnvironmentVolumeSettings {
-                    id:         "vol_auth".to_string(),
-                    mount_path: "/home/daytona/.config".to_string(),
-                    subpath:    Some("agents".to_string()),
-                }],
-                ..fabro_types::settings::run::EnvironmentSettings::default()
-            },
-        );
-
-        let config = daytona_config_from_environment(&settings, false);
-
-        assert_eq!(config.volumes.len(), 1);
-        assert_eq!(config.volumes[0].volume_id, "vol_auth");
-        assert_eq!(config.volumes[0].mount_path, "/home/daytona/.config");
-        assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
-    }
-    #[test]
     fn prepare_manifest_accepts_project_environment_catalog_definitions() {
         let mut manifest = minimal_manifest();
         manifest.configs.push(types::ManifestConfig {
@@ -1740,8 +1703,7 @@ provider = "local"
             Some(git_context("https://gitlab.com/acme/widgets", "main")),
         );
         let gitlab = fabro_sandbox::GitLabSandboxConfig {
-            base_url:    fabro_gitlab::repository::GitLabBaseUrl::parse("https://gitlab.com")
-                .unwrap(),
+            base_url:    gitlab_repository::GitLabBaseUrl::parse("https://gitlab.com").unwrap(),
             credentials: fabro_gitlab::GitLabCredentials::Token("glpat-test".to_string()),
         };
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1857,8 +1819,7 @@ provider = "local"
             Some(git_context("https://gitlab.com/acme/widgets", "missing")),
         );
         let gitlab = fabro_sandbox::GitLabSandboxConfig {
-            base_url:    fabro_gitlab::repository::GitLabBaseUrl::parse("https://gitlab.com")
-                .unwrap(),
+            base_url:    gitlab_repository::GitLabBaseUrl::parse("https://gitlab.com").unwrap(),
             credentials: fabro_gitlab::GitLabCredentials::Token("glpat-test".to_string()),
         };
         let mut checks = Vec::new();
@@ -1900,7 +1861,6 @@ provider = "local"
             SandboxProviderKind::Docker,
             &prepared,
             &resolved,
-            None,
             None,
             None,
             None,

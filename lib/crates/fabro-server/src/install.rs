@@ -16,14 +16,16 @@ use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_P
 use fabro_config::Storage;
 use fabro_config::bind::{Bind, BindRequest};
 use fabro_config::envfile::{EnvFileRemoval, EnvFileUpdate};
+use fabro_gitlab::oauth as gitlab_oauth;
+use fabro_gitlab::repository::GitLabBaseUrl;
 use fabro_install::{
     GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, GITLAB_APP_VAULT_KEYS,
     GITLAB_INSTALL_SECRET_KEYS, GitlabAppInstallSettings, InstallListenConfig,
-    InstallPersistencePlan, InstallSandboxSelection,
-    OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite,
-    VaultSecretWrite, merge_server_settings, prepare_dev_token_write_for_install,
-    write_github_app_settings, write_gitlab_app_settings, write_gitlab_token_settings,
-    write_object_store_settings, write_sandbox_settings, write_token_settings,
+    InstallPersistencePlan, InstallSandboxSelection, OBJECT_STORE_ACCESS_KEY_ID_ENV,
+    OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite, VaultSecretWrite,
+    merge_server_settings, prepare_dev_token_write_for_install, write_github_app_settings,
+    write_gitlab_app_settings, write_gitlab_token_settings, write_object_store_settings,
+    write_sandbox_settings, write_token_settings,
 };
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
@@ -33,7 +35,6 @@ use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
-use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::server::ObjectStoreSettings;
 use fabro_types::settings::{is_wildcard_host, validate_public_url_with_label};
 use fabro_util::version::FABRO_VERSION;
@@ -1018,10 +1019,7 @@ async fn post_install_sandbox_test(
 
     let api_key = {
         let pending_install = lock_unpoisoned(&state.pending_install, "install session");
-        match resolve_install_sandbox_state(
-            pending_install.sandbox.as_ref(),
-            input,
-        ) {
+        match resolve_install_sandbox_state(pending_install.sandbox.as_ref(), input) {
             Ok(InstallSandboxState {
                 provider: InstallSandboxProviderState::Daytona { api_key },
                 ..
@@ -1081,10 +1079,7 @@ async fn put_install_sandbox(
     observe_operator(&state, &headers);
 
     let mut pending_install = lock_unpoisoned(&state.pending_install, "install session");
-    let selection = match resolve_install_sandbox_state(
-        pending_install.sandbox.as_ref(),
-        input,
-    ) {
+    let selection = match resolve_install_sandbox_state(pending_install.sandbox.as_ref(), input) {
         Ok(selection) => selection,
         Err(err) => return install_error_response(StatusCode::UNPROCESSABLE_ENTITY, err),
     };
@@ -1236,8 +1231,8 @@ fn object_store_validation_settings(
     match selection {
         InstallObjectStoreState::Local { .. } => None,
         InstallObjectStoreState::S3 { bucket, region, .. } => Some(ObjectStoreSettings::S3 {
-            bucket:     InterpString::parse(bucket),
-            region:     InterpString::parse(region),
+            bucket:     bucket.clone(),
+            region:     region.clone(),
             endpoint:   None,
             path_style: false,
         }),
@@ -1848,10 +1843,11 @@ async fn post_install_finish(
     };
     let mut server_env_writes = object_store_env_plan.writes;
     let mut server_env_removals = object_store_env_plan.removals;
-    let mut vault_removals = vec![
-        EnvVars::FABRO_AZURE_ACR_USERNAME.to_string(),
-        EnvVars::FABRO_AZURE_ACR_PASSWORD.to_string(),
-    ];
+    let mut vault_removals = Vec::new();
+    #[expect(
+        clippy::result_large_err,
+        reason = "Install handler helpers return axum responses directly for early exits."
+    )]
     let prepare_dev_token_write = || {
         let dev_token_path = Storage::new(state.storage_dir.as_ref())
             .runtime_directory()
@@ -2560,10 +2556,11 @@ async fn validate_github_token(state: &InstallAppState, token: &str) -> anyhow::
 fn validate_install_gitlab_base_url(raw: &str) -> anyhow::Result<String> {
     let url = parse_install_upstream_url(raw)?;
     if url.scheme() == "http" {
-        let host = url.host_str().unwrap_or_default();
-        let local_or_test = matches!(host, "localhost" | "127.0.0.1" | "::1")
-            || host.ends_with(".localhost")
-            || host.ends_with(".test");
+        let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+        let local_or_test = matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+            || host
+                .rsplit_once('.')
+                .is_some_and(|(_, suffix)| matches!(suffix, "localhost" | "test"));
         if !local_or_test {
             bail!("GitLab base_url must use https unless it points to localhost or a test host");
         }
@@ -2573,11 +2570,11 @@ fn validate_install_gitlab_base_url(raw: &str) -> anyhow::Result<String> {
 
 async fn validate_gitlab_token(base_url: &str, token: &str) -> anyhow::Result<String> {
     let base_url = validate_install_gitlab_base_url(base_url)?;
-    let base = fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url)
+    let base = GitLabBaseUrl::parse(&base_url)
         .map_err(|err| anyhow!("GitLab base_url is invalid: {err}"))?;
     let client = install_http_client_for_url(base.url.as_str())?;
     let response = client
-        .get(fabro_gitlab::oauth::user_url(&base))
+        .get(gitlab_oauth::user_url(&base))
         .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/json")
         .send()
@@ -2641,10 +2638,8 @@ async fn write_artifact_store_metadata(
     settings: &ServerSettings,
     storage_dir: &Path,
 ) -> anyhow::Result<()> {
-    use fabro_types::settings::interp::InterpString;
-
     let mut settings = settings.clone();
-    settings.server.storage.root = InterpString::parse(&storage_dir.display().to_string());
+    settings.server.storage.root = storage_dir.display().to_string();
     let (object_store, prefix) = serve::build_artifact_object_store(&settings.server)?;
     let artifact_store = ArtifactStore::new(object_store, prefix);
     artifact_store.write_metadata(FABRO_VERSION).await?;
@@ -2699,6 +2694,15 @@ async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::disallowed_methods,
+        reason = "Install tests read generated files synchronously after handler completion."
+    )]
+    #![expect(
+        clippy::duration_suboptimal_units,
+        reason = "Install tests use second-based expiration setup for readability."
+    )]
+
     use std::collections::HashMap;
     use std::io;
     use std::path::Path;
@@ -3376,8 +3380,7 @@ methods = ["dev-token"]
             .unwrap();
 
         let mut overridden = settings.clone();
-        overridden.server.storage.root =
-            fabro_types::settings::interp::InterpString::parse(&dir.path().display().to_string());
+        overridden.server.storage.root = dir.path().display().to_string();
         let (object_store, prefix) =
             crate::serve::build_artifact_object_store(&overridden.server).unwrap();
         let marker = if prefix.is_empty() {

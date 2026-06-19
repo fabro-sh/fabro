@@ -771,8 +771,8 @@ fn build_git_context(
 
 fn configured_repo_origin_url(settings: &WorkflowSettings) -> Option<String> {
     let scm = &settings.run.scm;
-    if let Some(origin_url) = scm.origin_url.as_ref().map(InterpString::as_source) {
-        let normalized = fabro_github::normalize_repo_origin_url(&origin_url);
+    if let Some(origin_url) = scm.origin_url.as_ref() {
+        let normalized = fabro_github::normalize_repo_origin_url(origin_url);
         return (!normalized.is_empty()).then_some(normalized);
     }
     if !scm

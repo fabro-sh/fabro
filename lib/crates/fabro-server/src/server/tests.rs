@@ -26,7 +26,7 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
-    InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
+    InterviewQuestionRecord, Node, Outcome, Principal, QuestionType, RunBlobId, RunId, RunSpec,
     SandboxProviderKind, StageContextWindowBreakdownItem, StageContextWindowCategory,
     StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
     StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
@@ -165,7 +165,7 @@ fn test_gitlab_settings(
 ) -> fabro_types::settings::server::GitlabIntegrationSettings {
     fabro_types::settings::server::GitlabIntegrationSettings {
         enabled: true,
-        base_url: Some(fabro_types::settings::InterpString::parse(base_url)),
+        base_url: Some(base_url.to_string()),
         ..Default::default()
     }
 }
@@ -189,13 +189,14 @@ fn test_run_with_repository(
             edge_count: 0,
         },
         automation:       None,
-        source_context:   None,
         repository:       Some(fabro_types::RepositoryRef {
             name: "root/agentic-factory-prisma".to_string(),
             origin_url: Some(origin_url.to_string()),
             provider,
         }),
-        created_by:       None,
+        created_by:       Principal::System {
+            system_kind: SystemActorKind::Engine,
+        },
         origin:           fabro_types::RunOrigin::default(),
         labels:           HashMap::new(),
         lifecycle:        fabro_types::RunLifecycle {
@@ -231,11 +232,9 @@ fn test_run_with_repository(
 
 #[test]
 fn decorates_self_managed_gitlab_repository_provider_from_configured_base_url() {
-    let gitlab = test_gitlab_settings(
-        "https://ipt-fabro-gitlab-ch.purpletree-1e94316c.switzerlandnorth.azurecontainerapps.io",
-    );
+    let gitlab = test_gitlab_settings("https://gitlab.example.test");
     let run = test_run_with_repository(
-        "https://ipt-fabro-gitlab-ch.purpletree-1e94316c.switzerlandnorth.azurecontainerapps.io/root/agentic-factory-prisma",
+        "https://gitlab.example.test/root/agentic-factory-prisma",
         fabro_types::RepositoryProvider::Git,
     );
 
@@ -3238,8 +3237,12 @@ async fn create_run(app: &Router, dot_source: &str) -> String {
         .body(manifest_body(dot_source))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
+    let status = response.status();
     let body = body_json(response.into_body()).await;
-    body["id"].as_str().unwrap().to_string()
+    body["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("create run failed with status {status}: {body}"))
+        .to_string()
 }
 
 #[tokio::test]
@@ -6137,6 +6140,12 @@ fn create_github_gitlab_token_app_state(gitlab_base_url: &str) -> Arc<AppState> 
     let (store, artifact_store) = test_store_bundle();
     let vault_path = test_secret_store_path();
     let server_env_path = vault_path.with_file_name("server.env");
+    let active_config_path = vault_path.with_file_name("settings.toml");
+    let environment_dir = active_config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("environments");
+    fabro_environment::seed_environments(&environment_dir).expect("test environments should seed");
     let config = AppStateConfig {
         resolved_settings: resolved_runtime_settings_for_tests(
             github_gitlab_token_settings(gitlab_base_url),
@@ -6153,14 +6162,13 @@ fn create_github_gitlab_token_app_state(gitlab_base_url: &str) -> Arc<AppState> 
         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         env_lookup: Arc::new(|_| None),
         github_api_base_url: None,
-        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
+        active_config_path,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
         worker_control_bus: None,
         worker_runtime: None,
         automation_materializer_override: None,
-        automation_run_start_override: None,
     };
     let state = build_app_state(config).expect("test app state should build");
     state
@@ -6180,6 +6188,12 @@ fn create_github_gitlab_token_app_state_with_token(
     let (store, artifact_store) = test_store_bundle();
     let vault_path = test_secret_store_path();
     let server_env_path = vault_path.with_file_name("server.env");
+    let active_config_path = vault_path.with_file_name("settings.toml");
+    let environment_dir = active_config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("environments");
+    fabro_environment::seed_environments(&environment_dir).expect("test environments should seed");
     let config = AppStateConfig {
         resolved_settings: resolved_runtime_settings_for_tests(
             github_gitlab_token_settings(gitlab_base_url),
@@ -6196,14 +6210,13 @@ fn create_github_gitlab_token_app_state_with_token(
         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         env_lookup: Arc::new(|_| None),
         github_api_base_url: None,
-        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
+        active_config_path,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
         worker_control_bus: None,
         worker_runtime: None,
         automation_materializer_override: None,
-        automation_run_start_override: None,
     };
     let state = build_app_state(config).expect("test app state should build");
     state

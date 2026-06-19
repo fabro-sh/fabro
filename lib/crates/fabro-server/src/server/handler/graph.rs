@@ -133,6 +133,10 @@ pub(in crate::server) async fn render_dot_subprocess(
     exe_override: Option<&std::path::Path>,
 ) -> Result<Vec<u8>, RenderSubprocessError> {
     #[cfg(test)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Test fallback checks Cargo's executable override env before spawning a subprocess."
+    )]
     if exe_override.is_none() && std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).is_none() {
         let dot = fabro_graphviz::render::RenderableDot::from_fabro_source(dot_source);
         return fabro_graphviz::render::render_raw_svg(&dot)

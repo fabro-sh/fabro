@@ -4,14 +4,15 @@ use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_auth::auth_issue_message;
+use fabro_gitlab::repository::GitLabBaseUrl;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
 use fabro_model::{Catalog, ProviderId};
 use fabro_redact::redact_string;
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
+use fabro_types::settings::ServerAuthMethod;
 use fabro_types::settings::server::{GithubIntegrationStrategy, GitlabIntegrationStrategy};
-use fabro_types::settings::{InterpString, ServerAuthMethod};
 use fabro_util::check_report::{CheckDetail, CheckResult, CheckSection, CheckStatus};
 use fabro_util::dev_token::validate_dev_token_format;
 use fabro_util::session_secret;
@@ -129,16 +130,8 @@ async fn check_gitlab(state: &AppState) -> CheckResult {
     let settings = state.server_settings();
     let gitlab = &settings.server.integrations.gitlab;
     let auth = &settings.server.auth.gitlab;
-    let base_url = gitlab.base_url.as_ref().map(|value| {
-        state
-            .resolve_interp(value)
-            .unwrap_or_else(|_| value.as_source())
-    });
-    let client_id = gitlab.client_id.as_ref().map(|value| {
-        state
-            .resolve_interp(value)
-            .unwrap_or_else(|_| value.as_source())
-    });
+    let base_url = gitlab.base_url.clone();
+    let client_id = gitlab.client_id.clone();
     let token = state.vault_secret(EnvVars::GITLAB_TOKEN);
     let input = GitlabDiagnosticInput {
         enabled: gitlab.enabled,
@@ -172,22 +165,21 @@ pub(crate) async fn run_gitlab_diagnostics_for_test(input: GitlabDiagnosticInput
     let mut details = Vec::new();
     let mut errors = Vec::new();
 
-    let base = match input
+    let base = if let Some(base_url) = input
         .base_url
         .as_deref()
         .filter(|value| !value.trim().is_empty())
     {
-        Some(base_url) => match fabro_gitlab::repository::GitLabBaseUrl::parse(base_url) {
+        match GitLabBaseUrl::parse(base_url) {
             Ok(base) => Some(base),
             Err(err) => {
                 errors.push(format!("invalid GitLab base URL: {err}"));
                 None
             }
-        },
-        None => {
-            errors.push("server.integrations.gitlab.base_url is not configured".to_string());
-            None
         }
+    } else {
+        errors.push("server.integrations.gitlab.base_url is not configured".to_string());
+        None
     };
 
     if !input.token_present {

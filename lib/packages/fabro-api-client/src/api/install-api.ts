@@ -26,6 +26,8 @@ import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { InstallFinishResponse } from '../models';
 // @ts-ignore
+import type { InstallGithubAppInput } from '../models';
+// @ts-ignore
 import type { InstallGithubAppManifestInput } from '../models';
 // @ts-ignore
 import type { InstallGithubAppManifestResponse } from '../models';
@@ -35,6 +37,10 @@ import type { InstallGithubTokenInput } from '../models';
 import type { InstallGithubTokenTestInput } from '../models';
 // @ts-ignore
 import type { InstallGithubTokenTestResponse } from '../models';
+// @ts-ignore
+import type { InstallGitlabAppInput } from '../models';
+// @ts-ignore
+import type { InstallGitlabTokenInput } from '../models';
 // @ts-ignore
 import type { InstallLlmProvidersInput } from '../models';
 // @ts-ignore
@@ -198,6 +204,41 @@ export const InstallApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         * Records a pre-existing GitHub App chosen for headless install. Requires the one-time install token.
+         * @summary Save install GitHub App
+         * @param {InstallGithubAppInput} installGithubAppInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putInstallGithubApp: async (installGithubAppInput: InstallGithubAppInput, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'installGithubAppInput' is not null or undefined
+            assertParamExists('putInstallGithubApp', 'installGithubAppInput', installGithubAppInput)
+            const localVarPath = `/install/github/app`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(installGithubAppInput, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Records the GitHub personal access token chosen during the browser install. Requires the one-time install token.
          * @summary Save install GitHub token
          * @param {InstallGithubTokenInput} installGithubTokenInput
@@ -226,6 +267,76 @@ export const InstallApiAxiosParamCreator = function (configuration?: Configurati
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(installGithubTokenInput, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Records GitLab OAuth app settings and a token chosen during browser install. Requires the one-time install token.
+         * @summary Save install GitLab app
+         * @param {InstallGitlabAppInput} installGitlabAppInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putInstallGitlabApp: async (installGitlabAppInput: InstallGitlabAppInput, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'installGitlabAppInput' is not null or undefined
+            assertParamExists('putInstallGitlabApp', 'installGitlabAppInput', installGitlabAppInput)
+            const localVarPath = `/install/gitlab/app`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(installGitlabAppInput, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Records the GitLab personal access token chosen during the browser install. Requires the one-time install token.
+         * @summary Save install GitLab token
+         * @param {InstallGitlabTokenInput} installGitlabTokenInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putInstallGitlabToken: async (installGitlabTokenInput: InstallGitlabTokenInput, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'installGitlabTokenInput' is not null or undefined
+            assertParamExists('putInstallGitlabToken', 'installGitlabTokenInput', installGitlabTokenInput)
+            const localVarPath = `/install/gitlab/token`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(installGitlabTokenInput, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -366,6 +477,41 @@ export const InstallApiAxiosParamCreator = function (configuration?: Configurati
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(installServerConfigInput, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Validates a GitLab personal access token without persisting it. Requires the one-time install token.
+         * @summary Validate install GitLab token
+         * @param {InstallGitlabTokenInput} installGitlabTokenInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        testGitlabTokenInstall: async (installGitlabTokenInput: InstallGitlabTokenInput, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'installGitlabTokenInput' is not null or undefined
+            assertParamExists('testGitlabTokenInstall', 'installGitlabTokenInput', installGitlabTokenInput)
+            const localVarPath = `/install/gitlab/token/test`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(installGitlabTokenInput, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -573,6 +719,19 @@ export const InstallApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Records a pre-existing GitHub App chosen for headless install. Requires the one-time install token.
+         * @summary Save install GitHub App
+         * @param {InstallGithubAppInput} installGithubAppInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async putInstallGithubApp(installGithubAppInput: InstallGithubAppInput, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.putInstallGithubApp(installGithubAppInput, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['InstallApi.putInstallGithubApp']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Records the GitHub personal access token chosen during the browser install. Requires the one-time install token.
          * @summary Save install GitHub token
          * @param {InstallGithubTokenInput} installGithubTokenInput
@@ -583,6 +742,32 @@ export const InstallApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.putInstallGithubToken(installGithubTokenInput, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['InstallApi.putInstallGithubToken']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Records GitLab OAuth app settings and a token chosen during browser install. Requires the one-time install token.
+         * @summary Save install GitLab app
+         * @param {InstallGitlabAppInput} installGitlabAppInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async putInstallGitlabApp(installGitlabAppInput: InstallGitlabAppInput, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.putInstallGitlabApp(installGitlabAppInput, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['InstallApi.putInstallGitlabApp']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Records the GitLab personal access token chosen during the browser install. Requires the one-time install token.
+         * @summary Save install GitLab token
+         * @param {InstallGitlabTokenInput} installGitlabTokenInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async putInstallGitlabToken(installGitlabTokenInput: InstallGitlabTokenInput, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.putInstallGitlabToken(installGitlabTokenInput, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['InstallApi.putInstallGitlabToken']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -635,6 +820,19 @@ export const InstallApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.putInstallServer(installServerConfigInput, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['InstallApi.putInstallServer']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Validates a GitLab personal access token without persisting it. Requires the one-time install token.
+         * @summary Validate install GitLab token
+         * @param {InstallGitlabTokenInput} installGitlabTokenInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async testGitlabTokenInstall(installGitlabTokenInput: InstallGitlabTokenInput, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<InstallGithubTokenTestResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.testGitlabTokenInstall(installGitlabTokenInput, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['InstallApi.testGitlabTokenInstall']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -738,6 +936,16 @@ export const InstallApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.getInstallSession(options).then((request) => request(axios, basePath));
         },
         /**
+         * Records a pre-existing GitHub App chosen for headless install. Requires the one-time install token.
+         * @summary Save install GitHub App
+         * @param {InstallGithubAppInput} installGithubAppInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putInstallGithubApp(installGithubAppInput: InstallGithubAppInput, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.putInstallGithubApp(installGithubAppInput, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Records the GitHub personal access token chosen during the browser install. Requires the one-time install token.
          * @summary Save install GitHub token
          * @param {InstallGithubTokenInput} installGithubTokenInput
@@ -746,6 +954,26 @@ export const InstallApiFactory = function (configuration?: Configuration, basePa
          */
         putInstallGithubToken(installGithubTokenInput: InstallGithubTokenInput, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.putInstallGithubToken(installGithubTokenInput, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Records GitLab OAuth app settings and a token chosen during browser install. Requires the one-time install token.
+         * @summary Save install GitLab app
+         * @param {InstallGitlabAppInput} installGitlabAppInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putInstallGitlabApp(installGitlabAppInput: InstallGitlabAppInput, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.putInstallGitlabApp(installGitlabAppInput, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Records the GitLab personal access token chosen during the browser install. Requires the one-time install token.
+         * @summary Save install GitLab token
+         * @param {InstallGitlabTokenInput} installGitlabTokenInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putInstallGitlabToken(installGitlabTokenInput: InstallGitlabTokenInput, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.putInstallGitlabToken(installGitlabTokenInput, options).then((request) => request(axios, basePath));
         },
         /**
          * Records the LLM providers and API keys chosen during the browser install. An empty `providers` list marks the LLM step as completed and explicitly skipped. Requires the one-time install token.
@@ -786,6 +1014,16 @@ export const InstallApiFactory = function (configuration?: Configuration, basePa
          */
         putInstallServer(installServerConfigInput: InstallServerConfigInput, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.putInstallServer(installServerConfigInput, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Validates a GitLab personal access token without persisting it. Requires the one-time install token.
+         * @summary Validate install GitLab token
+         * @param {InstallGitlabTokenInput} installGitlabTokenInput
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        testGitlabTokenInstall(installGitlabTokenInput: InstallGitlabTokenInput, options?: RawAxiosRequestConfig): AxiosPromise<InstallGithubTokenTestResponse> {
+            return localVarFp.testGitlabTokenInstall(installGitlabTokenInput, options).then((request) => request(axios, basePath));
         },
         /**
          * Validates a GitHub personal access token without persisting it. Requires the one-time install token.
@@ -878,6 +1116,17 @@ export class InstallApi extends BaseAPI {
     }
 
     /**
+     * Records a pre-existing GitHub App chosen for headless install. Requires the one-time install token.
+     * @summary Save install GitHub App
+     * @param {InstallGithubAppInput} installGithubAppInput
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public putInstallGithubApp(installGithubAppInput: InstallGithubAppInput, options?: RawAxiosRequestConfig) {
+        return InstallApiFp(this.configuration).putInstallGithubApp(installGithubAppInput, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Records the GitHub personal access token chosen during the browser install. Requires the one-time install token.
      * @summary Save install GitHub token
      * @param {InstallGithubTokenInput} installGithubTokenInput
@@ -886,6 +1135,28 @@ export class InstallApi extends BaseAPI {
      */
     public putInstallGithubToken(installGithubTokenInput: InstallGithubTokenInput, options?: RawAxiosRequestConfig) {
         return InstallApiFp(this.configuration).putInstallGithubToken(installGithubTokenInput, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Records GitLab OAuth app settings and a token chosen during browser install. Requires the one-time install token.
+     * @summary Save install GitLab app
+     * @param {InstallGitlabAppInput} installGitlabAppInput
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public putInstallGitlabApp(installGitlabAppInput: InstallGitlabAppInput, options?: RawAxiosRequestConfig) {
+        return InstallApiFp(this.configuration).putInstallGitlabApp(installGitlabAppInput, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Records the GitLab personal access token chosen during the browser install. Requires the one-time install token.
+     * @summary Save install GitLab token
+     * @param {InstallGitlabTokenInput} installGitlabTokenInput
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public putInstallGitlabToken(installGitlabTokenInput: InstallGitlabTokenInput, options?: RawAxiosRequestConfig) {
+        return InstallApiFp(this.configuration).putInstallGitlabToken(installGitlabTokenInput, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -930,6 +1201,17 @@ export class InstallApi extends BaseAPI {
      */
     public putInstallServer(installServerConfigInput: InstallServerConfigInput, options?: RawAxiosRequestConfig) {
         return InstallApiFp(this.configuration).putInstallServer(installServerConfigInput, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Validates a GitLab personal access token without persisting it. Requires the one-time install token.
+     * @summary Validate install GitLab token
+     * @param {InstallGitlabTokenInput} installGitlabTokenInput
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public testGitlabTokenInstall(installGitlabTokenInput: InstallGitlabTokenInput, options?: RawAxiosRequestConfig) {
+        return InstallApiFp(this.configuration).testGitlabTokenInstall(installGitlabTokenInput, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

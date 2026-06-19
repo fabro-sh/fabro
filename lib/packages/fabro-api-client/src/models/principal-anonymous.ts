@@ -14,13 +14,12 @@
 
 
 
-/**
- * Whether the model endpoint supports a native reasoning-effort parameter.
- */
+export interface PrincipalAnonymous {
+    'kind': PrincipalAnonymousKindEnum;
+}
 
-export const ReasoningEffortFeature = {
-    LEVELS: 'levels',
-    NONE: 'none'
+export const PrincipalAnonymousKindEnum = {
+    ANONYMOUS: 'anonymous'
 } as const;
 
-export type ReasoningEffortFeature = typeof ReasoningEffortFeature[keyof typeof ReasoningEffortFeature];
+export type PrincipalAnonymousKindEnum = typeof PrincipalAnonymousKindEnum[keyof typeof PrincipalAnonymousKindEnum];

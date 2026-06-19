@@ -852,8 +852,8 @@ mod tests {
         OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite, VaultSecretWrite,
         default_web_url, merge_server_settings, persist_install_outputs_direct,
         prepare_dev_token_write_for_install, set_cli_target_http, set_server_listen,
-        write_github_app_settings, write_gitlab_app_settings,
-        write_gitlab_token_settings, write_object_store_settings, write_sandbox_settings,
+        write_github_app_settings, write_gitlab_app_settings, write_gitlab_token_settings,
+        write_object_store_settings, write_sandbox_settings,
     };
 
     fn format_config_toml() -> String {

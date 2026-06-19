@@ -272,8 +272,8 @@ pub struct GithubIntegrationSettings {
 pub struct GitlabIntegrationSettings {
     pub enabled:   bool,
     pub strategy:  GitlabIntegrationStrategy,
-    pub base_url:  Option<InterpString>,
-    pub client_id: Option<InterpString>,
+    pub base_url:  Option<String>,
+    pub client_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

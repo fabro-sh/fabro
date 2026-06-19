@@ -9,7 +9,9 @@ use axum::{Extension, Json, Router};
 use chrono::{DateTime, Utc};
 use cookie::time::Duration;
 use cookie::{Cookie, CookieJar, Key, SameSite};
-use fabro_gitlab::oauth::{GitLabUser, TokenExchangeRequest, TokenExchangeResponse};
+use fabro_gitlab::oauth::{
+    self as gitlab_oauth, GitLabUser, TokenExchangeRequest, TokenExchangeResponse,
+};
 use fabro_gitlab::repository::GitLabBaseUrl;
 use fabro_redact::DisplaySafeUrl;
 use fabro_static::EnvVars;
@@ -489,10 +491,6 @@ async fn login_github(
     response
 }
 
-#[expect(
-    clippy::disallowed_types,
-    reason = "GitLab OAuth authorize URL is raw browser redirect transit; logs use DisplaySafeUrl."
-)]
 async fn login_gitlab(
     State(state): State<Arc<AppState>>,
     Extension(auth_mode): Extension<AuthMode>,
@@ -534,7 +532,7 @@ async fn login_gitlab(
     let state_token = format!("fabro-{}", ulid::Ulid::new());
     let redirect_uri = format!("{web_url}/auth/callback/gitlab");
     let authorize_url =
-        fabro_gitlab::oauth::authorize_url(&base_url, &client_id, &redirect_uri, &state_token);
+        gitlab_oauth::authorize_url(&base_url, &client_id, &redirect_uri, &state_token);
 
     let safe_redirect_uri = redacted_url_for_log(&redirect_uri);
     debug!(redirect_uri = %safe_redirect_uri, "OAuth login redirecting to GitLab");
@@ -998,7 +996,7 @@ async fn callback_gitlab(
     };
 
     let token = match http
-        .post(fabro_gitlab::oauth::token_url(&base_url))
+        .post(gitlab_oauth::token_url(&base_url))
         .header(header::ACCEPT, "application/json")
         .form(&TokenExchangeRequest {
             client_id: &client_id,
@@ -1050,7 +1048,7 @@ async fn callback_gitlab(
 
     let auth_header = format!("Bearer {token}");
     let profile = match http
-        .get(fabro_gitlab::oauth::user_url(&base_url))
+        .get(gitlab_oauth::user_url(&base_url))
         .header(header::AUTHORIZATION, &auth_header)
         .send()
         .await
@@ -1153,20 +1151,18 @@ async fn callback_gitlab(
 }
 
 fn resolve_gitlab_base_url(
-    state: &AppState,
+    _state: &AppState,
     settings: &fabro_types::ServerSettings,
 ) -> Option<GitLabBaseUrl> {
     let base_url = settings.server.integrations.gitlab.base_url.as_ref()?;
-    let base_url = state.resolve_interp(base_url).ok()?;
-    GitLabBaseUrl::parse(&base_url).ok()
+    GitLabBaseUrl::parse(base_url).ok()
 }
 
 fn resolve_gitlab_client_id(
-    state: &AppState,
+    _state: &AppState,
     settings: &fabro_types::ServerSettings,
 ) -> Option<String> {
-    let client_id = settings.server.integrations.gitlab.client_id.as_ref()?;
-    state.resolve_interp(client_id).ok()
+    settings.server.integrations.gitlab.client_id.clone()
 }
 
 async fn gitlab_profile_avatar_url(
@@ -1180,7 +1176,7 @@ async fn gitlab_profile_avatar_url(
     }
 
     let Ok(response) = http
-        .get(fabro_gitlab::oauth::user_detail_url(base_url, profile.id))
+        .get(gitlab_oauth::user_detail_url(base_url, profile.id))
         .header(header::AUTHORIZATION, auth_header)
         .send()
         .await
@@ -1219,9 +1215,7 @@ async fn gitlab_login_allowed(
 
     for group in &auth.allowed_groups {
         let response = match http
-            .get(fabro_gitlab::oauth::group_member_url(
-                base_url, group, profile.id,
-            ))
+            .get(gitlab_oauth::group_member_url(base_url, group, profile.id))
             .header(header::AUTHORIZATION, auth_header)
             .send()
             .await

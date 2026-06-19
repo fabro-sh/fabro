@@ -1212,7 +1212,7 @@ fn decorate_repository_provider_for_gitlab(
     let Some(base_url) = gitlab.base_url.as_ref() else {
         return run;
     };
-    let Ok(base_url) = GitLabBaseUrl::parse(&base_url.as_source()) else {
+    let Ok(base_url) = GitLabBaseUrl::parse(base_url) else {
         return run;
     };
     let Some(origin_url) = repository.origin_url.as_deref() else {
@@ -1607,13 +1607,13 @@ impl AppState {
         let Some(base_url) = gitlab.base_url.as_ref() else {
             return Ok(None);
         };
-        let base_url = fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url.as_source())
+        let base_url = GitLabBaseUrl::parse(base_url)
             .map_err(|err| format!("Invalid GitLab base URL: {err}"))?;
 
         let Some(origin_url) = origin_url else {
             return Ok(None);
         };
-        if fabro_gitlab::repository::parse_origin(&base_url, origin_url).is_err() {
+        if gitlab_repository::parse_origin(&base_url, origin_url).is_err() {
             return Ok(None);
         }
 

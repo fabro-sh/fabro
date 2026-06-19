@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
+use fabro_gitlab::repository::GitLabBaseUrl;
 use fabro_slack::config::{
     SlackCredentialResolution,
     resolve_credentials_status_with_lookup as resolve_slack_credentials_status_with_lookup,
@@ -21,7 +22,7 @@ use super::super::{
     SystemIntegrationStatus, SystemIntegrationsResponse, SystemRepairRunIssue,
     SystemRepairRunsResponse, SystemRunCounts, build_disk_usage_response, build_prune_plan,
     counts_toward_scheduler_capacity, delete_run_internal, diagnostics, get, post,
-    resolve_interp_string, resource_sampler, spawn_blocking, system_sandbox_provider, to_i64,
+    resource_sampler, spawn_blocking, system_sandbox_provider, to_i64,
 };
 
 const GITLAB_INTEGRATION_PROBE_CACHE_TTL: Duration = Duration::from_secs(30);
@@ -58,7 +59,6 @@ async fn get_server_settings(_auth: RequiredUser, State(state): State<Arc<AppSta
 
 async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
     let manifest_run_settings = state.manifest_run_settings();
-    let server_settings = state.server_settings();
     let (total_runs, active_runs, scheduler_slots_used) = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         let active = runs
@@ -84,7 +84,7 @@ async fn get_system_info(_auth: RequiredUser, State(state): State<Arc<AppState>>
 
     let response = SystemInfoResponse {
         version:          Some(FABRO_VERSION.to_string()),
-        server_url:       Some(server_settings.server.web.url.as_source()),
+        server_url:       Some(state.effective_web_url()),
         git_sha:          option_env!("FABRO_GIT_SHA").map(str::to_string),
         build_date:       option_env!("FABRO_BUILD_DATE").map(str::to_string),
         profile:          option_env!("FABRO_BUILD_PROFILE").map(str::to_string),
@@ -132,10 +132,10 @@ fn github_integration_status(
         .to_string(),
     );
     if let Some(slug) = settings.slug.as_ref() {
-        metadata.insert("slug".to_string(), display_interp(state, slug));
+        metadata.insert("slug".to_string(), slug.clone());
     }
     if let Some(app_id) = settings.app_id.as_ref() {
-        metadata.insert("app_id".to_string(), display_interp(state, app_id));
+        metadata.insert("app_id".to_string(), app_id.clone());
     }
 
     if !settings.enabled {
@@ -193,13 +193,8 @@ async fn gitlab_integration_status(state: &AppState) -> SystemIntegrationStatus 
     let auth = &state.server_settings().server.auth.gitlab;
     let mut metadata = BTreeMap::new();
     metadata.insert("strategy".to_string(), settings.strategy.to_string());
-    let base_url = settings
-        .base_url
-        .as_ref()
-        .map(|value| display_interp(state, value));
-    let parsed_base_url = base_url
-        .as_deref()
-        .map(fabro_gitlab::repository::GitLabBaseUrl::parse);
+    let base_url = settings.base_url.clone();
+    let parsed_base_url = base_url.as_deref().map(GitLabBaseUrl::parse);
     match &parsed_base_url {
         Some(Ok(base)) => {
             metadata.insert("base_url".to_string(), base.url.to_string());
@@ -224,10 +219,7 @@ async fn gitlab_integration_status(state: &AppState) -> SystemIntegrationStatus 
         );
     }
 
-    let client_id = settings
-        .client_id
-        .as_ref()
-        .map(|value| display_interp(state, value));
+    let client_id = settings.client_id.clone();
     let mut missing = Vec::new();
     if settings.base_url.is_none() {
         missing.push("server.integrations.gitlab.base_url".to_string());
@@ -408,7 +400,7 @@ fn slack_integration_status(state: &AppState) -> SystemIntegrationStatus {
     if let Some(default_channel) = settings.default_channel.as_ref() {
         metadata.insert(
             "default_channel".to_string(),
-            display_interp(state, default_channel),
+            display_interp(default_channel),
         );
     }
 
@@ -468,6 +460,14 @@ fn slack_integration_status(state: &AppState) -> SystemIntegrationStatus {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "System integration metadata displays unresolved source only when interpolation fails."
+)]
+fn display_interp(value: &InterpString) -> String {
+    value.as_source()
+}
+
 fn integration_status(
     provider: IntegrationProvider,
     enabled: bool,
@@ -493,12 +493,6 @@ fn missing_vault_secret(state: &AppState, name: &str) -> bool {
         .as_deref()
         .map(str::trim)
         .is_none_or(str::is_empty)
-}
-
-fn display_interp(state: &AppState, value: &InterpString) -> String {
-    state
-        .resolve_interp(value)
-        .unwrap_or_else(|_| value.as_source())
 }
 
 #[cfg(test)]
@@ -1010,17 +1004,13 @@ async fn get_github_repo(
     let base_url = fabro_github::github_api_base_url();
     let (token, client) = match github_settings.strategy {
         GithubIntegrationStrategy::App => {
-            let Some(app_id) = github_settings.app_id.as_ref() else {
+            let Some(_app_id) = github_settings.app_id.as_ref() else {
                 return ApiError::new(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "server.integrations.github.app_id is not configured",
                 )
                 .into_response();
             };
-            if let Err(err) = resolve_interp_string(app_id) {
-                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
-                    .into_response();
-            }
             let creds = match state.github_credentials(github_settings) {
                 Ok(Some(fabro_github::GitHubCredentials::App(creds))) => creds,
                 Ok(Some(_)) => unreachable!("app strategy should not return token credentials"),
@@ -1045,13 +1035,7 @@ async fn get_github_repo(
                 }
             };
             let install_url = match github_settings.slug.as_ref() {
-                Some(slug) => match resolve_interp_string(slug) {
-                    Ok(slug) => format!("https://github.com/apps/{slug}/installations/new"),
-                    Err(err) => {
-                        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
-                            .into_response();
-                    }
-                },
+                Some(slug) => format!("https://github.com/apps/{slug}/installations/new"),
                 None => format!("https://github.com/organizations/{owner}/settings/installations"),
             };
 

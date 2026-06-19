@@ -1,7 +1,12 @@
 use std::sync::Arc;
 
+use fabro_gitlab::merge_requests as gitlab_merge_requests;
+use fabro_gitlab::repository::{
+    GitLabBaseUrl, GitLabRepository, parse_merge_request_url, parse_origin,
+};
 use fabro_static::EnvVars;
 use fabro_types::PullRequestProvider;
+use fabro_types::dense::ServerSettings;
 
 use super::super::{
     ApiError, AppState, CloseRunPullRequestResponse, CreateRunPullRequestRequest, IntoResponse,
@@ -56,7 +61,7 @@ fn parse_github_owner_repo_from_url(url: &str, kind: &str) -> Result<(String, St
 }
 
 fn pull_request_record_from_link_request(
-    settings: &fabro_types::dense::ServerSettings,
+    settings: &ServerSettings,
     body: &LinkRunPullRequestRequest,
 ) -> Result<PullRequestLink, ApiError> {
     parse_pull_request_url(settings, body.html_url.trim()).map_err(|err| {
@@ -70,7 +75,7 @@ fn pull_request_record_from_link_request(
 }
 
 fn parse_pull_request_url(
-    settings: &fabro_types::dense::ServerSettings,
+    settings: &ServerSettings,
     raw_url: &str,
 ) -> Result<PullRequestLink, String> {
     if let Ok(link) = PullRequestLink::from_github_url(raw_url) {
@@ -83,13 +88,11 @@ fn parse_pull_request_url(
                 .to_string(),
         );
     };
-    let base = fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url.as_source()).map_err(
-        |_| {
+    let base = GitLabBaseUrl::parse(base_url).map_err(|_| {
             "Pull request link must be a GitHub pull request URL or a configured GitLab merge request URL."
                 .to_string()
-        },
-    )?;
-    fabro_gitlab::repository::parse_merge_request_url(&base, raw_url).map_err(|_| {
+        })?;
+    parse_merge_request_url(&base, raw_url).map_err(|_| {
         "Pull request link must be a GitHub pull request URL or a configured GitLab merge request URL."
             .to_string()
     })
@@ -147,9 +150,7 @@ fn load_server_gitlab_context(
     server_gitlab_context_from_base_url(state, base_url).map(Some)
 }
 
-fn server_gitlab_base_url(
-    state: &AppState,
-) -> Result<Option<fabro_gitlab::repository::GitLabBaseUrl>, ApiError> {
+fn server_gitlab_base_url(state: &AppState) -> Result<Option<GitLabBaseUrl>, ApiError> {
     let settings = state.server_settings();
     let gitlab = &settings.server.integrations.gitlab;
     if !gitlab.enabled {
@@ -158,21 +159,19 @@ fn server_gitlab_base_url(
     let Some(base_url) = gitlab.base_url.as_ref() else {
         return Ok(None);
     };
-    fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url.as_source())
-        .map(Some)
-        .map_err(|err| {
-            warn!(error = %err, "GitLab integration unavailable on server");
-            ApiError::with_code(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "GitLab integration unavailable on server.",
-                "integration_unavailable",
-            )
-        })
+    GitLabBaseUrl::parse(base_url).map(Some).map_err(|err| {
+        warn!(error = %err, "GitLab integration unavailable on server");
+        ApiError::with_code(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "GitLab integration unavailable on server.",
+            "integration_unavailable",
+        )
+    })
 }
 
 fn server_gitlab_context_from_base_url(
     state: &AppState,
-    base_url: fabro_gitlab::repository::GitLabBaseUrl,
+    base_url: GitLabBaseUrl,
 ) -> Result<fabro_gitlab::GitLabContext, ApiError> {
     let token = state
         .vault_secret(EnvVars::GITLAB_TOKEN)
@@ -221,7 +220,7 @@ fn server_gitlab_context_for_origin(
     let Some(base_url) = server_gitlab_base_url(state)? else {
         return Ok(None);
     };
-    if fabro_gitlab::repository::parse_origin(&base_url, origin_url).is_err() {
+    if parse_origin(&base_url, origin_url).is_err() {
         return Ok(None);
     }
     server_gitlab_context_from_base_url(state, base_url).map(Some)
@@ -253,7 +252,7 @@ struct PullRequestGithubContext {
 
 struct PullRequestGitlabContext {
     record: PullRequestLink,
-    repo:   fabro_gitlab::repository::GitLabRepository,
+    repo:   GitLabRepository,
     number: u64,
     ctx:    fabro_gitlab::GitLabContext,
 }
@@ -296,16 +295,15 @@ fn github_coordinates_for_record(record: &PullRequestLink) -> (String, String, u
 fn gitlab_repo_for_record(
     ctx: &fabro_gitlab::GitLabContext,
     record: &PullRequestLink,
-) -> Result<fabro_gitlab::repository::GitLabRepository, ApiError> {
-    let base =
-        fabro_gitlab::repository::GitLabBaseUrl::parse(ctx.base_url.as_str()).map_err(|err| {
-            warn!(error = %err, "GitLab integration unavailable on server");
-            ApiError::with_code(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "GitLab integration unavailable on server.",
-                "integration_unavailable",
-            )
-        })?;
+) -> Result<GitLabRepository, ApiError> {
+    let base = GitLabBaseUrl::parse(ctx.base_url.as_str()).map_err(|err| {
+        warn!(error = %err, "GitLab integration unavailable on server");
+        ApiError::with_code(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "GitLab integration unavailable on server.",
+            "integration_unavailable",
+        )
+    })?;
     let full_path = format!("{}/{}", record.owner_path, record.repo);
     let origin_url = {
         let mut url = base.url.clone();
@@ -318,7 +316,7 @@ fn gitlab_repo_for_record(
         url.set_path(&path);
         url.to_string()
     };
-    fabro_gitlab::repository::parse_origin(&base, &origin_url).map_err(|err| {
+    parse_origin(&base, &origin_url).map_err(|err| {
         warn!(error = %err, "Stored GitLab pull request record is invalid");
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -705,11 +703,10 @@ async fn get_run_pull_request(
                     .into_response();
                 }
             };
-            match fabro_gitlab::merge_requests::get_merge_request(&ctx, &repo, record.number).await
-            {
+            match gitlab_merge_requests::get_merge_request(&ctx, &repo, record.number).await {
                 Ok(mr) => Json(available_pull_request_response(
                     record,
-                    fabro_gitlab::merge_requests::to_pull_request_details(&repo, mr),
+                    gitlab_merge_requests::to_pull_request_details(&repo, mr),
                 ))
                 .into_response(),
                 Err(fabro_gitlab::GitLabError::NotFound { .. }) => {
@@ -771,7 +768,7 @@ async fn merge_run_pull_request(
             }
         }
         StoredPullRequestContext::Gitlab(ctx) => {
-            match fabro_gitlab::merge_requests::merge_merge_request(
+            match gitlab_merge_requests::merge_merge_request(
                 &ctx.ctx,
                 &ctx.repo,
                 ctx.number,
@@ -824,8 +821,7 @@ async fn close_run_pull_request(
             }
         }
         StoredPullRequestContext::Gitlab(ctx) => {
-            match fabro_gitlab::merge_requests::close_merge_request(&ctx.ctx, &ctx.repo, ctx.number)
-                .await
+            match gitlab_merge_requests::close_merge_request(&ctx.ctx, &ctx.repo, ctx.number).await
             {
                 Ok(()) => Json(CloseRunPullRequestResponse {
                     number:   i64::try_from(ctx.number)
@@ -845,7 +841,6 @@ async fn close_run_pull_request(
 #[cfg(test)]
 mod tests {
     use fabro_types::PullRequestProvider;
-    use fabro_types::settings::InterpString;
 
     use super::*;
 
@@ -854,7 +849,7 @@ mod tests {
         let mut settings = crate::test_support::default_test_server_settings();
         settings.server.integrations.gitlab.enabled = true;
         settings.server.integrations.gitlab.base_url =
-            Some(InterpString::parse("https://gitlab.ipt.example"));
+            Some("https://gitlab.ipt.example".to_string());
 
         let link = parse_pull_request_url(
             &settings,
@@ -877,7 +872,7 @@ mod tests {
         let mut settings = crate::test_support::default_test_server_settings();
         settings.server.integrations.gitlab.enabled = true;
         settings.server.integrations.gitlab.base_url =
-            Some(InterpString::parse("https://gitlab.ipt.example"));
+            Some("https://gitlab.ipt.example".to_string());
         let state = crate::test_support::TestAppStateBuilder::new()
             .runtime_settings(settings, fabro_config::RunLayer::default())
             .build();

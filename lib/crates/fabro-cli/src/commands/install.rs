@@ -4,6 +4,10 @@
 )]
 
 use std::future::Future;
+#[expect(
+    clippy::disallowed_types,
+    reason = "CLI install reads secrets from stdin synchronously before async work."
+)]
 use std::io::Read as _;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -28,6 +32,8 @@ use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::user::{SETTINGS_CONFIG_FILENAME, default_storage_dir};
 use fabro_config::{Storage, UserSettingsBuilder, envfile};
+use fabro_gitlab::oauth as gitlab_oauth;
+use fabro_gitlab::repository::GitLabBaseUrl;
 use fabro_install::{
     GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, GITLAB_APP_VAULT_KEYS,
     GITLAB_INSTALL_SECRET_KEYS, GitlabAppInstallSettings, InstallListenConfig,
@@ -1004,6 +1010,10 @@ fn validate_install_gitlab_non_interactive(
     Ok(())
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "CLI install validates and normalizes a user-provided GitLab base URL without logging credentials."
+)]
 fn validate_install_gitlab_base_url(raw: &str) -> Result<String> {
     let url = fabro_http::Url::parse(raw).context("GitLab base_url is invalid")?;
     anyhow::ensure!(
@@ -1011,10 +1021,11 @@ fn validate_install_gitlab_base_url(raw: &str) -> Result<String> {
         "GitLab base_url must use http or https"
     );
     if url.scheme() == "http" {
-        let host = url.host_str().unwrap_or_default();
-        let local_or_test = matches!(host, "localhost" | "127.0.0.1" | "::1")
-            || host.ends_with(".localhost")
-            || host.ends_with(".test");
+        let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+        let local_or_test = matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+            || host
+                .rsplit_once('.')
+                .is_some_and(|(_, suffix)| matches!(suffix, "localhost" | "test"));
         anyhow::ensure!(
             local_or_test,
             "GitLab base_url must use https unless it points to localhost or a test host"
@@ -1030,11 +1041,11 @@ struct GitlabUserResponse {
 
 async fn validate_gitlab_token(base_url: &str, token: &str) -> Result<String> {
     let base_url = validate_install_gitlab_base_url(base_url)?;
-    let base = fabro_gitlab::repository::GitLabBaseUrl::parse(&base_url)
+    let base = GitLabBaseUrl::parse(&base_url)
         .map_err(|err| anyhow::anyhow!("GitLab base_url is invalid: {err}"))?;
     let client = fabro_http::http_client()?;
     let response = client
-        .get(fabro_gitlab::oauth::user_url(&base))
+        .get(gitlab_oauth::user_url(&base))
         .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/json")
         .send()

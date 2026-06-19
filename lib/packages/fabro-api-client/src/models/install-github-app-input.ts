@@ -14,13 +14,12 @@
 
 
 
-/**
- * Whether the model endpoint supports a native reasoning-effort parameter.
- */
-
-export const ReasoningEffortFeature = {
-    LEVELS: 'levels',
-    NONE: 'none'
-} as const;
-
-export type ReasoningEffortFeature = typeof ReasoningEffortFeature[keyof typeof ReasoningEffortFeature];
+export interface InstallGithubAppInput {
+    'app_id': string;
+    'client_id': string;
+    'client_secret': string;
+    'private_key': string;
+    'slug': string;
+    'allowed_username': string;
+    'webhook_secret'?: string | null;
+}

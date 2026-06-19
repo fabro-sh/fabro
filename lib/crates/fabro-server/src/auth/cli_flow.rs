@@ -817,10 +817,6 @@ fn session_required_error(providers: &[CliOAuthProvider]) -> (&'static str, &'st
     }
 }
 
-fn resolved_web_url(state: &AppState) -> Option<String> {
-    state.canonical_origin().ok()
-}
-
 fn session_cookie_secure(state: &AppState) -> bool {
     state
         .canonical_origin()
@@ -1077,7 +1073,6 @@ fn auth_method_for_identity(state: &AppState, identity: &fabro_types::IdpIdentit
         .gitlab
         .base_url
         .as_ref()
-        .and_then(|base_url| state.resolve_interp(base_url).ok())
         .map(|base_url| base_url.trim_end_matches('/').to_string())
         .is_some_and(|base_url| issuer.trim_end_matches('/') == base_url)
     {

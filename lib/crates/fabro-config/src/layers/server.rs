@@ -250,9 +250,9 @@ pub struct GitlabIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strategy:  Option<GitlabIntegrationStrategy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url:  Option<InterpString>,
+    pub base_url:  Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id: Option<InterpString>,
+    pub client_id: Option<String>,
 }
 
 impl Combine for GitlabIntegrationLayer {

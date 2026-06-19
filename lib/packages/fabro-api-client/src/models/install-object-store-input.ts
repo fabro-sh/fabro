@@ -13,29 +13,15 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { InstallObjectStoreLocalInput } from './install-object-store-local-input';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { InstallObjectStoreS3Input } from './install-object-store-s3-input';
 
 /**
+ * @type InstallObjectStoreInput
  * Object-store mode selected during browser install.
  */
-export interface InstallObjectStoreInput {
-    'provider': InstallObjectStoreInputProviderEnum;
-    'root'?: string;
-    'bucket'?: string;
-    'region'?: string;
-    'credential_mode'?: InstallObjectStoreInputCredentialModeEnum;
-    'access_key_id'?: string;
-    'secret_access_key'?: string;
-}
-
-export const InstallObjectStoreInputProviderEnum = {
-    LOCAL: 'local',
-    S3: 's3'
-} as const;
-
-export type InstallObjectStoreInputProviderEnum = typeof InstallObjectStoreInputProviderEnum[keyof typeof InstallObjectStoreInputProviderEnum];
-export const InstallObjectStoreInputCredentialModeEnum = {
-    RUNTIME: 'runtime',
-    ACCESS_KEY: 'access_key'
-} as const;
-
-export type InstallObjectStoreInputCredentialModeEnum = typeof InstallObjectStoreInputCredentialModeEnum[keyof typeof InstallObjectStoreInputCredentialModeEnum];
+export type InstallObjectStoreInput = { provider: 'local' } & InstallObjectStoreLocalInput | { provider: 's3' } & InstallObjectStoreS3Input;
