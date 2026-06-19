@@ -181,11 +181,21 @@ pub fn parse_merge_request_url(base: &GitLabBaseUrl, raw: &str) -> Result<PullRe
         return Err(GitLabError::InvalidMergeRequestUrl);
     }
 
+    let mut html_url = url;
+    html_url
+        .set_username("")
+        .map_err(|()| GitLabError::InvalidMergeRequestUrl)?;
+    html_url
+        .set_password(None)
+        .map_err(|()| GitLabError::InvalidMergeRequestUrl)?;
+    html_url.set_query(None);
+    html_url.set_fragment(None);
+
     Ok(PullRequestLink::gitlab(
         repo.owner_path,
         repo.repo,
         number,
-        raw.to_string(),
+        html_url.to_string(),
     ))
 }
 
@@ -373,6 +383,36 @@ mod tests {
         assert_eq!(link.owner_path, "platform/tools");
         assert_eq!(link.repo, "fabro");
         assert_eq!(link.number, 17);
+        assert_eq!(
+            link.html_url,
+            "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/17"
+        );
+    }
+
+    #[test]
+    fn strips_query_and_fragment_from_merge_request_url() {
+        let base = GitLabBaseUrl::parse("https://gitlab.ipt.example/gitlab").unwrap();
+        let link = parse_merge_request_url(
+            &base,
+            "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/17?private_token=secret#discussion",
+        )
+        .unwrap();
+
+        assert_eq!(
+            link.html_url,
+            "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/17"
+        );
+    }
+
+    #[test]
+    fn strips_credentials_from_merge_request_url() {
+        let base = GitLabBaseUrl::parse("https://gitlab.ipt.example/gitlab").unwrap();
+        let link = parse_merge_request_url(
+            &base,
+            "https://oauth2:secret@gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/17",
+        )
+        .unwrap();
+
         assert_eq!(
             link.html_url,
             "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/17"

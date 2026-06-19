@@ -8592,7 +8592,7 @@ async fn link_run_pull_request_links_gitlab_mr_from_configured_base_and_updates_
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
-                        "html_url": "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/42"
+                        "html_url": "https://gitlab.ipt.example/gitlab/platform/tools/fabro/-/merge_requests/42?private_token=secret#discussion"
                     })
                     .to_string(),
                 ))
