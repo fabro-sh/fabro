@@ -6,7 +6,7 @@ pub mod provider;
 pub mod sandbox;
 pub mod sandbox_spec;
 
-#[cfg(any(feature = "docker", feature = "daytona", feature = "azure", test))]
+#[cfg(any(feature = "docker", feature = "daytona", test))]
 #[cfg_attr(
     test,
     allow(
@@ -66,7 +66,7 @@ pub use sandbox::{
     StdioProcessTermination, format_lines_numbered, git_push_via_exec, redacted_output_tail,
     setup_git_via_exec, shell_quote,
 };
-#[cfg(any(feature = "azure", feature = "daytona", feature = "docker"))]
+#[cfg(any(feature = "daytona", feature = "docker"))]
 pub use sandbox_spec::GitLabSandboxConfig;
 pub use sandbox_spec::SandboxSpec;
 pub use terminal::{TerminalSession, TerminalSize, open_terminal_for_run};
