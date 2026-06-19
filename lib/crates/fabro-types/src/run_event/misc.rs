@@ -228,6 +228,8 @@ pub struct AgentAcpStartedProps {
     pub command:     String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_name: Option<String>,
+    #[serde(default)]
+    pub reused:      bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

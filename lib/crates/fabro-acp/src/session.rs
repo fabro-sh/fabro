@@ -12,8 +12,8 @@ use agent_client_protocol::{ActiveSession, Agent, Client, Error as ProtocolError
 use fabro_sandbox::Sandbox;
 use fabro_types::{Principal, SteeringMessage};
 use fabro_util::time::elapsed_ms;
-use tokio::sync::Notify;
 use tokio::sync::futures::Notified;
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
@@ -23,6 +23,8 @@ use crate::transport::{SandboxAcpTransport, TransportState};
 
 pub type AcpNaturalCompletionCallback = Arc<dyn Fn() -> bool + Send + Sync>;
 pub type AcpSteerPromptCallback = Arc<dyn Fn(String, Option<Principal>) + Send + Sync>;
+type PermissionCancelSlot = Arc<Mutex<Option<CancellationToken>>>;
+type AcpReadySlot = Arc<Mutex<Option<oneshot::Sender<Result<(), AcpError>>>>>;
 
 const CANCEL_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
@@ -170,12 +172,136 @@ pub struct AcpRunRequest {
     pub live_control: Option<AcpLiveControl>,
 }
 
+pub struct AcpSessionStartRequest {
+    pub command: AcpProcessSpec,
+    pub cwd:     String,
+    pub env:     HashMap<String, String>,
+    pub sandbox: Arc<dyn Sandbox>,
+}
+
+pub struct AcpPromptRequest {
+    pub prompt:       String,
+    pub timeout_ms:   Option<u64>,
+    pub cancel_token: CancellationToken,
+    pub on_activity:  Option<Arc<dyn Fn() + Send + Sync>>,
+    pub live_control: Option<AcpLiveControl>,
+}
+
 #[derive(Debug)]
 pub struct AcpRunResult {
     pub text:        String,
     pub stop_reason: StopReason,
     pub stderr:      String,
     pub duration_ms: u64,
+}
+
+pub struct AcpSessionHandle {
+    commands: mpsc::Sender<AcpSessionCommand>,
+    state:    TransportState,
+}
+
+impl AcpSessionHandle {
+    pub async fn prompt(&self, request: AcpPromptRequest) -> Result<AcpRunResult, AcpError> {
+        let (reply, result) = oneshot::channel();
+        if self
+            .commands
+            .send(AcpSessionCommand::Prompt { request, reply })
+            .await
+            .is_err()
+        {
+            return Err(closed_session_error(&self.state).await);
+        }
+
+        match result.await {
+            Ok(result) => result,
+            Err(_) => Err(closed_session_error(&self.state).await),
+        }
+    }
+
+    pub async fn shutdown(&self) -> Result<(), AcpError> {
+        let (reply, result) = oneshot::channel();
+        if self
+            .commands
+            .send(AcpSessionCommand::Shutdown { reply })
+            .await
+            .is_err()
+        {
+            return Err(closed_session_error(&self.state).await);
+        }
+
+        match result.await {
+            Ok(result) => result,
+            Err(_) => Err(closed_session_error(&self.state).await),
+        }
+    }
+}
+
+enum AcpSessionCommand {
+    Prompt {
+        request: AcpPromptRequest,
+        reply:   oneshot::Sender<Result<AcpRunResult, AcpError>>,
+    },
+    Shutdown {
+        reply: oneshot::Sender<Result<(), AcpError>>,
+    },
+}
+
+struct PermissionCancelGuard {
+    slot: PermissionCancelSlot,
+}
+
+impl PermissionCancelGuard {
+    fn set(slot: &PermissionCancelSlot, token: CancellationToken) -> Self {
+        *slot.lock().expect("ACP permission cancel lock poisoned") = Some(token);
+        Self {
+            slot: Arc::clone(slot),
+        }
+    }
+}
+
+impl Drop for PermissionCancelGuard {
+    fn drop(&mut self) {
+        *self
+            .slot
+            .lock()
+            .expect("ACP permission cancel lock poisoned") = None;
+    }
+}
+
+pub async fn start_acp_session(
+    request: AcpSessionStartRequest,
+) -> Result<AcpSessionHandle, AcpError> {
+    let AcpSessionStartRequest {
+        command,
+        cwd,
+        env,
+        sandbox,
+    } = request;
+    let state = TransportState::new();
+    let transport = SandboxAcpTransport::new(command, cwd.clone(), env, sandbox, state.clone());
+    let permission_cancel_token: PermissionCancelSlot = Arc::new(Mutex::new(None));
+    let (commands, command_rx) = mpsc::channel(1);
+    let (ready, ready_rx) = oneshot::channel();
+    let ready_slot: AcpReadySlot = Arc::new(Mutex::new(Some(ready)));
+    let handle = AcpSessionHandle {
+        commands,
+        state: state.clone(),
+    };
+
+    tokio::spawn(run_acp_session_task(
+        transport,
+        cwd,
+        command_rx,
+        state.clone(),
+        permission_cancel_token,
+        ready_slot,
+    ));
+
+    match ready_rx.await {
+        Ok(Ok(())) => Ok(handle),
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err(closed_session_error(&state).await),
+    }
 }
 
 pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpError> {
@@ -304,6 +430,210 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
         stderr,
         duration_ms: elapsed_ms(start),
     })
+}
+
+async fn run_acp_session_task(
+    transport: SandboxAcpTransport,
+    cwd: String,
+    command_rx: mpsc::Receiver<AcpSessionCommand>,
+    state: TransportState,
+    permission_cancel_token: PermissionCancelSlot,
+    ready_slot: AcpReadySlot,
+) {
+    let permission_cancel_token_for_requests = Arc::clone(&permission_cancel_token);
+    let ready_for_session = Arc::clone(&ready_slot);
+    let state_for_session = state.clone();
+    let result = Client
+        .builder()
+        .name("fabro")
+        .on_receive_request(
+            async move |request: RequestPermissionRequest, responder, _connection| {
+                let is_cancelled = permission_cancel_token_for_requests
+                    .lock()
+                    .expect("ACP permission cancel lock poisoned")
+                    .as_ref()
+                    .is_some_and(CancellationToken::is_cancelled);
+                let outcome = if is_cancelled {
+                    RequestPermissionOutcome::Cancelled
+                } else {
+                    select_permission_outcome(&request)
+                };
+                responder.respond(RequestPermissionResponse::new(outcome))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(transport, async move |cx| {
+            cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+
+            cx.build_session(&cwd)
+                .block_task()
+                .run_until(async |mut session| {
+                    send_ready(&ready_for_session, Ok(()));
+                    run_session_command_loop(
+                        &mut session,
+                        command_rx,
+                        state_for_session,
+                        permission_cancel_token,
+                    )
+                    .await
+                })
+                .await
+        })
+        .await;
+
+    match result {
+        Ok(()) => send_ready(&ready_slot, Err(AcpError::SessionClosed)),
+        Err(error) => {
+            let error = map_protocol_or_state_error(&state, error).await;
+            send_ready(&ready_slot, Err(error));
+        }
+    }
+}
+
+async fn run_session_command_loop(
+    session: &mut ActiveSession<'_, Agent>,
+    mut command_rx: mpsc::Receiver<AcpSessionCommand>,
+    state: TransportState,
+    permission_cancel_token: PermissionCancelSlot,
+) -> Result<(), ProtocolError> {
+    while let Some(command) = command_rx.recv().await {
+        match command {
+            AcpSessionCommand::Prompt { request, reply } => {
+                let result =
+                    run_prompt_on_session(session, request, &state, &permission_cancel_token).await;
+                let keep_alive = result.is_ok();
+                let _ = reply.send(result);
+                if !keep_alive {
+                    break;
+                }
+            }
+            AcpSessionCommand::Shutdown { reply } => {
+                let result = state.terminate().await.map_err(AcpError::Sandbox);
+                let _ = reply.send(result);
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_prompt_on_session(
+    session: &mut ActiveSession<'_, Agent>,
+    request: AcpPromptRequest,
+    state: &TransportState,
+    permission_cancel_token: &PermissionCancelSlot,
+) -> Result<AcpRunResult, AcpError> {
+    let AcpPromptRequest {
+        prompt,
+        timeout_ms,
+        cancel_token,
+        on_activity,
+        live_control,
+    } = request;
+    if cancel_token.is_cancelled() {
+        state.terminate().await?;
+        return Err(AcpError::Cancelled);
+    }
+
+    let live_control = live_control.unwrap_or_default();
+    let start = std::time::Instant::now();
+    let read_cancel_token = cancel_token.clone();
+    let run_cancel_token = cancel_token.clone();
+    let _permission_cancel_guard =
+        PermissionCancelGuard::set(permission_cancel_token, cancel_token.clone());
+
+    if let Err(error) = session.send_prompt(prompt) {
+        state.terminate().await?;
+        return Err(map_protocol_or_state_error(state, error).await);
+    }
+
+    let run = read_live_session(
+        session,
+        &read_cancel_token,
+        &live_control.handle,
+        live_control.on_natural_completion.as_ref(),
+        live_control.on_steer_prompt.as_ref(),
+        on_activity.as_ref(),
+    );
+    let outcome = match timeout_ms {
+        Some(timeout_ms) => {
+            if let Ok(result) = timeout(Duration::from_millis(timeout_ms), run).await {
+                result
+            } else {
+                state.terminate().await?;
+                if run_cancel_token.is_cancelled() {
+                    return Err(AcpError::Cancelled);
+                }
+                return Err(AcpError::TimedOut {
+                    exec_output_tail: state.exec_output_tail().await,
+                });
+            }
+        }
+        None => run.await,
+    };
+
+    let (text, stop_reason) = match outcome {
+        Ok(result) => result,
+        Err(_) if run_cancel_token.is_cancelled() => {
+            state.terminate().await?;
+            return Err(AcpError::Cancelled);
+        }
+        Err(error) => {
+            state.terminate().await?;
+            return Err(map_protocol_or_state_error(state, error).await);
+        }
+    };
+
+    match stop_reason {
+        StopReason::EndTurn | StopReason::Refusal => {}
+        StopReason::Cancelled => {
+            state.terminate().await?;
+            return Err(AcpError::Cancelled);
+        }
+        _ => {
+            state.terminate().await?;
+            return Err(AcpError::StopReason {
+                stop_reason: render_stop_reason(&stop_reason),
+                text,
+            });
+        }
+    }
+
+    Ok(AcpRunResult {
+        text,
+        stop_reason,
+        stderr: state.stderr_tail().await,
+        duration_ms: elapsed_ms(start),
+    })
+}
+
+async fn map_protocol_or_state_error(state: &TransportState, error: ProtocolError) -> AcpError {
+    if let Some(startup_error) = state.take_startup_error().await {
+        return AcpError::Sandbox(startup_error);
+    }
+    if let Some(process_exit) = state.take_process_exit().await {
+        return AcpError::ProcessExited(process_exit);
+    }
+    map_protocol_error(error)
+}
+
+async fn closed_session_error(state: &TransportState) -> AcpError {
+    if let Some(startup_error) = state.take_startup_error().await {
+        return AcpError::Sandbox(startup_error);
+    }
+    if let Some(process_exit) = state.take_process_exit().await {
+        return AcpError::ProcessExited(process_exit);
+    }
+    AcpError::SessionClosed
+}
+
+fn send_ready(ready_slot: &AcpReadySlot, result: Result<(), AcpError>) {
+    if let Some(ready) = ready_slot.lock().expect("ACP ready lock poisoned").take() {
+        let _ = ready.send(result);
+    }
 }
 
 fn map_protocol_error(error: ProtocolError) -> AcpError {

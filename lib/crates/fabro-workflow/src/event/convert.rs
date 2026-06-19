@@ -1234,11 +1234,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             visit,
             command,
             config_name,
+            reused,
             ..
         } => EventBody::AgentAcpStarted(fabro_types::AgentAcpStartedProps {
             visit:       *visit,
             command:     command.clone(),
             config_name: config_name.clone(),
+            reused:      *reused,
         }),
         Event::AgentAcpCompleted {
             stdout,
@@ -2231,6 +2233,7 @@ mod tests {
                 visit:       2,
                 command:     "python fake_agent.py".to_string(),
                 config_name: Some("fake".to_string()),
+                reused:      false,
             },
             Utc::now(),
             Some(&scope),
@@ -2245,6 +2248,7 @@ mod tests {
                 assert_eq!(props.visit, 2);
                 assert_eq!(props.command, "python fake_agent.py");
                 assert_eq!(props.config_name.as_deref(), Some("fake"));
+                assert!(!props.reused);
             }
             other => panic!("expected AgentAcpStarted, got {other:?}"),
         }

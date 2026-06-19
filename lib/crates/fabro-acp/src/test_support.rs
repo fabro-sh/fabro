@@ -32,7 +32,10 @@ methods = []
 session_id = "sess-1"
 prompt_count = 0
 
-if os.environ.get("ACP_PID_RECORD"):
+if os.environ.get("ACP_PID_RECORD_APPEND"):
+    with open(os.environ["ACP_PID_RECORD_APPEND"], "a", encoding="utf-8") as record:
+        record.write(str(os.getpid()) + "\n")
+elif os.environ.get("ACP_PID_RECORD"):
     with open(os.environ["ACP_PID_RECORD"], "w", encoding="utf-8") as record:
         record.write(str(os.getpid()))
 
@@ -97,6 +100,24 @@ for line in sys.stdin:
             with open(os.environ["ACP_PROMPT_RECORD"], "w", encoding="utf-8") as record:
                 record.write(json.dumps(message.get("params", {})))
         mode = os.environ.get("ACP_MODE", "normal")
+        if mode == "echo_prompt_count":
+            send({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {
+                            "type": "text",
+                            "text": str(prompt_count) + ":" + first_prompt_text(message)
+                        }
+                    }
+                }
+            })
+            record_methods()
+            respond(message, {"stopReason": "end_turn"})
+            continue
         if mode == "timeout":
             time.sleep(60)
         if mode == "malformed":

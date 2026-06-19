@@ -336,6 +336,7 @@ mod tests {
                 visit:       1,
                 command:     "python fake_agent.py".to_string(),
                 config_name: Some("fake".to_string()),
+                reused:      false,
             })
         ));
         assert!(replay_event_for_fork_projection(
