@@ -816,7 +816,7 @@ where
                 summary:     "failed".into(),
                 details:     vec![CheckDetail::new(format!("Origin: {github_origin_url}"))],
                 remediation: Some(format!(
-                    "Clone-based sandboxes currently support GitHub repository origins only: {err}"
+                    "Clone-based sandboxes support GitHub origins and configured GitLab origins: {err}"
                 )),
             });
             return false;
