@@ -198,6 +198,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
               "hooks": [],
               "scm": {
                 "provider": null,
+                "origin_url": null,
                 "owner": null,
                 "repository": null,
                 "github": null
@@ -209,6 +210,9 @@ fn inspect_resolves_selector_via_server_endpoint() {
               "integrations": {
                 "github": {
                   "permissions": {}
+                },
+                "gitlab": {
+                  "token": false
                 }
               }
             }

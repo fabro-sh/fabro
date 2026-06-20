@@ -44,6 +44,7 @@ use object_store::aws::resolve_bucket_region;
 use object_store::path::Path as ObjectStorePath;
 use object_store::{ClientOptions, RetryConfig};
 use serde::{Deserialize, Serialize};
+use tokio::fs;
 use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::watch;
 use tokio::time::{sleep, timeout};
@@ -1131,6 +1132,46 @@ fn resolve_install_sandbox_state(
     })
 }
 
+fn split_default_environment_toml(
+    settings_doc: &mut toml::Value,
+) -> anyhow::Result<Option<String>> {
+    let Some(root) = settings_doc.as_table_mut() else {
+        bail!("settings document root is not a table");
+    };
+    let Some(environments) = root.remove("environments") else {
+        return Ok(None);
+    };
+    let mut environments = environments
+        .as_table()
+        .cloned()
+        .context("settings.toml [environments] is not a table")?;
+    let Some(default_environment) = environments.remove("default") else {
+        return Ok(None);
+    };
+    if !environments.is_empty() {
+        bail!("install generated unexpected non-default environment entries");
+    }
+    toml::to_string_pretty(&default_environment)
+        .map(Some)
+        .context("serializing generated default environment")
+}
+
+async fn write_default_environment_file(storage_dir: &Path, contents: &str) -> anyhow::Result<()> {
+    let environment_dir = storage_dir.join("environments");
+    fs::create_dir_all(&environment_dir)
+        .await
+        .with_context(|| {
+            format!(
+                "creating environment directory {}",
+                environment_dir.display()
+            )
+        })?;
+    let path = environment_dir.join("default.toml");
+    fs::write(&path, contents)
+        .await
+        .with_context(|| format!("writing environment file {}", path.display()))
+}
+
 fn resolve_install_object_store_state(
     current: Option<&InstallObjectStoreState>,
     input: InstallObjectStoreInput,
@@ -1920,10 +1961,7 @@ async fn post_install_finish(
                     .iter()
                     .map(|k| make_env_removal(k)),
             );
-            match prepare_dev_token_write() {
-                Ok(value) => value,
-                Err(response) => return response,
-            }
+            (None, None)
         }
         None => {
             vault_removals.extend(GITHUB_INSTALL_SECRET_KEYS.iter().map(|k| (*k).to_string()));
@@ -1998,6 +2036,12 @@ async fn post_install_finish(
         );
     }
 
+    let default_environment_toml = match split_default_environment_toml(&mut settings_doc) {
+        Ok(value) => value,
+        Err(err) => {
+            return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
+        }
+    };
     let settings_toml = match toml::to_string_pretty(&settings_doc) {
         Ok(value) => value,
         Err(err) => {
@@ -2063,6 +2107,15 @@ async fn post_install_finish(
             })),
         )
             .into_response();
+    }
+    if let Some(default_environment_toml) = default_environment_toml.as_deref() {
+        if let Err(err) =
+            write_default_environment_file(state.storage_dir.as_ref(), default_environment_toml)
+                .await
+        {
+            error!(error = %err, "install environment persistence failed");
+            return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
+        }
     }
 
     if let Ok(settings) = fabro_config::ServerSettingsBuilder::from_toml(&settings_toml) {

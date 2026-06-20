@@ -100,10 +100,23 @@ impl Combine for RunIntegrationsGithubLayer {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+/// `[run.integrations.gitlab]` — run-level GitLab integration knobs.
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
 #[serde(default, deny_unknown_fields)]
 pub struct RunIntegrationsGitlabLayer {
+    /// Opt in to injecting `GITLAB_TOKEN` at execution time. The token is not
+    /// written to run manifests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(default = "false", value_type = "boolean")]
     pub token: Option<bool>,
 }
 
@@ -564,6 +577,9 @@ pub struct RunScmLayer {
 pub struct ScmGitHubLayer;
 
 /// `[run.pull_request]` — provider-neutral PR behavior.
+///
+/// For GitLab merge requests, `rebase` is not supported; use `merge` or
+/// `squash`.
 #[derive(
     Debug,
     Clone,
@@ -584,8 +600,8 @@ pub struct RunPullRequestLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(default = "true", value_type = "boolean")]
     pub draft:          Option<bool>,
-    /// Enable GitHub auto-merge for created pull requests. Implies `draft =
-    /// false`.
+    /// Enable provider auto-merge for created pull requests or merge requests.
+    /// Implies `draft = false`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(default = "false", value_type = "boolean")]
     pub auto_merge:     Option<bool>,

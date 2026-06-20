@@ -419,7 +419,10 @@ email = "fabro-bot@company.com"
 
 ## `[run.pull_request]`
 
-`[run.pull_request]` — provider-neutral PR behavior
+`[run.pull_request]` — provider-neutral PR behavior.
+
+For GitLab merge requests, `rebase` is not supported; use `merge` or
+`squash`
 
 ```toml title="settings.toml"
 [run.pull_request]
@@ -428,16 +431,14 @@ enabled = true
 
 | Key | Type / values | Default | Description |
 |---|---|---|---|
-| `auto_merge` | boolean | false | Enable provider auto-merge for created pull requests or merge requests. Implies `draft =<br />false`. |
+| `auto_merge` | boolean | false | Enable provider auto-merge for created pull requests or merge requests.<br />Implies `draft = false`. |
 | `draft` | boolean | true | Open created pull requests as drafts. |
 | `enabled` | boolean | false | Automatically create a PR after successful runs. |
 | `merge_strategy` | "merge" \| "squash" \| "rebase" | "squash" | Merge method to configure for the pull request. |
 
-For GitLab merge requests, `rebase` is not supported; use `merge` or `squash`.
-
 ## `[run.integrations.gitlab]`
 
-Request the configured GitLab automation token for workflow command and agent stages.
+`[run.integrations.gitlab]` — run-level GitLab integration knobs
 
 ```toml title="settings.toml"
 [run.integrations.gitlab]
@@ -446,7 +447,7 @@ token = true
 
 | Key | Type / values | Default | Description |
 |---|---|---|---|
-| `token` | boolean | false | Opt in to injecting `GITLAB_TOKEN` at execution time. The token is not written to run manifests. |
+| `token` | boolean | false | Opt in to injecting `GITLAB_TOKEN` at execution time. The token is not<br />written to run manifests. |
 
 ## `[run.agent]`
 

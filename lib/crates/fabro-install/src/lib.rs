@@ -235,18 +235,13 @@ fn gitlab_integration_table(doc: &mut toml::Value) -> Result<&mut toml::Table> {
         .context("settings.toml [server.integrations.gitlab] is not a table")
 }
 
-fn push_unique_auth_method(auth: &mut toml::Table, method: &str) -> Result<()> {
+fn push_app_auth_method(auth: &mut toml::Table, method: &str) -> Result<()> {
     let methods = auth
         .entry("methods".to_string())
         .or_insert_with(|| toml::Value::Array(Vec::new()))
         .as_array_mut()
         .context("settings.toml [server.auth].methods is not an array")?;
-    if !methods
-        .iter()
-        .any(|value| value.as_str() == Some("dev-token"))
-    {
-        methods.push(toml::Value::String("dev-token".to_string()));
-    }
+    methods.retain(|value| value.as_str() != Some("dev-token"));
     if !methods.iter().any(|value| value.as_str() == Some(method)) {
         methods.push(toml::Value::String(method.to_string()));
     }
@@ -358,7 +353,7 @@ pub fn write_github_app_settings(
     let root = root_table_mut(doc)?;
     let server = ensure_table(root, "server")?;
     let auth = ensure_table(server, "auth")?;
-    push_unique_auth_method(auth, "github")?;
+    push_app_auth_method(auth, "github")?;
     let github_auth = ensure_table(auth, "github")?;
     github_auth.insert(
         "allowed_usernames".to_string(),
@@ -409,7 +404,7 @@ pub fn write_gitlab_app_settings(
     let root = root_table_mut(doc)?;
     let server = ensure_table(root, "server")?;
     let auth = ensure_table(server, "auth")?;
-    push_unique_auth_method(auth, "gitlab")?;
+    push_app_auth_method(auth, "gitlab")?;
     let gitlab_auth = ensure_table(auth, "gitlab")?;
     gitlab_auth.insert(
         "allowed_usernames".to_string(),
@@ -615,6 +610,11 @@ pub fn write_sandbox_settings(
     default.insert(
         "provider".to_string(),
         toml::Value::String(provider.to_string()),
+    );
+    let image = ensure_table(default, "image")?;
+    image.insert(
+        "docker".to_string(),
+        toml::Value::String("buildpack-deps:noble".to_string()),
     );
     let server = ensure_table(root, "server")?;
     write_sandbox_provider_policy(server, selection, allow_local)?;
@@ -1108,7 +1108,7 @@ stale = "remove-me"
                 .iter()
                 .map(|value| value.as_str().expect("auth method should be a string"))
                 .collect::<Vec<_>>(),
-            vec!["dev-token", "github"]
+            vec!["github"]
         );
     }
 
@@ -1156,7 +1156,7 @@ client_id = "github-client"
                 .iter()
                 .map(|value| value.as_str().expect("auth method should be a string"))
                 .collect::<Vec<_>>(),
-            vec!["dev-token", "github", "gitlab"]
+            vec!["github", "gitlab"]
         );
     }
 

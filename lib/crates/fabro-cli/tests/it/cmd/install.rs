@@ -1032,7 +1032,7 @@ mode = "keep-me"
             .iter()
             .map(|value| value.as_str().expect("auth method should be a string"))
             .collect::<Vec<_>>(),
-        vec!["dev-token", "gitlab"]
+        vec!["gitlab"]
     );
     let gitlab_auth = auth
         .get("gitlab")

@@ -569,20 +569,18 @@ Configure GitLab integration (token or OAuth app)
 fabro install gitlab [OPTIONS]
 ```
 
-Run without options for interactive prompts. Use `--non-interactive` with the options below for scripted installs.
-
 #### Options
 
 | Option | Description |
 | --- | --- |
-| `--allowed-group <allowed-groups>` | GitLab group full path allowed to log in (app only, repeatable) |
-| `--allowed-username <allowed-usernames>` | GitLab username allowed to log in (app only, repeatable) |
-| `--base-url <base-url>` | GitLab base URL, for example `https://gitlab.com` or `https://gitlab.example.com` |
-| `--client-id <client-id>` | GitLab OAuth application client ID (app only, requires `--non-interactive`) |
-| `--client-secret-env <client-secret-env>` | Read the GitLab OAuth client secret from this environment variable (app only) |
+| `--allowed-group <allowed_groups>` | GitLab group full path allowed to log in (app only, repeatable) |
+| `--allowed-username <allowed_usernames>` | GitLab username allowed to log in (app only, repeatable) |
+| `--base-url <base_url>` | GitLab base URL, for example https://gitlab.com or https://gitlab.example.com |
+| `--client-id <client_id>` | GitLab OAuth application client ID (app only, requires --non-interactive) |
+| `--client-secret-env <client_secret_env>` | Read the GitLab OAuth client secret from this environment variable (app only) |
 | `--client-secret-stdin` | Read the GitLab OAuth client secret from stdin (app only) |
-| `--strategy <strategy>` | GitLab authentication strategy (requires `--non-interactive`)<br />Values: `token`, `app` |
-| `--token-env <token-env>` | Read the GitLab token from this environment variable |
+| `--strategy <strategy>` | GitLab authentication strategy (requires --non-interactive)<br />Values: `token`, `app` |
+| `--token-env <token_env>` | Read the GitLab token from this environment variable |
 | `--token-stdin` | Read the GitLab token from stdin |
 
 ### `fabro logs`

@@ -41,9 +41,9 @@ pub(crate) async fn authorize(Query(query): Query<HashMap<String, String>>) -> R
     Redirect::temporary(redirect.as_str()).into_response()
 }
 
-pub(crate) async fn token(State((_state, _automation_token)): State<AppState>) -> Response {
+pub(crate) async fn token(State((_state, automation_token)): State<AppState>) -> Response {
     Json(json!({
-        "access_token": "gitlab-oauth-access-token",
+        "access_token": automation_token,
         "token_type": "Bearer",
         "expires_in": 7200,
         "refresh_token": "gitlab-oauth-refresh-token",

@@ -127,6 +127,11 @@ email = "fabro-bot@company.com""#,
             r"[run.pull_request]
 enabled = true",
         ),
+        Section::of::<fabro_config::RunIntegrationsGitlabLayer>(
+            "[run.integrations.gitlab]",
+            r"[run.integrations.gitlab]
+token = true",
+        ),
         Section::of::<fabro_config::RunAgentLayer>(
             "[run.agent]",
             r#"[run.agent]

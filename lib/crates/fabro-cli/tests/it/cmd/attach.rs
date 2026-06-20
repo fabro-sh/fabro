@@ -973,6 +973,9 @@ fn attach_json_errors_without_prompting_for_human_input() {
               "integrations": {
                 "github": {
                   "permissions": {}
+                },
+                "gitlab": {
+                  "token": false
                 }
               },
               "interviews": {
@@ -1005,6 +1008,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               },
               "scm": {
                 "github": null,
+                "origin_url": null,
                 "owner": null,
                 "provider": null,
                 "repository": null

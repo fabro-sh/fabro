@@ -8989,7 +8989,7 @@ async fn token_mode_merge_request_lifecycle_against_twin_gitlab() {
         .unwrap();
     let get_body = response_json!(get_response, StatusCode::OK).await;
     assert_eq!(get_body["data"]["link"]["provider"], "gitlab");
-    assert_eq!(get_body["data"]["details"]["state"], "opened");
+    assert_eq!(get_body["data"]["details"]["state"], "open");
     assert_eq!(get_body["meta"]["details_status"], "available");
 
     let merge_response = app
@@ -9283,7 +9283,7 @@ async fn merge_run_pull_request_rejects_gitlab_rebase_method() {
             "platform/tools",
             "fabro",
             7,
-            &format!(
+            format!(
                 "{}/platform/tools/fabro/-/merge_requests/7",
                 gitlab.base_url()
             ),
