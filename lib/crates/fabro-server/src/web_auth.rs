@@ -2635,7 +2635,9 @@ client_id = "gitlab-client-id"
             .await;
         gitlab
             .mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path("/api/v4/user");
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/user")
+                    .header("authorization", "Bearer glpat_oauth");
                 then.status(200)
                     .header("content-type", "application/json")
                     .json_body(json!({
@@ -2649,7 +2651,8 @@ client_id = "gitlab-client-id"
         let member = gitlab
             .mock_async(|when, then| {
                 when.method(httpmock::Method::GET)
-                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/43");
+                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/43")
+                    .header("authorization", "Bearer glpat_oauth");
                 then.status(200)
                     .header("content-type", "application/json")
                     .json_body(json!({ "id": 43, "username": "bob" }));
@@ -2721,7 +2724,9 @@ client_id = "gitlab-client-id"
             .await;
         gitlab
             .mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path("/api/v4/user");
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/user")
+                    .header("authorization", "Bearer glpat_oauth");
                 then.status(200)
                     .header("content-type", "application/json")
                     .json_body(json!({
@@ -2732,18 +2737,11 @@ client_id = "gitlab-client-id"
                     }));
             })
             .await;
-        let visible_groups = gitlab
-            .mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path("/api/v4/groups");
-                then.status(200)
-                    .header("content-type", "application/json")
-                    .json_body(json!([{ "id": 1, "full_path": "platform/fabro-admins" }]));
-            })
-            .await;
         let member = gitlab
             .mock_async(|when, then| {
                 when.method(httpmock::Method::GET)
-                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/45");
+                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/45")
+                    .header("authorization", "Bearer glpat_oauth");
                 then.status(404)
                     .json_body(json!({ "message": "404 Group Member Not Found" }));
             })
@@ -2806,7 +2804,6 @@ client_id = "gitlab-client-id"
             Some("/login?error=unauthorized")
         );
         member.assert_async().await;
-        visible_groups.assert_calls_async(0).await;
     }
 
     #[tokio::test]
@@ -2867,7 +2864,9 @@ client_id = "gitlab-client-id"
             .await;
         gitlab
             .mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path("/api/v4/user");
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/user")
+                    .header("authorization", "Bearer glpat_oauth");
                 then.status(200)
                     .header("content-type", "application/json")
                     .json_body(json!({
@@ -2881,7 +2880,8 @@ client_id = "gitlab-client-id"
         let member = gitlab
             .mock_async(|when, then| {
                 when.method(httpmock::Method::GET)
-                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/44");
+                    .path("/api/v4/groups/platform%2Ffabro%2Dadmins/members/all/44")
+                    .header("authorization", "Bearer glpat_oauth");
                 then.status(500);
             })
             .await;

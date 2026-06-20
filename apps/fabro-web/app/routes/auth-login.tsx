@@ -12,7 +12,21 @@ import { useAuthConfig } from "../lib/queries";
 export default function AuthLogin() {
   const { data: authConfig } = useAuthConfig();
   const loginDevToken = useLoginDevToken();
-  const methods = authConfig?.methods ?? [];
+  return (
+    <AuthLoginView
+      methods={authConfig?.methods ?? []}
+      loginDevToken={loginDevToken}
+    />
+  );
+}
+
+export function AuthLoginView({
+  methods,
+  loginDevToken,
+}: {
+  methods: string[];
+  loginDevToken: { trigger: (arg: { token: string }) => Promise<unknown> };
+}) {
   const hasDevToken = methods.includes("dev-token");
   const hasGitHub = methods.includes("github");
   const hasGitLab = methods.includes("gitlab");

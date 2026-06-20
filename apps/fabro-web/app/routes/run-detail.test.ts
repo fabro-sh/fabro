@@ -379,6 +379,22 @@ function textFromNode(
   return (node.children ?? []).map(textFromNode).join(" ");
 }
 
+async function expectRenderedText(
+  renderer: TestRenderer.ReactTestRenderer,
+  expected: string,
+  timeoutMs = 500,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let text = textFromNode(renderer.toJSON());
+  while (!text.includes(expected) && Date.now() < deadline) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    text = textFromNode(renderer.toJSON());
+  }
+  expect(text).toContain(expected);
+}
+
 function textFromTestNode(node: TestRenderer.ReactTestInstance): string {
   return node.children.map((child) => {
     if (typeof child === "string") return child;
@@ -895,7 +911,7 @@ describe("RunDetail full-height child routes", () => {
     expect(deleteRunApiMock.mock.calls[0]?.[0]).toBe("run_1");
     expect(mutateRunListCachesMock).toHaveBeenCalledTimes(1);
     expect(mutateRunListCachesMock.mock.calls[0]?.[0]).toBe(swrMutateMock);
-    expect(textFromNode(renderer.toJSON())).toContain("Run deleted.");
+    await expectRenderedText(renderer, "Run deleted.");
     expect(router.state.location.pathname).toBe("/runs");
   });
 

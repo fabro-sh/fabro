@@ -166,4 +166,50 @@ mod tests {
         assert_eq!(values[0]["id"], 42);
         assert_eq!(values[0]["path_with_namespace"], "platform/tools/fabro");
     }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This twin contract test must explicitly prove local reqwest clients disable proxy discovery."
+    )]
+    #[tokio::test]
+    async fn rejects_user_and_group_requests_without_automation_token() {
+        let server = TestGitLabServer::start().await;
+        server.add_user("alice", "Alice Example", "alice@example.test");
+        server.add_group("platform/fabro-admins");
+        server.add_group_member("platform/fabro-admins", "alice");
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let base = server.base_url();
+
+        assert_eq!(
+            client
+                .get(format!("{base}/api/v4/user"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            client
+                .get(format!("{base}/api/v4/groups"))
+                .bearer_auth("wrong-token")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            client
+                .get(format!(
+                    "{base}/api/v4/groups/platform%2Ffabro-admins/members/all/1"
+                ))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+    }
 }

@@ -15,7 +15,10 @@ type AppState = (SharedGitLabState, String);
 
 const NOW: &str = "2026-06-13T00:00:00Z";
 
-pub(crate) async fn user(State((state, _)): State<AppState>) -> Response {
+pub(crate) async fn user(State(app_state): State<AppState>, headers: HeaderMap) -> Response {
+    let Some((state, _automation_token)) = authorize_api_request(&app_state, &headers) else {
+        return unauthorized();
+    };
     let state = state.lock();
     let user = state
         .users
@@ -26,7 +29,10 @@ pub(crate) async fn user(State((state, _)): State<AppState>) -> Response {
     Json(user).into_response()
 }
 
-pub(crate) async fn groups(State((state, _)): State<AppState>) -> Response {
+pub(crate) async fn groups(State(app_state): State<AppState>, headers: HeaderMap) -> Response {
+    let Some((state, _automation_token)) = authorize_api_request(&app_state, &headers) else {
+        return unauthorized();
+    };
     let state = state.lock();
     if let Some(status) = state.groups_failure {
         return (status, Json(json!({ "message": "injected group failure" }))).into_response();
@@ -36,9 +42,13 @@ pub(crate) async fn groups(State((state, _)): State<AppState>) -> Response {
 }
 
 pub(crate) async fn group_member(
-    State((state, _)): State<AppState>,
+    State(app_state): State<AppState>,
     Path((group_path, user_id)): Path<(String, u64)>,
+    headers: HeaderMap,
 ) -> Response {
+    let Some((state, _automation_token)) = authorize_api_request(&app_state, &headers) else {
+        return unauthorized();
+    };
     let state = state.lock();
     if let Some(status) = state.groups_failure {
         return (status, Json(json!({ "message": "injected group failure" }))).into_response();
@@ -76,7 +86,7 @@ pub(crate) async fn projects(
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Response {
-    let Some((state, _automation_token)) = authorize_project_request(&app_state, &headers) else {
+    let Some((state, _automation_token)) = authorize_api_request(&app_state, &headers) else {
         return unauthorized();
     };
     let state = state.lock();
@@ -131,7 +141,7 @@ pub(crate) async fn project_get(
     Path(path): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let Some((state, _automation_token)) = authorize_project_request(&app_state, &headers) else {
+    let Some((state, _automation_token)) = authorize_api_request(&app_state, &headers) else {
         return unauthorized();
     };
 
@@ -152,7 +162,7 @@ pub(crate) async fn project_post(
     headers: HeaderMap,
     Json(input): Json<CreateMergeRequestInput>,
 ) -> Response {
-    let Some((state, _automation_token)) = authorize_project_request(&app_state, &headers) else {
+    let Some((state, _automation_token)) = authorize_api_request(&app_state, &headers) else {
         return unauthorized();
     };
 
@@ -172,7 +182,7 @@ pub(crate) async fn project_put(
     headers: HeaderMap,
     body: Option<Json<UpdateMergeRequestInput>>,
 ) -> Response {
-    let Some((state, _automation_token)) = authorize_project_request(&app_state, &headers) else {
+    let Some((state, _automation_token)) = authorize_api_request(&app_state, &headers) else {
         return unauthorized();
     };
 
@@ -192,7 +202,7 @@ pub(crate) async fn project_put(
     get_merge_request(&state, &project_id, iid)
 }
 
-fn authorize_project_request(
+fn authorize_api_request(
     (state, automation_token): &AppState,
     headers: &HeaderMap,
 ) -> Option<(SharedGitLabState, String)> {

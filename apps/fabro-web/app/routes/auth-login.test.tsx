@@ -1,26 +1,24 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import TestRenderer, { act } from "react-test-renderer";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
 import { setupReactTestEnv } from "../lib/test-utils";
+import { AuthLoginView } from "./auth-login";
 
-let authMethods: string[] = [];
 let teardownReactTestEnv: (() => void) | undefined;
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
-mock.module("../lib/queries", () => ({
-  useAuthConfig: () => ({ data: { methods: authMethods } }),
-}));
-
-mock.module("../lib/mutations", () => ({
-  useLoginDevToken: () => ({ trigger: () => Promise.resolve(undefined) }),
-}));
-
-const { default: AuthLogin } = await import("./auth-login");
-
 async function renderAuthLogin() {
   const router = createMemoryRouter(
-    [{ path: "/login", element: <AuthLogin /> }],
+    [{
+      path:    "/login",
+      element: (
+        <AuthLoginView
+          methods={["dev-token", "gitlab"]}
+          loginDevToken={{ trigger: () => Promise.resolve(undefined) }}
+        />
+      ),
+    }],
     { initialEntries: ["/login"] },
   );
   let renderer!: TestRenderer.ReactTestRenderer;
@@ -49,14 +47,11 @@ describe("AuthLogin route", () => {
         renderer.unmount();
       }
     });
-    authMethods = [];
     teardownReactTestEnv?.();
     teardownReactTestEnv = undefined;
   });
 
   test("uses GitLab OAuth as the primary login when GitLab and dev token auth are configured", async () => {
-    authMethods = ["dev-token", "gitlab"];
-
     const renderer = await renderAuthLogin();
     const text = textContent(renderer.toJSON());
 
