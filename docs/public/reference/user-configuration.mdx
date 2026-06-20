@@ -433,6 +433,8 @@ enabled = true
 | `enabled` | boolean | false | Automatically create a PR after successful runs. |
 | `merge_strategy` | "merge" \| "squash" \| "rebase" | "squash" | Merge method to configure for the pull request. |
 
+For GitLab merge requests, `rebase` is not supported; use `merge` or `squash`.
+
 ## `[run.integrations.gitlab]`
 
 Request the configured GitLab automation token for workflow command and agent stages.

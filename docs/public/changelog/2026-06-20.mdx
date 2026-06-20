@@ -1,0 +1,30 @@
+---
+title: "GitLab integration"
+date: "2026-06-20"
+---
+
+## GitLab integration
+
+Fabro now supports GitLab as a first-class repository integration. Servers can configure one GitLab instance in token mode for repository automation, or app mode for GitLab OAuth login plus the same server-owned automation token for clone, push, branch checks, and merge request operations.
+
+GitLab origins now participate in Fabro's pull request workflow: successful runs can open draft merge requests, enable merge-when-pipeline-succeeds, and show merge request status through the existing PR routes, CLI output, and web UI.
+
+## More
+
+<Accordion title="Configuration">
+- Added `[server.integrations.gitlab]` with `enabled`, `strategy`, `base_url`, and `client_id`
+- Added `[server.auth.gitlab]` allowlists for usernames and group full paths
+- Added `[run.integrations.gitlab] token = true` for explicit `GITLAB_TOKEN` injection into workflow stages
+</Accordion>
+
+<Accordion title="Install and auth">
+- Added `fabro install gitlab` for interactive and scripted GitLab setup
+- Added GitLab OAuth login as a server auth method
+- Added GitLab diagnostics to `fabro doctor`
+</Accordion>
+
+<Accordion title="Merge requests">
+- Added GitLab merge request creation for `[run.pull_request] enabled = true`
+- Added GitLab live merge request details, close, and merge actions to the existing pull request API
+- Added support for nested GitLab namespaces and relative-URL GitLab instances
+</Accordion>

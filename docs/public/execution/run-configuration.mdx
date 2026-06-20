@@ -490,7 +490,7 @@ merge_strategy = "squash"
 
 Auto-PR creation only runs when the workflow completes successfully or partially successfully and the terminal diff is non-empty. Empty-diff runs complete normally and skip PR creation.
 
-GitLab merge requests appear through Fabro's existing pull request routes, events, and UI labels.
+GitLab merge requests appear through Fabro's existing pull request routes, events, and UI labels. GitLab supports `merge` and `squash` auto-merge strategies in Fabro; `rebase` is GitHub-only.
 
 ### `[[run.hooks]]`
 

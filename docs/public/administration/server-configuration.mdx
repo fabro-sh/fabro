@@ -41,10 +41,14 @@ enabled = true
 url = "https://fabro.example.com"
 
 [server.auth]
-methods = ["dev-token", "github"]
+methods = ["dev-token", "github", "gitlab"]
 
 [server.auth.github]
 allowed_usernames = ["alice", "bob"]
+
+[server.auth.gitlab]
+allowed_usernames = ["alice"]
+allowed_groups = ["platform/fabro-admins"]
 
 [server.sandbox.providers.local]
 enabled = true
@@ -61,6 +65,12 @@ client_id = "Iv1.abc123"
 
 [server.integrations.github.webhooks]
 strategy = "tailscale_funnel"
+
+[server.integrations.gitlab]
+enabled = true
+strategy = "app"
+base_url = "https://gitlab.example.com"
+client_id = "gitlab-client-id"
 
 [server.storage]
 root = "/var/lib/fabro"
@@ -158,11 +168,13 @@ Configure how users authenticate with the server.
 
 | Key | Description | Default |
 |---|---|---|
-| `methods` | Ordered list of enabled bootstrap methods: `dev-token`, `github` | `["dev-token"]` |
+| `methods` | Ordered list of enabled bootstrap methods: `dev-token`, `github`, `gitlab` | `["dev-token"]` |
 
 When `"dev-token"` is enabled, the API accepts `Authorization: Bearer fabro_dev_...` and the login page can authenticate with the dev token directly.
 
 When `"github"` is enabled, browser users can sign in with GitHub OAuth and receive a session cookie.
+
+When `"gitlab"` is enabled, browser users can sign in with GitLab OAuth and receive a session cookie.
 
 ### `[server.auth.github]` section
 
@@ -173,6 +185,17 @@ GitHub-specific auth policy.
 | `allowed_usernames` | GitHub usernames allowed to complete OAuth login |
 
 The GitHub OAuth client ID still lives under `[server.integrations.github].client_id`.
+
+### `[server.auth.gitlab]` section
+
+GitLab-specific auth policy.
+
+| Key | Description |
+|---|---|
+| `allowed_usernames` | GitLab usernames allowed to complete OAuth login |
+| `allowed_groups` | GitLab group `full_path` values whose members may complete OAuth login |
+
+An empty GitLab allowlist does not block server startup, but no GitLab user can sign in until at least one username or group is configured. The GitLab OAuth client ID still lives under `[server.integrations.gitlab].client_id`.
 
 ### `[server.sandbox.providers]` section
 
@@ -319,7 +342,7 @@ Incoming webhooks are authenticated only by GitHub's `X-Hub-Signature-256` HMAC 
 
 ### `[server.integrations.gitlab]` section
 
-Configure GitLab integration auth. `strategy = "token"` uses the vault secret `GITLAB_TOKEN` for clone, push, branch checks, and merge request operations. `strategy = "app"` enables GitLab OAuth login and also requires `GITLAB_TOKEN` for repository automation.
+Configure GitLab integration auth. `strategy = "token"` uses the vault secret `GITLAB_TOKEN` for clone, push, branch checks, and merge request operations. `strategy = "app"` enables GitLab OAuth login and also requires `GITLAB_TOKEN` for repository automation. See the [GitLab integration guide](/integrations/gitlab) for the setup flow and OAuth redirect URI.
 
 ```toml title="settings.toml"
 [server.integrations.gitlab]
