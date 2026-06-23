@@ -2700,6 +2700,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-mcp-store"
+version = "0.267.0-nightly.0"
+dependencies = [
+ "fabro-types",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
 name = "fabro-model"
 version = "0.267.0-nightly.0"
 dependencies = [
@@ -2848,6 +2861,7 @@ dependencies = [
  "fabro-llm",
  "fabro-macros",
  "fabro-manifest",
+ "fabro-mcp-store",
  "fabro-model",
  "fabro-proc",
  "fabro-redact",
