@@ -82,6 +82,9 @@ pub struct ToolInfo {
     pub original_tool_name: String,
     pub description:        String,
     pub input_schema:       serde_json::Value,
+    /// Per-call timeout for this tool, taken from the owning server's
+    /// `tool_timeout_secs` configuration at registration time.
+    pub tool_timeout:       Duration,
 }
 
 /// Manages connections to multiple MCP servers and their tools.
@@ -130,6 +133,7 @@ impl McpConnectionManager {
         let tools = client.list_tools().await?;
         let tool_count = tools.len();
 
+        let tool_timeout = config.tool_timeout();
         for (name, description, input_schema) in tools {
             let qualified = qualified_tool_name(&config.name, &name);
             self.tools.insert(qualified, ToolInfo {
@@ -137,6 +141,7 @@ impl McpConnectionManager {
                 original_tool_name: name,
                 description,
                 input_schema,
+                tool_timeout,
             });
         }
 
@@ -329,6 +334,7 @@ mod tests {
                 original_tool_name: "list_issues".to_string(),
                 description:        "list issues".to_string(),
                 input_schema:       serde_json::json!({}),
+                tool_timeout:       Duration::from_mins(1),
             });
         mgr.tools
             .insert(qualified_tool_name("github", "create_issue"), ToolInfo {
@@ -336,6 +342,7 @@ mod tests {
                 original_tool_name: "create_issue".to_string(),
                 description:        "create issue".to_string(),
                 input_schema:       serde_json::json!({}),
+                tool_timeout:       Duration::from_mins(1),
             });
         mgr.tools
             .insert(qualified_tool_name("other", "noop"), ToolInfo {
@@ -343,6 +350,7 @@ mod tests {
                 original_tool_name: "noop".to_string(),
                 description:        "noop".to_string(),
                 input_schema:       serde_json::json!({}),
+                tool_timeout:       Duration::from_mins(1),
             });
 
         let summaries = mgr.tool_summaries_for_server("github");

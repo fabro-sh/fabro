@@ -92,6 +92,7 @@ fn resolve_exec(exec: Option<&CliExecLayer>) -> CliExecSettings {
                     agent
                         .mcps
                         .iter()
+                        .filter(|(_, entry)| entry.is_enabled())
                         .map(|(name, entry)| {
                             (
                                 name.clone(),

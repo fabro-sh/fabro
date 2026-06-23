@@ -165,6 +165,24 @@ async fn connection_manager_stdio_roundtrip() {
 }
 
 #[tokio::test]
+async fn registered_tool_carries_configured_tool_timeout() {
+    // Per-server `tool_timeout_secs` must reach the registered tool so callers
+    // honor it on tool calls. Use a non-default value distinct from the
+    // previously hardcoded two-minute fallback.
+    let mut config = test_server_config();
+    config.tool_timeout_secs = 17;
+
+    let mut mgr = McpConnectionManager::new();
+    mgr.start_servers(&[config]).await;
+
+    let info = mgr
+        .all_tools()
+        .get("mcp__test_echo__echo")
+        .expect("echo tool should be registered");
+    assert_eq!(info.tool_timeout, Duration::from_secs(17));
+}
+
+#[tokio::test]
 async fn sse_client_initialize_and_call_tool() {
     #[derive(Clone)]
     struct SseState {

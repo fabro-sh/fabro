@@ -467,6 +467,20 @@ pub enum McpEntryLayer {
     },
 }
 
+impl McpEntryLayer {
+    /// Whether this entry should be activated. Absent `enabled` defaults to
+    /// `true`; only an explicit `enabled = false` disables the entry.
+    #[must_use]
+    pub fn is_enabled(&self) -> bool {
+        let enabled = match self {
+            Self::Http { enabled, .. }
+            | Self::Stdio { enabled, .. }
+            | Self::Sandbox { enabled, .. } => enabled,
+        };
+        enabled.unwrap_or(true)
+    }
+}
+
 /// A run hook entry. Exactly one of `script`, `command`, `url`, `prompt`, or
 /// `agent` fields determines the hook behavior. The `id` field, when set, is
 /// used for cross-layer replace-by-id merging.

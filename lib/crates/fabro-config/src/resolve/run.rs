@@ -289,6 +289,7 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
         mcps:        agent
             .mcps
             .iter()
+            .filter(|(_, entry)| entry.is_enabled())
             .map(|(name, entry)| (name.clone(), resolve_mcp_entry(name, entry)))
             .collect(),
     }

@@ -132,3 +132,29 @@ level = "debug"
     assert!(!cli.updates.check);
     assert_eq!(cli.logging.level.as_deref(), Some("debug"));
 }
+
+#[test]
+fn cli_exec_inline_mcp_with_enabled_false_is_skipped() {
+    let cli = UserSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[cli.exec.agent.mcps.fs]
+type = "stdio"
+command = ["echo", "cli"]
+
+[cli.exec.agent.mcps.disabled]
+type = "stdio"
+enabled = false
+command = ["never-launched"]
+"#,
+    )
+    .expect("cli settings should resolve")
+    .cli;
+
+    assert!(cli.exec.agent.mcps.contains_key("fs"));
+    assert!(
+        !cli.exec.agent.mcps.contains_key("disabled"),
+        "explicit `enabled = false` should drop the inline cli.exec MCP entry"
+    );
+}

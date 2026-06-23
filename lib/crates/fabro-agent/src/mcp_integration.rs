@@ -16,7 +16,10 @@ pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool
             let name = qualified_name.clone();
             let server_name = info.server_name.clone();
             let original_name = info.original_tool_name.clone();
-            let tool_timeout = std::time::Duration::from_mins(2);
+            // Per-server `tool_timeout_secs` config, threaded through `ToolInfo`
+            // at registration time. Previously hardcoded to two minutes, which
+            // silently dropped any configured per-server tool timeout.
+            let tool_timeout = info.tool_timeout;
 
             RegisteredTool {
                 definition: ToolDefinition {
