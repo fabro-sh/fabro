@@ -326,6 +326,7 @@ pub struct TransformOptions {
     pub current_dir:       Option<PathBuf>,
     pub file_resolver:     Option<Arc<dyn FileResolver>>,
     pub inputs:            HashMap<String, toml::Value>,
+    pub vars:              HashMap<String, String>,
     pub source_name:       Option<String>,
     pub render_mode:       RenderMode,
     pub custom_transforms: Vec<Box<dyn Transform>>,

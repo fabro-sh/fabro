@@ -41,6 +41,9 @@ pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
         resolved.file_resolver,
         input.custom_transforms,
         Some(&resolved.settings),
+        // Offline validation has no variable store; `{{ vars.* }}` renders
+        // undefined (structural-mode warning, hard error at run-create).
+        std::collections::HashMap::new(),
         resolved.goal_override.as_deref(),
         RenderMode::Structural,
         &input.catalog,

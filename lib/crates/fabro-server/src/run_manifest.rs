@@ -199,10 +199,12 @@ pub(crate) fn create_run_input(
     configured_providers: Vec<ProviderId>,
     provenance: RunProvenance,
     web_url: Option<String>,
+    vars: HashMap<String, String>,
 ) -> CreateRunInput {
     CreateRunInput {
         workflow: WorkflowInput::Bundled(prepared.workflow_input),
         settings: prepared.settings,
+        vars,
         cwd: prepared.cwd,
         workflow_slug: None,
         workflow_path: Some(prepared.target_path),

@@ -45,6 +45,7 @@ mod tests {
             current_dir:       None,
             file_resolver:     None,
             inputs:            std::collections::HashMap::new(),
+            vars:              std::collections::HashMap::new(),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],

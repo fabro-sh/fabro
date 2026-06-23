@@ -127,6 +127,7 @@ pub struct FileInliningTransform {
     current_dir:   PathBuf,
     resolver:      Arc<dyn FileResolver>,
     inputs:        HashMap<String, toml::Value>,
+    vars:          HashMap<String, String>,
     source_name:   Option<String>,
     source_text:   Option<String>,
     goal_override: Option<String>,
@@ -140,6 +141,7 @@ impl FileInliningTransform {
             current_dir,
             resolver,
             inputs: HashMap::new(),
+            vars: HashMap::new(),
             source_name: None,
             source_text: None,
             goal_override: None,
@@ -168,6 +170,13 @@ impl FileInliningTransform {
         self
     }
 
+    /// Run-scoped `{{ vars.* }}` available to prompts and the goal.
+    #[must_use]
+    pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
+        self.vars = vars;
+        self
+    }
+
     pub(crate) fn apply_with_diagnostics(
         &self,
         graph: Graph,
@@ -185,7 +194,8 @@ impl FileInliningTransform {
         };
         let ctx = TemplateContext::new()
             .with_goal(resolved_goal)
-            .with_inputs(self.inputs.clone());
+            .with_inputs(self.inputs.clone())
+            .with_vars(self.vars.clone());
 
         for (node_id, node) in &mut graph.nodes {
             // `prompt` is an importable template: MiniJinja-render the value,
@@ -248,7 +258,7 @@ impl FileInliningTransform {
         let Some(AttrValue::String(goal)) = graph.attrs.get("goal") else {
             return Ok(());
         };
-        let ctx = TemplateContext::for_input_scan(self.inputs.clone());
+        let ctx = TemplateContext::for_input_scan(self.inputs.clone()).with_vars(self.vars.clone());
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
             .with_source_origin(self.source_text.as_deref(), goal)
             .with_template_store(template_render_store(

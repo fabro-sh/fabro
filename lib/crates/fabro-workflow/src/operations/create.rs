@@ -34,6 +34,10 @@ use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
     pub settings: WorkflowSettings,
+    /// Run-scoped variables (`{{ vars.* }}`) snapshotted from the server's
+    /// variable store at create time, threaded into the template render
+    /// context for prompts and goals. Empty for offline/CLI callers.
+    pub vars: HashMap<String, String>,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
     pub workflow_path: Option<ManifestPath>,
@@ -63,6 +67,7 @@ pub struct CreatedRun {
 
 struct PersistCreateOptions {
     settings:             WorkflowSettings,
+    vars:                 HashMap<String, String>,
     run_id:               Option<RunId>,
     run_dir:              Option<PathBuf>,
     workflow_slug:        Option<String>,
@@ -97,6 +102,7 @@ pub async fn create(
     let CreateRunInput {
         workflow: _,
         settings: _,
+        vars,
         cwd: _,
         workflow_slug,
         workflow_path,
@@ -141,6 +147,7 @@ pub async fn create(
             &raw_source,
             PersistCreateOptions {
                 settings,
+                vars,
                 run_id: Some(run_id),
                 run_dir: Some(persisted_run_dir),
                 workflow_slug: workflow_slug.or(resolved_workflow_slug),
@@ -292,6 +299,7 @@ fn create_from_source(
         file_resolver,
         Vec::new(),
         Some(&options.settings),
+        options.vars.clone(),
         goal_override,
         RenderMode::Structural,
         &options.catalog,
@@ -314,6 +322,7 @@ pub(super) fn preprocess_and_validate(
     file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
     settings: Option<&WorkflowSettings>,
+    vars: HashMap<String, String>,
     goal_override: Option<&str>,
     render_mode: RenderMode,
     catalog: &Arc<Catalog>,
@@ -326,6 +335,7 @@ pub(super) fn preprocess_and_validate(
         current_dir,
         file_resolver,
         inputs,
+        vars,
         source_name,
         render_mode,
         custom_transforms,
@@ -355,6 +365,7 @@ fn persist_validated(
 ) -> Result<Persisted, Error> {
     let PersistCreateOptions {
         settings,
+        vars: _,
         run_id,
         run_dir,
         workflow_slug,
@@ -480,6 +491,25 @@ mod tests {
         .unwrap()
     }
 
+    /// Drive the create-time pipeline with an explicit variable snapshot, the
+    /// way the server does (`Structural` render mode, undefined vars promoted
+    /// to errors at run-create).
+    fn validate_dot_with_vars(dot_source: &str, vars: HashMap<String, String>) -> Validated {
+        preprocess_and_validate(
+            dot_source,
+            Some("workflow.fabro".to_string()),
+            Some(PathBuf::from(".")),
+            None,
+            Vec::new(),
+            Some(&WorkflowSettings::default()),
+            vars,
+            None,
+            RenderMode::Structural,
+            &test_catalog(),
+        )
+        .unwrap()
+    }
+
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
         start [shape=Mdiamond]
@@ -553,6 +583,57 @@ mod tests {
     }
 
     #[test]
+    fn vars_resolve_in_node_prompt_through_create_pipeline() {
+        let dot = r#"digraph Test {
+            graph [goal="Ship it"]
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare,  label="Exit"]
+            work  [label="Work", prompt="Service: {{ vars.SERVICE }}"]
+            start -> work -> exit
+        }"#;
+        let vars = HashMap::from([("SERVICE".to_string(), "billing".to_string())]);
+        let validated = validate_dot_with_vars(dot, vars);
+        validated.raise_on_errors().unwrap();
+        assert!(
+            !validated
+                .diagnostics()
+                .iter()
+                .any(|d| d.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE),
+            "vars.SERVICE should resolve through the create pipeline; got: {:?}",
+            validated.diagnostics()
+        );
+    }
+
+    #[test]
+    fn unknown_var_in_prompt_warns_at_validate_then_errors_at_run_create() {
+        let dot = r#"digraph Test {
+            graph [goal="Ship it"]
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare,  label="Exit"]
+            work  [label="Work", prompt="Service: {{ vars.MISSING }}"]
+            start -> work -> exit
+        }"#;
+        let mut validated = validate_dot_with_vars(dot, HashMap::new());
+
+        // `fabro validate` surfaces a warning, not a hard failure.
+        let diagnostic = validated
+            .diagnostics()
+            .iter()
+            .find(|d| d.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE)
+            .expect("expected a template_undefined_variable diagnostic");
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert!(
+            diagnostic.message.contains("vars.MISSING"),
+            "message: {}",
+            diagnostic.message
+        );
+
+        // Run-create promotes the same diagnostic to a hard error.
+        validated.promote_template_undefined_variables_to_errors();
+        assert!(validated.has_errors());
+    }
+
+    #[test]
     fn promote_template_undefined_rule_turns_warning_into_error() {
         let dot = r#"digraph Test {
             graph [goal="Build {{ inputs.app_dir }}"]
@@ -590,6 +671,7 @@ mod tests {
             None,
             Vec::new(),
             Some(&WorkflowSettings::default()),
+            HashMap::new(),
             None,
             RenderMode::Strict,
             &test_catalog(),
@@ -626,6 +708,7 @@ mod tests {
             ))),
             Vec::new(),
             Some(&WorkflowSettings::default()),
+            HashMap::new(),
             None,
             RenderMode::Strict,
             &test_catalog(),
@@ -1134,6 +1217,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: test_default_settings(),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -1200,6 +1284,7 @@ mod tests {
                         ..RunLayer::default()
                     }
                 }),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
@@ -1314,6 +1399,7 @@ mod tests {
                         ..RunLayer::default()
                     }
                 }),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -1354,6 +1440,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: dry_run_only_settings(),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -1433,6 +1520,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: dry_run_with_storage(&storage_dir),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
@@ -1486,6 +1574,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: dry_run_with_storage(&storage_dir),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,

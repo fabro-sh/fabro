@@ -20,6 +20,7 @@ pub struct ImportTransform {
     current_dir: PathBuf,
     resolver:    Arc<dyn FileResolver>,
     inputs:      HashMap<String, toml::Value>,
+    vars:        HashMap<String, String>,
     source_name: Option<String>,
     source_text: Option<String>,
     render_mode: RenderMode,
@@ -62,10 +63,19 @@ impl ImportTransform {
             current_dir,
             resolver,
             inputs,
+            vars: HashMap::new(),
             source_name: None,
             source_text: None,
             render_mode: RenderMode::Structural,
         }
+    }
+
+    /// Run-scoped `{{ vars.* }}`, propagated into imported subgraphs so their
+    /// prompts and goals interpolate variables too.
+    #[must_use]
+    pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
+        self.vars = vars;
+        self
     }
 
     #[must_use]
@@ -210,6 +220,7 @@ impl ImportTransform {
                         Some(source_text.clone()),
                         self.render_mode,
                     )
+                    .with_vars(self.vars.clone())
                     .with_goal_override(Some(parent_goal.to_string()))
                     .apply_with_diagnostics(graph)
                     .map_err(ImportPrepareError::Hard)?;
@@ -222,6 +233,7 @@ impl ImportTransform {
             );
             let (templated_graph, template_diagnostics) = TemplateTransform {
                 inputs:      self.inputs.clone(),
+                vars:        self.vars.clone(),
                 source_name: Some(source_name),
                 source_text: Some(source_text),
                 render_mode: self.render_mode,

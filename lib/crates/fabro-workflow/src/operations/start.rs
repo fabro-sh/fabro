@@ -1418,6 +1418,7 @@ reasoning = false
                     }),
                     ..RunLayer::default()
                 }),
+                vars: std::collections::HashMap::new(),
                 cwd: storage_root
                     .parent()
                     .unwrap_or_else(|| Path::new("."))
@@ -1843,6 +1844,7 @@ reasoning = false
                     }),
                     ..RunLayer::default()
                 }),
+                vars: std::collections::HashMap::new(),
                 cwd: temp.path().to_path_buf(),
                 workflow_slug: Some("bundle-child".to_string()),
                 workflow_path: Some(ManifestPath::from_wire("workflow.fabro").unwrap()),

@@ -686,11 +686,16 @@ pub(crate) async fn create_run_from_manifest(
         .map(LlmClientResult::provider_ids)
         .unwrap_or_default();
     let provenance = run_provenance(&headers, &actor);
+    // Snapshot the variable store so prompts/goals can interpolate `{{ vars.* }}`
+    // at render time (the same store `substitute_run_variables` read above for
+    // the settings goal).
+    let vars = state.variables.read().await.value_map();
     let mut create_input = run_manifest::create_run_input(
         prepared.clone(),
         ready_provider_ids.clone(),
         provenance,
         web_url.clone(),
+        vars,
     );
     create_input.run_id = Some(run_id);
     create_input.submitted_manifest_bytes = Some(submitted_manifest_bytes);
