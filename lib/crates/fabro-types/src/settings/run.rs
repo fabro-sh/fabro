@@ -106,9 +106,13 @@ impl RunNamespace {
         // run.scm.owner/repository were demoted and removed from this pass
         // (D2): values stay literal.
         substitute_string_vec(&mut self.prepare.commands, &mut lookup)?;
-        for mcp in self.agent.mcps.values_mut() {
-            substitute_string(&mut mcp.name, &mut lookup)?;
-            substitute_mcp_transport(&mut mcp.transport, &mut lookup)?;
+        // Only resolved inline servers carry substitutable templates; an
+        // unresolved reference holds just an id + enabled flag.
+        for entry in self.agent.mcps.values_mut() {
+            if let ResolvedMcpEntry::Resolved(mcp) = entry {
+                substitute_string(&mut mcp.name, &mut lookup)?;
+                substitute_mcp_transport(&mut mcp.transport, &mut lookup)?;
+            }
         }
         for hook in &mut self.hooks {
             substitute_option_string(&mut hook.name, &mut lookup)?;
@@ -356,21 +360,24 @@ mod run_namespace_variable_substitution_tests {
                 timeout_ms: 1_000,
             },
             agent: super::RunAgentSettings {
-                mcps: HashMap::from([("http".to_string(), McpServerSettings {
-                    name:                 "http".to_string(),
-                    transport:            McpTransport::Http {
-                        protocol: McpHttpProtocol::default(),
-                        url:      "https://{{ vars.HOST }}/mcp".to_string(),
-                        headers:  HashMap::from([(
-                            "X-Env".to_string(),
-                            "{{ vars.ENV }}".to_string(),
-                        )]),
-                    },
-                    current_dir:          None,
-                    clear_env:            false,
-                    startup_timeout_secs: 10,
-                    tool_timeout_secs:    60,
-                })]),
+                mcps: HashMap::from([(
+                    "http".to_string(),
+                    super::ResolvedMcpEntry::Resolved(McpServerSettings {
+                        name:                 "http".to_string(),
+                        transport:            McpTransport::Http {
+                            protocol: McpHttpProtocol::default(),
+                            url:      "https://{{ vars.HOST }}/mcp".to_string(),
+                            headers:  HashMap::from([(
+                                "X-Env".to_string(),
+                                "{{ vars.ENV }}".to_string(),
+                            )]),
+                        },
+                        current_dir:          None,
+                        clear_env:            false,
+                        startup_timeout_secs: 10,
+                        tool_timeout_secs:    60,
+                    }),
+                )]),
                 ..super::RunAgentSettings::default()
             },
             hooks: vec![HookDefinition {
@@ -412,7 +419,9 @@ mod run_namespace_variable_substitution_tests {
         assert_eq!(run.prepare.commands, vec![
             "echo prod {{ env.REGION }}".to_string()
         ]);
-        let mcp = &run.agent.mcps["http"];
+        let super::ResolvedMcpEntry::Resolved(mcp) = &run.agent.mcps["http"] else {
+            panic!("expected resolved inline mcp entry")
+        };
         match &mcp.transport {
             McpTransport::Http { url, headers, .. } => {
                 assert_eq!(url, "https://mcp.example/mcp");
@@ -1053,12 +1062,47 @@ pub struct RunAgentSettings {
     #[serde(default)]
     pub fabro_tools: bool,
     pub permissions: Option<AgentPermissions>,
-    pub mcps:        HashMap<String, McpServerSettings>,
+    pub mcps:        HashMap<String, ResolvedMcpEntry>,
+}
+
+/// An MCP entry in a run's agent settings: either an inline resolved server or
+/// an unresolved reference to a server-side catalog definition.
+///
+/// `Resolved` (de)serializes as a **bare** [`McpServerSettings`] — with no enum
+/// tag — for backward compatibility with run specs persisted before this enum
+/// existed. The serde representation is `#[serde(untagged)]` with `Resolved`
+/// listed first so it is tried first; `McpServerRef` uses
+/// `#[serde(deny_unknown_fields)]` so the two variants can never collide
+/// (`McpServerSettings` requires `name` + `transport`, which `McpServerRef`
+/// rejects).
+///
+/// Invariant: no `Reference` survives run creation. References are resolved to
+/// `Resolved` on the server's run-preparation path before the run spec is
+/// persisted; any `Reference` reaching a post-persistence consumer is a bug.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ResolvedMcpEntry {
+    Resolved(McpServerSettings),
+    Reference(McpServerRef),
+}
+
+/// An unresolved reference to a server-defined MCP catalog entry.
+///
+/// `id` is kept as a plain `String` to keep `fabro-types` decoupled from the
+/// `fabro-mcp-store` crate; the resolver maps it to a store id at resolve time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpServerRef {
+    pub id:      String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
 }
 
 #[cfg(test)]
 mod run_agent_settings_tests {
-    use super::RunAgentSettings;
+    use super::{
+        McpServerRef, McpServerSettings, McpTransport, ResolvedMcpEntry, RunAgentSettings,
+    };
 
     #[test]
     fn deserializes_missing_fabro_tools_as_false() {
@@ -1069,6 +1113,145 @@ mod run_agent_settings_tests {
         .expect("legacy run agent settings should deserialize");
 
         assert!(!settings.fabro_tools);
+    }
+
+    /// Critical back-compat guarantee: a run spec persisted before
+    /// `ResolvedMcpEntry` existed stores `mcps` as a map of bare
+    /// `McpServerSettings` (no enum tag). It must still deserialize, with every
+    /// entry landing as `ResolvedMcpEntry::Resolved`.
+    #[test]
+    fn deserializes_old_format_bare_mcps_as_resolved_json() {
+        let settings: RunAgentSettings = serde_json::from_value(serde_json::json!({
+            "fabro_tools": true,
+            "permissions": null,
+            "mcps": {
+                "filesystem": {
+                    "name": "filesystem",
+                    "transport": {
+                        "type": "stdio",
+                        "command": ["npx", "server-filesystem"],
+                        "env": {}
+                    },
+                    "startup_timeout_secs": 10,
+                    "tool_timeout_secs": 60
+                }
+            }
+        }))
+        .expect("old-format run agent settings should deserialize");
+
+        let entry = settings
+            .mcps
+            .get("filesystem")
+            .expect("filesystem entry should be present");
+        match entry {
+            ResolvedMcpEntry::Resolved(server) => {
+                assert_eq!(server.name, "filesystem");
+                assert!(matches!(server.transport, McpTransport::Stdio { .. }));
+            }
+            ResolvedMcpEntry::Reference(_) => {
+                panic!("bare McpServerSettings must deserialize as Resolved, not Reference")
+            }
+        }
+    }
+
+    /// The same guarantee via TOML, since run specs are also persisted/read as
+    /// TOML config.
+    #[test]
+    fn deserializes_old_format_bare_mcps_as_resolved_toml() {
+        let toml = r#"
+fabro_tools = true
+
+[mcps.http_server]
+name = "http_server"
+startup_timeout_secs = 10
+tool_timeout_secs = 60
+
+[mcps.http_server.transport]
+type = "http"
+url = "https://example.com/mcp"
+
+[mcps.http_server.transport.headers]
+"#;
+        let settings: RunAgentSettings =
+            toml::from_str(toml).expect("old-format TOML run agent settings should deserialize");
+
+        match settings.mcps.get("http_server") {
+            Some(ResolvedMcpEntry::Resolved(server)) => {
+                assert_eq!(server.name, "http_server");
+                assert!(matches!(server.transport, McpTransport::Http { .. }));
+            }
+            other => panic!("expected Resolved http_server entry, got {other:?}"),
+        }
+    }
+
+    /// A `{ id, enabled }`-shaped value deserializes as `Reference` (it has no
+    /// `name`/`transport`, and `deny_unknown_fields` keeps it from matching a
+    /// server config), while a full server config deserializes as `Resolved`.
+    #[test]
+    fn distinguishes_reference_from_resolved() {
+        let settings: RunAgentSettings = serde_json::from_value(serde_json::json!({
+            "mcps": {
+                "sentry": { "id": "sentry", "enabled": true },
+                "linear": { "id": "linear" },
+                "inline": {
+                    "name": "inline",
+                    "transport": {
+                        "type": "stdio",
+                        "command": ["my-server"],
+                        "env": {}
+                    },
+                    "startup_timeout_secs": 5,
+                    "tool_timeout_secs": 30
+                }
+            }
+        }))
+        .expect("mixed reference/resolved settings should deserialize");
+
+        assert_eq!(
+            settings.mcps.get("sentry"),
+            Some(&ResolvedMcpEntry::Reference(McpServerRef {
+                id:      "sentry".to_string(),
+                enabled: Some(true),
+            }))
+        );
+        assert_eq!(
+            settings.mcps.get("linear"),
+            Some(&ResolvedMcpEntry::Reference(McpServerRef {
+                id:      "linear".to_string(),
+                enabled: None,
+            }))
+        );
+        match settings.mcps.get("inline") {
+            Some(ResolvedMcpEntry::Resolved(server)) => assert_eq!(server.name, "inline"),
+            other => panic!("expected Resolved inline entry, got {other:?}"),
+        }
+    }
+
+    /// `Resolved` serializes back out as a bare `McpServerSettings` (no enum
+    /// tag) so newly written run specs stay readable by any old reader and the
+    /// round-trip is stable.
+    #[test]
+    fn resolved_serializes_as_bare_server_settings() {
+        let server = McpServerSettings {
+            name: "demo".to_string(),
+            transport: McpTransport::Stdio {
+                command: vec!["demo-server".to_string()],
+                env:     std::collections::HashMap::new(),
+            },
+            ..McpServerSettings::default()
+        };
+        let entry = ResolvedMcpEntry::Resolved(server.clone());
+
+        let value = serde_json::to_value(&entry).expect("entry should serialize");
+        // No "Resolved" tag — it serializes as the bare server settings.
+        assert_eq!(
+            value,
+            serde_json::to_value(&server).expect("server serializes")
+        );
+
+        let round_tripped: ResolvedMcpEntry =
+            serde_json::from_value(value).expect("entry should round-trip");
+        assert_eq!(round_tripped, entry);
     }
 }
 

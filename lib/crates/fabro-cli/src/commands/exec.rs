@@ -17,6 +17,7 @@ use fabro_llm::types::{
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::ProviderId;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
+use fabro_types::settings::run::ResolvedMcpEntry;
 use fabro_util::exit::{self, ErrorExt, ExitClass};
 use futures::stream;
 use serde::Deserialize;
@@ -317,7 +318,20 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
         Some(mcps) => mcps.values().cloned().collect(),
         None => ctx
             .run_settings()
-            .map(|settings| settings.agent.mcps.values().cloned().collect())
+            .map(|settings| {
+                settings
+                    .agent
+                    .mcps
+                    .values()
+                    // `fabro exec` is a CLI-direct path with no server-side
+                    // catalog resolver, so it only honors inline resolved
+                    // servers; unresolved catalog references are run-only.
+                    .filter_map(|entry| match entry {
+                        ResolvedMcpEntry::Resolved(server) => Some(server.clone()),
+                        ResolvedMcpEntry::Reference(_) => None,
+                    })
+                    .collect()
+            })
             .unwrap_or_default(),
     };
     // Resolve `{{ env.* }}` in MCP transport config at the exec boundary,

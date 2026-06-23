@@ -4,11 +4,11 @@ use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
     McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
-    NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunBranchSettings,
-    RunCheckpointSettings, RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal,
-    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
-    RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
-    RunScmSettings, ScmGitHubSettings, TlsMode,
+    NotificationRouteSettings, PullRequestSettings, ResolvedMcpEntry, RunAgentSettings,
+    RunBranchSettings, RunCheckpointSettings, RunCloneSettings, RunExecutionSettings,
+    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
+    RunInterviewsSettings, RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace,
+    RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 
 use super::{ResolveError, resolve_run_environment};
@@ -288,7 +288,10 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
     RunAgentSettings {
         fabro_tools: agent.fabro_tools.unwrap_or(false),
         permissions: agent.permissions,
-        mcps:        resolve_enabled_mcps(&agent.mcps),
+        mcps:        resolve_enabled_mcps(&agent.mcps)
+            .into_iter()
+            .map(|(name, settings)| (name, ResolvedMcpEntry::Resolved(settings)))
+            .collect(),
     }
 }
 
