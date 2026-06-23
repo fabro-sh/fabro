@@ -510,8 +510,8 @@ impl fmt::Display for ResolveError {
                 // `InterpString` field. Point the user at where it works.
                 Namespace::Inputs => write!(
                     f,
-                    "{{{{ inputs.{} }}}} is only available in prompts and goals, not in \
-                     command, script, header, env, or URL fields",
+                    "{{{{ inputs.{} }}}} is only available in prompts and goals, not in other \
+                     config fields",
                     self.name
                 ),
                 _ => write!(
