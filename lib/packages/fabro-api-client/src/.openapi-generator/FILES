@@ -9,6 +9,7 @@ api/human-in-the-loop-api.ts
 api/insights-api.ts
 api/install-api.ts
 api/integrations-api.ts
+api/mcpservers-api.ts
 api/models-api.ts
 api/playground-api.ts
 api/repos-api.ts
@@ -98,6 +99,7 @@ models/cost-source.ts
 models/create-automation-request.ts
 models/create-completion-request.ts
 models/create-environment-request.ts
+models/create-mcp-server-request.ts
 models/create-playground-chat-request.ts
 models/create-run-pull-request-request.ts
 models/create-run-session-request.ts
@@ -203,14 +205,22 @@ models/manifest-goal.ts
 models/manifest-target.ts
 models/manifest-workflow-config.ts
 models/manifest-workflow.ts
+models/mcp-http-protocol.ts
+models/mcp-server-list-meta.ts
+models/mcp-server-list-response.ts
 models/mcp-server-projection.ts
 models/mcp-server-settings.ts
 models/mcp-server-status-failed.ts
 models/mcp-server-status-ready.ts
 models/mcp-server-status.ts
+models/mcp-server.ts
 models/mcp-transport-http.ts
 models/mcp-transport-sandbox.ts
 models/mcp-transport-stdio.ts
+models/mcp-transport-view-http.ts
+models/mcp-transport-view-sandbox.ts
+models/mcp-transport-view-stdio.ts
+models/mcp-transport-view.ts
 models/mcp-transport.ts
 models/merge-method.ts
 models/merge-run-pull-request-request.ts
@@ -309,6 +319,7 @@ models/render-workflow-graph-format.ts
 models/render-workflow-graph-request.ts
 models/replace-automation-request.ts
 models/replace-environment-request.ts
+models/replace-mcp-server-request.ts
 models/repo-check-response-permissions.ts
 models/repo-check-response.ts
 models/repository-ref.ts

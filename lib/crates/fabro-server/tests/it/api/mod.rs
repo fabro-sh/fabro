@@ -6,6 +6,7 @@ mod environments;
 mod events;
 mod install;
 mod install_openai_compatible;
+mod mcp_servers;
 mod routing;
 mod run_files;
 mod runs;

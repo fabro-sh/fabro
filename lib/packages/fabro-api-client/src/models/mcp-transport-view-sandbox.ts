@@ -18,21 +18,24 @@
 import type { McpHttpProtocol } from './mcp-http-protocol';
 
 /**
- * Sandbox transport that launches the MCP server inside the run sandbox and connects over HTTP.
+ * Sandbox transport view. Environment variable values are omitted.
  */
-export interface McpTransportSandbox {
-    'type': McpTransportSandboxTypeEnum;
+export interface McpTransportViewSandbox {
+    'type': McpTransportViewSandboxTypeEnum;
     'protocol'?: McpHttpProtocol;
     /**
      * Command and arguments used to launch the in-sandbox MCP server.
      */
     'command': Array<string>;
     'port': number;
-    'env': { [key: string]: string; };
+    /**
+     * Environment variable names configured for this transport.
+     */
+    'env_keys': Array<string>;
 }
 
-export const McpTransportSandboxTypeEnum = {
+export const McpTransportViewSandboxTypeEnum = {
     SANDBOX: 'sandbox'
 } as const;
 
-export type McpTransportSandboxTypeEnum = typeof McpTransportSandboxTypeEnum[keyof typeof McpTransportSandboxTypeEnum];
+export type McpTransportViewSandboxTypeEnum = typeof McpTransportViewSandboxTypeEnum[keyof typeof McpTransportViewSandboxTypeEnum];

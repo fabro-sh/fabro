@@ -18,17 +18,20 @@
 import type { McpHttpProtocol } from './mcp-http-protocol';
 
 /**
- * HTTP transport that connects to a remote MCP server URL.
+ * HTTP transport view. Header values are omitted.
  */
-export interface McpTransportHttp {
-    'type': McpTransportHttpTypeEnum;
+export interface McpTransportViewHttp {
+    'type': McpTransportViewHttpTypeEnum;
     'protocol'?: McpHttpProtocol;
     'url': string;
-    'headers': { [key: string]: string; };
+    /**
+     * HTTP header names configured for this transport.
+     */
+    'header_keys': Array<string>;
 }
 
-export const McpTransportHttpTypeEnum = {
+export const McpTransportViewHttpTypeEnum = {
     HTTP: 'http'
 } as const;
 
-export type McpTransportHttpTypeEnum = typeof McpTransportHttpTypeEnum[keyof typeof McpTransportHttpTypeEnum];
+export type McpTransportViewHttpTypeEnum = typeof McpTransportViewHttpTypeEnum[keyof typeof McpTransportViewHttpTypeEnum];

@@ -645,6 +645,18 @@ fn main() {
             "fabro_automation::AutomationReplace",
             &[],
         ),
+        // MCP server catalog wire types reuse the domain model rather than
+        // generating parallel DTOs. The integer formats in the spec generate as
+        // `i64`/`i32`, but the domain types use `u64`/`u16`; the replacements
+        // ensure the signed widths never leak into the public client.
+        // (`McpTransport`/`McpHttpProtocol` are already mapped above.)
+        ("McpServer", "fabro_types::McpServerDefinition", &[]),
+        ("CreateMcpServerRequest", "fabro_types::McpServerDraft", &[]),
+        (
+            "ReplaceMcpServerRequest",
+            "fabro_types::McpServerReplace",
+            &[],
+        ),
         ("Environment", "fabro_environment::Environment", &[]),
         ("SessionId", "fabro_types::SessionId", &[]),
         ("TurnId", "fabro_types::TurnId", &[]),

@@ -64,6 +64,7 @@ use fabro_llm::model_test::run_model_test;
 use fabro_llm::types::{
     FinishReason, Message as LlmMessage, Request as LlmRequest, ToolChoice, ToolDefinition,
 };
+use fabro_mcp_store::McpServerStore;
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{BilledTokenCounts, Catalog, ModelRef, ModelTestMode, ProviderId};
 use fabro_redact::redact_jsonl_line;
@@ -1107,6 +1108,7 @@ pub(crate) struct AppStores {
     pub(crate) runs:         Arc<Database>,
     pub(crate) automations:  Arc<AutomationStore>,
     pub(crate) environments: Arc<EnvironmentStore>,
+    pub(crate) mcp_servers:  Arc<McpServerStore>,
     pub(crate) vault:        Arc<AsyncRwLock<Vault>>,
     pub(crate) variables:    Arc<VariableStore>,
 }
@@ -1120,6 +1122,10 @@ impl AppState {
 
     pub(crate) fn environment_store(&self) -> &EnvironmentStore {
         &self.stores.environments
+    }
+
+    pub(crate) fn mcp_server_store(&self) -> &McpServerStore {
+        &self.stores.mcp_servers
     }
 
     pub(crate) async fn materialize_automation_run(
@@ -2285,6 +2291,13 @@ fn environment_dir_for_active_config(active_config_path: &std::path::Path) -> Pa
         .join("environments")
 }
 
+fn mcp_server_dir_for_active_config(active_config_path: &std::path::Path) -> PathBuf {
+    active_config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("mcps")
+}
+
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
@@ -2328,6 +2341,12 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         EnvironmentStore::load(environment_dir, local_provider_enabled)
             .map_err(anyhow::Error::new)
             .context("load environments")?,
+    );
+    let mcp_server_dir = mcp_server_dir_for_active_config(&active_config_path);
+    let mcp_server_store = Arc::new(
+        McpServerStore::load(mcp_server_dir)
+            .map_err(anyhow::Error::new)
+            .context("load mcp servers")?,
     );
     let variables = Arc::new(VariableStore::new(db_pool));
     let vault = match preloaded_vault {
@@ -2439,6 +2458,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             runs: store,
             automations: automation_store,
             environments: environment_store,
+            mcp_servers: mcp_server_store,
             vault,
             variables,
         },

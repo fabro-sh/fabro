@@ -15,19 +15,22 @@
 
 
 /**
- * Stdio transport that launches a local MCP server subprocess.
+ * Stdio transport view. Environment variable values are omitted.
  */
-export interface McpTransportStdio {
-    'type': McpTransportStdioTypeEnum;
+export interface McpTransportViewStdio {
+    'type': McpTransportViewStdioTypeEnum;
     /**
      * Command and arguments used to launch the MCP server.
      */
     'command': Array<string>;
-    'env': { [key: string]: string; };
+    /**
+     * Environment variable names configured for this transport.
+     */
+    'env_keys': Array<string>;
 }
 
-export const McpTransportStdioTypeEnum = {
+export const McpTransportViewStdioTypeEnum = {
     STDIO: 'stdio'
 } as const;
 
-export type McpTransportStdioTypeEnum = typeof McpTransportStdioTypeEnum[keyof typeof McpTransportStdioTypeEnum];
+export type McpTransportViewStdioTypeEnum = typeof McpTransportViewStdioTypeEnum[keyof typeof McpTransportViewStdioTypeEnum];

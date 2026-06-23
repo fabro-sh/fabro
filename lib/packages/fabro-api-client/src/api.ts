@@ -24,6 +24,7 @@ export * from './api/human-in-the-loop-api';
 export * from './api/insights-api';
 export * from './api/install-api';
 export * from './api/integrations-api';
+export * from './api/mcpservers-api';
 export * from './api/models-api';
 export * from './api/playground-api';
 export * from './api/repos-api';

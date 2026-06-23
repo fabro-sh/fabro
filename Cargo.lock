@@ -2928,6 +2928,7 @@ dependencies = [
  "fabro-llm",
  "fabro-macros",
  "fabro-manifest",
+ "fabro-mcp-store",
  "fabro-model",
  "fabro-proc",
  "fabro-redact",

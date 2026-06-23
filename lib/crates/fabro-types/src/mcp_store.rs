@@ -22,8 +22,13 @@ use crate::settings::McpTransport;
 /// A server-managed MCP server definition.
 ///
 /// `id` and `revision` are derived (filename stem + content hash of the
-/// persisted TOML bytes) and are not stored in the file body.
-#[derive(Debug, Clone, PartialEq)]
+/// persisted TOML bytes) and are not stored in the persisted TOML body. It
+/// derives serde because it is the public wire type for `GET`/`POST`/`PUT` MCP
+/// server responses (reused by `fabro-api` via `with_replacement` rather than a
+/// parallel DTO). The serialized shape is the struct's own fields — `id` and
+/// `revision` are present on the wire but not in the persisted TOML body.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct McpServerDefinition {
     pub id:                   McpServerId,
     pub revision:             McpServerRevision,
