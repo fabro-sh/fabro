@@ -1586,8 +1586,20 @@ async fn diagnostics_reports_under_scoped_daytona_api_key() {
     ])
     .await;
     let base_url = server.base_url();
+    let settings = fabro_config::ServerSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.sandbox.providers.docker]
+enabled = false
+"#,
+    )
+    .expect("settings should parse");
     let state = test_app_state_with_env_lookup(
-        default_test_server_settings(),
+        settings,
         fabro_config::RunLayer::default(),
         5,
         move |name| match name {

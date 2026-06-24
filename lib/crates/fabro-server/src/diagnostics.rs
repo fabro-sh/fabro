@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,7 +9,7 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
 use fabro_model::{Catalog, ProviderId};
 use fabro_redact::redact_string;
-use fabro_sandbox::daytona;
+use fabro_sandbox::{DockerSandboxProvider, daytona};
 use fabro_static::EnvVars;
 use fabro_types::settings::ServerAuthMethod;
 use fabro_types::settings::server::GithubIntegrationStrategy;
@@ -88,9 +89,10 @@ fn validate_session_secret(value: &str) -> Result<(), String> {
 }
 
 pub async fn run_all(state: &AppState) -> DiagnosticsReport {
-    let (llm, github, sandbox, brave) = tokio::join!(
+    let (llm, github, docker_sandbox, sandbox, brave) = tokio::join!(
         check_llm_providers(state),
         check_github_app(state),
+        check_docker_sandbox(state),
         check_sandbox(state),
         check_brave_search(state),
     );
@@ -101,7 +103,7 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
         sections: vec![
             CheckSection {
                 title:  "Credentials".to_string(),
-                checks: vec![llm, github, sandbox, brave],
+                checks: vec![llm, github, docker_sandbox, sandbox, brave],
             },
             CheckSection {
                 title:  "Configuration".to_string(),
@@ -548,6 +550,77 @@ async fn check_github_app(state: &AppState) -> CheckResult {
     }
 }
 
+async fn check_docker_sandbox(state: &AppState) -> CheckResult {
+    check_docker_sandbox_with_probe(
+        state
+            .server_settings()
+            .server
+            .sandbox
+            .providers
+            .docker
+            .enabled,
+        || async {
+            DockerSandboxProvider::check_daemon()
+                .await
+                .map_err(|err| err.display_with_causes())
+        },
+        Duration::from_secs(5),
+    )
+    .await
+}
+
+async fn check_docker_sandbox_with_probe<F, Fut>(
+    enabled: bool,
+    probe: F,
+    probe_timeout: Duration,
+) -> CheckResult
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    if !enabled {
+        return CheckResult {
+            name:        "Docker Sandbox".to_string(),
+            status:      CheckStatus::Pass,
+            summary:     "disabled".to_string(),
+            details:     vec![CheckDetail::new(
+                "server.sandbox.providers.docker.enabled = false".to_string(),
+            )],
+            remediation: None,
+        };
+    }
+
+    let probe = timeout(probe_timeout, probe()).await;
+    match probe {
+        Ok(result) => docker_sandbox_probe_check(result),
+        Err(_) => docker_sandbox_probe_check(Err("Docker daemon probe timed out".to_string())),
+    }
+}
+
+fn docker_sandbox_probe_check(probe: Result<(), String>) -> CheckResult {
+    match probe {
+        Ok(()) => CheckResult {
+            name:        "Docker Sandbox".to_string(),
+            status:      CheckStatus::Pass,
+            summary:     "daemon reachable".to_string(),
+            details:     vec![CheckDetail::new(
+                "Docker daemon responded to ping".to_string(),
+            )],
+            remediation: None,
+        },
+        Err(err) => CheckResult {
+            name:    "Docker Sandbox".to_string(),
+            status:  CheckStatus::Error,
+            summary: "daemon unavailable".to_string(),
+            details: vec![CheckDetail::new(err)],
+            remediation: Some(
+                "Start Docker Desktop, verify DOCKER_HOST, or fix permissions for the Docker socket."
+                    .to_string(),
+            ),
+        },
+    }
+}
+
 async fn check_sandbox(state: &AppState) -> CheckResult {
     let Some(api_key) = state.vault_secret(EnvVars::DAYTONA_API_KEY) else {
         return CheckResult {
@@ -917,6 +990,109 @@ mod tests {
                 .any(|detail| detail.text == "openai: OK"),
             "expected openai OK detail, got: {:?}",
             result.details
+        );
+    }
+
+    #[test]
+    fn docker_sandbox_probe_passes_when_daemon_responds() {
+        let result = docker_sandbox_probe_check(Ok(()));
+
+        assert_eq!(result.name, "Docker Sandbox");
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert_eq!(result.summary, "daemon reachable");
+        assert_eq!(result.remediation, None);
+    }
+
+    #[test]
+    fn docker_sandbox_probe_errors_when_daemon_is_unavailable() {
+        let result = docker_sandbox_probe_check(Err("connection refused".to_string()));
+
+        assert_eq!(result.name, "Docker Sandbox");
+        assert_eq!(result.status, CheckStatus::Error);
+        assert_eq!(result.summary, "daemon unavailable");
+        assert_eq!(result.details[0].text, "connection refused");
+        assert_eq!(
+            result.remediation.as_deref(),
+            Some(
+                "Start Docker Desktop, verify DOCKER_HOST, or fix permissions for the Docker socket."
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn check_docker_sandbox_reports_pass_when_enabled_probe_succeeds() {
+        let result = check_docker_sandbox_with_probe(
+            true,
+            || async { Ok::<(), String>(()) },
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert_eq!(result.name, "Docker Sandbox");
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert_eq!(result.summary, "daemon reachable");
+        assert_eq!(
+            result.details[0].text,
+            "Docker daemon responded to ping"
+        );
+    }
+
+    #[tokio::test]
+    async fn check_docker_sandbox_reports_error_when_enabled_probe_fails() {
+        let result = check_docker_sandbox_with_probe(
+            true,
+            || async { Err::<(), String>("socket permission denied".to_string()) },
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert_eq!(result.name, "Docker Sandbox");
+        assert_eq!(result.status, CheckStatus::Error);
+        assert_eq!(result.summary, "daemon unavailable");
+        assert_eq!(result.details[0].text, "socket permission denied");
+    }
+
+    #[tokio::test]
+    async fn check_docker_sandbox_reports_error_when_enabled_probe_times_out() {
+        let result = check_docker_sandbox_with_probe(
+            true,
+            || std::future::pending::<Result<(), String>>(),
+            Duration::from_millis(1),
+        )
+        .await;
+
+        assert_eq!(result.name, "Docker Sandbox");
+        assert_eq!(result.status, CheckStatus::Error);
+        assert_eq!(result.summary, "daemon unavailable");
+        assert_eq!(result.details[0].text, "Docker daemon probe timed out");
+    }
+
+    #[tokio::test]
+    async fn check_docker_sandbox_skips_probe_when_provider_is_disabled() {
+        let settings = fabro_config::ServerSettingsBuilder::from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.sandbox.providers.docker]
+enabled = false
+"#,
+        )
+        .expect("settings should parse");
+        let state = TestAppStateBuilder::new()
+            .runtime_settings(settings, RunLayer::default())
+            .build();
+
+        let result = check_docker_sandbox(&state).await;
+
+        assert_eq!(result.name, "Docker Sandbox");
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert_eq!(result.summary, "disabled");
+        assert_eq!(
+            result.details[0].text,
+            "server.sandbox.providers.docker.enabled = false"
         );
     }
 

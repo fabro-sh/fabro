@@ -21,6 +21,15 @@ impl DockerSandboxProvider {
         Self
     }
 
+    pub async fn check_daemon() -> crate::Result<()> {
+        let docker = Self::docker_client()?;
+        docker
+            .ping()
+            .await
+            .map_err(|err| crate::Error::context("Failed to reach Docker daemon", err))?;
+        Ok(())
+    }
+
     fn docker_client() -> crate::Result<Docker> {
         Docker::connect_with_local_defaults().map_err(crate::Error::docker_connect)
     }
