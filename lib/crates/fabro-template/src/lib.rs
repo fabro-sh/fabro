@@ -48,12 +48,23 @@ pub struct TemplateErrorLocation {
     pub span_len:    Option<usize>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct TemplateContext {
     goal:   Option<String>,
-    inputs: HashMap<String, toml::Value>,
-    vars:   HashMap<String, String>,
+    inputs: Value,
+    vars:   Value,
     env:    Option<Value>,
+}
+
+impl Default for TemplateContext {
+    fn default() -> Self {
+        Self {
+            goal:   None,
+            inputs: Value::from_serialize(HashMap::<String, toml::Value>::new()),
+            vars:   Value::from_serialize(HashMap::<String, String>::new()),
+            env:    None,
+        }
+    }
 }
 
 impl TemplateContext {
@@ -70,14 +81,14 @@ impl TemplateContext {
 
     #[must_use]
     pub fn with_inputs(mut self, inputs: HashMap<String, toml::Value>) -> Self {
-        self.inputs = inputs;
+        self.inputs = Value::from_serialize(inputs);
         self
     }
 
     /// Run-scoped `{{ vars.* }}` available to prompts and goals.
     #[must_use]
     pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
-        self.vars = vars;
+        self.vars = Value::from_serialize(vars);
         self
     }
 
@@ -115,8 +126,8 @@ impl TemplateContext {
 
     fn into_value(self) -> Value {
         let goal = self.goal.map(Value::from);
-        let inputs = Value::from_serialize(self.inputs);
-        let vars = Value::from_serialize(self.vars);
+        let inputs = self.inputs;
+        let vars = self.vars;
         let env = self.env;
         Value::from_object(RenderContext {
             goal,

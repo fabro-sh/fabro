@@ -185,9 +185,18 @@ pub(crate) fn validate_prepared_manifest(
     prepared: &PreparedManifest,
     catalog: Arc<Catalog>,
 ) -> Result<Validated, WorkflowError> {
+    validate_prepared_manifest_with_vars(prepared, catalog, HashMap::new())
+}
+
+pub(crate) fn validate_prepared_manifest_with_vars(
+    prepared: &PreparedManifest,
+    catalog: Arc<Catalog>,
+    vars: HashMap<String, String>,
+) -> Result<Validated, WorkflowError> {
     validate(ValidateInput {
         workflow: WorkflowInput::Bundled(prepared.workflow_input.clone()),
         settings: prepared.settings.clone(),
+        vars,
         cwd: prepared.cwd.clone(),
         custom_transforms: Vec::new(),
         catalog,

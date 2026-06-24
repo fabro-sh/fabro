@@ -292,8 +292,7 @@ fn goal_self_reference_diagnostic(
 /// Expands `{{ goal }}` / `{{ inputs.* }}` / `{{ vars.* }}` across all string
 /// attributes.
 pub struct TemplateTransform {
-    pub inputs:      HashMap<String, toml::Value>,
-    pub vars:        HashMap<String, String>,
+    pub context:     TemplateContext,
     pub source_name: Option<String>,
     pub source_text: Option<String>,
     pub render_mode: RenderMode,
@@ -303,12 +302,17 @@ impl TemplateTransform {
     #[must_use]
     pub fn new(inputs: HashMap<String, toml::Value>) -> Self {
         Self {
-            inputs,
-            vars: HashMap::new(),
+            context:     TemplateContext::new().with_inputs(inputs),
             source_name: None,
             source_text: None,
             render_mode: RenderMode::Structural,
         }
+    }
+
+    #[must_use]
+    pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
+        self.context = self.context.with_vars(vars);
+        self
     }
 
     pub(crate) fn resolved_goal(
@@ -335,9 +339,7 @@ impl TemplateTransform {
             ));
             return Ok(goal.to_string());
         }
-        let ctx = TemplateContext::new()
-            .with_inputs(self.inputs.clone())
-            .with_vars(self.vars.clone());
+        let ctx = self.context.clone();
         render_template_for_target(goal, &ctx, self.render_mode, &target, diagnostics)
     }
 
@@ -346,9 +348,7 @@ impl TemplateTransform {
         goal: &str,
         target: &TemplateRenderTarget,
     ) -> Option<TemplateError> {
-        let ctx = TemplateContext::new()
-            .with_inputs(self.inputs.clone())
-            .with_vars(self.vars.clone());
+        let ctx = self.context.clone();
         match render_template_with_mode(goal, &ctx, TemplateRenderMode::Strict, target) {
             Err(err @ TemplateError::UndefinedVariable { .. })
                 if err.expression() == Some("goal") =>
@@ -412,10 +412,7 @@ impl TemplateTransform {
         graph
             .attrs
             .insert("goal".to_string(), AttrValue::String(resolved_goal.clone()));
-        let ctx = TemplateContext::new()
-            .with_goal(resolved_goal)
-            .with_inputs(self.inputs.clone())
-            .with_vars(self.vars.clone());
+        let ctx = self.context.clone().with_goal(resolved_goal);
 
         Self::render_attrs(
             &mut graph.attrs,
@@ -621,8 +618,7 @@ mod tests {
         graph.nodes.insert("plan".to_string(), node);
 
         let transform = TemplateTransform {
-            inputs:      HashMap::new(),
-            vars:        HashMap::new(),
+            context:     TemplateContext::new(),
             source_name: Some("workflow.fabro".to_string()),
             source_text: Some(source.to_string()),
             render_mode: RenderMode::Structural,
@@ -801,8 +797,7 @@ mod tests {
         graph.nodes.insert("plan".to_string(), node);
 
         let transform = TemplateTransform {
-            inputs:      HashMap::new(),
-            vars:        HashMap::new(),
+            context:     TemplateContext::new(),
             source_name: Some("workflow.fabro".to_string()),
             source_text: None,
             render_mode: RenderMode::Structural,

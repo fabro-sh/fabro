@@ -22,9 +22,8 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
         let (graph, transform_diagnostics) = ImportTransform::new(
             current_dir.clone(),
             Arc::clone(file_resolver),
-            options.inputs.clone(),
+            options.template_context.clone(),
         )
-        .with_vars(options.vars.clone())
         .with_template_options(
             options.source_name.clone(),
             Some(source.clone()),
@@ -43,12 +42,11 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
         let (graph, transform_diagnostics) =
             FileInliningTransform::new(current_dir.clone(), Arc::clone(file_resolver))
                 .with_template_options(
-                    options.inputs.clone(),
+                    options.template_context.clone(),
                     options.source_name.clone(),
                     Some(source.clone()),
                     options.render_mode,
                 )
-                .with_vars(options.vars.clone())
                 .apply_with_diagnostics(graph)?;
         diagnostics.extend(transform_diagnostics);
         graph
@@ -57,8 +55,7 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
     };
 
     let (graph, transform_diagnostics) = TemplateTransform {
-        inputs:      options.inputs.clone(),
-        vars:        options.vars.clone(),
+        context:     options.template_context.clone(),
         source_name: options.source_name.clone(),
         source_text: Some(source.clone()),
         render_mode: options.render_mode,
@@ -111,8 +108,7 @@ mod tests {
         TransformOptions {
             current_dir:       None,
             file_resolver:     None,
-            inputs:            HashMap::new(),
-            vars:              HashMap::new(),
+            template_context:  fabro_template::TemplateContext::new(),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],
@@ -174,8 +170,7 @@ mod tests {
         let transformed = transform(parsed, &TransformOptions {
             current_dir:       Some(dir.path().to_path_buf()),
             file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
-            inputs:            HashMap::new(),
-            vars:              HashMap::new(),
+            template_context:  fabro_template::TemplateContext::new(),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],
@@ -222,11 +217,12 @@ mod tests {
         let transformed = transform(parsed, &TransformOptions {
             current_dir:       Some(dir.path().to_path_buf()),
             file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
-            inputs:            HashMap::from([(
-                "task".to_string(),
-                toml::Value::String("Launch".to_string()),
-            )]),
-            vars:              HashMap::new(),
+            template_context:  fabro_template::TemplateContext::new().with_inputs(HashMap::from([
+                (
+                    "task".to_string(),
+                    toml::Value::String("Launch".to_string()),
+                ),
+            ])),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],
@@ -256,7 +252,10 @@ mod tests {
         }"#;
         let parsed = parse(dot).unwrap();
         let transformed = transform(parsed, &TransformOptions {
-            vars: HashMap::from([("SERVICE".to_string(), "billing".to_string())]),
+            template_context: fabro_template::TemplateContext::new().with_vars(HashMap::from([(
+                "SERVICE".to_string(),
+                "billing".to_string(),
+            )])),
             ..transform_options()
         })
         .unwrap();
@@ -281,7 +280,10 @@ mod tests {
         }"#;
         let parsed = parse(dot).unwrap();
         let transformed = transform(parsed, &TransformOptions {
-            vars: HashMap::from([("SERVICE".to_string(), "billing".to_string())]),
+            template_context: fabro_template::TemplateContext::new().with_vars(HashMap::from([(
+                "SERVICE".to_string(),
+                "billing".to_string(),
+            )])),
             ..transform_options()
         })
         .unwrap();
@@ -315,7 +317,7 @@ mod tests {
         }"#;
         let parsed = parse(dot).unwrap();
         let transformed = transform(parsed, &TransformOptions {
-            vars: HashMap::new(),
+            template_context: fabro_template::TemplateContext::new(),
             render_mode: crate::operations::RenderMode::Structural,
             ..transform_options()
         })
@@ -350,8 +352,7 @@ mod tests {
         let transformed = transform(parsed, &TransformOptions {
             current_dir:       Some(dir.path().to_path_buf()),
             file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
-            inputs:            HashMap::new(),
-            vars:              HashMap::new(),
+            template_context:  fabro_template::TemplateContext::new(),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Structural,
             custom_transforms: vec![],

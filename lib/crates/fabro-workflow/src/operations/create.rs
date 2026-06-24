@@ -12,6 +12,7 @@ use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, ProviderId};
 use fabro_store::Database;
+use fabro_template::TemplateContext;
 use fabro_types::{
     AutomationRef, ForkSourceRef, GitContext, ManifestPath, RunId, RunProvenance, WorkflowSettings,
 };
@@ -330,12 +331,12 @@ pub(super) fn preprocess_and_validate(
     let inputs = run_inputs(settings);
     let mut parsed = pipeline::parse(dot_source)?;
     apply_goal_override(&mut parsed.graph, goal_override);
+    let template_context = TemplateContext::new().with_inputs(inputs).with_vars(vars);
 
     let transformed = pipeline::transform(parsed, &TransformOptions {
         current_dir,
         file_resolver,
-        inputs,
-        vars,
+        template_context,
         source_name,
         render_mode,
         custom_transforms,
@@ -484,6 +485,7 @@ mod tests {
                 base_dir: None,
             },
             settings,
+            vars: HashMap::new(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog: test_catalog(),
@@ -767,6 +769,7 @@ mod tests {
                     ..RunLayer::default()
                 }
             }),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -815,6 +818,7 @@ mod tests {
                 base_dir: Some(dir.path().to_path_buf()),
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -833,6 +837,7 @@ mod tests {
                 base_dir: Some(dir.path().to_path_buf()),
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -856,6 +861,7 @@ mod tests {
                 base_dir: Some(dir.path().to_path_buf()),
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -874,6 +880,7 @@ mod tests {
                 base_dir: Some(dir.path().to_path_buf()),
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -965,6 +972,7 @@ mod tests {
                 base_dir: None,
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -1009,6 +1017,7 @@ mod tests {
                 base_dir: None,
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
             catalog:           test_catalog(),
@@ -1043,6 +1052,7 @@ mod tests {
         let validated = validate(ValidateInput {
             workflow:          WorkflowInput::Path(dot_path),
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -1084,6 +1094,7 @@ mod tests {
         let validated = validate(ValidateInput {
             workflow:          WorkflowInput::Path(dot_path),
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -1133,6 +1144,7 @@ mod tests {
                 ]),
             }),
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -1183,6 +1195,7 @@ mod tests {
                 ]),
             }),
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),

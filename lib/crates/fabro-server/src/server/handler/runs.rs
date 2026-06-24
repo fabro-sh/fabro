@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::ErrorKind;
 use std::sync::Arc;
 
@@ -645,7 +645,8 @@ pub(crate) async fn create_run_from_manifest(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    if let Err(err) = substitute_run_variables(&state, &mut prepared.settings).await {
+    let vars = snapshot_run_variables(&state).await;
+    if let Err(err) = substitute_run_variables(&vars, &mut prepared.settings) {
         return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
             .into_response();
     }
@@ -686,10 +687,6 @@ pub(crate) async fn create_run_from_manifest(
         .map(LlmClientResult::provider_ids)
         .unwrap_or_default();
     let provenance = run_provenance(&headers, &actor);
-    // Snapshot the variable store so prompts/goals can interpolate `{{ vars.* }}`
-    // at render time (the same store `substitute_run_variables` read above for
-    // the settings goal).
-    let vars = state.variables.read().await.value_map();
     let mut create_input = run_manifest::create_run_input(
         prepared.clone(),
         ready_provider_ids.clone(),
@@ -906,11 +903,16 @@ async fn run_preflight(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    if let Err(err) = substitute_run_variables(&state, &mut prepared.settings).await {
+    let vars = snapshot_run_variables(&state).await;
+    if let Err(err) = substitute_run_variables(&vars, &mut prepared.settings) {
         return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
             .into_response();
     }
-    let mut validated = match run_manifest::validate_prepared_manifest(&prepared, state.catalog()) {
+    let mut validated = match run_manifest::validate_prepared_manifest_with_vars(
+        &prepared,
+        state.catalog(),
+        vars,
+    ) {
         Ok(validated) => validated,
         Err(WorkflowError::Parse(_)) => {
             return ApiError::bad_request("Validation failed").into_response();
@@ -943,11 +945,16 @@ async fn validate_run_manifest(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    if let Err(err) = substitute_run_variables(&state, &mut prepared.settings).await {
+    let vars = snapshot_run_variables(&state).await;
+    if let Err(err) = substitute_run_variables(&vars, &mut prepared.settings) {
         return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
             .into_response();
     }
-    let validated = match run_manifest::validate_prepared_manifest(&prepared, state.catalog()) {
+    let validated = match run_manifest::validate_prepared_manifest_with_vars(
+        &prepared,
+        state.catalog(),
+        vars,
+    ) {
         Ok(validated) => validated,
         Err(WorkflowError::Parse(_)) => {
             return ApiError::bad_request("Validation failed").into_response();
@@ -961,14 +968,17 @@ async fn validate_run_manifest(
         .into_response()
 }
 
-async fn substitute_run_variables(
-    state: &AppState,
+async fn snapshot_run_variables(state: &AppState) -> HashMap<String, String> {
+    state.variables.read().await.value_map()
+}
+
+fn substitute_run_variables(
+    variables: &HashMap<String, String>,
     settings: &mut WorkflowSettings,
 ) -> Result<(), ResolveError> {
-    let variables = state.variables.read().await;
     settings
         .run
-        .substitute_variables(|name| variables.get_value(name).map(str::to_string))
+        .substitute_variables(|name| variables.get(name).cloned())
 }
 
 async fn get_run_status(

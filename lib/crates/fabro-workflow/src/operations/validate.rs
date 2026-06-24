@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,6 +15,9 @@ use crate::transforms::Transform;
 pub struct ValidateInput {
     pub workflow:          WorkflowInput,
     pub settings:          WorkflowSettings,
+    /// Run-scoped variables (`{{ vars.* }}`) available to prompts and goals.
+    /// Empty for offline/CLI validation.
+    pub vars:              HashMap<String, String>,
     pub cwd:               PathBuf,
     pub custom_transforms: Vec<Box<dyn Transform>>,
     pub catalog:           Arc<Catalog>,
@@ -41,9 +45,7 @@ pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
         resolved.file_resolver,
         input.custom_transforms,
         Some(&resolved.settings),
-        // Offline validation has no variable store; `{{ vars.* }}` renders
-        // undefined (structural-mode warning, hard error at run-create).
-        std::collections::HashMap::new(),
+        input.vars,
         resolved.goal_override.as_deref(),
         RenderMode::Structural,
         &input.catalog,

@@ -72,6 +72,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
                 base_dir: None,
             },
             settings:          WorkflowSettings::default(),
+            vars:              std::collections::HashMap::new(),
             cwd:               cwd.clone(),
             custom_transforms: Vec::new(),
             catalog:           Arc::clone(&services.run.catalog),
@@ -116,6 +117,7 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
         let mut validated = validate(ValidateInput {
             workflow,
             settings: WorkflowSettings::default(),
+            vars: std::collections::HashMap::new(),
             cwd,
             custom_transforms: Vec::new(),
             catalog: Arc::clone(&services.run.catalog),

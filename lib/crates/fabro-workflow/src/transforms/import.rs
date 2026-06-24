@@ -19,8 +19,7 @@ use crate::transforms::variable_expansion::{
 pub struct ImportTransform {
     current_dir: PathBuf,
     resolver:    Arc<dyn FileResolver>,
-    inputs:      HashMap<String, toml::Value>,
-    vars:        HashMap<String, String>,
+    context:     TemplateContext,
     source_name: Option<String>,
     source_text: Option<String>,
     render_mode: RenderMode,
@@ -57,13 +56,12 @@ impl ImportTransform {
     pub fn new(
         current_dir: PathBuf,
         resolver: Arc<dyn FileResolver>,
-        inputs: HashMap<String, toml::Value>,
+        context: TemplateContext,
     ) -> Self {
         Self {
             current_dir,
             resolver,
-            inputs,
-            vars: HashMap::new(),
+            context,
             source_name: None,
             source_text: None,
             render_mode: RenderMode::Structural,
@@ -74,7 +72,7 @@ impl ImportTransform {
     /// prompts and goals interpolate variables too.
     #[must_use]
     pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
-        self.vars = vars;
+        self.context = self.context.with_vars(vars);
         self
     }
 
@@ -215,12 +213,11 @@ impl ImportTransform {
             let (inlined_graph, file_diagnostics) =
                 FileInliningTransform::new(import_base_dir.clone(), Arc::clone(&self.resolver))
                     .with_template_options(
-                        self.inputs.clone(),
+                        self.context.clone(),
                         Some(source_name.clone()),
                         Some(source_text.clone()),
                         self.render_mode,
                     )
-                    .with_vars(self.vars.clone())
                     .with_goal_override(Some(parent_goal.to_string()))
                     .apply_with_diagnostics(graph)
                     .map_err(ImportPrepareError::Hard)?;
@@ -232,8 +229,7 @@ impl ImportTransform {
                 AttrValue::String(parent_goal.to_string()),
             );
             let (templated_graph, template_diagnostics) = TemplateTransform {
-                inputs:      self.inputs.clone(),
-                vars:        self.vars.clone(),
+                context:     self.context.clone(),
                 source_name: Some(source_name),
                 source_text: Some(source_text),
                 render_mode: self.render_mode,
@@ -684,7 +680,7 @@ impl ImportTransform {
         let imports = Self::collect_import_nodes(&graph);
         let mut import_stack = Vec::new();
         let mut diagnostics = Vec::new();
-        let path_ctx = TemplateContext::for_input_scan(self.inputs.clone());
+        let path_ctx = self.context.clone().with_goal("{{ goal }}");
         let mut ignored_goal_diagnostics = Vec::new();
         let goal_target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
             .with_source_origin(self.source_text.as_deref(), graph.goal())
@@ -766,7 +762,7 @@ mod tests {
             Arc::new(FilesystemFileResolver::new(
                 fallback_dir.map(Path::to_path_buf),
             )),
-            HashMap::new(),
+            TemplateContext::new(),
         )
         .apply(graph)
         .unwrap()
@@ -787,7 +783,7 @@ mod tests {
         let graph = ImportTransform::new(
             dir.path().to_path_buf(),
             Arc::new(FilesystemFileResolver::new(None)),
-            HashMap::new(),
+            TemplateContext::new(),
         )
         .with_template_options(
             Some("workflow.fabro".to_string()),
@@ -833,7 +829,7 @@ mod tests {
         let err = ImportTransform::new(
             dir.path().to_path_buf(),
             Arc::new(FilesystemFileResolver::new(None)),
-            HashMap::new(),
+            TemplateContext::new(),
         )
         .with_template_options(
             Some("workflow.fabro".to_string()),
@@ -857,6 +853,48 @@ mod tests {
             exit [shape=Msquare]
             start -> lint -> test -> exit
         }"#
+    }
+
+    #[test]
+    fn import_parent_goal_resolves_vars_before_imported_prompt_uses_goal() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(
+            &dir.path().join("validate.fabro"),
+            r#"digraph validate {
+                start [shape=Mdiamond]
+                lint [prompt="Goal: {{ goal }}"]
+                exit [shape=Msquare]
+                start -> lint -> exit
+            }"#,
+        );
+        let graph = parse_graph(
+            r#"digraph Deploy {
+                graph [goal="Ship {{ vars.SERVICE }}"]
+                start [shape=Mdiamond]
+                validate [import="./validate.fabro"]
+                exit [shape=Msquare]
+                start -> validate -> exit
+            }"#,
+        );
+
+        let graph = ImportTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+            TemplateContext::new().with_vars(HashMap::from([(
+                "SERVICE".to_string(),
+                "billing".to_string(),
+            )])),
+        )
+        .apply(graph)
+        .unwrap();
+
+        assert_eq!(
+            graph.nodes["validate.lint"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("Goal: Ship billing")
+        );
     }
 
     #[test]
@@ -946,7 +984,7 @@ mod tests {
         let (graph, diagnostics) = ImportTransform::new(
             dir.path().to_path_buf(),
             Arc::new(FilesystemFileResolver::new(None)),
-            HashMap::new(),
+            TemplateContext::new(),
         )
         .apply_with_diagnostics(graph)
         .unwrap();
@@ -1647,7 +1685,7 @@ mod tests {
         let graph = ImportTransform::new(
             dir.path().to_path_buf(),
             Arc::new(FilesystemFileResolver::new(None)),
-            HashMap::new(),
+            TemplateContext::new(),
         )
         .apply(graph)
         .unwrap();

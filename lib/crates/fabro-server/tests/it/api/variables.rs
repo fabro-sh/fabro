@@ -319,3 +319,50 @@ async fn run_create_interpolates_variables_into_node_prompts() {
         "node prompt should interpolate the run variable; event: {created}"
     );
 }
+
+#[tokio::test]
+async fn run_validate_resolves_variables_in_node_prompts() {
+    let app = fabro_server::test_support::build_test_router(test_app_state_with_options(
+        test_settings(),
+        5,
+    ));
+
+    let create_variable = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/variables",
+            &serde_json::json!({ "name": "SERVICE", "value": "billing" }),
+        ))
+        .await
+        .expect("POST /variables should route");
+    response_status(create_variable, StatusCode::OK, "POST /api/v1/variables").await;
+
+    let dot = r#"digraph Test {
+        graph [goal="Ship it"]
+        start [shape=Mdiamond]
+        work  [shape=box, prompt="Service: {{ vars.SERVICE }}"]
+        exit  [shape=Msquare]
+        start -> work -> exit
+    }"#;
+
+    let validate = app
+        .oneshot(json_request(
+            Method::POST,
+            "/validate",
+            &minimal_manifest_json(dot),
+        ))
+        .await
+        .expect("POST /validate should route");
+    let body = response_json(validate, StatusCode::OK, "POST /api/v1/validate").await;
+    assert_eq!(body["ok"], true, "{body}");
+    let diagnostics = body["workflow"]["diagnostics"]
+        .as_array()
+        .expect("validate response should include diagnostics");
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["rule"] == "template_undefined_variable"),
+        "vars.SERVICE should resolve during validation; diagnostics: {diagnostics:?}"
+    );
+}
