@@ -6609,17 +6609,7 @@ components:
           example: 60
 
     CreateMcpServerRequest:
-      description: |
-        Request body for creating an MCP server definition.
-
-        OPEN DECISION (PR3b implementer): the design plan calls for rejecting
-        credential-looking *literal* values in `env` and HTTP `headers` and
-        guiding the user to store the value in the server vault, then reference
-        it with `{{ secrets.NAME }}`. Whether the API hard-rejects (HTTP 422) or
-        only warns on suspected credential literals is still undecided; this
-        schema intentionally does NOT enforce that rule. Non-sensitive literals
-        (e.g. `NODE_ENV=production`, ports, feature flags) are always allowed and
-        secret references are stored verbatim.
+      description: Request body for creating an MCP server definition.
       type: object
       additionalProperties: false
       required:
@@ -6653,14 +6643,7 @@ components:
           example: 60
 
     ReplaceMcpServerRequest:
-      description: |
-        Request body for replacing an MCP server definition. The path id is
-        authoritative.
-
-        OPEN DECISION (PR3b implementer): same credential-literal handling
-        question as `CreateMcpServerRequest` — whether the API hard-rejects
-        (HTTP 422) or only warns on credential-looking literal values in `env`
-        and HTTP `headers` is undecided and intentionally NOT enforced here.
+      description: Request body for replacing an MCP server definition. The path id is authoritative.
       type: object
       additionalProperties: false
       required:
@@ -6688,10 +6671,9 @@ components:
           minimum: 0
           example: 60
 
-    # `McpServer.transport` (and the create/replace request bodies) reuse the
-    # canonical `McpTransport` schema defined alongside `McpServerSettings`
-    # (under the run-config schema tree). That single schema is the API surface
-    # of `fabro_types::McpTransport`; do not fork a parallel transport schema.
+    # `McpServer.transport` and the create/replace request bodies reuse the
+    # single canonical `McpTransport` schema (defined with `McpServerSettings`
+    # under the run-config schema tree); do not fork a parallel transport schema.
 
     McpServerListResponse:
       description: List envelope for MCP server definitions.
