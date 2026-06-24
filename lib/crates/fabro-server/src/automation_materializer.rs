@@ -115,9 +115,9 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
             .await?;
 
         let manifest_input = ManifestFromCheckoutInput {
-            workflow: input.target.workflow.clone(),
+            workflow: input.target.workflow,
             run_id: input.run_id,
-            user_settings_path: input.user_settings_path.clone(),
+            user_settings_path: input.user_settings_path,
             checkout_dir,
             git_context: ManifestGitContextInput {
                 repo,
@@ -125,7 +125,6 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
                 checked_out_sha: Some(checked_out_sha),
             },
             environment_defaults: self.environment_defaults.clone(),
-            serialize_error_context: format!("automation {}", input.automation_id.as_str()),
         };
         task::spawn_blocking(move || build_manifest_from_checkout(manifest_input))
             .await
@@ -141,13 +140,12 @@ fn render_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
 
 #[derive(Debug)]
 pub(crate) struct ManifestFromCheckoutInput {
-    workflow:                String,
-    run_id:                  RunId,
-    user_settings_path:      PathBuf,
-    checkout_dir:            PathBuf,
-    git_context:             ManifestGitContextInput,
-    environment_defaults:    MergeMap<EnvironmentLayer>,
-    serialize_error_context: String,
+    workflow:             String,
+    run_id:               RunId,
+    user_settings_path:   PathBuf,
+    checkout_dir:         PathBuf,
+    git_context:          ManifestGitContextInput,
+    environment_defaults: MergeMap<EnvironmentLayer>,
 }
 
 #[derive(Debug)]
@@ -167,7 +165,6 @@ fn build_manifest_from_checkout(
         checkout_dir,
         git_context,
         environment_defaults,
-        serialize_error_context,
     } = args;
     let built = fabro_manifest::build_run_manifest(ManifestBuildInput {
         workflow: workflow.into(),
@@ -188,9 +185,7 @@ fn build_manifest_from_checkout(
         push_outcome: PreRunPushOutcome::NotAttempted,
     });
     let submitted_manifest_bytes = serde_json::to_vec(&manifest)
-        .with_context(|| {
-            format!("failed to serialize materialized manifest for {serialize_error_context}")
-        })
+        .context("failed to serialize materialized run manifest")
         .map_err(|err| RunMaterializeError::Manifest(err.to_string()))?;
     Ok(AutomationRunMaterialized {
         manifest,
@@ -329,7 +324,6 @@ mod tests {
                 checked_out_sha: Some(sha.clone()),
             },
             environment_defaults: test_environment_defaults(),
-            serialize_error_context: "automation nightly".to_string(),
         })
         .expect("manifest should build from checkout");
 
