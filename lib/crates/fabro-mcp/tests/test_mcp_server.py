@@ -7,6 +7,7 @@ Exposes a single tool: echo(message) -> message.
 import json
 import os
 import sys
+import time
 
 SERVER_INFO = {
     "name": "test-echo-server",
@@ -59,6 +60,10 @@ def handle_request(req):
             elif msg.startswith("__env:") and msg.endswith("__"):
                 key = msg[len("__env:") : -len("__")]
                 msg = os.environ.get(key, "")
+            elif msg.startswith("__sleep_ms:") and msg.endswith("__"):
+                milliseconds = int(msg[len("__sleep_ms:") : -len("__")])
+                time.sleep(milliseconds / 1000)
+                msg = f"slept {milliseconds}ms"
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,

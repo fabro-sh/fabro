@@ -155,7 +155,6 @@ async fn connection_manager_stdio_roundtrip() {
         .call_tool(
             "mcp__test_echo__echo",
             serde_json::json!({"message": "roundtrip"}),
-            Duration::from_secs(10),
         )
         .await
         .unwrap();
@@ -165,21 +164,31 @@ async fn connection_manager_stdio_roundtrip() {
 }
 
 #[tokio::test]
-async fn registered_tool_carries_configured_tool_timeout() {
-    // Per-server `tool_timeout_secs` must reach the registered tool so callers
-    // honor it on tool calls. Use a non-default value distinct from the
-    // previously hardcoded two-minute fallback.
+async fn connection_manager_call_tool_uses_configured_tool_timeout() {
     let mut config = test_server_config();
-    config.tool_timeout_secs = 17;
+    config.tool_timeout_secs = 1;
 
     let mut mgr = McpConnectionManager::new();
-    mgr.start_servers(&[config]).await;
+    let results = mgr.start_servers(&[config]).await;
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].1.is_ok(),
+        "server should start: {:?}",
+        results[0]
+    );
 
-    let info = mgr
-        .all_tools()
-        .get("mcp__test_echo__echo")
-        .expect("echo tool should be registered");
-    assert_eq!(info.tool_timeout, Duration::from_secs(17));
+    let err = mgr
+        .call_tool(
+            "mcp__test_echo__echo",
+            serde_json::json!({"message": "__sleep_ms:1500__"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("timed out calling tool 'echo' on MCP server 'test-echo'"),
+        "unexpected error: {err}"
+    );
 }
 
 #[tokio::test]

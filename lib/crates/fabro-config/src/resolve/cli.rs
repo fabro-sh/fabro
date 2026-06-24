@@ -85,11 +85,9 @@ fn resolve_exec(exec: Option<&CliExecLayer>) -> CliExecSettings {
         },
         agent:              CliExecAgentSettings {
             permissions: exec.agent.as_ref().and_then(|agent| agent.permissions),
-            mcps:        exec
-                .agent
-                .as_ref()
-                .map(|agent| super::run::resolve_enabled_mcps(&agent.mcps))
-                .unwrap_or_default(),
+            mcps:        exec.agent.as_ref().and_then(|agent| {
+                (!agent.mcps.is_empty()).then(|| super::run::resolve_enabled_mcps(&agent.mcps))
+            }),
         },
     }
 }

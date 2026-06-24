@@ -50,7 +50,8 @@ pub struct CliExecModelSettings {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CliExecAgentSettings {
     pub permissions: Option<AgentPermissions>,
-    pub mcps:        HashMap<String, McpServerSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcps:        Option<HashMap<String, McpServerSettings>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

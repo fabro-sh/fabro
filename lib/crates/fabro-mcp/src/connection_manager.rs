@@ -82,14 +82,16 @@ pub struct ToolInfo {
     pub original_tool_name: String,
     pub description:        String,
     pub input_schema:       serde_json::Value,
-    /// Per-call timeout for this tool, taken from the owning server's
-    /// `tool_timeout_secs` configuration at registration time.
-    pub tool_timeout:       Duration,
+}
+
+struct ServerConnection {
+    client:       Arc<McpClient>,
+    tool_timeout: Duration,
 }
 
 /// Manages connections to multiple MCP servers and their tools.
 pub struct McpConnectionManager {
-    clients: HashMap<String, Arc<McpClient>>,
+    clients: HashMap<String, ServerConnection>,
     tools:   HashMap<String, ToolInfo>,
 }
 
@@ -133,7 +135,6 @@ impl McpConnectionManager {
         let tools = client.list_tools().await?;
         let tool_count = tools.len();
 
-        let tool_timeout = config.tool_timeout();
         for (name, description, input_schema) in tools {
             let qualified = qualified_tool_name(&config.name, &name);
             self.tools.insert(qualified, ToolInfo {
@@ -141,11 +142,13 @@ impl McpConnectionManager {
                 original_tool_name: name,
                 description,
                 input_schema,
-                tool_timeout,
             });
         }
 
-        self.clients.insert(config.name.clone(), Arc::new(client));
+        self.clients.insert(config.name.clone(), ServerConnection {
+            client:       Arc::new(client),
+            tool_timeout: config.tool_timeout(),
+        });
 
         Ok(tool_count)
     }
@@ -177,20 +180,20 @@ impl McpConnectionManager {
         &self,
         qualified_name: &str,
         arguments: serde_json::Value,
-        timeout: Duration,
     ) -> Result<CallToolResult> {
         let info = self
             .tools
             .get(qualified_name)
             .ok_or_else(|| anyhow::anyhow!("unknown MCP tool: {qualified_name}"))?;
 
-        let client = self
+        let connection = self
             .clients
             .get(&info.server_name)
             .ok_or_else(|| anyhow::anyhow!("no client for MCP server: {}", info.server_name))?;
 
-        client
-            .call_tool(&info.original_tool_name, arguments, timeout)
+        connection
+            .client
+            .call_tool(&info.original_tool_name, arguments, connection.tool_timeout)
             .await
     }
 }
@@ -334,7 +337,6 @@ mod tests {
                 original_tool_name: "list_issues".to_string(),
                 description:        "list issues".to_string(),
                 input_schema:       serde_json::json!({}),
-                tool_timeout:       Duration::from_mins(1),
             });
         mgr.tools
             .insert(qualified_tool_name("github", "create_issue"), ToolInfo {
@@ -342,7 +344,6 @@ mod tests {
                 original_tool_name: "create_issue".to_string(),
                 description:        "create issue".to_string(),
                 input_schema:       serde_json::json!({}),
-                tool_timeout:       Duration::from_mins(1),
             });
         mgr.tools
             .insert(qualified_tool_name("other", "noop"), ToolInfo {
@@ -350,7 +351,6 @@ mod tests {
                 original_tool_name: "noop".to_string(),
                 description:        "noop".to_string(),
                 input_schema:       serde_json::json!({}),
-                tool_timeout:       Duration::from_mins(1),
             });
 
         let summaries = mgr.tool_summaries_for_server("github");
