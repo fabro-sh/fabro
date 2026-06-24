@@ -2111,13 +2111,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
         .find(|k| k.ends_with("browser_install"))
         .expect("no browser_install tool found");
     eprintln!("Calling tool: {install_tool}");
-    let install_result = manager
-        .call_tool(
-            install_tool,
-            serde_json::json!({}),
-            std::time::Duration::from_mins(2),
-        )
-        .await;
+    let install_result = manager.call_tool(install_tool, serde_json::json!({})).await;
     match &install_result {
         Ok(result) => eprintln!(
             "Install result: {}",
@@ -2137,11 +2131,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
         .expect("no browser_navigate tool found");
     eprintln!("Calling tool: {nav_tool}");
     let nav_result = manager
-        .call_tool(
-            nav_tool,
-            serde_json::json!({"url": "https://example.com"}),
-            std::time::Duration::from_secs(30),
-        )
+        .call_tool(nav_tool, serde_json::json!({"url": "https://example.com"}))
         .await;
     match &nav_result {
         Ok(result) => eprintln!(
@@ -2162,13 +2152,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
         .find(|k| k.contains("snapshot"))
         .expect("no snapshot tool found");
     eprintln!("Calling tool: {snap_tool}");
-    let snap_result = manager
-        .call_tool(
-            snap_tool,
-            serde_json::json!({}),
-            std::time::Duration::from_secs(30),
-        )
-        .await;
+    let snap_result = manager.call_tool(snap_tool, serde_json::json!({})).await;
     match &snap_result {
         Ok(result) => {
             let text = result
