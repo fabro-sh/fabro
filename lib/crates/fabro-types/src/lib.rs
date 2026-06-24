@@ -78,8 +78,7 @@ pub use llm_backend::AgentBackend;
 pub use manifest_path::{ManifestPath, ManifestPathParseError};
 pub use mcp_store::{
     McpServerDefinition, McpServerDraft, McpServerId, McpServerReplace, McpServerRevision,
-    McpServerRevisionParseError, McpServerValidationError, PersistedMcpServer,
-    validate_mcp_server_fields,
+    McpServerRevisionParseError, McpServerValidationError, validate_mcp_server_fields,
 };
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,

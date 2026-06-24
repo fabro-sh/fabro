@@ -30,7 +30,6 @@ fabro-environment.workspace = true
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }
-fabro-mcp-store = { path = "../fabro-mcp-store" }
 fabro-slack = { path = "../fabro-slack" }
 fabro-workflow = { path = "../fabro-workflow" }
 fabro-validate = { path = "../fabro-validate" }

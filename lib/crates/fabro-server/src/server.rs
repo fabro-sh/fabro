@@ -62,7 +62,6 @@ use fabro_llm::model_test::run_model_test;
 use fabro_llm::types::{
     FinishReason, Message as LlmMessage, Request as LlmRequest, ToolChoice, ToolDefinition,
 };
-use fabro_mcp_store::McpServerStore;
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{BilledTokenCounts, Catalog, ModelRef, ModelTestMode, ProviderId};
 use fabro_redact::redact_jsonl_line;
@@ -1066,7 +1065,6 @@ pub struct AppState {
     automation_store: Arc<AutomationStore>,
     automation_repo_cache: Arc<GitRepoCache>,
     environment_store: Arc<EnvironmentStore>,
-    mcp_server_store: Arc<McpServerStore>,
     #[cfg(any(test, feature = "test-support"))]
     automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
     worker_tokens: WorkerTokenKeys,
@@ -1115,14 +1113,6 @@ impl AppState {
 
     pub(crate) fn environment_store(&self) -> &EnvironmentStore {
         &self.environment_store
-    }
-
-    #[expect(
-        dead_code,
-        reason = "Single AppState accessor that keeps a future SQL migration cheap; first caller lands with the MCP server API/resolver (PR3+)."
-    )]
-    pub(crate) fn mcp_server_store(&self) -> &McpServerStore {
-        &self.mcp_server_store
     }
 
     pub(crate) async fn materialize_automation_run(
@@ -2287,13 +2277,6 @@ fn environment_dir_for_active_config(active_config_path: &std::path::Path) -> Pa
         .join("environments")
 }
 
-fn mcp_server_dir_for_active_config(active_config_path: &std::path::Path) -> PathBuf {
-    active_config_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("mcps")
-}
-
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
@@ -2337,12 +2320,6 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         EnvironmentStore::load(environment_dir, local_provider_enabled)
             .map_err(anyhow::Error::new)
             .context("load environments")?,
-    );
-    let mcp_server_dir = mcp_server_dir_for_active_config(&active_config_path);
-    let mcp_server_store = Arc::new(
-        McpServerStore::load(mcp_server_dir)
-            .map_err(anyhow::Error::new)
-            .context("load mcp servers")?,
     );
     let variables = VariableStore::load(variables_path).context("load variables")?;
     let variables = Arc::new(AsyncRwLock::new(variables));
@@ -2457,7 +2434,6 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         automation_store,
         automation_repo_cache,
         environment_store,
-        mcp_server_store,
         #[cfg(any(test, feature = "test-support"))]
         automation_materializer_override,
         worker_tokens,

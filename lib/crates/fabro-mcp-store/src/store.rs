@@ -67,11 +67,11 @@ impl McpServerStore {
         draft: McpServerDraft,
     ) -> Result<McpServerDefinition, McpServerStoreError> {
         let (id, replace) = draft.into();
-        let (definition, bytes) = model::definition_from_replace(id.clone(), replace)?;
         let _mutation = self.mutations.lock().await;
         if self.defs.read().await.contains_key(&id) {
             return Err(McpServerStoreError::AlreadyExists { id });
         }
+        let (definition, bytes) = model::definition_from_replace(id.clone(), replace)?;
 
         let path = definition_path(&self.dir, &id);
         write_new(&self.dir, &path, &bytes)
@@ -89,21 +89,12 @@ impl McpServerStore {
         expected: &McpServerRevision,
         replace: McpServerReplace,
     ) -> Result<McpServerDefinition, McpServerStoreError> {
-        let (definition, bytes) = model::definition_from_replace(id.clone(), replace)?;
         let _mutation = self.mutations.lock().await;
         {
             let defs = self.defs.read().await;
-            let current = defs
-                .get(id)
-                .ok_or_else(|| McpServerStoreError::NotFound { id: id.clone() })?;
-            if &current.revision != expected {
-                return Err(McpServerStoreError::StaleRevision {
-                    id:       id.clone(),
-                    expected: expected.clone(),
-                    actual:   current.revision.clone(),
-                });
-            }
+            check_revision(&defs, id, expected)?;
         }
+        let (definition, bytes) = model::definition_from_replace(id.clone(), replace)?;
 
         write_atomic(&self.dir, &definition_path(&self.dir, id), &bytes).await?;
         let mut defs = self.defs.write().await;
@@ -119,16 +110,7 @@ impl McpServerStore {
         let _mutation = self.mutations.lock().await;
         {
             let defs = self.defs.read().await;
-            let current = defs
-                .get(id)
-                .ok_or_else(|| McpServerStoreError::NotFound { id: id.clone() })?;
-            if &current.revision != expected {
-                return Err(McpServerStoreError::StaleRevision {
-                    id:       id.clone(),
-                    expected: expected.clone(),
-                    actual:   current.revision.clone(),
-                });
-            }
+            check_revision(&defs, id, expected)?;
         }
 
         let path = definition_path(&self.dir, id);
@@ -139,6 +121,24 @@ impl McpServerStore {
         defs.remove(id);
         Ok(())
     }
+}
+
+fn check_revision(
+    defs: &HashMap<McpServerId, McpServerDefinition>,
+    id: &McpServerId,
+    expected: &McpServerRevision,
+) -> Result<(), McpServerStoreError> {
+    let current = defs
+        .get(id)
+        .ok_or_else(|| McpServerStoreError::NotFound { id: id.clone() })?;
+    if &current.revision != expected {
+        return Err(McpServerStoreError::StaleRevision {
+            id:       id.clone(),
+            expected: expected.clone(),
+            actual:   current.revision.clone(),
+        });
+    }
+    Ok(())
 }
 
 #[expect(
@@ -201,27 +201,7 @@ fn is_toml_file(path: &Path) -> bool {
 }
 
 async fn write_atomic(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), McpServerStoreError> {
-    fs::create_dir_all(dir)
-        .await
-        .map_err(|err| McpServerStoreError::io(dir, err))?;
-    let temp_path = temp_path_for(path);
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temp_path)
-        .await
-        .map_err(|err| McpServerStoreError::io(&temp_path, err))?;
-
-    if let Err(err) = file.write_all(bytes).await {
-        cleanup_temp(&temp_path).await;
-        return Err(McpServerStoreError::io(&temp_path, err));
-    }
-    if let Err(err) = file.sync_all().await {
-        cleanup_temp(&temp_path).await;
-        return Err(McpServerStoreError::io(&temp_path, err));
-    }
-    drop(file);
-
+    let temp_path = write_temp_file(dir, path, bytes).await?;
     if let Err(err) = fs::rename(&temp_path, path).await {
         cleanup_temp(&temp_path).await;
         return Err(McpServerStoreError::io(path, err));
@@ -231,6 +211,20 @@ async fn write_atomic(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), McpSe
 }
 
 async fn write_new(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), McpServerStoreError> {
+    let temp_path = write_temp_file(dir, path, bytes).await?;
+    if let Err(err) = fs::hard_link(&temp_path, path).await {
+        cleanup_temp(&temp_path).await;
+        return Err(McpServerStoreError::io(path, err));
+    }
+    cleanup_temp(&temp_path).await;
+    Ok(())
+}
+
+async fn write_temp_file(
+    dir: &Path,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<PathBuf, McpServerStoreError> {
     fs::create_dir_all(dir)
         .await
         .map_err(|err| McpServerStoreError::io(dir, err))?;
@@ -252,12 +246,7 @@ async fn write_new(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), McpServe
     }
     drop(file);
 
-    if let Err(err) = fs::hard_link(&temp_path, path).await {
-        cleanup_temp(&temp_path).await;
-        return Err(McpServerStoreError::io(path, err));
-    }
-    cleanup_temp(&temp_path).await;
-    Ok(())
+    Ok(temp_path)
 }
 
 async fn cleanup_temp(path: &Path) {

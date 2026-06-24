@@ -2709,7 +2709,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tracing",
 ]
 
 [[package]]
@@ -2861,7 +2860,6 @@ dependencies = [
  "fabro-llm",
  "fabro-macros",
  "fabro-manifest",
- "fabro-mcp-store",
  "fabro-model",
  "fabro-proc",
  "fabro-redact",

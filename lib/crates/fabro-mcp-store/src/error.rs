@@ -10,8 +10,6 @@ pub enum McpServerStoreError {
     NotFound { id: McpServerId },
     #[error("mcp server already exists: {id}")]
     AlreadyExists { id: McpServerId },
-    #[error("mcp server revision is missing: {id}")]
-    MissingRevision { id: McpServerId },
     #[error("mcp server revision is stale for {id}: expected {expected}, actual {actual}")]
     StaleRevision {
         id:       McpServerId,
@@ -77,7 +75,6 @@ impl McpServerStoreError {
         match self {
             Self::NotFound { .. } => "not_found",
             Self::AlreadyExists { .. } => "already_exists",
-            Self::MissingRevision { .. } => "missing_revision",
             Self::StaleRevision { .. } => "stale_revision",
             Self::Validation { .. } => "validation",
             Self::InvalidFilename { .. } => "invalid_filename",

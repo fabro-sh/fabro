@@ -1,20 +1,67 @@
 //! Construction and persistence glue for [`McpServerDefinition`].
 //!
 //! The domain types (`McpServerDefinition`, `McpServerDraft`,
-//! `McpServerReplace`, `McpServerId`, `McpServerRevision`,
-//! `PersistedMcpServer`) live in `fabro-types` so they stay
-//! persistence-independent. This module owns the store-side glue: validating,
-//! serializing to canonical TOML bytes, deriving the revision, and
-//! reconstructing definitions from persisted bytes.
+//! `McpServerReplace`, `McpServerId`, `McpServerRevision`) live in
+//! `fabro-types` so they stay persistence-independent. This module owns the
+//! store-side glue: validating, serializing to canonical TOML bytes, deriving
+//! the revision, and reconstructing definitions from persisted bytes.
 
 use std::path::PathBuf;
 
+use fabro_types::settings::McpTransport;
 use fabro_types::{
-    McpServerDefinition, McpServerId, McpServerReplace, McpServerRevision, PersistedMcpServer,
-    mcp_store,
+    McpServerDefinition, McpServerId, McpServerReplace, McpServerRevision, mcp_store,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::error::McpServerStoreError;
+
+/// The on-disk body of a definition. Excludes `id`/`revision`, which are
+/// derived from the filename and content hash rather than persisted.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedMcpServer {
+    name:                 String,
+    #[serde(default)]
+    description:          Option<String>,
+    transport:            McpTransport,
+    startup_timeout_secs: u64,
+    tool_timeout_secs:    u64,
+}
+
+#[derive(Serialize)]
+struct PersistedMcpServerRef<'a> {
+    name:                 &'a str,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description:          Option<&'a str>,
+    transport:            &'a McpTransport,
+    startup_timeout_secs: u64,
+    tool_timeout_secs:    u64,
+}
+
+impl<'a> From<&'a McpServerReplace> for PersistedMcpServerRef<'a> {
+    fn from(value: &'a McpServerReplace) -> Self {
+        Self {
+            name:                 &value.name,
+            description:          value.description.as_deref(),
+            transport:            &value.transport,
+            startup_timeout_secs: value.startup_timeout_secs,
+            tool_timeout_secs:    value.tool_timeout_secs,
+        }
+    }
+}
+
+impl From<PersistedMcpServer> for McpServerReplace {
+    fn from(value: PersistedMcpServer) -> Self {
+        Self {
+            name:                 value.name,
+            description:          value.description,
+            transport:            value.transport,
+            startup_timeout_secs: value.startup_timeout_secs,
+            tool_timeout_secs:    value.tool_timeout_secs,
+        }
+    }
+}
 
 /// Build a definition + its canonical persisted bytes from a replace payload.
 ///
@@ -26,8 +73,7 @@ pub(crate) fn definition_from_replace(
     replace: McpServerReplace,
 ) -> Result<(McpServerDefinition, Vec<u8>), McpServerStoreError> {
     mcp_store::validate_mcp_server_fields(&replace)?;
-    let persisted = PersistedMcpServer::from(replace.clone());
-    let bytes = canonical_bytes(&persisted)?;
+    let bytes = canonical_bytes(&replace)?;
     let revision = McpServerRevision::from_bytes(&bytes);
     let definition = assemble(id, revision, replace);
     Ok((definition, bytes))
@@ -64,10 +110,9 @@ fn assemble(
     }
 }
 
-pub(crate) fn canonical_bytes(
-    persisted: &PersistedMcpServer,
-) -> Result<Vec<u8>, McpServerStoreError> {
-    let toml = toml::to_string_pretty(persisted)?;
+pub(crate) fn canonical_bytes(replace: &McpServerReplace) -> Result<Vec<u8>, McpServerStoreError> {
+    let persisted = PersistedMcpServerRef::from(replace);
+    let toml = toml::to_string_pretty(&persisted)?;
     Ok(toml.into_bytes())
 }
 

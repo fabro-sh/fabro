@@ -22,8 +22,7 @@ use crate::settings::McpTransport;
 /// A server-managed MCP server definition.
 ///
 /// `id` and `revision` are derived (filename stem + content hash of the
-/// persisted TOML bytes) and are not stored in the file body; see
-/// [`PersistedMcpServer`].
+/// persisted TOML bytes) and are not stored in the file body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct McpServerDefinition {
     pub id:                   McpServerId,
@@ -63,19 +62,6 @@ pub struct McpServerReplace {
     pub tool_timeout_secs:    u64,
 }
 
-/// The on-disk body of a definition. Excludes `id`/`revision`, which are
-/// derived from the filename and content hash rather than persisted.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PersistedMcpServer {
-    pub name:                 String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description:          Option<String>,
-    pub transport:            McpTransport,
-    pub startup_timeout_secs: u64,
-    pub tool_timeout_secs:    u64,
-}
-
 impl From<McpServerDraft> for (McpServerId, McpServerReplace) {
     fn from(value: McpServerDraft) -> Self {
         (value.id, McpServerReplace {
@@ -85,30 +71,6 @@ impl From<McpServerDraft> for (McpServerId, McpServerReplace) {
             startup_timeout_secs: value.startup_timeout_secs,
             tool_timeout_secs:    value.tool_timeout_secs,
         })
-    }
-}
-
-impl From<McpServerReplace> for PersistedMcpServer {
-    fn from(value: McpServerReplace) -> Self {
-        Self {
-            name:                 value.name,
-            description:          value.description,
-            transport:            value.transport,
-            startup_timeout_secs: value.startup_timeout_secs,
-            tool_timeout_secs:    value.tool_timeout_secs,
-        }
-    }
-}
-
-impl From<PersistedMcpServer> for McpServerReplace {
-    fn from(value: PersistedMcpServer) -> Self {
-        Self {
-            name:                 value.name,
-            description:          value.description,
-            transport:            value.transport,
-            startup_timeout_secs: value.startup_timeout_secs,
-            tool_timeout_secs:    value.tool_timeout_secs,
-        }
     }
 }
 
@@ -281,11 +243,6 @@ fn is_valid_mcp_server_id(value: &str) -> bool {
 /// Scope is intentionally structural for now: id format (enforced by
 /// [`McpServerId`]), non-empty name, and a well-formed transport. It does not
 /// reject credential-looking literal values in env vars or HTTP headers.
-//
-// TODO(mcp-store): credential-literal validation — see plan, warn-vs-reject
-// open question. Deferred to the API layer (PR3); env/header values should
-// reject credential-looking literals and point the user at `{{ secrets.NAME
-// }}`.
 pub fn validate_mcp_server_fields(
     replace: &McpServerReplace,
 ) -> Result<(), McpServerValidationError> {
@@ -298,9 +255,12 @@ pub fn validate_mcp_server_fields(
 fn validate_transport(transport: &McpTransport) -> Result<(), McpServerValidationError> {
     match transport {
         McpTransport::Stdio { command, .. } | McpTransport::Sandbox { command, .. } => {
-            if command.is_empty() || command.iter().all(|part| part.trim().is_empty()) {
+            if command
+                .first()
+                .is_none_or(|program| program.trim().is_empty())
+            {
                 return Err(McpServerValidationError::InvalidTransport {
-                    reason: "command must not be empty".to_string(),
+                    reason: "command program must not be empty".to_string(),
                 });
             }
         }
@@ -375,6 +335,21 @@ mod tests {
             description:          None,
             transport:            McpTransport::Stdio {
                 command: Vec::new(),
+                env:     HashMap::new(),
+            },
+            startup_timeout_secs: 10,
+            tool_timeout_secs:    60,
+        };
+        assert!(validate_mcp_server_fields(&replace).is_err());
+    }
+
+    #[test]
+    fn validation_rejects_blank_transport_program() {
+        let replace = McpServerReplace {
+            name:                 "Local".to_string(),
+            description:          None,
+            transport:            McpTransport::Stdio {
+                command: vec![" ".to_string(), "--arg".to_string()],
                 env:     HashMap::new(),
             },
             startup_timeout_secs: 10,
