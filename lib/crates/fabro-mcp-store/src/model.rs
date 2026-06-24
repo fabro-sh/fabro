@@ -42,7 +42,7 @@ pub(crate) fn definition_from_persisted_path(
 ) -> Result<McpServerDefinition, McpServerStoreError> {
     let path = path.into();
     let revision = McpServerRevision::from_bytes(bytes);
-    let persisted = parse_persisted(bytes, Some(path))?;
+    let persisted = parse_persisted(bytes, path)?;
     let replace = McpServerReplace::from(persisted);
     mcp_store::validate_mcp_server_fields(&replace)?;
     Ok(assemble(id, revision, replace))
@@ -71,16 +71,8 @@ pub(crate) fn canonical_bytes(
     Ok(toml.into_bytes())
 }
 
-fn parse_persisted(
-    bytes: &[u8],
-    path: Option<PathBuf>,
-) -> Result<PersistedMcpServer, McpServerStoreError> {
-    let content = std::str::from_utf8(bytes).map_err(|err| match &path {
-        Some(path) => McpServerStoreError::invalid_utf8(path.clone(), err),
-        None => McpServerStoreError::invalid_utf8("<memory>", err),
-    })?;
-    toml::from_str(content).map_err(|err| match path {
-        Some(path) => McpServerStoreError::parse(path, err),
-        None => McpServerStoreError::parse("<memory>", err),
-    })
+fn parse_persisted(bytes: &[u8], path: PathBuf) -> Result<PersistedMcpServer, McpServerStoreError> {
+    let content = std::str::from_utf8(bytes)
+        .map_err(|err| McpServerStoreError::invalid_utf8(path.clone(), err))?;
+    toml::from_str(content).map_err(|err| McpServerStoreError::parse(path, err))
 }
