@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
@@ -16,7 +18,7 @@ use crate::{
     NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
     RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer,
     RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer,
-    RunScmLayer, StringOrSplice,
+    RunScmLayer, StickyMap, StringOrSplice,
 };
 
 pub fn resolve_run(
@@ -286,13 +288,21 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
     RunAgentSettings {
         fabro_tools: agent.fabro_tools.unwrap_or(false),
         permissions: agent.permissions,
-        mcps:        agent
-            .mcps
-            .iter()
-            .filter(|(_, entry)| entry.is_enabled())
-            .map(|(name, entry)| (name.clone(), resolve_mcp_entry(name, entry)))
-            .collect(),
+        mcps:        resolve_enabled_mcps(&agent.mcps),
     }
+}
+
+/// Resolve an agent layer's inline MCP entries into runtime settings, dropping
+/// any entry with an explicit `enabled = false`. Shared by the `run.agent` and
+/// `cli.exec.agent` resolution paths so the enable check lives in one place and
+/// any future inline-MCP site inherits it for free.
+pub(crate) fn resolve_enabled_mcps(
+    mcps: &StickyMap<McpEntryLayer>,
+) -> HashMap<String, McpServerSettings> {
+    mcps.iter()
+        .filter(|(_, entry)| entry.is_enabled())
+        .map(|(name, entry)| (name.clone(), resolve_mcp_entry(name, entry)))
+        .collect()
 }
 
 #[expect(
