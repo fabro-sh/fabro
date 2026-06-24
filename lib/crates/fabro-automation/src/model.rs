@@ -137,6 +137,24 @@ pub struct AutomationTarget {
     pub workflow:     String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitHubRepositorySlug {
+    owner: String,
+    repo:  String,
+}
+
+impl GitHubRepositorySlug {
+    #[must_use]
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    #[must_use]
+    pub fn repo(&self) -> &str {
+        &self.repo
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AutomationTrigger {
@@ -273,7 +291,9 @@ fn validate_fields(value: &AutomationReplace) -> Result<(), AutomationValidation
     validate_triggers(&value.triggers)
 }
 
-fn validate_repository_slug(value: &str) -> Result<(), AutomationValidationError> {
+pub fn parse_github_repository_slug(
+    value: &str,
+) -> Result<GitHubRepositorySlug, AutomationValidationError> {
     let Some((owner, repo)) = value.split_once('/') else {
         return Err(AutomationValidationError::InvalidRepositorySlug {
             value: value.to_string(),
@@ -284,7 +304,14 @@ fn validate_repository_slug(value: &str) -> Result<(), AutomationValidationError
             value: value.to_string(),
         });
     }
-    Ok(())
+    Ok(GitHubRepositorySlug {
+        owner: owner.to_string(),
+        repo:  repo.to_string(),
+    })
+}
+
+fn validate_repository_slug(value: &str) -> Result<(), AutomationValidationError> {
+    parse_github_repository_slug(value).map(|_| ())
 }
 
 fn valid_github_owner(value: &str) -> bool {
@@ -513,6 +540,15 @@ enabled = true
             .collect::<Vec<_>>();
 
         assert_eq!(trigger_ids, vec!["nightly"]);
+    }
+
+    #[test]
+    fn repository_slug_parser_returns_validated_parts() {
+        let slug = crate::parse_github_repository_slug("owner/.github").unwrap();
+
+        assert_eq!(slug.owner(), "owner");
+        assert_eq!(slug.repo(), ".github");
+        assert!(crate::parse_github_repository_slug("not/github/slug").is_err());
     }
 
     #[test]

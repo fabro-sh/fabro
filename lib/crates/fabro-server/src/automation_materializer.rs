@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use async_trait::async_trait;
 use fabro_api::types::RunManifest;
-use fabro_automation::{AutomationId, AutomationTarget};
+use fabro_automation::{AutomationId, AutomationTarget, GitHubRepositorySlug};
 use fabro_config::{EnvironmentLayer, MergeMap};
 use fabro_manifest::ManifestBuildInput;
 use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId};
@@ -12,8 +12,8 @@ use fabro_util::error::collect_chain;
 use tokio::{fs, task};
 
 use crate::git_checkout::{
-    GitRepoCache, GithubRepository, RunMaterializeError, WorktreePrepareInput, github_clone_url,
-    github_metadata_url, parse_github_repository_slug, resolve_git_auth_config,
+    GitCheckoutError, GitRepoCache, WorktreePrepareInput, github_metadata_url,
+    parse_github_repository_slug, resolve_git_auth_config,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,27 @@ pub(crate) struct AutomationRunMaterializeInput {
 pub(crate) struct AutomationRunMaterialized {
     pub manifest:                 RunManifest,
     pub submitted_manifest_bytes: Vec<u8>,
+}
+
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RunMaterializeError {
+    #[error("invalid repository target: {0}")]
+    InvalidTarget(String),
+    #[error("failed to clone repository: {0}")]
+    CloneFailed(String),
+    #[error("failed to resolve workflow: {0}")]
+    WorkflowNotFound(String),
+    #[error("failed to build run manifest: {0}")]
+    Manifest(String),
+}
+
+impl From<GitCheckoutError> for RunMaterializeError {
+    fn from(value: GitCheckoutError) -> Self {
+        match value {
+            GitCheckoutError::InvalidTarget(message) => Self::InvalidTarget(message),
+            GitCheckoutError::CloneFailed(message) => Self::CloneFailed(message),
+        }
+    }
 }
 
 #[async_trait]
@@ -93,7 +114,6 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
                 ))
             })?;
         let checkout_dir = temp_dir.path().join("repo");
-        let clone_url = github_clone_url(&repo);
         let auth = resolve_git_auth_config(
             self.github_credentials.as_ref(),
             &repo,
@@ -107,7 +127,6 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
             .repo_cache
             .prepare_worktree(WorktreePrepareInput {
                 repo:         &repo,
-                clone_url:    &clone_url,
                 ref_selector: &input.target.ref_selector,
                 auth:         auth.as_ref(),
                 worktree_dir: &checkout_dir,
@@ -122,7 +141,7 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
             git_context: ManifestGitContextInput {
                 repo,
                 ref_selector: input.target.ref_selector,
-                checked_out_sha: Some(checked_out_sha),
+                checked_out_sha,
             },
             environment_defaults: self.environment_defaults.clone(),
         };
@@ -150,9 +169,9 @@ pub(crate) struct ManifestFromCheckoutInput {
 
 #[derive(Debug)]
 pub(crate) struct ManifestGitContextInput {
-    repo:            GithubRepository,
+    repo:            GitHubRepositorySlug,
     ref_selector:    String,
-    checked_out_sha: Option<String>,
+    checked_out_sha: String,
 }
 
 fn build_manifest_from_checkout(
@@ -180,7 +199,7 @@ fn build_manifest_from_checkout(
     manifest.git = Some(GitContext {
         origin_url:   github_metadata_url(&git_context.repo),
         branch:       git_context.ref_selector,
-        sha:          git_context.checked_out_sha,
+        sha:          Some(git_context.checked_out_sha),
         dirty:        DirtyStatus::Clean,
         push_outcome: PreRunPushOutcome::NotAttempted,
     });
@@ -321,7 +340,7 @@ mod tests {
             git_context: ManifestGitContextInput {
                 repo,
                 ref_selector: "release".to_string(),
-                checked_out_sha: Some(sha.clone()),
+                checked_out_sha: sha.clone(),
             },
             environment_defaults: test_environment_defaults(),
         })

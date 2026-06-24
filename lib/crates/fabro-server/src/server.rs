@@ -139,11 +139,11 @@ use ulid::Ulid;
 use crate::auth::{self, GithubEndpoints, auth_translation_middleware, demo_routing_middleware};
 use crate::automation_materializer::{
     AutomationRunMaterializeInput, AutomationRunMaterialized, AutomationRunMaterializer,
-    ProductionAutomationRunMaterializer,
+    ProductionAutomationRunMaterializer, RunMaterializeError,
 };
 use crate::canonical_origin::{canonical_origin_from_effective_web_url, effective_web_url};
 use crate::error::ApiError;
-use crate::git_checkout::{GitRepoCache, RunMaterializeError};
+use crate::git_checkout::GitRepoCache;
 use crate::github_webhooks::{
     WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, parse_event_metadata, verify_signature,
 };

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_automation::GitHubRepositorySlug;
 use fabro_store::KeyedMutex;
 use tokio::process::Command;
 use tokio::{fs, time};
@@ -13,24 +14,13 @@ const GIT_WORKTREE_ADD_TIMEOUT: Duration = Duration::from_secs(30);
 const GIT_WORKTREE_PRUNE_TIMEOUT: Duration = Duration::from_secs(10);
 const GIT_REV_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Error returned while materializing a run from a git source.
-///
-/// Shared by the automation materializer and the (future) external-workflow
-/// resolver, so the variant names and messages stay provider-neutral rather
-/// than carrying automation-specific vocabulary into reusable code.
-/// `git_checkout` produces `InvalidTarget`/`CloneFailed`; manifest building
-/// produces `WorkflowNotFound`/`Manifest`. All map to a single 4xx materialize
-/// taxonomy.
+/// Error returned while preparing a checkout from a git source.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RunMaterializeError {
+pub(crate) enum GitCheckoutError {
     #[error("invalid repository target: {0}")]
     InvalidTarget(String),
     #[error("failed to clone repository: {0}")]
     CloneFailed(String),
-    #[error("failed to resolve workflow: {0}")]
-    WorkflowNotFound(String),
-    #[error("failed to build run manifest: {0}")]
-    Manifest(String),
 }
 
 /// Persistent on-disk cache of bare GitHub clones, one per `(owner, repo)`.
@@ -55,10 +45,10 @@ impl GitRepoCache {
         }
     }
 
-    fn bare_dir(&self, repo: &GithubRepository) -> PathBuf {
+    fn bare_dir(&self, repo: &GitHubRepositorySlug) -> PathBuf {
         self.cache_root
-            .join(&repo.owner)
-            .join(format!("{}.git", repo.name))
+            .join(repo.owner())
+            .join(format!("{}.git", repo.repo()))
     }
 
     /// Prepare a worktree containing the requested ref of `repo` at
@@ -74,14 +64,23 @@ impl GitRepoCache {
     pub(crate) async fn prepare_worktree(
         &self,
         args: WorktreePrepareInput<'_>,
-    ) -> Result<String, RunMaterializeError> {
+    ) -> Result<String, GitCheckoutError> {
+        let clone_url = github_clone_url(args.repo);
+        self.prepare_worktree_with_clone_url(args, &clone_url).await
+    }
+
+    async fn prepare_worktree_with_clone_url(
+        &self,
+        args: WorktreePrepareInput<'_>,
+        clone_url: &str,
+    ) -> Result<String, GitCheckoutError> {
         let _guard = self
             .locks
-            .lock((args.repo.owner.clone(), args.repo.name.clone()))
+            .lock((args.repo.owner().to_string(), args.repo.repo().to_string()))
             .await;
         let bare_dir = self.bare_dir(args.repo);
 
-        match self.try_prepare_worktree(&bare_dir, &args).await {
+        match self.try_prepare_worktree(&bare_dir, &args, clone_url).await {
             Ok(sha) => Ok(sha),
             Err(first_err) if bare_clone_may_be_corrupt(&bare_dir).await => {
                 // Best-effort wipe and one retry. Corruption is rare; auth
@@ -89,7 +88,7 @@ impl GitRepoCache {
                 // `bare_clone_may_be_corrupt` only returns true when the
                 // bare repo's `HEAD` file is missing or empty.
                 let _ = fs::remove_dir_all(&bare_dir).await;
-                self.try_prepare_worktree(&bare_dir, &args)
+                self.try_prepare_worktree(&bare_dir, &args, clone_url)
                     .await
                     .map_err(|_| first_err)
             }
@@ -101,7 +100,8 @@ impl GitRepoCache {
         &self,
         bare_dir: &Path,
         args: &WorktreePrepareInput<'_>,
-    ) -> Result<String, RunMaterializeError> {
+        clone_url: &str,
+    ) -> Result<String, GitCheckoutError> {
         let bare_exists = fs::try_exists(&bare_dir.join("HEAD"))
             .await
             .unwrap_or(false);
@@ -112,18 +112,18 @@ impl GitRepoCache {
         } else {
             if let Some(parent) = bare_dir.parent() {
                 fs::create_dir_all(parent).await.map_err(|err| {
-                    RunMaterializeError::CloneFailed(format!(
+                    GitCheckoutError::CloneFailed(format!(
                         "failed to create cache dir {}: {err}",
                         parent.display()
                     ))
                 })?;
             }
-            run_git_plan(build_bare_clone_plan(args.clone_url, bare_dir, args.auth)).await?;
+            run_git_plan(build_bare_clone_plan(clone_url, bare_dir, args.auth)).await?;
         }
 
         run_git_plan(build_bare_fetch_plan(
             bare_dir,
-            args.clone_url,
+            clone_url,
             args.ref_selector,
             args.auth,
         ))
@@ -140,8 +140,7 @@ impl GitRepoCache {
 }
 
 pub(crate) struct WorktreePrepareInput<'a> {
-    pub repo:         &'a GithubRepository,
-    pub clone_url:    &'a str,
+    pub repo:         &'a GitHubRepositorySlug,
     pub ref_selector: &'a str,
     pub auth:         Option<&'a GitAuthConfig>,
     pub worktree_dir: &'a Path,
@@ -154,61 +153,19 @@ async fn bare_clone_may_be_corrupt(bare_dir: &Path) -> bool {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GithubRepository {
-    owner: String,
-    name:  String,
-}
-
 pub(crate) fn parse_github_repository_slug(
     value: &str,
-) -> Result<GithubRepository, RunMaterializeError> {
-    let Some((owner, repo)) = value.split_once('/') else {
-        return Err(RunMaterializeError::InvalidTarget(format!(
-            "repository must be a GitHub owner/repo slug: {value}"
-        )));
-    };
-    if repo.contains('/') || !valid_github_owner(owner) || !valid_github_repo(repo) {
-        return Err(RunMaterializeError::InvalidTarget(format!(
-            "repository must be a GitHub owner/repo slug: {value}"
-        )));
-    }
-    Ok(GithubRepository {
-        owner: owner.to_string(),
-        name:  repo.to_string(),
-    })
+) -> Result<GitHubRepositorySlug, GitCheckoutError> {
+    fabro_automation::parse_github_repository_slug(value)
+        .map_err(|err| GitCheckoutError::InvalidTarget(err.to_string()))
 }
 
-fn valid_github_owner(value: &str) -> bool {
-    if value.is_empty() || value.len() > 39 {
-        return false;
-    }
-    let bytes = value.as_bytes();
-    let first = bytes[0];
-    let last = bytes[bytes.len() - 1];
-    (first.is_ascii_alphanumeric() && last.is_ascii_alphanumeric())
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+fn github_clone_url(repo: &GitHubRepositorySlug) -> String {
+    format!("https://github.com/{}/{}.git", repo.owner(), repo.repo())
 }
 
-fn valid_github_repo(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 100
-        && value != "."
-        && value != ".."
-        && !value.starts_with('.')
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
-pub(crate) fn github_clone_url(repo: &GithubRepository) -> String {
-    format!("https://github.com/{}/{}.git", repo.owner, repo.name)
-}
-
-pub(crate) fn github_metadata_url(repo: &GithubRepository) -> String {
-    format!("https://github.com/{}/{}", repo.owner, repo.name)
+pub(crate) fn github_metadata_url(repo: &GitHubRepositorySlug) -> String {
+    format!("https://github.com/{}/{}", repo.owner(), repo.repo())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -257,7 +214,7 @@ impl GitAuthConfig {
 
 pub(crate) async fn resolve_git_auth_config(
     credentials: Option<&fabro_github::GitHubCredentials>,
-    repo: &GithubRepository,
+    repo: &GitHubRepositorySlug,
     github_api_base_url: &str,
     http_client: Option<fabro_http::HttpClient>,
 ) -> anyhow::Result<Option<GitAuthConfig>> {
@@ -271,7 +228,7 @@ pub(crate) async fn resolve_git_auth_config(
         None => fabro_github::GitHubContext::new(credentials, github_api_base_url),
     };
     let (username, password) =
-        fabro_github::resolve_clone_credentials(&context, &repo.owner, &repo.name).await?;
+        fabro_github::resolve_clone_credentials(&context, repo.owner(), repo.repo()).await?;
     Ok(Some(GitAuthConfig::new(username, password)))
 }
 
@@ -392,7 +349,7 @@ fn build_rev_parse_fetch_head_plan(bare_dir: &Path) -> GitCommandPlan {
     GitCommandPlan::new(["rev-parse", "FETCH_HEAD"], GIT_REV_PARSE_TIMEOUT).current_dir(bare_dir)
 }
 
-async fn run_git_plan(plan: GitCommandPlan) -> Result<Vec<u8>, RunMaterializeError> {
+async fn run_git_plan(plan: GitCommandPlan) -> Result<Vec<u8>, GitCheckoutError> {
     let mut command = Command::new(&plan.program);
     command.args(&plan.args);
     command.envs(plan.env.iter().map(|(key, value)| (key, value)));
@@ -404,14 +361,14 @@ async fn run_git_plan(plan: GitCommandPlan) -> Result<Vec<u8>, RunMaterializeErr
     let output = time::timeout(plan.timeout, command.output())
         .await
         .map_err(|_| {
-            RunMaterializeError::CloneFailed(format!(
+            GitCheckoutError::CloneFailed(format!(
                 "{} timed out after {}s",
                 safe_command_label(&plan),
                 plan.timeout.as_secs()
             ))
         })?
         .map_err(|err| {
-            RunMaterializeError::CloneFailed(format!(
+            GitCheckoutError::CloneFailed(format!(
                 "failed to run {}: {err}",
                 safe_command_label(&plan)
             ))
@@ -435,7 +392,7 @@ async fn run_git_plan(plan: GitCommandPlan) -> Result<Vec<u8>, RunMaterializeErr
         message.push_str(": ");
         message.push_str(stdout.trim());
     }
-    Err(RunMaterializeError::CloneFailed(redact_git_output(
+    Err(GitCheckoutError::CloneFailed(redact_git_output(
         &message,
         &plan.sensitive_values,
     )))
@@ -479,8 +436,8 @@ mod tests {
     fn target_repository_urls_are_github_metadata_urls_without_credentials() {
         let repo = parse_github_repository_slug("fabro-sh/fabro").expect("slug should parse");
 
-        assert_eq!(repo.owner, "fabro-sh");
-        assert_eq!(repo.name, "fabro");
+        assert_eq!(repo.owner(), "fabro-sh");
+        assert_eq!(repo.repo(), "fabro");
         assert_eq!(
             github_clone_url(&repo),
             "https://github.com/fabro-sh/fabro.git"
@@ -499,7 +456,6 @@ mod tests {
             "https://github.com/fabro-sh/fabro",
             "fabro-sh/fabro/extra",
             "-owner/repo",
-            "owner/.git",
         ] {
             let error = parse_github_repository_slug(value).expect_err("invalid slug should fail");
             assert!(
@@ -507,6 +463,18 @@ mod tests {
                 "unexpected error for {value}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn target_repository_validation_matches_automation_validation() {
+        let repo = parse_github_repository_slug("owner/.github").expect("slug should parse");
+
+        assert_eq!(repo.owner(), "owner");
+        assert_eq!(repo.repo(), ".github");
+        assert_eq!(
+            github_metadata_url(&repo),
+            "https://github.com/owner/.github"
+        );
     }
 
     #[test]
@@ -703,21 +671,20 @@ mod tests {
         let upstream = temp.path().join("upstream.git");
         let expected_sha = seed_upstream(&upstream);
         let cache = GitRepoCache::new(temp.path().join("cache"));
-        let repo = GithubRepository {
-            owner: "fabro-sh".to_string(),
-            name:  "fabro".to_string(),
-        };
+        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
         let upstream_url = upstream.to_str().unwrap().to_string();
 
         let worktree_a = temp.path().join("wt-a");
         let sha_a = cache
-            .prepare_worktree(WorktreePrepareInput {
-                repo:         &repo,
-                clone_url:    &upstream_url,
-                ref_selector: "main",
-                auth:         None,
-                worktree_dir: &worktree_a,
-            })
+            .prepare_worktree_with_clone_url(
+                WorktreePrepareInput {
+                    repo:         &repo,
+                    ref_selector: "main",
+                    auth:         None,
+                    worktree_dir: &worktree_a,
+                },
+                &upstream_url,
+            )
             .await
             .expect("first prepare_worktree");
         assert_eq!(sha_a, expected_sha);
@@ -731,13 +698,15 @@ mod tests {
 
         let worktree_b = temp.path().join("wt-b");
         let sha_b = cache
-            .prepare_worktree(WorktreePrepareInput {
-                repo:         &repo,
-                clone_url:    &upstream_url,
-                ref_selector: "main",
-                auth:         None,
-                worktree_dir: &worktree_b,
-            })
+            .prepare_worktree_with_clone_url(
+                WorktreePrepareInput {
+                    repo:         &repo,
+                    ref_selector: "main",
+                    auth:         None,
+                    worktree_dir: &worktree_b,
+                },
+                &upstream_url,
+            )
             .await
             .expect("second prepare_worktree");
         assert_eq!(sha_b, expected_sha);
@@ -754,21 +723,20 @@ mod tests {
         let upstream = temp.path().join("upstream.git");
         let expected_sha = seed_upstream(&upstream);
         let cache = GitRepoCache::new(temp.path().join("cache"));
-        let repo = GithubRepository {
-            owner: "fabro-sh".to_string(),
-            name:  "fabro".to_string(),
-        };
+        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
         let upstream_url = upstream.to_str().unwrap().to_string();
 
         let worktree_a = temp.path().join("wt-a");
         cache
-            .prepare_worktree(WorktreePrepareInput {
-                repo:         &repo,
-                clone_url:    &upstream_url,
-                ref_selector: "main",
-                auth:         None,
-                worktree_dir: &worktree_a,
-            })
+            .prepare_worktree_with_clone_url(
+                WorktreePrepareInput {
+                    repo:         &repo,
+                    ref_selector: "main",
+                    auth:         None,
+                    worktree_dir: &worktree_a,
+                },
+                &upstream_url,
+            )
             .await
             .expect("first prepare_worktree");
 
@@ -778,13 +746,15 @@ mod tests {
 
         let worktree_b = temp.path().join("wt-b");
         let sha = cache
-            .prepare_worktree(WorktreePrepareInput {
-                repo:         &repo,
-                clone_url:    &upstream_url,
-                ref_selector: "main",
-                auth:         None,
-                worktree_dir: &worktree_b,
-            })
+            .prepare_worktree_with_clone_url(
+                WorktreePrepareInput {
+                    repo:         &repo,
+                    ref_selector: "main",
+                    auth:         None,
+                    worktree_dir: &worktree_b,
+                },
+                &upstream_url,
+            )
             .await
             .expect("prepare_worktree should recover from corruption");
         assert_eq!(sha, expected_sha);
