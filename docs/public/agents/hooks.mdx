@@ -28,16 +28,17 @@ POST the event context as JSON to an HTTP endpoint. Useful for webhooks, externa
 event = "run_complete"
 type = "http"
 url = "https://hooks.example.com/done"
+allowed_env_vars = ["API_KEY"]
 
 [hooks.headers]
-Authorization = "Bearer $API_KEY"
+Authorization = "Bearer {{ env.API_KEY }}"
 ```
 
 | Field | Description |
 |---|---|
-| `url` | The endpoint to POST to. Must use `https://` unless `tls = "off"`. |
-| `headers` | Optional HTTP headers. Values support `$VAR` interpolation from `allowed_env_vars`. |
-| `allowed_env_vars` | List of environment variable names that may be interpolated into headers. |
+| `url` | The endpoint to POST to. Must use `https://` unless `tls = "off"`. Supports `{{ env.NAME }}` interpolation. |
+| `headers` | Optional HTTP headers. Values support `{{ env.NAME }}` interpolation, scoped to the names in `allowed_env_vars`. A token for any other env var fails to resolve and the hook blocks (fail-closed). |
+| `allowed_env_vars` | Allowlist of environment variable names a header may read via `{{ env.NAME }}`. Empty (the default) means no env vars may be interpolated into headers. |
 | `tls` | TLS mode: `"verify"` (default), `"no_verify"`, or `"off"`. |
 
 ### Prompt

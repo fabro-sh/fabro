@@ -14222,10 +14222,19 @@ components:
           oneOf:
             - $ref: "#/components/schemas/StringMap"
             - type: "null"
+          description: >-
+            Optional HTTP headers for an http hook. Values support
+            `{{ env.NAME }}` interpolation, scoped to the names listed in
+            `allowed_env_vars`; a token for any other env var fails to resolve
+            and the hook blocks (fail-closed).
         allowed_env_vars:
           type: array
           items:
             type: string
+          description: >-
+            Allowlist of environment variable names that an http hook header may
+            read via `{{ env.NAME }}`. An empty list (the default) permits no env
+            vars in headers.
         tls:
           $ref: "#/components/schemas/TlsMode"
         prompt:
