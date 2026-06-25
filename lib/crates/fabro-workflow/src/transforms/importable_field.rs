@@ -1,4 +1,4 @@
-//! The `ImportableTemplate` type: a workflow field that is either inline
+//! The `ImportableField` type: a workflow field that is either inline
 //! content or an `@path` file import.
 //!
 //! Three field consumers share this classification:
@@ -21,7 +21,7 @@ use crate::static_reference::{ReferenceKind, validate_static_reference};
 /// Borrows the classified string: callers always already hold the inline value
 /// (and fall back to it), so the type never needs to own a copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ImportableTemplate<'a> {
+pub(crate) enum ImportableField<'a> {
     /// Inline content — the literal value or, for templated fields, the
     /// already-rendered text. The caller keeps the value itself; this variant
     /// carries no payload.
@@ -30,7 +30,7 @@ pub(crate) enum ImportableTemplate<'a> {
     Import { path: &'a str },
 }
 
-impl<'a> ImportableTemplate<'a> {
+impl<'a> ImportableField<'a> {
     /// Classify a value: a leading `@` marks a file import, everything else is
     /// inline.
     ///
@@ -68,16 +68,16 @@ mod tests {
     #[test]
     fn parse_classifies_inline_value() {
         assert_eq!(
-            ImportableTemplate::parse("Do the work"),
-            ImportableTemplate::Inline
+            ImportableField::parse("Do the work"),
+            ImportableField::Inline
         );
     }
 
     #[test]
     fn parse_classifies_at_reference_as_import() {
         assert_eq!(
-            ImportableTemplate::parse("@prompts/work.md"),
-            ImportableTemplate::Import {
+            ImportableField::parse("@prompts/work.md"),
+            ImportableField::Import {
                 path: "prompts/work.md",
             }
         );
@@ -87,36 +87,36 @@ mod tests {
     fn parse_strips_only_the_leading_at() {
         // A non-leading `@` (e.g. an email address) is inline, not an import.
         assert_eq!(
-            ImportableTemplate::parse("ping me@example.com"),
-            ImportableTemplate::Inline
+            ImportableField::parse("ping me@example.com"),
+            ImportableField::Inline
         );
     }
 
     #[test]
     fn import_path_returns_validated_path_for_imports_only() {
         assert_eq!(
-            ImportableTemplate::parse("@goal.md").import_path().unwrap(),
+            ImportableField::parse("@goal.md").import_path().unwrap(),
             Some("goal.md")
         );
         assert_eq!(
-            ImportableTemplate::parse("inline").import_path().unwrap(),
+            ImportableField::parse("inline").import_path().unwrap(),
             None
         );
     }
 
     #[test]
     fn import_path_accepts_inline_and_plain_import_paths() {
-        ImportableTemplate::parse("plain inline text")
+        ImportableField::parse("plain inline text")
             .import_path()
             .unwrap();
-        ImportableTemplate::parse("@prompts/work.md")
+        ImportableField::parse("@prompts/work.md")
             .import_path()
             .unwrap();
     }
 
     #[test]
     fn import_path_rejects_template_syntax() {
-        let err = ImportableTemplate::parse("@prompts/{{ inputs.prompt_file }}")
+        let err = ImportableField::parse("@prompts/{{ inputs.prompt_file }}")
             .import_path()
             .unwrap_err();
 

@@ -2,7 +2,7 @@
 //!
 //! An [`InterpString`] field may contain narrow `{{ <namespace>.NAME }}`
 //! tokens — no template logic. Three [`Namespace`]s resolve here: `env`,
-//! `vars`, and `secrets`. `inputs` is **template-only** (D12): it is a
+//! `vars`, and `secrets`. `inputs` is **template-only**: it is a
 //! recognized namespace so an `{{ inputs.* }}` token fails loudly with a clear
 //! message instead of passing through as literal text, but it never resolves
 //! in an `InterpString` field — it belongs in prompts and goals. Which of the
@@ -149,7 +149,7 @@ impl<'a> ResolveCtx<'a> {
             Namespace::Env => self.env.as_mut(),
             Namespace::Vars => self.vars.as_mut(),
             Namespace::Secrets => self.secrets.as_mut(),
-            // `inputs` is template-only (D12): an `InterpString` resolve context
+            // `inputs` is template-only: an `InterpString` resolve context
             // never provides it, so an `{{ inputs.* }}` token is always
             // unavailable here. `substitute_with` still preserves the token so a
             // goal (an `InterpString` that feeds a template) can forward it.
@@ -361,7 +361,7 @@ impl InterpString {
         clippy::disallowed_methods,
         reason = "intentional raw-source fallback so a missing env var surfaces as a \
                   recognizable diagnostic; slated for hard-error semantics in the \
-                  interpolation unification (D3)"
+                  interpolation cleanup"
     )]
     #[must_use]
     pub fn resolve_or_source<F>(&self, lookup: F) -> String
@@ -506,7 +506,7 @@ impl fmt::Display for ResolveError {
                 self.name, self.name
             ),
             ResolveErrorKind::Unavailable => match namespace {
-                // `inputs` is template-only (D12): it never resolves in an
+                // `inputs` is template-only: it never resolves in an
                 // `InterpString` field. Point the user at where it works.
                 Namespace::Inputs => write!(
                     f,
@@ -816,8 +816,8 @@ mod tests {
 
     #[test]
     fn resolve_with_rejects_inputs_as_template_only() {
-        // D12: `inputs` is template-only. An `{{ inputs.* }}` token never
-        // resolves in an `InterpString` field — it fails loudly, pointing the
+        // `inputs` is template-only. An `{{ inputs.* }}` token never resolves
+        // in an `InterpString` field — it fails loudly, pointing the
         // user at prompts and goals.
         let s = InterpString::parse("run-{{ inputs.ticket-id }}");
 

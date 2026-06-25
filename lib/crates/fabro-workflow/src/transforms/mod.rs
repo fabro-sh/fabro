@@ -10,7 +10,7 @@ pub trait Transform {
 
 mod file_inlining;
 mod import;
-mod importable_template;
+mod importable_field;
 mod model_resolution;
 mod preamble;
 pub mod stylesheet;

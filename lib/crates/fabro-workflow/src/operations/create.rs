@@ -68,7 +68,6 @@ pub struct CreatedRun {
 
 struct PersistCreateOptions {
     settings:             WorkflowSettings,
-    vars:                 HashMap<String, String>,
     run_id:               Option<RunId>,
     run_dir:              Option<PathBuf>,
     workflow_slug:        Option<String>,
@@ -146,9 +145,9 @@ pub async fn create(
     let persisted = spawn_blocking(move || {
         create_from_source(
             &raw_source,
+            vars,
             PersistCreateOptions {
                 settings,
-                vars,
                 run_id: Some(run_id),
                 run_dir: Some(persisted_run_dir),
                 workflow_slug: workflow_slug.or(resolved_workflow_slug),
@@ -288,19 +287,20 @@ fn store_error(err: impl std::fmt::Display) -> Error {
 
 fn create_from_source(
     dot_source: &str,
+    vars: HashMap<String, String>,
     options: PersistCreateOptions,
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     goal_override: Option<&str>,
 ) -> Result<Persisted, Error> {
+    let template_context = template_context(Some(&options.settings), vars);
     let mut validated = preprocess_and_validate(
         dot_source,
         options.source_name.clone(),
         current_dir,
         file_resolver,
         Vec::new(),
-        Some(&options.settings),
-        options.vars.clone(),
+        template_context,
         goal_override,
         RenderMode::Structural,
         &options.catalog,
@@ -322,16 +322,13 @@ pub(super) fn preprocess_and_validate(
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    settings: Option<&WorkflowSettings>,
-    vars: HashMap<String, String>,
+    template_context: TemplateContext,
     goal_override: Option<&str>,
     render_mode: RenderMode,
     catalog: &Arc<Catalog>,
 ) -> Result<Validated, Error> {
-    let inputs = run_inputs(settings);
     let mut parsed = pipeline::parse(dot_source)?;
     apply_goal_override(&mut parsed.graph, goal_override);
-    let template_context = TemplateContext::new().with_inputs(inputs).with_vars(vars);
 
     let transformed = pipeline::transform(parsed, &TransformOptions {
         current_dir,
@@ -343,6 +340,15 @@ pub(super) fn preprocess_and_validate(
         catalog: Arc::clone(catalog),
     })?;
     Ok(pipeline::validate(transformed, catalog.as_ref(), &[]))
+}
+
+pub(super) fn template_context(
+    settings: Option<&WorkflowSettings>,
+    vars: HashMap<String, String>,
+) -> TemplateContext {
+    TemplateContext::new()
+        .with_inputs(run_inputs(settings))
+        .with_vars(vars)
 }
 
 fn run_inputs(settings: Option<&WorkflowSettings>) -> HashMap<String, toml::Value> {
@@ -366,7 +372,6 @@ fn persist_validated(
 ) -> Result<Persisted, Error> {
     let PersistCreateOptions {
         settings,
-        vars: _,
         run_id,
         run_dir,
         workflow_slug,
@@ -503,8 +508,7 @@ mod tests {
             Some(PathBuf::from(".")),
             None,
             Vec::new(),
-            Some(&WorkflowSettings::default()),
-            vars,
+            template_context(Some(&WorkflowSettings::default()), vars),
             None,
             RenderMode::Structural,
             &test_catalog(),
@@ -672,8 +676,7 @@ mod tests {
             Some(PathBuf::from(".")),
             None,
             Vec::new(),
-            Some(&WorkflowSettings::default()),
-            HashMap::new(),
+            template_context(Some(&WorkflowSettings::default()), HashMap::new()),
             None,
             RenderMode::Strict,
             &test_catalog(),
@@ -709,8 +712,7 @@ mod tests {
                 None,
             ))),
             Vec::new(),
-            Some(&WorkflowSettings::default()),
-            HashMap::new(),
+            template_context(Some(&WorkflowSettings::default()), HashMap::new()),
             None,
             RenderMode::Strict,
             &test_catalog(),

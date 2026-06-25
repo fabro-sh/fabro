@@ -13,7 +13,7 @@ use tokio::{fs, task};
 
 use crate::git_checkout::{
     GitCheckoutError, GitRepoCache, WorktreePrepareInput, github_metadata_url,
-    parse_github_repository_slug, resolve_git_auth_config,
+    resolve_git_auth_config,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +46,6 @@ pub(crate) enum RunMaterializeError {
 impl From<GitCheckoutError> for RunMaterializeError {
     fn from(value: GitCheckoutError) -> Self {
         match value {
-            GitCheckoutError::InvalidTarget(message) => Self::InvalidTarget(message),
             GitCheckoutError::CloneFailed(message) => Self::CloneFailed(message),
         }
     }
@@ -93,7 +92,7 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
         &self,
         input: AutomationRunMaterializeInput,
     ) -> Result<AutomationRunMaterialized, RunMaterializeError> {
-        let repo = parse_github_repository_slug(&input.target.repository)?;
+        let repo = parse_target_repository(&input.target.repository)?;
         fs::create_dir_all(&input.temp_root).await.map_err(|err| {
             RunMaterializeError::CloneFailed(format!(
                 "failed to create temp root {}: {err}",
@@ -155,6 +154,11 @@ impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
 
 fn render_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
     collect_chain(error).join(": ")
+}
+
+fn parse_target_repository(value: &str) -> Result<GitHubRepositorySlug, RunMaterializeError> {
+    fabro_automation::parse_github_repository_slug(value)
+        .map_err(|err| RunMaterializeError::InvalidTarget(err.to_string()))
 }
 
 #[derive(Debug)]
@@ -329,7 +333,7 @@ mod tests {
         let user_settings_path = temp.path().join("settings.toml");
         fs::write(&user_settings_path, "_version = 1\n").unwrap();
         let run_id = RunId::new();
-        let repo = parse_github_repository_slug("workspace-org/app").unwrap();
+        let repo = parse_target_repository("workspace-org/app").unwrap();
         let sha = "0123456789abcdef0123456789abcdef01234567".to_string();
 
         let materialized = build_manifest_from_checkout(ManifestFromCheckoutInput {

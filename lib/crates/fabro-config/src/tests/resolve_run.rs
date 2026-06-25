@@ -647,7 +647,7 @@ name = "sonnet"
         }
         other => panic!("expected file goal, got {other:?}"),
     }
-    // run.working_dir is demoted (D11): the env token stays literal text.
+    // run.working_dir is demoted: the env token stays literal text.
     assert_eq!(
         settings.working_dir.as_deref(),
         Some("{{ env.FABRO_WORKDIR }}")

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use fabro_model::Catalog;
 use fabro_types::WorkflowSettings;
 
-use super::create::preprocess_and_validate;
+use super::create::{preprocess_and_validate, template_context};
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::error::Error;
 use crate::operations::RenderMode;
@@ -44,8 +44,7 @@ pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
         resolved.current_dir,
         resolved.file_resolver,
         input.custom_transforms,
-        Some(&resolved.settings),
-        input.vars,
+        template_context(Some(&resolved.settings), input.vars),
         resolved.goal_override.as_deref(),
         RenderMode::Structural,
         &input.catalog,

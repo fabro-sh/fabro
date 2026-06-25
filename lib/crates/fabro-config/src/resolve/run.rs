@@ -154,7 +154,7 @@ fn resolve_git(git: Option<&RunGitLayer>) -> RunGitSettings {
 #[expect(
     clippy::disallowed_methods,
     reason = "known leak: prepare step templates collapse to raw source unresolved; strict \
-              resolution scheduled in the interpolation unification (Phase 2)"
+              resolution scheduled for follow-up interpolation cleanup"
 )]
 fn resolve_prepare(
     prepare: Option<&RunPrepareLayer>,

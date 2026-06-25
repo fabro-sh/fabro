@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -8,7 +7,7 @@ use fabro_types::ManifestPath;
 use fabro_validate::Diagnostic;
 
 use super::Transform;
-use super::importable_template::ImportableTemplate;
+use super::importable_field::ImportableField;
 use crate::error::Error;
 use crate::file_resolver::{FileResolver, FileResolverTemplateStore, ResolvedFile};
 use crate::transforms::variable_expansion::{
@@ -148,13 +147,6 @@ impl FileInliningTransform {
         self
     }
 
-    /// Run-scoped `{{ vars.* }}` available to prompts and the goal.
-    #[must_use]
-    pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
-        self.context = self.context.with_vars(vars);
-        self
-    }
-
     pub(crate) fn apply_with_diagnostics(
         &self,
         graph: Graph,
@@ -265,7 +257,7 @@ impl FileInliningTransform {
         owner_target: TemplateRenderTarget,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Option<String>, Error> {
-        let Some(path) = ImportableTemplate::parse(rendered).import_path()? else {
+        let Some(path) = ImportableField::parse(rendered).import_path()? else {
             return Ok(None);
         };
         let Some(resolved) = self.resolver.resolve(&self.current_dir, path) else {
@@ -290,7 +282,7 @@ impl FileInliningTransform {
     /// `output_schema` is not a template, so neither the value nor the loaded
     /// file contents are MiniJinja-rendered.
     fn resolve_output_schema_ref(&self, node_id: &str, value: &str) -> Result<String, Error> {
-        let Some(path) = ImportableTemplate::parse(value).import_path()? else {
+        let Some(path) = ImportableField::parse(value).import_path()? else {
             return Ok(value.to_string());
         };
         let Some(resolved) = self.resolver.resolve(&self.current_dir, path) else {
@@ -365,6 +357,7 @@ mod tests {
         reason = "These unit tests use the real git CLI to build repositories for file-inlining transform coverage."
     )]
 
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use fabro_graphviz::graph::{AttrValue, Graph, Node};

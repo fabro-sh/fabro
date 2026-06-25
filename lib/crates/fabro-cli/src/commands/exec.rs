@@ -324,7 +324,7 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     // against the CLI process env — the mirror of the `fabro run` worker
     // boundary in `fabro_workflow::operations::start::runtime_mcp_server`.
     // Both consumers read the same source-form settings; missing env is a hard
-    // error (D3) and reserved secrets/inputs tokens surface loudly rather than
+    // error and reserved secrets/inputs tokens surface loudly rather than
     // leaking.
     let mcp_servers = mcp_servers
         .into_iter()
