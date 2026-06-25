@@ -17,16 +17,20 @@ use crate::error::Error;
 use crate::static_reference::{ReferenceKind, validate_static_reference};
 
 /// A field value that is either inline content or an `@path` file import.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ImportableTemplate {
-    /// Inline content. For templated fields this is the already-rendered text;
-    /// for `output_schema` it is the literal value.
-    Inline(String),
+///
+/// Borrows the classified string: callers always already hold the inline value
+/// (and fall back to it), so the type never needs to own a copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImportableTemplate<'a> {
+    /// Inline content — the literal value or, for templated fields, the
+    /// already-rendered text. The caller keeps the value itself; this variant
+    /// carries no payload.
+    Inline,
     /// An `@path` file import. `path` has the leading `@` stripped.
-    Import { path: String },
+    Import { path: &'a str },
 }
 
-impl ImportableTemplate {
+impl<'a> ImportableTemplate<'a> {
     /// Classify a value: a leading `@` marks a file import, everything else is
     /// inline.
     ///
@@ -34,32 +38,26 @@ impl ImportableTemplate {
     /// *already-rendered* string, because a leading `@` may be produced by
     /// rendering (e.g. `{{ inputs.prompt_file }}` expanding to
     /// `@prompts/work.md`).
-    pub(crate) fn parse(value: &str) -> Self {
+    pub(crate) fn parse(value: &'a str) -> Self {
         match value.strip_prefix('@') {
-            Some(path) => Self::Import {
-                path: path.to_string(),
-            },
-            None => Self::Inline(value.to_string()),
+            Some(path) => Self::Import { path },
+            None => Self::Inline,
         }
     }
 
-    /// The import path (leading `@` stripped), or `None` for inline content.
-    pub(crate) fn import_path(&self) -> Option<&str> {
+    /// The validated import path (leading `@` stripped), or `None` for inline
+    /// content. Validating here means a caller cannot extract a path without it
+    /// being checked: an import is a static reference and must not contain
+    /// template syntax (e.g. `@prompts/{{ inputs.x }}.md`).
+    pub(crate) fn import_path(&self) -> Result<Option<&'a str>, Error> {
         match self {
-            Self::Import { path } => Some(path),
-            Self::Inline(_) => None,
+            Self::Import { path } => {
+                validate_static_reference(path, ReferenceKind::FileInline)
+                    .map_err(|error| Error::Validation(error.to_string()))?;
+                Ok(Some(path))
+            }
+            Self::Inline => Ok(None),
         }
-    }
-
-    /// Validate an import path: a file reference is a static reference and must
-    /// not contain template syntax (e.g. `@prompts/{{ inputs.x }}.md`). A no-op
-    /// for inline content.
-    pub(crate) fn validate(&self) -> Result<(), Error> {
-        if let Self::Import { path } = self {
-            validate_static_reference(path, ReferenceKind::FileInline)
-                .map_err(|error| Error::Validation(error.to_string()))?;
-        }
-        Ok(())
     }
 }
 
@@ -71,7 +69,7 @@ mod tests {
     fn parse_classifies_inline_value() {
         assert_eq!(
             ImportableTemplate::parse("Do the work"),
-            ImportableTemplate::Inline("Do the work".to_string())
+            ImportableTemplate::Inline
         );
     }
 
@@ -80,7 +78,7 @@ mod tests {
         assert_eq!(
             ImportableTemplate::parse("@prompts/work.md"),
             ImportableTemplate::Import {
-                path: "prompts/work.md".to_string(),
+                path: "prompts/work.md",
             }
         );
     }
@@ -90,33 +88,36 @@ mod tests {
         // A non-leading `@` (e.g. an email address) is inline, not an import.
         assert_eq!(
             ImportableTemplate::parse("ping me@example.com"),
-            ImportableTemplate::Inline("ping me@example.com".to_string())
+            ImportableTemplate::Inline
         );
     }
 
     #[test]
-    fn import_path_returns_stripped_path_for_imports_only() {
+    fn import_path_returns_validated_path_for_imports_only() {
         assert_eq!(
-            ImportableTemplate::parse("@goal.md").import_path(),
+            ImportableTemplate::parse("@goal.md").import_path().unwrap(),
             Some("goal.md")
         );
-        assert_eq!(ImportableTemplate::parse("inline").import_path(), None);
+        assert_eq!(
+            ImportableTemplate::parse("inline").import_path().unwrap(),
+            None
+        );
     }
 
     #[test]
-    fn validate_accepts_inline_and_plain_import_paths() {
+    fn import_path_accepts_inline_and_plain_import_paths() {
         ImportableTemplate::parse("plain inline text")
-            .validate()
+            .import_path()
             .unwrap();
         ImportableTemplate::parse("@prompts/work.md")
-            .validate()
+            .import_path()
             .unwrap();
     }
 
     #[test]
-    fn validate_rejects_template_syntax_in_import_path() {
+    fn import_path_rejects_template_syntax() {
         let err = ImportableTemplate::parse("@prompts/{{ inputs.prompt_file }}")
-            .validate()
+            .import_path()
             .unwrap_err();
 
         assert!(

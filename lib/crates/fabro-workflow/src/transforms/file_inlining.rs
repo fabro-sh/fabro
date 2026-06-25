@@ -265,9 +265,7 @@ impl FileInliningTransform {
         owner_target: TemplateRenderTarget,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Option<String>, Error> {
-        let template = ImportableTemplate::parse(rendered);
-        template.validate()?;
-        let Some(path) = template.import_path() else {
+        let Some(path) = ImportableTemplate::parse(rendered).import_path()? else {
             return Ok(None);
         };
         let Some(resolved) = self.resolver.resolve(&self.current_dir, path) else {
@@ -292,9 +290,7 @@ impl FileInliningTransform {
     /// `output_schema` is not a template, so neither the value nor the loaded
     /// file contents are MiniJinja-rendered.
     fn resolve_output_schema_ref(&self, node_id: &str, value: &str) -> Result<String, Error> {
-        let template = ImportableTemplate::parse(value);
-        template.validate()?;
-        let Some(path) = template.import_path() else {
+        let Some(path) = ImportableTemplate::parse(value).import_path()? else {
             return Ok(value.to_string());
         };
         let Some(resolved) = self.resolver.resolve(&self.current_dir, path) else {
