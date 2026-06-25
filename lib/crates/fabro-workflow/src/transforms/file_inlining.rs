@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -8,32 +7,12 @@ use fabro_types::ManifestPath;
 use fabro_validate::Diagnostic;
 
 use super::Transform;
+use super::importable_field::ImportableField;
 use crate::error::Error;
 use crate::file_resolver::{FileResolver, FileResolverTemplateStore, ResolvedFile};
-use crate::static_reference::{ReferenceKind, validate_static_reference};
 use crate::transforms::variable_expansion::{
     RenderMode, TemplateRenderStore, TemplateRenderTarget, render_template_for_target,
 };
-
-/// Resolve a potential `@path` file reference.
-///
-/// If `value` starts with `@` and the referenced file exists locally, the file
-/// contents are returned (inlined). Otherwise the original value is returned
-/// unchanged.
-pub fn resolve_file_ref(
-    value: &str,
-    current_dir: &Path,
-    resolver: &dyn FileResolver,
-) -> Result<String, Error> {
-    let Some(path_str) = value.strip_prefix('@') else {
-        return Ok(value.to_string());
-    };
-    validate_static_reference(path_str, ReferenceKind::FileInline)
-        .map_err(|error| Error::Validation(error.to_string()))?;
-    Ok(resolver
-        .resolve(current_dir, path_str)
-        .map_or_else(|| value.to_string(), |resolved| resolved.content))
-}
 
 fn parent_dir_or_dot(path: &Path) -> PathBuf {
     path.parent()
@@ -126,7 +105,7 @@ fn manifest_path_is_within_root(path: &ManifestPath, root: &ManifestPath) -> boo
 pub struct FileInliningTransform {
     current_dir:   PathBuf,
     resolver:      Arc<dyn FileResolver>,
-    inputs:        HashMap<String, toml::Value>,
+    context:       TemplateContext,
     source_name:   Option<String>,
     source_text:   Option<String>,
     goal_override: Option<String>,
@@ -139,7 +118,7 @@ impl FileInliningTransform {
         Self {
             current_dir,
             resolver,
-            inputs: HashMap::new(),
+            context: TemplateContext::new(),
             source_name: None,
             source_text: None,
             goal_override: None,
@@ -150,12 +129,12 @@ impl FileInliningTransform {
     #[must_use]
     pub fn with_template_options(
         mut self,
-        inputs: HashMap<String, toml::Value>,
+        context: TemplateContext,
         source_name: Option<String>,
         source_text: Option<String>,
         render_mode: RenderMode,
     ) -> Self {
-        self.inputs = inputs;
+        self.context = context;
         self.source_name = source_name;
         self.source_text = source_text;
         self.render_mode = render_mode;
@@ -183,9 +162,7 @@ impl FileInliningTransform {
             // pass owns canonical goal validation diagnostics.
             None => graph.goal().to_string(),
         };
-        let ctx = TemplateContext::new()
-            .with_goal(resolved_goal)
-            .with_inputs(self.inputs.clone());
+        let ctx = self.context.clone().with_goal(resolved_goal);
 
         for (node_id, node) in &mut graph.nodes {
             // `prompt` is an importable template: MiniJinja-render the value,
@@ -217,7 +194,7 @@ impl FileInliningTransform {
                     &mut diagnostics,
                 )?;
                 let value = self
-                    .render_resolved_file_ref(&rendered, &ctx, target, &mut diagnostics)?
+                    .render_import(&rendered, &ctx, target, &mut diagnostics)?
                     .unwrap_or(rendered);
                 node.attrs
                     .insert("prompt".to_string(), AttrValue::String(value));
@@ -248,7 +225,7 @@ impl FileInliningTransform {
         let Some(AttrValue::String(goal)) = graph.attrs.get("goal") else {
             return Ok(());
         };
-        let ctx = TemplateContext::for_input_scan(self.inputs.clone());
+        let ctx = self.context.clone().with_goal("{{ goal }}");
         let target = TemplateRenderTarget::graph_attr(self.source_name.clone(), "goal")
             .with_source_origin(self.source_text.as_deref(), goal)
             .with_template_store(template_render_store(
@@ -260,7 +237,7 @@ impl FileInliningTransform {
         let rendered =
             render_template_for_target(goal, &ctx, self.render_mode, &target, diagnostics)?;
         let value = self
-            .render_resolved_file_ref(&rendered, &ctx, target, diagnostics)?
+            .render_import(&rendered, &ctx, target, diagnostics)?
             .unwrap_or(rendered);
         graph
             .attrs
@@ -268,19 +245,22 @@ impl FileInliningTransform {
         Ok(())
     }
 
-    fn render_resolved_file_ref(
+    /// Resolve a node `prompt` / graph `goal` value to its final text. The
+    /// `rendered` value is the already-MiniJinja-rendered inline content; when
+    /// it is an `@path` import, the file is loaded and its contents rendered
+    /// too. Returns `Ok(None)` for inline content or a missing file, so the
+    /// caller falls back to the rendered inline value.
+    fn render_import(
         &self,
-        value: &str,
+        rendered: &str,
         ctx: &TemplateContext,
         owner_target: TemplateRenderTarget,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Option<String>, Error> {
-        let Some(path_str) = value.strip_prefix('@') else {
+        let Some(path) = ImportableField::parse(rendered).import_path()? else {
             return Ok(None);
         };
-        validate_static_reference(path_str, ReferenceKind::FileInline)
-            .map_err(|error| Error::Validation(error.to_string()))?;
-        let Some(resolved) = self.resolver.resolve(&self.current_dir, path_str) else {
+        let Some(resolved) = self.resolver.resolve(&self.current_dir, path) else {
             return Ok(None);
         };
         let (source, store) = self.template_source_for_resolved_file(&resolved)?;
@@ -288,8 +268,8 @@ impl FileInliningTransform {
             .with_source_name(resolved.path.display().to_string())
             .with_source_origin(Some(&resolved.content), &resolved.content)
             .with_template_store(TemplateRenderStore::new(source, store));
-        Ok(Some(render_file_contents(
-            &resolved,
+        Ok(Some(render_template_for_target(
+            &resolved.content,
             ctx,
             self.render_mode,
             &target,
@@ -298,16 +278,14 @@ impl FileInliningTransform {
     }
 
     /// Resolve an `output_schema` value. An inline JSON string is returned
-    /// as-is; an `@file` reference is loaded verbatim. Unlike `prompt`,
+    /// as-is; an `@file` import is loaded verbatim. Unlike `prompt`,
     /// `output_schema` is not a template, so neither the value nor the loaded
     /// file contents are MiniJinja-rendered.
     fn resolve_output_schema_ref(&self, node_id: &str, value: &str) -> Result<String, Error> {
-        let Some(path_str) = value.strip_prefix('@') else {
+        let Some(path) = ImportableField::parse(value).import_path()? else {
             return Ok(value.to_string());
         };
-        validate_static_reference(path_str, ReferenceKind::FileInline)
-            .map_err(|error| Error::Validation(error.to_string()))?;
-        let Some(resolved) = self.resolver.resolve(&self.current_dir, path_str) else {
+        let Some(resolved) = self.resolver.resolve(&self.current_dir, path) else {
             return Err(Error::Validation(format!(
                 "node '{node_id}' output_schema has unresolved file reference: {value}"
             )));
@@ -372,16 +350,6 @@ impl Transform for FileInliningTransform {
     }
 }
 
-pub(crate) fn render_file_contents(
-    resolved: &ResolvedFile,
-    ctx: &TemplateContext,
-    render_mode: RenderMode,
-    target: &TemplateRenderTarget,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Result<String, Error> {
-    render_template_for_target(&resolved.content, ctx, render_mode, target, diagnostics)
-}
-
 #[cfg(test)]
 mod tests {
     #![expect(
@@ -389,6 +357,7 @@ mod tests {
         reason = "These unit tests use the real git CLI to build repositories for file-inlining transform coverage."
     )]
 
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use fabro_graphviz::graph::{AttrValue, Graph, Node};
@@ -400,45 +369,6 @@ mod tests {
 
     fn manifest_path(value: &str) -> ManifestPath {
         ManifestPath::from_wire(value).expect("path should parse")
-    }
-
-    #[test]
-    fn resolve_file_ref_passthrough_non_at() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(
-            resolve_file_ref(
-                "hello world",
-                dir.path(),
-                &FilesystemFileResolver::new(None),
-            )
-            .unwrap(),
-            "hello world"
-        );
-    }
-
-    #[test]
-    fn resolve_file_ref_passthrough_missing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(
-            resolve_file_ref(
-                "@nonexistent.md",
-                dir.path(),
-                &FilesystemFileResolver::new(None),
-            )
-            .unwrap(),
-            "@nonexistent.md"
-        );
-    }
-
-    #[test]
-    fn resolve_file_ref_inlines_existing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("prompt.md"), "inlined content").unwrap();
-
-        assert_eq!(
-            resolve_file_ref("@prompt.md", dir.path(), &FilesystemFileResolver::new(None)).unwrap(),
-            "inlined content"
-        );
     }
 
     #[test]
@@ -757,127 +687,6 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, fabro_template::TemplateError::Load { .. }));
-    }
-
-    #[test]
-    fn resolve_file_ref_expands_tilde() {
-        let home = dirs::home_dir().expect("home dir must exist");
-        let test_file = home.join(".fabro_test_tilde_tmp");
-        std::fs::write(&test_file, "tilde content").unwrap();
-        let _cleanup = scopeguard::guard((), |()| {
-            let _ = std::fs::remove_file(&test_file);
-        });
-
-        let dir = tempfile::tempdir().unwrap();
-
-        assert_eq!(
-            resolve_file_ref(
-                "@~/.fabro_test_tilde_tmp",
-                dir.path(),
-                &FilesystemFileResolver::new(None),
-            )
-            .unwrap(),
-            "tilde content"
-        );
-    }
-
-    #[test]
-    fn resolve_file_ref_resolves_dotdot() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("file.md"), "dotdot content").unwrap();
-        std::fs::create_dir(dir.path().join("subdir")).unwrap();
-
-        assert_eq!(
-            resolve_file_ref(
-                "@subdir/../file.md",
-                dir.path(),
-                &FilesystemFileResolver::new(None),
-            )
-            .unwrap(),
-            "dotdot content"
-        );
-    }
-
-    #[test]
-    fn resolve_file_ref_falls_back_to_fallback_dir() {
-        let base = tempfile::tempdir().unwrap();
-        let fallback = tempfile::tempdir().unwrap();
-        std::fs::write(fallback.path().join("shared.md"), "shared content").unwrap();
-
-        assert_eq!(
-            resolve_file_ref(
-                "@shared.md",
-                base.path(),
-                &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
-            )
-            .unwrap(),
-            "shared content"
-        );
-    }
-
-    #[test]
-    fn resolve_file_ref_base_dir_takes_precedence_over_fallback() {
-        let base = tempfile::tempdir().unwrap();
-        let fallback = tempfile::tempdir().unwrap();
-        std::fs::write(base.path().join("prompt.md"), "base content").unwrap();
-        std::fs::write(fallback.path().join("prompt.md"), "fallback content").unwrap();
-
-        assert_eq!(
-            resolve_file_ref(
-                "@prompt.md",
-                base.path(),
-                &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
-            )
-            .unwrap(),
-            "base content"
-        );
-    }
-
-    #[test]
-    fn resolve_file_ref_no_fallback_for_tilde_path() {
-        let base = tempfile::tempdir().unwrap();
-        let fallback = tempfile::tempdir().unwrap();
-        std::fs::write(fallback.path().join("file.md"), "fallback").unwrap();
-
-        // Tilde path to nonexistent file should return original value, not try fallback
-        let result = resolve_file_ref(
-            "@~/nonexistent_fabro_test.md",
-            base.path(),
-            &FilesystemFileResolver::new(Some(fallback.path().to_path_buf())),
-        )
-        .unwrap();
-        assert_eq!(result, "@~/nonexistent_fabro_test.md");
-    }
-
-    #[test]
-    fn resolve_file_ref_fallback_none_behaves_as_before() {
-        let base = tempfile::tempdir().unwrap();
-        assert_eq!(
-            resolve_file_ref(
-                "@missing.md",
-                base.path(),
-                &FilesystemFileResolver::new(None)
-            )
-            .unwrap(),
-            "@missing.md"
-        );
-    }
-
-    #[test]
-    fn resolve_file_ref_rejects_template_path() {
-        let base = tempfile::tempdir().unwrap();
-        let err = resolve_file_ref(
-            "@prompts/{{ inputs.prompt_file }}",
-            base.path(),
-            &FilesystemFileResolver::new(None),
-        )
-        .unwrap_err();
-
-        assert!(
-            err.to_string()
-                .contains("templates are not supported in file inline references"),
-            "unexpected error: {err}"
-        );
     }
 
     #[test]

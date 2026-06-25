@@ -126,9 +126,64 @@ level = "debug"
     assert_eq!(cli.exec.model.provider.as_deref(), Some("openai"));
     assert_eq!(cli.exec.model.name.as_deref(), Some("gpt-5"));
     assert_eq!(cli.exec.agent.permissions, Some(AgentPermissions::ReadOnly));
-    assert_eq!(cli.exec.agent.mcps["fs"].name, "fs");
+    assert_eq!(cli.exec.agent.mcps.as_ref().unwrap()["fs"].name, "fs");
     assert_eq!(cli.output.format, OutputFormat::Json);
     assert_eq!(cli.output.verbosity, OutputVerbosity::Verbose);
     assert!(!cli.updates.check);
     assert_eq!(cli.logging.level.as_deref(), Some("debug"));
+}
+
+#[test]
+fn cli_exec_inline_mcp_with_enabled_false_is_skipped() {
+    let cli = UserSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[cli.exec.agent.mcps.fs]
+type = "stdio"
+command = ["echo", "cli"]
+
+[cli.exec.agent.mcps.disabled]
+type = "stdio"
+enabled = false
+command = ["never-launched"]
+"#,
+    )
+    .expect("cli settings should resolve")
+    .cli;
+
+    let mcps = cli
+        .exec
+        .agent
+        .mcps
+        .as_ref()
+        .expect("cli MCP table should be marked configured");
+    assert!(mcps.contains_key("fs"));
+    assert!(
+        !mcps.contains_key("disabled"),
+        "explicit `enabled = false` should drop the inline cli.exec MCP entry"
+    );
+}
+
+#[test]
+fn cli_exec_all_disabled_mcps_preserves_configured_empty_set() {
+    let cli = UserSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[cli.exec.agent.mcps.disabled]
+type = "stdio"
+enabled = false
+command = ["never-launched"]
+"#,
+    )
+    .expect("cli settings should resolve")
+    .cli;
+
+    let mcps = cli
+        .exec
+        .agent
+        .mcps
+        .expect("cli MCP table should be marked configured");
+    assert!(mcps.is_empty());
 }

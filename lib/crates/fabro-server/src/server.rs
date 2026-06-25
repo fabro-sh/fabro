@@ -138,11 +138,12 @@ use ulid::Ulid;
 
 use crate::auth::{self, GithubEndpoints, auth_translation_middleware, demo_routing_middleware};
 use crate::automation_materializer::{
-    AutomationRunMaterializeError, AutomationRunMaterializeInput, AutomationRunMaterialized,
-    AutomationRunMaterializer, GitRepoCache, ProductionAutomationRunMaterializer,
+    AutomationRunMaterializeInput, AutomationRunMaterialized, AutomationRunMaterializer,
+    ProductionAutomationRunMaterializer, RunMaterializeError,
 };
 use crate::canonical_origin::{canonical_origin_from_effective_web_url, effective_web_url};
 use crate::error::ApiError;
+use crate::git_checkout::GitRepoCache;
 use crate::github_webhooks::{
     WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, parse_event_metadata, verify_signature,
 };
@@ -1118,7 +1119,7 @@ impl AppState {
     pub(crate) async fn materialize_automation_run(
         &self,
         input: AutomationRunMaterializeInput,
-    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError> {
+    ) -> Result<AutomationRunMaterialized, RunMaterializeError> {
         #[cfg(any(test, feature = "test-support"))]
         if let Some(materializer) = self.automation_materializer_override.as_ref() {
             return materializer.materialize(input).await;

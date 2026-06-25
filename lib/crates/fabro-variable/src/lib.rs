@@ -158,6 +158,17 @@ impl VariableStore {
         data
     }
 
+    /// Snapshot every variable as a `name -> value` map, dropping descriptions
+    /// and timestamps. Used to seed the template render context (`{{ vars.*
+    /// }}`) at run creation.
+    #[must_use]
+    pub fn value_map(&self) -> HashMap<String, String> {
+        self.entries
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.value.clone()))
+            .collect()
+    }
+
     pub fn remove(&mut self, name: &str) -> Result<(), Error> {
         Self::validate_name(name)?;
         if self.entries.remove(name).is_none() {

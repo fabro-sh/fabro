@@ -22,7 +22,7 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
         let (graph, transform_diagnostics) = ImportTransform::new(
             current_dir.clone(),
             Arc::clone(file_resolver),
-            options.inputs.clone(),
+            options.template_context.clone(),
         )
         .with_template_options(
             options.source_name.clone(),
@@ -42,7 +42,7 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
         let (graph, transform_diagnostics) =
             FileInliningTransform::new(current_dir.clone(), Arc::clone(file_resolver))
                 .with_template_options(
-                    options.inputs.clone(),
+                    options.template_context.clone(),
                     options.source_name.clone(),
                     Some(source.clone()),
                     options.render_mode,
@@ -55,7 +55,7 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
     };
 
     let (graph, transform_diagnostics) = TemplateTransform {
-        inputs:      options.inputs.clone(),
+        context:     options.template_context.clone(),
         source_name: options.source_name.clone(),
         source_text: Some(source.clone()),
         render_mode: options.render_mode,
@@ -91,7 +91,7 @@ mod tests {
     use super::*;
     use crate::file_resolver::FilesystemFileResolver;
     use crate::pipeline::parse::parse;
-    use crate::pipeline::types::GOAL_SELF_REFERENCE_RULE;
+    use crate::pipeline::types::{GOAL_SELF_REFERENCE_RULE, TEMPLATE_UNDEFINED_VARIABLE_RULE};
 
     fn write_file(path: &Path, contents: &str) {
         if let Some(parent) = path.parent() {
@@ -108,7 +108,7 @@ mod tests {
         TransformOptions {
             current_dir:       None,
             file_resolver:     None,
-            inputs:            HashMap::new(),
+            template_context:  fabro_template::TemplateContext::new(),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],
@@ -170,7 +170,7 @@ mod tests {
         let transformed = transform(parsed, &TransformOptions {
             current_dir:       Some(dir.path().to_path_buf()),
             file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
-            inputs:            HashMap::new(),
+            template_context:  fabro_template::TemplateContext::new(),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],
@@ -217,10 +217,12 @@ mod tests {
         let transformed = transform(parsed, &TransformOptions {
             current_dir:       Some(dir.path().to_path_buf()),
             file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
-            inputs:            HashMap::from([(
-                "task".to_string(),
-                toml::Value::String("Launch".to_string()),
-            )]),
+            template_context:  fabro_template::TemplateContext::new().with_inputs(HashMap::from([
+                (
+                    "task".to_string(),
+                    toml::Value::String("Launch".to_string()),
+                ),
+            ])),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],
@@ -236,6 +238,99 @@ mod tests {
         assert_eq!(
             lint.attrs.get("model"),
             Some(&AttrValue::String("claude-sonnet-4-6".into()))
+        );
+    }
+
+    #[test]
+    fn transform_interpolates_vars_in_node_prompt() {
+        let dot = r#"digraph Test {
+            graph [goal="Fix bugs"]
+            start [shape=Mdiamond]
+            work  [prompt="Service: {{ vars.SERVICE }}"]
+            exit  [shape=Msquare]
+            start -> work -> exit
+        }"#;
+        let parsed = parse(dot).unwrap();
+        let transformed = transform(parsed, &TransformOptions {
+            template_context: fabro_template::TemplateContext::new().with_vars(HashMap::from([(
+                "SERVICE".to_string(),
+                "billing".to_string(),
+            )])),
+            ..transform_options()
+        })
+        .unwrap();
+        let prompt = transformed.graph.nodes["work"]
+            .attrs
+            .get("prompt")
+            .and_then(AttrValue::as_str)
+            .unwrap();
+        assert_eq!(prompt, "Service: billing");
+    }
+
+    #[test]
+    fn transform_interpolates_vars_in_graph_goal_and_through_prompt() {
+        // The goal interpolates `{{ vars.* }}`, and a prompt that embeds the
+        // goal sees the vars-resolved text.
+        let dot = r#"digraph Test {
+            graph [goal="Ship {{ vars.SERVICE }}"]
+            start [shape=Mdiamond]
+            work  [prompt="Goal: {{ goal }}"]
+            exit  [shape=Msquare]
+            start -> work -> exit
+        }"#;
+        let parsed = parse(dot).unwrap();
+        let transformed = transform(parsed, &TransformOptions {
+            template_context: fabro_template::TemplateContext::new().with_vars(HashMap::from([(
+                "SERVICE".to_string(),
+                "billing".to_string(),
+            )])),
+            ..transform_options()
+        })
+        .unwrap();
+        assert_eq!(
+            transformed
+                .graph
+                .attrs
+                .get("goal")
+                .and_then(AttrValue::as_str),
+            Some("Ship billing")
+        );
+        assert_eq!(
+            transformed.graph.nodes["work"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("Goal: Ship billing")
+        );
+    }
+
+    #[test]
+    fn transform_with_empty_vars_warns_on_unknown_var() {
+        // Offline / no variable store: `{{ vars.* }}` is undefined, surfacing a
+        // structural-mode warning (promoted to a hard error at run-create).
+        let dot = r#"digraph Test {
+            graph [goal="Fix bugs"]
+            start [shape=Mdiamond]
+            work  [prompt="Service: {{ vars.MISSING }}"]
+            exit  [shape=Msquare]
+            start -> work -> exit
+        }"#;
+        let parsed = parse(dot).unwrap();
+        let transformed = transform(parsed, &TransformOptions {
+            template_context: fabro_template::TemplateContext::new(),
+            render_mode: crate::operations::RenderMode::Structural,
+            ..transform_options()
+        })
+        .unwrap();
+        let diag = transformed
+            .diagnostics
+            .iter()
+            .find(|d| d.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE)
+            .expect("expected a template_undefined_variable diagnostic for vars.MISSING");
+        assert!(
+            diag.message.contains("vars.MISSING"),
+            "message: {}",
+            diag.message
         );
     }
 
@@ -257,7 +352,7 @@ mod tests {
         let transformed = transform(parsed, &TransformOptions {
             current_dir:       Some(dir.path().to_path_buf()),
             file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
-            inputs:            HashMap::new(),
+            template_context:  fabro_template::TemplateContext::new(),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Structural,
             custom_transforms: vec![],

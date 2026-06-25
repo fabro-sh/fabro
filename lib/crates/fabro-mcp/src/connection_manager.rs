@@ -84,9 +84,14 @@ pub struct ToolInfo {
     pub input_schema:       serde_json::Value,
 }
 
+struct ServerConnection {
+    client:       Arc<McpClient>,
+    tool_timeout: Duration,
+}
+
 /// Manages connections to multiple MCP servers and their tools.
 pub struct McpConnectionManager {
-    clients: HashMap<String, Arc<McpClient>>,
+    clients: HashMap<String, ServerConnection>,
     tools:   HashMap<String, ToolInfo>,
 }
 
@@ -140,7 +145,10 @@ impl McpConnectionManager {
             });
         }
 
-        self.clients.insert(config.name.clone(), Arc::new(client));
+        self.clients.insert(config.name.clone(), ServerConnection {
+            client:       Arc::new(client),
+            tool_timeout: config.tool_timeout(),
+        });
 
         Ok(tool_count)
     }
@@ -172,20 +180,20 @@ impl McpConnectionManager {
         &self,
         qualified_name: &str,
         arguments: serde_json::Value,
-        timeout: Duration,
     ) -> Result<CallToolResult> {
         let info = self
             .tools
             .get(qualified_name)
             .ok_or_else(|| anyhow::anyhow!("unknown MCP tool: {qualified_name}"))?;
 
-        let client = self
+        let connection = self
             .clients
             .get(&info.server_name)
             .ok_or_else(|| anyhow::anyhow!("no client for MCP server: {}", info.server_name))?;
 
-        client
-            .call_tool(&info.original_tool_name, arguments, timeout)
+        connection
+            .client
+            .call_tool(&info.original_tool_name, arguments, connection.tool_timeout)
             .await
     }
 }

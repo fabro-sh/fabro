@@ -44,7 +44,7 @@ mod tests {
         let transformed = transform::transform(parsed, &TransformOptions {
             current_dir:       None,
             file_resolver:     None,
-            inputs:            std::collections::HashMap::new(),
+            template_context:  fabro_template::TemplateContext::new(),
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],

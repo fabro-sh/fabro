@@ -16,7 +16,6 @@ pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool
             let name = qualified_name.clone();
             let server_name = info.server_name.clone();
             let original_name = info.original_tool_name.clone();
-            let tool_timeout = std::time::Duration::from_mins(2);
 
             RegisteredTool {
                 definition: ToolDefinition {
@@ -27,10 +26,9 @@ pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool
                 executor:   Arc::new(move |args, _ctx| {
                     let mgr = Arc::clone(&mgr);
                     let name = name.clone();
-                    let timeout = tool_timeout;
                     Box::pin(async move {
                         let result = mgr
-                            .call_tool(&name, args, timeout)
+                            .call_tool(&name, args)
                             .await
                             .map_err(|e| e.to_string())?;
                         call_result_to_string(&result)

@@ -7,6 +7,7 @@ use fabro_interview::Interviewer;
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::SandboxSpec;
+use fabro_template::TemplateContext;
 use fabro_types::settings::run::{PullRequestSettings, RunModelControls};
 use fabro_types::{ManifestPath, RunId};
 use fabro_validate::{Diagnostic, Severity};
@@ -325,7 +326,7 @@ pub struct Finalized {
 pub struct TransformOptions {
     pub current_dir:       Option<PathBuf>,
     pub file_resolver:     Option<Arc<dyn FileResolver>>,
-    pub inputs:            HashMap<String, toml::Value>,
+    pub template_context:  TemplateContext,
     pub source_name:       Option<String>,
     pub render_mode:       RenderMode,
     pub custom_transforms: Vec<Box<dyn Transform>>,

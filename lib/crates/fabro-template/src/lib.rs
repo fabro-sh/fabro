@@ -48,11 +48,23 @@ pub struct TemplateErrorLocation {
     pub span_len:    Option<usize>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct TemplateContext {
     goal:   Option<String>,
-    inputs: HashMap<String, toml::Value>,
+    inputs: Value,
+    vars:   Value,
     env:    Option<Value>,
+}
+
+impl Default for TemplateContext {
+    fn default() -> Self {
+        Self {
+            goal:   None,
+            inputs: Value::from_serialize(HashMap::<String, toml::Value>::new()),
+            vars:   Value::from_serialize(HashMap::<String, String>::new()),
+            env:    None,
+        }
+    }
 }
 
 impl TemplateContext {
@@ -69,7 +81,14 @@ impl TemplateContext {
 
     #[must_use]
     pub fn with_inputs(mut self, inputs: HashMap<String, toml::Value>) -> Self {
-        self.inputs = inputs;
+        self.inputs = Value::from_serialize(inputs);
+        self
+    }
+
+    /// Run-scoped `{{ vars.* }}` available to prompts and goals.
+    #[must_use]
+    pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
+        self.vars = Value::from_serialize(vars);
         self
     }
 
@@ -107,9 +126,15 @@ impl TemplateContext {
 
     fn into_value(self) -> Value {
         let goal = self.goal.map(Value::from);
-        let inputs = Value::from_serialize(self.inputs);
+        let inputs = self.inputs;
+        let vars = self.vars;
         let env = self.env;
-        Value::from_object(RenderContext { goal, inputs, env })
+        Value::from_object(RenderContext {
+            goal,
+            inputs,
+            vars,
+            env,
+        })
     }
 }
 
@@ -117,6 +142,7 @@ impl TemplateContext {
 struct RenderContext {
     goal:   Option<Value>,
     inputs: Value,
+    vars:   Value,
     env:    Option<Value>,
 }
 
@@ -125,6 +151,7 @@ impl Object for RenderContext {
         match key {
             "goal" => self.goal.clone(),
             "inputs" => Some(self.inputs.clone()),
+            "vars" => Some(self.vars.clone()),
             "env" => self.env.clone(),
             _ => None,
         }
@@ -832,6 +859,30 @@ mod tests {
             "{# {{ goal }} is commented out #}",
             "goal"
         ));
+    }
+
+    #[test]
+    fn renders_vars_variable() {
+        let ctx = TemplateContext::new().with_vars(HashMap::from([(
+            "SERVICE".to_string(),
+            "billing".to_string(),
+        )]));
+
+        let rendered = render("Service: {{ vars.SERVICE }}", &ctx).unwrap();
+
+        assert_eq!(rendered, "Service: billing");
+    }
+
+    #[test]
+    fn unknown_vars_member_is_strict_error() {
+        let ctx = TemplateContext::new().with_vars(HashMap::from([(
+            "SERVICE".to_string(),
+            "billing".to_string(),
+        )]));
+
+        let err = render("{{ vars.MISSING }}", &ctx).unwrap_err();
+
+        assert!(err.to_string().to_lowercase().contains("undefined"));
     }
 
     #[test]

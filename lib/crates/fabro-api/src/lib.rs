@@ -25,6 +25,7 @@ pub mod types {
     };
     pub use fabro_types::run_event::AgentSessionActivatedProps;
     pub use fabro_types::settings::ServerNamespace;
+    pub use fabro_types::settings::run::{McpHttpProtocol, McpTransport};
     pub use fabro_types::settings::server::{
         GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
         LogDestination, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,

@@ -19,6 +19,8 @@ tags:
     description: Server-managed automation definitions and automation-triggered runs
   - name: Environments
     description: Server-managed execution environment catalog
+  - name: MCP Servers
+    description: Server-managed MCP server definitions referenced by id from workflow configs
   - name: Sandboxes
     description: Provider-backed sandbox inventory
   - name: Sessions
@@ -4226,6 +4228,265 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── MCP Servers ──────────────────────────────────────────────────────
+
+  /api/v1/mcp-servers:
+    get:
+      operationId: listMcpServers
+      tags: [MCP Servers]
+      summary: List MCP servers
+      description: Returns all server-managed MCP server definitions with transport env/header values omitted.
+      responses:
+        "200":
+          description: MCP server definitions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServerListResponse"
+        "500":
+          description: MCP server store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createMcpServer
+      tags: [MCP Servers]
+      summary: Create MCP server
+      description: Creates a new MCP server definition. The id is the runtime MCP server name used in qualified tool names.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMcpServerRequest"
+      responses:
+        "201":
+          description: MCP server created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
+        "400":
+          description: Malformed JSON request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: MCP server id already exists
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: MCP server failed domain validation
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: MCP server store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/mcp-servers/{id}:
+    get:
+      operationId: retrieveMcpServer
+      tags: [MCP Servers]
+      summary: Retrieve MCP server
+      description: Returns one MCP server definition by id with transport env/header values omitted.
+      parameters:
+        - $ref: "#/components/parameters/McpServerId"
+      responses:
+        "200":
+          description: MCP server definition
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
+        "400":
+          description: Invalid MCP server id
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: MCP server not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: MCP server store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: replaceMcpServer
+      tags: [MCP Servers]
+      summary: Replace MCP server
+      description: Replaces an MCP server definition when `If-Match` matches the current MCP server revision.
+      parameters:
+        - $ref: "#/components/parameters/McpServerId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceMcpServerRequest"
+      responses:
+        "200":
+          description: MCP server replaced
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
+        "400":
+          description: Malformed JSON request body, invalid MCP server id, or invalid revision header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: MCP server not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: MCP server revision mismatch
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: MCP server failed domain validation
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing required `If-Match` header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: MCP server store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteMcpServer
+      tags: [MCP Servers]
+      summary: Delete MCP server
+      description: Deletes an MCP server definition when `If-Match` matches the current MCP server revision.
+      parameters:
+        - $ref: "#/components/parameters/McpServerId"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "204":
+          description: MCP server deleted
+        "400":
+          description: Invalid MCP server id or revision header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: MCP server not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: MCP server revision mismatch
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Missing required `If-Match` header
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: MCP server store operation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Environments ─────────────────────────────────────────────────────
 
   /api/v1/environments:
@@ -5420,6 +5681,16 @@ components:
         pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
       example: docker
 
+    McpServerId:
+      name: id
+      in: path
+      required: true
+      description: Stable MCP server identifier, used as the runtime MCP server name in qualified tool names.
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+      example: sentry
+
     IfMatch:
       name: If-Match
       in: header
@@ -6342,6 +6613,232 @@ components:
           format: int64
           minimum: 0
           description: Total number of configured automation definitions.
+
+    # ── MCP Servers ──────────────────────────────────────────────────────
+
+    McpServer:
+      description: Public server-managed MCP server definition. Transport env/header values are never returned.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - revision
+        - display_name
+        - description
+        - transport
+        - startup_timeout_secs
+        - tool_timeout_secs
+      properties:
+        id:
+          type: string
+          description: Stable MCP server identifier, used as the runtime MCP server name in qualified tool names.
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+          example: sentry
+        revision:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: Stable revision used with `If-Match` for optimistic concurrency.
+          example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        display_name:
+          type: string
+          description: Human-readable label for display in management UIs.
+          example: Sentry
+        description:
+          type: ["string", "null"]
+          example: Production Sentry MCP server.
+        transport:
+          $ref: "#/components/schemas/McpTransportView"
+        startup_timeout_secs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Seconds to wait for the MCP server to become ready at connect time.
+          example: 10
+        tool_timeout_secs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Seconds to allow each MCP tool call before timing out.
+          example: 60
+
+    CreateMcpServerRequest:
+      description: Request body for creating an MCP server definition.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - display_name
+        - transport
+        - startup_timeout_secs
+        - tool_timeout_secs
+      properties:
+        id:
+          type: string
+          description: Stable MCP server identifier, used as the runtime MCP server name in qualified tool names.
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+          example: sentry
+        display_name:
+          type: string
+          description: Human-readable label for display in management UIs.
+          example: Sentry
+        description:
+          type: ["string", "null"]
+          example: Production Sentry MCP server.
+        transport:
+          $ref: "#/components/schemas/McpTransport"
+        startup_timeout_secs:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 10
+        tool_timeout_secs:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 60
+
+    ReplaceMcpServerRequest:
+      description: Request body for replacing an MCP server definition. The path id is authoritative.
+      type: object
+      additionalProperties: false
+      required:
+        - display_name
+        - transport
+        - startup_timeout_secs
+        - tool_timeout_secs
+      properties:
+        display_name:
+          type: string
+          description: Human-readable label for display in management UIs.
+          example: Sentry
+        description:
+          type: ["string", "null"]
+          example: Production Sentry MCP server.
+        transport:
+          $ref: "#/components/schemas/McpTransport"
+        startup_timeout_secs:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 10
+        tool_timeout_secs:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 60
+
+    # Write requests use the same transport schema as run config. Read responses
+    # use a value-omitting view so secret-bearing env/header values are never returned.
+
+    McpTransportView:
+      description: MCP server transport configuration returned by catalog read APIs.
+      oneOf:
+        - $ref: "#/components/schemas/McpTransportViewStdio"
+        - $ref: "#/components/schemas/McpTransportViewHttp"
+        - $ref: "#/components/schemas/McpTransportViewSandbox"
+      discriminator:
+        propertyName: type
+        mapping:
+          stdio: "#/components/schemas/McpTransportViewStdio"
+          http: "#/components/schemas/McpTransportViewHttp"
+          sandbox: "#/components/schemas/McpTransportViewSandbox"
+
+    McpTransportViewStdio:
+      description: Stdio transport view. Environment variable values are omitted.
+      type: object
+      additionalProperties: false
+      required: [type, command, env_keys]
+      properties:
+        type:
+          type: string
+          enum: [stdio]
+        command:
+          type: array
+          minItems: 1
+          description: Command and arguments used to launch the MCP server.
+          items:
+            type: string
+        env_keys:
+          type: array
+          description: Environment variable names configured for this transport.
+          items:
+            type: string
+
+    McpTransportViewHttp:
+      description: HTTP transport view. Header values are omitted.
+      type: object
+      additionalProperties: false
+      required: [type, url, header_keys]
+      properties:
+        type:
+          type: string
+          enum: [http]
+        protocol:
+          $ref: "#/components/schemas/McpHttpProtocol"
+        url:
+          type: string
+          format: uri
+        header_keys:
+          type: array
+          description: HTTP header names configured for this transport.
+          items:
+            type: string
+
+    McpTransportViewSandbox:
+      description: Sandbox transport view. Environment variable values are omitted.
+      type: object
+      additionalProperties: false
+      required: [type, command, port, env_keys]
+      properties:
+        type:
+          type: string
+          enum: [sandbox]
+        protocol:
+          $ref: "#/components/schemas/McpHttpProtocol"
+        command:
+          type: array
+          minItems: 1
+          description: Command and arguments used to launch the in-sandbox MCP server.
+          items:
+            type: string
+        port:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 65535
+        env_keys:
+          type: array
+          description: Environment variable names configured for this transport.
+          items:
+            type: string
+
+    McpServerListResponse:
+      description: List envelope for MCP server definitions.
+      type: object
+      additionalProperties: false
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/McpServer"
+        meta:
+          $ref: "#/components/schemas/McpServerListMeta"
+
+    McpServerListMeta:
+      description: Metadata for MCP server list responses.
+      type: object
+      additionalProperties: false
+      required:
+        - total
+      properties:
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total number of server-managed MCP server definitions.
 
     # ── Environments ─────────────────────────────────────────────────────
 
@@ -13552,13 +14049,25 @@ components:
           format: int64
 
     McpTransport:
+      description: |
+        MCP server transport configuration. The `type` field selects stdio,
+        HTTP, or sandbox transport. Unknown `type` discriminator values are
+        reported as domain validation errors with HTTP 422.
       oneOf:
         - $ref: "#/components/schemas/McpTransportStdio"
         - $ref: "#/components/schemas/McpTransportHttp"
         - $ref: "#/components/schemas/McpTransportSandbox"
+      discriminator:
+        propertyName: type
+        mapping:
+          stdio: "#/components/schemas/McpTransportStdio"
+          http: "#/components/schemas/McpTransportHttp"
+          sandbox: "#/components/schemas/McpTransportSandbox"
 
     McpTransportStdio:
+      description: Stdio transport that launches a local MCP server subprocess.
       type: object
+      additionalProperties: false
       required: [type, command, env]
       properties:
         type:
@@ -13566,39 +14075,60 @@ components:
           enum: [stdio]
         command:
           type: array
+          minItems: 1
+          description: Command and arguments used to launch the MCP server.
           items:
             type: string
         env:
           $ref: "#/components/schemas/StringMap"
 
     McpTransportHttp:
+      description: HTTP transport that connects to a remote MCP server URL.
       type: object
+      additionalProperties: false
       required: [type, url, headers]
       properties:
         type:
           type: string
           enum: [http]
+        protocol:
+          $ref: "#/components/schemas/McpHttpProtocol"
         url:
           type: string
+          format: uri
         headers:
           $ref: "#/components/schemas/StringMap"
 
     McpTransportSandbox:
+      description: Sandbox transport that launches the MCP server inside the run sandbox and connects over HTTP.
       type: object
+      additionalProperties: false
       required: [type, command, port, env]
       properties:
         type:
           type: string
           enum: [sandbox]
+        protocol:
+          $ref: "#/components/schemas/McpHttpProtocol"
         command:
           type: array
+          minItems: 1
+          description: Command and arguments used to launch the in-sandbox MCP server.
           items:
             type: string
         port:
           type: integer
           format: int32
+          minimum: 1
+          maximum: 65535
         env:
           $ref: "#/components/schemas/StringMap"
+
+    McpHttpProtocol:
+      description: Wire protocol used by HTTP and sandbox MCP transports.
+      type: string
+      enum: [streamable_http, sse]
+      default: streamable_http
 
     HookDefinition:
       type: object

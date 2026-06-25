@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use fabro_model::Catalog;
 use fabro_types::WorkflowSettings;
 
-use super::create::preprocess_and_validate;
+use super::create::{preprocess_and_validate, template_context};
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::error::Error;
 use crate::operations::RenderMode;
@@ -14,6 +15,9 @@ use crate::transforms::Transform;
 pub struct ValidateInput {
     pub workflow:          WorkflowInput,
     pub settings:          WorkflowSettings,
+    /// Run-scoped variables (`{{ vars.* }}`) available to prompts and goals.
+    /// Empty for offline/CLI validation.
+    pub vars:              HashMap<String, String>,
     pub cwd:               PathBuf,
     pub custom_transforms: Vec<Box<dyn Transform>>,
     pub catalog:           Arc<Catalog>,
@@ -40,7 +44,7 @@ pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
         resolved.current_dir,
         resolved.file_resolver,
         input.custom_transforms,
-        Some(&resolved.settings),
+        template_context(Some(&resolved.settings), input.vars),
         resolved.goal_override.as_deref(),
         RenderMode::Structural,
         &input.catalog,

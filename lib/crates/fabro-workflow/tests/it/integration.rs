@@ -4684,7 +4684,7 @@ async fn import_e2e_through_engine() {
         file_resolver:     Some(std::sync::Arc::new(
             fabro_workflow::file_resolver::FilesystemFileResolver::new(None),
         )),
-        inputs:            std::collections::HashMap::new(),
+        template_context:  fabro_template::TemplateContext::new(),
         source_name:       None,
         render_mode:       fabro_workflow::operations::RenderMode::Strict,
         custom_transforms: vec![],

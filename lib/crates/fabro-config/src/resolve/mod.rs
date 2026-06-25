@@ -101,7 +101,9 @@ pub(crate) fn warn_if_demoted_template(field: &str, value: Option<&str>) {
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_types::settings::run::{HookType, McpHttpProtocol, McpTransport, TlsMode};
+    use fabro_types::settings::run::{
+        HookType, McpHttpProtocol, McpTransport, ResolvedMcpEntry, TlsMode,
+    };
 
     use crate::SettingsLayer;
     use crate::tests::workflow_settings_from_layer;
@@ -151,9 +153,14 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
             .expect("run settings should resolve")
             .run;
         let mcps = &resolved.agent.mcps;
+        let transport = |name: &str| {
+            mcps.get(name)
+                .and_then(ResolvedMcpEntry::as_resolved)
+                .map(|server| &server.transport)
+        };
 
         assert_eq!(
-            mcps.get("stdio").map(|mcp| &mcp.transport),
+            transport("stdio"),
             Some(&McpTransport::Stdio {
                 command: vec!["fabro-mcp".to_string(), "--stdio".to_string()],
                 env:     HashMap::from([(
@@ -163,7 +170,7 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
             })
         );
         assert_eq!(
-            mcps.get("http").map(|mcp| &mcp.transport),
+            transport("http"),
             Some(&McpTransport::Http {
                 protocol: McpHttpProtocol::default(),
                 url:      "https://mcp.example.com".to_string(),
@@ -174,7 +181,7 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
             })
         );
         assert_eq!(
-            mcps.get("sandbox").map(|mcp| &mcp.transport),
+            transport("sandbox"),
             Some(&McpTransport::Sandbox {
                 protocol: McpHttpProtocol::default(),
                 command:  vec!["fabro-mcp".to_string(), "--sandbox".to_string()],

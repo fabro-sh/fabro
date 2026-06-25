@@ -155,13 +155,40 @@ async fn connection_manager_stdio_roundtrip() {
         .call_tool(
             "mcp__test_echo__echo",
             serde_json::json!({"message": "roundtrip"}),
-            Duration::from_secs(10),
         )
         .await
         .unwrap();
 
     let text = call_result_to_string(&result).unwrap();
     assert_eq!(text, "roundtrip");
+}
+
+#[tokio::test]
+async fn connection_manager_call_tool_uses_configured_tool_timeout() {
+    let mut config = test_server_config();
+    config.tool_timeout_secs = 1;
+
+    let mut mgr = McpConnectionManager::new();
+    let results = mgr.start_servers(&[config]).await;
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].1.is_ok(),
+        "server should start: {:?}",
+        results[0]
+    );
+
+    let err = mgr
+        .call_tool(
+            "mcp__test_echo__echo",
+            serde_json::json!({"message": "__sleep_ms:1500__"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("timed out calling tool 'echo' on MCP server 'test-echo'"),
+        "unexpected error: {err}"
+    );
 }
 
 #[tokio::test]

@@ -647,7 +647,7 @@ name = "sonnet"
         }
         other => panic!("expected file goal, got {other:?}"),
     }
-    // run.working_dir is demoted (D11): the env token stays literal text.
+    // run.working_dir is demoted: the env token stays literal text.
     assert_eq!(
         settings.working_dir.as_deref(),
         Some("{{ env.FABRO_WORKDIR }}")
@@ -1010,5 +1010,160 @@ exclude_globs = ["**/lower/**"]
 
         assert_eq!(settings.checkpoint.exclude_globs, vec!["**/lower/**"]);
         assert!(settings.checkpoint.skip_git_hooks);
+    }
+}
+
+mod run_agent_mcps {
+    //! Layer + resolver tests for `[run.agent.mcps]`: same-key replacement
+    //! across layers (`StickyMap`) and honoring `enabled = false`.
+
+    use fabro_types::settings::run::{McpTransport, ResolvedMcpEntry};
+
+    use crate::SettingsLayer;
+    use crate::layers::Combine;
+
+    fn parse_settings(source: &str) -> SettingsLayer {
+        source
+            .parse::<SettingsLayer>()
+            .expect("fixture should parse via SettingsLayer")
+    }
+
+    fn stdio_command(entry: &ResolvedMcpEntry) -> &[String] {
+        let server = entry.as_resolved().expect("expected resolved inline entry");
+        match &server.transport {
+            McpTransport::Stdio { command, .. } => command,
+            other => panic!("expected stdio transport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn higher_layer_replaces_same_key_mcp_entry() {
+        // Both layers define `[run.agent.mcps.fs]`; the higher (workflow)
+        // layer's entry must win wholesale via StickyMap same-key replacement.
+        let workflow = parse_settings(
+            r#"
+_version = 1
+
+[run.agent.mcps.fs]
+type = "stdio"
+command = ["fs-server", "--workflow"]
+"#,
+        );
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.agent.mcps.fs]
+type = "stdio"
+command = ["fs-server", "--user"]
+
+[run.agent.mcps.extra]
+type = "stdio"
+command = ["extra-server"]
+"#,
+        );
+        let merged = workflow.combine(user);
+
+        let mcps = super::workflow_settings_from_layer(merged)
+            .expect("merged settings should resolve")
+            .run
+            .agent
+            .mcps;
+
+        // Same-key `fs` is replaced by the higher layer; different-key `extra`
+        // is additive and inherited from the lower layer.
+        assert_eq!(stdio_command(&mcps["fs"]), &[
+            "fs-server".to_string(),
+            "--workflow".to_string()
+        ],);
+        assert!(mcps.contains_key("extra"));
+    }
+
+    #[test]
+    fn inline_entry_with_enabled_false_is_skipped() {
+        let mcps = super::workflow_settings_from_toml(
+            r#"
+_version = 1
+
+[run.agent.mcps.fs]
+type = "stdio"
+command = ["fs-server"]
+
+[run.agent.mcps.disabled]
+type = "stdio"
+enabled = false
+command = ["never-launched"]
+"#,
+        )
+        .expect("settings should resolve")
+        .run
+        .agent
+        .mcps;
+
+        assert!(mcps.contains_key("fs"));
+        assert!(
+            !mcps.contains_key("disabled"),
+            "explicit `enabled = false` should drop the inline MCP entry"
+        );
+    }
+
+    #[test]
+    fn absent_enabled_keeps_inline_entry() {
+        let mcps = super::workflow_settings_from_toml(
+            r#"
+_version = 1
+
+[run.agent.mcps.fs]
+type = "stdio"
+command = ["fs-server"]
+"#,
+        )
+        .expect("settings should resolve")
+        .run
+        .agent
+        .mcps;
+
+        assert!(
+            mcps.contains_key("fs"),
+            "an entry without `enabled` defaults to enabled"
+        );
+    }
+
+    #[test]
+    fn higher_layer_disable_shadows_lower_layer_entry() {
+        // Lower layer enables `fs`; higher layer redefines the same key with
+        // `enabled = false`. StickyMap replacement means the disabled entry
+        // wins and the server is dropped from the resolved map.
+        let workflow = parse_settings(
+            r#"
+_version = 1
+
+[run.agent.mcps.fs]
+type = "stdio"
+enabled = false
+command = ["fs-server"]
+"#,
+        );
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.agent.mcps.fs]
+type = "stdio"
+command = ["fs-server"]
+"#,
+        );
+        let merged = workflow.combine(user);
+
+        let mcps = super::workflow_settings_from_layer(merged)
+            .expect("merged settings should resolve")
+            .run
+            .agent
+            .mcps;
+
+        assert!(
+            !mcps.contains_key("fs"),
+            "a higher-layer `enabled = false` should shadow and disable the lower-layer entry"
+        );
     }
 }

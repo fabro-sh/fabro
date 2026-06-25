@@ -4,7 +4,7 @@ use tower::ServiceExt;
 
 use crate::helpers::{
     MINIMAL_DOT, api, body_json, minimal_manifest_json, response_json, response_status,
-    test_app_state,
+    test_app_state, test_app_state_with_options, test_settings,
 };
 
 fn json_request(method: Method, path: &str, body: &serde_json::Value) -> Request<Body> {
@@ -245,4 +245,124 @@ id = "local"
     .await;
 
     assert_eq!(body["run"]["goal"]["value"], "secret: token-from-variable");
+}
+
+#[tokio::test]
+async fn run_create_interpolates_variables_into_node_prompts() {
+    // End-to-end through the real run-create path: a server variable resolves
+    // inside a node `prompt` (a DOT graph attribute the settings substitution
+    // pass never touches), proving the variable store is snapshotted into the
+    // template render context at create time.
+    let app = fabro_server::test_support::build_test_router(test_app_state_with_options(
+        test_settings(),
+        5,
+    ));
+
+    let create_variable = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/variables",
+            &serde_json::json!({ "name": "SERVICE", "value": "billing" }),
+        ))
+        .await
+        .expect("POST /variables should route");
+    response_status(create_variable, StatusCode::OK, "POST /api/v1/variables").await;
+
+    let dot = r#"digraph Test {
+        graph [goal="Ship it"]
+        start [shape=Mdiamond]
+        work  [shape=box, prompt="Service: {{ vars.SERVICE }}"]
+        exit  [shape=Msquare]
+        start -> work -> exit
+    }"#;
+
+    let create_run = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/runs",
+            &minimal_manifest_json(dot),
+        ))
+        .await
+        .expect("POST /runs should route");
+    let create_status = create_run.status();
+    let create_body = body_json(create_run.into_body()).await;
+    assert_eq!(create_status, StatusCode::CREATED, "{create_body}");
+    let run_id = create_body["id"]
+        .as_str()
+        .expect("create run response should include id");
+
+    // The persisted `run.created` event carries the fully-rendered graph.
+    let events = app
+        .oneshot(empty_request(
+            Method::GET,
+            &format!("/runs/{run_id}/events"),
+        ))
+        .await
+        .expect("GET run events should route");
+    let body = response_json(
+        events,
+        StatusCode::OK,
+        format!("GET /api/v1/runs/{run_id}/events"),
+    )
+    .await;
+    let created = body["data"]
+        .as_array()
+        .expect("events response should include data")
+        .iter()
+        .find(|event| event["event"] == "run.created")
+        .expect("expected a run.created event");
+    assert_eq!(
+        created["properties"]["graph"]["nodes"]["work"]["attrs"]["prompt"]["String"],
+        "Service: billing",
+        "node prompt should interpolate the run variable; event: {created}"
+    );
+}
+
+#[tokio::test]
+async fn run_validate_resolves_variables_in_node_prompts() {
+    let app = fabro_server::test_support::build_test_router(test_app_state_with_options(
+        test_settings(),
+        5,
+    ));
+
+    let create_variable = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/variables",
+            &serde_json::json!({ "name": "SERVICE", "value": "billing" }),
+        ))
+        .await
+        .expect("POST /variables should route");
+    response_status(create_variable, StatusCode::OK, "POST /api/v1/variables").await;
+
+    let dot = r#"digraph Test {
+        graph [goal="Ship it"]
+        start [shape=Mdiamond]
+        work  [shape=box, prompt="Service: {{ vars.SERVICE }}"]
+        exit  [shape=Msquare]
+        start -> work -> exit
+    }"#;
+
+    let validate = app
+        .oneshot(json_request(
+            Method::POST,
+            "/validate",
+            &minimal_manifest_json(dot),
+        ))
+        .await
+        .expect("POST /validate should route");
+    let body = response_json(validate, StatusCode::OK, "POST /api/v1/validate").await;
+    assert_eq!(body["ok"], true, "{body}");
+    let diagnostics = body["workflow"]["diagnostics"]
+        .as_array()
+        .expect("validate response should include diagnostics");
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["rule"] == "template_undefined_variable"),
+        "vars.SERVICE should resolve during validation; diagnostics: {diagnostics:?}"
+    );
 }

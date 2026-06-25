@@ -12,6 +12,7 @@ use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, ProviderId};
 use fabro_store::Database;
+use fabro_template::TemplateContext;
 use fabro_types::{
     AutomationRef, ForkSourceRef, GitContext, ManifestPath, RunId, RunProvenance, WorkflowSettings,
 };
@@ -34,6 +35,10 @@ use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
     pub settings: WorkflowSettings,
+    /// Run-scoped variables (`{{ vars.* }}`) snapshotted from the server's
+    /// variable store at create time, threaded into the template render
+    /// context for prompts and goals. Empty for offline/CLI callers.
+    pub vars: HashMap<String, String>,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
     pub workflow_path: Option<ManifestPath>,
@@ -97,6 +102,7 @@ pub async fn create(
     let CreateRunInput {
         workflow: _,
         settings: _,
+        vars,
         cwd: _,
         workflow_slug,
         workflow_path,
@@ -139,6 +145,7 @@ pub async fn create(
     let persisted = spawn_blocking(move || {
         create_from_source(
             &raw_source,
+            vars,
             PersistCreateOptions {
                 settings,
                 run_id: Some(run_id),
@@ -280,18 +287,20 @@ fn store_error(err: impl std::fmt::Display) -> Error {
 
 fn create_from_source(
     dot_source: &str,
+    vars: HashMap<String, String>,
     options: PersistCreateOptions,
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     goal_override: Option<&str>,
 ) -> Result<Persisted, Error> {
+    let template_context = template_context(Some(&options.settings), vars);
     let mut validated = preprocess_and_validate(
         dot_source,
         options.source_name.clone(),
         current_dir,
         file_resolver,
         Vec::new(),
-        Some(&options.settings),
+        template_context,
         goal_override,
         RenderMode::Structural,
         &options.catalog,
@@ -313,25 +322,33 @@ pub(super) fn preprocess_and_validate(
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    settings: Option<&WorkflowSettings>,
+    template_context: TemplateContext,
     goal_override: Option<&str>,
     render_mode: RenderMode,
     catalog: &Arc<Catalog>,
 ) -> Result<Validated, Error> {
-    let inputs = run_inputs(settings);
     let mut parsed = pipeline::parse(dot_source)?;
     apply_goal_override(&mut parsed.graph, goal_override);
 
     let transformed = pipeline::transform(parsed, &TransformOptions {
         current_dir,
         file_resolver,
-        inputs,
+        template_context,
         source_name,
         render_mode,
         custom_transforms,
         catalog: Arc::clone(catalog),
     })?;
     Ok(pipeline::validate(transformed, catalog.as_ref(), &[]))
+}
+
+pub(super) fn template_context(
+    settings: Option<&WorkflowSettings>,
+    vars: HashMap<String, String>,
+) -> TemplateContext {
+    TemplateContext::new()
+        .with_inputs(run_inputs(settings))
+        .with_vars(vars)
 }
 
 fn run_inputs(settings: Option<&WorkflowSettings>) -> HashMap<String, toml::Value> {
@@ -473,10 +490,29 @@ mod tests {
                 base_dir: None,
             },
             settings,
+            vars: HashMap::new(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog: test_catalog(),
         })
+        .unwrap()
+    }
+
+    /// Drive the create-time pipeline with an explicit variable snapshot, the
+    /// way the server does (`Structural` render mode, undefined vars promoted
+    /// to errors at run-create).
+    fn validate_dot_with_vars(dot_source: &str, vars: HashMap<String, String>) -> Validated {
+        preprocess_and_validate(
+            dot_source,
+            Some("workflow.fabro".to_string()),
+            Some(PathBuf::from(".")),
+            None,
+            Vec::new(),
+            template_context(Some(&WorkflowSettings::default()), vars),
+            None,
+            RenderMode::Structural,
+            &test_catalog(),
+        )
         .unwrap()
     }
 
@@ -553,6 +589,57 @@ mod tests {
     }
 
     #[test]
+    fn vars_resolve_in_node_prompt_through_create_pipeline() {
+        let dot = r#"digraph Test {
+            graph [goal="Ship it"]
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare,  label="Exit"]
+            work  [label="Work", prompt="Service: {{ vars.SERVICE }}"]
+            start -> work -> exit
+        }"#;
+        let vars = HashMap::from([("SERVICE".to_string(), "billing".to_string())]);
+        let validated = validate_dot_with_vars(dot, vars);
+        validated.raise_on_errors().unwrap();
+        assert!(
+            !validated
+                .diagnostics()
+                .iter()
+                .any(|d| d.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE),
+            "vars.SERVICE should resolve through the create pipeline; got: {:?}",
+            validated.diagnostics()
+        );
+    }
+
+    #[test]
+    fn unknown_var_in_prompt_warns_at_validate_then_errors_at_run_create() {
+        let dot = r#"digraph Test {
+            graph [goal="Ship it"]
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare,  label="Exit"]
+            work  [label="Work", prompt="Service: {{ vars.MISSING }}"]
+            start -> work -> exit
+        }"#;
+        let mut validated = validate_dot_with_vars(dot, HashMap::new());
+
+        // `fabro validate` surfaces a warning, not a hard failure.
+        let diagnostic = validated
+            .diagnostics()
+            .iter()
+            .find(|d| d.rule == TEMPLATE_UNDEFINED_VARIABLE_RULE)
+            .expect("expected a template_undefined_variable diagnostic");
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert!(
+            diagnostic.message.contains("vars.MISSING"),
+            "message: {}",
+            diagnostic.message
+        );
+
+        // Run-create promotes the same diagnostic to a hard error.
+        validated.promote_template_undefined_variables_to_errors();
+        assert!(validated.has_errors());
+    }
+
+    #[test]
     fn promote_template_undefined_rule_turns_warning_into_error() {
         let dot = r#"digraph Test {
             graph [goal="Build {{ inputs.app_dir }}"]
@@ -589,7 +676,7 @@ mod tests {
             Some(PathBuf::from(".")),
             None,
             Vec::new(),
-            Some(&WorkflowSettings::default()),
+            template_context(Some(&WorkflowSettings::default()), HashMap::new()),
             None,
             RenderMode::Strict,
             &test_catalog(),
@@ -625,7 +712,7 @@ mod tests {
                 None,
             ))),
             Vec::new(),
-            Some(&WorkflowSettings::default()),
+            template_context(Some(&WorkflowSettings::default()), HashMap::new()),
             None,
             RenderMode::Strict,
             &test_catalog(),
@@ -684,6 +771,7 @@ mod tests {
                     ..RunLayer::default()
                 }
             }),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -732,6 +820,7 @@ mod tests {
                 base_dir: Some(dir.path().to_path_buf()),
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -750,6 +839,7 @@ mod tests {
                 base_dir: Some(dir.path().to_path_buf()),
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -773,6 +863,7 @@ mod tests {
                 base_dir: Some(dir.path().to_path_buf()),
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -791,6 +882,7 @@ mod tests {
                 base_dir: Some(dir.path().to_path_buf()),
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -882,6 +974,7 @@ mod tests {
                 base_dir: None,
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -926,6 +1019,7 @@ mod tests {
                 base_dir: None,
             },
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
             catalog:           test_catalog(),
@@ -960,6 +1054,7 @@ mod tests {
         let validated = validate(ValidateInput {
             workflow:          WorkflowInput::Path(dot_path),
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -1001,6 +1096,7 @@ mod tests {
         let validated = validate(ValidateInput {
             workflow:          WorkflowInput::Path(dot_path),
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -1050,6 +1146,7 @@ mod tests {
                 ]),
             }),
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -1100,6 +1197,7 @@ mod tests {
                 ]),
             }),
             settings:          WorkflowSettings::default(),
+            vars:              HashMap::new(),
             cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
             catalog:           test_catalog(),
@@ -1134,6 +1232,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: test_default_settings(),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -1200,6 +1299,7 @@ mod tests {
                         ..RunLayer::default()
                     }
                 }),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
@@ -1314,6 +1414,7 @@ mod tests {
                         ..RunLayer::default()
                     }
                 }),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -1354,6 +1455,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: dry_run_only_settings(),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -1433,6 +1535,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: dry_run_with_storage(&storage_dir),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
@@ -1486,6 +1589,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: dry_run_with_storage(&storage_dir),
+                vars: HashMap::new(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,

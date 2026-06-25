@@ -385,6 +385,16 @@ fn main() {
             "fabro_types::AgentMcpToolSummary",
             &[],
         ),
+        (
+            "McpHttpProtocol",
+            "fabro_types::settings::run::McpHttpProtocol",
+            &[],
+        ),
+        (
+            "McpTransport",
+            "fabro_types::settings::run::McpTransport",
+            &[],
+        ),
         ("StageContextWindow", "fabro_types::StageContextWindow", &[]),
         (
             "StageContextWindowProjection",

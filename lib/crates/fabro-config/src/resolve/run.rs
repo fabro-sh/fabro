@@ -1,12 +1,14 @@
+use std::collections::HashMap;
+
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
     McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
-    NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunBranchSettings,
-    RunCheckpointSettings, RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal,
-    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
-    RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
-    RunScmSettings, ScmGitHubSettings, TlsMode,
+    NotificationRouteSettings, PullRequestSettings, ResolvedMcpEntry, RunAgentSettings,
+    RunBranchSettings, RunCheckpointSettings, RunCloneSettings, RunExecutionSettings,
+    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
+    RunInterviewsSettings, RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace,
+    RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 
 use super::{ResolveError, resolve_run_environment};
@@ -16,7 +18,7 @@ use crate::{
     NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
     RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer,
     RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer,
-    RunScmLayer, StringOrSplice,
+    RunScmLayer, StickyMap, StringOrSplice,
 };
 
 pub fn resolve_run(
@@ -152,7 +154,7 @@ fn resolve_git(git: Option<&RunGitLayer>) -> RunGitSettings {
 #[expect(
     clippy::disallowed_methods,
     reason = "known leak: prepare step templates collapse to raw source unresolved; strict \
-              resolution scheduled in the interpolation unification (Phase 2)"
+              resolution scheduled for follow-up interpolation cleanup"
 )]
 fn resolve_prepare(
     prepare: Option<&RunPrepareLayer>,
@@ -286,12 +288,28 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
     RunAgentSettings {
         fabro_tools: agent.fabro_tools.unwrap_or(false),
         permissions: agent.permissions,
-        mcps:        agent
-            .mcps
-            .iter()
-            .map(|(name, entry)| (name.clone(), resolve_mcp_entry(name, entry)))
+        mcps:        enabled_mcp_settings(&agent.mcps)
+            .map(|(name, settings)| (name, ResolvedMcpEntry::Resolved(settings)))
             .collect(),
     }
+}
+
+/// Resolve an agent layer's inline MCP entries into runtime settings, dropping
+/// any entry with an explicit `enabled = false`. Shared by the `run.agent` and
+/// `cli.exec.agent` resolution paths so the enable check lives in one place and
+/// any future inline-MCP site inherits it for free.
+pub(crate) fn resolve_enabled_mcps(
+    mcps: &StickyMap<McpEntryLayer>,
+) -> HashMap<String, McpServerSettings> {
+    enabled_mcp_settings(mcps).collect()
+}
+
+fn enabled_mcp_settings(
+    mcps: &StickyMap<McpEntryLayer>,
+) -> impl Iterator<Item = (String, McpServerSettings)> + '_ {
+    mcps.iter()
+        .filter(|(_, entry)| entry.is_enabled())
+        .map(|(name, entry)| (name.clone(), resolve_mcp_entry(name, entry)))
 }
 
 #[expect(
