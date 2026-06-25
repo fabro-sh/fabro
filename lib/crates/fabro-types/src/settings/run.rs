@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration as StdDuration;
 
+use serde::de::{self, Deserializer};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
@@ -1068,22 +1069,57 @@ pub struct RunAgentSettings {
 /// An MCP entry in a run's agent settings: either an inline resolved server or
 /// an unresolved reference to a server-side catalog definition.
 ///
-/// `Resolved` (de)serializes as a **bare** [`McpServerSettings`] — with no enum
-/// tag — for backward compatibility with run specs persisted before this enum
-/// existed. The serde representation is `#[serde(untagged)]` with `Resolved`
-/// listed first so it is tried first; `McpServerRef` uses
-/// `#[serde(deny_unknown_fields)]` so the two variants can never collide
-/// (`McpServerSettings` requires `name` + `transport`, which `McpServerRef`
-/// rejects).
+/// `Resolved` (de)serializes as a **bare** [`McpServerSettings`] - with no enum
+/// tag - for backward compatibility with run specs persisted before this enum
+/// existed. Serialization stays `#[serde(untagged)]`, and custom
+/// deserialization preserves the same wire shapes while rejecting entries that
+/// mix catalog-reference fields (`id`, `enabled`) with inline server fields.
 ///
 /// Invariant: no `Reference` survives run creation. References are resolved to
 /// `Resolved` on the server's run-preparation path before the run spec is
 /// persisted; any `Reference` reaching a post-persistence consumer is a bug.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum ResolvedMcpEntry {
     Resolved(McpServerSettings),
     Reference(McpServerRef),
+}
+
+impl<'de> Deserialize<'de> for ResolvedMcpEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let serde_json::Value::Object(map) = &value else {
+            return Err(de::Error::custom("MCP entry must be a table"));
+        };
+
+        let has_reference_fields = map.contains_key("id") || map.contains_key("enabled");
+        let has_inline_server_fields = map.contains_key("name")
+            || map.contains_key("transport")
+            || map.contains_key("current_dir")
+            || map.contains_key("clear_env")
+            || map.contains_key("startup_timeout_secs")
+            || map.contains_key("tool_timeout_secs");
+
+        if has_reference_fields && has_inline_server_fields {
+            return Err(de::Error::custom(
+                "MCP entry cannot mix catalog reference fields (`id`, `enabled`) with inline \
+                 server fields",
+            ));
+        }
+
+        if has_reference_fields {
+            serde_json::from_value(value)
+                .map(Self::Reference)
+                .map_err(de::Error::custom)
+        } else {
+            serde_json::from_value(value)
+                .map(Self::Resolved)
+                .map_err(de::Error::custom)
+        }
+    }
 }
 
 impl ResolvedMcpEntry {
@@ -1238,6 +1274,32 @@ url = "https://example.com/mcp"
             Some(ResolvedMcpEntry::Resolved(server)) => assert_eq!(server.name, "inline"),
             other => panic!("expected Resolved inline entry, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rejects_entry_mixing_reference_and_inline_server_fields() {
+        let err = serde_json::from_value::<RunAgentSettings>(serde_json::json!({
+            "mcps": {
+                "mixed": {
+                    "id": "catalog-server",
+                    "name": "inline",
+                    "transport": {
+                        "type": "stdio",
+                        "command": ["my-server"],
+                        "env": {}
+                    },
+                    "startup_timeout_secs": 5,
+                    "tool_timeout_secs": 30
+                }
+            }
+        }))
+        .expect_err("mixed reference/server entry should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("cannot mix catalog reference fields"),
+            "unexpected error: {err}"
+        );
     }
 
     /// `Resolved` serializes back out as a bare `McpServerSettings` (no enum

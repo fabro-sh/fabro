@@ -390,7 +390,6 @@ impl RunSession {
                          startup; references must be resolved before the run spec is persisted",
                         reference.id
                     );
-                    debug_assert!(false, "{message}");
                     Err(Error::engine(message))
                 }
             })
