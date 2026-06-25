@@ -419,9 +419,9 @@ mod run_namespace_variable_substitution_tests {
         assert_eq!(run.prepare.commands, vec![
             "echo prod {{ env.REGION }}".to_string()
         ]);
-        let super::ResolvedMcpEntry::Resolved(mcp) = &run.agent.mcps["http"] else {
-            panic!("expected resolved inline mcp entry")
-        };
+        let mcp = run.agent.mcps["http"]
+            .as_resolved()
+            .expect("expected resolved inline mcp entry");
         match &mcp.transport {
             McpTransport::Http { url, headers, .. } => {
                 assert_eq!(url, "https://mcp.example/mcp");
@@ -1084,6 +1084,19 @@ pub struct RunAgentSettings {
 pub enum ResolvedMcpEntry {
     Resolved(McpServerSettings),
     Reference(McpServerRef),
+}
+
+impl ResolvedMcpEntry {
+    /// The inline resolved server, or `None` for an unresolved [`Reference`].
+    ///
+    /// [`Reference`]: ResolvedMcpEntry::Reference
+    #[must_use]
+    pub fn as_resolved(&self) -> Option<&McpServerSettings> {
+        match self {
+            Self::Resolved(server) => Some(server),
+            Self::Reference(_) => None,
+        }
+    }
 }
 
 /// An unresolved reference to a server-defined MCP catalog entry.

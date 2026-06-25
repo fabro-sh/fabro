@@ -1029,17 +1029,10 @@ mod run_agent_mcps {
     }
 
     fn stdio_command(entry: &ResolvedMcpEntry) -> &[String] {
-        match entry {
-            ResolvedMcpEntry::Resolved(server) => match &server.transport {
-                McpTransport::Stdio { command, .. } => command,
-                other => panic!("expected stdio transport, got {other:?}"),
-            },
-            ResolvedMcpEntry::Reference(reference) => {
-                panic!(
-                    "expected resolved inline entry, got reference `{}`",
-                    reference.id
-                )
-            }
+        let server = entry.as_resolved().expect("expected resolved inline entry");
+        match &server.transport {
+            McpTransport::Stdio { command, .. } => command,
+            other => panic!("expected stdio transport, got {other:?}"),
         }
     }
 

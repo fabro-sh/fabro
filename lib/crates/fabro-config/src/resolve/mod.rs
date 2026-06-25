@@ -153,9 +153,10 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
             .expect("run settings should resolve")
             .run;
         let mcps = &resolved.agent.mcps;
-        let transport = |name: &str| match mcps.get(name) {
-            Some(ResolvedMcpEntry::Resolved(server)) => Some(&server.transport),
-            _ => None,
+        let transport = |name: &str| {
+            mcps.get(name)
+                .and_then(ResolvedMcpEntry::as_resolved)
+                .map(|server| &server.transport)
         };
 
         assert_eq!(

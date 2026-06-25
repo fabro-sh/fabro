@@ -385,17 +385,13 @@ impl RunSession {
                 // worker startup with an unresolved reference is an invariant
                 // violation, so fail loudly rather than silently dropping it.
                 ResolvedMcpEntry::Reference(reference) => {
-                    debug_assert!(
-                        false,
-                        "unresolved MCP reference `{key}` (id `{}`) reached worker startup; \
-                         references must be resolved before run-spec persistence",
-                        reference.id
-                    );
-                    Err(Error::engine(format!(
+                    let message = format!(
                         "unresolved MCP server reference `{key}` (id `{}`) reached worker \
                          startup; references must be resolved before the run spec is persisted",
                         reference.id
-                    )))
+                    );
+                    debug_assert!(false, "{message}");
+                    Err(Error::engine(message))
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;

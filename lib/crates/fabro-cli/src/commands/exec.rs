@@ -326,10 +326,8 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
                     // `fabro exec` is a CLI-direct path with no server-side
                     // catalog resolver, so it only honors inline resolved
                     // servers; unresolved catalog references are run-only.
-                    .filter_map(|entry| match entry {
-                        ResolvedMcpEntry::Resolved(server) => Some(server.clone()),
-                        ResolvedMcpEntry::Reference(_) => None,
-                    })
+                    .filter_map(ResolvedMcpEntry::as_resolved)
+                    .cloned()
                     .collect()
             })
             .unwrap_or_default(),
