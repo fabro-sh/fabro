@@ -1053,7 +1053,7 @@ mod tests {
     async fn check_docker_sandbox_reports_error_when_enabled_probe_times_out() {
         let result = check_docker_sandbox_with_probe(
             true,
-            || std::future::pending::<Result<(), String>>(),
+            std::future::pending::<Result<(), String>>,
             Duration::from_millis(1),
         )
         .await;
