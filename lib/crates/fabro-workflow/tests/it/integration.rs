@@ -8906,7 +8906,13 @@ async fn hook_config_merge_run_overrides_by_name() {
     let merged = server_hooks.merge(run_hooks);
     assert_eq!(merged.hooks.len(), 1);
     // Run config wins — command should be "exit 0"
-    assert_eq!(merged.hooks[0].command.as_deref(), Some("exit 0"));
+    assert_eq!(
+        merged.hooks[0]
+            .command
+            .as_ref()
+            .map(fabro_hooks::InterpString::as_source),
+        Some("exit 0".to_string())
+    );
 
     // Verify it actually works end-to-end
     let engine = engine_with_hooks(merged.hooks);

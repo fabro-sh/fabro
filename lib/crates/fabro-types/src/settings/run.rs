@@ -117,7 +117,7 @@ impl RunNamespace {
         }
         for hook in &mut self.hooks {
             substitute_option_string(&mut hook.name, &mut lookup)?;
-            substitute_option_string(&mut hook.command, &mut lookup)?;
+            substitute_option(&mut hook.command, &mut lookup)?;
             substitute_option_string(&mut hook.matcher, &mut lookup)?;
             if let Some(hook_type) = &mut hook.hook_type {
                 substitute_hook_type(hook_type, &mut lookup)?;
@@ -320,17 +320,17 @@ where
     F: FnMut(&str) -> Option<String>,
 {
     match hook_type {
-        HookType::Command { command } => substitute_string(command, lookup),
+        HookType::Command { command } => substitute(command, lookup),
         HookType::Http { url, headers, .. } => {
-            substitute_string(url, lookup)?;
+            substitute(url, lookup)?;
             if let Some(headers) = headers {
-                substitute_string_map(headers, lookup)?;
+                substitute_map(headers, lookup)?;
             }
             Ok(())
         }
         HookType::Prompt { prompt, model } | HookType::Agent { prompt, model, .. } => {
-            substitute_string(prompt, lookup)?;
-            substitute_option_string(model, lookup)
+            substitute(prompt, lookup)?;
+            substitute_option(model, lookup)
         }
     }
 }
@@ -386,10 +386,10 @@ mod run_namespace_variable_substitution_tests {
                 event:      HookEvent::RunComplete,
                 command:    None,
                 hook_type:  Some(HookType::Http {
-                    url:              "https://hooks.example/{{ vars.ENV }}".to_string(),
+                    url:              InterpString::parse("https://hooks.example/{{ vars.ENV }}"),
                     headers:          Some(HashMap::from([(
                         "X-Env".to_string(),
-                        "{{ vars.ENV }}".to_string(),
+                        InterpString::parse("{{ vars.ENV }}"),
                     )])),
                     allowed_env_vars: Vec::new(),
                     tls:              super::TlsMode::Verify,
@@ -432,13 +432,13 @@ mod run_namespace_variable_substitution_tests {
         }
         match run.hooks[0].hook_type.as_ref().unwrap() {
             HookType::Http { url, headers, .. } => {
-                assert_eq!(url, "https://hooks.example/prod");
+                assert_eq!(url.as_source(), "https://hooks.example/prod");
                 assert_eq!(
                     headers
                         .as_ref()
                         .and_then(|headers| headers.get("X-Env"))
-                        .map(String::as_str),
-                    Some("prod")
+                        .map(InterpString::as_source),
+                    Some("prod".to_string())
                 );
             }
             other => panic!("expected http hook type, got {other:?}"),
@@ -1607,23 +1607,23 @@ pub enum TlsMode {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HookType {
     Command {
-        command: String,
+        command: InterpString,
     },
     Http {
-        url:              String,
-        headers:          Option<HashMap<String, String>>,
+        url:              InterpString,
+        headers:          Option<HashMap<String, InterpString>>,
         #[serde(default)]
         allowed_env_vars: Vec<String>,
         #[serde(default)]
         tls:              TlsMode,
     },
     Prompt {
-        prompt: String,
-        model:  Option<String>,
+        prompt: InterpString,
+        model:  Option<InterpString>,
     },
     Agent {
-        prompt:          String,
-        model:           Option<String>,
+        prompt:          InterpString,
+        model:           Option<InterpString>,
         max_tool_rounds: Option<u32>,
     },
 }
@@ -1633,7 +1633,7 @@ pub struct HookDefinition {
     pub name:       Option<String>,
     pub event:      HookEvent,
     #[serde(default)]
-    pub command:    Option<String>,
+    pub command:    Option<InterpString>,
     #[serde(flatten)]
     pub hook_type:  Option<HookType>,
     pub matcher:    Option<String>,
@@ -1686,6 +1686,11 @@ impl HookDefinition {
     }
 
     #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "effective_name builds a human/merge-identity label from the hook's unresolved \
+                  template source; the source text is the intended display value here"
+    )]
     pub fn effective_name(&self) -> String {
         if let Some(ref name) = self.name {
             return name.clone();
@@ -1693,12 +1698,14 @@ impl HookDefinition {
         let event = format!("{:?}", self.event).to_lowercase();
         match self.resolved_hook_type().as_deref() {
             Some(HookType::Command { command }) => {
-                let short = &command[..command.floor_char_boundary(20)];
+                let source = command.as_source();
+                let short = &source[..source.floor_char_boundary(20)];
                 format!("{event}:{short}")
             }
-            Some(HookType::Http { url, .. }) => format!("{event}:{url}"),
+            Some(HookType::Http { url, .. }) => format!("{event}:{}", url.as_source()),
             Some(HookType::Prompt { prompt, .. } | HookType::Agent { prompt, .. }) => {
-                let short = &prompt[..prompt.floor_char_boundary(20)];
+                let source = prompt.as_source();
+                let short = &source[..source.floor_char_boundary(20)];
                 format!("{event}:{short}")
             }
             None => event,

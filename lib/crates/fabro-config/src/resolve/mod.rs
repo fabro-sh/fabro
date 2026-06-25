@@ -101,6 +101,7 @@ pub(crate) fn warn_if_demoted_template(field: &str, value: Option<&str>) {
 mod tests {
     use std::collections::HashMap;
 
+    use fabro_types::settings::InterpString;
     use fabro_types::settings::run::{
         HookType, McpHttpProtocol, McpTransport, ResolvedMcpEntry, TlsMode,
     };
@@ -201,10 +202,10 @@ Authorization = "Bearer {{ env.HOOK_TOKEN }}"
         assert_eq!(
             hook.resolved_hook_type().as_deref(),
             Some(&HookType::Http {
-                url:              "https://hooks.example.com".to_string(),
+                url:              InterpString::parse("https://hooks.example.com"),
                 headers:          Some(HashMap::from([(
                     "Authorization".to_string(),
-                    "Bearer {{ env.HOOK_TOKEN }}".to_string(),
+                    InterpString::parse("Bearer {{ env.HOOK_TOKEN }}"),
                 )])),
                 allowed_env_vars: Vec::new(),
                 tls:              TlsMode::Verify,

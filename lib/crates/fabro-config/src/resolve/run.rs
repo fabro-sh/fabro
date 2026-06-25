@@ -412,11 +412,6 @@ fn resolve_mcp_command(
         .unwrap_or_default()
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "intentional source preservation: the hook executor re-resolves {{ env.* }} \
-              tokens at hook fire time"
-)]
 fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) -> HookDefinition {
     let variants = [
         hook.script.is_some() || hook.command.is_some(),
@@ -437,15 +432,9 @@ fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) 
 
     let hook_type = resolve_hook_type(hook);
     let command = if let Some(script) = &hook.script {
-        Some(script.as_source())
+        Some(script.clone())
     } else {
-        hook.command.as_ref().map(|command| {
-            command
-                .iter()
-                .map(InterpString::as_source)
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
+        hook.command.as_ref().map(|command| join_command(command))
     };
 
     HookDefinition {
@@ -462,11 +451,24 @@ fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) 
     }
 }
 
+/// Join an argv-style `command` into a single space-separated [`InterpString`],
+/// preserving every `{{ ... }}` token so the executor resolves it at hook fire
+/// time. The join reconstructs the source form once, in one audited place.
 #[expect(
     clippy::disallowed_methods,
-    reason = "intentional source preservation: the hook executor re-resolves {{ env.* }} \
-              tokens at hook fire time"
+    reason = "deliberate source reconstruction: argv parts are reassembled into one InterpString \
+              whose tokens stay typed for resolution at hook fire time"
 )]
+fn join_command(command: &[InterpString]) -> InterpString {
+    InterpString::parse(
+        &command
+            .iter()
+            .map(InterpString::as_source)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
 fn resolve_hook_type(hook: &HookEntry) -> Option<HookType> {
     if hook.script.is_some() || hook.command.is_some() {
         return None;
@@ -479,7 +481,7 @@ fn resolve_hook_type(hook: &HookEntry) -> Option<HookType> {
             Some(
                 hook.headers
                     .iter()
-                    .map(|(key, value)| (key.clone(), value.as_source()))
+                    .map(|(key, value)| (key.clone(), value.clone()))
                     .collect(),
             )
         };
@@ -490,7 +492,7 @@ fn resolve_hook_type(hook: &HookEntry) -> Option<HookType> {
             None => TlsMode::default(),
         };
         return Some(HookType::Http {
-            url: url.as_source(),
+            url: url.clone(),
             headers,
             allowed_env_vars: hook.allowed_env_vars.clone(),
             tls,
@@ -501,17 +503,16 @@ fn resolve_hook_type(hook: &HookEntry) -> Option<HookType> {
         return Some(HookType::Agent {
             prompt:          hook
                 .prompt
-                .as_ref()
-                .map(InterpString::as_source)
-                .unwrap_or_default(),
-            model:           hook.model.as_ref().map(InterpString::as_source),
+                .clone()
+                .unwrap_or_else(|| InterpString::parse("")),
+            model:           hook.model.clone(),
             max_tool_rounds: hook.max_tool_rounds,
         });
     }
 
     hook.prompt.as_ref().map(|prompt| HookType::Prompt {
-        prompt: prompt.as_source(),
-        model:  hook.model.as_ref().map(InterpString::as_source),
+        prompt: prompt.clone(),
+        model:  hook.model.clone(),
     })
 }
 

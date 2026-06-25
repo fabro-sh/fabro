@@ -9,6 +9,7 @@
 
 use std::borrow::Cow;
 
+use fabro_types::settings::InterpString;
 use serde::{Deserialize, Serialize};
 
 /// Lifecycle events that can trigger user-defined hooks.
@@ -91,23 +92,23 @@ pub enum TlsMode {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HookType {
     Command {
-        command: String,
+        command: InterpString,
     },
     Http {
-        url:              String,
-        headers:          Option<std::collections::HashMap<String, String>>,
+        url:              InterpString,
+        headers:          Option<std::collections::HashMap<String, InterpString>>,
         #[serde(default)]
         allowed_env_vars: Vec<String>,
         #[serde(default)]
         tls:              TlsMode,
     },
     Prompt {
-        prompt: String,
-        model:  Option<String>,
+        prompt: InterpString,
+        model:  Option<InterpString>,
     },
     Agent {
-        prompt:          String,
-        model:           Option<String>,
+        prompt:          InterpString,
+        model:           Option<InterpString>,
         max_tool_rounds: Option<u32>,
     },
 }
@@ -119,7 +120,7 @@ pub struct HookDefinition {
     pub event:      HookEvent,
     /// Inline command shorthand — if set, implies `type = "command"`.
     #[serde(default)]
-    pub command:    Option<String>,
+    pub command:    Option<InterpString>,
     /// Explicit hook type (command or http). If omitted and `command` is set,
     /// defaults to `Command`.
     #[serde(flatten)]
@@ -178,6 +179,11 @@ impl HookDefinition {
 
     /// The effective name: explicit name or a generated one.
     #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "effective_name builds a human/merge-identity label from the hook's unresolved \
+                  template source; the source text is the intended display value here"
+    )]
     pub fn effective_name(&self) -> String {
         if let Some(ref n) = self.name {
             return n.clone();
@@ -185,12 +191,14 @@ impl HookDefinition {
         let event_str = self.event.to_string();
         match self.resolved_hook_type().as_deref() {
             Some(HookType::Command { ref command }) => {
-                let short = &command[..command.floor_char_boundary(20)];
+                let source = command.as_source();
+                let short = &source[..source.floor_char_boundary(20)];
                 format!("{event_str}:{short}")
             }
-            Some(HookType::Http { ref url, .. }) => format!("{event_str}:{url}"),
+            Some(HookType::Http { ref url, .. }) => format!("{event_str}:{}", url.as_source()),
             Some(HookType::Prompt { ref prompt, .. } | HookType::Agent { ref prompt, .. }) => {
-                let short = &prompt[..prompt.floor_char_boundary(20)];
+                let source = prompt.as_source();
+                let short = &source[..source.floor_char_boundary(20)];
                 format!("{event_str}:{short}")
             }
             None => event_str,

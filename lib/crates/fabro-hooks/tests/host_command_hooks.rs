@@ -5,7 +5,7 @@ use fabro_agent::{LocalSandbox, Sandbox};
 use fabro_auth::{CredentialSource, EnvCredentialSource};
 use fabro_hooks::{
     HookContext, HookDecision, HookDefinition, HookEvent, HookExecutionContext, HookRunner,
-    HookSettings,
+    HookSettings, InterpString,
 };
 use fabro_model::Catalog;
 use fabro_types::RunId;
@@ -44,7 +44,7 @@ async fn host_command_hook_uses_host_workdir_not_sandbox_workdir() {
             hooks: vec![HookDefinition {
                 name:       Some("host-marker".to_string()),
                 event:      HookEvent::RunStart,
-                command:    Some("printf ran > marker.txt".to_string()),
+                command:    Some(InterpString::parse("printf ran > marker.txt")),
                 hook_type:  None,
                 matcher:    None,
                 blocking:   Some(true),
