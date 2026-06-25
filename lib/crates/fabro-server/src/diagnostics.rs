@@ -614,7 +614,7 @@ fn docker_sandbox_probe_check(probe: Result<(), String>) -> CheckResult {
             summary: "daemon unavailable".to_string(),
             details: vec![CheckDetail::new(err)],
             remediation: Some(
-                "Start Docker Desktop, verify DOCKER_HOST, or fix permissions for the Docker socket."
+                "Start Docker Desktop or the Docker daemon, fix Docker socket permissions, or disable Docker with `server.sandbox.providers.docker.enabled = false`."
                     .to_string(),
             ),
         },
@@ -1014,7 +1014,7 @@ mod tests {
         assert_eq!(
             result.remediation.as_deref(),
             Some(
-                "Start Docker Desktop, verify DOCKER_HOST, or fix permissions for the Docker socket."
+                "Start Docker Desktop or the Docker daemon, fix Docker socket permissions, or disable Docker with `server.sandbox.providers.docker.enabled = false`."
             )
         );
     }
@@ -1031,10 +1031,7 @@ mod tests {
         assert_eq!(result.name, "Docker Sandbox");
         assert_eq!(result.status, CheckStatus::Pass);
         assert_eq!(result.summary, "daemon reachable");
-        assert_eq!(
-            result.details[0].text,
-            "Docker daemon responded to ping"
-        );
+        assert_eq!(result.details[0].text, "Docker daemon responded to ping");
     }
 
     #[tokio::test]
