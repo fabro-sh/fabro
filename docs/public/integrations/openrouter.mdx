@@ -7,12 +7,12 @@ description: "Route Fabro models through OpenRouter's multi-provider gateway"
 
 ## Prerequisites
 
-- An [OpenRouter account](https://openrouter.ai/) with credit
+- An [OpenRouter account](https://openrouter.ai/) with credit for paid models
 - An API key from [openrouter.ai/keys](https://openrouter.ai/keys)
 
 ## Enable the provider
 
-Add the provider override to `~/.fabro/settings.toml`:
+Fabro runs execute through a Fabro server. Add the provider override to the settings file used by that server. For a local server, this is usually `~/.fabro/settings.toml`; for a remote deployment, update the server host's Fabro settings.
 
 ```toml title="settings.toml"
 _version = 1
@@ -26,10 +26,12 @@ enabled = true
 For server-backed runs, store the key in the Fabro server vault:
 
 ```bash
-fabro provider login openrouter
+fabro provider login --provider openrouter
 # or
 fabro secret set OPENROUTER_API_KEY sk-or-v1-...
 ```
+
+Pass `--server https://your-fabro.example` when configuring a non-default remote server.
 
 Standalone local SDK/CLI runs can use an env-backed credential source explicitly:
 
@@ -58,6 +60,7 @@ Any other OpenRouter model can be added as a settings model entry with `provider
 ```toml title="settings.toml"
 [llm.models."meta-llama/llama-4-maverick"]
 provider = "openrouter"
+api_id = "meta-llama/llama-4-maverick"
 display_name = "Llama 4 Maverick"
 family = "llama-4"
 
@@ -130,9 +133,9 @@ Fabro does not send OpenRouter's optional attribution headers (`HTTP-Referer`, `
 
 ## Troubleshooting
 
-**"No API key configured"** — For server-backed runs, set the key with `fabro provider login openrouter` or `fabro secret set OPENROUTER_API_KEY ...`. For standalone local usage, export `OPENROUTER_API_KEY` in the invoking shell.
+**"No API key configured"** — Set the key on the target server with `fabro provider login --provider openrouter` or `fabro secret set OPENROUTER_API_KEY ...`. For standalone local usage, export `OPENROUTER_API_KEY` in the invoking shell.
 
-**402 / insufficient credits** — OpenRouter requires prepaid credit; check your balance at [openrouter.ai/credits](https://openrouter.ai/credits).
+**402 / insufficient credits** — Paid OpenRouter models require prepaid credit; check your balance at [openrouter.ai/credits](https://openrouter.ai/credits).
 
 **Unknown model** — Confirm the model's `api_id` matches an OpenRouter slug exactly (including the vendor prefix), then run `fabro model test --model <fabro-model-id>`.
 

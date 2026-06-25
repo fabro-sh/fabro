@@ -804,6 +804,32 @@ impl Client {
         Ok(models)
     }
 
+    pub async fn list_providers(&self) -> Result<Vec<types::Provider>> {
+        let response = self
+            .send_api(|client| async move { client.list_providers().send().await })
+            .await?;
+        convert_type::<_, Vec<types::Provider>>(response.into_inner().data)
+    }
+
+    pub async fn test_provider_credentials(
+        &self,
+        provider: &ProviderId,
+        api_key: &str,
+    ) -> Result<()> {
+        self.send_api(|client| async move {
+            client
+                .test_provider_credentials()
+                .provider(provider.to_string())
+                .body(types::ProviderCredentialTestRequest {
+                    api_key: api_key.to_string(),
+                })
+                .send()
+                .await
+        })
+        .await?;
+        Ok(())
+    }
+
     pub async fn test_model(
         &self,
         id: &str,
@@ -2248,6 +2274,29 @@ mod tests {
 
         mock.assert_async().await;
         assert!(models.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_provider_credentials_posts_api_key() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/api/v1/providers/openrouter/credentials/test")
+                    .json_body(json!({ "api_key": "sk-test" }));
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .json_body(json!({ "ok": true }));
+            })
+            .await;
+
+        let client = Client::new_no_proxy(&server.url("")).unwrap();
+        client
+            .test_provider_credentials(&ProviderId::new("openrouter"), "sk-test")
+            .await
+            .unwrap();
+
+        mock.assert_async().await;
     }
 
     async fn oauth_client(

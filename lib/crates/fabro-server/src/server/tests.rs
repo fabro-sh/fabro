@@ -6310,6 +6310,79 @@ async fn test_model_invalid_mode_returns_400() {
 }
 
 #[tokio::test]
+async fn test_provider_credentials_uses_app_state_catalog() {
+    let upstream = MockServer::start();
+    let completion = upstream.mock(|when, then| {
+        when.method(POST)
+            .path("/chat/completions")
+            .header("authorization", "Bearer sk-test");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "id": "chatcmpl_test",
+                "object": "chat.completion",
+                "created": 1_700_000_000,
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "OK"},
+                    "finish_reason": "stop"
+                }],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+            }));
+    });
+    let llm_catalog_settings: LlmCatalogSettings = toml::from_str(&format!(
+        r#"
+[providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+agent_profile = "openai"
+base_url = "{}"
+priority = 120
+
+[providers.acme.auth]
+credentials = ["vault:ACME_API_KEY"]
+
+[models."acme-probe"]
+provider = "acme"
+api_id = "test-model"
+display_name = "Acme Probe"
+family = "acme"
+default = true
+probe = true
+
+[models."acme-probe".limits]
+context_window = 128000
+
+[models."acme-probe".features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        upstream.base_url()
+    ))
+    .expect("catalog fixture should parse");
+    let state = TestAppStateBuilder::new()
+        .runtime_settings(default_test_server_settings(), RunLayer::default())
+        .max_concurrent_runs(5)
+        .llm_catalog_settings(llm_catalog_settings)
+        .build();
+    let app = crate::test_support::build_test_router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/providers/acme/credentials/test"))
+        .header("content-type", "application/json")
+        .body(Body::from(json!({ "api_key": "sk-test" }).to_string()))
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(body["ok"], true);
+    completion.assert();
+}
+
+#[tokio::test]
 async fn list_models_filters_by_provider() {
     let app = test_app_with();
 

@@ -1,9 +1,15 @@
 use std::sync::Arc;
 
+use fabro_auth::ApiCredential;
+use fabro_llm::client::Client as LlmClient;
+use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
+use fabro_redact::redact_string;
+
 use super::super::{
     ApiError, AppState, FromStr, HashSet, IntoResponse, Json, MAX_PAGE_OFFSET, ModelTestMode, Path,
-    ProviderId, ProviderList, Query, RequiredUser, Response, Router, State, StatusCode,
-    auth_issue_message, default_page_limit, error, get, post, run_model_test,
+    ProviderCredentialTestRequest, ProviderCredentialTestResponse, ProviderId, ProviderList, Query,
+    RequiredUser, Response, Router, State, StatusCode, auth_issue_message, default_page_limit,
+    error, get, post, run_model_test,
 };
 use crate::diagnostics;
 
@@ -12,6 +18,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
         .route("/providers", get(list_providers))
+        .route(
+            "/providers/{provider}/credentials/test",
+            post(test_provider_credentials),
+        )
         .route("/providers/test", post(test_providers))
 }
 
@@ -93,6 +103,72 @@ async fn list_providers(_auth: RequiredUser, State(state): State<Arc<AppState>>)
     let data = catalog.provider_summaries(&configured);
 
     (StatusCode::OK, Json(ProviderList { data })).into_response()
+}
+
+async fn test_provider_credentials(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(provider): Path<String>,
+    Json(body): Json<ProviderCredentialTestRequest>,
+) -> Response {
+    if body.api_key.trim().is_empty() {
+        return ApiError::bad_request("api_key is required").into_response();
+    }
+
+    let requested_provider = ProviderId::new(provider);
+    let catalog = state.catalog();
+    let Some(catalog_provider) = catalog.provider(&requested_provider) else {
+        return ApiError::not_found(format!("Provider not found: {requested_provider}"))
+            .into_response();
+    };
+    if catalog_provider.auth.is_none() {
+        return ApiError::bad_request(format!(
+            "provider '{}' does not define an API-key credential path",
+            catalog_provider.id,
+        ))
+        .into_response();
+    }
+    let provider_id = catalog_provider.id.clone();
+
+    let credential =
+        match ApiCredential::from_api_key(provider_id.clone(), body.api_key, catalog.as_ref()) {
+            Ok(credential) => credential,
+            Err(err) => {
+                return ApiError::bad_request(err.to_string()).into_response();
+            }
+        };
+    let client = match LlmClient::from_credentials(vec![credential], Arc::clone(&catalog)).await {
+        Ok(client) => Arc::new(client),
+        Err(err) => {
+            error!(provider = %provider_id, error = ?err, "Failed to create LLM client for provider credential validation");
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create LLM client: {err}"),
+            )
+            .into_response();
+        }
+    };
+    let Some(model) = catalog.probe_for_provider(&provider_id) else {
+        return ApiError::bad_request(format!(
+            "provider '{provider_id}' does not define a probe model"
+        ))
+        .into_response();
+    };
+
+    let outcome = run_basic_model_probe(&model.id, &provider_id, client).await;
+    match outcome.status {
+        ModelTestStatus::Ok => (
+            StatusCode::OK,
+            Json(ProviderCredentialTestResponse { ok: true }),
+        )
+            .into_response(),
+        ModelTestStatus::Error => {
+            let message = outcome
+                .error_message
+                .unwrap_or_else(|| "provider credential validation failed".to_string());
+            ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, redact_string(&message)).into_response()
+        }
+    }
 }
 
 async fn test_providers(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {

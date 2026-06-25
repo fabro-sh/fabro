@@ -5265,6 +5265,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProviderList"
 
+  /api/v1/providers/{provider}/credentials/test:
+    post:
+      operationId: testProviderCredentials
+      tags: [Models]
+      summary: Test Provider Credentials
+      description: Validates an LLM provider API key against the server's effective catalog without persisting it.
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The provider identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderCredentialTestRequest"
+      responses:
+        "200":
+          description: Credentials validated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderCredentialTestResponse"
+        "400":
+          description: Invalid provider credential request
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Provider not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Credential validation failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/providers/test:
     post:
       operationId: testProviders
@@ -7433,6 +7487,25 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Provider"
+
+    ProviderCredentialTestRequest:
+      description: API key to validate against an LLM provider without persisting it.
+      type: object
+      required:
+        - api_key
+      properties:
+        api_key:
+          type: string
+
+    ProviderCredentialTestResponse:
+      description: Successful response from provider credential validation.
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+          example: true
 
     ProviderTestList:
       description: Results from testing all configured LLM providers.

@@ -142,7 +142,10 @@ fn read_api_key_from_env_var(name: &str) -> Result<String> {
         .with_context(|| format!("environment variable {name} did not contain an API key"))
 }
 
-async fn read_api_key_from_source(source: &ApiKeySource, prompt: &str) -> Result<String> {
+pub(crate) async fn read_api_key_from_source(
+    source: &ApiKeySource,
+    prompt: &str,
+) -> Result<String> {
     match source {
         ApiKeySource::Prompt => {
             let prompt = prompt.to_string();
