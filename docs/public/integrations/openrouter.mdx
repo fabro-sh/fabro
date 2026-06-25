@@ -23,17 +23,20 @@ enabled = true
 
 ## Configure credentials
 
-For server-backed runs, store the key in the Fabro server vault:
+Store the key in the target Fabro server vault:
 
 ```bash
 fabro provider login --provider openrouter
-# or
+
+# For a non-default remote server:
+fabro provider login --server https://your-fabro.example --provider openrouter
+
+# Or set the vault token directly:
 fabro secret set OPENROUTER_API_KEY sk-or-v1-...
+fabro secret --server https://your-fabro.example set OPENROUTER_API_KEY sk-or-v1-...
 ```
 
-Pass `--server https://your-fabro.example` when configuring a non-default remote server.
-
-Standalone local SDK/CLI runs can use an env-backed credential source explicitly:
+Direct SDK usage outside a Fabro server can use an env-backed credential source explicitly:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-...
@@ -79,6 +82,13 @@ reasoning = false
 fabro model list --provider openrouter
 fabro model test --model anthropic/claude-sonnet-4-6
 fabro run workflow.fabro --model deepseek/deepseek-v4-flash
+```
+
+When targeting a non-default remote server, pass the same `--server` value to verification commands:
+
+```bash
+fabro model list --server https://your-fabro.example --provider openrouter
+fabro model test --server https://your-fabro.example --model anthropic/claude-sonnet-4-6
 ```
 
 In workflow stylesheets:
@@ -133,7 +143,9 @@ Fabro does not send OpenRouter's optional attribution headers (`HTTP-Referer`, `
 
 ## Troubleshooting
 
-**"No API key configured"** — Set the key on the target server with `fabro provider login --provider openrouter` or `fabro secret set OPENROUTER_API_KEY ...`. For standalone local usage, export `OPENROUTER_API_KEY` in the invoking shell.
+**"No API key configured"** — Set the key on the target server with `fabro provider login --provider openrouter` or `fabro secret set OPENROUTER_API_KEY ...`. For direct SDK usage outside a Fabro server, export `OPENROUTER_API_KEY` in the invoking shell.
+
+**"provider 'openrouter' is not configured in the server model catalog"** — Confirm the server host's `settings.toml` has `[llm.providers.openrouter]` with `enabled = true`. Fabro live-reloads `settings.toml` within a few seconds; after that, `fabro model list --provider openrouter` against the same server should show the enabled catalog.
 
 **402 / insufficient credits** — Paid OpenRouter models require prepaid credit; check your balance at [openrouter.ai/credits](https://openrouter.ai/credits).
 
