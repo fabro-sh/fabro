@@ -89,11 +89,11 @@ fn validate_session_secret(value: &str) -> Result<(), String> {
 }
 
 pub async fn run_all(state: &AppState) -> DiagnosticsReport {
-    let (llm, github, docker_sandbox, sandbox, brave) = tokio::join!(
+    let (llm, github, docker_sandbox, cloud_sandbox, brave) = tokio::join!(
         check_llm_providers(state),
         check_github_app(state),
         check_docker_sandbox(state),
-        check_sandbox(state),
+        check_cloud_sandbox(state),
         check_brave_search(state),
     );
     let crypto = check_crypto(state);
@@ -103,7 +103,7 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
         sections: vec![
             CheckSection {
                 title:  "Credentials".to_string(),
-                checks: vec![llm, github, docker_sandbox, sandbox, brave],
+                checks: vec![llm, github, docker_sandbox, cloud_sandbox, brave],
             },
             CheckSection {
                 title:  "Configuration".to_string(),
@@ -621,10 +621,10 @@ fn docker_sandbox_probe_check(probe: Result<(), String>) -> CheckResult {
     }
 }
 
-async fn check_sandbox(state: &AppState) -> CheckResult {
+async fn check_cloud_sandbox(state: &AppState) -> CheckResult {
     let Some(api_key) = state.vault_secret(EnvVars::DAYTONA_API_KEY) else {
         return CheckResult {
-            name:        "Sandbox".to_string(),
+            name:        "Cloud Sandbox".to_string(),
             status:      CheckStatus::Warning,
             summary:     "recommended, not configured".to_string(),
             details:     Vec::new(),
@@ -637,14 +637,14 @@ async fn check_sandbox(state: &AppState) -> CheckResult {
 
     match state.check_daytona_api_key(api_key).await {
         Ok(check) if check.ok() => CheckResult {
-            name:        "Sandbox".to_string(),
+            name:        "Cloud Sandbox".to_string(),
             status:      CheckStatus::Pass,
             summary:     format!("Daytona configured ({})", check.key_name),
             details:     Vec::new(),
             remediation: None,
         },
         Ok(check) => CheckResult {
-            name:        "Sandbox".to_string(),
+            name:        "Cloud Sandbox".to_string(),
             status:      CheckStatus::Error,
             summary:     "Daytona API key is missing required scopes".to_string(),
             details:     vec![CheckDetail::new(format!(
@@ -658,7 +658,7 @@ async fn check_sandbox(state: &AppState) -> CheckResult {
             )),
         },
         Err(err) => CheckResult {
-            name:        "Sandbox".to_string(),
+            name:        "Cloud Sandbox".to_string(),
             status:      CheckStatus::Error,
             summary:     "Daytona credential rejected".to_string(),
             details:     vec![CheckDetail::new(format!("{err:#}"))],
@@ -1094,15 +1094,16 @@ enabled = false
     }
 
     #[tokio::test]
-    async fn check_sandbox_ignores_env_backed_daytona_api_key() {
+    async fn check_cloud_sandbox_ignores_env_backed_daytona_api_key() {
         let state = TestAppStateBuilder::new()
             .env_lookup(|name| {
                 (name == EnvVars::DAYTONA_API_KEY).then(|| "dtn_from_env".to_string())
             })
             .build();
 
-        let result = check_sandbox(&state).await;
+        let result = check_cloud_sandbox(&state).await;
 
+        assert_eq!(result.name, "Cloud Sandbox");
         assert_eq!(result.status, CheckStatus::Warning);
         assert_eq!(result.summary, "recommended, not configured");
         assert_eq!(

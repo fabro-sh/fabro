@@ -1620,24 +1620,24 @@ enabled = false
         .unwrap();
 
     let report = crate::diagnostics::run_all(&state).await;
-    let sandbox = report
+    let cloud_sandbox = report
         .sections
         .iter()
         .flat_map(|section| &section.checks)
-        .find(|check| check.name == "Sandbox")
-        .expect("sandbox check should be present");
+        .find(|check| check.name == "Cloud Sandbox")
+        .expect("cloud sandbox check should be present");
 
-    assert_eq!(sandbox.status, CheckStatus::Error);
+    assert_eq!(cloud_sandbox.status, CheckStatus::Error);
     assert_eq!(
-        sandbox.summary,
+        cloud_sandbox.summary,
         "Daytona API key is missing required scopes"
     );
     assert_eq!(
-        sandbox.details[0].text,
+        cloud_sandbox.details[0].text,
         "missing: write:snapshots, write:sandboxes"
     );
     assert_eq!(
-        sandbox.remediation.as_deref(),
+        cloud_sandbox.remediation.as_deref(),
         Some(
             "Regenerate the Daytona API key with scopes: write:snapshots, \
              delete:snapshots, write:sandboxes, delete:sandboxes, then \
