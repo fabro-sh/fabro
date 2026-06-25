@@ -250,6 +250,7 @@ export * from './preflight-check-result';
 export * from './preflight-check-section';
 export * from './preflight-response';
 export * from './preflight-workflow-summary';
+export * from './prepared-step';
 export * from './preview-url-request';
 export * from './preview-url-response';
 export * from './principal';

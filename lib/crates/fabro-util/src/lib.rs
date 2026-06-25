@@ -11,6 +11,7 @@ pub mod path;
 pub mod printer;
 pub mod run_log;
 pub mod session_secret;
+pub mod shell;
 pub mod terminal;
 pub mod text;
 pub mod time;

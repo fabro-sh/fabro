@@ -106,7 +106,10 @@ impl RunNamespace {
         substitute_map(&mut self.integrations.github.permissions, &mut lookup)?;
         // run.scm.owner/repository were demoted and removed from this pass
         // (D2): values stay literal.
-        substitute_string_vec(&mut self.prepare.commands, &mut lookup)?;
+        for step in &mut self.prepare.steps {
+            substitute_string(&mut step.command, &mut lookup)?;
+            substitute_string_map(&mut step.env, &mut lookup)?;
+        }
         // Only resolved inline servers carry substitutable templates; an
         // unresolved reference holds just an id + enabled flag.
         for entry in self.agent.mcps.values_mut() {
@@ -357,7 +360,13 @@ mod run_namespace_variable_substitution_tests {
                 "deploy {{ vars.ENV }} in {{ env.REGION }}",
             ))),
             prepare: RunPrepareSettings {
-                commands:   vec!["echo {{ vars.ENV }} {{ env.REGION }}".to_string()],
+                steps:      vec![super::PreparedStep {
+                    command: "echo {{ vars.ENV }} {{ env.REGION }}".to_string(),
+                    env:     HashMap::from([(
+                        "STAGE".to_string(),
+                        "{{ vars.ENV }}-{{ env.REGION }}".to_string(),
+                    )]),
+                }],
                 timeout_ms: 1_000,
             },
             agent: super::RunAgentSettings {
@@ -417,9 +426,12 @@ mod run_namespace_variable_substitution_tests {
             goal_source,
             Some("deploy prod in {{ env.REGION }}".to_string())
         );
-        assert_eq!(run.prepare.commands, vec![
-            "echo prod {{ env.REGION }}".to_string()
-        ]);
+        assert_eq!(run.prepare.steps.len(), 1);
+        assert_eq!(run.prepare.steps[0].command, "echo prod {{ env.REGION }}");
+        assert_eq!(
+            run.prepare.steps[0].env.get("STAGE").map(String::as_str),
+            Some("prod-{{ env.REGION }}")
+        );
         let mcp = run.agent.mcps["http"]
             .as_resolved()
             .expect("expected resolved inline mcp entry");
@@ -671,17 +683,62 @@ pub struct GitAuthorSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunPrepareSettings {
-    pub commands:   Vec<String>,
+    pub steps:      Vec<PreparedStep>,
     pub timeout_ms: u64,
 }
 
 impl Default for RunPrepareSettings {
     fn default() -> Self {
         Self {
-            commands:   Vec::new(),
+            steps:      Vec::new(),
             timeout_ms: 300_000,
         }
     }
+}
+
+impl RunPrepareSettings {
+    /// Resolve `{{ env.* }}` tokens in every prepare step's `command` and
+    /// per-step `env` values against `env_lookup`, returning a copy with
+    /// the tokens replaced and every other field preserved.
+    ///
+    /// This is the late, use-time half of prepare-step interpolation, the
+    /// counterpart to the server-side `{{ vars.* }}` substitution in
+    /// [`RunNamespace::substitute_variables`]: `{{ vars.* }}` are substituted
+    /// earlier, server-side, while `{{ env.* }}` resolve here — in whichever
+    /// process actually runs the steps (the run worker for `fabro run`).
+    /// Carrying the source form out of the config resolve layer keeps
+    /// `fabro validate` portable (it never requires env to be set).
+    ///
+    /// A referenced env var that is unset is a hard error — no fallback to the
+    /// unresolved source. Reserved `secrets`/`inputs` tokens have no lookup
+    /// here and surface as a loud
+    /// [`super::interp::ResolveErrorKind::Unavailable`] error rather than
+    /// passing through as literal text.
+    pub fn resolve_step_env(
+        &self,
+        mut env_lookup: impl FnMut(&str) -> Option<String>,
+    ) -> Result<Self, ResolveError> {
+        let mut resolved = self.clone();
+        for step in &mut resolved.steps {
+            resolve_env_string(&mut step.command, &mut env_lookup)?;
+            for value in step.env.values_mut() {
+                resolve_env_string(value, &mut env_lookup)?;
+            }
+        }
+        Ok(resolved)
+    }
+}
+
+/// A single resolved prepare step: a shell command to run plus the per-step
+/// environment variables it should see. Both the command and the env values are
+/// carried in source form out of the config resolve layer; their `{{ env.* }}`
+/// tokens resolve at the run boundary via
+/// [`RunPrepareSettings::resolve_step_env`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PreparedStep {
+    pub command: String,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env:     HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1550,6 +1607,126 @@ mod resolve_transport_env_tests {
         };
 
         let err = settings.resolve_transport_env(env_lookup(&[])).unwrap_err();
+
+        assert_eq!(err.namespace, Namespace::Secrets);
+        assert_eq!(err.kind, ResolveErrorKind::Unavailable);
+    }
+}
+
+#[cfg(test)]
+mod resolve_step_env_tests {
+    use std::collections::HashMap;
+
+    use super::super::interp::ResolveErrorKind;
+    use super::{Namespace, PreparedStep, RunPrepareSettings};
+
+    fn env_lookup(
+        pairs: &'static [(&'static str, &'static str)],
+    ) -> impl Fn(&str) -> Option<String> + Copy {
+        move |name| {
+            pairs
+                .iter()
+                .find_map(|(key, value)| (*key == name).then(|| (*value).to_string()))
+        }
+    }
+
+    #[test]
+    fn literal_step_passes_through() {
+        let settings = RunPrepareSettings {
+            steps:      vec![PreparedStep {
+                command: "echo hello".to_string(),
+                env:     HashMap::from([("STAGE".to_string(), "build".to_string())]),
+            }],
+            timeout_ms: 1_000,
+        };
+
+        let resolved = settings.resolve_step_env(env_lookup(&[])).unwrap();
+
+        assert_eq!(resolved.steps[0].command, "echo hello");
+        assert_eq!(
+            resolved.steps[0].env.get("STAGE").map(String::as_str),
+            Some("build")
+        );
+    }
+
+    #[test]
+    fn command_and_env_resolve() {
+        let settings = RunPrepareSettings {
+            steps:      vec![PreparedStep {
+                command: "deploy {{ env.REGION }}".to_string(),
+                env:     HashMap::from([(
+                    "TOKEN".to_string(),
+                    "{{ env.DEPLOY_TOKEN }}".to_string(),
+                )]),
+            }],
+            timeout_ms: 1_000,
+        };
+
+        let resolved = settings
+            .resolve_step_env(env_lookup(&[
+                ("REGION", "us-east-1"),
+                ("DEPLOY_TOKEN", "secret-token"),
+            ]))
+            .unwrap();
+
+        assert_eq!(resolved.steps[0].command, "deploy us-east-1");
+        assert_eq!(
+            resolved.steps[0].env.get("TOKEN").map(String::as_str),
+            Some("secret-token")
+        );
+    }
+
+    #[test]
+    fn missing_env_in_command_is_hard_error() {
+        let settings = RunPrepareSettings {
+            steps:      vec![PreparedStep {
+                command: "deploy {{ env.REGION }}".to_string(),
+                env:     HashMap::new(),
+            }],
+            timeout_ms: 1_000,
+        };
+
+        let err = settings.resolve_step_env(env_lookup(&[])).unwrap_err();
+
+        assert_eq!(err.namespace, Namespace::Env);
+        assert_eq!(err.name, "REGION");
+        assert_eq!(err.kind, ResolveErrorKind::Missing);
+    }
+
+    #[test]
+    fn missing_env_in_step_env_value_is_hard_error() {
+        let settings = RunPrepareSettings {
+            steps:      vec![PreparedStep {
+                command: "echo hi".to_string(),
+                env:     HashMap::from([(
+                    "TOKEN".to_string(),
+                    "{{ env.DEPLOY_TOKEN }}".to_string(),
+                )]),
+            }],
+            timeout_ms: 1_000,
+        };
+
+        let err = settings.resolve_step_env(env_lookup(&[])).unwrap_err();
+
+        assert_eq!(err.namespace, Namespace::Env);
+        assert_eq!(err.name, "DEPLOY_TOKEN");
+        assert_eq!(err.kind, ResolveErrorKind::Missing);
+    }
+
+    #[test]
+    fn reserved_secret_token_is_unavailable_not_leaked() {
+        let settings = RunPrepareSettings {
+            steps:      vec![PreparedStep {
+                command: "echo hi".to_string(),
+                env:     HashMap::from([(
+                    "API_KEY".to_string(),
+                    "{{ secrets.API_KEY }}".to_string(),
+                )]),
+            }],
+            timeout_ms: 1_000,
+        };
+
+        let err = settings.resolve_step_env(env_lookup(&[])).unwrap_err();
 
         assert_eq!(err.namespace, Namespace::Secrets);
         assert_eq!(err.kind, ResolveErrorKind::Unavailable);

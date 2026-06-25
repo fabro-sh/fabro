@@ -13,11 +13,8 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PreparedStep } from './prepared-step';
 
-export interface RunPrepareSettings {
-    'steps': Array<PreparedStep>;
-    'timeout_ms': number;
+export interface PreparedStep {
+    'command': string;
+    'env'?: { [key: string]: string; };
 }

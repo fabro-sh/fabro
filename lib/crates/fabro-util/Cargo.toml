@@ -16,6 +16,7 @@ workspace = true
 console.workspace = true
 fabro-static.workspace = true
 rand.workspace = true
+shlex = "1"
 termimad.workspace = true
 serde_json.workspace = true
 serde.workspace = true

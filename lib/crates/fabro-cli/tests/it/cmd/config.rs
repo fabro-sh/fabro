@@ -357,10 +357,10 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
         run_spec["settings"]["run"]["model"]["name"].as_str(),
         Some("gpt-5.4-pro")
     );
-    // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
+    // run.prepare.steps replaces the whole ordered list across layers.
     assert_eq!(
-        run_spec["settings"]["run"]["prepare"]["commands"],
-        serde_json::json!(["workflow-setup"])
+        run_spec["settings"]["run"]["prepare"]["steps"],
+        serde_json::json!([{ "command": "workflow-setup" }])
     );
 }
 

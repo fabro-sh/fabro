@@ -18,7 +18,7 @@ use fabro_static::EnvVars;
 use fabro_types::settings::run::{
     ApprovalMode, McpServerSettings as ResolvedMcpServerSettings, PullRequestSettings,
     ResolvedMcpEntry, RunMode, RunModelSettings as ResolvedRunModelSettings,
-    RunNamespace as ResolvedRunSettings,
+    RunNamespace as ResolvedRunSettings, RunPrepareSettings as ResolvedRunPrepareSettings,
 };
 use fabro_types::settings::{ModelRegistry, ResolvedModelRef};
 use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
@@ -44,7 +44,7 @@ use crate::pipeline::{
 use crate::records::Checkpoint;
 use crate::run_control::RunControlState;
 use crate::run_metadata::metadata_branch_name;
-use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions, SetupCommand};
 use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
 use crate::services::FabroRunToolServices;
@@ -471,7 +471,7 @@ impl RunSession {
             steering_hub: services.steering_hub,
             on_node: services.on_node,
             lifecycle: LifecycleOptions {
-                setup_commands:           resolved.prepare.commands.clone(),
+                setup_commands:           runtime_setup_commands(&resolved.prepare)?,
                 setup_command_timeout_ms: resolved.prepare.timeout_ms,
             },
             hooks: fabro_hooks::HookSettings {
@@ -701,6 +701,34 @@ fn runtime_mcp_server(
             err,
         )
     })
+}
+
+/// Build the launch-time setup (prepare) commands from resolved settings,
+/// resolving any `{{ env.* }}` tokens in each step's command and per-step env
+/// against the worker process environment — the run boundary where the steps
+/// actually run.
+///
+/// The resolution itself lives on the type
+/// ([`ResolvedRunPrepareSettings::resolve_step_env`]) so prepare-step env
+/// resolution shares one resolver with the rest of the run-boundary
+/// interpolation. Prepare-step commands and env are carried in source form out
+/// of the config resolve layer so `fabro validate` stays portable (it never
+/// requires env to be set), and a referenced env var that is unset is a hard
+/// error — no fallback to the unresolved source.
+fn runtime_setup_commands(
+    prepare: &ResolvedRunPrepareSettings,
+) -> Result<Vec<SetupCommand>, Error> {
+    let resolved = prepare
+        .resolve_step_env(process_env_var)
+        .map_err(|err| Error::engine_with_source("failed to resolve prepare step", err))?;
+    Ok(resolved
+        .steps
+        .into_iter()
+        .map(|step| SetupCommand {
+            command: step.command,
+            env:     step.env,
+        })
+        .collect())
 }
 
 impl RunSession {

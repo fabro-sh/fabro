@@ -74,8 +74,18 @@ impl RunOptions {
 
 /// Options for sandbox lifecycle management within the engine.
 pub struct LifecycleOptions {
-    /// Setup commands to run inside the sandbox after initialization.
-    pub setup_commands:           Vec<String>,
+    /// Setup commands to run inside the sandbox after initialization, each with
+    /// its own environment.
+    pub setup_commands:           Vec<SetupCommand>,
     /// Timeout in milliseconds for each setup command.
     pub setup_command_timeout_ms: u64,
+}
+
+/// A single setup (prepare) command and the per-step environment it runs with.
+/// Both the command string and the env values are already fully resolved (their
+/// `{{ env.* }}` tokens replaced at the run boundary) by the time they reach
+/// the sandbox.
+pub struct SetupCommand {
+    pub command: String,
+    pub env:     std::collections::HashMap<String, String>,
 }

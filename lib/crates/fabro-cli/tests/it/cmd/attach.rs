@@ -995,7 +995,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
               },
               "notifications": {},
               "prepare": {
-                "commands": [],
+                "steps": [],
                 "timeout_ms": 300000
               },
               "pull_request": null,

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fabro_types::{CommandOutputStream, CommandTermination};
+use fabro_util::shell;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::Mutex as TokioMutex;
@@ -1049,12 +1050,10 @@ pub(crate) fn resolve_path(path: &str, working_dir: &str) -> String {
 }
 
 /// Shell-quote a string using `shlex::try_quote`, with a fallback for edge
-/// cases.
+/// cases. Re-exported from [`fabro_util::shell::shell_quote`] so sandbox code
+/// and the config resolve layer share one audited implementation.
 pub fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |q| q.to_string(),
-    )
+    shell::shell_quote(s)
 }
 
 /// Helper for sandbox implementations that manage git internally.

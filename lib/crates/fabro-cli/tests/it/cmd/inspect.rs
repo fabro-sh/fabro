@@ -139,7 +139,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
                 "author": null
               },
               "prepare": {
-                "commands": [],
+                "steps": [],
                 "timeout_ms": 300000
               },
               "execution": {

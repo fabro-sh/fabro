@@ -525,19 +525,21 @@ pub async fn initialize(
             command_count: options.lifecycle.setup_commands.len(),
         });
         let setup_start = Instant::now();
-        for (index, command) in options.lifecycle.setup_commands.iter().enumerate() {
+        for (index, setup) in options.lifecycle.setup_commands.iter().enumerate() {
+            let command = &setup.command;
             options.emitter.emit(&Event::SetupCommandStarted {
                 command: command.clone(),
                 index,
             });
             let cmd_start = Instant::now();
             let cancel_token = options.run_options.cancel_token.child_token();
+            let step_env = (!setup.env.is_empty()).then_some(&setup.env);
             let result = sandbox
                 .exec_command(
                     command,
                     options.lifecycle.setup_command_timeout_ms,
                     None,
-                    None,
+                    step_env,
                     Some(cancel_token.clone()),
                 )
                 .await
@@ -665,6 +667,13 @@ mod tests {
         fixtures::RUN_1
     }
 
+    fn setup_cmd(command: &str) -> crate::run_options::SetupCommand {
+        crate::run_options::SetupCommand {
+            command: command.to_string(),
+            env:     HashMap::new(),
+        }
+    }
+
     fn test_catalog() -> Arc<Catalog> {
         Arc::new(Catalog::from_builtin().expect("default catalog should build"))
     }
@@ -784,6 +793,12 @@ mod tests {
     async fn initialize_with_setup_command(
         command: &str,
     ) -> (crate::error::Result<Initialized>, Vec<RunEvent>) {
+        initialize_with_setup_step(setup_cmd(command)).await
+    }
+
+    async fn initialize_with_setup_step(
+        setup: crate::run_options::SetupCommand,
+    ) -> (crate::error::Result<Initialized>, Vec<RunEvent>) {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
@@ -820,7 +835,7 @@ mod tests {
             steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
             catalog:           test_catalog(),
             lifecycle:         crate::run_options::LifecycleOptions {
-                setup_commands:           vec![command.to_string()],
+                setup_commands:           vec![setup],
                 setup_command_timeout_ms: 1_000,
             },
             run_options:       test_settings(&run_dir),
@@ -1196,7 +1211,7 @@ mod tests {
             steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
             catalog:           test_catalog(),
             lifecycle:         crate::run_options::LifecycleOptions {
-                setup_commands:           vec!["true".to_string()],
+                setup_commands:           vec![setup_cmd("true")],
                 setup_command_timeout_ms: 1_000,
             },
             run_options:       test_settings(&run_dir),
@@ -1228,6 +1243,35 @@ mod tests {
                 .iter()
                 .any(|event| event == "sandbox.initialized")
         );
+    }
+
+    #[tokio::test]
+    async fn initialize_passes_per_step_env_to_setup_command() {
+        // The command only succeeds when the per-step env var is visible to the
+        // shell, so a green run proves the env reached `exec_command`.
+        let setup = crate::run_options::SetupCommand {
+            command: "test \"$PREPARE_STAGE\" = build".to_string(),
+            env:     HashMap::from([("PREPARE_STAGE".to_string(), "build".to_string())]),
+        };
+
+        let (result, events) = initialize_with_setup_step(setup).await;
+
+        assert!(result.is_ok(), "setup with per-step env should succeed");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event_name() == "setup.completed")
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_setup_command_without_step_env_does_not_see_it() {
+        // Negative control: the same command without the per-step env fails,
+        // confirming the success above is attributable to the per-step env.
+        let (result, _events) =
+            initialize_with_setup_command("test \"$PREPARE_STAGE\" = build").await;
+
+        assert!(result.is_err(), "setup should fail without per-step env");
     }
 
     #[tokio::test]
@@ -1310,7 +1354,7 @@ mod tests {
             steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(emitter.clone())),
             catalog: test_catalog(),
             lifecycle: crate::run_options::LifecycleOptions {
-                setup_commands:           vec!["sleep 5".to_string()],
+                setup_commands:           vec![setup_cmd("sleep 5")],
                 setup_command_timeout_ms: 5_000,
             },
             run_options,

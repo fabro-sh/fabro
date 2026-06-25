@@ -566,7 +566,7 @@ async fn build_preflight_report(
 }
 
 fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<CheckResult> {
-    let setup_command_count = prepared.settings.run.prepare.commands.len();
+    let setup_command_count = prepared.settings.run.prepare.steps.len();
     let repo_summary = prepared.git.as_ref().map_or_else(
         || "unknown".to_string(),
         |git| {
@@ -1940,11 +1940,13 @@ app_id = "fixture-app-id"
         let prepared = prepare_manifest(&server_settings, &manifest).unwrap();
         let settings_json = serde_json::to_value(&prepared.settings).unwrap();
 
-        // v2 merge matrix: run.prepare.steps replaces the whole list across
-        // layers, so the higher-precedence workflow layer wins over cli.
-        assert_eq!(prepared.settings.run.prepare.commands, vec![
-            "workflow-setup".to_string()
-        ]);
+        // run.prepare.steps replaces the whole list across layers, so the
+        // higher-precedence workflow layer wins over cli.
+        assert_eq!(prepared.settings.run.prepare.steps.len(), 1);
+        assert_eq!(
+            prepared.settings.run.prepare.steps[0].command,
+            "workflow-setup"
+        );
         assert!(settings_json.pointer("/server").is_none());
     }
 

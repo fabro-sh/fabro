@@ -38,7 +38,6 @@ fabro-proc = { path = "../fabro-proc" }
 fabro-static.workspace = true
 fabro-util = { path = "../fabro-util" }
 fabro-redact.workspace = true
-shlex = "1"
 
 # local
 glob = { version = "0.3" }

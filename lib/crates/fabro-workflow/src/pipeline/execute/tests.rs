@@ -33,7 +33,7 @@ use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
 use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::records::RunSpec;
-use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions, SetupCommand};
 use crate::test_support::run_graph;
 
 fn local_env() -> Arc<dyn Sandbox> {
@@ -175,9 +175,15 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
     )
 }
 
-fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleOptions {
+fn test_lifecycle(setup_commands: Vec<&str>) -> LifecycleOptions {
     LifecycleOptions {
-        setup_commands,
+        setup_commands:           setup_commands
+            .into_iter()
+            .map(|command| SetupCommand {
+                command: command.to_string(),
+                env:     std::collections::HashMap::new(),
+            })
+            .collect(),
         setup_command_timeout_ms: 300_000,
     }
 }
@@ -1202,7 +1208,7 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
         local_env(),
         &simple_graph(),
         test_run_options(dir.path(), "order-test"),
-        test_lifecycle(vec!["echo ok".to_string()]),
+        test_lifecycle(vec!["echo ok"]),
     )
     .await
     .unwrap();

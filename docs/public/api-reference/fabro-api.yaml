@@ -13851,15 +13851,24 @@ components:
 
     RunPrepareSettings:
       type: object
-      required: [commands, timeout_ms]
+      required: [steps, timeout_ms]
       properties:
-        commands:
+        steps:
           type: array
           items:
-            type: string
+            $ref: "#/components/schemas/PreparedStep"
         timeout_ms:
           type: integer
           format: int64
+
+    PreparedStep:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+        env:
+          $ref: "#/components/schemas/StringMap"
 
     RunExecutionSettings:
       type: object
