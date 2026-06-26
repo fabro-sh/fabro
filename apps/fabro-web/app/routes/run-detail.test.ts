@@ -6,6 +6,7 @@ import {
   RouterProvider,
   useParams,
 } from "react-router";
+import { toast as sonnerToast } from "sonner";
 import {
   AskFabroUnavailableReasonEnum,
   QuestionType,
@@ -379,6 +380,13 @@ function textFromNode(
   return (node.children ?? []).map(textFromNode).join(" ");
 }
 
+async function flushSonnerUpdates() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 function textFromTestNode(node: TestRenderer.ReactTestInstance): string {
   return node.children.map((child) => {
     if (typeof child === "string") return child;
@@ -593,6 +601,7 @@ describe("RunDetail full-height child routes", () => {
         renderer.unmount();
       }
     });
+    sonnerToast.dismiss();
     currentRunSummary = null;
     currentRunState = null;
     currentQuestions = [];
@@ -887,9 +896,7 @@ describe("RunDetail full-height child routes", () => {
       await deletion.promise;
       await Promise.resolve();
     });
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await flushSonnerUpdates();
 
     expect(deleteRunApiMock).toHaveBeenCalledTimes(1);
     expect(deleteRunApiMock.mock.calls[0]?.[0]).toBe("run_1");

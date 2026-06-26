@@ -17,8 +17,6 @@ const GIT_REV_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Error returned while preparing a checkout from a git source.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GitCheckoutError {
-    #[error("invalid repository target: {0}")]
-    InvalidTarget(String),
     #[error("failed to clone repository: {0}")]
     CloneFailed(String),
 }
@@ -58,9 +56,9 @@ impl GitRepoCache {
     /// `<cache>/<owner>/<repo>.git`. Subsequent calls reuse the bare clone
     /// and only `git fetch --depth 1` the requested ref. In both cases a
     /// short-lived worktree is added at `worktree_dir`; the caller owns its
-    /// lifetime (typically a `TempDir`). Stale worktree admin entries from
-    /// crashed prior calls are pruned at the start of each call so they do
-    /// not accumulate.
+    /// lifetime (typically a `TempDir`). If stale worktree admin entries from
+    /// crashed prior calls block the add, the cache prunes those entries and
+    /// retries once.
     pub(crate) async fn prepare_worktree(
         &self,
         args: WorktreePrepareInput<'_>,
@@ -87,7 +85,14 @@ impl GitRepoCache {
                 // and network failures don't trip this branch because
                 // `bare_clone_may_be_corrupt` only returns true when the
                 // bare repo's `HEAD` file is missing or empty.
-                let _ = fs::remove_dir_all(&bare_dir).await;
+                if let Err(remove_err) = fs::remove_dir_all(&bare_dir).await {
+                    tracing::warn!(
+                        path = %bare_dir.display(),
+                        error = %remove_err,
+                        "failed to remove corrupt cached git repository"
+                    );
+                    return Err(first_err);
+                }
                 self.try_prepare_worktree(&bare_dir, &args, clone_url)
                     .await
                     .map_err(|_| first_err)
@@ -105,11 +110,7 @@ impl GitRepoCache {
         let bare_exists = fs::try_exists(&bare_dir.join("HEAD"))
             .await
             .unwrap_or(false);
-        if bare_exists {
-            // Drop any worktree admin entries whose working trees were
-            // deleted by previous `TempDir` cleanup. Cheap and idempotent.
-            let _ = run_git_plan(build_worktree_prune_plan(bare_dir)).await;
-        } else {
+        if !bare_exists {
             if let Some(parent) = bare_dir.parent() {
                 fs::create_dir_all(parent).await.map_err(|err| {
                     GitCheckoutError::CloneFailed(format!(
@@ -133,7 +134,7 @@ impl GitRepoCache {
             .await
             .map(|stdout| String::from_utf8_lossy(&stdout).trim().to_string())?;
 
-        run_git_plan(build_worktree_add_plan(bare_dir, args.worktree_dir)).await?;
+        add_worktree_with_stale_retry(bare_dir, args.worktree_dir, &checked_out_sha).await?;
 
         Ok(checked_out_sha)
     }
@@ -149,15 +150,18 @@ pub(crate) struct WorktreePrepareInput<'a> {
 async fn bare_clone_may_be_corrupt(bare_dir: &Path) -> bool {
     match fs::metadata(&bare_dir.join("HEAD")).await {
         Ok(meta) => meta.len() == 0,
-        Err(_) => bare_dir.exists(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            fs::try_exists(bare_dir).await.unwrap_or(false)
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %bare_dir.join("HEAD").display(),
+                %err,
+                "Failed to inspect cached git repository HEAD"
+            );
+            false
+        }
     }
-}
-
-pub(crate) fn parse_github_repository_slug(
-    value: &str,
-) -> Result<GitHubRepositorySlug, GitCheckoutError> {
-    fabro_automation::parse_github_repository_slug(value)
-        .map_err(|err| GitCheckoutError::InvalidTarget(err.to_string()))
 }
 
 fn github_clone_url(repo: &GitHubRepositorySlug) -> String {
@@ -326,7 +330,7 @@ fn build_bare_fetch_plan(
     .with_auth(clone_url, auth)
 }
 
-fn build_worktree_add_plan(bare_dir: &Path, worktree_dir: &Path) -> GitCommandPlan {
+fn build_worktree_add_plan(bare_dir: &Path, worktree_dir: &Path, target: &str) -> GitCommandPlan {
     GitCommandPlan::new(
         [
             "worktree".to_string(),
@@ -334,7 +338,7 @@ fn build_worktree_add_plan(bare_dir: &Path, worktree_dir: &Path) -> GitCommandPl
             "--detach".to_string(),
             "--force".to_string(),
             worktree_dir.display().to_string(),
-            "FETCH_HEAD".to_string(),
+            target.to_string(),
         ],
         GIT_WORKTREE_ADD_TIMEOUT,
     )
@@ -347,6 +351,34 @@ fn build_worktree_prune_plan(bare_dir: &Path) -> GitCommandPlan {
 
 fn build_rev_parse_fetch_head_plan(bare_dir: &Path) -> GitCommandPlan {
     GitCommandPlan::new(["rev-parse", "FETCH_HEAD"], GIT_REV_PARSE_TIMEOUT).current_dir(bare_dir)
+}
+
+async fn add_worktree_with_stale_retry(
+    bare_dir: &Path,
+    worktree_dir: &Path,
+    target: &str,
+) -> Result<(), GitCheckoutError> {
+    match run_git_plan(build_worktree_add_plan(bare_dir, worktree_dir, target)).await {
+        Ok(_) => Ok(()),
+        Err(first_err) => {
+            tracing::warn!(
+                %first_err,
+                bare_dir = %bare_dir.display(),
+                worktree_dir = %worktree_dir.display(),
+                "git worktree add failed; pruning stale worktree entries and retrying"
+            );
+            if let Err(prune_err) = run_git_plan(build_worktree_prune_plan(bare_dir)).await {
+                tracing::warn!(
+                    %prune_err,
+                    bare_dir = %bare_dir.display(),
+                    "failed to prune stale git worktree entries"
+                );
+            }
+            run_git_plan(build_worktree_add_plan(bare_dir, worktree_dir, target))
+                .await
+                .map(|_| ())
+        }
+    }
 }
 
 async fn run_git_plan(plan: GitCommandPlan) -> Result<Vec<u8>, GitCheckoutError> {
@@ -432,9 +464,13 @@ mod tests {
 
     use super::*;
 
+    fn repository_slug(value: &str) -> GitHubRepositorySlug {
+        fabro_automation::parse_github_repository_slug(value).expect("slug should parse")
+    }
+
     #[test]
     fn target_repository_urls_are_github_metadata_urls_without_credentials() {
-        let repo = parse_github_repository_slug("fabro-sh/fabro").expect("slug should parse");
+        let repo = repository_slug("fabro-sh/fabro");
 
         assert_eq!(repo.owner(), "fabro-sh");
         assert_eq!(repo.repo(), "fabro");
@@ -450,24 +486,8 @@ mod tests {
     }
 
     #[test]
-    fn target_repository_validation_rejects_non_github_owner_repo_shapes() {
-        for value in [
-            "fabro-sh",
-            "https://github.com/fabro-sh/fabro",
-            "fabro-sh/fabro/extra",
-            "-owner/repo",
-        ] {
-            let error = parse_github_repository_slug(value).expect_err("invalid slug should fail");
-            assert!(
-                error.to_string().contains("invalid repository target"),
-                "unexpected error for {value}: {error}"
-            );
-        }
-    }
-
-    #[test]
     fn target_repository_validation_matches_automation_validation() {
-        let repo = parse_github_repository_slug("owner/.github").expect("slug should parse");
+        let repo = repository_slug("owner/.github");
 
         assert_eq!(repo.owner(), "owner");
         assert_eq!(repo.repo(), ".github");
@@ -479,7 +499,7 @@ mod tests {
 
     #[test]
     fn bare_cache_command_plans_use_argv_prompt_disable_and_timeouts() {
-        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
+        let repo = repository_slug("fabro-sh/fabro");
         let clone_url = github_clone_url(&repo);
         let temp = TempDir::new().unwrap();
         let bare_dir = temp.path().join("fabro-sh/fabro.git");
@@ -511,14 +531,18 @@ mod tests {
         assert_eq!(fetch.timeout, Duration::from_mins(1));
         assert_eq!(fetch.env_value("GIT_TERMINAL_PROMPT"), Some("0"));
 
-        let worktree = build_worktree_add_plan(&bare_dir, &worktree_dir);
+        let worktree = build_worktree_add_plan(
+            &bare_dir,
+            &worktree_dir,
+            "0123456789abcdef0123456789abcdef01234567",
+        );
         assert_eq!(worktree.args, vec![
             "worktree",
             "add",
             "--detach",
             "--force",
             worktree_dir.to_str().unwrap(),
-            "FETCH_HEAD",
+            "0123456789abcdef0123456789abcdef01234567",
         ]);
         assert_eq!(worktree.current_dir.as_deref(), Some(bare_dir.as_path()));
         assert_eq!(worktree.timeout, Duration::from_secs(30));
@@ -563,7 +587,7 @@ mod tests {
 
     #[test]
     fn credential_config_env_keeps_clone_url_uncredentialed() {
-        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
+        let repo = repository_slug("fabro-sh/fabro");
         let clone_url = github_clone_url(&repo);
         let auth = GitAuthConfig::new(
             Some("x-access-token".to_string()),
@@ -671,7 +695,7 @@ mod tests {
         let upstream = temp.path().join("upstream.git");
         let expected_sha = seed_upstream(&upstream);
         let cache = GitRepoCache::new(temp.path().join("cache"));
-        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
+        let repo = repository_slug("fabro-sh/fabro");
         let upstream_url = upstream.to_str().unwrap().to_string();
 
         let worktree_a = temp.path().join("wt-a");
@@ -723,7 +747,7 @@ mod tests {
         let upstream = temp.path().join("upstream.git");
         let expected_sha = seed_upstream(&upstream);
         let cache = GitRepoCache::new(temp.path().join("cache"));
-        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
+        let repo = repository_slug("fabro-sh/fabro");
         let upstream_url = upstream.to_str().unwrap().to_string();
 
         let worktree_a = temp.path().join("wt-a");

@@ -16,6 +16,7 @@ mod id;
 pub mod interview;
 pub mod llm_backend;
 pub mod manifest_path;
+pub mod mcp_store;
 pub mod outcome;
 pub mod pair;
 pub mod principal;
@@ -75,6 +76,10 @@ pub use graph::{
 pub use interview::{InterviewQuestionRecord, QuestionType};
 pub use llm_backend::AgentBackend;
 pub use manifest_path::{ManifestPath, ManifestPathParseError};
+pub use mcp_store::{
+    McpServerDefinition, McpServerDraft, McpServerId, McpServerReplace, McpServerRevision,
+    McpServerRevisionParseError, McpServerValidationError, validate_mcp_server_fields,
+};
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
 };

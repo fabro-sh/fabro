@@ -309,12 +309,6 @@ impl TemplateTransform {
         }
     }
 
-    #[must_use]
-    pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
-        self.context = self.context.with_vars(vars);
-        self
-    }
-
     pub(crate) fn resolved_goal(
         &self,
         graph: &Graph,

@@ -37,12 +37,12 @@ pub use run::{
     ArtifactsSettings, DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
     EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentProvider,
     EnvironmentResourcesSettings, EnvironmentSettings, GitAuthorSettings, HookDefinition, HookType,
-    InterviewProviderSettings, McpServerSettings, McpTransport, NotificationProviderSettings,
-    NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunCheckpointSettings,
-    RunEnvironmentSettings, RunExecutionSettings, RunGitSettings, RunGoal,
-    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
-    RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings, RunScmSettings,
-    ScmGitHubSettings, TlsMode,
+    InterviewProviderSettings, McpServerRef, McpServerSettings, McpTransport,
+    NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings, ResolvedMcpEntry,
+    RunAgentSettings, RunCheckpointSettings, RunEnvironmentSettings, RunExecutionSettings,
+    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
+    RunInterviewsSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
+    RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 pub use server::{
     GithubIntegrationSettings, IntegrationWebhooksSettings, LogDestination, ObjectStoreSettings,

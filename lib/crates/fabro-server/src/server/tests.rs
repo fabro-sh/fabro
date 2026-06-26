@@ -1586,8 +1586,20 @@ async fn diagnostics_reports_under_scoped_daytona_api_key() {
     ])
     .await;
     let base_url = server.base_url();
+    let settings = fabro_config::ServerSettingsBuilder::from_toml(
+        r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.sandbox.providers.docker]
+enabled = false
+"#,
+    )
+    .expect("settings should parse");
     let state = test_app_state_with_env_lookup(
-        default_test_server_settings(),
+        settings,
         fabro_config::RunLayer::default(),
         5,
         move |name| match name {
@@ -1608,24 +1620,24 @@ async fn diagnostics_reports_under_scoped_daytona_api_key() {
         .unwrap();
 
     let report = crate::diagnostics::run_all(&state).await;
-    let sandbox = report
+    let cloud_sandbox = report
         .sections
         .iter()
         .flat_map(|section| &section.checks)
-        .find(|check| check.name == "Sandbox")
-        .expect("sandbox check should be present");
+        .find(|check| check.name == "Cloud Sandbox")
+        .expect("cloud sandbox check should be present");
 
-    assert_eq!(sandbox.status, CheckStatus::Error);
+    assert_eq!(cloud_sandbox.status, CheckStatus::Error);
     assert_eq!(
-        sandbox.summary,
+        cloud_sandbox.summary,
         "Daytona API key is missing required scopes"
     );
     assert_eq!(
-        sandbox.details[0].text,
+        cloud_sandbox.details[0].text,
         "missing: write:snapshots, write:sandboxes"
     );
     assert_eq!(
-        sandbox.remediation.as_deref(),
+        cloud_sandbox.remediation.as_deref(),
         Some(
             "Regenerate the Daytona API key with scopes: write:snapshots, \
              delete:snapshots, write:sandboxes, delete:sandboxes, then \

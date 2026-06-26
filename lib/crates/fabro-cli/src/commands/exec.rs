@@ -17,6 +17,7 @@ use fabro_llm::types::{
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::ProviderId;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
+use fabro_types::settings::run::ResolvedMcpEntry;
 use fabro_util::exit::{self, ErrorExt, ExitClass};
 use futures::stream;
 use serde::Deserialize;
@@ -289,6 +290,24 @@ fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+fn run_mcp_servers_for_exec(
+    mcps: &HashMap<String, ResolvedMcpEntry>,
+) -> AnyResult<Vec<McpServerSettings>> {
+    mcps.iter()
+        .map(|(key, entry)| match entry {
+            ResolvedMcpEntry::Resolved(server) => Ok(server.clone()),
+            ResolvedMcpEntry::Reference(reference) => {
+                anyhow::bail!(
+                    "fabro exec cannot resolve run.agent.mcps.{key} catalog reference \
+                     (id `{}`); define an inline server under [cli.exec.agent.mcps.{key}] or \
+                     remove the run-level reference",
+                    reference.id
+                );
+            }
+        })
+        .collect()
+}
+
 pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResult<()> {
     use fabro_agent::cli::PermissionLevel as AgentPermissionLevel;
     use fabro_types::settings::run::AgentPermissions;
@@ -317,14 +336,16 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
         Some(mcps) => mcps.values().cloned().collect(),
         None => ctx
             .run_settings()
-            .map(|settings| settings.agent.mcps.values().cloned().collect())
+            .ok()
+            .map(|settings| run_mcp_servers_for_exec(&settings.agent.mcps))
+            .transpose()?
             .unwrap_or_default(),
     };
     // Resolve `{{ env.* }}` in MCP transport config at the exec boundary,
     // against the CLI process env — the mirror of the `fabro run` worker
     // boundary in `fabro_workflow::operations::start::runtime_mcp_server`.
     // Both consumers read the same source-form settings; missing env is a hard
-    // error (D3) and reserved secrets/inputs tokens surface loudly rather than
+    // error and reserved secrets/inputs tokens surface loudly rather than
     // leaking.
     let mcp_servers = mcp_servers
         .into_iter()
@@ -367,4 +388,46 @@ pub(crate) async fn execute(mut args: ExecArgs, ctx: &CommandContext) -> AnyResu
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use fabro_types::settings::run::{McpServerRef, McpServerSettings, ResolvedMcpEntry};
+
+    use super::run_mcp_servers_for_exec;
+
+    #[test]
+    fn run_mcp_servers_for_exec_rejects_catalog_references() {
+        let err = run_mcp_servers_for_exec(&HashMap::from([(
+            "sentry".to_string(),
+            ResolvedMcpEntry::Reference(McpServerRef {
+                id:      "catalog/sentry".to_string(),
+                enabled: None,
+            }),
+        )]))
+        .expect_err("fabro exec should reject unresolved run-level MCP references");
+
+        assert!(
+            err.to_string()
+                .contains("fabro exec cannot resolve run.agent.mcps.sentry catalog reference"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn run_mcp_servers_for_exec_keeps_resolved_servers() {
+        let servers = run_mcp_servers_for_exec(&HashMap::from([(
+            "inline".to_string(),
+            ResolvedMcpEntry::Resolved(McpServerSettings {
+                name: "inline".to_string(),
+                ..McpServerSettings::default()
+            }),
+        )]))
+        .expect("resolved inline server should be usable by fabro exec");
+
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "inline");
+    }
 }

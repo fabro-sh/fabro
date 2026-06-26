@@ -68,14 +68,6 @@ impl ImportTransform {
         }
     }
 
-    /// Run-scoped `{{ vars.* }}`, propagated into imported subgraphs so their
-    /// prompts and goals interpolate variables too.
-    #[must_use]
-    pub fn with_vars(mut self, vars: HashMap<String, String>) -> Self {
-        self.context = self.context.with_vars(vars);
-        self
-    }
-
     #[must_use]
     pub fn with_template_options(
         mut self,

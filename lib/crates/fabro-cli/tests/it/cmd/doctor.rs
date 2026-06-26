@@ -6,7 +6,7 @@
 use std::process::Output;
 
 use fabro_config::Storage;
-use fabro_test::{fabro_snapshot, test_context, twin_openai};
+use fabro_test::{fabro_snapshot, require_env, test_context, twin_openai};
 use fabro_vault::{SecretType, Vault};
 
 async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
@@ -22,12 +22,16 @@ fn toml_path(path: &std::path::Path) -> String {
         .replace('"', "\\\"")
 }
 
-fn seed_openai_vault(storage_dir: &std::path::Path, api_key: &str) {
+fn seed_vault_secret(storage_dir: &std::path::Path, name: &str, value: &str) {
     let mut vault =
         Vault::load(Storage::new(storage_dir).secrets_path()).expect("test vault should load");
     vault
-        .set("OPENAI_API_KEY", api_key, SecretType::Token, None)
-        .expect("OpenAI credential should store in test vault");
+        .set(name, value, SecretType::Token, None)
+        .expect("credential should store in test vault");
+}
+
+fn seed_openai_vault(storage_dir: &std::path::Path, api_key: &str) {
+    seed_vault_secret(storage_dir, "OPENAI_API_KEY", api_key);
 }
 
 #[test]
@@ -75,7 +79,27 @@ fn dry_run_flag_is_rejected() {
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn live_doctor() {
-    let context = test_context!();
+    let mut context = test_context!();
+    let api_key = require_env("ANTHROPIC_API_KEY")
+        .expect("e2e_test live guard should require ANTHROPIC_API_KEY");
+    let storage_dir = context.temp_dir.join("doctor-live-server-storage");
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            r#"[server.storage]
+root = "{}"
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.sandbox.providers.docker]
+enabled = false
+"#,
+            toml_path(&storage_dir)
+        ),
+    );
+    seed_vault_secret(&storage_dir, "ANTHROPIC_API_KEY", &api_key);
+    context.isolated_server();
     context.doctor().assert().success();
 }
 
@@ -96,6 +120,9 @@ methods = ["dev-token"]
 
 [server.integrations.github]
 strategy = "app"
+
+[server.sandbox.providers.docker]
+enabled = false
 "#,
             toml_path(&storage_dir)
         ),

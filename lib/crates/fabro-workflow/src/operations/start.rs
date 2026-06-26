@@ -18,7 +18,7 @@ use fabro_static::EnvVars;
 use fabro_types::settings::run::{
     ApprovalMode, HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
     HookType as ResolvedHookType, McpServerSettings as ResolvedMcpServerSettings,
-    PullRequestSettings, RunMode, RunModelSettings as ResolvedRunModelSettings,
+    PullRequestSettings, ResolvedMcpEntry, RunMode, RunModelSettings as ResolvedRunModelSettings,
     RunNamespace as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
 };
 use fabro_types::settings::{ModelRegistry, ResolvedModelRef};
@@ -377,8 +377,22 @@ impl RunSession {
         let mcp_servers = resolved
             .agent
             .mcps
-            .values()
-            .map(|settings| runtime_mcp_server(settings, process_env_var))
+            .iter()
+            .map(|(key, entry)| match entry {
+                ResolvedMcpEntry::Resolved(server) => runtime_mcp_server(server, process_env_var),
+                // References must be resolved to concrete servers before the run
+                // spec is persisted (server-side run-preparation pass). Reaching
+                // worker startup with an unresolved reference is an invariant
+                // violation, so fail loudly rather than silently dropping it.
+                ResolvedMcpEntry::Reference(reference) => {
+                    let message = format!(
+                        "unresolved MCP server reference `{key}` (id `{}`) reached worker \
+                         startup; references must be resolved before the run spec is persisted",
+                        reference.id
+                    );
+                    Err(Error::engine(message))
+                }
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         let sandbox = match sandbox_provider {

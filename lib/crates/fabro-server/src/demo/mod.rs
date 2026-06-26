@@ -670,7 +670,8 @@ pub(crate) async fn run_diagnostics(
                     "checks": [
                         { "name": "LLM Providers", "status": "pass", "summary": "demo configured", "details": [], "remediation": null },
                         { "name": "GitHub App", "status": "pass", "summary": "demo configured", "details": [], "remediation": null },
-                        { "name": "Sandbox", "status": "warning", "summary": "not configured", "details": [], "remediation": "Set DAYTONA_API_KEY to enable cloud sandbox execution" },
+                        { "name": "Docker Sandbox", "status": "pass", "summary": "disabled", "details": [{ "text": "server.sandbox.providers.docker.enabled = false", "warn": false }], "remediation": null },
+                        { "name": "Cloud Sandbox", "status": "warning", "summary": "not configured", "details": [], "remediation": "Set DAYTONA_API_KEY to enable cloud sandbox execution" },
                         { "name": "Brave Search", "status": "warning", "summary": "not configured", "details": [], "remediation": "Set BRAVE_SEARCH_API_KEY to enable web search" }
                     ]
                 },
