@@ -14,6 +14,7 @@ import {
   canApprove,
   canCancel,
   canRetry,
+  canRetryStatus,
   canUnarchive,
   cancelRun,
   deleteRuns,
@@ -409,6 +410,13 @@ describe("run lifecycle actions", () => {
 
     expect(canUnarchive("archived")).toBe(true);
     expect(canUnarchive("failed")).toBe(false);
+
+    expect(canRetryStatus("succeeded")).toBe(true);
+    expect(canRetryStatus("failed")).toBe(true);
+    expect(canRetryStatus("dead")).toBe(true);
+    expect(canRetryStatus("running")).toBe(false);
+    expect(canRetryStatus("archived")).toBe(false);
+    expect(canRetryStatus(null)).toBe(false);
   });
 
   test("approval predicate requires pending status and pending approval state", () => {

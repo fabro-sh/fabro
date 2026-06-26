@@ -155,6 +155,16 @@ export function canRetry(run: Pick<Run, "lifecycle"> | null | undefined): boolea
   return status.kind === "succeeded" || status.kind === "failed" || status.kind === "dead";
 }
 
+/**
+ * String-status form of {@link canRetry} for list rows that only carry the
+ * flattened `lifecycleStatus` (no full `lifecycle` object). A run is retryable
+ * once it reaches a terminal, non-archived state — archived rows surface as
+ * `"archived"`, so they're naturally excluded.
+ */
+export function canRetryStatus(status: string | null | undefined): boolean {
+  return status === "succeeded" || status === "failed" || status === "dead";
+}
+
 export function canDelete(status: string | null | undefined): boolean {
   return status === "archived";
 }
