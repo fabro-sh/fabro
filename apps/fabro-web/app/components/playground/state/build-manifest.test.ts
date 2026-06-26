@@ -35,7 +35,21 @@ describe("buildRunManifest", () => {
     expect(workflow!.source).toContain("digraph");
     expect(workflow!.source).toContain("start ->");
     expect(workflow!.config?.path).toBe("workflow.toml");
-    expect(workflow!.config?.source).toContain("[run.sandbox]");
+    // workflow.toml must stay parseable by the server's RunLayer, which
+    // rejects the unknown `[run.sandbox]` section.
+    expect(workflow!.config?.source).not.toContain("[run.sandbox]");
+    expect(workflow!.config?.source).toContain("[workflow]");
+  });
+
+  test("clamps an over-long goal so the title stays within the server's 100-char limit", () => {
+    const goal = "a".repeat(150);
+    const draft = { ...createInitialDraft(), name: "release_notes", goal };
+    const manifest = buildRunManifest(draft);
+    expect(manifest.title).toBeDefined();
+    // Server caps RunManifest.title at 100 Unicode scalar values; count by
+    // code point (not UTF-16 units) to match its `chars().count()` check.
+    expect(Array.from(manifest.title!).length).toBeLessThanOrEqual(100);
+    expect(manifest.title!.endsWith("…")).toBe(true);
   });
 
   test("named draft → title and identifier use the snake_case name", () => {

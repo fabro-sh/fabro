@@ -14,6 +14,7 @@ import DownloadButton from "./ui/download-button";
 import NodeInspector from "./ui/node-inspector";
 import ResetButton from "./ui/reset-button";
 import RunForRealButton, { type RealRunRedirect } from "./ui/run-for-real-button";
+import SaveToRunsButton from "./ui/save-to-runs-button";
 import RunTrace from "./ui/run-trace";
 import SimulationControls from "./ui/simulation-controls";
 import WorkflowHeader from "./ui/workflow-header";
@@ -113,6 +114,7 @@ export default function Playground({
           <div className="ml-auto flex items-center gap-2">
             <ResetButton onReset={handleReset} />
             <DownloadButton draft={draft} />
+            <SaveToRunsButton draft={draft} />
             <RunForRealButton draft={draft} redirect={realRunRedirect} />
             {!isChatOpen && (
               <button
