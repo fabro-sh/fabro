@@ -49,6 +49,18 @@ export default function RunForRealModal({
       if (!body.id) {
         throw new Error("Server did not return a run id.");
       }
+      // `POST /runs` only creates the run in `submitted` status; "Run for real"
+      // is a launch action ("…redirecting you to its run page when it starts"),
+      // so kick off execution before redirecting. Without this the run sits
+      // `submitted` forever — the run page has no start affordance.
+      const startResponse = await fetch(`/api/v1/runs/${body.id}/start`, {
+        method:      "POST",
+        credentials: "same-origin",
+      });
+      if (!startResponse.ok) {
+        const detail = await readErrorDetail(startResponse);
+        throw new Error(detail ?? `${startResponse.status} ${startResponse.statusText}`);
+      }
       window.location.assign(`/runs/${body.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
