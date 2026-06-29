@@ -918,6 +918,7 @@ fn preflight_sandbox_spec(
                 gcloud_config_from_environment(&resolved_run.environment, process_env_var)?;
             SandboxSpec::Gcloud {
                 config: Box::new(config),
+                github_app,
                 run_id: None,
                 clone_origin_url,
                 clone_branch,

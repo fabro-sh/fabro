@@ -49,6 +49,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use fabro_github::GitHubCredentials;
 use fabro_types::{CommandOutputStream, CommandTermination, RunId};
 use tokio::io::AsyncReadExt;
 use tokio::sync::{Mutex, OnceCell};
@@ -78,6 +79,7 @@ pub struct GcloudSandbox {
     run_id: Option<RunId>,
     clone_url: Option<String>,
     clone_branch: Option<String>,
+    github_app: Option<GitHubCredentials>,
     instance_name: OnceCell<String>,
     data_ssh: OnceCell<OpensshRunner>,
     origin_url: OnceCell<String>,
@@ -98,6 +100,7 @@ impl GcloudSandbox {
         run_id: Option<RunId>,
         clone_url: Option<String>,
         clone_branch: Option<String>,
+        github_app: Option<GitHubCredentials>,
     ) -> crate::Result<Self> {
         let compute = Arc::new(ComputeClient::new(http, auth));
         let keypair = EphemeralKeypair::generate()?;
@@ -108,6 +111,7 @@ impl GcloudSandbox {
             run_id,
             clone_url,
             clone_branch,
+            github_app,
             instance_name: OnceCell::new(),
             data_ssh: OnceCell::new(),
             origin_url: OnceCell::new(),
@@ -259,6 +263,31 @@ impl GcloudSandbox {
         });
         let started = Instant::now();
 
+        // Resolve an authenticated HTTPS clone URL from the GitHub App (same path
+        // the docker provider uses). The in-VM clone must go over HTTPS: the
+        // sandbox egress guard permits 443 via squid but blocks raw SSH (github
+        // port 22), and the golden image ships no git credential (the build-time
+        // token is scrubbed). Falls back to the bare origin only when no App is
+        // configured (public repos / non-github remotes).
+        let auth_url = match &self.github_app {
+            Some(creds) => Some(
+                fabro_github::resolve_authenticated_url(
+                    &fabro_github::GitHubContext::new(creds, &fabro_github::github_api_base_url()),
+                    &url,
+                )
+                .await
+                .map_err(|e| {
+                    crate::Error::message(format!(
+                        "Failed to get GitHub App credentials for clone: {e}"
+                    ))
+                })?,
+            ),
+            None => None,
+        };
+        let clone_target = auth_url
+            .as_ref()
+            .map_or(url.as_str(), |u| u.as_raw_url().as_str());
+
         let branch_flag = self
             .clone_branch
             .as_deref()
@@ -266,18 +295,20 @@ impl GcloudSandbox {
             .unwrap_or_default();
         let script = format!(
             "git clone{branch_flag} {} {}",
-            shell_quote(&url),
+            shell_quote(clone_target),
             shell_quote(&self.config.working_dir)
         );
         let output = ssh
             .run_command_with_timeout(&wrap_bash(&script), Duration::from_secs(300))
             .await?;
         if output.exit_code != 0 {
-            let err = format!(
-                "git clone failed (exit {}): {}",
-                output.exit_code,
-                String::from_utf8_lossy(&output.stderr)
-            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Strip the embedded token from any surfaced error.
+            let stderr = match &auth_url {
+                Some(u) => stderr.replace(u.as_raw_url().as_str(), &u.redacted_string()),
+                None => stderr.into_owned(),
+            };
+            let err = format!("git clone failed (exit {}): {}", output.exit_code, stderr);
             self.emit(SandboxEvent::GitCloneFailed {
                 url: url.clone(),
                 error: err.clone(),
@@ -895,7 +926,7 @@ mod tests {
         };
         let config = GcloudConfig::resolve(&settings, EgressPolicy::Block).unwrap();
         let auth = Arc::new(GcpAuth::new(reqwest::Client::new(), None));
-        GcloudSandbox::new(config, reqwest::Client::new(), auth, None, None, None).unwrap()
+        GcloudSandbox::new(config, reqwest::Client::new(), auth, None, None, None, None).unwrap()
     }
 
     #[test]

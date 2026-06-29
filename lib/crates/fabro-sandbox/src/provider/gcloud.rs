@@ -81,6 +81,7 @@ impl SandboxProvider for GcloudSandboxProvider {
     async fn create(&self, spec: SandboxCreateSpec) -> crate::Result<SandboxInfo> {
         let SandboxCreateSpec::Gcloud {
             config,
+            github_app,
             run_id,
             clone_origin_url,
             clone_branch,
@@ -99,6 +100,7 @@ impl SandboxProvider for GcloudSandboxProvider {
             run_id,
             clone_origin_url,
             clone_branch,
+            github_app,
         )?;
         sandbox.initialize().await?;
 

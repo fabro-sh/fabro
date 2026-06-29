@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 #[cfg(feature = "docker")]
 use anyhow::Context as _;
-#[cfg(any(feature = "docker", feature = "daytona"))]
+#[cfg(any(feature = "docker", feature = "daytona", feature = "gcloud"))]
 use fabro_github::GitHubCredentials;
 #[allow(
     unused_imports,
@@ -47,6 +47,7 @@ pub enum SandboxSpec {
     #[cfg(feature = "gcloud")]
     Gcloud {
         config: Box<GcloudConfig>,
+        github_app: Option<GitHubCredentials>,
         run_id: Option<RunId>,
         clone_origin_url: Option<String>,
         clone_branch: Option<String>,
@@ -258,6 +259,7 @@ impl SandboxSpec {
             #[cfg(feature = "gcloud")]
             Self::Gcloud {
                 config,
+                github_app,
                 run_id,
                 clone_origin_url,
                 clone_branch,
@@ -272,6 +274,7 @@ impl SandboxSpec {
                     *run_id,
                     clone_origin_url.clone(),
                     clone_branch.clone(),
+                    github_app.clone(),
                 )
                 .map_err(anyhow::Error::new)?;
                 if let Some(callback) = event_callback {

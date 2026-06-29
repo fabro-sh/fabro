@@ -8,7 +8,7 @@ pub mod gcloud;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-#[cfg(any(feature = "docker", feature = "daytona"))]
+#[cfg(any(feature = "docker", feature = "daytona", feature = "gcloud"))]
 use fabro_github::GitHubCredentials;
 #[cfg(any(feature = "docker", feature = "daytona", feature = "gcloud"))]
 use fabro_types::RunId;
@@ -46,6 +46,7 @@ pub enum SandboxCreateSpec {
     #[cfg(feature = "gcloud")]
     Gcloud {
         config: Box<crate::gcloud::GcloudConfig>,
+        github_app: Option<GitHubCredentials>,
         run_id: Option<RunId>,
         clone_origin_url: Option<String>,
         clone_branch: Option<String>,

@@ -440,6 +440,7 @@ impl RunSession {
                         })?;
                 SandboxSpec::Gcloud {
                     config: Box::new(config),
+                    github_app: services.github_app.clone(),
                     run_id: Some(record.run_id),
                     clone_origin_url: record.repo_origin_url().map(str::to_string),
                     clone_branch: record.base_branch().map(str::to_string),
