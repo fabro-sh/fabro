@@ -215,6 +215,40 @@ impl GcloudSandbox {
         }
     }
 
+    /// Connect over SSH, retrying until the VM accepts the per-run key or the
+    /// deadline elapses. The host key is published to guest attributes (which
+    /// `poll_host_key` waits for) BEFORE the guest agent writes the injected
+    /// public key to `~/.ssh/authorized_keys`, so the first connect after the
+    /// host key appears often hits `Permission denied (publickey)`. Retrying
+    /// absorbs that window instead of failing the whole run on a transient
+    /// not-yet-provisioned auth state. Each attempt keeps the per-attempt
+    /// `ssh_connect_timeout` for the TCP connect itself.
+    async fn connect_with_retry(
+        &self,
+        ip: &str,
+        host_key_line: String,
+    ) -> crate::Result<OpensshRunner> {
+        let deadline = Instant::now() + self.config.host_key_poll_timeout;
+        loop {
+            let attempt = OpensshRunner::connect(&SshConnectParams {
+                host: ip.to_string(),
+                user: self.config.ssh_user.clone(),
+                private_key: self.keypair.private_openssh().to_string(),
+                host_key_line: host_key_line.clone(),
+                connect_timeout: self.config.ssh_connect_timeout,
+            })
+            .await;
+            match attempt {
+                Ok(runner) => return Ok(runner),
+                Err(err) if Instant::now() < deadline => {
+                    tracing::debug!(%ip, error = %err, "SSH connect not ready yet; retrying");
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     async fn clone_repo(&self, ssh: &OpensshRunner) -> crate::Result<()> {
         let Some(url) = self.clone_url.clone() else {
             return Ok(());
@@ -330,14 +364,7 @@ impl Sandbox for GcloudSandbox {
 
             let host_key_line = self.poll_host_key(&name).await?;
 
-            let runner = OpensshRunner::connect(&SshConnectParams {
-                host: ip,
-                user: self.config.ssh_user.clone(),
-                private_key: self.keypair.private_openssh().to_string(),
-                host_key_line,
-                connect_timeout: self.config.ssh_connect_timeout,
-            })
-            .await?;
+            let runner = self.connect_with_retry(&ip, host_key_line).await?;
 
             self.clone_repo(&runner).await?;
             Ok::<OpensshRunner, crate::Error>(runner)
