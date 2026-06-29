@@ -270,18 +270,27 @@ impl GcloudSandbox {
         // token is scrubbed). Falls back to the bare origin only when no App is
         // configured (public repos / non-github remotes).
         let auth_url = match &self.github_app {
-            Some(creds) => Some(
-                fabro_github::resolve_authenticated_url(
-                    &fabro_github::GitHubContext::new(creds, &fabro_github::github_api_base_url()),
-                    &url,
+            Some(creds) => {
+                // `resolve_authenticated_url` needs an `https://github.com/...`
+                // URL; the origin is the SSH form (`git@github.com:...`), so
+                // normalize it first (same helper the layout code uses).
+                let https_url = fabro_github::normalize_repo_origin_url(&url);
+                Some(
+                    fabro_github::resolve_authenticated_url(
+                        &fabro_github::GitHubContext::new(
+                            creds,
+                            &fabro_github::github_api_base_url(),
+                        ),
+                        &https_url,
+                    )
+                    .await
+                    .map_err(|e| {
+                        crate::Error::message(format!(
+                            "Failed to get GitHub App credentials for clone: {e}"
+                        ))
+                    })?,
                 )
-                .await
-                .map_err(|e| {
-                    crate::Error::message(format!(
-                        "Failed to get GitHub App credentials for clone: {e}"
-                    ))
-                })?,
-            ),
+            }
             None => None,
         };
         let clone_target = auth_url
