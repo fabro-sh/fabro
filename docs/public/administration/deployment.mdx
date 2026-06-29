@@ -32,9 +32,11 @@ See [Server Operations](/reference/server-operations) for starting the server, t
 
 For team use, production workflows, or running 24/7, self-host the server as a Docker container. The recommended approach is `docker compose` for a single host, or any cloud container service (ECS, Cloud Run, Kubernetes) using the same image with the same requirements.
 
+Use a public reverse proxy such as Caddy when the server must be reachable from the public internet. Use Tailscale Services when the server should stay private to your tailnet; Fabro still serves plain HTTP locally, and Tailscale provides the HTTPS endpoint.
+
 <Columns cols={2}>
   <Card title="Self-host with Docker" icon="docker" href="/administration/self-host-docker">
-    Compose-first walkthrough. Same image works on ECS, Cloud Run, and Kubernetes.
+    Compose-first walkthrough, including Caddy and Tailscale Services options.
   </Card>
   <Card title="Deploy to Railway" icon="train" href="/administration/deploy-railway">
     One-click managed shortcut for the same Docker image.

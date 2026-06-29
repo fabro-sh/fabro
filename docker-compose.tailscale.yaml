@@ -1,0 +1,23 @@
+services:
+  fabro:
+    image: ghcr.io/fabro-sh/fabro:${FABRO_VERSION:-nightly}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FABRO_PORT:-32276}:32276"
+    volumes:
+      - fabro-storage:/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FABRO_WEB_URL: ${FABRO_WEB_URL:?Set FABRO_WEB_URL to the Tailscale Service HTTPS origin}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:32276/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  fabro-storage:

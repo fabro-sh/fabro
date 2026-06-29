@@ -22,7 +22,7 @@ Fabro only reads `settings.toml`. Older `server.toml`, `user.toml`, and `cli.tom
 
 The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
 
-Fabro does not terminate inbound TLS directly. Bind `[server.listen]` to a Unix socket or plain TCP port, and terminate HTTPS or mTLS at a reverse proxy, load balancer, or platform ingress in front of Fabro. Use `[server.api].url` and `[server.web].url` for those external HTTPS URLs.
+Fabro does not terminate inbound TLS directly. Bind `[server.listen]` to a Unix socket or plain TCP port, and terminate HTTPS or mTLS at a reverse proxy, load balancer, Tailscale Service, or platform ingress in front of Fabro. Use `[server.api].url` and `[server.web].url` for those external HTTPS URLs.
 
 ### Full reference
 
@@ -151,6 +151,8 @@ Control the embedded SPA and browser-oriented routes.
 When `enabled = false`, the server still exposes the machine API and `/health`, but `/`, `/auth/*`, SPA client routes, `/api/v1/auth/me`, and `/api/v1/setup/*` all return `404`.
 
 `server.web.url` is not a secondary web host. Fabro supports a single public origin for API and web traffic. In local development that can be plain HTTP such as `http://localhost:3000` or `http://127.0.0.1:3000`. In production, operators are responsible for terminating HTTPS upstream.
+
+When the external origin is assigned at deployment time, set `FABRO_WEB_URL` in the server process environment. It overrides `server.web.url` for the canonical browser/API origin and is the recommended control for Tailscale Services deployments.
 
 ### `[server.auth]` section
 
@@ -314,6 +316,8 @@ Fabro always serves the GitHub webhook handler at `POST /api/v1/webhooks/github`
 - `strategy = "server_url"`: recommended for production or any deployment with a stable public API URL. Fabro sets the GitHub App webhook URL to `<server.api.url>/api/v1/webhooks/github` on startup. Requires `server.api.url` and `GITHUB_APP_WEBHOOK_SECRET`.
 - `strategy = "tailscale_funnel"`: opt-in for Tailscale-hosted machines without a stable public URL. Fabro runs `tailscale funnel <server-port>`, exposes the main server on that Funnel URL, and best-effort updates the GitHub App webhook URL to `<funnel-url>/api/v1/webhooks/github`. Requires a TCP listener and `GITHUB_APP_WEBHOOK_SECRET`.
 - `strategy` unset: Fabro still accepts signed webhook deliveries on `/api/v1/webhooks/github` when the secret is present, but it does not run `tailscale funnel` and does not update the GitHub App webhook URL.
+
+Tailscale Services and Tailscale Funnel are different ingress features. Services are private to the tailnet and work well for Fabro's web UI and CLI API access, but github.com cannot deliver webhooks to a private Service URL. Use `tailscale_funnel`, `server_url`, or another public relay when GitHub webhook delivery is required.
 
 Incoming webhooks are authenticated only by GitHub's `X-Hub-Signature-256` HMAC signature, not by Fabro's bearer/session auth.
 

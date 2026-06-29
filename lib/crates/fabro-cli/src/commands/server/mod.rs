@@ -17,6 +17,7 @@ use fabro_server::install::{self, InstallAppState, InstallFinishHook, InstallFin
 use fabro_server::serve::{self, ServeArgs};
 use fabro_server::static_files;
 use fabro_static::EnvVars;
+use fabro_types::settings;
 use fabro_util::browser;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -306,9 +307,17 @@ fn install_mode_next_step_message(supervised: bool) -> &'static str {
 
 #[expect(
     clippy::disallowed_methods,
-    reason = "Install-mode URL hints honor Railway's documented public-domain env var."
+    reason = "Install-mode URL hints honor documented deployment public URL env vars."
 )]
 fn install_url_hint(bind: &Bind, token: &str) -> Option<String> {
+    if let Some(origin) = std::env::var(EnvVars::FABRO_WEB_URL)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .and_then(|value| settings::validate_public_url(&value).ok())
+    {
+        return Some(format!("{origin}/install?token={token}"));
+    }
+
     if let Some(domain) = std::env::var(EnvVars::RAILWAY_PUBLIC_DOMAIN)
         .ok()
         .filter(|value| !value.is_empty())
@@ -373,8 +382,9 @@ fn generate_install_token() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use fabro_config::bind::Bind;
+    use fabro_static::EnvVars;
 
-    use super::{bind_to_browser_url, install_mode_next_step_message};
+    use super::{bind_to_browser_url, install_mode_next_step_message, install_url_hint};
 
     #[test]
     fn install_mode_next_step_message_recommends_manual_restart_locally() {
@@ -410,5 +420,55 @@ mod tests {
             bind_to_browser_url(&bind).as_deref(),
             Some("http://[::1]:32276")
         );
+    }
+
+    #[test]
+    fn install_url_hint_prefers_fabro_web_url_over_bind() {
+        let bind = Bind::Tcp("0.0.0.0:32276".parse().unwrap());
+
+        temp_env::with_var(EnvVars::RAILWAY_PUBLIC_DOMAIN, None::<&str>, || {
+            temp_env::with_var(
+                EnvVars::FABRO_WEB_URL,
+                Some("https://fabro-testing.example.ts.net"),
+                || {
+                    assert_eq!(
+                        install_url_hint(&bind, "test-token").as_deref(),
+                        Some("https://fabro-testing.example.ts.net/install?token=test-token")
+                    );
+                },
+            );
+        });
+    }
+
+    #[test]
+    fn install_url_hint_ignores_empty_fabro_web_url() {
+        let bind = Bind::Tcp("0.0.0.0:32276".parse().unwrap());
+
+        temp_env::with_var(EnvVars::RAILWAY_PUBLIC_DOMAIN, None::<&str>, || {
+            temp_env::with_var(EnvVars::FABRO_WEB_URL, Some("  "), || {
+                assert_eq!(
+                    install_url_hint(&bind, "test-token").as_deref(),
+                    Some("http://127.0.0.1:32276/install?token=test-token")
+                );
+            });
+        });
+    }
+
+    #[test]
+    fn install_url_hint_ignores_invalid_fabro_web_url() {
+        let bind = Bind::Tcp("0.0.0.0:32276".parse().unwrap());
+
+        temp_env::with_var(EnvVars::RAILWAY_PUBLIC_DOMAIN, None::<&str>, || {
+            temp_env::with_var(
+                EnvVars::FABRO_WEB_URL,
+                Some("https://bad.example.com/install"),
+                || {
+                    assert_eq!(
+                        install_url_hint(&bind, "test-token").as_deref(),
+                        Some("http://127.0.0.1:32276/install?token=test-token")
+                    );
+                },
+            );
+        });
     }
 }
