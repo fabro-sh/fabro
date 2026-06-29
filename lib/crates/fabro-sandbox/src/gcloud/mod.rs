@@ -361,7 +361,13 @@ impl GcloudSandbox {
 
 fn wrap_bash(command: &str) -> String {
     let encoded = STANDARD.encode(command.as_bytes());
-    format!("echo {} | base64 -d | bash", shell_quote(&encoded))
+    // Decode through process substitution, NOT `... | base64 -d | bash`: piping the
+    // script into bash makes the spawned command inherit the (exhausted) decode
+    // pipe as its stdin. For `spawn_stdio_process` that silently severs the
+    // bidirectional ACP stdio — the agent reads EOF and exits before the handshake
+    // (claude-agent-acp: "exited before protocol completed", 0 inference). `bash
+    // <(...)` runs the same script with this process's stdin still attached.
+    format!("bash <(echo {} | base64 -d)", shell_quote(&encoded))
 }
 
 fn ssh_to_exec(output: SshOutput, duration_ms: u64) -> ExecResult {
@@ -977,9 +983,10 @@ mod tests {
         let sb = sandbox();
         let env = HashMap::from([("FOO".to_string(), "bar".to_string())]);
         let script = sb.build_exec_script("echo hi", None, Some(&env));
-        // wrap_bash → `echo <quoted-b64> | base64 -d | bash`; strip the shell
-        // quoting before decoding.
-        let token = script.split_whitespace().nth(1).unwrap();
+        // wrap_bash → `bash <(echo <quoted-b64> | base64 -d)`; the b64 is the 3rd
+        // whitespace token (`bash`, `<(echo`, `<b64>`). Strip the shell quoting
+        // before decoding.
+        let token = script.split_whitespace().nth(2).unwrap();
         let token = token.trim_matches('\'');
         let decoded = STANDARD.decode(token).unwrap();
         let decoded = String::from_utf8(decoded).unwrap();
@@ -987,6 +994,34 @@ mod tests {
         assert!(decoded.contains("bar"));
         assert!(decoded.contains("/home/fabro/workspace"));
         assert!(decoded.contains("echo hi"));
+    }
+
+    #[test]
+    fn wrap_bash_keeps_stdin_attached_to_the_inner_command() {
+        // Regression: the ACP transport spawns the agent via `bash -c <wrap_bash>`
+        // and writes JSON-RPC to its stdin. The old `... | base64 -d | bash` form
+        // made the agent's stdin the exhausted decode pipe, so it read EOF and
+        // exited before the ACP handshake. Drive the wrapped script with stdin and
+        // assert the inner command (cat) actually receives it.
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let wrapped = wrap_bash("cat");
+        let mut child = Command::new("bash")
+            .arg("-c")
+            .arg(&wrapped)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn bash");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(b"HELLO_STDIN\n")
+            .expect("write stdin");
+        let output = child.wait_with_output().expect("wait");
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "HELLO_STDIN");
     }
 
     #[tokio::test]
