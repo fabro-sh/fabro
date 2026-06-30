@@ -94,13 +94,13 @@ fn request_with_if_match(
 }
 
 async fn create_mcp_server(app: &axum::Router, id: &str, name: &str) -> Value {
-    create_mcp_server_with_body(app, &mcp_server_body(id, name)).await
-}
-
-async fn create_mcp_server_with_body(app: &axum::Router, body: &Value) -> Value {
     let response = app
         .clone()
-        .oneshot(json_request(Method::POST, "/mcp-servers", body))
+        .oneshot(json_request(
+            Method::POST,
+            "/mcp-servers",
+            &mcp_server_body(id, name),
+        ))
         .await
         .expect("create mcp server should respond");
     response_json(response, StatusCode::CREATED, "POST /api/v1/mcp-servers").await
