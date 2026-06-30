@@ -12,7 +12,7 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::types::{Message, Request, ToolResult};
 use fabro_model::Catalog;
-use fabro_types::settings::InterpString;
+use fabro_types::settings::{InterpString, ResolveError};
 use fabro_util::env::{Env, SystemEnv};
 use tokio::process::Command as TokioCommand;
 use tokio::time::timeout as tokio_timeout;
@@ -68,14 +68,16 @@ pub trait HookExecutor: Send + Sync {
 /// there is no `InterpString -> String -> InterpString` re-parse. A missing or
 /// out-of-scope token is a hard error (fail-closed); there is no fallback to
 /// the unresolved source.
-fn resolve_interp<E>(value: &InterpString, env: &E) -> Result<String, String>
+///
+/// Returns the typed [`ResolveError`] so callers keep the source until the
+/// decision boundary renders it; do not flatten it to a `String` here.
+fn resolve_interp<E>(value: &InterpString, env: &E) -> Result<String, ResolveError>
 where
     E: Env + ?Sized,
 {
     value
         .resolve(|name| env.var(name).ok())
         .map(|resolved| resolved.value)
-        .map_err(|error| error.to_string())
 }
 
 /// Resolve an HTTP-hook **header** value at fire time, scoping its
@@ -93,7 +95,7 @@ fn resolve_header<E>(
     value: &InterpString,
     allowed_env_vars: &[String],
     env: &E,
-) -> Result<String, String>
+) -> Result<String, ResolveError>
 where
     E: Env + ?Sized,
 {
@@ -106,7 +108,6 @@ where
             }
         })
         .map(|resolved| resolved.value)
-        .map_err(|error| error.to_string())
 }
 
 /// Executes hooks via shell commands or HTTP POST.
@@ -146,7 +147,7 @@ impl HookExecutorImpl {
         prompt: &InterpString,
         model: Option<&InterpString>,
         env: &E,
-    ) -> Result<(String, Option<String>), String>
+    ) -> Result<(String, Option<String>), ResolveError>
     where
         E: Env + ?Sized,
     {
@@ -171,7 +172,7 @@ impl HookExecutorImpl {
             Ok(command) => command,
             Err(error) => {
                 return HookDecision::Block {
-                    reason: Some(error),
+                    reason: Some(error.to_string()),
                 };
             }
         };
@@ -331,7 +332,7 @@ impl HookExecutorImpl {
             Err(error) => {
                 tracing::error!(error = %error, "prompt hook env resolution failed, not firing");
                 return HookDecision::Block {
-                    reason: Some(error),
+                    reason: Some(error.to_string()),
                 };
             }
         };
@@ -400,7 +401,7 @@ impl HookExecutorImpl {
             Err(error) => {
                 tracing::error!(error = %error, "agent hook env resolution failed, not firing");
                 return HookDecision::Block {
-                    reason: Some(error),
+                    reason: Some(error.to_string()),
                 };
             }
         };
@@ -553,13 +554,13 @@ impl HookExecutorImpl {
                 )]
                 {
                     tracing::error!(
-                        url.source = %url.as_source(),
+                        url_source = %url.as_source(),
                         error = %error,
                         "HTTP hook URL env resolution failed, not firing"
                     );
                 }
                 return HookDecision::Block {
-                    reason: Some(error),
+                    reason: Some(error.to_string()),
                 };
             }
         };
@@ -598,14 +599,14 @@ impl HookExecutorImpl {
                         )]
                         {
                             tracing::error!(
-                                url.source = %url.as_source(),
+                                url_source = %url.as_source(),
                                 header = %key,
                                 error = %error,
                                 "HTTP hook header env resolution failed, not firing"
                             );
                         }
                         return HookDecision::Block {
-                            reason: Some(error),
+                            reason: Some(error.to_string()),
                         };
                     }
                 };
@@ -1151,7 +1152,7 @@ mod tests {
             &env,
         )
         .unwrap_err();
-        assert!(err.contains("FABRO_TEST_KEY_3"));
+        assert_eq!(err.name, "FABRO_TEST_KEY_3");
     }
 
     #[test]
@@ -1163,7 +1164,7 @@ mod tests {
             &env,
         )
         .unwrap_err();
-        assert!(err.contains("FABRO_TEST_KEY_3"));
+        assert_eq!(err.name, "FABRO_TEST_KEY_3");
     }
 
     // The value stays a typed `InterpString`: it resolves at fire time from its
@@ -1180,7 +1181,7 @@ mod tests {
     fn resolve_interp_errors_on_missing_var() {
         let env = test_env(&[]);
         let err = resolve_interp(&interp("a{{ env.FABRO_TEST_NOEXIST }}-b"), &env).unwrap_err();
-        assert!(err.contains("FABRO_TEST_NOEXIST"));
+        assert_eq!(err.name, "FABRO_TEST_NOEXIST");
     }
 
     #[test]
