@@ -21,6 +21,7 @@ use fabro_sandbox::SandboxProviderRegistry;
 use fabro_static::EnvVars;
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::settings::ServerAuthMethod;
+use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{AuthMethod, IdpIdentity, ServerSettings};
 use fabro_vault::{SecretType, Vault};
 use fabro_workflow::handler::HandlerRegistry;
@@ -63,43 +64,45 @@ methods = ["dev-token"]
 
 #[must_use]
 pub struct TestAppStateBuilder {
-    server_settings:           ServerSettings,
-    manifest_run_defaults:     RunLayer,
-    max_concurrent_runs:       usize,
-    registry_factory_override: Option<Box<RegistryFactoryOverride>>,
-    sandbox_provider_registry: Option<SandboxProviderRegistry>,
-    store_bundle:              Option<(Arc<Database>, ArtifactStore)>,
-    vault_path:                Option<PathBuf>,
-    vault_entries:             Vec<(String, String)>,
-    server_env_path:           Option<PathBuf>,
-    active_config_path:        Option<PathBuf>,
-    server_secret_env:         HashMap<String, String>,
-    env_lookup:                EnvLookup,
-    llm_catalog_settings:      LlmCatalogSettings,
-    automation_materializer:   Option<Arc<dyn AutomationRunMaterializer>>,
+    server_settings:              ServerSettings,
+    manifest_run_defaults:        RunLayer,
+    max_concurrent_runs:          usize,
+    registry_factory_override:    Option<Box<RegistryFactoryOverride>>,
+    sandbox_provider_registry:    Option<SandboxProviderRegistry>,
+    store_bundle:                 Option<(Arc<Database>, ArtifactStore)>,
+    vault_path:                   Option<PathBuf>,
+    vault_entries:                Vec<(String, String)>,
+    server_env_path:              Option<PathBuf>,
+    active_config_path:           Option<PathBuf>,
+    server_secret_env:            HashMap<String, String>,
+    default_environment_provider: Option<EnvironmentProvider>,
+    env_lookup:                   EnvLookup,
+    llm_catalog_settings:         LlmCatalogSettings,
+    automation_materializer:      Option<Arc<dyn AutomationRunMaterializer>>,
     #[cfg(test)]
-    worker_runtime:            Option<Arc<dyn WorkerRuntime>>,
+    worker_runtime:               Option<Arc<dyn WorkerRuntime>>,
 }
 
 impl Default for TestAppStateBuilder {
     fn default() -> Self {
         Self {
-            server_settings:             default_test_server_settings(),
-            manifest_run_defaults:       RunLayer::default(),
-            max_concurrent_runs:         5,
-            registry_factory_override:   None,
-            sandbox_provider_registry:   None,
-            store_bundle:                None,
-            vault_path:                  None,
-            vault_entries:               Vec::new(),
-            server_env_path:             None,
-            active_config_path:          None,
-            server_secret_env:           HashMap::new(),
-            env_lookup:                  default_env_lookup(),
-            llm_catalog_settings:        LlmCatalogSettings::default(),
-            automation_materializer:     None,
+            server_settings:              default_test_server_settings(),
+            manifest_run_defaults:        RunLayer::default(),
+            max_concurrent_runs:          5,
+            registry_factory_override:    None,
+            sandbox_provider_registry:    None,
+            store_bundle:                 None,
+            vault_path:                   None,
+            vault_entries:                Vec::new(),
+            server_env_path:              None,
+            active_config_path:           None,
+            server_secret_env:            HashMap::new(),
+            default_environment_provider: Some(EnvironmentProvider::Docker),
+            env_lookup:                   default_env_lookup(),
+            llm_catalog_settings:         LlmCatalogSettings::default(),
+            automation_materializer:      None,
             #[cfg(test)]
-            worker_runtime:              None,
+            worker_runtime:               None,
         }
     }
 }
@@ -186,6 +189,11 @@ impl TestAppStateBuilder {
         self
     }
 
+    pub fn default_environment_provider(mut self, provider: Option<EnvironmentProvider>) -> Self {
+        self.default_environment_provider = provider;
+        self
+    }
+
     pub fn store_bundle(mut self, store: Arc<Database>, artifact_store: ArtifactStore) -> Self {
         self.store_bundle = Some((store, artifact_store));
         self
@@ -240,16 +248,10 @@ impl TestAppStateBuilder {
         let active_config_path = self
             .active_config_path
             .unwrap_or_else(|| vault_path.with_file_name("settings.toml"));
-        // Production seeds environments at install time, not on startup. Tests
-        // exercise an installed instance, so seed the built-ins next to the
-        // settings file before `build_app_state` loads them.
-        let environment_dir = active_config_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("environments");
-        fabro_environment::seed_environments(&environment_dir)
-            .expect("test environments should seed");
-        let db_pool = test_db_pool_for_vault_path(&vault_path)?;
+        let db_pool = test_db_pool_for_vault_path_with_default_environment(
+            &vault_path,
+            self.default_environment_provider,
+        )?;
         build_app_state(AppStateConfig {
             resolved_settings: resolved_runtime_settings_for_tests(
                 self.server_settings,
@@ -496,8 +498,22 @@ pub fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
     (store, artifact_store)
 }
 
+#[cfg(test)]
 pub(crate) fn test_db_pool_for_vault_path(vault_path: &Path) -> anyhow::Result<DbPool> {
-    test_db_pool(sqlite_path_for_vault_path(vault_path))
+    test_db_pool_for_vault_path_with_default_environment(
+        vault_path,
+        Some(EnvironmentProvider::Docker),
+    )
+}
+
+pub(crate) fn test_db_pool_for_vault_path_with_default_environment(
+    vault_path: &Path,
+    default_environment_provider: Option<EnvironmentProvider>,
+) -> anyhow::Result<DbPool> {
+    test_db_pool(
+        sqlite_path_for_vault_path(vault_path),
+        default_environment_provider,
+    )
 }
 
 fn sqlite_path_for_vault_path(vault_path: &Path) -> PathBuf {
@@ -512,7 +528,10 @@ fn sqlite_path_for_vault_path(vault_path: &Path) -> PathBuf {
     clippy::disallowed_methods,
     reason = "sync test builders may be called inside async tests; a short-lived OS thread avoids nested Tokio runtimes"
 )]
-fn test_db_pool(path: PathBuf) -> anyhow::Result<DbPool> {
+fn test_db_pool(
+    path: PathBuf,
+    default_environment_provider: Option<EnvironmentProvider>,
+) -> anyhow::Result<DbPool> {
     std::thread::spawn(move || {
         let runtime = TokioRuntimeBuilder::new_current_thread()
             .enable_all()
@@ -520,6 +539,9 @@ fn test_db_pool(path: PathBuf) -> anyhow::Result<DbPool> {
         runtime.block_on(async move {
             let database = fabro_db::Database::connect(&path).await?;
             database.migrate().await?;
+            if let Some(provider) = default_environment_provider {
+                fabro_environment::seed_default_environment(database.pool(), provider).await?;
+            }
             Ok(database.clone_pool())
         })
     })

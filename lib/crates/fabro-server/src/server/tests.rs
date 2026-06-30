@@ -83,6 +83,40 @@ fn manifest_run_defaults_from_toml(source: &str) -> fabro_config::RunLayer {
         .unwrap_or_default()
 }
 
+fn test_environment_store(
+    default_provider: Option<EnvironmentProvider>,
+    local_enabled: bool,
+) -> (tempfile::TempDir, EnvironmentStore) {
+    let temp = tempfile::tempdir().expect("environment store tempdir should be created");
+    let db_path = temp.path().join("fabro.sqlite3");
+    let pool = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("environment store setup runtime should build");
+        runtime.block_on(async move {
+            let database = fabro_db::Database::connect(db_path)
+                .await
+                .expect("test environment database should connect");
+            database
+                .migrate()
+                .await
+                .expect("test environment database should migrate");
+            if let Some(provider) = default_provider {
+                fabro_environment::seed_default_environment(database.pool(), provider)
+                    .await
+                    .expect("test default environment should seed");
+            }
+            database.clone_pool()
+        })
+    })
+    .join()
+    .expect("environment store setup thread should not panic");
+    let store = EnvironmentStore::load_blocking(pool, local_enabled)
+        .expect("test environment store should load");
+    (temp, store)
+}
+
 fn server_settings_from_toml(source: &str) -> ServerSettings {
     ServerSettingsBuilder::from_toml(source).expect("server settings should resolve")
 }
@@ -1251,12 +1285,8 @@ id = "missing"
 
 #[test]
 fn system_sandbox_provider_uses_manifest_defaults() {
-    let temp = tempfile::tempdir().unwrap();
-    let environment_dir = temp.path().join("environments");
-    fabro_environment::seed_default_environment(&environment_dir, EnvironmentProvider::Daytona)
-        .expect("seed built-in environments");
-    let environment_store =
-        EnvironmentStore::load(&environment_dir, true).expect("environment store should load");
+    let (_temp, environment_store) =
+        test_environment_store(Some(EnvironmentProvider::Daytona), true);
     let source = r#"
 _version = 1
 
@@ -1273,9 +1303,7 @@ id = "default"
 
 #[test]
 fn system_sandbox_provider_defaults_when_manifest_run_settings_do_not_resolve() {
-    let temp = tempfile::tempdir().unwrap();
-    let environment_store = EnvironmentStore::load(temp.path().join("environments"), true)
-        .expect("environment store should load");
+    let (_temp, environment_store) = test_environment_store(None, true);
     let source = r#"
 _version = 1
 
@@ -6006,11 +6034,6 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
     let vault_path = test_secret_store_path();
     let server_env_path = vault_path.with_file_name("server.env");
     let active_config_path = vault_path.with_file_name("settings.toml");
-    let environment_dir = active_config_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("environments");
-    fabro_environment::seed_environments(&environment_dir).expect("test environments should seed");
     let db_pool = test_db_pool_for_vault_path(&vault_path).expect("test db pool should build");
     let config = AppStateConfig {
         resolved_settings: resolved_runtime_settings_for_tests(

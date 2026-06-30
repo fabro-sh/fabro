@@ -749,13 +749,15 @@ fn install_listen_config(bind: &Bind) -> InstallListenConfig {
     }
 }
 
-/// The environments directory sits next to the active settings file, matching
-/// the server's own `environment_dir_for_active_config` derivation.
-fn install_environment_dir(config_path: &Path) -> PathBuf {
-    config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("environments")
+async fn seed_default_environment_in_sqlite(
+    storage_dir: &Path,
+    provider: EnvironmentProvider,
+) -> anyhow::Result<()> {
+    let storage = Storage::new(storage_dir);
+    let database = fabro_db::Database::connect(storage.sqlite_path()).await?;
+    database.migrate().await?;
+    fabro_environment::seed_default_environment(database.pool(), provider).await?;
+    Ok(())
 }
 
 async fn health() -> Response {
@@ -1751,14 +1753,15 @@ async fn post_install_finish(
             .into_response();
     }
 
-    // Seed the default environment next to the settings file. The server does
-    // not seed on startup, so install is the only place the default is written;
-    // existing files are preserved, so re-running install never clobbers edits.
-    let environment_dir = install_environment_dir(state.config_path.as_ref());
-    if let Err(err) = fabro_environment::seed_default_environment(
-        &environment_dir,
+    // Seed the default environment in SQLite. The server does not seed on
+    // startup, so install is the only place the default is written; existing
+    // rows are preserved, so re-running install never clobbers edits.
+    if let Err(err) = seed_default_environment_in_sqlite(
+        state.storage_dir.as_ref(),
         sandbox.to_environment_provider(),
-    ) {
+    )
+    .await
+    {
         warn!(error = %err, "failed to seed default environment after install");
     }
 

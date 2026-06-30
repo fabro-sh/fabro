@@ -73,13 +73,11 @@ enabled = false
 fn daytona_disabled_app() -> (axum::Router, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().expect("daytona disabled test tempdir should be created");
     let active_config_path = temp_dir.path().join("settings.toml");
-    let environment_dir = temp_dir.path().join("environments");
-    fabro_environment::seed_default_environment(&environment_dir, EnvironmentProvider::Daytona)
-        .expect("daytona default environment should seed");
     let settings = daytona_disabled_settings();
     let state = fabro_server::test_support::TestAppStateBuilder::new()
         .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
         .active_config_path(active_config_path)
+        .default_environment_provider(Some(EnvironmentProvider::Daytona))
         .build();
     (
         fabro_server::test_support::build_test_router(state),

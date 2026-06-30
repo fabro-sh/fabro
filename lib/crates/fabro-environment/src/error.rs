@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use toml::de::Error as TomlDeError;
 use toml::ser::Error as TomlSerError;
 
-use crate::{EnvironmentId, EnvironmentRevision};
+use crate::{EnvironmentId, EnvironmentRevision, EnvironmentRevisionParseError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EnvironmentValidationError {
@@ -17,6 +17,10 @@ pub enum EnvironmentValidationError {
         #[source]
         source: std::io::Error,
     },
+    #[error(
+        "Dockerfile path sources are not supported for stored environments; use inline Dockerfile content"
+    )]
+    DockerfilePathUnsupported,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -46,6 +50,12 @@ pub enum EnvironmentStoreError {
         #[source]
         source: TomlDeError,
     },
+    #[error("invalid persisted environment revision for {id}")]
+    InvalidRevision {
+        id:     EnvironmentId,
+        #[source]
+        source: EnvironmentRevisionParseError,
+    },
     #[error("environment TOML at {path:?} is not UTF-8")]
     InvalidUtf8 {
         path:   PathBuf,
@@ -63,6 +73,25 @@ pub enum EnvironmentStoreError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to encode environment JSON for {field}")]
+    JsonEncode {
+        field:  &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("failed to decode environment JSON for {field}")]
+    JsonDecode {
+        field:  &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("database error")]
+    Db {
+        #[from]
+        source: sqlx::Error,
+    },
+    #[error("environment row count {count} exceeds SQLite integer range")]
+    RowCountOverflow { count: usize },
 }
 
 impl EnvironmentStoreError {
@@ -96,8 +125,11 @@ impl EnvironmentStoreError {
             Self::Reserved { .. } => "reserved",
             Self::Validation { .. } => "validation",
             Self::InvalidFilename { .. } => "invalid_filename",
-            Self::Parse { .. } | Self::InvalidUtf8 { .. } => "parse",
+            Self::Parse { .. } | Self::InvalidUtf8 { .. } | Self::InvalidRevision { .. } => "parse",
             Self::Serialize { .. } => "serialize",
+            Self::JsonEncode { .. } | Self::JsonDecode { .. } => "json",
+            Self::Db { .. } => "db",
+            Self::RowCountOverflow { .. } => "row_count_overflow",
             Self::Io { .. } => "io",
         }
     }

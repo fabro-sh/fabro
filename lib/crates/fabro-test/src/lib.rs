@@ -19,6 +19,7 @@ pub use fabro_static::EnvVars;
 use fabro_types::RunId;
 use regex::Regex;
 use serde_json::{Map, Value, json};
+use tokio::runtime::Builder as TokioRuntimeBuilder;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 
@@ -656,13 +657,25 @@ fn home_settings_path(home_dir: &Path) -> PathBuf {
     home_dir.join(".fabro/settings.toml")
 }
 
-fn seed_settings_environments(settings_path: &Path) {
-    let environment_dir = settings_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("environments");
-    fabro_environment::seed_environments(&environment_dir)
-        .unwrap_or_else(|err| panic!("failed to seed {}: {err}", environment_dir.display()));
+fn seed_storage_environments(storage_dir: &Path) {
+    let sqlite_path = Storage::new(storage_dir).sqlite_path();
+    let display_path = sqlite_path.clone();
+    std::thread::spawn(move || {
+        let runtime = TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("environment seed runtime should build");
+        runtime
+            .block_on(async move {
+                let database = fabro_db::Database::connect(&sqlite_path).await?;
+                database.migrate().await?;
+                fabro_environment::seed_environments(database.pool()).await?;
+                anyhow::Ok(())
+            })
+            .unwrap_or_else(|err| panic!("failed to seed {}: {err}", display_path.display()));
+    })
+    .join()
+    .expect("environment seed thread should not panic");
 }
 
 fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
@@ -675,7 +688,7 @@ fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
         ),
     )
     .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-    seed_settings_environments(path);
+    seed_storage_environments(storage_dir);
 }
 
 fn write_test_server_dev_token(storage_dir: &Path) {
@@ -711,7 +724,6 @@ fn write_settings_table(path: &Path, table: &TomlMap<String, TomlValue>) {
     }
     std::fs::write(path, contents)
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
-    seed_settings_environments(path);
 }
 
 fn server_target_from_table(table: &TomlMap<String, TomlValue>) -> Option<String> {
@@ -816,11 +828,12 @@ fn sync_home_settings(
         ensure_parent_dir(settings_path);
         std::fs::write(settings_path, contents)
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", settings_path.display()));
-        seed_settings_environments(settings_path);
+        seed_storage_environments(storage_dir);
         return;
     }
 
     write_settings_table(settings_path, &table);
+    seed_storage_environments(storage_dir);
 }
 
 fn has_explicit_server_auth_methods(table: &TomlMap<String, TomlValue>) -> bool {
@@ -870,7 +883,7 @@ fn ensure_home_server_auth_methods(
     };
 
     if has_explicit_server_auth_methods(&table) {
-        seed_settings_environments(settings_path);
+        seed_storage_environments(storage_dir);
         return;
     }
 
@@ -969,7 +982,7 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
     ensure_parent_dir(config_path);
     std::fs::create_dir_all(&server.storage_dir)
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", server.storage_dir.display()));
-    seed_settings_environments(config_path);
+    seed_storage_environments(&server.storage_dir);
     write_test_server_dev_token(&server.storage_dir);
     ServerDaemon::remove(&server_runtime_directory(server));
     let _ = std::fs::remove_file(&server.socket_path);

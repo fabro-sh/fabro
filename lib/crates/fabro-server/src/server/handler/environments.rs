@@ -248,9 +248,14 @@ impl From<EnvironmentStoreError> for ApiError {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, source.to_string())
             }
             EnvironmentStoreError::InvalidFilename { .. }
+            | EnvironmentStoreError::InvalidRevision { .. }
             | EnvironmentStoreError::Parse { .. }
             | EnvironmentStoreError::InvalidUtf8 { .. }
             | EnvironmentStoreError::Serialize { .. }
+            | EnvironmentStoreError::JsonEncode { .. }
+            | EnvironmentStoreError::JsonDecode { .. }
+            | EnvironmentStoreError::Db { .. }
+            | EnvironmentStoreError::RowCountOverflow { .. }
             | EnvironmentStoreError::Io { .. } => Self::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "environment store operation failed",

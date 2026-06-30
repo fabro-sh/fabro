@@ -13,16 +13,22 @@ doctest = false
 workspace = true
 
 [dependencies]
+chrono.workspace = true
+fabro-db = { path = "../fabro-db" }
 fabro-config = { path = "../fabro-config" }
 fabro-types = { path = "../fabro-types" }
 hex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "test-util"] }

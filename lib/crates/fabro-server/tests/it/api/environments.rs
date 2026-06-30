@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
@@ -48,8 +48,10 @@ fn environment_app() -> (axum::Router, tempfile::TempDir, PathBuf) {
     let temp_dir = tempfile::tempdir().expect("environment test tempdir should be created");
     let active_config_path = temp_dir.path().join("settings.toml");
     let environment_dir = temp_dir.path().join("environments");
+    let vault_path = temp_dir.path().join("secrets.json");
     let state = TestAppStateBuilder::new()
         .active_config_path(active_config_path)
+        .vault_path(vault_path)
         .build();
     (build_test_router(state), temp_dir, environment_dir)
 }
@@ -59,6 +61,7 @@ fn environment_app_with_default_environment(
 ) -> (axum::Router, tempfile::TempDir) {
     let temp_dir = tempfile::tempdir().expect("environment test tempdir should be created");
     let active_config_path = temp_dir.path().join("settings.toml");
+    let vault_path = temp_dir.path().join("secrets.json");
     let manifest_run_defaults = RunLayer {
         environment: Some(RunEnvironmentLayer {
             id: Some(environment_id.to_string()),
@@ -69,6 +72,7 @@ fn environment_app_with_default_environment(
     let state = TestAppStateBuilder::new()
         .runtime_settings(default_test_server_settings(), manifest_run_defaults)
         .active_config_path(active_config_path)
+        .vault_path(vault_path)
         .build();
     (build_test_router(state), temp_dir)
 }
@@ -133,11 +137,17 @@ fn revision_from(body: &Value) -> &str {
         .expect("environment response should include a revision")
 }
 
-async fn persisted_environment_toml(environment_dir: &Path, id: &str) -> toml::Value {
-    let persisted = tokio::fs::read_to_string(environment_dir.join(format!("{id}.toml")))
+async fn persisted_environment(
+    temp_dir: &tempfile::TempDir,
+    id: &str,
+) -> Option<fabro_environment::Environment> {
+    let database = fabro_db::Database::connect(temp_dir.path().join("db/fabro.sqlite3"))
         .await
-        .expect("persisted environment TOML should be readable");
-    toml::from_str(&persisted).expect("persisted environment TOML should parse")
+        .expect("environment test database should connect");
+    let store = fabro_environment::EnvironmentStore::load(database.clone_pool(), false)
+        .await
+        .expect("environment store should load from test database");
+    store.get(&fabro_environment::EnvironmentId::new(id).expect("environment id should be valid"))
 }
 
 async fn system_info(app: &axum::Router) -> Value {
@@ -174,8 +184,8 @@ async fn list_environments_returns_seeded_catalog_sorted_by_id() {
 }
 
 #[tokio::test]
-async fn create_environment_persists_sibling_toml_and_is_visible() {
-    let (app, _temp_dir, environment_dir) = environment_app();
+async fn create_environment_persists_to_sqlite_and_is_visible() {
+    let (app, temp_dir, environment_dir) = environment_app();
     let mut body = environment_body("custom-env", "docker");
     body["cwd"] = json!("/workspace/custom");
 
@@ -184,7 +194,7 @@ async fn create_environment_persists_sibling_toml_and_is_visible() {
     assert_eq!(created["id"], "custom-env");
     assert_eq!(created["provider"], "docker");
     assert_eq!(created["cwd"], "/workspace/custom");
-    assert!(environment_dir.join("custom-env.toml").exists());
+    assert!(!environment_dir.join("custom-env.toml").exists());
 
     let retrieved = app
         .clone()
@@ -214,17 +224,11 @@ async fn create_environment_persists_sibling_toml_and_is_visible() {
             .any(|environment| environment["id"] == "custom-env")
     );
 
-    let persisted = persisted_environment_toml(&environment_dir, "custom-env").await;
-    assert_eq!(
-        persisted.get("provider").and_then(toml::Value::as_str),
-        Some("docker")
-    );
-    assert_eq!(
-        persisted.get("cwd").and_then(toml::Value::as_str),
-        Some("/workspace/custom")
-    );
-    assert!(persisted.get("id").is_none());
-    assert!(persisted.get("revision").is_none());
+    let persisted = persisted_environment(&temp_dir, "custom-env")
+        .await
+        .expect("custom environment should persist to SQLite");
+    assert_eq!(persisted.settings.provider.to_string(), "docker");
+    assert_eq!(persisted.settings.cwd.as_deref(), Some("/workspace/custom"));
 }
 
 #[tokio::test]
@@ -256,8 +260,8 @@ async fn get_environment_returns_current_etag() {
 }
 
 #[tokio::test]
-async fn replace_environment_updates_file_and_returns_new_etag() {
-    let (app, _temp_dir, environment_dir) = environment_app();
+async fn replace_environment_updates_sqlite_and_returns_new_etag() {
+    let (app, temp_dir, environment_dir) = environment_app();
     let created = create_environment(&app, "replace-env", "docker").await;
     let revision = revision_from(&created);
     let mut replacement = environment_settings("local");
@@ -293,19 +297,15 @@ async fn replace_environment_updates_file_and_returns_new_etag() {
     assert_eq!(body["cwd"], "/srv/fabro/local");
     assert_ne!(body["revision"], revision);
     assert_eq!(etag, format!("\"{}\"", revision_from(&body)));
-    let persisted = persisted_environment_toml(&environment_dir, "replace-env").await;
+    assert!(!environment_dir.join("replace-env.toml").exists());
+    let persisted = persisted_environment(&temp_dir, "replace-env")
+        .await
+        .expect("replacement should persist to SQLite");
     assert_eq!(
-        persisted
-            .get("labels")
-            .and_then(toml::Value::as_table)
-            .and_then(|labels| labels.get("tier"))
-            .and_then(toml::Value::as_str),
+        persisted.settings.labels.get("tier").map(String::as_str),
         Some("dev")
     );
-    assert_eq!(
-        persisted.get("cwd").and_then(toml::Value::as_str),
-        Some("/srv/fabro/local")
-    );
+    assert_eq!(persisted.settings.cwd.as_deref(), Some("/srv/fabro/local"));
 }
 
 #[tokio::test]
@@ -540,7 +540,7 @@ async fn invalid_environment_settings_return_unprocessable_entity() {
 
 #[tokio::test]
 async fn relative_environment_cwd_over_rest_returns_unprocessable_entity() {
-    let (app, _temp_dir, environment_dir) = environment_app();
+    let (app, temp_dir, environment_dir) = environment_app();
     let mut body = environment_body("relative-cwd", "local");
     body["cwd"] = json!("relative/workspace");
 
@@ -556,6 +556,11 @@ async fn relative_environment_cwd_over_rest_returns_unprocessable_entity() {
     .await;
 
     assert!(!environment_dir.join("relative-cwd.toml").exists());
+    assert!(
+        persisted_environment(&temp_dir, "relative-cwd")
+            .await
+            .is_none()
+    );
     let message = serde_json::to_string(&error).expect("error should serialize");
     assert!(
         message.contains("environment.cwd") && message.contains("absolute path"),
@@ -592,6 +597,7 @@ async fn dockerfile_path_over_rest_is_rejected_without_persisting_or_exposing_co
     .await;
 
     assert!(!environment_dir.join("path-env.toml").exists());
+    assert!(persisted_environment(&temp_dir, "path-env").await.is_none());
     assert!(
         !serde_json::to_string(&error)
             .expect("error body should serialize")
@@ -613,7 +619,7 @@ async fn dockerfile_path_over_rest_is_rejected_without_persisting_or_exposing_co
 
 #[tokio::test]
 async fn delete_environment_removes_non_default_and_default_is_deletable() {
-    let (app, _temp_dir, environment_dir) = environment_app();
+    let (app, temp_dir, environment_dir) = environment_app();
     let created = create_environment(&app, "delete-env", "local").await;
     let revision = revision_from(&created);
 
@@ -635,6 +641,11 @@ async fn delete_environment_removes_non_default_and_default_is_deletable() {
     .await;
 
     assert!(!environment_dir.join("delete-env.toml").exists());
+    assert!(
+        persisted_environment(&temp_dir, "delete-env")
+            .await
+            .is_none()
+    );
     let missing = app
         .clone()
         .oneshot(empty_request(Method::GET, "/environments/delete-env"))
@@ -673,6 +684,7 @@ async fn delete_environment_removes_non_default_and_default_is_deletable() {
     .await;
 
     assert!(!environment_dir.join("default.toml").exists());
+    assert!(persisted_environment(&temp_dir, "default").await.is_none());
     let missing_default = app
         .oneshot(empty_request(Method::GET, "/environments/default"))
         .await

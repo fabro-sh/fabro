@@ -691,6 +691,18 @@ where
                 variables_path.display()
             )
         })?;
+    let legacy_environment_dir = active_config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("environments");
+    fabro_environment::import_legacy_directory_once(database.pool(), &legacy_environment_dir)
+        .await
+        .with_context(|| {
+            format!(
+                "importing legacy environments directory {}",
+                legacy_environment_dir.display()
+            )
+        })?;
     let db_pool = database.clone_pool();
     let max_concurrent_runs = resolved_server_settings.scheduler.max_concurrent_runs;
     // In `--watch-web` mode the build watcher will populate `dist/` shortly

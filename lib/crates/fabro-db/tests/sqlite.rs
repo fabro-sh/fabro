@@ -18,6 +18,13 @@ async fn connect_creates_parent_directory_and_migrate_is_idempotent() -> anyhow:
     .await?;
     assert_eq!(variable_table_count, 1);
 
+    let environments_table_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'environments'",
+    )
+    .fetch_one(database.pool())
+    .await?;
+    assert_eq!(environments_table_count, 1);
+
     let legacy_import_table_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'legacy_imports'",
     )
@@ -30,6 +37,61 @@ async fn connect_creates_parent_directory_and_migrate_is_idempotent() -> anyhow:
         .await?
         .get(0);
     assert_eq!(foreign_keys, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn environments_schema_rejects_invalid_rows() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let database = fabro_db::Database::connect(dir.path().join("fabro.sqlite3")).await?;
+    database.migrate().await?;
+
+    insert_minimal_environment(database.pool(), "valid", "docker", "allow_all").await?;
+
+    for (id, provider, network_mode) in [
+        ("Bad", "docker", "allow_all"),
+        ("local", "docker", "allow_all"),
+        ("bad-provider", "bogus", "allow_all"),
+        ("bad-network", "docker", "bogus"),
+    ] {
+        let result = insert_minimal_environment(database.pool(), id, provider, network_mode).await;
+        assert!(
+            result.is_err(),
+            "environment row should be rejected: id={id}, provider={provider}, network_mode={network_mode}"
+        );
+    }
+
+    Ok(())
+}
+
+async fn insert_minimal_environment(
+    pool: &fabro_db::DbPool,
+    id: &str,
+    provider: &str,
+    network_mode: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r"
+        INSERT INTO environments (
+            id,
+            revision,
+            provider,
+            network_mode,
+            lifecycle_preserve,
+            lifecycle_stop_on_terminal
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        ",
+    )
+    .bind(id)
+    .bind("a".repeat(64))
+    .bind(provider)
+    .bind(network_mode)
+    .bind(false)
+    .bind(true)
+    .execute(pool)
+    .await?;
 
     Ok(())
 }

@@ -11,7 +11,7 @@ Fabro separates **environments** from **sandboxes**:
 <Warning>
 Older pre-v1.0 config files that still use `[run.sandbox]` are temporarily auto-migrated when Fabro loads them from disk. Fabro writes a sibling `*.legacy-sandbox-migration.bak` file, rewrites the config to `[run.environment]` plus an environment definition, and then continues startup.
 
-Similarly, `[environments.*]` tables in the server's active `settings.toml` are auto-migrated on startup: each entry is extracted into a sibling `environments/<id>.toml` file, with a `.settings-environments-migration.bak` backup written first.
+Similarly, `[environments.*]` tables in the server's active `settings.toml` are auto-migrated on startup. Existing sibling `environments/*.toml` files are then treated as a legacy import source: Fabro imports missing environment IDs into SQLite once and renames the directory to `environments.imported-<timestamp>.bak`.
 
 These compatibility rewrites only handle direct field mappings. Unsupported legacy fields fail with a migration message that lists the keys to edit manually. The rewrite paths will be removed before v1.0.
 </Warning>
@@ -23,45 +23,76 @@ Runs select environments by slug:
 id = "fabro-dev"
 ```
 
-Environments are server-managed. The server keeps one TOML file per environment in an `environments/` directory next to its `settings.toml`, seeded on first startup with built-in `default`, `local`, `docker`, and `daytona` environments. Manage them by editing those files or through the `/api/v1/environments` REST API. Workflow and project TOML can additionally define `[environments.<slug>]` catalog entries that merge with the server catalog through the normal settings precedence. The built-in default is `default`, a Docker environment using `buildpack-deps:noble`.
+Server-managed environments are stored in the server SQLite database. Manage them through the web UI or the `/api/v1/environments` REST API. Install seeds `default` as an ordinary persisted environment; users can replace or delete it. `local` is reserved, synthetic, and unpersisted: it appears only when the local sandbox provider is enabled, and it cannot be created, replaced, or deleted through the environments API. Workflow and project TOML can additionally define `[environments.<slug>]` catalog entries that merge with the server catalog through the normal settings precedence.
 
-## Defining environments
+## Defining Server Environments
 
-Each server-managed environment is a file whose name is its slug:
+Create server-managed environments through the REST API. Stored environments use inline Dockerfile content; local Dockerfile paths are rejected by the API because the server cannot safely resolve client-side paths.
 
-```toml title="environments/fabro-dev.toml"
-provider = "daytona" # local | docker | daytona
-
-[image]
-dockerfile = { path = "Dockerfile" }
-
-[resources]
-cpu = 8
-memory = "16GB"
-disk = "20GB"
-
-[network]
-mode = "cidr_allow_list"       # allow_all | block | cidr_allow_list
-allow = ["10.0.0.0/8"]
-
-[lifecycle]
-preserve = false
-stop_on_terminal = true
-auto_stop = "30m"
-
-[labels]
-repo = "fabro-sh/fabro"
-
-[env]
-NODE_ENV = "development"
+```json title="POST /api/v1/environments"
+{
+  "id": "fabro-dev",
+  "provider": "daytona",
+  "cwd": null,
+  "image": {
+    "docker": null,
+    "dockerfile": {
+      "type": "inline",
+      "value": "FROM buildpack-deps:noble\n"
+    }
+  },
+  "resources": {
+    "cpu": 8,
+    "memory": "16GB",
+    "disk": "20GB"
+  },
+  "network": {
+    "mode": "cidr_allow_list",
+    "allow": ["10.0.0.0/8"]
+  },
+  "lifecycle": {
+    "preserve": false,
+    "stop_on_terminal": true,
+    "auto_stop": "30m"
+  },
+  "labels": {
+    "repo": "fabro-sh/fabro"
+  },
+  "env": {
+    "NODE_ENV": "development"
+  }
+}
 ```
 
-Server-managed local environments can also set `cwd`, an optional runtime
+Server-managed local-provider environments can also set `cwd`, an optional runtime
 command working directory:
 
-```toml title="environments/host.toml"
-provider = "local"
-cwd = "/srv/fabro/workspaces/team-a"
+```json title="POST /api/v1/environments"
+{
+  "id": "host",
+  "provider": "local",
+  "cwd": "/srv/fabro/workspaces/team-a",
+  "image": {
+    "docker": null,
+    "dockerfile": null
+  },
+  "resources": {
+    "cpu": null,
+    "memory": null,
+    "disk": null
+  },
+  "network": {
+    "mode": "allow_all",
+    "allow": []
+  },
+  "lifecycle": {
+    "preserve": false,
+    "stop_on_terminal": true,
+    "auto_stop": null
+  },
+  "labels": {},
+  "env": {}
+}
 ```
 
 `cwd` is owned by the server environment and is only honored by the `local`
@@ -69,7 +100,7 @@ provider. It is not a replacement for `run.working_dir`. Docker and Daytona
 ignore `cwd` and report a preflight warning because those clone-based providers
 own their workspace layout. Workflow, project, user, and direct-run
 `[environments.<slug>]` catalogs cannot set `cwd`; configure it in the
-server-managed environment file or through the environments API.
+server-managed environment through the environments API.
 
 The same fields nest under `[environments.<slug>]` when defined in workflow or project TOML instead:
 
@@ -131,24 +162,38 @@ fabro server start --environment default
 
 `--preserve-sandbox` still controls the concrete runtime instance lifecycle for a run. Runtime commands such as `fabro sandbox ssh` keep the word "sandbox" because they operate on an already-created runtime instance.
 
-## Built-in environments
+## Seeded Environments
 
-The server seeds four built-in environments on first startup: `default`, `local`, `docker`, and `daytona`. Missing files are re-seeded, so editing a seeded file customizes it while deleting it restores the built-in definition on the next restart. The seeded default:
+Install seeds a `default` environment into SQLite. It is a normal persisted environment, so deleting it removes the default run target until you recreate it. The standard Docker default is:
 
-```toml title="environments/default.toml"
-provider = "docker"
-
-[image]
-docker = "buildpack-deps:noble"
-
-[resources]
-cpu = 2
-memory = "4GB"
-
-[lifecycle]
-preserve = false
-stop_on_terminal = true
+```json title="GET /api/v1/environments/default"
+{
+  "id": "default",
+  "provider": "docker",
+  "image": {
+    "docker": "buildpack-deps:noble",
+    "dockerfile": null
+  },
+  "resources": {
+    "cpu": 2,
+    "memory": "4GB",
+    "disk": null
+  },
+  "network": {
+    "mode": "allow_all",
+    "allow": []
+  },
+  "lifecycle": {
+    "preserve": false,
+    "stop_on_terminal": true,
+    "auto_stop": null
+  },
+  "labels": {},
+  "env": {}
+}
 ```
+
+`local` is not stored in SQLite. It is synthesized at runtime when the local sandbox provider is enabled.
 
 ## Provider mappings
 
@@ -171,10 +216,7 @@ stop_on_terminal = true
 
 `local` runs tools directly in the resolved working directory. It offers no filesystem or network isolation, so use it only for trusted workflows.
 
-```toml title="environments/host.toml"
-provider = "local"
-cwd = "/srv/fabro/workspaces/team-a"
-```
+Create a server-managed local-provider environment through the environments API when you need a host `cwd`.
 
 When `cwd` is set, local runs execute commands from that absolute server-side
 path. When it is unset, Fabro keeps same-host compatibility by using the
@@ -188,17 +230,18 @@ Fabro hard-errors if a local environment asks for blocked or CIDR-restricted net
 
 Docker runs tools inside a container created from `image.docker`. Docker is the built-in default provider.
 
-```toml title="environments/ci.toml"
+```toml title="workflow.toml"
+[environments.ci]
 provider = "docker"
 
-[image]
+[environments.ci.image]
 docker = "buildpack-deps:noble"
 
-[resources]
+[environments.ci.resources]
 cpu = 2
 memory = "4GB"
 
-[network]
+[environments.ci.network]
 mode = "block"
 ```
 
@@ -208,21 +251,22 @@ Docker and Daytona are clone-based providers. When a run has a GitHub origin, Fa
 
 Daytona runs tools in a cloud sandbox. Without `image.dockerfile`, Fabro uses Daytona's built-in `daytona-medium` snapshot. With `image.dockerfile`, Fabro computes a deterministic internal snapshot name from the Dockerfile, resource hints, a single-tenant scope, and the Daytona API key.
 
-```toml title="environments/cloud.toml"
+```toml title="workflow.toml"
+[environments.cloud]
 provider = "daytona"
 
-[image]
+[environments.cloud.image]
 dockerfile = { path = "Dockerfile" }
 
-[resources]
+[environments.cloud.resources]
 cpu = 4
 memory = "8GB"
 disk = "20GB"
 
-[lifecycle]
+[environments.cloud.lifecycle]
 auto_stop = "30m"
 
-[network]
+[environments.cloud.network]
 mode = "cidr_allow_list"
 allow = ["208.80.154.232/32", "10.0.0.0/8"]
 ```

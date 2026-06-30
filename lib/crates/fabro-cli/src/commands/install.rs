@@ -2014,16 +2014,19 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
     )
     .await?;
 
-    // Seed the default environment next to the settings file. The server never
-    // seeds on startup, so install is the only place the default is written;
-    // existing files are preserved, so re-running install never clobbers edits.
-    let environment_dir = config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("environments");
-    if let Err(err) =
-        fabro_environment::seed_default_environment(&environment_dir, EnvironmentProvider::Docker)
-    {
+    // Seed the default environment in SQLite. The server never seeds on
+    // startup, so install is the only place the default is written; existing
+    // rows are preserved, so re-running install never clobbers edits.
+    let environment_seed_result = async {
+        let database =
+            fabro_db::Database::connect(Storage::new(&storage_dir).sqlite_path()).await?;
+        database.migrate().await?;
+        fabro_environment::seed_default_environment(database.pool(), EnvironmentProvider::Docker)
+            .await?;
+        anyhow::Ok(())
+    }
+    .await;
+    if let Err(err) = environment_seed_result {
         fabro_util::printerr!(
             printer,
             "  {} Failed to seed default environment: {err}",

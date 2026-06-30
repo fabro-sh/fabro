@@ -28,16 +28,27 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub(crate) fn from_persisted_path(
+    pub(crate) async fn from_legacy_path(
         id: EnvironmentId,
         bytes: &[u8],
         path: &Path,
     ) -> Result<Self, EnvironmentStoreError> {
-        let revision = EnvironmentRevision::from_bytes(bytes);
         let mut persisted = parse_persisted(bytes, path)?;
         let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
-        inline_layer_dockerfile_paths(&mut persisted, base_dir)?;
+        inline_layer_dockerfile_paths(&mut persisted, base_dir).await?;
         let settings = resolve_environment(&persisted)?;
+        Self::from_settings(id, &settings)
+    }
+
+    pub(crate) fn from_settings(
+        id: EnvironmentId,
+        settings: &EnvironmentSettings,
+    ) -> Result<Self, EnvironmentStoreError> {
+        reject_dockerfile_paths(settings)?;
+        let persisted = environment_settings_to_layer(settings);
+        let settings = resolve_environment(&persisted)?;
+        let bytes = canonical_bytes(&persisted).into_bytes();
+        let revision = EnvironmentRevision::from_bytes(&bytes);
         Ok(Self {
             id,
             revision,
@@ -45,24 +56,17 @@ impl Environment {
         })
     }
 
-    pub(crate) async fn from_settings(
+    pub(crate) fn from_row(
         id: EnvironmentId,
-        settings: EnvironmentSettings,
-        dockerfile_base_dir: &Path,
-    ) -> Result<(Self, Vec<u8>), EnvironmentStoreError> {
-        let settings = inline_dense_dockerfile(settings, dockerfile_base_dir).await?;
-        let persisted = environment_settings_to_layer(&settings);
-        let settings = resolve_environment(&persisted)?;
-        let bytes = canonical_bytes(&persisted).into_bytes();
-        let revision = EnvironmentRevision::from_bytes(&bytes);
-        Ok((
-            Self {
-                id,
-                revision,
-                settings,
-            },
-            bytes,
-        ))
+        revision: EnvironmentRevision,
+        layer: &EnvironmentLayer,
+    ) -> Result<Self, EnvironmentStoreError> {
+        let settings = resolve_environment(layer)?;
+        Ok(Self {
+            id,
+            revision,
+            settings,
+        })
     }
 
     /// Builds an in-memory environment from settings without touching the
@@ -137,11 +141,7 @@ fn resolve_environment(
     })
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Dockerfile inlining runs during synchronous startup load before request handling."
-)]
-fn inline_layer_dockerfile_paths(
+async fn inline_layer_dockerfile_paths(
     layer: &mut EnvironmentLayer,
     base_dir: &Path,
 ) -> Result<(), EnvironmentValidationError> {
@@ -152,7 +152,7 @@ fn inline_layer_dockerfile_paths(
         return Ok(());
     };
     let path = base_dir.join(path);
-    let content = std::fs::read_to_string(&path).map_err(|source| {
+    let content = fs::read_to_string(&path).await.map_err(|source| {
         EnvironmentValidationError::DockerfileRead {
             path: path.clone(),
             source,
@@ -162,22 +162,16 @@ fn inline_layer_dockerfile_paths(
     Ok(())
 }
 
-async fn inline_dense_dockerfile(
-    mut settings: EnvironmentSettings,
-    base_dir: &Path,
-) -> Result<EnvironmentSettings, EnvironmentValidationError> {
-    let Some(DockerfileSource::Path { path }) = settings.image.dockerfile.as_ref() else {
-        return Ok(settings);
-    };
-    let path = base_dir.join(path);
-    let content = fs::read_to_string(&path).await.map_err(|source| {
-        EnvironmentValidationError::DockerfileRead {
-            path: path.clone(),
-            source,
-        }
-    })?;
-    settings.image.dockerfile = Some(DockerfileSource::Inline(content));
-    Ok(settings)
+fn reject_dockerfile_paths(
+    settings: &EnvironmentSettings,
+) -> Result<(), EnvironmentValidationError> {
+    if matches!(
+        settings.image.dockerfile,
+        Some(DockerfileSource::Path { .. })
+    ) {
+        return Err(EnvironmentValidationError::DockerfilePathUnsupported);
+    }
+    Ok(())
 }
 
 fn environment_settings_to_layer(settings: &EnvironmentSettings) -> EnvironmentLayer {

@@ -2278,13 +2278,6 @@ fn automation_dir_for_active_config(active_config_path: &std::path::Path) -> Pat
         .join("automations")
 }
 
-fn environment_dir_for_active_config(active_config_path: &std::path::Path) -> PathBuf {
-    active_config_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("environments")
-}
-
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
@@ -2316,7 +2309,6 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             .map_err(anyhow::Error::new)
             .context("load automations")?,
     );
-    let environment_dir = environment_dir_for_active_config(&active_config_path);
     let local_provider_enabled = resolved_settings
         .server_settings
         .server
@@ -2325,7 +2317,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         .local
         .enabled;
     let environment_store = Arc::new(
-        EnvironmentStore::load(environment_dir, local_provider_enabled)
+        EnvironmentStore::load_blocking(db_pool.clone(), local_provider_enabled)
             .map_err(anyhow::Error::new)
             .context("load environments")?,
     );
