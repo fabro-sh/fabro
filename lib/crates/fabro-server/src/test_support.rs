@@ -518,9 +518,9 @@ fn test_db_pool(path: PathBuf) -> anyhow::Result<DbPool> {
             .enable_all()
             .build()?;
         runtime.block_on(async move {
-            let pool = fabro_db::connect(&path).await?;
-            fabro_db::migrate(&pool).await?;
-            Ok(pool)
+            let database = fabro_db::Database::connect(&path).await?;
+            database.migrate().await?;
+            Ok(database.clone_pool())
         })
     })
     .join()

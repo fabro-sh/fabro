@@ -681,9 +681,9 @@ where
     let shared_settings = Arc::new(RwLock::new(disk_document));
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("creating data directory {}", data_dir.display()))?;
-    let db_pool = fabro_db::connect(&sqlite_path).await?;
-    fabro_db::migrate(&db_pool).await?;
-    fabro_variable::import_legacy_json_once(&db_pool, &variables_path)
+    let database = fabro_db::Database::connect(&sqlite_path).await?;
+    database.migrate().await?;
+    fabro_variable::import_legacy_json_once(database.pool(), &variables_path)
         .await
         .with_context(|| {
             format!(
@@ -691,6 +691,7 @@ where
                 variables_path.display()
             )
         })?;
+    let db_pool = database.clone_pool();
     let max_concurrent_runs = resolved_server_settings.scheduler.max_concurrent_runs;
     // In `--watch-web` mode the build watcher will populate `dist/` shortly
     // after startup. Treat that the same as assets being present so the web

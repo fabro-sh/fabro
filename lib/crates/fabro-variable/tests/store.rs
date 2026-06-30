@@ -9,8 +9,9 @@ struct TestStore {
 
 async fn test_store() -> anyhow::Result<TestStore> {
     let dir = tempfile::tempdir()?;
-    let pool = fabro_db::connect(dir.path().join("fabro.sqlite3")).await?;
-    fabro_db::migrate(&pool).await?;
+    let database = fabro_db::Database::connect(dir.path().join("fabro.sqlite3")).await?;
+    database.migrate().await?;
+    let pool = database.clone_pool();
     let store = VariableStore::new(pool.clone());
     Ok(TestStore { dir, pool, store })
 }
