@@ -9,10 +9,10 @@ use tower::ServiceExt;
 
 use crate::helpers::{checked_response, response_json, response_status};
 
-fn mcp_server_body(id: &str, name: &str) -> Value {
+fn mcp_server_body(id: &str, display_name: &str) -> Value {
     json!({
         "id": id,
-        "name": name,
+        "display_name": display_name,
         "description": "Production MCP server.",
         "transport": {
             "type": "http",
@@ -27,9 +27,9 @@ fn mcp_server_body(id: &str, name: &str) -> Value {
     })
 }
 
-fn replacement_body(name: &str) -> Value {
+fn replacement_body(display_name: &str) -> Value {
     json!({
-        "name": name,
+        "display_name": display_name,
         "description": null,
         "transport": {
             "type": "http",
@@ -163,17 +163,34 @@ async fn create_mcp_server_returns_etag_and_persists_sibling_toml_file() {
     let body = crate::helpers::body_json(response.into_body()).await;
 
     assert_eq!(body["id"], "sentry");
-    assert_eq!(body["name"], "Sentry");
+    assert_eq!(body["display_name"], "Sentry");
     assert_eq!(etag, format!("\"{}\"", revision_from(&body)));
     assert!(mcp_dir.join("sentry.toml").exists());
 
+    // The response is the value-omitting view: header *names* are returned, but
+    // the stored header value is not.
+    assert_eq!(body["transport"]["header_keys"], json!(["X-Org"]));
+    assert!(
+        body["transport"].get("headers").is_none(),
+        "response must not echo transport header values"
+    );
+
     let persisted = persisted_mcp_server_toml(&mcp_dir, "sentry").await;
     assert_eq!(
-        persisted.get("name").and_then(toml::Value::as_str),
+        persisted.get("display_name").and_then(toml::Value::as_str),
         Some("Sentry")
     );
     assert!(persisted.get("id").is_none());
     assert!(persisted.get("revision").is_none());
+    // The value the view omits is still persisted on disk for the runtime to use.
+    assert_eq!(
+        persisted
+            .get("transport")
+            .and_then(|transport| transport.get("headers"))
+            .and_then(|headers| headers.get("X-Org"))
+            .and_then(toml::Value::as_str),
+        Some("fabro")
+    );
 }
 
 #[tokio::test]
@@ -308,7 +325,7 @@ async fn replace_mcp_server_accepts_unquoted_if_match_and_returns_new_etag() {
         .to_string();
     let body = crate::helpers::body_json(response.into_body()).await;
 
-    assert_eq!(body["name"], "Sentry v2");
+    assert_eq!(body["display_name"], "Sentry v2");
     assert_eq!(body["transport"]["protocol"], "sse");
     assert_ne!(body["revision"], revision);
     assert_eq!(etag, format!("\"{}\"", revision_from(&body)));
@@ -452,7 +469,7 @@ async fn delete_mcp_server_removes_file_and_resource() {
 async fn empty_mcp_server_name_is_unprocessable() {
     let (app, _temp_dir, _mcp_dir) = mcp_server_app();
     let mut body = mcp_server_body("sentry", "Sentry");
-    body["name"] = json!(" ");
+    body["display_name"] = json!(" ");
 
     let response = app
         .oneshot(json_request(Method::POST, "/mcp-servers", &body))

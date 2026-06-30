@@ -298,10 +298,10 @@ mod tests {
         }
     }
 
-    fn draft(id: &str, name: &str) -> McpServerDraft {
+    fn draft(id: &str, display_name: &str) -> McpServerDraft {
         McpServerDraft {
             id:                   McpServerId::new(id).unwrap(),
-            name:                 name.to_string(),
+            display_name:         display_name.to_string(),
             description:          None,
             transport:            http_transport("https://example.com/mcp"),
             startup_timeout_secs: 10,
@@ -309,9 +309,9 @@ mod tests {
         }
     }
 
-    fn replacement(name: &str) -> McpServerReplace {
+    fn replacement(display_name: &str) -> McpServerReplace {
         McpServerReplace {
-            name:                 name.to_string(),
+            display_name:         display_name.to_string(),
             description:          Some("updated".to_string()),
             transport:            http_transport("https://example.com/mcp/v2"),
             startup_timeout_secs: 15,
@@ -339,7 +339,7 @@ mod tests {
         fs::write(
             mcp_dir.join("sentry.toml"),
             r#"
-name = "Sentry"
+display_name = "Sentry"
 startup_timeout_secs = 10
 tool_timeout_secs = 60
 
@@ -358,7 +358,7 @@ url = "https://sentry.example.com/mcp"
 
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].id.as_str(), "sentry");
-        assert_eq!(defs[0].name, "Sentry");
+        assert_eq!(defs[0].display_name, "Sentry");
     }
 
     #[tokio::test]
@@ -379,7 +379,7 @@ url = "https://sentry.example.com/mcp"
         let dir = tempfile::tempdir().unwrap();
         let mcp_dir = dir.path().join("mcps");
         fs::create_dir_all(&mcp_dir).await.unwrap();
-        fs::write(mcp_dir.join("Bad Name.toml"), "name = \"Bad\"")
+        fs::write(mcp_dir.join("Bad Name.toml"), "display_name = \"Bad\"")
             .await
             .unwrap();
 
@@ -396,7 +396,7 @@ url = "https://sentry.example.com/mcp"
         let created = store.create(draft("sentry", "Sentry")).await.unwrap();
         let path = mcp_dir.join("sentry.toml");
         let persisted = fs::read_to_string(&path).await.unwrap();
-        assert!(persisted.contains("name = \"Sentry\""));
+        assert!(persisted.contains("display_name = \"Sentry\""));
         assert!(!top_level_lines(&persisted).any(|line| line.starts_with("id = ")));
         assert!(!top_level_lines(&persisted).any(|line| line.starts_with("revision = ")));
         assert_eq!(
@@ -414,7 +414,7 @@ url = "https://sentry.example.com/mcp"
             .await
             .unwrap();
         assert_ne!(replaced.revision, created.revision);
-        assert_eq!(replaced.name, "Sentry v2");
+        assert_eq!(replaced.display_name, "Sentry v2");
         assert_eq!(
             store.get(&created.id).await.unwrap().revision,
             replaced.revision

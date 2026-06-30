@@ -21,7 +21,7 @@ use crate::error::McpServerStoreError;
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PersistedMcpServer {
-    name:                 String,
+    display_name:         String,
     #[serde(default)]
     description:          Option<String>,
     transport:            McpTransport,
@@ -31,7 +31,7 @@ struct PersistedMcpServer {
 
 #[derive(Serialize)]
 struct PersistedMcpServerRef<'a> {
-    name:                 &'a str,
+    display_name:         &'a str,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     description:          Option<&'a str>,
     transport:            &'a McpTransport,
@@ -42,7 +42,7 @@ struct PersistedMcpServerRef<'a> {
 impl<'a> From<&'a McpServerReplace> for PersistedMcpServerRef<'a> {
     fn from(value: &'a McpServerReplace) -> Self {
         Self {
-            name:                 &value.name,
+            display_name:         &value.display_name,
             description:          value.description.as_deref(),
             transport:            &value.transport,
             startup_timeout_secs: value.startup_timeout_secs,
@@ -54,7 +54,7 @@ impl<'a> From<&'a McpServerReplace> for PersistedMcpServerRef<'a> {
 impl From<PersistedMcpServer> for McpServerReplace {
     fn from(value: PersistedMcpServer) -> Self {
         Self {
-            name:                 value.name,
+            display_name:         value.display_name,
             description:          value.description,
             transport:            value.transport,
             startup_timeout_secs: value.startup_timeout_secs,
@@ -102,7 +102,7 @@ fn assemble(
     McpServerDefinition {
         id,
         revision,
-        name: replace.name,
+        display_name: replace.display_name,
         description: replace.description,
         transport: replace.transport,
         startup_timeout_secs: replace.startup_timeout_secs,

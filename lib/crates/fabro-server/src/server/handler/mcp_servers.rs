@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use axum::http::HeaderMap;
 use fabro_mcp_store::McpServerStoreError;
-use fabro_types::{McpServerDefinition, McpServerDraft, McpServerId, McpServerReplace};
+use fabro_types::{
+    McpServerDefinition, McpServerDraft, McpServerId, McpServerReplace, McpServerView,
+};
 use serde::Serialize;
 
 use super::super::{
@@ -13,7 +15,7 @@ use super::{json_with_etag_response, parse_required_if_match};
 
 #[derive(Serialize)]
 struct McpServerListResponse {
-    data: Vec<McpServerDefinition>,
+    data: Vec<McpServerView>,
     meta: McpServerListMeta,
 }
 
@@ -37,8 +39,9 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn list_mcp_servers(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
-    let data = state.mcp_server_store().list().await;
-    let total = data.len();
+    let definitions = state.mcp_server_store().list().await;
+    let total = definitions.len();
+    let data: Vec<McpServerView> = definitions.into_iter().map(McpServerView::from).collect();
     (
         StatusCode::OK,
         Json(McpServerListResponse {
@@ -115,7 +118,8 @@ fn parse_path_id(id: String) -> Result<McpServerId, ApiError> {
 
 fn mcp_server_with_etag_response(status: StatusCode, definition: McpServerDefinition) -> Response {
     let revision = definition.revision.clone();
-    json_with_etag_response(status, "mcp server", &revision, definition)
+    let view = McpServerView::from(definition);
+    json_with_etag_response(status, "mcp server", &revision, view)
 }
 
 impl From<McpServerStoreError> for ApiError {
