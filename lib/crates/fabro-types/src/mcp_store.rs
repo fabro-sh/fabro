@@ -116,6 +116,20 @@ impl From<McpServerDefinition> for McpServerView {
     }
 }
 
+impl From<&McpServerDefinition> for McpServerView {
+    fn from(value: &McpServerDefinition) -> Self {
+        Self {
+            id:                   value.id.clone(),
+            revision:             value.revision.clone(),
+            display_name:         value.display_name.clone(),
+            description:          value.description.clone(),
+            transport:            (&value.transport).into(),
+            startup_timeout_secs: value.startup_timeout_secs,
+            tool_timeout_secs:    value.tool_timeout_secs,
+        }
+    }
+}
+
 /// The read-side projection of [`McpTransport`]. It mirrors the transport shape
 /// but replaces the `env`/`headers` value maps with sorted `env_keys`/
 /// `header_keys` name lists, so secret-bearing values are never returned.
@@ -172,10 +186,47 @@ impl From<McpTransport> for McpTransportView {
     }
 }
 
+impl From<&McpTransport> for McpTransportView {
+    fn from(value: &McpTransport) -> Self {
+        match value {
+            McpTransport::Stdio { command, env } => Self::Stdio {
+                command:  command.clone(),
+                env_keys: sorted_keys_ref(env),
+            },
+            McpTransport::Http {
+                protocol,
+                url,
+                headers,
+            } => Self::Http {
+                protocol:    *protocol,
+                url:         url.clone(),
+                header_keys: sorted_keys_ref(headers),
+            },
+            McpTransport::Sandbox {
+                protocol,
+                command,
+                port,
+                env,
+            } => Self::Sandbox {
+                protocol: *protocol,
+                command:  command.clone(),
+                port:     *port,
+                env_keys: sorted_keys_ref(env),
+            },
+        }
+    }
+}
+
 /// Collect a value map's keys into a sorted list, so the projection is
 /// deterministic regardless of the map's iteration order.
 fn sorted_keys(map: HashMap<String, String>) -> Vec<String> {
     let mut keys: Vec<String> = map.into_keys().collect();
+    keys.sort();
+    keys
+}
+
+fn sorted_keys_ref(map: &HashMap<String, String>) -> Vec<String> {
+    let mut keys: Vec<String> = map.keys().cloned().collect();
     keys.sort();
     keys
 }

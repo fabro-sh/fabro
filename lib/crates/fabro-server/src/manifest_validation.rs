@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -30,6 +31,7 @@ pub fn validate_manifest_with_environment_defaults(
     let prepared = run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults,
         manifest_environment_defaults,
+        &HashMap::new(),
         manifest,
     )?;
     let validated =

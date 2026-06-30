@@ -24,6 +24,7 @@ use crate::{
 pub fn resolve_run(
     layer: &RunLayer,
     environments: &MergeMap<EnvironmentLayer>,
+    mcp_server_catalog: &HashMap<String, McpServerSettings>,
     errors: &mut Vec<ResolveError>,
 ) -> RunNamespace {
     let clone = resolve_clone(layer.clone.as_ref());
@@ -73,7 +74,7 @@ pub fn resolve_run(
             .map(|(name, route)| (name.clone(), resolve_notification_route(route)))
             .collect(),
         interviews: resolve_interviews(layer.interviews.as_ref()),
-        agent: resolve_agent(layer.agent.as_ref()),
+        agent: resolve_agent(layer.agent.as_ref(), mcp_server_catalog, errors),
         hooks: layer
             .hooks
             .iter()
@@ -280,7 +281,11 @@ fn resolve_interview_provider(provider: &InterviewProviderLayer) -> InterviewPro
     }
 }
 
-fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
+fn resolve_agent(
+    agent: Option<&RunAgentLayer>,
+    mcp_server_catalog: &HashMap<String, McpServerSettings>,
+    errors: &mut Vec<ResolveError>,
+) -> RunAgentSettings {
     let Some(agent) = agent else {
         return RunAgentSettings::default();
     };
@@ -288,10 +293,41 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
     RunAgentSettings {
         fabro_tools: agent.fabro_tools.unwrap_or(false),
         permissions: agent.permissions,
-        mcps:        enabled_mcp_settings(&agent.mcps)
-            .map(|(name, settings)| (name, ResolvedMcpEntry::Resolved(settings)))
-            .collect(),
+        mcps:        resolve_mcp_entries(&agent.mcps, mcp_server_catalog, errors),
     }
+}
+
+fn resolve_mcp_entries(
+    mcps: &StickyMap<McpEntryLayer>,
+    mcp_server_catalog: &HashMap<String, McpServerSettings>,
+    errors: &mut Vec<ResolveError>,
+) -> HashMap<String, ResolvedMcpEntry> {
+    let mut resolved = HashMap::new();
+    for (name, entry) in mcps.iter() {
+        if !entry.is_enabled() {
+            continue;
+        }
+        match entry {
+            McpEntryLayer::Reference { id, .. } => match mcp_server_catalog.get(id) {
+                Some(server) => {
+                    resolved.insert(name.clone(), ResolvedMcpEntry::Resolved(server.clone()));
+                }
+                None => {
+                    errors.push(ResolveError::Invalid {
+                        path:   format!("run.agent.mcps.{name}.id"),
+                        reason: format!("unknown MCP server: {id}"),
+                    });
+                }
+            },
+            _ => {
+                resolved.insert(
+                    name.clone(),
+                    ResolvedMcpEntry::Resolved(resolve_mcp_entry(name, entry)),
+                );
+            }
+        }
+    }
+    resolved
 }
 
 /// Resolve an agent layer's inline MCP entries into runtime settings, dropping
@@ -300,16 +336,24 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
 /// any future inline-MCP site inherits it for free.
 pub(crate) fn resolve_enabled_mcps(
     mcps: &StickyMap<McpEntryLayer>,
+    path: &str,
+    errors: &mut Vec<ResolveError>,
 ) -> HashMap<String, McpServerSettings> {
-    enabled_mcp_settings(mcps).collect()
-}
-
-fn enabled_mcp_settings(
-    mcps: &StickyMap<McpEntryLayer>,
-) -> impl Iterator<Item = (String, McpServerSettings)> + '_ {
-    mcps.iter()
-        .filter(|(_, entry)| entry.is_enabled())
-        .map(|(name, entry)| (name.clone(), resolve_mcp_entry(name, entry)))
+    let mut resolved = HashMap::new();
+    for (name, entry) in mcps.iter() {
+        if !entry.is_enabled() {
+            continue;
+        }
+        if matches!(entry, McpEntryLayer::Reference { .. }) {
+            errors.push(ResolveError::Invalid {
+                path:   format!("{path}.{name}.id"),
+                reason: "MCP catalog references are only supported in run.agent.mcps".to_string(),
+            });
+            continue;
+        }
+        resolved.insert(name.clone(), resolve_mcp_entry(name, entry));
+    }
+    resolved
 }
 
 #[expect(
@@ -361,6 +405,9 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
                 .map(|(key, value)| (key.clone(), value.as_source()))
                 .collect(),
         },
+        McpEntryLayer::Reference { .. } => {
+            unreachable!("MCP catalog references are resolved before inline entry conversion")
+        }
     };
 
     let (startup_timeout_secs, tool_timeout_secs) = match entry {
@@ -382,6 +429,9 @@ pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerS
             startup_timeout.map_or(10, |timeout| timeout.as_std().as_secs()),
             tool_timeout.map_or(60, |timeout| timeout.as_std().as_secs()),
         ),
+        McpEntryLayer::Reference { .. } => {
+            unreachable!("MCP catalog references are resolved before inline entry conversion")
+        }
     };
 
     McpServerSettings {

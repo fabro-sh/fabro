@@ -7,7 +7,9 @@ use fabro_server::test_support::{TestAppStateBuilder, build_test_router, test_au
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use crate::helpers::{checked_response, response_json, response_status};
+use crate::helpers::{
+    MINIMAL_DOT, checked_response, minimal_manifest_json, response_json, response_status,
+};
 
 fn mcp_server_body(id: &str, display_name: &str) -> Value {
     json!({
@@ -530,6 +532,25 @@ async fn unknown_transport_type_is_unprocessable() {
 }
 
 #[tokio::test]
+async fn unknown_transport_field_is_unprocessable() {
+    let (app, _temp_dir, _mcp_dir) = mcp_server_app();
+    let mut body = mcp_server_body("sentry", "Sentry");
+    body["transport"]["unexpected"] = json!("typo");
+
+    let response = app
+        .oneshot(json_request(Method::POST, "/mcp-servers", &body))
+        .await
+        .expect("unknown transport field create should respond");
+
+    response_status(
+        response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "POST /api/v1/mcp-servers unknown transport field",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn invalid_mcp_server_id_is_bad_request() {
     let (app, _temp_dir, _mcp_dir) = mcp_server_app();
 
@@ -544,6 +565,31 @@ async fn invalid_mcp_server_id_is_bad_request() {
         "GET /api/v1/mcp-servers/Bad_Id",
     )
     .await;
+}
+
+#[tokio::test]
+async fn created_mcp_server_can_be_referenced_by_manifest_validation() {
+    let (app, _temp_dir, _mcp_dir) = mcp_server_app();
+    create_mcp_server(&app, "sentry", "Sentry").await;
+
+    let mut manifest = minimal_manifest_json(MINIMAL_DOT);
+    manifest["workflows"]["workflow.fabro"]["config"] = json!({
+        "path": "workflow.toml",
+        "source": r#"
+_version = 1
+
+[run.agent.mcps.sentry]
+id = "sentry"
+"#
+    });
+
+    let response = app
+        .oneshot(json_request(Method::POST, "/validate", &manifest))
+        .await
+        .expect("manifest validation should respond");
+    let body = response_json(response, StatusCode::OK, "POST /api/v1/validate").await;
+
+    assert_eq!(body["ok"], true);
 }
 
 #[tokio::test]

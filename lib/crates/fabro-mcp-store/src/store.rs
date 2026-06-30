@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fabro_types::{
     McpServerDefinition, McpServerDraft, McpServerId, McpServerReplace, McpServerRevision,
+    McpServerView,
 };
 use tokio::fs;
 use tokio::io::AsyncWriteExt as _;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 use crate::error::McpServerStoreError;
 use crate::model;
@@ -41,25 +43,53 @@ impl McpServerStore {
         })
     }
 
+    fn read_defs(
+        &self,
+    ) -> std::sync::RwLockReadGuard<'_, HashMap<McpServerId, McpServerDefinition>> {
+        self.defs.read().expect("mcp server store lock poisoned")
+    }
+
+    fn write_defs(
+        &self,
+    ) -> std::sync::RwLockWriteGuard<'_, HashMap<McpServerId, McpServerDefinition>> {
+        self.defs.write().expect("mcp server store lock poisoned")
+    }
+
     pub async fn list(&self) -> Vec<McpServerDefinition> {
-        let defs = self.defs.read().await;
+        let defs = self.read_defs();
         let mut values = defs.values().cloned().collect::<Vec<_>>();
         values.sort_by(|left, right| left.id.cmp(&right.id));
         values
+    }
+
+    pub async fn list_views(&self) -> Vec<McpServerView> {
+        let defs = self.read_defs();
+        let mut values = defs.values().map(McpServerView::from).collect::<Vec<_>>();
+        values.sort_by(|left, right| left.id.cmp(&right.id));
+        values
+    }
+
+    pub fn catalog_settings(
+        &self,
+    ) -> HashMap<String, fabro_types::settings::run::McpServerSettings> {
+        let defs = self.read_defs();
+        defs.iter()
+            .map(|(id, definition)| (id.to_string(), server_settings_from_definition(definition)))
+            .collect()
     }
 
     /// Sorted ids only, without cloning the (potentially sensitive) env/header
     /// maps carried by full definitions. Used by missing-reference errors to
     /// list available ids cheaply.
     pub async fn ids(&self) -> Vec<McpServerId> {
-        let defs = self.defs.read().await;
+        let defs = self.read_defs();
         let mut ids = defs.keys().cloned().collect::<Vec<_>>();
         ids.sort();
         ids
     }
 
     pub async fn get(&self, id: &McpServerId) -> Option<McpServerDefinition> {
-        self.defs.read().await.get(id).cloned()
+        self.read_defs().get(id).cloned()
     }
 
     pub async fn create(
@@ -68,7 +98,7 @@ impl McpServerStore {
     ) -> Result<McpServerDefinition, McpServerStoreError> {
         let (id, replace) = draft.into();
         let _mutation = self.mutations.lock().await;
-        if self.defs.read().await.contains_key(&id) {
+        if self.read_defs().contains_key(&id) {
             return Err(McpServerStoreError::AlreadyExists { id });
         }
         let (definition, bytes) = model::definition_from_replace(id.clone(), replace)?;
@@ -78,7 +108,7 @@ impl McpServerStore {
             .await
             .map_err(|err| create_error_for(id.clone(), err))?;
 
-        let mut defs = self.defs.write().await;
+        let mut defs = self.write_defs();
         defs.insert(id, definition.clone());
         Ok(definition)
     }
@@ -91,13 +121,13 @@ impl McpServerStore {
     ) -> Result<McpServerDefinition, McpServerStoreError> {
         let _mutation = self.mutations.lock().await;
         {
-            let defs = self.defs.read().await;
+            let defs = self.read_defs();
             check_revision(&defs, id, expected)?;
         }
         let (definition, bytes) = model::definition_from_replace(id.clone(), replace)?;
 
         write_atomic(&self.dir, &definition_path(&self.dir, id), &bytes).await?;
-        let mut defs = self.defs.write().await;
+        let mut defs = self.write_defs();
         defs.insert(id.clone(), definition.clone());
         Ok(definition)
     }
@@ -109,7 +139,7 @@ impl McpServerStore {
     ) -> Result<(), McpServerStoreError> {
         let _mutation = self.mutations.lock().await;
         {
-            let defs = self.defs.read().await;
+            let defs = self.read_defs();
             check_revision(&defs, id, expected)?;
         }
 
@@ -117,7 +147,7 @@ impl McpServerStore {
         fs::remove_file(&path)
             .await
             .map_err(|err| McpServerStoreError::io(path, err))?;
-        let mut defs = self.defs.write().await;
+        let mut defs = self.write_defs();
         defs.remove(id);
         Ok(())
     }
@@ -139,6 +169,19 @@ fn check_revision(
         });
     }
     Ok(())
+}
+
+fn server_settings_from_definition(
+    definition: &McpServerDefinition,
+) -> fabro_types::settings::run::McpServerSettings {
+    fabro_types::settings::run::McpServerSettings {
+        name:                 definition.id.to_string(),
+        transport:            definition.transport.clone(),
+        current_dir:          None,
+        clear_env:            false,
+        startup_timeout_secs: definition.startup_timeout_secs,
+        tool_timeout_secs:    definition.tool_timeout_secs,
+    }
 }
 
 #[expect(

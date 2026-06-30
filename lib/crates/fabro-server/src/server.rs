@@ -1343,16 +1343,21 @@ impl AppState {
             .clone()
     }
 
-    pub(crate) fn refresh_manifest_run_settings_from_environment_catalog(&self) {
+    pub(crate) fn refresh_manifest_run_settings_from_catalogs(&self) {
         let manifest_run_defaults = self.manifest_run_defaults();
         let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
             manifest_run_defaults.as_ref(),
             &self.stores.environments,
+            &self.stores.mcp_servers,
         );
         *self
             .manifest_run_settings
             .write()
             .expect("manifest run settings lock poisoned") = manifest_run_settings;
+    }
+
+    pub(crate) fn refresh_manifest_run_settings_from_environment_catalog(&self) {
+        self.refresh_manifest_run_settings_from_catalogs();
     }
 
     fn http_client(&self) -> Result<fabro_http::HttpClient, fabro_http::HttpClientBuildError> {
@@ -1589,6 +1594,7 @@ impl AppState {
         let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
             manifest_run_defaults.as_ref(),
             &self.stores.environments,
+            &self.stores.mcp_servers,
         );
         let catalog = Arc::new(
             Catalog::from_builtin_with_overrides(&llm_catalog_settings)
@@ -2182,12 +2188,14 @@ fn build_prune_plan(
 fn resolve_manifest_run_settings_with_catalog(
     manifest_run_defaults: &RunLayer,
     environment_store: &EnvironmentStore,
+    mcp_server_store: &McpServerStore,
 ) -> std::result::Result<RunNamespace, SharedError> {
     WorkflowSettingsBuilder::new()
         .server_manifest_defaults(
             manifest_run_defaults.clone(),
             (*environment_store.catalog_layer()).clone(),
         )
+        .server_mcp_catalog(mcp_server_store.catalog_settings())
         .build()
         .map(|settings| settings.run)
         .map_err(|err| SharedError::new(anyhow::Error::msg(err.to_string())))
@@ -2367,6 +2375,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     let current_manifest_run_settings = resolve_manifest_run_settings_with_catalog(
         current_manifest_run_defaults.as_ref(),
         &environment_store,
+        &mcp_server_store,
     );
     let current_catalog = Arc::new(
         Catalog::from_builtin_with_overrides(&resolved_settings.llm_catalog_settings)

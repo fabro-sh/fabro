@@ -39,9 +39,8 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn list_mcp_servers(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
-    let definitions = state.mcp_server_store().list().await;
-    let total = definitions.len();
-    let data: Vec<McpServerView> = definitions.into_iter().map(McpServerView::from).collect();
+    let data = state.mcp_server_store().list_views().await;
+    let total = data.len();
     (
         StatusCode::OK,
         Json(McpServerListResponse {
@@ -63,6 +62,7 @@ async fn create_mcp_server(
     // point the user at `{{ secrets.NAME }}` is undecided. Until then literals
     // are accepted verbatim and secret references are stored as written.
     let definition = state.mcp_server_store().create(draft).await?;
+    state.refresh_manifest_run_settings_from_catalogs();
     Ok(mcp_server_with_etag_response(
         StatusCode::CREATED,
         definition,
@@ -96,6 +96,7 @@ async fn replace_mcp_server(
         .mcp_server_store()
         .replace(&id, &expected, replacement)
         .await?;
+    state.refresh_manifest_run_settings_from_catalogs();
     Ok(mcp_server_with_etag_response(StatusCode::OK, definition))
 }
 
@@ -108,6 +109,7 @@ async fn delete_mcp_server(
     let id = parse_path_id(id)?;
     let expected = parse_required_if_match(&headers, "mcp server", &id)?;
     state.mcp_server_store().delete(&id, &expected).await?;
+    state.refresh_manifest_run_settings_from_catalogs();
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
