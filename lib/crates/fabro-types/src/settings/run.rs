@@ -107,13 +107,7 @@ impl RunNamespace {
         substitute_map(&mut self.integrations.github.permissions, &mut lookup)?;
         // run.scm.owner/repository are plain strings: values stay literal.
         for step in &mut self.prepare.steps {
-            match &mut step.run {
-                PreparedStepRun::Script { script } => substitute_string(script, &mut lookup)?,
-                PreparedStepRun::Command { command } => {
-                    substitute_string_vec(command, &mut lookup)?;
-                }
-            }
-            substitute_string_map(&mut step.env, &mut lookup)?;
+            visit_prepared_step_strings(step, &mut |value| substitute_string(value, &mut lookup))?;
         }
         // Only resolved inline servers carry substitutable templates; an
         // unresolved reference holds just an id + enabled flag.
@@ -268,6 +262,28 @@ where
             visit_string_map(headers, visitor)
         }
     }
+}
+
+/// Walk every interpolatable string in one prepare step — the runnable part
+/// (a `script` snippet or each `command` argv element) and every per-step `env`
+/// value. Both interpolation passes route through this one traversal so they
+/// cannot drift as `PreparedStepRun` or `PreparedStep` grow fields: the
+/// `{{ vars.* }}` pass ([`RunNamespace::substitute_variables`]) passes a
+/// `substitute_string` visitor, the `{{ env.* }}` pass
+/// ([`RunPrepareSettings::resolve_step_env`]) passes a `resolve_env_string`
+/// visitor. Mirrors [`visit_mcp_transport_strings`].
+fn visit_prepared_step_strings<F>(
+    step: &mut PreparedStep,
+    visitor: &mut F,
+) -> Result<(), ResolveError>
+where
+    F: FnMut(&mut String) -> Result<(), ResolveError>,
+{
+    match &mut step.run {
+        PreparedStepRun::Script { script } => visitor(script)?,
+        PreparedStepRun::Command { command } => visit_string_vec(command, visitor)?,
+    }
+    visit_string_map(&mut step.env, visitor)
 }
 
 fn visit_string_vec<F>(values: &mut [String], visitor: &mut F) -> Result<(), ResolveError>
@@ -744,19 +760,9 @@ impl RunPrepareSettings {
     ) -> Result<Self, ResolveError> {
         let mut resolved = self.clone();
         for step in &mut resolved.steps {
-            match &mut step.run {
-                PreparedStepRun::Script { script } => {
-                    resolve_env_string(script, &mut env_lookup)?;
-                }
-                PreparedStepRun::Command { command } => {
-                    for element in command.iter_mut() {
-                        resolve_env_string(element, &mut env_lookup)?;
-                    }
-                }
-            }
-            for value in step.env.values_mut() {
-                resolve_env_string(value, &mut env_lookup)?;
-            }
+            visit_prepared_step_strings(step, &mut |value| {
+                resolve_env_string(value, &mut env_lookup)
+            })?;
         }
         Ok(resolved)
     }
@@ -807,11 +813,7 @@ impl PreparedStep {
     pub fn to_shell_command(&self) -> String {
         match &self.run {
             PreparedStepRun::Script { script } => script.clone(),
-            PreparedStepRun::Command { command } => command
-                .iter()
-                .map(|element| shell::shell_quote(element))
-                .collect::<Vec<_>>()
-                .join(" "),
+            PreparedStepRun::Command { command } => shell::shell_join(command),
         }
     }
 }

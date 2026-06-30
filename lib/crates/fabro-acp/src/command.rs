@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use agent_client_protocol::schema::{McpServer, McpServerStdio};
 use agent_client_protocol_tokio::AcpAgent;
-use fabro_util::shell::shell_quote;
+use fabro_util::shell::shell_join;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpProcessSpec {
@@ -144,11 +144,7 @@ pub enum AcpCommandError {
 }
 
 fn render_command(program: &Path, args: &[String]) -> String {
-    std::iter::once(program.to_string_lossy().into_owned())
-        .chain(args.iter().cloned())
-        .map(|part| shell_quote(&part))
-        .collect::<Vec<_>>()
-        .join(" ")
+    shell_join(std::iter::once(program.to_string_lossy().into_owned()).chain(args.iter().cloned()))
 }
 
 fn parse_config_server(raw: &str) -> Result<McpServer, AcpCommandError> {
