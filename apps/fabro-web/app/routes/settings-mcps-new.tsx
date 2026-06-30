@@ -8,7 +8,6 @@ import {
   createRequestFromForm,
   defaultMcpServerFormValues,
   isMcpServerFormValid,
-  parseMcpTransportKind,
   type McpServerFormValues,
 } from "../components/mcp-server-form";
 import {
@@ -18,6 +17,8 @@ import {
 } from "../components/ui";
 import { useToast } from "../components/toast";
 import { ApiError, apiData, mcpServersApi } from "../lib/api-client";
+import { upsertMcpServerInList } from "../lib/mcp-server-cache";
+import { parseMcpTransportKind } from "../lib/mcp-transport-kinds";
 import { queryKeys } from "../lib/query-keys";
 
 export function meta() {
@@ -65,10 +66,17 @@ function CreateMcpServerForm() {
     setError(null);
     const id = values.id.trim();
     try {
-      await apiData(() => mcpServersApi.createMcpServer(createRequestFromForm(values)));
-      await mutate(queryKeys.mcpServers.list());
+      const created = await apiData(() =>
+        mcpServersApi.createMcpServer(createRequestFromForm(values)),
+      );
+      await mutate(
+        queryKeys.mcpServers.list(),
+        (current) => upsertMcpServerInList(current, created),
+        { revalidate: false },
+      );
       toast.push({ message: `MCP server “${id}” created.` });
       navigate("/settings/mcps");
+      void mutate(queryKeys.mcpServers.list());
     } catch (cause) {
       setError(
         cause instanceof ApiError && cause.message

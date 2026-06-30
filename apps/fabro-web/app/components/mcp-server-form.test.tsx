@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { McpServer } from "@qltysh/fabro-api-client";
 
 import {
+  credentialWarnings,
   createRequestFromForm,
   defaultMcpServerFormValues,
   isMcpServerFormValid,
@@ -162,6 +163,23 @@ describe("MCP server form helpers", () => {
         { isEdit: true },
       ),
     ).toBe(true);
+  });
+
+  test("reports credential warnings for the active key-value field only", () => {
+    expect(
+      credentialWarnings(values({
+        env:     [{ key: "API_KEY", value: "literal-secret" }],
+        headers: [{ key: "Authorization", value: "Bearer literal-secret" }],
+      })),
+    ).toEqual([{ field: "env", index: 0 }]);
+
+    expect(
+      credentialWarnings(values({
+        transport: "http",
+        env:       [{ key: "API_KEY", value: "literal-secret" }],
+        headers:   [{ key: "Authorization", value: "Bearer literal-secret" }],
+      })),
+    ).toEqual([{ field: "headers", index: 0 }]);
   });
 
   test("round-trips editable values while documenting omitted write-only values", () => {

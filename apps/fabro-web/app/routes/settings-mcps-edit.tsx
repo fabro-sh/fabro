@@ -19,6 +19,7 @@ import {
 } from "../components/ui";
 import { useToast } from "../components/toast";
 import { ApiError, apiData, mcpServersApi } from "../lib/api-client";
+import { upsertMcpServerInList } from "../lib/mcp-server-cache";
 import { queryKeys } from "../lib/query-keys";
 import { useMcpServer } from "../lib/queries";
 
@@ -78,17 +79,25 @@ function EditMcpServerForm({ server }: { server: McpServer }) {
     setSubmitting(true);
     setError(null);
     try {
-      await apiData(() =>
+      const updated = await apiData(() =>
         mcpServersApi.replaceMcpServer(
           server.id,
           server.revision,
           replaceRequestFromForm(values),
         ),
       );
-      await mutate(queryKeys.mcpServers.list());
-      await mutate(queryKeys.mcpServers.detail(server.id));
+      await Promise.all([
+        mutate(
+          queryKeys.mcpServers.list(),
+          (current) => upsertMcpServerInList(current, updated),
+          { revalidate: false },
+        ),
+        mutate(queryKeys.mcpServers.detail(server.id), updated, { revalidate: false }),
+      ]);
       toast.push({ message: `MCP server “${server.id}” updated.` });
       navigate("/settings/mcps");
+      void mutate(queryKeys.mcpServers.list());
+      void mutate(queryKeys.mcpServers.detail(server.id));
     } catch (cause) {
       setError(staleAwareMessage(cause));
       setSubmitting(false);

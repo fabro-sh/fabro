@@ -3,7 +3,6 @@ import {
   type CreateMcpServerRequest,
   type McpServer,
   type McpTransport,
-  type McpTransportView,
   type ReplaceMcpServerRequest,
 } from "@qltysh/fabro-api-client";
 
@@ -12,11 +11,14 @@ import {
   secretNameForKey,
   secretReference,
 } from "../lib/credential-heuristics";
+import {
+  MCP_TRANSPORT_KINDS,
+  parseMcpTransportKind,
+  type McpTransportKind,
+} from "../lib/mcp-transport-kinds";
 import { KeyValueEditor, mapFromEntries, type KeyValueEntry } from "./key-value-editor";
 import { Badge, Label, Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
-
-export type McpTransportKind = McpTransportView["type"];
 
 export interface McpServerFormValues {
   id: string;
@@ -43,16 +45,6 @@ const MCP_SERVER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const STARTUP_TIMEOUT_SECS = 10;
 const TOOL_TIMEOUT_SECS = 60;
 const DEFAULT_SANDBOX_PORT = 3000;
-
-export const MCP_TRANSPORT_KINDS: readonly McpTransportKind[] = [
-  "stdio",
-  "http",
-  "sandbox",
-];
-
-export function parseMcpTransportKind(value: string | null): McpTransportKind {
-  return value === "http" || value === "sandbox" ? value : "stdio";
-}
 
 export function defaultMcpServerFormValues(kind: McpTransportKind): McpServerFormValues {
   return {
@@ -193,6 +185,15 @@ export function isMcpServerFormValid(
 
   if (isEdit && !writeOnlyRowsHaveValues(values)) return false;
   return true;
+}
+
+export function credentialWarnings(
+  values: McpServerFormValues,
+): { field: "env" | "headers"; index: number }[] {
+  const field = values.transport === "http" ? "headers" : "env";
+  return activeValueEntries(values).flatMap((entry, index) =>
+    looksLikeCredential(entry.key, entry.value) ? [{ field, index }] : [],
+  );
 }
 
 function writeOnlyRowsHaveValues(values: McpServerFormValues): boolean {
@@ -561,5 +562,3 @@ function openSecretCreateTab(secretName: string) {
     "noopener,noreferrer",
   );
 }
-
-

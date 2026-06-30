@@ -6,7 +6,6 @@ import { ChevronDownIcon, PlusIcon } from "@heroicons/react/16/solid";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import type { McpServer } from "@qltysh/fabro-api-client";
 
-import { MCP_TRANSPORT_KINDS, type McpTransportKind } from "../components/mcp-server-form";
 import {
   Badge,
   Muted,
@@ -17,6 +16,8 @@ import {
 import { ConfirmDialog } from "../components/ui";
 import { useToast } from "../components/toast";
 import { ApiError, apiData, mcpServersApi } from "../lib/api-client";
+import { removeMcpServerFromList } from "../lib/mcp-server-cache";
+import { MCP_TRANSPORT_KINDS, type McpTransportKind } from "../lib/mcp-transport-kinds";
 import { queryKeys } from "../lib/query-keys";
 import { useMcpServers } from "../lib/queries";
 
@@ -97,9 +98,14 @@ function McpServersPanel({ servers }: { servers: McpServer[] }) {
     setDeleting(true);
     try {
       await apiData(() => mcpServersApi.deleteMcpServer(target.id, target.revision));
-      await mutate(queryKeys.mcpServers.list());
+      await mutate(
+        queryKeys.mcpServers.list(),
+        (current) => removeMcpServerFromList(current, target.id),
+        { revalidate: false },
+      );
       toast.push({ message: `MCP server “${target.id}” deleted.` });
       setPendingDelete(null);
+      void mutate(queryKeys.mcpServers.list());
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         await mutate(queryKeys.mcpServers.list());
