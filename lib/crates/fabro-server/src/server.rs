@@ -53,6 +53,7 @@ use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 use fabro_automation::AutomationStore;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{RunLayer, Storage, WorkflowSettingsBuilder};
+use fabro_db::DbPool;
 use fabro_environment::EnvironmentStore;
 use fabro_interview::{
     Answer, AnswerSubmission, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
@@ -744,7 +745,7 @@ impl SlackService {
             return;
         };
         let event_name = event.body.event_name();
-        let projection = match state.store.get_cached_run(&event.run_id).await {
+        let projection = match state.stores.runs.get_cached_run(&event.run_id).await {
             Ok(Some(cached)) => cached.projection,
             Ok(None) => {
                 warn!(
@@ -939,7 +940,7 @@ async fn load_prior_slack_lifecycle_event_details(
     run_id: RunId,
     before_seq: u32,
 ) -> PriorSlackLifecycleEventDetails {
-    let run_store = match state.store.open_run_reader(&run_id).await {
+    let run_store = match state.stores.runs.open_run_reader(&run_id).await {
         Ok(run_store) => run_store,
         Err(err) => {
             warn!(
@@ -1061,12 +1062,10 @@ fn resolve_slack_lifecycle_route_channel(
 pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
     aggregate_billing: Mutex<BillingAccumulator>,
-    store: Arc<Database>,
+    pub(crate) stores: AppStores,
     session_runtimes: SessionRuntimeManager,
     artifact_store: ArtifactStore,
-    automation_store: Arc<AutomationStore>,
     automation_repo_cache: Arc<GitRepoCache>,
-    environment_store: Arc<EnvironmentStore>,
     #[cfg(any(test, feature = "test-support"))]
     automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
     worker_tokens: WorkerTokenKeys,
@@ -1085,8 +1084,6 @@ pub struct AppState {
     pull_request_create_locks: PullRequestCreateLocks,
     parent_link_lock: AsyncMutex<()>,
 
-    pub(crate) vault: Arc<AsyncRwLock<Vault>>,
-    pub(crate) variables: Arc<AsyncRwLock<VariableStore>>,
     pub(super) server_secrets: ServerSecrets,
     pub(crate) llm_source: Arc<dyn CredentialSource>,
     manifest_run_defaults: RwLock<Arc<RunLayer>>,
@@ -1106,15 +1103,23 @@ pub struct AppState {
     slack_started: AtomicBool,
 }
 
+pub(crate) struct AppStores {
+    pub(crate) runs:         Arc<Database>,
+    pub(crate) automations:  Arc<AutomationStore>,
+    pub(crate) environments: Arc<EnvironmentStore>,
+    pub(crate) vault:        Arc<AsyncRwLock<Vault>>,
+    pub(crate) variables:    Arc<VariableStore>,
+}
+
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
 
 impl AppState {
     pub(crate) fn automation_store(&self) -> &AutomationStore {
-        &self.automation_store
+        &self.stores.automations
     }
 
     pub(crate) fn environment_store(&self) -> &EnvironmentStore {
-        &self.environment_store
+        &self.stores.environments
     }
 
     pub(crate) async fn materialize_automation_run(
@@ -1135,7 +1140,7 @@ impl AppState {
             credentials,
             self.github_api_base_url.clone(),
             self.http_client.clone(),
-            (*self.environment_store.catalog_layer()).clone(),
+            (*self.stores.environments.catalog_layer()).clone(),
             Arc::clone(&self.automation_repo_cache),
         )
         .materialize(input)
@@ -1238,7 +1243,7 @@ pub(crate) struct AppStateConfig {
     pub(crate) store: Arc<Database>,
     pub(crate) artifact_store: ArtifactStore,
     pub(crate) vault_path: PathBuf,
-    pub(crate) variables_path: PathBuf,
+    pub(crate) db_pool: DbPool,
     pub(crate) preloaded_vault: Option<Vault>,
     pub(crate) server_secrets: ServerSecrets,
     pub(crate) env_lookup: EnvLookup,
@@ -1336,7 +1341,7 @@ impl AppState {
         let manifest_run_defaults = self.manifest_run_defaults();
         let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
             manifest_run_defaults.as_ref(),
-            &self.environment_store,
+            &self.stores.environments,
         );
         *self
             .manifest_run_settings
@@ -1423,7 +1428,8 @@ impl AppState {
     }
 
     pub(crate) fn vault_secret(&self, name: &str) -> Option<String> {
-        self.vault
+        self.stores
+            .vault
             .try_read()
             .ok()
             .and_then(|vault| vault.get(name).map(str::to_string))
@@ -1451,7 +1457,7 @@ impl AppState {
     /// Borrow the persistent store so sibling modules can open run readers
     /// without cross-module state coupling on the `AppState` field layout.
     pub(crate) fn store_ref(&self) -> &Arc<Database> {
-        &self.store
+        &self.stores.runs
     }
 
     pub(crate) fn session_runtimes(&self) -> &SessionRuntimeManager {
@@ -1576,7 +1582,7 @@ impl AppState {
             effective_web_url(&server_settings.server, |name| (self.env_lookup)(name));
         let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
             manifest_run_defaults.as_ref(),
-            &self.environment_store,
+            &self.stores.environments,
         );
         let catalog = Arc::new(
             Catalog::from_builtin_with_overrides(&llm_catalog_settings)
@@ -2287,7 +2293,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         store,
         artifact_store,
         vault_path,
-        variables_path,
+        db_pool,
         preloaded_vault,
         server_secrets,
         env_lookup,
@@ -2323,8 +2329,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             .map_err(anyhow::Error::new)
             .context("load environments")?,
     );
-    let variables = VariableStore::load(variables_path).context("load variables")?;
-    let variables = Arc::new(AsyncRwLock::new(variables));
+    let variables = Arc::new(VariableStore::new(db_pool));
     let vault = match preloaded_vault {
         Some(vault) => vault,
         None => load_startup_vault(&vault_path)?,
@@ -2430,12 +2435,16 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     Ok(Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_billing: Mutex::new(BillingAccumulator::default()),
-        store,
+        stores: AppStores {
+            runs: store,
+            automations: automation_store,
+            environments: environment_store,
+            vault,
+            variables,
+        },
         session_runtimes: SessionRuntimeManager::new(),
         artifact_store,
-        automation_store,
         automation_repo_cache,
-        environment_store,
         #[cfg(any(test, feature = "test-support"))]
         automation_materializer_override,
         worker_tokens,
@@ -2450,8 +2459,6 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         files_in_flight: new_files_in_flight(),
         pull_request_create_locks: Arc::new(Mutex::new(HashMap::new())),
         parent_link_lock: AsyncMutex::new(()),
-        vault,
-        variables,
         server_secrets,
         llm_source,
         manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
@@ -2554,7 +2561,8 @@ async fn delete_run_internal(
     }
 
     state
-        .store
+        .stores
+        .runs
         .delete_run(&id)
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
@@ -2572,7 +2580,7 @@ async fn delete_run_internal(
 }
 
 async fn load_durable_run_status(state: &AppState, id: &RunId) -> Option<RunStatus> {
-    let run_store = state.store.open_run(id).await.ok()?;
+    let run_store = state.stores.runs.open_run(id).await.ok()?;
     let projection = run_store.state().await.ok()?;
     Some(projection.status)
 }
@@ -2582,7 +2590,7 @@ async fn delete_run_sandbox_resource(
     id: RunId,
     force: bool,
 ) -> Result<SandboxDeleteOutcome, ApiError> {
-    let Ok(run_store) = state.store.open_run(&id).await else {
+    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
         return Ok(SandboxDeleteOutcome::Absent);
     };
     let projection = match run_store.state().await {
@@ -2690,7 +2698,7 @@ async fn reject_active_delete_without_force(
         return Ok(());
     }
 
-    match state.store.runs().find(run_id).await {
+    match state.stores.runs.runs().find(run_id).await {
         Ok(Some(summary)) if summary.lifecycle.status.requires_force_to_delete() => {
             Err(ApiError::new(
                 StatusCode::CONFLICT,
@@ -2957,7 +2965,8 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
     state: &Arc<AppState>,
 ) -> anyhow::Result<usize> {
     let summaries = state
-        .store
+        .stores
+        .runs
         .list_runs(&fabro_store::ListRunsQuery::default(), chrono::Utc::now())
         .await?;
     let mut reconciled = 0usize;
@@ -2967,7 +2976,7 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
             continue;
         }
 
-        let run_store = state.store.open_run(&summary.id).await?;
+        let run_store = state.stores.runs.open_run(&summary.id).await?;
         let (error, reason) = failure_for_incomplete_run(
             summary.lifecycle.pending_control,
             "Fabro server restarted before the run reached a terminal state.".to_string(),
@@ -3013,7 +3022,7 @@ async fn persist_shutdown_run_failures(
         .collect::<HashSet<_>>();
 
     for run_id in run_ids {
-        let run_store = state.store.open_run(&run_id).await?;
+        let run_store = state.stores.runs.open_run(&run_id).await?;
         let run_state = run_store.state().await?;
         if run_state.status.is_terminal() {
             continue;
@@ -3109,7 +3118,7 @@ async fn alive_refs(state: &AppState, refs: &[WorkerRef]) -> Vec<WorkerRef> {
 }
 
 async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
-    let run_store = state.store.open_run(&run_id).await?;
+    let run_store = state.stores.runs.open_run(&run_id).await?;
     let run_state = run_store.state().await?;
     if run_state.status.is_terminal() {
         return Ok(());
@@ -3167,7 +3176,7 @@ async fn fail_run_before_execution(
     reason: FailureReason,
     message: String,
 ) {
-    match state.store.open_run(&run_id).await {
+    match state.stores.runs.open_run(&run_id).await {
         Ok(run_store) => {
             let failure_event = workflow_event::Event::workflow_run_failed_from_error(
                 &WorkflowError::engine(message.clone()),
@@ -3252,7 +3261,8 @@ async fn load_pending_control(
     run_id: RunId,
 ) -> anyhow::Result<Option<RunControlAction>> {
     Ok(state
-        .store
+        .stores
+        .runs
         .runs()
         .find(&run_id)
         .await?
@@ -3261,7 +3271,8 @@ async fn load_pending_control(
 
 async fn durable_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<Option<RunStatus>> {
     Ok(state
-        .store
+        .stores
+        .runs
         .runs()
         .find(&run_id)
         .await?
@@ -3614,7 +3625,7 @@ async fn load_pending_interview(
     run_id: RunId,
     qid: &str,
 ) -> Result<LoadedPendingInterview, Response> {
-    let cached = match state.store.get_cached_run(&run_id).await {
+    let cached = match state.stores.runs.get_cached_run(&run_id).await {
         Ok(Some(cached)) => cached,
         Ok(None) => return Err(ApiError::not_found("Run not found.").into_response()),
         Err(err) => {
@@ -3867,7 +3878,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         return;
     }
 
-    let run_store = match state.store.open_run(&run_id).await {
+    let run_store = match state.stores.runs.open_run(&run_id).await {
         Ok(run_store) => run_store,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to open run store");
@@ -3983,7 +3994,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         run_control: None,
         github_app,
         github_permissions,
-        vault: Some(Arc::clone(&state.vault)),
+        vault: Some(Arc::clone(&state.stores.vault)),
         catalog: state.catalog(),
         on_node: None,
         registry_override,
@@ -4107,7 +4118,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         (run_dir, managed_run.execution_mode)
     };
 
-    let run_store = match state.store.open_run(&run_id).await {
+    let run_store = match state.stores.runs.open_run(&run_id).await {
         Ok(run_store) => run_store,
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed to open run store");
@@ -4348,7 +4359,7 @@ async fn append_control_request(
     action: RunControlAction,
     actor: Option<Principal>,
 ) -> anyhow::Result<()> {
-    let run_store = state.store.open_run(&run_id).await?;
+    let run_store = state.stores.runs.open_run(&run_id).await?;
     let event = match action {
         RunControlAction::Cancel => workflow_event::Event::RunCancelRequested { actor },
         RunControlAction::Pause => workflow_event::Event::RunPauseRequested { actor },
@@ -4361,7 +4372,7 @@ async fn append_control_request(
 /// run is currently archived. Returns `None` otherwise (including when the run
 /// doesn't exist — the caller's own not-found handling will surface that).
 async fn reject_if_archived(state: &AppState, run_id: &RunId) -> Option<Response> {
-    let run_store = state.store.open_run_reader(run_id).await.ok()?;
+    let run_store = state.stores.runs.open_run_reader(run_id).await.ok()?;
     let projection = run_store.state().await.ok()?;
     projection.archived_at.is_some().then(|| {
         ApiError::new(

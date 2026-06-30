@@ -240,7 +240,7 @@ async fn load_run_dot_source(state: &AppState, id: &RunId) -> Result<String, Res
     let dot_source = if let Some(dot) = live_dot_source.filter(|d| !d.is_empty()) {
         Some(dot)
     } else {
-        match state.store.open_run_reader(id).await {
+        match state.stores.runs.open_run_reader(id).await {
             Ok(run_store) => match run_store.state().await {
                 Ok(run_state) => run_state.spec.graph_source,
                 Err(err) => {

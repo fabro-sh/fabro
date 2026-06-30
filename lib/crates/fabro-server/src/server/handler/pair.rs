@@ -689,7 +689,7 @@ async fn open_pair_run_reader(
     state: &AppState,
     id: &RunId,
 ) -> Result<fabro_store::RunDatabase, Response> {
-    match state.store.open_run_reader(id).await {
+    match state.stores.runs.open_run_reader(id).await {
         Ok(run_store) => Ok(run_store),
         Err(_) => match durable_run_status(state, *id).await {
             Ok(Some(_)) => Err(worker_unavailable(
@@ -704,7 +704,7 @@ async fn open_pair_run_reader(
 }
 
 async fn list_all_events(state: &AppState, id: &RunId) -> Result<Vec<EventEnvelope>, Response> {
-    match state.store.open_run_reader(id).await {
+    match state.stores.runs.open_run_reader(id).await {
         Ok(run_store) => run_store.list_events().await.map_err(|err| {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }),
@@ -725,7 +725,7 @@ async fn transcript_page(
     since_seq: u32,
     limit: usize,
 ) -> Result<TranscriptPage, Response> {
-    match state.store.open_run_reader(id).await {
+    match state.stores.runs.open_run_reader(id).await {
         Ok(run_store) => {
             let mut next_seq = since_seq.max(window.start_seq);
             let mut highest_scanned_seq = since_seq.saturating_sub(1);

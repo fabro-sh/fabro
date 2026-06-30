@@ -922,7 +922,7 @@ async fn load_run_sandbox_instance(
     state: &Arc<AppState>,
     run_id: &RunId,
 ) -> Result<fabro_types::RunSandboxInstance, Response> {
-    match state.store.open_run_reader(run_id).await {
+    match state.stores.runs.open_run_reader(run_id).await {
         Ok(run_store) => match run_store.state().await {
             Ok(run_state) => run_state
                 .sandbox

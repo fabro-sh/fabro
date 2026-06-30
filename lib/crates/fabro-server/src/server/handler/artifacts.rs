@@ -68,7 +68,7 @@ async fn get_checkpoint(
         Ok(id) => id,
         Err(response) => return response,
     };
-    match state.store.get_cached_run(&id).await {
+    match state.stores.runs.get_cached_run(&id).await {
         Ok(Some(cached)) => match cached.projection.current_checkpoint() {
             Some(cp) => (StatusCode::OK, Json(cp.clone())).into_response(),
             None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
@@ -88,7 +88,7 @@ async fn write_run_blob(
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
-    match state.store.open_run(&id).await {
+    match state.stores.runs.open_run(&id).await {
         Ok(run_store) => match run_store.write_blob(&body).await {
             Ok(blob_id) => Json(WriteBlobResponse {
                 id: blob_id.to_string(),
@@ -106,7 +106,7 @@ async fn read_run_blob(
     RequireRunBlob(id, blob_id): RequireRunBlob,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.store.open_run_reader(&id).await {
+    match state.stores.runs.open_run_reader(&id).await {
         Ok(run_store) => match run_store.read_blob(&blob_id).await {
             Ok(Some(bytes)) => octet_stream_response(bytes),
             Ok(None) => ApiError::not_found("Blob not found.").into_response(),
@@ -120,7 +120,8 @@ async fn read_run_blob(
 
 async fn load_run_spec(state: &AppState, run_id: &RunId) -> Result<fabro_types::RunSpec, Response> {
     let run_store = state
-        .store
+        .stores
+        .runs
         .open_run_reader(run_id)
         .await
         .map_err(|_| ApiError::not_found("Run not found.").into_response())?;

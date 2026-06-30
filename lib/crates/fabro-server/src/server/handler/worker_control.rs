@@ -35,7 +35,7 @@ async fn worker_control_stream(
     Query(query): Query<WorkerControlStreamQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let cached = match state.store.get_cached_run(&id).await {
+    let cached = match state.stores.runs.get_cached_run(&id).await {
         Ok(Some(cached)) => cached,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {

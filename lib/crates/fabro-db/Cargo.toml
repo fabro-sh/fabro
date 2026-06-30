@@ -1,0 +1,22 @@
+[package]
+name = "fabro-db"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "SQLite storage foundation for Fabro"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["macros"] }

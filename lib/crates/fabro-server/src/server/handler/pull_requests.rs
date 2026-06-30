@@ -129,7 +129,8 @@ async fn load_pull_request_record(
     id: &RunId,
 ) -> Result<PullRequestLink, ApiError> {
     let run_store = state
-        .store
+        .stores
+        .runs
         .open_run_reader(id)
         .await
         .map_err(|_| ApiError::not_found("Run not found."))?;
@@ -290,7 +291,7 @@ async fn create_run_pull_request(
     Json(body): Json<CreateRunPullRequestRequest>,
 ) -> Response {
     let _create_guard = lock_pull_request_create(&state.pull_request_create_locks, &id).await;
-    let Ok(run_store) = state.store.open_run(&id).await else {
+    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
     let run_state = match run_store.state().await {
@@ -373,7 +374,7 @@ async fn link_run_pull_request(
         Ok(record) => record,
         Err(err) => return err.into_response(),
     };
-    let Ok(run_store) = state.store.open_run(&id).await else {
+    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
     let event = workflow_event::Event::PullRequestLinked {
@@ -391,7 +392,7 @@ async fn unlink_run_pull_request(
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let _create_guard = lock_pull_request_create(&state.pull_request_create_locks, &id).await;
-    let Ok(run_store) = state.store.open_run(&id).await else {
+    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
     let run_state = match run_store.state().await {

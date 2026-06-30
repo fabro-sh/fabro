@@ -419,7 +419,8 @@ mod tests {
 
     async fn cached_runs(state: &AppState) -> Vec<fabro_types::Run> {
         state
-            .store
+            .stores
+            .runs
             .list_cached_runs(&ListRunsQuery::default(), Utc::now())
             .await
             .expect("cached runs should list")

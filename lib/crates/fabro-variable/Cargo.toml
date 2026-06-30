@@ -14,10 +14,16 @@ workspace = true
 
 [dependencies]
 chrono.workspace = true
+fabro-db = { path = "../fabro-db" }
 fabro-types = { path = "../fabro-types" }
 serde.workspace = true
 serde_json.workspace = true
-ulid.workspace = true
+sqlx.workspace = true
+strum.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 tempfile = "3"

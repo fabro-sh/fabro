@@ -180,7 +180,7 @@ async fn append_run_event(
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
 
-    match state.store.open_run(&id).await {
+    match state.stores.runs.open_run(&id).await {
         Ok(run_store) => match run_store.append_event(&payload).await {
             Ok(seq) => {
                 update_live_run_from_event(&state, id, &event);
@@ -204,7 +204,7 @@ async fn list_run_events(
 ) -> Response {
     let since_seq = params.since_seq();
     let limit = params.limit();
-    match state.store.open_run_reader(&id).await {
+    match state.stores.runs.open_run_reader(&id).await {
         Ok(run_store) => match run_store
             .list_events_from_with_limit(since_seq, limit)
             .await
@@ -240,7 +240,7 @@ async fn list_run_stage_events(
     };
     let since_seq = params.since_seq();
     let limit = params.limit();
-    match state.store.open_run_reader(&id).await {
+    match state.stores.runs.open_run_reader(&id).await {
         Ok(run_store) => match run_store
             .list_events_for_stage_from_with_limit(&stage_id, since_seq, limit)
             .await
@@ -272,7 +272,7 @@ async fn get_run_event_detail(
     Query(params): Query<EventDetailParams>,
 ) -> Response {
     let max_content_length = params.max_content_length();
-    match state.store.open_run_reader(&id).await {
+    match state.stores.runs.open_run_reader(&id).await {
         Ok(run_store) => match run_store.get_event(seq).await {
             Ok(event) => {
                 let Some(envelope) = event else {
@@ -384,7 +384,7 @@ async fn attach_run_events(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let Ok(run_store) = state.store.open_run_reader(&id).await else {
+    let Ok(run_store) = state.stores.runs.open_run_reader(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
     let start_seq = match params.since_seq {

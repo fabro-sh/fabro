@@ -18,7 +18,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn list_secrets(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
-    let data = state.vault.read().await.list();
+    let data = state.stores.vault.read().await.list();
     (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response()
 }
 
@@ -61,7 +61,7 @@ async fn create_secret(
     }
     let state_for_write = Arc::clone(&state);
     let result = spawn_blocking(move || {
-        let mut vault = state_for_write.vault.blocking_write();
+        let mut vault = state_for_write.stores.vault.blocking_write();
         vault.set(&name, &value, secret_type, description.as_deref())
     })
     .await;
@@ -98,7 +98,7 @@ async fn delete_secret_by_name(
     let name = body.name;
     let state_for_write = Arc::clone(&state);
     let result = spawn_blocking(move || {
-        let mut vault = state_for_write.vault.blocking_write();
+        let mut vault = state_for_write.stores.vault.blocking_write();
         vault.remove(&name)
     })
     .await;

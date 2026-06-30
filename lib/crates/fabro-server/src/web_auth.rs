@@ -1657,6 +1657,7 @@ client_id = "github-client-id"
             Some("web-auth-test-key-material-0123456789"),
         );
         state
+            .stores
             .vault
             .write()
             .await

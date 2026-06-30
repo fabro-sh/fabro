@@ -45,6 +45,7 @@ fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-api = { path = "../fabro-api" }
 fabro-client = { path = "../fabro-client" }
+fabro-db = { path = "../fabro-db" }
 fabro-store = { path = "../fabro-store" }
 fabro-vault = { path = "../fabro-vault" }
 fabro-variable = { path = "../fabro-variable" }

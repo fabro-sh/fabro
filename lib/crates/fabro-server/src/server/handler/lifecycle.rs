@@ -40,7 +40,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn run_response(state: &AppState, id: RunId, status: StatusCode) -> Response {
-    match state.store.get_cached_summary(&id, Utc::now()).await {
+    match state.stores.runs.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(summary)) => {
             (status, Json(state.decorate_run_summary(summary).await)).into_response()
         }
@@ -102,7 +102,7 @@ pub(in crate::server) async fn queue_run_start(
         }
     }
 
-    let Ok(run_store) = state.store.open_run(&id).await else {
+    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
         return Err(ApiError::not_found("Run not found."));
     };
     let run_state = match run_store.state().await {
@@ -213,7 +213,7 @@ async fn approve_run(
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
-    let Ok(run_store) = state.store.open_run(&id).await else {
+    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
     let run_state = match run_store.state().await {
@@ -295,7 +295,7 @@ async fn deny_run(
     let message = reason
         .clone()
         .unwrap_or_else(|| "Not approved for execution".to_string());
-    let Ok(run_store) = state.store.open_run(&id).await else {
+    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
     let run_state = match run_store.state().await {
@@ -371,7 +371,7 @@ async fn cancel_run(
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
-    let durable_summary = match state.store.runs().find(&id).await {
+    let durable_summary = match state.stores.runs.runs().find(&id).await {
         Ok(summary) => summary,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
@@ -802,7 +802,7 @@ async fn rewind_run(
     };
     let input = operations::RewindInput { run_id: id, target };
     match Box::pin(operations::rewind(
-        &state.store,
+        &state.stores.runs,
         &input,
         Some(Principal::User(subject.0.clone())),
     ))
@@ -865,7 +865,7 @@ async fn fork_run(
         source_run_id: id,
         target,
     };
-    match Box::pin(operations::fork_run(&state.store, &input)).await {
+    match Box::pin(operations::fork_run(&state.stores.runs, &input)).await {
         Ok(outcome) => (
             StatusCode::OK,
             Json(ForkResponse {
@@ -897,7 +897,7 @@ async fn retry_run(
         provenance: run_provenance(&headers, &actor),
         web_url: state.run_web_url(&new_run_id),
     };
-    match Box::pin(operations::retry_run(&state.store, &input)).await {
+    match Box::pin(operations::retry_run(&state.stores.runs, &input)).await {
         Ok(outcome) => {
             let new_run_id = outcome.new_run_id;
             if let Err(err) = queue_run_start(state.as_ref(), new_run_id, false, actor).await {
@@ -918,7 +918,7 @@ async fn run_timeline(
         Ok(id) => id,
         Err(response) => return response,
     };
-    match operations::timeline(&state.store, &id).await {
+    match operations::timeline(&state.stores.runs, &id).await {
         Ok(entries) => Json(
             entries
                 .into_iter()
@@ -1105,7 +1105,7 @@ async fn batch_run_archive_item(
         }
     };
 
-    match state.store.get_cached_summary(&id, Utc::now()).await {
+    match state.stores.runs.get_cached_summary(&id, Utc::now()).await {
         Ok(Some(summary)) => BatchRunLifecycleResult {
             run_id: id.to_string(),
             ok: true,
@@ -1150,30 +1150,26 @@ async fn run_archive_operation(
     action: ArchiveAction,
 ) -> Result<BatchRunLifecycleResultOutcome, WorkflowError> {
     match action {
-        ArchiveAction::Archive => {
-            operations::archive(&state.store, id, actor)
-                .await
-                .map(|outcome| match outcome {
-                    operations::ArchiveOutcome::Archived { .. } => {
-                        BatchRunLifecycleResultOutcome::Archived
-                    }
-                    operations::ArchiveOutcome::AlreadyArchived => {
-                        BatchRunLifecycleResultOutcome::AlreadyArchived
-                    }
-                })
-        }
-        ArchiveAction::Unarchive => {
-            operations::unarchive(&state.store, id, actor)
-                .await
-                .map(|outcome| match outcome {
-                    operations::UnarchiveOutcome::Unarchived { .. } => {
-                        BatchRunLifecycleResultOutcome::Unarchived
-                    }
-                    operations::UnarchiveOutcome::NotArchived { .. } => {
-                        BatchRunLifecycleResultOutcome::NotArchived
-                    }
-                })
-        }
+        ArchiveAction::Archive => operations::archive(&state.stores.runs, id, actor)
+            .await
+            .map(|outcome| match outcome {
+                operations::ArchiveOutcome::Archived { .. } => {
+                    BatchRunLifecycleResultOutcome::Archived
+                }
+                operations::ArchiveOutcome::AlreadyArchived => {
+                    BatchRunLifecycleResultOutcome::AlreadyArchived
+                }
+            }),
+        ArchiveAction::Unarchive => operations::unarchive(&state.stores.runs, id, actor)
+            .await
+            .map(|outcome| match outcome {
+                operations::UnarchiveOutcome::Unarchived { .. } => {
+                    BatchRunLifecycleResultOutcome::Unarchived
+                }
+                operations::UnarchiveOutcome::NotArchived { .. } => {
+                    BatchRunLifecycleResultOutcome::NotArchived
+                }
+            }),
     }
 }
 
@@ -1209,7 +1205,7 @@ async fn synchronous_transition(
     id: RunId,
     append_events: impl FnOnce(&mut Vec<workflow_event::Event>),
 ) -> Option<Response> {
-    let run_store = match state.store.open_run(&id).await {
+    let run_store = match state.stores.runs.open_run(&id).await {
         Ok(run_store) => run_store,
         Err(err) => {
             return Some(

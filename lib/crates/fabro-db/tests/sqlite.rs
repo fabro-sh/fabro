@@ -1,0 +1,56 @@
+use sqlx::Row as _;
+
+#[tokio::test]
+async fn connect_creates_parent_directory_and_migrate_is_idempotent() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let db_path = dir.path().join("nested").join("fabro.sqlite3");
+
+    let pool = fabro_db::connect(&db_path).await?;
+    fabro_db::migrate(&pool).await?;
+    fabro_db::migrate(&pool).await?;
+    fabro_db::health_check(&pool).await?;
+
+    assert!(db_path.exists());
+    let table_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('variables', 'legacy_imports')",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(table_count, 2);
+
+    let foreign_keys: i64 = sqlx::query("PRAGMA foreign_keys")
+        .fetch_one(&pool)
+        .await?
+        .get(0);
+    assert_eq!(foreign_keys, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn variables_schema_enforces_env_style_names() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let pool = fabro_db::connect(dir.path().join("fabro.sqlite3")).await?;
+    fabro_db::migrate(&pool).await?;
+
+    sqlx::query("INSERT INTO variables (name, value, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        .bind("OK_123")
+        .bind("")
+        .bind("2026-06-30T00:00:00Z")
+        .bind("2026-06-30T00:00:00Z")
+        .execute(&pool)
+        .await?;
+
+    let invalid = sqlx::query(
+        "INSERT INTO variables (name, value, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind("1BAD")
+    .bind("value")
+    .bind("2026-06-30T00:00:00Z")
+    .bind("2026-06-30T00:00:00Z")
+    .execute(&pool)
+    .await;
+    assert!(invalid.is_err());
+
+    Ok(())
+}

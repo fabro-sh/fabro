@@ -886,6 +886,7 @@ mod tests {
             .provider_base_url("openai", server.url("/v1"))
             .build();
         state
+            .stores
             .vault
             .write()
             .await
@@ -967,6 +968,7 @@ mod tests {
             .provider_base_url("openai", server.url("/v1"))
             .build();
         state
+            .stores
             .vault
             .write()
             .await

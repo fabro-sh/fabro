@@ -74,7 +74,8 @@ async fn list_automation_runs(
     }
 
     let entries = match state
-        .store
+        .stores
+        .runs
         .list_cached_runs(&fabro_store::ListRunsQuery::default(), Utc::now())
         .await
     {

@@ -186,6 +186,39 @@ async fn variables_validate_names_and_allow_empty_values() {
 }
 
 #[tokio::test]
+async fn variables_persist_across_rebuilt_app_state() {
+    let vault_path = fabro_server::test_support::test_secret_store_path();
+    let state = fabro_server::test_support::TestAppStateBuilder::new()
+        .vault_path(vault_path.clone())
+        .build();
+    let app = fabro_server::test_support::build_test_router(state);
+
+    let create = app
+        .oneshot(json_request(
+            Method::POST,
+            "/variables",
+            &serde_json::json!({
+                "name": "PERSISTED",
+                "value": "from-sqlite"
+            }),
+        ))
+        .await
+        .expect("POST /variables should route");
+    response_status(create, StatusCode::OK, "POST /api/v1/variables").await;
+
+    let rebuilt_state = fabro_server::test_support::TestAppStateBuilder::new()
+        .vault_path(vault_path)
+        .build();
+    let rebuilt_app = fabro_server::test_support::build_test_router(rebuilt_state);
+    let get = rebuilt_app
+        .oneshot(empty_request(Method::GET, "/variables/PERSISTED"))
+        .await
+        .expect("GET /variables/PERSISTED should route");
+    let body = response_json(get, StatusCode::OK, "GET /api/v1/variables/PERSISTED").await;
+    assert_eq!(body["value"], "from-sqlite");
+}
+
+#[tokio::test]
 async fn run_config_substitutes_variables_before_persisting_settings() {
     let app = fabro_server::test_support::build_test_router(test_app_state());
 

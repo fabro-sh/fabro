@@ -53,6 +53,11 @@ impl Storage {
     }
 
     #[must_use]
+    pub fn sqlite_path(&self) -> PathBuf {
+        self.root.join("db").join("fabro.sqlite3")
+    }
+
+    #[must_use]
     pub fn runtime_directory(&self) -> RuntimeDirectory {
         RuntimeDirectory::new(self.root.clone())
     }
@@ -191,6 +196,10 @@ mod tests {
         assert_eq!(
             storage.variables_path(),
             std::path::Path::new("/tmp/fabro-data/variables.json")
+        );
+        assert_eq!(
+            storage.sqlite_path(),
+            std::path::Path::new("/tmp/fabro-data/db/fabro.sqlite3")
         );
         assert_eq!(
             storage.objects_dir(),

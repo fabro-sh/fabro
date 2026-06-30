@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Mutex;
 use std::sync::{Arc, OnceLock};
@@ -14,6 +14,7 @@ use axum::response::Response;
 use axum::{Router, middleware};
 use chrono::Duration as ChronoDuration;
 use fabro_config::{RunLayer, ServerSettingsBuilder, envfile};
+use fabro_db::DbPool;
 use fabro_interview::Interviewer;
 use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
 use fabro_sandbox::SandboxProviderRegistry;
@@ -24,6 +25,7 @@ use fabro_types::{AuthMethod, IdpIdentity, ServerSettings};
 use fabro_vault::{SecretType, Vault};
 use fabro_workflow::handler::HandlerRegistry;
 use object_store::memory::InMemory as MemoryObjectStore;
+use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
@@ -194,7 +196,7 @@ impl TestAppStateBuilder {
         self
     }
 
-    fn vault_path(mut self, vault_path: PathBuf) -> Self {
+    pub fn vault_path(mut self, vault_path: PathBuf) -> Self {
         self.vault_path = Some(vault_path);
         self
     }
@@ -247,6 +249,7 @@ impl TestAppStateBuilder {
             .join("environments");
         fabro_environment::seed_environments(&environment_dir)
             .expect("test environments should seed");
+        let db_pool = test_db_pool_for_vault_path(&vault_path)?;
         build_app_state(AppStateConfig {
             resolved_settings: resolved_runtime_settings_for_tests(
                 self.server_settings,
@@ -257,7 +260,7 @@ impl TestAppStateBuilder {
             max_concurrent_runs: self.max_concurrent_runs,
             store,
             artifact_store,
-            variables_path: vault_path.with_file_name("variables.json"),
+            db_pool,
             vault_path,
             preloaded_vault: None,
             server_secrets: load_test_server_secrets(server_env_path, self.server_secret_env),
@@ -491,6 +494,37 @@ pub fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
     ));
     let artifact_store = ArtifactStore::new(object_store, "artifacts");
     (store, artifact_store)
+}
+
+pub(crate) fn test_db_pool_for_vault_path(vault_path: &Path) -> anyhow::Result<DbPool> {
+    test_db_pool(sqlite_path_for_vault_path(vault_path))
+}
+
+fn sqlite_path_for_vault_path(vault_path: &Path) -> PathBuf {
+    vault_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("db")
+        .join("fabro.sqlite3")
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "sync test builders may be called inside async tests; a short-lived OS thread avoids nested Tokio runtimes"
+)]
+fn test_db_pool(path: PathBuf) -> anyhow::Result<DbPool> {
+    std::thread::spawn(move || {
+        let runtime = TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async move {
+            let pool = fabro_db::connect(&path).await?;
+            fabro_db::migrate(&pool).await?;
+            Ok(pool)
+        })
+    })
+    .join()
+    .expect("test database setup thread should not panic")
 }
 
 pub fn test_app_state_with_store_and_runtime_settings(

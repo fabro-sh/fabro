@@ -294,7 +294,8 @@ async fn get_system_df(
 ) -> Response {
     let storage_dir = state.server_storage_dir();
     let summaries = match state
-        .store
+        .stores
+        .runs
         .list_runs(&fabro_store::ListRunsQuery::default(), Utc::now())
         .await
     {
@@ -328,7 +329,7 @@ async fn get_system_repair_runs(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let issues = match state.store.list_unreadable_runs().await {
+    let issues = match state.stores.runs.list_unreadable_runs().await {
         Ok(issues) => issues,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
@@ -359,7 +360,8 @@ async fn prune_runs(
 ) -> Response {
     let storage_dir = state.server_storage_dir();
     let summaries = match state
-        .store
+        .stores
+        .runs
         .list_runs(&fabro_store::ListRunsQuery::default(), Utc::now())
         .await
     {
