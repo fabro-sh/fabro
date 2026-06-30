@@ -42,9 +42,11 @@ async fn render_graph_from_manifest(
 ) -> Response {
     let manifest_run_defaults = state.manifest_run_defaults();
     let manifest_environment_defaults = state.environment_store().catalog_layer();
+    let manifest_mcp_server_catalog = state.mcp_server_store().catalog_settings();
     let prepared = match run_manifest::prepare_manifest_with_environment_defaults(
         manifest_run_defaults.as_ref(),
         manifest_environment_defaults.as_ref(),
+        &manifest_mcp_server_catalog,
         &req.manifest,
     ) {
         Ok(prepared) => prepared,

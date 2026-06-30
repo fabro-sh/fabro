@@ -1557,7 +1557,7 @@ mod resolve_transport_env_tests {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum McpTransport {
     Stdio {
         command: Vec<String>,

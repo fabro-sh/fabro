@@ -395,6 +395,7 @@ fn main() {
             "fabro_types::settings::run::McpTransport",
             &[],
         ),
+        ("McpTransportView", "fabro_types::McpTransportView", &[]),
         ("StageContextWindow", "fabro_types::StageContextWindow", &[]),
         (
             "StageContextWindowProjection",
@@ -643,6 +644,22 @@ fn main() {
         (
             "ReplaceAutomationRequest",
             "fabro_automation::AutomationReplace",
+            &[],
+        ),
+        // MCP server catalog wire types reuse the domain model rather than
+        // generating parallel DTOs. The integer formats in the spec generate as
+        // `i64`/`i32`, but the domain types use `u64`/`u16`; the replacements
+        // ensure the signed widths never leak into the public client.
+        // (`McpTransport`/`McpTransportView`/`McpHttpProtocol` are mapped above.)
+        //
+        // Read responses use the value-omitting `McpServerView`/`McpTransportView`
+        // projection (env/header values are never returned); write requests carry
+        // the full transport, so they reuse the draft/replace domain types.
+        ("McpServer", "fabro_types::McpServerView", &[]),
+        ("CreateMcpServerRequest", "fabro_types::McpServerDraft", &[]),
+        (
+            "ReplaceMcpServerRequest",
+            "fabro_types::McpServerReplace",
             &[],
         ),
         ("Environment", "fabro_environment::Environment", &[]),

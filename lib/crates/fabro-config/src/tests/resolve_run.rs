@@ -1017,10 +1017,15 @@ mod run_agent_mcps {
     //! Layer + resolver tests for `[run.agent.mcps]`: same-key replacement
     //! across layers (`StickyMap`) and honoring `enabled = false`.
 
-    use fabro_types::settings::run::{McpTransport, ResolvedMcpEntry};
+    use std::collections::HashMap;
 
-    use crate::SettingsLayer;
+    use fabro_types::settings::run::{
+        McpHttpProtocol, McpServerSettings, McpTransport, ResolvedMcpEntry,
+    };
+
     use crate::layers::Combine;
+    use crate::tests::seeded_environment_catalog;
+    use crate::{RunLayer, SettingsLayer, WorkflowSettingsBuilder};
 
     fn parse_settings(source: &str) -> SettingsLayer {
         source
@@ -1034,6 +1039,21 @@ mod run_agent_mcps {
             McpTransport::Stdio { command, .. } => command,
             other => panic!("expected stdio transport, got {other:?}"),
         }
+    }
+
+    fn mcp_catalog() -> HashMap<String, McpServerSettings> {
+        HashMap::from([("sentry".to_string(), McpServerSettings {
+            name: "sentry".to_string(),
+            transport: McpTransport::Http {
+                protocol: McpHttpProtocol::default(),
+                url:      "https://sentry.example.com/mcp".to_string(),
+                headers:  HashMap::from([(
+                    "Authorization".to_string(),
+                    "{{ secrets.SENTRY_TOKEN }}".to_string(),
+                )]),
+            },
+            ..McpServerSettings::default()
+        })])
     }
 
     #[test]
@@ -1127,6 +1147,97 @@ command = ["fs-server"]
             mcps.contains_key("fs"),
             "an entry without `enabled` defaults to enabled"
         );
+    }
+
+    #[test]
+    fn catalog_reference_resolves_from_server_catalog() {
+        let settings = WorkflowSettingsBuilder::new()
+            .server_manifest_defaults(RunLayer::default(), seeded_environment_catalog())
+            .server_mcp_catalog(mcp_catalog())
+            .workflow_toml(
+                r#"
+_version = 1
+
+[run.agent.mcps.error_tracker]
+id = "sentry"
+"#,
+            )
+            .expect("settings should parse")
+            .build()
+            .expect("settings should resolve");
+
+        let server = settings.run.agent.mcps["error_tracker"]
+            .as_resolved()
+            .expect("catalog reference should resolve to a concrete server");
+        assert_eq!(server.name, "sentry");
+        match &server.transport {
+            McpTransport::Http { url, headers, .. } => {
+                assert_eq!(url, "https://sentry.example.com/mcp");
+                assert_eq!(
+                    headers.get("Authorization").map(String::as_str),
+                    Some("{{ secrets.SENTRY_TOKEN }}")
+                );
+            }
+            other => panic!("expected HTTP catalog transport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disabled_catalog_reference_is_skipped_without_lookup() {
+        let settings = WorkflowSettingsBuilder::new()
+            .server_manifest_defaults(RunLayer::default(), seeded_environment_catalog())
+            .workflow_toml(
+                r#"
+_version = 1
+
+[run.agent.mcps.optional]
+id = "missing"
+enabled = false
+"#,
+            )
+            .expect("settings should parse")
+            .build()
+            .expect("disabled reference should not require a catalog entry");
+
+        assert!(!settings.run.agent.mcps.contains_key("optional"));
+    }
+
+    #[test]
+    fn missing_catalog_reference_is_a_resolve_error() {
+        let err = WorkflowSettingsBuilder::new()
+            .server_manifest_defaults(RunLayer::default(), seeded_environment_catalog())
+            .workflow_toml(
+                r#"
+_version = 1
+
+[run.agent.mcps.missing]
+id = "missing"
+"#,
+            )
+            .expect("settings should parse")
+            .build()
+            .expect_err("missing catalog entry should fail resolution");
+
+        assert!(
+            err.to_string().contains("unknown MCP server: missing"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn catalog_reference_serializes_without_transport_tag() {
+        let settings = parse_settings(
+            r#"
+_version = 1
+
+[run.agent.mcps.error_tracker]
+id = "sentry"
+"#,
+        );
+        let entry = &settings.run.unwrap().agent.unwrap().mcps["error_tracker"];
+        let value = serde_json::to_value(entry).expect("MCP reference should serialize");
+
+        assert_eq!(value, serde_json::json!({ "id": "sentry" }));
     }
 
     #[test]

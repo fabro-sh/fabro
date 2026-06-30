@@ -4266,6 +4266,9 @@ paths:
       responses:
         "201":
           description: MCP server created
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
           content:
             application/json:
               schema:

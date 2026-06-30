@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use fabro_types::settings::run::McpServerSettings;
 use fabro_types::{
     McpServerDefinition, McpServerDraft, McpServerId, McpServerReplace, McpServerRevision,
+    McpServerView,
 };
 use tokio::fs;
 use tokio::io::AsyncWriteExt as _;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 use crate::error::McpServerStoreError;
 use crate::model;
@@ -16,9 +19,8 @@ use crate::model;
 /// Durable per-file TOML store for server-managed MCP server definitions.
 ///
 /// Concrete by design (no trait): a future FS→SQL move is a one-time migration,
-/// not a runtime backend choice. The migration seam is the async, storage-
-/// agnostic method surface; only [`McpServerStore::load`] knows about the
-/// filesystem.
+/// not a runtime backend choice. The method surface keeps callers storage-
+/// agnostic; only [`McpServerStore::load`] knows about the filesystem.
 #[derive(Debug)]
 pub struct McpServerStore {
     dir:       PathBuf,
@@ -41,25 +43,51 @@ impl McpServerStore {
         })
     }
 
-    pub async fn list(&self) -> Vec<McpServerDefinition> {
-        let defs = self.defs.read().await;
+    fn read_defs(
+        &self,
+    ) -> std::sync::RwLockReadGuard<'_, HashMap<McpServerId, McpServerDefinition>> {
+        self.defs.read().expect("mcp server store lock poisoned")
+    }
+
+    fn write_defs(
+        &self,
+    ) -> std::sync::RwLockWriteGuard<'_, HashMap<McpServerId, McpServerDefinition>> {
+        self.defs.write().expect("mcp server store lock poisoned")
+    }
+
+    pub fn list(&self) -> Vec<McpServerDefinition> {
+        let defs = self.read_defs();
         let mut values = defs.values().cloned().collect::<Vec<_>>();
         values.sort_by(|left, right| left.id.cmp(&right.id));
         values
     }
 
+    pub fn list_views(&self) -> Vec<McpServerView> {
+        let defs = self.read_defs();
+        let mut values = defs.values().map(McpServerView::from).collect::<Vec<_>>();
+        values.sort_by(|left, right| left.id.cmp(&right.id));
+        values
+    }
+
+    pub fn catalog_settings(&self) -> HashMap<String, McpServerSettings> {
+        let defs = self.read_defs();
+        defs.iter()
+            .map(|(id, definition)| (id.to_string(), server_settings_from_definition(definition)))
+            .collect()
+    }
+
     /// Sorted ids only, without cloning the (potentially sensitive) env/header
     /// maps carried by full definitions. Used by missing-reference errors to
     /// list available ids cheaply.
-    pub async fn ids(&self) -> Vec<McpServerId> {
-        let defs = self.defs.read().await;
+    pub fn ids(&self) -> Vec<McpServerId> {
+        let defs = self.read_defs();
         let mut ids = defs.keys().cloned().collect::<Vec<_>>();
         ids.sort();
         ids
     }
 
-    pub async fn get(&self, id: &McpServerId) -> Option<McpServerDefinition> {
-        self.defs.read().await.get(id).cloned()
+    pub fn get(&self, id: &McpServerId) -> Option<McpServerDefinition> {
+        self.read_defs().get(id).cloned()
     }
 
     pub async fn create(
@@ -68,7 +96,7 @@ impl McpServerStore {
     ) -> Result<McpServerDefinition, McpServerStoreError> {
         let (id, replace) = draft.into();
         let _mutation = self.mutations.lock().await;
-        if self.defs.read().await.contains_key(&id) {
+        if self.read_defs().contains_key(&id) {
             return Err(McpServerStoreError::AlreadyExists { id });
         }
         let (definition, bytes) = model::definition_from_replace(id.clone(), replace)?;
@@ -78,7 +106,7 @@ impl McpServerStore {
             .await
             .map_err(|err| create_error_for(id.clone(), err))?;
 
-        let mut defs = self.defs.write().await;
+        let mut defs = self.write_defs();
         defs.insert(id, definition.clone());
         Ok(definition)
     }
@@ -91,13 +119,13 @@ impl McpServerStore {
     ) -> Result<McpServerDefinition, McpServerStoreError> {
         let _mutation = self.mutations.lock().await;
         {
-            let defs = self.defs.read().await;
+            let defs = self.read_defs();
             check_revision(&defs, id, expected)?;
         }
         let (definition, bytes) = model::definition_from_replace(id.clone(), replace)?;
 
         write_atomic(&self.dir, &definition_path(&self.dir, id), &bytes).await?;
-        let mut defs = self.defs.write().await;
+        let mut defs = self.write_defs();
         defs.insert(id.clone(), definition.clone());
         Ok(definition)
     }
@@ -109,7 +137,7 @@ impl McpServerStore {
     ) -> Result<(), McpServerStoreError> {
         let _mutation = self.mutations.lock().await;
         {
-            let defs = self.defs.read().await;
+            let defs = self.read_defs();
             check_revision(&defs, id, expected)?;
         }
 
@@ -117,7 +145,7 @@ impl McpServerStore {
         fs::remove_file(&path)
             .await
             .map_err(|err| McpServerStoreError::io(path, err))?;
-        let mut defs = self.defs.write().await;
+        let mut defs = self.write_defs();
         defs.remove(id);
         Ok(())
     }
@@ -139,6 +167,17 @@ fn check_revision(
         });
     }
     Ok(())
+}
+
+fn server_settings_from_definition(definition: &McpServerDefinition) -> McpServerSettings {
+    McpServerSettings {
+        name:                 definition.id.to_string(),
+        transport:            definition.transport.clone(),
+        current_dir:          None,
+        clear_env:            false,
+        startup_timeout_secs: definition.startup_timeout_secs,
+        tool_timeout_secs:    definition.tool_timeout_secs,
+    }
 }
 
 #[expect(
@@ -298,10 +337,10 @@ mod tests {
         }
     }
 
-    fn draft(id: &str, name: &str) -> McpServerDraft {
+    fn draft(id: &str, display_name: &str) -> McpServerDraft {
         McpServerDraft {
             id:                   McpServerId::new(id).unwrap(),
-            name:                 name.to_string(),
+            display_name:         display_name.to_string(),
             description:          None,
             transport:            http_transport("https://example.com/mcp"),
             startup_timeout_secs: 10,
@@ -309,9 +348,9 @@ mod tests {
         }
     }
 
-    fn replacement(name: &str) -> McpServerReplace {
+    fn replacement(display_name: &str) -> McpServerReplace {
         McpServerReplace {
-            name:                 name.to_string(),
+            display_name:         display_name.to_string(),
             description:          Some("updated".to_string()),
             transport:            http_transport("https://example.com/mcp/v2"),
             startup_timeout_secs: 15,
@@ -324,8 +363,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = McpServerStore::load(dir.path().join("mcps")).unwrap();
 
-        assert!(store.list().await.is_empty());
-        assert!(store.ids().await.is_empty());
+        assert!(store.list().is_empty());
+        assert!(store.ids().is_empty());
     }
 
     #[tokio::test]
@@ -339,7 +378,7 @@ mod tests {
         fs::write(
             mcp_dir.join("sentry.toml"),
             r#"
-name = "Sentry"
+display_name = "Sentry"
 startup_timeout_secs = 10
 tool_timeout_secs = 60
 
@@ -354,11 +393,11 @@ url = "https://sentry.example.com/mcp"
         .unwrap();
 
         let store = McpServerStore::load(&mcp_dir).unwrap();
-        let defs = store.list().await;
+        let defs = store.list();
 
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].id.as_str(), "sentry");
-        assert_eq!(defs[0].name, "Sentry");
+        assert_eq!(defs[0].display_name, "Sentry");
     }
 
     #[tokio::test]
@@ -379,7 +418,7 @@ url = "https://sentry.example.com/mcp"
         let dir = tempfile::tempdir().unwrap();
         let mcp_dir = dir.path().join("mcps");
         fs::create_dir_all(&mcp_dir).await.unwrap();
-        fs::write(mcp_dir.join("Bad Name.toml"), "name = \"Bad\"")
+        fs::write(mcp_dir.join("Bad Name.toml"), "display_name = \"Bad\"")
             .await
             .unwrap();
 
@@ -396,7 +435,7 @@ url = "https://sentry.example.com/mcp"
         let created = store.create(draft("sentry", "Sentry")).await.unwrap();
         let path = mcp_dir.join("sentry.toml");
         let persisted = fs::read_to_string(&path).await.unwrap();
-        assert!(persisted.contains("name = \"Sentry\""));
+        assert!(persisted.contains("display_name = \"Sentry\""));
         assert!(!top_level_lines(&persisted).any(|line| line.starts_with("id = ")));
         assert!(!top_level_lines(&persisted).any(|line| line.starts_with("revision = ")));
         assert_eq!(
@@ -404,24 +443,21 @@ url = "https://sentry.example.com/mcp"
             McpServerRevision::from_bytes(persisted.as_bytes())
         );
 
-        assert_eq!(store.get(&created.id).await.unwrap(), created);
-        let listed = store.list().await;
+        assert_eq!(store.get(&created.id).unwrap(), created);
+        let listed = store.list();
         assert_eq!(listed.len(), 1);
-        assert_eq!(store.ids().await, vec![created.id.clone()]);
+        assert_eq!(store.ids(), vec![created.id.clone()]);
 
         let replaced = store
             .replace(&created.id, &created.revision, replacement("Sentry v2"))
             .await
             .unwrap();
         assert_ne!(replaced.revision, created.revision);
-        assert_eq!(replaced.name, "Sentry v2");
-        assert_eq!(
-            store.get(&created.id).await.unwrap().revision,
-            replaced.revision
-        );
+        assert_eq!(replaced.display_name, "Sentry v2");
+        assert_eq!(store.get(&created.id).unwrap().revision, replaced.revision);
 
         store.delete(&created.id, &replaced.revision).await.unwrap();
-        assert!(store.get(&created.id).await.is_none());
+        assert!(store.get(&created.id).is_none());
         assert!(!path.exists());
     }
 
@@ -439,7 +475,7 @@ url = "https://sentry.example.com/mcp"
         assert!(matches!(err, McpServerStoreError::StaleRevision { .. }));
 
         // The on-disk and in-memory definition is unchanged after a rejected replace.
-        assert_eq!(store.get(&created.id).await.unwrap(), created);
+        assert_eq!(store.get(&created.id).unwrap(), created);
     }
 
     #[tokio::test]

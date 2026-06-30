@@ -9,7 +9,13 @@
 //! Transport is the existing [`McpTransport`](crate::settings::McpTransport)
 //! reused verbatim, so a stored definition uses the same `stdio`/`http`/
 //! `sandbox` shape as inline MCP config.
+//!
+//! Read APIs do not return [`McpServerDefinition`] directly. They return
+//! [`McpServerView`], a value-omitting projection whose transport carries only
+//! the env/header *names* ([`McpTransportView`]) so stored secret-bearing
+//! values are never sent back to a client.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -18,16 +24,20 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use crate::settings::McpTransport;
+use crate::settings::run::McpHttpProtocol;
 
 /// A server-managed MCP server definition.
 ///
 /// `id` and `revision` are derived (filename stem + content hash of the
-/// persisted TOML bytes) and are not stored in the file body.
+/// persisted TOML bytes) and are not stored in the persisted TOML body. This is
+/// the internal/persistence model and carries full transport values; it is not
+/// serialized to clients. Read APIs return [`McpServerView`] instead, which
+/// omits env/header values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct McpServerDefinition {
     pub id:                   McpServerId,
     pub revision:             McpServerRevision,
-    pub name:                 String,
+    pub display_name:         String,
     pub description:          Option<String>,
     pub transport:            McpTransport,
     pub startup_timeout_secs: u64,
@@ -40,7 +50,7 @@ pub struct McpServerDefinition {
 #[serde(deny_unknown_fields)]
 pub struct McpServerDraft {
     pub id:                   McpServerId,
-    pub name:                 String,
+    pub display_name:         String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description:          Option<String>,
     pub transport:            McpTransport,
@@ -54,7 +64,7 @@ pub struct McpServerDraft {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpServerReplace {
-    pub name:                 String,
+    pub display_name:         String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description:          Option<String>,
     pub transport:            McpTransport,
@@ -65,13 +75,160 @@ pub struct McpServerReplace {
 impl From<McpServerDraft> for (McpServerId, McpServerReplace) {
     fn from(value: McpServerDraft) -> Self {
         (value.id, McpServerReplace {
-            name:                 value.name,
+            display_name:         value.display_name,
             description:          value.description,
             transport:            value.transport,
             startup_timeout_secs: value.startup_timeout_secs,
             tool_timeout_secs:    value.tool_timeout_secs,
         })
     }
+}
+
+/// The read-side projection of a definition returned by catalog read APIs.
+///
+/// Identical to [`McpServerDefinition`] except that the transport is the
+/// value-omitting [`McpTransportView`], so stored env/header values never leave
+/// the server. This is the wire type behind the OpenAPI `McpServer` schema
+/// (reused by `fabro-api` via `with_replacement`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpServerView {
+    pub id:                   McpServerId,
+    pub revision:             McpServerRevision,
+    pub display_name:         String,
+    pub description:          Option<String>,
+    pub transport:            McpTransportView,
+    pub startup_timeout_secs: u64,
+    pub tool_timeout_secs:    u64,
+}
+
+impl From<McpServerDefinition> for McpServerView {
+    fn from(value: McpServerDefinition) -> Self {
+        Self {
+            id:                   value.id,
+            revision:             value.revision,
+            display_name:         value.display_name,
+            description:          value.description,
+            transport:            value.transport.into(),
+            startup_timeout_secs: value.startup_timeout_secs,
+            tool_timeout_secs:    value.tool_timeout_secs,
+        }
+    }
+}
+
+impl From<&McpServerDefinition> for McpServerView {
+    fn from(value: &McpServerDefinition) -> Self {
+        Self {
+            id:                   value.id.clone(),
+            revision:             value.revision.clone(),
+            display_name:         value.display_name.clone(),
+            description:          value.description.clone(),
+            transport:            (&value.transport).into(),
+            startup_timeout_secs: value.startup_timeout_secs,
+            tool_timeout_secs:    value.tool_timeout_secs,
+        }
+    }
+}
+
+/// The read-side projection of [`McpTransport`]. It mirrors the transport shape
+/// but replaces the `env`/`headers` value maps with sorted `env_keys`/
+/// `header_keys` name lists, so secret-bearing values are never returned.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum McpTransportView {
+    Stdio {
+        command:  Vec<String>,
+        env_keys: Vec<String>,
+    },
+    Http {
+        #[serde(default)]
+        protocol:    McpHttpProtocol,
+        url:         String,
+        header_keys: Vec<String>,
+    },
+    Sandbox {
+        #[serde(default)]
+        protocol: McpHttpProtocol,
+        command:  Vec<String>,
+        port:     u16,
+        env_keys: Vec<String>,
+    },
+}
+
+impl From<McpTransport> for McpTransportView {
+    fn from(value: McpTransport) -> Self {
+        match value {
+            McpTransport::Stdio { command, env } => Self::Stdio {
+                command,
+                env_keys: sorted_keys(env),
+            },
+            McpTransport::Http {
+                protocol,
+                url,
+                headers,
+            } => Self::Http {
+                protocol,
+                url,
+                header_keys: sorted_keys(headers),
+            },
+            McpTransport::Sandbox {
+                protocol,
+                command,
+                port,
+                env,
+            } => Self::Sandbox {
+                protocol,
+                command,
+                port,
+                env_keys: sorted_keys(env),
+            },
+        }
+    }
+}
+
+impl From<&McpTransport> for McpTransportView {
+    fn from(value: &McpTransport) -> Self {
+        match value {
+            McpTransport::Stdio { command, env } => Self::Stdio {
+                command:  command.clone(),
+                env_keys: sorted_keys_ref(env),
+            },
+            McpTransport::Http {
+                protocol,
+                url,
+                headers,
+            } => Self::Http {
+                protocol:    *protocol,
+                url:         url.clone(),
+                header_keys: sorted_keys_ref(headers),
+            },
+            McpTransport::Sandbox {
+                protocol,
+                command,
+                port,
+                env,
+            } => Self::Sandbox {
+                protocol: *protocol,
+                command:  command.clone(),
+                port:     *port,
+                env_keys: sorted_keys_ref(env),
+            },
+        }
+    }
+}
+
+/// Collect a value map's keys into a sorted list, so the projection is
+/// deterministic regardless of the map's iteration order.
+fn sorted_keys(map: HashMap<String, String>) -> Vec<String> {
+    let mut keys: Vec<String> = map.into_keys().collect();
+    keys.sort();
+    keys
+}
+
+fn sorted_keys_ref(map: &HashMap<String, String>) -> Vec<String> {
+    let mut keys: Vec<String> = map.keys().cloned().collect();
+    keys.sort();
+    keys
 }
 
 /// Validation errors for MCP server domain fields.
@@ -91,7 +248,7 @@ impl fmt::Display for McpServerValidationError {
                     "mcp server id {value:?} must match [a-z0-9][a-z0-9-]{{0,62}}"
                 )
             }
-            Self::EmptyName => f.write_str("mcp server name must not be empty"),
+            Self::EmptyName => f.write_str("mcp server display name must not be empty"),
             Self::InvalidTransport { reason } => {
                 write!(f, "mcp server transport is invalid: {reason}")
             }
@@ -246,7 +403,7 @@ fn is_valid_mcp_server_id(value: &str) -> bool {
 pub fn validate_mcp_server_fields(
     replace: &McpServerReplace,
 ) -> Result<(), McpServerValidationError> {
-    if replace.name.trim().is_empty() {
+    if replace.display_name.trim().is_empty() {
         return Err(McpServerValidationError::EmptyName);
     }
     validate_transport(&replace.transport)
@@ -319,7 +476,7 @@ mod tests {
     #[test]
     fn validation_rejects_empty_name() {
         let replace = McpServerReplace {
-            name:                 "  ".to_string(),
+            display_name:         "  ".to_string(),
             description:          None,
             transport:            http_transport(),
             startup_timeout_secs: 10,
@@ -331,7 +488,7 @@ mod tests {
     #[test]
     fn validation_rejects_empty_transport_command() {
         let replace = McpServerReplace {
-            name:                 "Local".to_string(),
+            display_name:         "Local".to_string(),
             description:          None,
             transport:            McpTransport::Stdio {
                 command: Vec::new(),
@@ -346,7 +503,7 @@ mod tests {
     #[test]
     fn validation_rejects_blank_transport_program() {
         let replace = McpServerReplace {
-            name:                 "Local".to_string(),
+            display_name:         "Local".to_string(),
             description:          None,
             transport:            McpTransport::Stdio {
                 command: vec![" ".to_string(), "--arg".to_string()],
@@ -361,7 +518,7 @@ mod tests {
     #[test]
     fn validation_accepts_well_formed_definition() {
         let replace = McpServerReplace {
-            name:                 "Sentry".to_string(),
+            display_name:         "Sentry".to_string(),
             description:          Some("Issue tracker".to_string()),
             transport:            http_transport(),
             startup_timeout_secs: 10,

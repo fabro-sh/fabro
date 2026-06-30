@@ -6,7 +6,8 @@ use fabro_types::settings::run::{
     AgentPermissions, ApprovalMode, HookEvent, McpHttpProtocol, MergeStrategy, RunMode,
 };
 use fabro_types::settings::{Duration, InterpString, ModelRef};
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Deserializer};
+use serde::{Deserialize, Serialize, Serializer};
 
 use super::combine::Combine;
 use super::environment::RunEnvironmentLayer;
@@ -418,53 +419,141 @@ pub struct RunAgentLayer {
 /// A single MCP entry. `type` selects the transport; `script`/`command` are
 /// mutually exclusive for process-launching transports. Non-launching HTTP
 /// transports use neither field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum McpEntryLayer {
     Http {
-        #[serde(default)]
         enabled:         Option<bool>,
-        #[serde(default)]
         protocol:        McpHttpProtocol,
         url:             InterpString,
-        #[serde(default)]
         headers:         HashMap<String, InterpString>,
-        #[serde(default)]
         startup_timeout: Option<Duration>,
-        #[serde(default)]
         tool_timeout:    Option<Duration>,
     },
     Stdio {
-        #[serde(default)]
         enabled:         Option<bool>,
-        #[serde(default)]
         script:          Option<InterpString>,
-        #[serde(default)]
         command:         Option<Vec<InterpString>>,
-        #[serde(default)]
         env:             HashMap<String, InterpString>,
-        #[serde(default)]
         startup_timeout: Option<Duration>,
-        #[serde(default)]
         tool_timeout:    Option<Duration>,
     },
     Sandbox {
-        #[serde(default)]
         enabled:         Option<bool>,
-        #[serde(default)]
         protocol:        McpHttpProtocol,
-        #[serde(default)]
         script:          Option<InterpString>,
-        #[serde(default)]
         command:         Option<Vec<InterpString>>,
         port:            u16,
-        #[serde(default)]
         env:             HashMap<String, InterpString>,
-        #[serde(default)]
         startup_timeout: Option<Duration>,
-        #[serde(default)]
         tool_timeout:    Option<Duration>,
     },
+    Reference {
+        id:      String,
+        enabled: Option<bool>,
+    },
+}
+
+impl Serialize for McpEntryLayer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[derive(Serialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum TaggedMcpEntryLayer<'a> {
+            Http {
+                enabled:         &'a Option<bool>,
+                protocol:        &'a McpHttpProtocol,
+                url:             &'a InterpString,
+                headers:         &'a HashMap<String, InterpString>,
+                startup_timeout: &'a Option<Duration>,
+                tool_timeout:    &'a Option<Duration>,
+            },
+            Stdio {
+                enabled:         &'a Option<bool>,
+                script:          &'a Option<InterpString>,
+                command:         &'a Option<Vec<InterpString>>,
+                env:             &'a HashMap<String, InterpString>,
+                startup_timeout: &'a Option<Duration>,
+                tool_timeout:    &'a Option<Duration>,
+            },
+            Sandbox {
+                enabled:         &'a Option<bool>,
+                protocol:        &'a McpHttpProtocol,
+                script:          &'a Option<InterpString>,
+                command:         &'a Option<Vec<InterpString>>,
+                port:            &'a u16,
+                env:             &'a HashMap<String, InterpString>,
+                startup_timeout: &'a Option<Duration>,
+                tool_timeout:    &'a Option<Duration>,
+            },
+        }
+
+        #[derive(Serialize)]
+        struct McpReferenceLayer<'a> {
+            id:      &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            enabled: &'a Option<bool>,
+        }
+
+        match self {
+            Self::Http {
+                enabled,
+                protocol,
+                url,
+                headers,
+                startup_timeout,
+                tool_timeout,
+            } => TaggedMcpEntryLayer::Http {
+                enabled,
+                protocol,
+                url,
+                headers,
+                startup_timeout,
+                tool_timeout,
+            }
+            .serialize(serializer),
+            Self::Stdio {
+                enabled,
+                script,
+                command,
+                env,
+                startup_timeout,
+                tool_timeout,
+            } => TaggedMcpEntryLayer::Stdio {
+                enabled,
+                script,
+                command,
+                env,
+                startup_timeout,
+                tool_timeout,
+            }
+            .serialize(serializer),
+            Self::Sandbox {
+                enabled,
+                protocol,
+                script,
+                command,
+                port,
+                env,
+                startup_timeout,
+                tool_timeout,
+            } => TaggedMcpEntryLayer::Sandbox {
+                enabled,
+                protocol,
+                script,
+                command,
+                port,
+                env,
+                startup_timeout,
+                tool_timeout,
+            }
+            .serialize(serializer),
+            Self::Reference { id, enabled } => {
+                McpReferenceLayer { id, enabled }.serialize(serializer)
+            }
+        }
+    }
 }
 
 impl McpEntryLayer {
@@ -475,9 +564,158 @@ impl McpEntryLayer {
         let enabled = match self {
             Self::Http { enabled, .. }
             | Self::Stdio { enabled, .. }
-            | Self::Sandbox { enabled, .. } => enabled,
+            | Self::Sandbox { enabled, .. }
+            | Self::Reference { enabled, .. } => enabled,
         };
         enabled.unwrap_or(true)
+    }
+}
+
+impl<'de> Deserialize<'de> for McpEntryLayer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct McpReferenceLayer {
+            id:      String,
+            #[serde(default)]
+            enabled: Option<bool>,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, tag = "type", rename_all = "snake_case")]
+        enum TaggedMcpEntryLayer {
+            Http {
+                #[serde(default)]
+                enabled:         Option<bool>,
+                #[serde(default)]
+                protocol:        McpHttpProtocol,
+                url:             InterpString,
+                #[serde(default)]
+                headers:         HashMap<String, InterpString>,
+                #[serde(default)]
+                startup_timeout: Option<Duration>,
+                #[serde(default)]
+                tool_timeout:    Option<Duration>,
+            },
+            Stdio {
+                #[serde(default)]
+                enabled:         Option<bool>,
+                #[serde(default)]
+                script:          Option<InterpString>,
+                #[serde(default)]
+                command:         Option<Vec<InterpString>>,
+                #[serde(default)]
+                env:             HashMap<String, InterpString>,
+                #[serde(default)]
+                startup_timeout: Option<Duration>,
+                #[serde(default)]
+                tool_timeout:    Option<Duration>,
+            },
+            Sandbox {
+                #[serde(default)]
+                enabled:         Option<bool>,
+                #[serde(default)]
+                protocol:        McpHttpProtocol,
+                #[serde(default)]
+                script:          Option<InterpString>,
+                #[serde(default)]
+                command:         Option<Vec<InterpString>>,
+                port:            u16,
+                #[serde(default)]
+                env:             HashMap<String, InterpString>,
+                #[serde(default)]
+                startup_timeout: Option<Duration>,
+                #[serde(default)]
+                tool_timeout:    Option<Duration>,
+            },
+        }
+
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let serde_json::Value::Object(map) = &value else {
+            return Err(de::Error::custom("MCP entry must be a table"));
+        };
+
+        let has_reference_fields = map.contains_key("id");
+        let has_inline_fields = map.contains_key("type")
+            || map.contains_key("script")
+            || map.contains_key("command")
+            || map.contains_key("url")
+            || map.contains_key("headers")
+            || map.contains_key("port")
+            || map.contains_key("env")
+            || map.contains_key("startup_timeout")
+            || map.contains_key("tool_timeout");
+
+        if has_reference_fields && has_inline_fields {
+            return Err(de::Error::custom(
+                "MCP entry cannot mix catalog reference fields (`id`, `enabled`) with inline \
+                 server fields",
+            ));
+        }
+
+        if has_reference_fields {
+            let reference: McpReferenceLayer =
+                serde_json::from_value(value).map_err(de::Error::custom)?;
+            return Ok(Self::Reference {
+                id:      reference.id,
+                enabled: reference.enabled,
+            });
+        }
+
+        match serde_json::from_value(value).map_err(de::Error::custom)? {
+            TaggedMcpEntryLayer::Http {
+                enabled,
+                protocol,
+                url,
+                headers,
+                startup_timeout,
+                tool_timeout,
+            } => Ok(Self::Http {
+                enabled,
+                protocol,
+                url,
+                headers,
+                startup_timeout,
+                tool_timeout,
+            }),
+            TaggedMcpEntryLayer::Stdio {
+                enabled,
+                script,
+                command,
+                env,
+                startup_timeout,
+                tool_timeout,
+            } => Ok(Self::Stdio {
+                enabled,
+                script,
+                command,
+                env,
+                startup_timeout,
+                tool_timeout,
+            }),
+            TaggedMcpEntryLayer::Sandbox {
+                enabled,
+                protocol,
+                script,
+                command,
+                port,
+                env,
+                startup_timeout,
+                tool_timeout,
+            } => Ok(Self::Sandbox {
+                enabled,
+                protocol,
+                script,
+                command,
+                port,
+                env,
+                startup_timeout,
+                tool_timeout,
+            }),
+        }
     }
 }
 

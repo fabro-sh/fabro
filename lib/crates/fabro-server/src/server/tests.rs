@@ -1285,8 +1285,10 @@ id = "missing"
 
 #[test]
 fn system_sandbox_provider_uses_manifest_defaults() {
-    let (_temp, environment_store) =
+    let (temp, environment_store) =
         test_environment_store(Some(EnvironmentProvider::Daytona), true);
+    let mcp_server_store =
+        McpServerStore::load(temp.path().join("mcps")).expect("mcp server store should load");
     let source = r#"
 _version = 1
 
@@ -1296,6 +1298,7 @@ id = "default"
     let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
         &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
         &environment_store,
+        &mcp_server_store,
     );
 
     assert_eq!(system_sandbox_provider(&manifest_run_settings), "daytona");
@@ -1303,7 +1306,9 @@ id = "default"
 
 #[test]
 fn system_sandbox_provider_defaults_when_manifest_run_settings_do_not_resolve() {
-    let (_temp, environment_store) = test_environment_store(None, true);
+    let (temp, environment_store) = test_environment_store(None, true);
+    let mcp_server_store =
+        McpServerStore::load(temp.path().join("mcps")).expect("mcp server store should load");
     let source = r#"
 _version = 1
 
@@ -1313,6 +1318,7 @@ id = "missing"
     let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
         &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
         &environment_store,
+        &mcp_server_store,
     );
 
     assert_eq!(

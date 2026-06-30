@@ -27,7 +27,7 @@ use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
-use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
+use fabro_types::settings::run::{EnvironmentProvider, McpServerSettings, RunGoal, RunNamespace};
 use fabro_types::{
     ManifestPath, RunId, RunProvenance, SandboxProviderKind, ServerSettings, WorkflowSettings,
 };
@@ -77,6 +77,7 @@ pub(crate) fn manifest_run_defaults(run: Option<&RunLayer>) -> RunLayer {
 pub(crate) fn prepare_manifest_with_environment_defaults(
     manifest_run_defaults: &RunLayer,
     manifest_environment_defaults: &MergeMap<EnvironmentLayer>,
+    manifest_mcp_server_catalog: &HashMap<String, McpServerSettings>,
     manifest: &types::RunManifest,
 ) -> Result<PreparedManifest> {
     if manifest.version != 1 {
@@ -95,10 +96,12 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
 
     let args_overrides =
         manifest_args_overrides(manifest.args.as_ref()).context("failed to parse manifest args")?;
-    let mut workflow_settings_builder = WorkflowSettingsBuilder::new().server_manifest_defaults(
-        manifest_run_defaults.clone(),
-        manifest_environment_defaults.clone(),
-    );
+    let mut workflow_settings_builder = WorkflowSettingsBuilder::new()
+        .server_manifest_defaults(
+            manifest_run_defaults.clone(),
+            manifest_environment_defaults.clone(),
+        )
+        .server_mcp_catalog(manifest_mcp_server_catalog.clone());
     if let Some(run) = args_overrides.run {
         workflow_settings_builder = workflow_settings_builder.run_overrides(run);
     }
@@ -1442,6 +1445,7 @@ mod tests {
         super::prepare_manifest_with_environment_defaults(
             manifest_run_defaults,
             &environment_defaults_fixture(),
+            &HashMap::new(),
             manifest,
         )
     }
@@ -1511,6 +1515,7 @@ enabled = {clone_enabled}
         let prepared = super::prepare_manifest_with_environment_defaults(
             &manifest_run_defaults(Some(&default_settings_fixture())),
             &environment_defaults,
+            &HashMap::new(),
             &manifest,
         )
         .unwrap();
