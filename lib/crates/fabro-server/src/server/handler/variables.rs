@@ -97,6 +97,7 @@ fn variable_error_response(err: VariableError) -> Response {
         VariableError::LegacyRead { .. }
         | VariableError::LegacyParse { .. }
         | VariableError::LegacyInvalidName { .. }
+        | VariableError::LegacyBackup { .. }
         | VariableError::Timestamp { .. }
         | VariableError::RowCountOverflow { .. } => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()

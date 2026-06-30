@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -7,9 +8,7 @@ use fabro_types::{Variable, is_env_style_name};
 use sqlx::Row as _;
 use sqlx::sqlite::SqliteRow;
 use tokio::fs;
-use tracing::{info, warn};
-
-const LEGACY_VARIABLE_IMPORT_NAME: &str = "variables-json-v1";
+use tracing::info;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -39,6 +38,14 @@ pub enum Error {
     #[error("legacy variables file {path} contains invalid variable name: {name}")]
     LegacyInvalidName { path: PathBuf, name: String },
 
+    #[error("renaming legacy variables file {source_path} to backup {backup_path}")]
+    LegacyBackup {
+        source_path: PathBuf,
+        backup_path: PathBuf,
+        #[source]
+        source:      std::io::Error,
+    },
+
     #[error("parsing variable timestamp for {name}.{column}")]
     Timestamp {
         name:   String,
@@ -51,17 +58,10 @@ pub enum Error {
     RowCountOverflow { count: usize },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
-#[strum(serialize_all = "snake_case")]
-pub enum ImportStatus {
-    Imported,
-    SkippedExistingTarget,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportReport {
-    pub status:         ImportStatus,
     pub source_path:    PathBuf,
+    pub backup_path:    PathBuf,
     pub imported_rows:  i64,
     pub skipped_rows:   i64,
     pub variable_names: Vec<String>,
@@ -228,10 +228,6 @@ pub async fn import_legacy_json_once(
     source_path: impl AsRef<Path>,
 ) -> Result<Option<ImportReport>, Error> {
     let source_path = source_path.as_ref();
-    if legacy_import_exists(pool).await? {
-        return Ok(None);
-    }
-
     let contents = match fs::read_to_string(source_path).await {
         Ok(contents) => contents,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -242,27 +238,6 @@ pub async fn import_legacy_json_once(
             });
         }
     };
-
-    let existing_names = variable_names(pool).await?;
-    if !existing_names.is_empty() {
-        let report = ImportReport {
-            status:         ImportStatus::SkippedExistingTarget,
-            source_path:    source_path.to_path_buf(),
-            imported_rows:  0,
-            skipped_rows:   row_count(existing_names.len())?,
-            variable_names: existing_names,
-        };
-        insert_import_marker(pool, &report).await?;
-        warn!(
-            import_name = LEGACY_VARIABLE_IMPORT_NAME,
-            source_path = %source_path.display(),
-            imported_rows = report.imported_rows,
-            skipped_rows = report.skipped_rows,
-            variable_names = ?report.variable_names,
-            "skipped legacy variables json import because sqlite already has variables"
-        );
-        return Ok(Some(report));
-    }
 
     let entries = parse_legacy_entries(source_path, &contents)?;
     let mut names = entries.keys().cloned().collect::<Vec<_>>();
@@ -278,10 +253,16 @@ pub async fn import_legacy_json_once(
     }
 
     let mut transaction = pool.begin().await?;
+    let mut imported_names = Vec::new();
+    let mut skipped_rows = 0usize;
     for name in &names {
         let entry = &entries[name];
-        sqlx::query(
-            "INSERT INTO variables (name, value, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        let result = sqlx::query(
+            r"
+            INSERT INTO variables (name, value, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO NOTHING
+            ",
         )
         .bind(name)
         .bind(&entry.value)
@@ -290,21 +271,28 @@ pub async fn import_legacy_json_once(
         .bind(entry.updated_at.to_rfc3339())
         .execute(&mut *transaction)
         .await?;
+
+        if result.rows_affected() == 0 {
+            skipped_rows += 1;
+        } else {
+            imported_names.push(name.clone());
+        }
     }
 
-    let report = ImportReport {
-        status:         ImportStatus::Imported,
-        source_path:    source_path.to_path_buf(),
-        imported_rows:  row_count(names.len())?,
-        skipped_rows:   0,
-        variable_names: names,
-    };
-    insert_import_marker_in_transaction(&mut transaction, &report).await?;
     transaction.commit().await?;
+    let backup_path = rename_imported_legacy_file(source_path).await?;
+
+    let report = ImportReport {
+        source_path: source_path.to_path_buf(),
+        backup_path,
+        imported_rows: row_count(imported_names.len())?,
+        skipped_rows: row_count(skipped_rows)?,
+        variable_names: imported_names,
+    };
 
     info!(
-        import_name = LEGACY_VARIABLE_IMPORT_NAME,
         source_path = %source_path.display(),
+        backup_path = %report.backup_path.display(),
         imported_rows = report.imported_rows,
         skipped_rows = report.skipped_rows,
         variable_names = ?report.variable_names,
@@ -324,65 +312,25 @@ fn parse_legacy_entries(
     })
 }
 
-async fn legacy_import_exists(pool: &DbPool) -> Result<bool, Error> {
-    let exists: Option<i64> =
-        sqlx::query_scalar("SELECT 1 FROM legacy_imports WHERE import_name = ?")
-            .bind(LEGACY_VARIABLE_IMPORT_NAME)
-            .fetch_optional(pool)
-            .await?;
-    Ok(exists.is_some())
+async fn rename_imported_legacy_file(source_path: &Path) -> Result<PathBuf, Error> {
+    let backup_path = legacy_backup_path(source_path, Utc::now());
+    fs::rename(source_path, &backup_path)
+        .await
+        .map_err(|source| Error::LegacyBackup {
+            source_path: source_path.to_path_buf(),
+            backup_path: backup_path.clone(),
+            source,
+        })?;
+    Ok(backup_path)
 }
 
-async fn variable_names(pool: &DbPool) -> Result<Vec<String>, Error> {
-    let rows = sqlx::query("SELECT name FROM variables ORDER BY name")
-        .fetch_all(pool)
-        .await?;
-    Ok(rows.into_iter().map(|row| row.get("name")).collect())
-}
-
-async fn insert_import_marker(pool: &DbPool, report: &ImportReport) -> Result<(), Error> {
-    sqlx::query(
-        r"
-        INSERT INTO legacy_imports
-            (import_name, source_path, status, imported_rows, skipped_rows, imported_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ",
-    )
-    .bind(LEGACY_VARIABLE_IMPORT_NAME)
-    .bind(report.source_path.display().to_string())
-    .bind(import_status_text(report.status))
-    .bind(report.imported_rows)
-    .bind(report.skipped_rows)
-    .bind(Utc::now().to_rfc3339())
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-async fn insert_import_marker_in_transaction(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    report: &ImportReport,
-) -> Result<(), Error> {
-    sqlx::query(
-        r"
-        INSERT INTO legacy_imports
-            (import_name, source_path, status, imported_rows, skipped_rows, imported_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ",
-    )
-    .bind(LEGACY_VARIABLE_IMPORT_NAME)
-    .bind(report.source_path.display().to_string())
-    .bind(import_status_text(report.status))
-    .bind(report.imported_rows)
-    .bind(report.skipped_rows)
-    .bind(Utc::now().to_rfc3339())
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-fn import_status_text(status: ImportStatus) -> &'static str {
-    status.into()
+fn legacy_backup_path(source_path: &Path, imported_at: DateTime<Utc>) -> PathBuf {
+    let timestamp = imported_at.format("%Y%m%dT%H%M%S%fZ");
+    let mut file_name = source_path
+        .file_name()
+        .map_or_else(|| OsString::from("variables.json"), OsString::from);
+    file_name.push(format!(".imported-{timestamp}.bak"));
+    source_path.with_file_name(file_name)
 }
 
 fn row_count(count: usize) -> Result<i64, Error> {

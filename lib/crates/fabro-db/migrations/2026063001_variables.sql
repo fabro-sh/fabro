@@ -1,12 +1,3 @@
-CREATE TABLE legacy_imports (
-    import_name TEXT PRIMARY KEY NOT NULL,
-    source_path TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('imported', 'skipped_existing_target')),
-    imported_rows INTEGER NOT NULL CHECK (imported_rows >= 0),
-    skipped_rows INTEGER NOT NULL CHECK (skipped_rows >= 0),
-    imported_at TEXT NOT NULL CHECK (length(imported_at) > 0)
-);
-
 CREATE TABLE variables (
     name TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL,

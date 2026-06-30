@@ -11,12 +11,19 @@ async fn connect_creates_parent_directory_and_migrate_is_idempotent() -> anyhow:
     database.health_check().await?;
 
     assert!(db_path.exists());
-    let table_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('variables', 'legacy_imports')",
+    let variable_table_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'variables'",
     )
     .fetch_one(database.pool())
     .await?;
-    assert_eq!(table_count, 2);
+    assert_eq!(variable_table_count, 1);
+
+    let legacy_import_table_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'legacy_imports'",
+    )
+    .fetch_one(database.pool())
+    .await?;
+    assert_eq!(legacy_import_table_count, 0);
 
     let foreign_keys: i64 = sqlx::query("PRAGMA foreign_keys")
         .fetch_one(database.pool())

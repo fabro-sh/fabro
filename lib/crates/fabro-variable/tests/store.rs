@@ -1,4 +1,6 @@
-use fabro_variable::{Error, ImportStatus, VariableStore, import_legacy_json_once};
+use std::path::{Path, PathBuf};
+
+use fabro_variable::{Error, VariableStore, import_legacy_json_once};
 use tokio::fs;
 
 struct TestStore {
@@ -158,7 +160,7 @@ async fn value_map_snapshots_values_only() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn import_missing_legacy_file_is_noop_without_marker() -> anyhow::Result<()> {
+async fn import_missing_legacy_file_is_noop() -> anyhow::Result<()> {
     let test = test_store().await?;
     let source = test.dir.path().join("variables.json");
 
@@ -166,18 +168,15 @@ async fn import_missing_legacy_file_is_noop_without_marker() -> anyhow::Result<(
 
     assert!(report.is_none());
     assert!(test.store.list().await?.is_empty());
-    assert_eq!(legacy_import_count(&test.pool).await?, 0);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn import_valid_legacy_json_imports_rows_and_marker() -> anyhow::Result<()> {
+async fn import_valid_legacy_json_imports_rows_and_renames_source() -> anyhow::Result<()> {
     let test = test_store().await?;
     let source = test.dir.path().join("variables.json");
-    fs::write(
-        &source,
-        r#"{
+    let source_contents = r#"{
   "ALPHA": {
     "value": "first",
     "description": "Alpha variable",
@@ -189,15 +188,13 @@ async fn import_valid_legacy_json_imports_rows_and_marker() -> anyhow::Result<()
     "created_at": "2026-06-30T10:02:00Z",
     "updated_at": "2026-06-30T10:03:00Z"
   }
-}"#,
-    )
-    .await?;
+}"#;
+    fs::write(&source, source_contents).await?;
 
     let report = import_legacy_json_once(&test.pool, &source)
         .await?
         .expect("existing legacy file should report import");
 
-    assert_eq!(report.status, ImportStatus::Imported);
     assert_eq!(report.imported_rows, 2);
     assert_eq!(report.skipped_rows, 0);
     assert_eq!(report.variable_names, vec!["ALPHA", "EMPTY"]);
@@ -212,16 +209,20 @@ async fn import_valid_legacy_json_imports_rows_and_marker() -> anyhow::Result<()
         Some("Alpha variable")
     );
     assert_eq!(test.store.get("EMPTY").await?.unwrap().value, "");
+    assert!(!source.exists());
     assert_eq!(
-        legacy_import_status(&test.pool).await?,
-        Some("imported".to_string())
+        fs::read_to_string(&report.backup_path).await?,
+        source_contents
     );
+    assert_eq!(legacy_backups(test.dir.path()).await?, vec![
+        report.backup_path
+    ]);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn import_empty_legacy_json_records_zero_row_marker() -> anyhow::Result<()> {
+async fn import_empty_legacy_json_still_renames_source() -> anyhow::Result<()> {
     let test = test_store().await?;
     let source = test.dir.path().join("variables.json");
     fs::write(&source, "{}").await?;
@@ -230,20 +231,17 @@ async fn import_empty_legacy_json_records_zero_row_marker() -> anyhow::Result<()
         .await?
         .expect("existing empty legacy file should report import");
 
-    assert_eq!(report.status, ImportStatus::Imported);
     assert_eq!(report.imported_rows, 0);
     assert_eq!(report.skipped_rows, 0);
     assert!(report.variable_names.is_empty());
-    assert_eq!(
-        legacy_import_status(&test.pool).await?,
-        Some("imported".to_string())
-    );
+    assert!(!source.exists());
+    assert_eq!(fs::read_to_string(&report.backup_path).await?, "{}");
 
     Ok(())
 }
 
 #[tokio::test]
-async fn import_second_run_is_noop_after_marker() -> anyhow::Result<()> {
+async fn import_second_run_is_noop_after_source_was_renamed() -> anyhow::Result<()> {
     let test = test_store().await?;
     let source = test.dir.path().join("variables.json");
     fs::write(
@@ -264,20 +262,27 @@ async fn import_second_run_is_noop_after_marker() -> anyhow::Result<()> {
     assert!(first.is_some());
     assert!(second.is_none());
     assert_eq!(test.store.list().await?.len(), 1);
+    assert!(!source.exists());
+    assert_eq!(legacy_backups(test.dir.path()).await?.len(), 1);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn import_skips_legacy_file_when_sqlite_already_has_rows() -> anyhow::Result<()> {
+async fn import_preserves_existing_sqlite_values_and_imports_new_names() -> anyhow::Result<()> {
     let test = test_store().await?;
     test.store.set("CURRENT", "sqlite wins", None).await?;
     let source = test.dir.path().join("variables.json");
     fs::write(
         &source,
         r#"{
-  "LEGACY": {
+  "CURRENT": {
     "value": "file loses",
+    "created_at": "2026-06-30T10:00:00Z",
+    "updated_at": "2026-06-30T10:01:00Z"
+  },
+  "LEGACY": {
+    "value": "file imports",
     "created_at": "2026-06-30T10:00:00Z",
     "updated_at": "2026-06-30T10:01:00Z"
   }
@@ -287,16 +292,34 @@ async fn import_skips_legacy_file_when_sqlite_already_has_rows() -> anyhow::Resu
 
     let report = import_legacy_json_once(&test.pool, &source)
         .await?
-        .expect("existing SQLite rows should report skipped import");
+        .expect("existing legacy file should report import");
 
-    assert_eq!(report.status, ImportStatus::SkippedExistingTarget);
-    assert_eq!(report.imported_rows, 0);
+    assert_eq!(report.imported_rows, 1);
     assert_eq!(report.skipped_rows, 1);
-    assert_eq!(report.variable_names, vec!["CURRENT"]);
-    assert!(test.store.get("LEGACY").await?.is_none());
+    assert_eq!(report.variable_names, vec!["LEGACY"]);
     assert_eq!(
-        legacy_import_status(&test.pool).await?,
-        Some("skipped_existing_target".to_string())
+        test.store.get("CURRENT").await?.unwrap().value,
+        "sqlite wins"
+    );
+    assert_eq!(
+        test.store.get("LEGACY").await?.unwrap().value,
+        "file imports"
+    );
+    assert!(!source.exists());
+    assert_eq!(
+        fs::read_to_string(&report.backup_path).await?,
+        r#"{
+  "CURRENT": {
+    "value": "file loses",
+    "created_at": "2026-06-30T10:00:00Z",
+    "updated_at": "2026-06-30T10:01:00Z"
+  },
+  "LEGACY": {
+    "value": "file imports",
+    "created_at": "2026-06-30T10:00:00Z",
+    "updated_at": "2026-06-30T10:01:00Z"
+  }
+}"#
     );
 
     Ok(())
@@ -316,6 +339,8 @@ async fn import_invalid_json_or_name_fails_when_sqlite_is_empty() -> anyhow::Res
             .to_string()
             .contains(&invalid_json_source.display().to_string())
     );
+    assert!(invalid_json_source.exists());
+    assert!(legacy_backups(invalid_json.dir.path()).await?.is_empty());
 
     let invalid_name = test_store().await?;
     let invalid_name_source = invalid_name.dir.path().join("variables.json");
@@ -338,20 +363,28 @@ async fn import_invalid_json_or_name_fails_when_sqlite_is_empty() -> anyhow::Res
     assert!(message.contains(&invalid_name_source.display().to_string()));
     assert!(message.contains("BAD-NAME"));
     assert!(!message.contains("secret-ish value"));
+    assert!(invalid_name_source.exists());
+    assert!(legacy_backups(invalid_name.dir.path()).await?.is_empty());
 
     Ok(())
 }
 
-async fn legacy_import_count(pool: &fabro_db::DbPool) -> anyhow::Result<i64> {
-    Ok(sqlx::query_scalar("SELECT COUNT(*) FROM legacy_imports")
-        .fetch_one(pool)
-        .await?)
-}
-
-async fn legacy_import_status(pool: &fabro_db::DbPool) -> anyhow::Result<Option<String>> {
-    Ok(sqlx::query_scalar(
-        "SELECT status FROM legacy_imports WHERE import_name = 'variables-json-v1'",
-    )
-    .fetch_optional(pool)
-    .await?)
+async fn legacy_backups(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut entries = fs::read_dir(dir).await?;
+    let mut backups = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if file_name.starts_with("variables.json.imported-")
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("bak"))
+        {
+            backups.push(path);
+        }
+    }
+    backups.sort();
+    Ok(backups)
 }
