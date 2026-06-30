@@ -1656,16 +1656,8 @@ impl HookDefinition {
 
     #[must_use]
     pub fn is_blocking(&self) -> bool {
-        self.blocking.unwrap_or({
-            matches!(
-                self.event,
-                HookEvent::RunStart
-                    | HookEvent::StageStart
-                    | HookEvent::EdgeSelected
-                    | HookEvent::PreToolUse
-                    | HookEvent::SandboxReady
-            )
-        })
+        self.blocking
+            .unwrap_or_else(|| self.event.is_blocking_by_default())
     }
 
     #[must_use]
@@ -1695,7 +1687,7 @@ impl HookDefinition {
         if let Some(ref name) = self.name {
             return name.clone();
         }
-        let event = format!("{:?}", self.event).to_lowercase();
+        let event = self.event.to_string();
         match self.resolved_hook_type().as_deref() {
             Some(HookType::Command { command }) => {
                 let source = command.as_source();
@@ -1805,8 +1797,9 @@ pub enum AgentPermissions {
     Full,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::Display)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum HookEvent {
     RunStart,
     RunComplete,
@@ -1824,6 +1817,20 @@ pub enum HookEvent {
     PreToolUse,
     PostToolUse,
     PostToolUseFailure,
+}
+
+impl HookEvent {
+    #[must_use]
+    pub fn is_blocking_by_default(self) -> bool {
+        matches!(
+            self,
+            Self::RunStart
+                | Self::StageStart
+                | Self::EdgeSelected
+                | Self::PreToolUse
+                | Self::SandboxReady
+        )
+    }
 }
 
 #[derive(

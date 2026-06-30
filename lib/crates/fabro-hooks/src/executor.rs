@@ -12,6 +12,8 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::types::{Message, Request, ToolResult};
 use fabro_model::Catalog;
+use fabro_redact::DisplaySafeUrl;
+use fabro_types::settings::interp::Namespace;
 use fabro_types::settings::{InterpString, ResolveError};
 use fabro_util::env::{Env, SystemEnv};
 use tokio::process::Command as TokioCommand;
@@ -80,34 +82,78 @@ where
         .map(|resolved| resolved.value)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "hook HTTP logs use the unresolved token source, not the resolved URL, so env-sourced \
+              URL material is not logged; DisplaySafeUrl handles literal credentials in parseable \
+              source URLs, and unparseable sources are not logged"
+)]
+fn safe_url_source_for_log(url: &InterpString) -> String {
+    let source = url.as_source();
+    DisplaySafeUrl::parse(&source).map_or_else(
+        |_| "<unparseable url source>".to_string(),
+        |url| url.redacted_string(),
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HeaderResolveError {
+    NotAllowed { name: String },
+    Resolve(ResolveError),
+}
+
+impl fmt::Display for HeaderResolveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAllowed { name } => write!(
+                f,
+                "environment variable {name:?} referenced by an HTTP hook header is not listed in \
+                 allowed_env_vars"
+            ),
+            Self::Resolve(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for HeaderResolveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NotAllowed { .. } => None,
+            Self::Resolve(error) => Some(error),
+        }
+    }
+}
+
 /// Resolve an HTTP-hook **header** value at fire time, scoping its
 /// `{{ env.* }}` lookups to `allowed_env_vars`.
 ///
 /// Headers carry credentials, so unlike every other hook field they read env
 /// through an allowlist: a `{{ env.NAME }}` token resolves only when `NAME` is
-/// listed in the hook's `allowed_env_vars`. A name outside the allowlist looks
-/// up as absent, so it surfaces as the same fail-closed `Missing` error as an
-/// unset variable and the hook blocks instead of firing. An empty
-/// `allowed_env_vars` therefore permits no env vars in headers at all. This
-/// mirrors the previous template-based `with_env_lookup_allowed` behavior
-/// without reviving any template engine.
+/// listed in the hook's `allowed_env_vars`. A name outside the allowlist fails
+/// with a distinct error before any lookup, while an allowlisted-but-unset name
+/// still surfaces as the normal `Missing` error. An empty `allowed_env_vars`
+/// therefore permits no env vars in headers at all. This mirrors the previous
+/// template-based `with_env_lookup_allowed` behavior without reviving any
+/// template engine.
 fn resolve_header<E>(
     value: &InterpString,
     allowed_env_vars: &[String],
     env: &E,
-) -> Result<String, ResolveError>
+) -> Result<String, HeaderResolveError>
 where
     E: Env + ?Sized,
 {
-    value
-        .resolve(|name| {
-            if allowed_env_vars.iter().any(|allowed| allowed == name) {
-                env.var(name).ok()
-            } else {
-                None
-            }
-        })
-        .map(|resolved| resolved.value)
+    if let Some(name) = value.names(Namespace::Env).into_iter().find(|name| {
+        !allowed_env_vars
+            .iter()
+            .any(|allowed| allowed.as_str() == *name)
+    }) {
+        return Err(HeaderResolveError::NotAllowed {
+            name: name.to_string(),
+        });
+    }
+
+    resolve_interp(value, env).map_err(HeaderResolveError::Resolve)
 }
 
 /// Executes hooks via shell commands or HTTP POST.
@@ -166,7 +212,7 @@ impl HookExecutorImpl {
         env: &E,
     ) -> HookDecision
     where
-        E: Env + Clone + Send + Sync + fmt::Debug + 'static,
+        E: Env + ?Sized,
     {
         let command = match resolve_interp(command, env) {
             Ok(command) => command,
@@ -325,7 +371,7 @@ impl HookExecutorImpl {
         catalog: Arc<Catalog>,
     ) -> HookDecision
     where
-        E: Env + Clone + Send + Sync + fmt::Debug + 'static,
+        E: Env + ?Sized,
     {
         let (prompt, model) = match Self::resolve_prompt_and_model(prompt, model, env) {
             Ok(resolved) => resolved,
@@ -394,7 +440,7 @@ impl HookExecutorImpl {
         catalog: Arc<Catalog>,
     ) -> HookDecision
     where
-        E: Env + Clone + Send + Sync + fmt::Debug + 'static,
+        E: Env + ?Sized,
     {
         let (prompt, model) = match Self::resolve_prompt_and_model(prompt, model, env) {
             Ok(resolved) => resolved,
@@ -538,27 +584,16 @@ impl HookExecutorImpl {
         env: &E,
     ) -> HookDecision
     where
-        E: Env + Clone + Send + Sync + fmt::Debug + 'static,
+        E: Env + ?Sized,
     {
         let resolved_url = match resolve_interp(url, env) {
             Ok(url) => url,
             Err(error) => {
-                // Log the unresolved source, never the resolved URL, so a
-                // credential embedded in the URL (userinfo/query) cannot leak.
-                #[expect(
-                    clippy::disallowed_methods,
-                    reason = "logging the unresolved token source on a failure path is \
-                              deliberate: it avoids materializing a URL-embedded credential \
-                              in logs, and resolution has already failed so there is nothing \
-                              resolved to log"
-                )]
-                {
-                    tracing::error!(
-                        url_source = %url.as_source(),
-                        error = %error,
-                        "HTTP hook URL env resolution failed, not firing"
-                    );
-                }
+                tracing::error!(
+                    url_source = %safe_url_source_for_log(url),
+                    error = %error,
+                    "HTTP hook URL env resolution failed, not firing"
+                );
                 return HookDecision::Block {
                     reason: Some(error.to_string()),
                 };
@@ -584,27 +619,18 @@ impl HookExecutorImpl {
         if let Some(hdrs) = headers {
             for (key, value) in hdrs {
                 // Headers resolve through the per-hook env allowlist: a
-                // `{{ env.NAME }}` not in `allowed_env_vars` looks up as absent
-                // and blocks (fail-closed), exactly like an unset variable.
+                // `{{ env.NAME }}` not in `allowed_env_vars` blocks before any
+                // lookup, while an allowlisted-but-unset name still fails as
+                // missing.
                 let interpolated = match resolve_header(value, allowed_env_vars, env) {
                     Ok(rendered) => rendered,
                     Err(error) => {
-                        // Log the unresolved URL source, not the resolved URL,
-                        // so a URL-embedded credential cannot leak to logs.
-                        #[expect(
-                            clippy::disallowed_methods,
-                            reason = "logging the unresolved URL token source on a failure \
-                                      path is deliberate: it avoids materializing a \
-                                      URL-embedded credential in logs"
-                        )]
-                        {
-                            tracing::error!(
-                                url_source = %url.as_source(),
-                                header = %key,
-                                error = %error,
-                                "HTTP hook header env resolution failed, not firing"
-                            );
-                        }
+                        tracing::error!(
+                            url_source = %safe_url_source_for_log(url),
+                            header = %key,
+                            error = %error,
+                            "HTTP hook header env resolution failed, not firing"
+                        );
                         return HookDecision::Block {
                             reason: Some(error.to_string()),
                         };
@@ -617,14 +643,18 @@ impl HookExecutorImpl {
         let response = match request.send().await {
             Ok(resp) => resp,
             Err(e) => {
-                tracing::warn!(url = %resolved_url, error = %e, "HTTP hook request failed, proceeding");
+                tracing::warn!(
+                    url_source = %safe_url_source_for_log(url),
+                    error = %e,
+                    "HTTP hook request failed, proceeding"
+                );
                 return HookDecision::Proceed;
             }
         };
 
         if !response.status().is_success() {
             tracing::warn!(
-                url = %resolved_url,
+                url_source = %safe_url_source_for_log(url),
                 status = response.status().as_u16(),
                 "HTTP hook returned non-2xx, proceeding"
             );
@@ -634,7 +664,11 @@ impl HookExecutorImpl {
         let body = match response.text().await {
             Ok(text) => text,
             Err(e) => {
-                tracing::warn!(url = %resolved_url, error = %e, "HTTP hook body read failed, proceeding");
+                tracing::warn!(
+                    url_source = %safe_url_source_for_log(url),
+                    error = %e,
+                    "HTTP hook body read failed, proceeding"
+                );
                 return HookDecision::Proceed;
             }
         };
@@ -646,7 +680,11 @@ impl HookExecutorImpl {
         match serde_json::from_str::<HookDecision>(body.trim()) {
             Ok(decision) => decision,
             Err(e) => {
-                tracing::warn!(url = %resolved_url, error = %e, "HTTP hook response parse failed, proceeding");
+                tracing::warn!(
+                    url_source = %safe_url_source_for_log(url),
+                    error = %e,
+                    "HTTP hook response parse failed, proceeding"
+                );
                 HookDecision::Proceed
             }
         }
@@ -1125,9 +1163,28 @@ mod tests {
         InterpString::parse(value)
     }
 
+    #[test]
+    fn safe_url_source_for_log_redacts_parseable_url_source() {
+        let safe = safe_url_source_for_log(&interp(
+            "https://user:secret@example.com/hook?token=literal&keep=value",
+        ));
+
+        assert_eq!(
+            safe,
+            "https://user:****@example.com/hook?token=****&keep=value"
+        );
+    }
+
+    #[test]
+    fn safe_url_source_for_log_hides_unparseable_url_source() {
+        let safe = safe_url_source_for_log(&interp("{{ env.FABRO_TEST_HOOK_URL }}"));
+
+        assert_eq!(safe, "<unparseable url source>");
+    }
+
     // Headers resolve `{{ env.NAME }}` tokens through the per-hook
     // `allowed_env_vars` allowlist: an allowlisted name resolves, anything else
-    // looks up as absent and fails closed.
+    // fails closed before lookup.
     #[test]
     fn header_resolves_allowlisted_var() {
         let env = test_env(&[("FABRO_TEST_KEY_1", "secret123")]);
@@ -1141,8 +1198,8 @@ mod tests {
     }
 
     // Fail-closed: a header may not read an env var that is set in the process
-    // but missing from `allowed_env_vars`. It resolves as absent (a hard error),
-    // so the value never reaches the request.
+    // but missing from `allowed_env_vars`. This is distinct from an unset
+    // allowlisted variable, so the block reason points at the allowlist.
     #[test]
     fn header_rejects_unlisted_var() {
         let env = test_env(&[("FABRO_TEST_KEY_3", "should_not_appear")]);
@@ -1152,7 +1209,9 @@ mod tests {
             &env,
         )
         .unwrap_err();
-        assert_eq!(err.name, "FABRO_TEST_KEY_3");
+        assert_eq!(err, HeaderResolveError::NotAllowed {
+            name: "FABRO_TEST_KEY_3".to_string(),
+        });
     }
 
     #[test]
@@ -1164,7 +1223,12 @@ mod tests {
             &env,
         )
         .unwrap_err();
-        assert_eq!(err.name, "FABRO_TEST_KEY_3");
+        match err {
+            HeaderResolveError::Resolve(error) => assert_eq!(error.name, "FABRO_TEST_KEY_3"),
+            HeaderResolveError::NotAllowed { .. } => {
+                panic!("expected missing token resolve error, got {err:?}")
+            }
+        }
     }
 
     // The value stays a typed `InterpString`: it resolves at fire time from its

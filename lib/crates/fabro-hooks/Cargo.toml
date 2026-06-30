@@ -15,10 +15,9 @@ workspace = true
 [dependencies]
 fabro-agent = { path = "../fabro-agent" }
 fabro-auth = { path = "../fabro-auth" }
-fabro-config = { path = "../fabro-config" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
-fabro-template = { path = "../fabro-template" }
+fabro-redact.workspace = true
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-http.workspace = true

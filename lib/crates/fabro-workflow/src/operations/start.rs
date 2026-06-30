@@ -16,10 +16,9 @@ use fabro_sandbox::from_environment::{
 use fabro_sandbox::{DockerSandboxOptions, SandboxSpec};
 use fabro_static::EnvVars;
 use fabro_types::settings::run::{
-    ApprovalMode, HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
-    HookType as ResolvedHookType, McpServerSettings as ResolvedMcpServerSettings,
-    PullRequestSettings, ResolvedMcpEntry, RunMode, RunModelSettings as ResolvedRunModelSettings,
-    RunNamespace as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
+    ApprovalMode, McpServerSettings as ResolvedMcpServerSettings, PullRequestSettings,
+    ResolvedMcpEntry, RunMode, RunModelSettings as ResolvedRunModelSettings,
+    RunNamespace as ResolvedRunSettings,
 };
 use fabro_types::settings::{ModelRegistry, ResolvedModelRef};
 use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
@@ -476,7 +475,7 @@ impl RunSession {
                 setup_command_timeout_ms: resolved.prepare.timeout_ms,
             },
             hooks: fabro_hooks::HookSettings {
-                hooks: resolved.hooks.iter().map(runtime_hook_definition).collect(),
+                hooks: resolved.hooks.clone(),
             },
             sandbox_env,
             seed_context: None,
@@ -702,72 +701,6 @@ fn runtime_mcp_server(
             err,
         )
     })
-}
-
-fn runtime_hook_definition(definition: &ResolvedHookDefinition) -> fabro_hooks::HookDefinition {
-    fabro_hooks::HookDefinition {
-        name:       definition.name.clone(),
-        event:      match definition.event {
-            ResolvedHookEvent::RunStart => fabro_hooks::HookEvent::RunStart,
-            ResolvedHookEvent::RunComplete => fabro_hooks::HookEvent::RunComplete,
-            ResolvedHookEvent::RunFailed => fabro_hooks::HookEvent::RunFailed,
-            ResolvedHookEvent::StageStart => fabro_hooks::HookEvent::StageStart,
-            ResolvedHookEvent::StageComplete => fabro_hooks::HookEvent::StageComplete,
-            ResolvedHookEvent::StageFailed => fabro_hooks::HookEvent::StageFailed,
-            ResolvedHookEvent::StageRetrying => fabro_hooks::HookEvent::StageRetrying,
-            ResolvedHookEvent::EdgeSelected => fabro_hooks::HookEvent::EdgeSelected,
-            ResolvedHookEvent::ParallelStart => fabro_hooks::HookEvent::ParallelStart,
-            ResolvedHookEvent::ParallelComplete => fabro_hooks::HookEvent::ParallelComplete,
-            ResolvedHookEvent::SandboxReady => fabro_hooks::HookEvent::SandboxReady,
-            ResolvedHookEvent::SandboxCleanup => fabro_hooks::HookEvent::SandboxCleanup,
-            ResolvedHookEvent::CheckpointSaved => fabro_hooks::HookEvent::CheckpointSaved,
-            ResolvedHookEvent::PreToolUse => fabro_hooks::HookEvent::PreToolUse,
-            ResolvedHookEvent::PostToolUse => fabro_hooks::HookEvent::PostToolUse,
-            ResolvedHookEvent::PostToolUseFailure => fabro_hooks::HookEvent::PostToolUseFailure,
-        },
-        command:    definition.command.clone(),
-        hook_type:  definition.hook_type.as_ref().map(runtime_hook_type),
-        matcher:    definition.matcher.clone(),
-        blocking:   definition.blocking,
-        timeout_ms: definition.timeout_ms,
-        sandbox:    definition.sandbox,
-    }
-}
-
-fn runtime_hook_type(hook_type: &ResolvedHookType) -> fabro_hooks::HookType {
-    match hook_type {
-        ResolvedHookType::Command { command } => fabro_hooks::HookType::Command {
-            command: command.clone(),
-        },
-        ResolvedHookType::Http {
-            url,
-            headers,
-            allowed_env_vars,
-            tls,
-        } => fabro_hooks::HookType::Http {
-            url:              url.clone(),
-            headers:          headers.clone(),
-            allowed_env_vars: allowed_env_vars.clone(),
-            tls:              match tls {
-                ResolvedTlsMode::Verify => fabro_hooks::TlsMode::Verify,
-                ResolvedTlsMode::NoVerify => fabro_hooks::TlsMode::NoVerify,
-                ResolvedTlsMode::Off => fabro_hooks::TlsMode::Off,
-            },
-        },
-        ResolvedHookType::Prompt { prompt, model } => fabro_hooks::HookType::Prompt {
-            prompt: prompt.clone(),
-            model:  model.clone(),
-        },
-        ResolvedHookType::Agent {
-            prompt,
-            model,
-            max_tool_rounds,
-        } => fabro_hooks::HookType::Agent {
-            prompt:          prompt.clone(),
-            model:           model.clone(),
-            max_tool_rounds: *max_tool_rounds,
-        },
-    }
 }
 
 impl RunSession {
