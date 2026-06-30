@@ -12,6 +12,7 @@ import {
   HumanInTheLoopApi,
   InsightsApi,
   InstallApi,
+  MCPServersApi,
   ModelsApi,
   RunInternalsApi,
   RunOutputsApi,
@@ -93,6 +94,11 @@ export const humanInTheLoopApi = new HumanInTheLoopApi(
   generatedAxios,
 );
 export const insightsApi = new InsightsApi(
+  generatedApiConfiguration,
+  "",
+  generatedAxios,
+);
+export const mcpServersApi = new MCPServersApi(
   generatedApiConfiguration,
   "",
   generatedAxios,

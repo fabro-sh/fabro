@@ -13,6 +13,8 @@ import type {
   EventEnvelope,
   ListRunsDirectionEnum,
   ListRunsSortEnum,
+  McpServer,
+  McpServerListResponse,
   Model,
   PaginatedRunCommitList,
   PaginatedRunFileList,
@@ -53,6 +55,7 @@ import {
   generatedAxios,
   humanInTheLoopApi,
   insightsApi,
+  mcpServersApi,
   modelsApi,
   runInternalsApi,
   runOutputsApi,
@@ -441,6 +444,20 @@ export function useEnvironment(id: string | undefined) {
   return useSWR<Environment | null>(
     id ? queryKeys.environments.detail(id) : null,
     id ? () => apiNullableData(() => environmentsApi.retrieveEnvironment(id)) : null,
+  );
+}
+
+export function useMcpServers() {
+  return useSWR<McpServerListResponse>(
+    queryKeys.mcpServers.list(),
+    () => apiData(() => mcpServersApi.listMcpServers()),
+  );
+}
+
+export function useMcpServer(id: string | undefined) {
+  return useSWR<McpServer | null>(
+    id ? queryKeys.mcpServers.detail(id) : null,
+    id ? () => apiNullableData(() => mcpServersApi.retrieveMcpServer(id)) : null,
   );
 }
 

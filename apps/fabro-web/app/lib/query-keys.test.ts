@@ -51,6 +51,12 @@ describe("queryKeys", () => {
     ]);
     expect(queryKeys.runs.sandbox("run 1")).toEqual(["runs", "sandbox", "run 1"]);
     expect(queryKeys.system.integrations()).toEqual(["system", "integrations"]);
+    expect(queryKeys.mcpServers.list()).toEqual(["mcp-servers", "list"]);
+    expect(queryKeys.mcpServers.detail("github")).toEqual([
+      "mcp-servers",
+      "detail",
+      "github",
+    ]);
     expect(queryKeys.system.attachUrl()).toBe("/api/v1/attach");
     expect(queryKeys.runs.attachUrl("run 1")).toBe("/api/v1/runs/run%201/attach");
   });

@@ -38,4 +38,12 @@ describe("browser router", () => {
 
     expect(paths).toContain("/settings/monitoring");
   });
+
+  test("exposes MCP server settings pages", () => {
+    const paths = collectPaths(routes);
+
+    expect(paths).toContain("/settings/mcps");
+    expect(paths).toContain("/settings/mcps/new");
+    expect(paths).toContain("/settings/mcps/:id/edit");
+  });
 });

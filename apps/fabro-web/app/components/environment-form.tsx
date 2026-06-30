@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { Disclosure, DisclosureButton, DisclosurePanel, Switch } from "@headlessui/react";
-import { PlusIcon, XMarkIcon } from "@heroicons/react/16/solid";
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import {
   EnvironmentApiDockerfileSourceInlineTypeEnum,
@@ -19,6 +18,12 @@ import type {
 
 import { Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
+import {
+  KeyValueEditor,
+  entriesFromMap,
+  mapFromEntries,
+  type KeyValueEntry,
+} from "./key-value-editor";
 
 // Providers a managed environment can be created with. `local` is a reserved,
 // in-memory environment, never a managed-environment provider, so it is never
@@ -44,11 +49,6 @@ const ENVIRONMENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const CPU = { min: 1, max: 8, step: 1, default: 4 };
 const MEMORY = { min: 1, max: 16, step: 1, default: 8 };
 const DISK = { min: 1, max: 20, step: 1, default: 16 };
-
-interface KeyValueEntry {
-  key: string;
-  value: string;
-}
 
 // An environment image comes from exactly one source: a prebuilt image
 // reference or an inline Dockerfile. The form keeps both field values around so
@@ -224,18 +224,6 @@ function lifecycleFromForm(values: EnvironmentFormValues): EnvironmentLifecycleS
     stop_on_terminal: values.stopOnTerminal,
     auto_stop:        values.autoStop.trim() || null,
   };
-}
-
-function entriesFromMap(map: { [key: string]: string }): KeyValueEntry[] {
-  return Object.entries(map).map(([key, value]) => ({ key, value }));
-}
-
-function mapFromEntries(entries: KeyValueEntry[]): { [key: string]: string } {
-  return Object.fromEntries(
-    entries
-      .map((entry): [string, string] => [entry.key.trim(), entry.value])
-      .filter((entry) => entry[0] !== ""),
-  );
 }
 
 function parseImageSource(value: string): ImageSource {
@@ -439,82 +427,6 @@ export function EnvironmentFormFields({
         </p>
       ) : null}
     </>
-  );
-}
-
-function KeyValueEditor({
-  entries,
-  onChange,
-  keyPlaceholder,
-  valuePlaceholder,
-  addLabel,
-}: {
-  entries: KeyValueEntry[];
-  onChange: (entries: KeyValueEntry[]) => void;
-  keyPlaceholder: string;
-  valuePlaceholder: string;
-  addLabel: string;
-}) {
-  function update(index: number, partial: Partial<KeyValueEntry>) {
-    onChange(entries.map((entry, i) => (i === index ? { ...entry, ...partial } : entry)));
-  }
-
-  return (
-    <div className="space-y-2">
-      {entries.map((entry, index) => (
-        <div key={index} className="flex items-center gap-2">
-          <input
-            type="text"
-            aria-label="Key"
-            value={entry.key}
-            onChange={(e) => update(index, { key: e.target.value })}
-            placeholder={keyPlaceholder}
-            autoComplete="off"
-            spellCheck={false}
-            className={`${INPUT_CLASS} font-mono`}
-          />
-          <input
-            type="text"
-            aria-label="Value"
-            value={entry.value}
-            onChange={(e) => update(index, { value: e.target.value })}
-            placeholder={valuePlaceholder}
-            autoComplete="off"
-            spellCheck={false}
-            className={`${INPUT_CLASS} font-mono`}
-          />
-          <RemoveButton onClick={() => onChange(entries.filter((_, i) => i !== index))} />
-        </div>
-      ))}
-      <AddButton label={addLabel} onClick={() => onChange([...entries, { key: "", value: "" }])} />
-    </div>
-  );
-}
-
-function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-2.5 py-1 text-xs font-medium text-fg-3 transition-colors hover:border-line-strong hover:bg-panel hover:text-fg"
-    >
-      <PlusIcon className="size-3.5" aria-hidden="true" />
-      {label}
-    </button>
-  );
-}
-
-function RemoveButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label="Remove row"
-      title="Remove"
-      className="flex size-9 shrink-0 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-overlay hover:text-coral"
-    >
-      <XMarkIcon className="size-4" aria-hidden="true" />
-    </button>
   );
 }
 

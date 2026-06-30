@@ -121,4 +121,8 @@ export const queryKeys = {
     list: () => ["environments", "list"] as const,
     detail: (id: string) => ["environments", "detail", id] as const,
   },
+  mcpServers: {
+    list: () => ["mcp-servers", "list"] as const,
+    detail: (id: string) => ["mcp-servers", "detail", id] as const,
+  },
 };

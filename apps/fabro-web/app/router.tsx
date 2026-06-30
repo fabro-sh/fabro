@@ -41,6 +41,9 @@ import * as SettingsSandboxes from "./routes/settings-sandboxes";
 import * as SettingsEnvironments from "./routes/settings-environments";
 import * as SettingsEnvironmentsNew from "./routes/settings-environments-new";
 import * as SettingsEnvironmentsEdit from "./routes/settings-environments-edit";
+import * as SettingsMcps from "./routes/settings-mcps";
+import * as SettingsMcpsNew from "./routes/settings-mcps-new";
+import * as SettingsMcpsEdit from "./routes/settings-mcps-edit";
 import * as SettingsSecrets from "./routes/settings-secrets";
 import * as SettingsSecretsNew from "./routes/settings-secrets-new";
 import * as SettingsVariables from "./routes/settings-variables";
@@ -154,6 +157,9 @@ export const routes: RouteObject[] = [
               route("environments", SettingsEnvironments),
               route("environments/new", SettingsEnvironmentsNew),
               route("environments/:id/edit", SettingsEnvironmentsEdit),
+              route("mcps", SettingsMcps),
+              route("mcps/new", SettingsMcpsNew),
+              route("mcps/:id/edit", SettingsMcpsEdit),
               route("variables", SettingsVariables),
               route("variables/new", SettingsVariablesNew),
               route("variables/:name/edit", SettingsVariablesEdit),

@@ -74,6 +74,13 @@ export const navSections: NavSection[] = [
         match: (p) => p.startsWith("/settings/environments"),
       },
       {
+        name: "MCP servers",
+        href: "/settings/mcps",
+        icon: PuzzlePieceIcon,
+        description: "Server-managed MCP servers you can enable by name in workflows.",
+        match: (p) => p.startsWith("/settings/mcps"),
+      },
+      {
         name: "Variables",
         href: "/settings/variables",
         icon: CodeBracketIcon,
