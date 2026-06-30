@@ -1019,7 +1019,9 @@ mod run_agent_mcps {
 
     use std::collections::HashMap;
 
-    use fabro_types::settings::run::{McpServerSettings, McpTransport, ResolvedMcpEntry};
+    use fabro_types::settings::run::{
+        McpHttpProtocol, McpServerSettings, McpTransport, ResolvedMcpEntry,
+    };
 
     use crate::layers::Combine;
     use crate::tests::seeded_environment_catalog;
@@ -1043,7 +1045,7 @@ mod run_agent_mcps {
         HashMap::from([("sentry".to_string(), McpServerSettings {
             name: "sentry".to_string(),
             transport: McpTransport::Http {
-                protocol: fabro_types::settings::run::McpHttpProtocol::default(),
+                protocol: McpHttpProtocol::default(),
                 url:      "https://sentry.example.com/mcp".to_string(),
                 headers:  HashMap::from([(
                     "Authorization".to_string(),

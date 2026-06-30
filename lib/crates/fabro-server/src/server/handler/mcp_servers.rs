@@ -39,7 +39,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn list_mcp_servers(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
-    let data = state.mcp_server_store().list_views().await;
+    let data = state.mcp_server_store().list_views();
     let total = data.len();
     (
         StatusCode::OK,
@@ -75,7 +75,7 @@ async fn get_mcp_server(
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let id = parse_path_id(id)?;
-    match state.mcp_server_store().get(&id).await {
+    match state.mcp_server_store().get(&id) {
         Some(definition) => Ok(mcp_server_with_etag_response(StatusCode::OK, definition)),
         None => Err(ApiError::not_found(format!("mcp server not found: {id}"))),
     }

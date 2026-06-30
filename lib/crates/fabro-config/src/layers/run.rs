@@ -576,44 +576,12 @@ impl<'de> Deserialize<'de> for McpEntryLayer {
     where
         D: Deserializer<'de>,
     {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let serde_json::Value::Object(map) = &value else {
-            return Err(de::Error::custom("MCP entry must be a table"));
-        };
-
-        let has_reference_fields = map.contains_key("id");
-        let has_inline_fields = map.contains_key("type")
-            || map.contains_key("script")
-            || map.contains_key("command")
-            || map.contains_key("url")
-            || map.contains_key("headers")
-            || map.contains_key("port")
-            || map.contains_key("env")
-            || map.contains_key("startup_timeout")
-            || map.contains_key("tool_timeout");
-
-        if has_reference_fields && has_inline_fields {
-            return Err(de::Error::custom(
-                "MCP entry cannot mix catalog reference fields (`id`, `enabled`) with inline \
-                 server fields",
-            ));
-        }
-
-        if has_reference_fields {
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct McpReferenceLayer {
-                id:      String,
-                #[serde(default)]
-                enabled: Option<bool>,
-            }
-
-            let reference: McpReferenceLayer =
-                serde_json::from_value(value).map_err(de::Error::custom)?;
-            return Ok(Self::Reference {
-                id:      reference.id,
-                enabled: reference.enabled,
-            });
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct McpReferenceLayer {
+            id:      String,
+            #[serde(default)]
+            enabled: Option<bool>,
         }
 
         #[derive(Deserialize)]
@@ -663,6 +631,38 @@ impl<'de> Deserialize<'de> for McpEntryLayer {
                 #[serde(default)]
                 tool_timeout:    Option<Duration>,
             },
+        }
+
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let serde_json::Value::Object(map) = &value else {
+            return Err(de::Error::custom("MCP entry must be a table"));
+        };
+
+        let has_reference_fields = map.contains_key("id");
+        let has_inline_fields = map.contains_key("type")
+            || map.contains_key("script")
+            || map.contains_key("command")
+            || map.contains_key("url")
+            || map.contains_key("headers")
+            || map.contains_key("port")
+            || map.contains_key("env")
+            || map.contains_key("startup_timeout")
+            || map.contains_key("tool_timeout");
+
+        if has_reference_fields && has_inline_fields {
+            return Err(de::Error::custom(
+                "MCP entry cannot mix catalog reference fields (`id`, `enabled`) with inline \
+                 server fields",
+            ));
+        }
+
+        if has_reference_fields {
+            let reference: McpReferenceLayer =
+                serde_json::from_value(value).map_err(de::Error::custom)?;
+            return Ok(Self::Reference {
+                id:      reference.id,
+                enabled: reference.enabled,
+            });
         }
 
         match serde_json::from_value(value).map_err(de::Error::custom)? {

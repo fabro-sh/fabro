@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use fabro_types::settings::run::McpServerSettings;
 use fabro_types::{
     McpServerDefinition, McpServerDraft, McpServerId, McpServerReplace, McpServerRevision,
     McpServerView,
@@ -18,9 +19,8 @@ use crate::model;
 /// Durable per-file TOML store for server-managed MCP server definitions.
 ///
 /// Concrete by design (no trait): a future FS→SQL move is a one-time migration,
-/// not a runtime backend choice. The migration seam is the async, storage-
-/// agnostic method surface; only [`McpServerStore::load`] knows about the
-/// filesystem.
+/// not a runtime backend choice. The method surface keeps callers storage-
+/// agnostic; only [`McpServerStore::load`] knows about the filesystem.
 #[derive(Debug)]
 pub struct McpServerStore {
     dir:       PathBuf,
@@ -55,23 +55,21 @@ impl McpServerStore {
         self.defs.write().expect("mcp server store lock poisoned")
     }
 
-    pub async fn list(&self) -> Vec<McpServerDefinition> {
+    pub fn list(&self) -> Vec<McpServerDefinition> {
         let defs = self.read_defs();
         let mut values = defs.values().cloned().collect::<Vec<_>>();
         values.sort_by(|left, right| left.id.cmp(&right.id));
         values
     }
 
-    pub async fn list_views(&self) -> Vec<McpServerView> {
+    pub fn list_views(&self) -> Vec<McpServerView> {
         let defs = self.read_defs();
         let mut values = defs.values().map(McpServerView::from).collect::<Vec<_>>();
         values.sort_by(|left, right| left.id.cmp(&right.id));
         values
     }
 
-    pub fn catalog_settings(
-        &self,
-    ) -> HashMap<String, fabro_types::settings::run::McpServerSettings> {
+    pub fn catalog_settings(&self) -> HashMap<String, McpServerSettings> {
         let defs = self.read_defs();
         defs.iter()
             .map(|(id, definition)| (id.to_string(), server_settings_from_definition(definition)))
@@ -81,14 +79,14 @@ impl McpServerStore {
     /// Sorted ids only, without cloning the (potentially sensitive) env/header
     /// maps carried by full definitions. Used by missing-reference errors to
     /// list available ids cheaply.
-    pub async fn ids(&self) -> Vec<McpServerId> {
+    pub fn ids(&self) -> Vec<McpServerId> {
         let defs = self.read_defs();
         let mut ids = defs.keys().cloned().collect::<Vec<_>>();
         ids.sort();
         ids
     }
 
-    pub async fn get(&self, id: &McpServerId) -> Option<McpServerDefinition> {
+    pub fn get(&self, id: &McpServerId) -> Option<McpServerDefinition> {
         self.read_defs().get(id).cloned()
     }
 
@@ -171,10 +169,8 @@ fn check_revision(
     Ok(())
 }
 
-fn server_settings_from_definition(
-    definition: &McpServerDefinition,
-) -> fabro_types::settings::run::McpServerSettings {
-    fabro_types::settings::run::McpServerSettings {
+fn server_settings_from_definition(definition: &McpServerDefinition) -> McpServerSettings {
+    McpServerSettings {
         name:                 definition.id.to_string(),
         transport:            definition.transport.clone(),
         current_dir:          None,
@@ -367,8 +363,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = McpServerStore::load(dir.path().join("mcps")).unwrap();
 
-        assert!(store.list().await.is_empty());
-        assert!(store.ids().await.is_empty());
+        assert!(store.list().is_empty());
+        assert!(store.ids().is_empty());
     }
 
     #[tokio::test]
@@ -397,7 +393,7 @@ url = "https://sentry.example.com/mcp"
         .unwrap();
 
         let store = McpServerStore::load(&mcp_dir).unwrap();
-        let defs = store.list().await;
+        let defs = store.list();
 
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].id.as_str(), "sentry");
@@ -447,10 +443,10 @@ url = "https://sentry.example.com/mcp"
             McpServerRevision::from_bytes(persisted.as_bytes())
         );
 
-        assert_eq!(store.get(&created.id).await.unwrap(), created);
-        let listed = store.list().await;
+        assert_eq!(store.get(&created.id).unwrap(), created);
+        let listed = store.list();
         assert_eq!(listed.len(), 1);
-        assert_eq!(store.ids().await, vec![created.id.clone()]);
+        assert_eq!(store.ids(), vec![created.id.clone()]);
 
         let replaced = store
             .replace(&created.id, &created.revision, replacement("Sentry v2"))
@@ -458,13 +454,10 @@ url = "https://sentry.example.com/mcp"
             .unwrap();
         assert_ne!(replaced.revision, created.revision);
         assert_eq!(replaced.display_name, "Sentry v2");
-        assert_eq!(
-            store.get(&created.id).await.unwrap().revision,
-            replaced.revision
-        );
+        assert_eq!(store.get(&created.id).unwrap().revision, replaced.revision);
 
         store.delete(&created.id, &replaced.revision).await.unwrap();
-        assert!(store.get(&created.id).await.is_none());
+        assert!(store.get(&created.id).is_none());
         assert!(!path.exists());
     }
 
@@ -482,7 +475,7 @@ url = "https://sentry.example.com/mcp"
         assert!(matches!(err, McpServerStoreError::StaleRevision { .. }));
 
         // The on-disk and in-memory definition is unchanged after a rejected replace.
-        assert_eq!(store.get(&created.id).await.unwrap(), created);
+        assert_eq!(store.get(&created.id).unwrap(), created);
     }
 
     #[tokio::test]
