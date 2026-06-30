@@ -12,7 +12,7 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::types::{Message, Request, ToolResult};
 use fabro_model::Catalog;
-use fabro_redact::DisplaySafeUrl;
+use fabro_redact::redacted_url_for_log;
 use fabro_types::settings::interp::Namespace;
 use fabro_types::settings::{InterpString, ResolveError};
 use fabro_util::env::{Env, SystemEnv};
@@ -85,15 +85,11 @@ where
 #[expect(
     clippy::disallowed_methods,
     reason = "hook HTTP logs use the unresolved token source, not the resolved URL, so env-sourced \
-              URL material is not logged; DisplaySafeUrl handles literal credentials in parseable \
-              source URLs, and unparseable sources are not logged"
+              URL material is not logged; redacted_url_for_log masks literal credentials in \
+              parseable source URLs and replaces unparseable sources with a placeholder"
 )]
 fn safe_url_source_for_log(url: &InterpString) -> String {
-    let source = url.as_source();
-    DisplaySafeUrl::parse(&source).map_or_else(
-        |_| "<unparseable url source>".to_string(),
-        |url| url.redacted_string(),
-    )
+    redacted_url_for_log(&url.as_source())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1179,7 +1175,7 @@ mod tests {
     fn safe_url_source_for_log_hides_unparseable_url_source() {
         let safe = safe_url_source_for_log(&interp("{{ env.FABRO_TEST_HOOK_URL }}"));
 
-        assert_eq!(safe, "<unparseable url source>");
+        assert_eq!(safe, "<invalid url>");
     }
 
     // Headers resolve `{{ env.NAME }}` tokens through the per-hook

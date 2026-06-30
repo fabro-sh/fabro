@@ -12,6 +12,20 @@ mod safe_url;
 pub use jsonl::{redact_json_value, redact_jsonl_line};
 pub use safe_url::{DisplaySafeUrl, DisplaySafeUrlError};
 
+/// Redact a URL string for log or error output.
+///
+/// Returns the credential-redacted form when `url` parses as a URL, or a fixed
+/// `"<invalid url>"` placeholder when it does not. This is the one place log
+/// sites should reach for instead of re-rolling the
+/// [`DisplaySafeUrl::parse`] + [`DisplaySafeUrl::redacted_string`] fallback
+/// themselves, so an unparseable or credential-bearing URL never leaks into a
+/// log line.
+#[must_use]
+pub fn redacted_url_for_log(url: &str) -> String {
+    DisplaySafeUrl::parse(url)
+        .map_or_else(|_| "<invalid url>".to_string(), |url| url.redacted_string())
+}
+
 /// A byte range within a string that should be redacted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Region {
@@ -67,6 +81,19 @@ mod tests {
     #[test]
     fn redact_string_no_secrets() {
         assert_eq!(redact_string("hello world"), "hello world");
+    }
+
+    #[test]
+    fn redacted_url_for_log_redacts_credentials() {
+        assert_eq!(
+            redacted_url_for_log("https://user:secret@example.com/hook?token=literal&keep=value"),
+            "https://user:****@example.com/hook?token=****&keep=value"
+        );
+    }
+
+    #[test]
+    fn redacted_url_for_log_uses_placeholder_when_unparseable() {
+        assert_eq!(redacted_url_for_log("{{ env.HOOK_URL }}"), "<invalid url>");
     }
 
     #[test]
