@@ -34,4 +34,5 @@ url.workspace = true
 
 [dev-dependencies]
 fabro-types = { path = ".", features = ["test-support"] }
+shlex = "1"
 tempfile = "3"

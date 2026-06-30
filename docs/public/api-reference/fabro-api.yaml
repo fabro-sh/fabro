@@ -13862,13 +13862,40 @@ components:
           format: int64
 
     PreparedStep:
+      description: |
+        A single resolved prepare step. The runnable part preserves the
+        script-vs-argv distinction via the `type` discriminator: a `script`
+        is a raw shell snippet kept verbatim, while a `command` is an argv
+        whose elements are shell-quoted and joined at the run boundary (after
+        `{{ env.* }}` resolution) so an interpolated value cannot inject shell
+        syntax. Optional per-step `env` is shared by both shapes.
       type: object
-      required: [command]
-      properties:
-        command:
-          type: string
-        env:
-          $ref: "#/components/schemas/StringMap"
+      required: [type]
+      oneOf:
+        - type: object
+          required: [type, script]
+          properties:
+            type:
+              type: string
+              enum: [script]
+            script:
+              type: string
+            env:
+              $ref: "#/components/schemas/StringMap"
+        - type: object
+          required: [type, command]
+          properties:
+            type:
+              type: string
+              enum: [command]
+            command:
+              type: array
+              items:
+                type: string
+            env:
+              $ref: "#/components/schemas/StringMap"
+      discriminator:
+        propertyName: type
 
     RunExecutionSettings:
       type: object

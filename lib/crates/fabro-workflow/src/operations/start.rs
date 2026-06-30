@@ -725,7 +725,11 @@ fn runtime_setup_commands(
         .steps
         .into_iter()
         .map(|step| SetupCommand {
-            command: step.command,
+            // Flatten the runnable part into the shell string AFTER env
+            // resolution: an argv `command` is shell-quoted per resolved
+            // element here so an interpolated value stays a single token; a
+            // `script` is kept verbatim.
+            command: step.to_shell_command(),
             env:     step.env,
         })
         .collect())

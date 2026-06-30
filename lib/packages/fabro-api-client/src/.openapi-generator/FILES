@@ -281,6 +281,8 @@ models/preflight-check-section.ts
 models/preflight-response.ts
 models/preflight-workflow-summary.ts
 models/prepared-step.ts
+models/prepared-step-one-of.ts
+models/prepared-step-one-of1.ts
 models/preview-url-request.ts
 models/preview-url-response.ts
 models/principal-agent.ts

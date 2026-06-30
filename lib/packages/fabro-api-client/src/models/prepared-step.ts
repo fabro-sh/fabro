@@ -13,8 +13,15 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PreparedStepOneOf } from './prepared-step-one-of';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PreparedStepOneOf1 } from './prepared-step-one-of1';
 
-export interface PreparedStep {
-    'command': string;
-    'env'?: { [key: string]: string; };
-}
+/**
+ * @type PreparedStep
+ * A single resolved prepare step. The runnable part preserves the script-vs-argv distinction via the `type` discriminator: a `script` is a raw shell snippet kept verbatim, while a `command` is an argv whose elements are shell-quoted and joined at the run boundary (after `{{ env.* }}` resolution) so an interpolated value cannot inject shell syntax. Optional per-step `env` is shared by both shapes.
+ */
+export type PreparedStep = PreparedStepOneOf | PreparedStepOneOf1;

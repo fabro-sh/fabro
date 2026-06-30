@@ -4,13 +4,12 @@ use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
     McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
-    NotificationRouteSettings, PreparedStep, PullRequestSettings, ResolvedMcpEntry,
-    RunAgentSettings, RunBranchSettings, RunCheckpointSettings, RunCloneSettings,
+    NotificationRouteSettings, PreparedStep, PreparedStepRun, PullRequestSettings,
+    ResolvedMcpEntry, RunAgentSettings, RunBranchSettings, RunCheckpointSettings, RunCloneSettings,
     RunExecutionSettings, RunGitSettings, RunGoal, RunIntegrationsGithubSettings,
     RunIntegrationsSettings, RunInterviewsSettings, RunMetaBranchSettings, RunModelControls,
     RunModelSettings, RunNamespace, RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
-use fabro_util::shell::shell_quote;
 
 use super::{ResolveError, resolve_run_environment};
 use crate::{
@@ -167,19 +166,22 @@ fn resolve_prepare(
 
     let mut steps = Vec::new();
     for (index, step) in prepare.steps.iter().enumerate() {
-        let command = match (&step.script, &step.command) {
-            // A `script` is a raw shell snippet: keep it verbatim so the shell
+        let run = match (&step.script, &step.command) {
+            // A `script` is a raw shell snippet: carry it verbatim so the shell
             // interprets it. Its `{{ env.* }}` tokens resolve at the run
             // boundary.
-            (Some(script), None) => script.as_source(),
-            // A `command` is an argv: shell-quote each element so an argument
-            // with spaces or quotes survives as a single token instead of
-            // being re-split by the shell.
-            (None, Some(argv)) => argv
-                .iter()
-                .map(|arg| shell_quote(&arg.as_source()))
-                .collect::<Vec<_>>()
-                .join(" "),
+            (Some(script), None) => PreparedStepRun::Script {
+                script: script.as_source(),
+            },
+            // A `command` is an argv: carry it as a vector of element source
+            // strings — neither pre-joined nor shell-quoted here. Each element's
+            // `{{ env.* }}` token resolves at the run boundary, and only the
+            // resolved value is shell-quoted (resolve-then-quote), so an
+            // interpolated value can never break out of its argument and inject
+            // shell syntax.
+            (None, Some(argv)) => PreparedStepRun::Command {
+                command: argv.iter().map(InterpString::as_source).collect(),
+            },
             (Some(_), Some(_)) | (None, None) => {
                 errors.push(ResolveError::Invalid {
                     path:   format!("run.prepare.steps[{index}]"),
@@ -189,7 +191,7 @@ fn resolve_prepare(
             }
         };
         steps.push(PreparedStep {
-            command,
+            run,
             env: step
                 .env
                 .iter()
@@ -627,6 +629,7 @@ mod resolve_prepare_tests {
     use std::collections::HashMap;
 
     use fabro_types::settings::InterpString;
+    use fabro_types::settings::run::PreparedStepRun;
 
     use super::{ResolveError, resolve_prepare};
     use crate::{PrepareStep, RunPrepareLayer};
@@ -655,7 +658,9 @@ mod resolve_prepare_tests {
         let steps = resolve(&layer);
 
         assert_eq!(steps.len(), 1);
-        assert_eq!(steps[0].command, "setup");
+        assert_eq!(steps[0].run, PreparedStepRun::Script {
+            script: "setup".to_string(),
+        });
         // The per-step env survives resolution in source form (its {{ env.* }}
         // token resolves later, at the run boundary).
         assert_eq!(
@@ -665,14 +670,14 @@ mod resolve_prepare_tests {
     }
 
     #[test]
-    fn argv_command_elements_are_shell_quoted() {
+    fn argv_command_elements_are_carried_in_source_form() {
         let layer = RunPrepareLayer {
             steps:   vec![PrepareStep {
                 script:  None,
                 command: Some(vec![
                     InterpString::parse("echo"),
                     InterpString::parse("hello world"),
-                    InterpString::parse("it's"),
+                    InterpString::parse("{{ env.USER_INPUT }}"),
                 ]),
                 env:     HashMap::new(),
             }],
@@ -681,10 +686,17 @@ mod resolve_prepare_tests {
 
         let steps = resolve(&layer);
 
-        // Each argv element is quoted independently so spaces and quotes do not
-        // re-split into extra shell words. `shlex` double-quotes a token that
-        // contains a single quote.
-        assert_eq!(steps[0].command, r#"echo 'hello world' "it's""#);
+        // Argv elements are carried as separate source strings, NOT joined and
+        // NOT shell-quoted here. Quoting happens at the run boundary, after
+        // `{{ env.* }}` resolution, so the resolved value (not the source
+        // token) is what gets quoted.
+        assert_eq!(steps[0].run, PreparedStepRun::Command {
+            command: vec![
+                "echo".to_string(),
+                "hello world".to_string(),
+                "{{ env.USER_INPUT }}".to_string(),
+            ],
+        });
     }
 
     #[test]
@@ -700,7 +712,9 @@ mod resolve_prepare_tests {
 
         let steps = resolve(&layer);
 
-        // A script is a raw shell snippet, not an argv: it must NOT be quoted.
-        assert_eq!(steps[0].command, "echo hello && ls -la");
+        // A script is a raw shell snippet, not an argv: it is carried verbatim.
+        assert_eq!(steps[0].run, PreparedStepRun::Script {
+            script: "echo hello && ls -la".to_string(),
+        });
     }
 }

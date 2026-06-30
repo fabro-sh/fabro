@@ -1944,7 +1944,7 @@ app_id = "fixture-app-id"
         // higher-precedence workflow layer wins over cli.
         assert_eq!(prepared.settings.run.prepare.steps.len(), 1);
         assert_eq!(
-            prepared.settings.run.prepare.steps[0].command,
+            prepared.settings.run.prepare.steps[0].to_shell_command(),
             "workflow-setup"
         );
         assert!(settings_json.pointer("/server").is_none());

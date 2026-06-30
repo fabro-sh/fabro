@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration as StdDuration;
 
+use fabro_util::shell;
 use serde::de::{self, Deserializer};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -107,7 +108,12 @@ impl RunNamespace {
         // run.scm.owner/repository were demoted and removed from this pass
         // (D2): values stay literal.
         for step in &mut self.prepare.steps {
-            substitute_string(&mut step.command, &mut lookup)?;
+            match &mut step.run {
+                PreparedStepRun::Script { script } => substitute_string(script, &mut lookup)?,
+                PreparedStepRun::Command { command } => {
+                    substitute_string_vec(command, &mut lookup)?;
+                }
+            }
             substitute_string_map(&mut step.env, &mut lookup)?;
         }
         // Only resolved inline servers carry substitutable templates; an
@@ -345,7 +351,7 @@ mod run_namespace_variable_substitution_tests {
     use super::{
         ArtifactsSettings, DockerfileSource, EnvironmentImageSettings, EnvironmentNetworkMode,
         EnvironmentNetworkSettings, HookDefinition, HookEvent, HookType, InterpString,
-        McpHttpProtocol, McpServerSettings, McpTransport, RunCheckpointSettings,
+        McpHttpProtocol, McpServerSettings, McpTransport, PreparedStepRun, RunCheckpointSettings,
         RunEnvironmentSettings, RunGoal, RunNamespace, RunPrepareSettings,
     };
 
@@ -361,8 +367,14 @@ mod run_namespace_variable_substitution_tests {
             ))),
             prepare: RunPrepareSettings {
                 steps:      vec![super::PreparedStep {
-                    command: "echo {{ vars.ENV }} {{ env.REGION }}".to_string(),
-                    env:     HashMap::from([(
+                    run: PreparedStepRun::Command {
+                        command: vec![
+                            "echo".to_string(),
+                            "{{ vars.ENV }}".to_string(),
+                            "{{ env.REGION }}".to_string(),
+                        ],
+                    },
+                    env: HashMap::from([(
                         "STAGE".to_string(),
                         "{{ vars.ENV }}-{{ env.REGION }}".to_string(),
                     )]),
@@ -427,7 +439,16 @@ mod run_namespace_variable_substitution_tests {
             Some("deploy prod in {{ env.REGION }}".to_string())
         );
         assert_eq!(run.prepare.steps.len(), 1);
-        assert_eq!(run.prepare.steps[0].command, "echo prod {{ env.REGION }}");
+        // `{{ vars.* }}` substitutes per argv element while `{{ env.* }}` is
+        // left for the run boundary.
+        let PreparedStepRun::Command { command } = &run.prepare.steps[0].run else {
+            panic!("expected command argv prepare step");
+        };
+        assert_eq!(command.as_slice(), [
+            "echo".to_string(),
+            "prod".to_string(),
+            "{{ env.REGION }}".to_string(),
+        ]);
         assert_eq!(
             run.prepare.steps[0].env.get("STAGE").map(String::as_str),
             Some("prod-{{ env.REGION }}")
@@ -697,9 +718,13 @@ impl Default for RunPrepareSettings {
 }
 
 impl RunPrepareSettings {
-    /// Resolve `{{ env.* }}` tokens in every prepare step's `command` and
-    /// per-step `env` values against `env_lookup`, returning a copy with
-    /// the tokens replaced and every other field preserved.
+    /// Resolve `{{ env.* }}` tokens in every prepare step's runnable part and
+    /// per-step `env` values against `env_lookup`, returning a copy with the
+    /// tokens replaced and every other field preserved. A `script` step's
+    /// snippet resolves in place; a `command` step's argv resolves per element
+    /// (each element is shell-quoted later, in
+    /// [`PreparedStep::to_shell_command`], so quoting applies to the resolved
+    /// value rather than the source token).
     ///
     /// This is the late, use-time half of prepare-step interpolation, the
     /// counterpart to the server-side `{{ vars.* }}` substitution in
@@ -720,7 +745,16 @@ impl RunPrepareSettings {
     ) -> Result<Self, ResolveError> {
         let mut resolved = self.clone();
         for step in &mut resolved.steps {
-            resolve_env_string(&mut step.command, &mut env_lookup)?;
+            match &mut step.run {
+                PreparedStepRun::Script { script } => {
+                    resolve_env_string(script, &mut env_lookup)?;
+                }
+                PreparedStepRun::Command { command } => {
+                    for element in command.iter_mut() {
+                        resolve_env_string(element, &mut env_lookup)?;
+                    }
+                }
+            }
             for value in step.env.values_mut() {
                 resolve_env_string(value, &mut env_lookup)?;
             }
@@ -729,16 +763,66 @@ impl RunPrepareSettings {
     }
 }
 
-/// A single resolved prepare step: a shell command to run plus the per-step
-/// environment variables it should see. Both the command and the env values are
+/// A single resolved prepare step: the thing to run plus the per-step
+/// environment variables it should see. The runnable part keeps the
+/// script-vs-argv distinction (see [`PreparedStepRun`]), and every string is
 /// carried in source form out of the config resolve layer; their `{{ env.* }}`
 /// tokens resolve at the run boundary via
 /// [`RunPrepareSettings::resolve_step_env`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PreparedStep {
-    pub command: String,
+    #[serde(flatten)]
+    pub run: PreparedStepRun,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub env:     HashMap<String, String>,
+    pub env: HashMap<String, String>,
+}
+
+/// The runnable part of a prepare step, preserving the script-vs-argv
+/// distinction so each is treated correctly when assembled into the shell
+/// command that runs via `bash -c`:
+///
+/// - [`Script`](PreparedStepRun::Script) is a raw shell snippet. It is kept
+///   verbatim — the shell interprets it as written.
+/// - [`Command`](PreparedStepRun::Command) is an argv: a vector of element
+///   source strings, neither pre-joined nor shell-quoted at config time. Its
+///   `{{ env.* }}` tokens resolve per element at the run boundary, and only
+///   then is each *resolved* element shell-quoted and joined. Resolving before
+///   quoting is what stops an interpolated env value from breaking out of its
+///   argument and injecting shell syntax.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PreparedStepRun {
+    Script { script: String },
+    Command { command: Vec<String> },
+}
+
+impl Default for PreparedStepRun {
+    fn default() -> Self {
+        Self::Script {
+            script: String::new(),
+        }
+    }
+}
+
+impl PreparedStep {
+    /// Flatten this step's runnable part into the single shell string that runs
+    /// via `bash -c`.
+    ///
+    /// For a script, the snippet is returned verbatim. For an argv `command`,
+    /// each element is shell-quoted and joined with spaces so an argument that
+    /// contains spaces or shell metacharacters survives as a single token. This
+    /// must run *after* [`RunPrepareSettings::resolve_step_env`] so the quoting
+    /// applies to the resolved values, not the `{{ env.* }}` source.
+    pub fn to_shell_command(&self) -> String {
+        match &self.run {
+            PreparedStepRun::Script { script } => script.clone(),
+            PreparedStepRun::Command { command } => command
+                .iter()
+                .map(|element| shell::shell_quote(element))
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1618,7 +1702,7 @@ mod resolve_step_env_tests {
     use std::collections::HashMap;
 
     use super::super::interp::ResolveErrorKind;
-    use super::{Namespace, PreparedStep, RunPrepareSettings};
+    use super::{Namespace, PreparedStep, PreparedStepRun, RunPrepareSettings};
 
     fn env_lookup(
         pairs: &'static [(&'static str, &'static str)],
@@ -1630,19 +1714,37 @@ mod resolve_step_env_tests {
         }
     }
 
+    fn script_step(script: &str, env: HashMap<String, String>) -> PreparedStep {
+        PreparedStep {
+            run: PreparedStepRun::Script {
+                script: script.to_string(),
+            },
+            env,
+        }
+    }
+
+    fn command_step(argv: &[&str], env: HashMap<String, String>) -> PreparedStep {
+        PreparedStep {
+            run: PreparedStepRun::Command {
+                command: argv.iter().map(|element| (*element).to_string()).collect(),
+            },
+            env,
+        }
+    }
+
     #[test]
     fn literal_step_passes_through() {
         let settings = RunPrepareSettings {
-            steps:      vec![PreparedStep {
-                command: "echo hello".to_string(),
-                env:     HashMap::from([("STAGE".to_string(), "build".to_string())]),
-            }],
+            steps:      vec![script_step(
+                "echo hello",
+                HashMap::from([("STAGE".to_string(), "build".to_string())]),
+            )],
             timeout_ms: 1_000,
         };
 
         let resolved = settings.resolve_step_env(env_lookup(&[])).unwrap();
 
-        assert_eq!(resolved.steps[0].command, "echo hello");
+        assert_eq!(resolved.steps[0].to_shell_command(), "echo hello");
         assert_eq!(
             resolved.steps[0].env.get("STAGE").map(String::as_str),
             Some("build")
@@ -1650,15 +1752,35 @@ mod resolve_step_env_tests {
     }
 
     #[test]
+    fn script_resolves_verbatim() {
+        // A script is a raw shell snippet: its `{{ env.* }}` token resolves but
+        // the result is NOT shell-quoted — the shell interprets the snippet as
+        // written.
+        let settings = RunPrepareSettings {
+            steps:      vec![script_step(
+                "deploy {{ env.REGION }} && echo done",
+                HashMap::new(),
+            )],
+            timeout_ms: 1_000,
+        };
+
+        let resolved = settings
+            .resolve_step_env(env_lookup(&[("REGION", "us-east-1")]))
+            .unwrap();
+
+        assert_eq!(
+            resolved.steps[0].to_shell_command(),
+            "deploy us-east-1 && echo done"
+        );
+    }
+
+    #[test]
     fn command_and_env_resolve() {
         let settings = RunPrepareSettings {
-            steps:      vec![PreparedStep {
-                command: "deploy {{ env.REGION }}".to_string(),
-                env:     HashMap::from([(
-                    "TOKEN".to_string(),
-                    "{{ env.DEPLOY_TOKEN }}".to_string(),
-                )]),
-            }],
+            steps:      vec![command_step(
+                &["deploy", "{{ env.REGION }}"],
+                HashMap::from([("TOKEN".to_string(), "{{ env.DEPLOY_TOKEN }}".to_string())]),
+            )],
             timeout_ms: 1_000,
         };
 
@@ -1669,7 +1791,7 @@ mod resolve_step_env_tests {
             ]))
             .unwrap();
 
-        assert_eq!(resolved.steps[0].command, "deploy us-east-1");
+        assert_eq!(resolved.steps[0].to_shell_command(), "deploy us-east-1");
         assert_eq!(
             resolved.steps[0].env.get("TOKEN").map(String::as_str),
             Some("secret-token")
@@ -1677,12 +1799,67 @@ mod resolve_step_env_tests {
     }
 
     #[test]
+    fn command_arg_with_space_stays_one_token() {
+        // A resolved argv element that contains a space must survive as a
+        // single shell word, not re-split into two.
+        let settings = RunPrepareSettings {
+            steps:      vec![command_step(&["echo", "{{ env.MESSAGE }}"], HashMap::new())],
+            timeout_ms: 1_000,
+        };
+
+        let resolved = settings
+            .resolve_step_env(env_lookup(&[("MESSAGE", "hello world")]))
+            .unwrap();
+
+        let shell = resolved.steps[0].to_shell_command();
+        let tokens = shlex::split(&shell).expect("resolved command should be valid shell");
+        assert_eq!(tokens, vec!["echo".to_string(), "hello world".to_string()]);
+    }
+
+    #[test]
+    fn command_arg_resolving_to_shell_metacharacters_is_not_injected() {
+        // Regression test for the command-injection defect: an `{{ env.* }}`
+        // value containing a single quote and `;` must be resolved THEN quoted
+        // so it stays a single argument and cannot break out to inject extra
+        // shell commands. Quoting the source token *before* resolving (the old
+        // behavior) lets the substituted value escape its quotes.
+        let malicious = "x'; touch PWNED; echo '";
+        let settings = RunPrepareSettings {
+            steps:      vec![command_step(
+                &["echo", "{{ env.USER_INPUT }}"],
+                HashMap::new(),
+            )],
+            timeout_ms: 1_000,
+        };
+
+        let resolved = settings
+            .resolve_step_env(|name| (name == "USER_INPUT").then(|| malicious.to_string()))
+            .unwrap();
+
+        let shell = resolved.steps[0].to_shell_command();
+        // The flattened shell string round-trips to EXACTLY two tokens: the
+        // command and the verbatim payload as a single argument. Pre-fix, the
+        // value was substituted raw inside config-time quotes
+        // (`echo 'x'; touch PWNED; echo ''`), which `shlex::split` parses as
+        // several tokens / an injected `touch PWNED` command — so the round-trip
+        // equality below fails on the buggy code and passes once the value is
+        // resolved THEN quoted.
+        let tokens = shlex::split(&shell).expect("resolved command should be valid shell");
+        assert_eq!(tokens, vec!["echo".to_string(), malicious.to_string()]);
+        assert_eq!(
+            tokens.len(),
+            2,
+            "injected shell syntax leaked extra tokens: {shell}"
+        );
+    }
+
+    #[test]
     fn missing_env_in_command_is_hard_error() {
         let settings = RunPrepareSettings {
-            steps:      vec![PreparedStep {
-                command: "deploy {{ env.REGION }}".to_string(),
-                env:     HashMap::new(),
-            }],
+            steps:      vec![command_step(
+                &["deploy", "{{ env.REGION }}"],
+                HashMap::new(),
+            )],
             timeout_ms: 1_000,
         };
 
@@ -1696,13 +1873,10 @@ mod resolve_step_env_tests {
     #[test]
     fn missing_env_in_step_env_value_is_hard_error() {
         let settings = RunPrepareSettings {
-            steps:      vec![PreparedStep {
-                command: "echo hi".to_string(),
-                env:     HashMap::from([(
-                    "TOKEN".to_string(),
-                    "{{ env.DEPLOY_TOKEN }}".to_string(),
-                )]),
-            }],
+            steps:      vec![script_step(
+                "echo hi",
+                HashMap::from([("TOKEN".to_string(), "{{ env.DEPLOY_TOKEN }}".to_string())]),
+            )],
             timeout_ms: 1_000,
         };
 
@@ -1716,13 +1890,10 @@ mod resolve_step_env_tests {
     #[test]
     fn reserved_secret_token_is_unavailable_not_leaked() {
         let settings = RunPrepareSettings {
-            steps:      vec![PreparedStep {
-                command: "echo hi".to_string(),
-                env:     HashMap::from([(
-                    "API_KEY".to_string(),
-                    "{{ secrets.API_KEY }}".to_string(),
-                )]),
-            }],
+            steps:      vec![script_step(
+                "echo hi",
+                HashMap::from([("API_KEY".to_string(), "{{ secrets.API_KEY }}".to_string())]),
+            )],
             timeout_ms: 1_000,
         };
 
