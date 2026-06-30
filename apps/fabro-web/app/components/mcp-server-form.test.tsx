@@ -3,7 +3,6 @@ import type { McpServer } from "@qltysh/fabro-api-client";
 
 import {
   createRequestFromForm,
-  credentialWarnings,
   defaultMcpServerFormValues,
   isMcpServerFormValid,
   mcpServerToFormValues,
@@ -163,13 +162,6 @@ describe("MCP server form helpers", () => {
         { isEdit: true },
       ),
     ).toBe(true);
-  });
-
-  test("reports credential-looking key/value rows", () => {
-    expect(credentialWarnings(values({
-      env:     [{ key: "GITHUB_TOKEN", value: "literal-token" }],
-      headers: [{ key: "NODE_ENV", value: "production" }],
-    }))).toEqual([{ field: "env", index: 0 }]);
   });
 
   test("round-trips editable values while documenting omitted write-only values", () => {

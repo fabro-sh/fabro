@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { Disclosure, DisclosureButton, DisclosurePanel, Switch } from "@headlessui/react";
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import {
@@ -16,7 +15,7 @@ import type {
   ReplaceEnvironmentRequest,
 } from "@qltysh/fabro-api-client";
 
-import { Panel, Row } from "./settings-panel";
+import { Label, Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
 import {
   KeyValueEditor,
@@ -427,28 +426,6 @@ export function EnvironmentFormFields({
         </p>
       ) : null}
     </>
-  );
-}
-
-function Label({
-  children,
-  required,
-  optional,
-}: {
-  children: ReactNode;
-  required?: boolean;
-  optional?: boolean;
-}) {
-  return (
-    <span className="inline-flex items-baseline gap-1.5">
-      <span>{children}</span>
-      {required ? (
-        <span aria-label="required" className="text-coral">
-          *
-        </span>
-      ) : null}
-      {optional ? <span className="text-xs font-normal text-fg-muted">Optional</span> : null}
-    </span>
   );
 }
 

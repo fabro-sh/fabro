@@ -100,11 +100,11 @@ function EditMcpServerForm({ server }: { server: McpServer }) {
       {hasWriteOnlyValues(server) ? <WriteOnlyValuesBanner /> : null}
 
       <McpServerFormFields
-        key={server.revision}
         values={values}
         onChange={setValues}
         lockId
         lockTransport
+        isEdit
       />
 
       {error ? <ErrorMessage message={error} /> : null}

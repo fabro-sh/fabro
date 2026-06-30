@@ -51,6 +51,28 @@ export function Row({
   );
 }
 
+export function Label({
+  children,
+  required,
+  optional,
+}: {
+  children: ReactNode;
+  required?: boolean;
+  optional?: boolean;
+}) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5">
+      <span>{children}</span>
+      {required ? (
+        <span aria-label="required" className="text-coral">
+          *
+        </span>
+      ) : null}
+      {optional ? <span className="text-xs font-normal text-fg-muted">Optional</span> : null}
+    </span>
+  );
+}
+
 export function SettingsPageIntro({
   description,
   action,

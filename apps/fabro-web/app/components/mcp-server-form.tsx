@@ -1,10 +1,9 @@
-import type { ReactNode } from "react";
 import {
   McpHttpProtocol,
   type CreateMcpServerRequest,
-  type McpHttpProtocol as McpHttpProtocolValue,
   type McpServer,
   type McpTransport,
+  type McpTransportView,
   type ReplaceMcpServerRequest,
 } from "@qltysh/fabro-api-client";
 
@@ -14,10 +13,10 @@ import {
   secretReference,
 } from "../lib/credential-heuristics";
 import { KeyValueEditor, mapFromEntries, type KeyValueEntry } from "./key-value-editor";
-import { Badge, Panel, Row } from "./settings-panel";
+import { Badge, Label, Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
 
-export type McpTransportKind = "stdio" | "http" | "sandbox";
+export type McpTransportKind = McpTransportView["type"];
 
 export interface McpServerFormValues {
   id: string;
@@ -29,7 +28,7 @@ export interface McpServerFormValues {
   // stdio + sandbox
   command: string;
   // http + sandbox
-  protocol: McpHttpProtocolValue;
+  protocol: McpHttpProtocol;
   // http
   url: string;
   headers: KeyValueEntry[];
@@ -39,12 +38,7 @@ export interface McpServerFormValues {
   env: KeyValueEntry[];
 }
 
-export interface CredentialWarning {
-  field: "env" | "headers";
-  index: number;
-}
-
-const DEFAULT_PROTOCOL: McpHttpProtocolValue = McpHttpProtocol.STREAMABLE_HTTP;
+const DEFAULT_PROTOCOL: McpHttpProtocol = McpHttpProtocol.STREAMABLE_HTTP;
 const MCP_SERVER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const STARTUP_TIMEOUT_SECS = 10;
 const TOOL_TIMEOUT_SECS = 60;
@@ -167,7 +161,7 @@ function transportFromForm(values: McpServerFormValues): McpTransport {
   }
 }
 
-function protocolProperty(protocol: McpHttpProtocolValue): { protocol?: McpHttpProtocolValue } {
+function protocolProperty(protocol: McpHttpProtocol): { protocol?: McpHttpProtocol } {
   return protocol === DEFAULT_PROTOCOL ? {} : { protocol };
 }
 
@@ -211,19 +205,12 @@ function activeValueEntries(values: McpServerFormValues): KeyValueEntry[] {
   return values.transport === "http" ? values.headers : values.env;
 }
 
-export function credentialWarnings(values: McpServerFormValues): CredentialWarning[] {
-  const field = values.transport === "http" ? "headers" : "env";
-  const entries = values.transport === "http" ? values.headers : values.env;
-  return entries.flatMap((entry, index) =>
-    looksLikeCredential(entry.key, entry.value) ? [{ field, index }] : [],
-  );
-}
-
 interface McpServerFormFieldsProps {
   values: McpServerFormValues;
   onChange: (values: McpServerFormValues) => void;
   lockId?: boolean;
   lockTransport?: boolean;
+  isEdit?: boolean;
 }
 
 export function McpServerFormFields({
@@ -231,19 +218,13 @@ export function McpServerFormFields({
   onChange,
   lockId = false,
   lockTransport = false,
+  isEdit = false,
 }: McpServerFormFieldsProps) {
   function patch(partial: Partial<McpServerFormValues>) {
     onChange({ ...values, ...partial });
   }
 
-  function setEntryValue(field: "env" | "headers", index: number, value: string) {
-    patch({
-      [field]: values[field].map((entry, i) => (i === index ? { ...entry, value } : entry)),
-    });
-  }
-
   const idValid = MCP_SERVER_ID_PATTERN.test(values.id.trim());
-  const requireWriteOnlyValues = lockId && lockTransport;
 
   return (
     <>
@@ -305,9 +286,11 @@ export function McpServerFormFields({
               onChange={(e) => patch({ transport: parseMcpTransportKind(e.target.value) })}
               className={INPUT_CLASS}
             >
-              <option value="stdio">stdio</option>
-              <option value="http">http</option>
-              <option value="sandbox">sandbox</option>
+              {MCP_TRANSPORT_KINDS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {kind}
+                </option>
+              ))}
             </select>
           )}
         </Row>
@@ -337,26 +320,11 @@ export function McpServerFormFields({
 
       <Panel title="Transport">
         {values.transport === "stdio" ? (
-          <StdioTransportFields
-            values={values}
-            patch={patch}
-            requireWriteOnlyValues={requireWriteOnlyValues}
-            setEntryValue={setEntryValue}
-          />
+          <StdioTransportFields values={values} patch={patch} isEdit={isEdit} />
         ) : values.transport === "http" ? (
-          <HttpTransportFields
-            values={values}
-            patch={patch}
-            requireWriteOnlyValues={requireWriteOnlyValues}
-            setEntryValue={setEntryValue}
-          />
+          <HttpTransportFields values={values} patch={patch} isEdit={isEdit} />
         ) : (
-          <SandboxTransportFields
-            values={values}
-            patch={patch}
-            requireWriteOnlyValues={requireWriteOnlyValues}
-            setEntryValue={setEntryValue}
-          />
+          <SandboxTransportFields values={values} patch={patch} isEdit={isEdit} />
         )}
       </Panel>
 
@@ -369,44 +337,26 @@ export function McpServerFormFields({
   );
 }
 
-function StdioTransportFields({
-  values,
-  patch,
-  requireWriteOnlyValues,
-  setEntryValue,
-}: TransportFieldsProps) {
+function StdioTransportFields({ values, patch, isEdit }: TransportFieldsProps) {
   return (
     <>
-      <Row title={<Label required>Command</Label>} help="Command and arguments used to launch the MCP server.">
-        <input
-          type="text"
-          name="command"
-          aria-label="Command"
-          value={values.command}
-          onChange={(e) => patch({ command: e.target.value })}
-          placeholder="npx -y @modelcontextprotocol/server-github"
-          autoComplete="off"
-          spellCheck={false}
-          className={`${INPUT_CLASS} font-mono`}
-        />
-      </Row>
+      <CommandRow
+        values={values}
+        patch={patch}
+        help="Command and arguments used to launch the MCP server."
+        placeholder="npx -y @modelcontextprotocol/server-github"
+      />
       <KeyValueRows
         field="env"
         entries={values.env}
         onChange={(env) => patch({ env })}
-        requireWriteOnlyValues={requireWriteOnlyValues}
-        setEntryValue={setEntryValue}
+        isEdit={isEdit}
       />
     </>
   );
 }
 
-function HttpTransportFields({
-  values,
-  patch,
-  requireWriteOnlyValues,
-  setEntryValue,
-}: TransportFieldsProps) {
+function HttpTransportFields({ values, patch, isEdit }: TransportFieldsProps) {
   return (
     <>
       <ProtocolRow values={values} patch={patch} />
@@ -427,35 +377,22 @@ function HttpTransportFields({
         field="headers"
         entries={values.headers}
         onChange={(headers) => patch({ headers })}
-        requireWriteOnlyValues={requireWriteOnlyValues}
-        setEntryValue={setEntryValue}
+        isEdit={isEdit}
       />
     </>
   );
 }
 
-function SandboxTransportFields({
-  values,
-  patch,
-  requireWriteOnlyValues,
-  setEntryValue,
-}: TransportFieldsProps) {
+function SandboxTransportFields({ values, patch, isEdit }: TransportFieldsProps) {
   return (
     <>
       <ProtocolRow values={values} patch={patch} />
-      <Row title={<Label required>Command</Label>} help="Command and arguments used to launch the MCP server inside the run sandbox.">
-        <input
-          type="text"
-          name="command"
-          aria-label="Command"
-          value={values.command}
-          onChange={(e) => patch({ command: e.target.value })}
-          placeholder="python server.py"
-          autoComplete="off"
-          spellCheck={false}
-          className={`${INPUT_CLASS} font-mono`}
-        />
-      </Row>
+      <CommandRow
+        values={values}
+        patch={patch}
+        help="Command and arguments used to launch the MCP server inside the run sandbox."
+        placeholder="python server.py"
+      />
       <Row title={<Label required>Port</Label>} help="Port where the in-sandbox MCP server listens.">
         <input
           type="number"
@@ -472,8 +409,7 @@ function SandboxTransportFields({
         field="env"
         entries={values.env}
         onChange={(env) => patch({ env })}
-        requireWriteOnlyValues={requireWriteOnlyValues}
-        setEntryValue={setEntryValue}
+        isEdit={isEdit}
       />
     </>
   );
@@ -482,8 +418,35 @@ function SandboxTransportFields({
 interface TransportFieldsProps {
   values: McpServerFormValues;
   patch: (partial: Partial<McpServerFormValues>) => void;
-  requireWriteOnlyValues: boolean;
-  setEntryValue: (field: "env" | "headers", index: number, value: string) => void;
+  isEdit: boolean;
+}
+
+function CommandRow({
+  values,
+  patch,
+  help,
+  placeholder,
+}: {
+  values: McpServerFormValues;
+  patch: (partial: Partial<McpServerFormValues>) => void;
+  help: string;
+  placeholder: string;
+}) {
+  return (
+    <Row title={<Label required>Command</Label>} help={help}>
+      <input
+        type="text"
+        name="command"
+        aria-label="Command"
+        value={values.command}
+        onChange={(e) => patch({ command: e.target.value })}
+        placeholder={placeholder}
+        autoComplete="off"
+        spellCheck={false}
+        className={`${INPUT_CLASS} font-mono`}
+      />
+    </Row>
+  );
 }
 
 function ProtocolRow({
@@ -509,7 +472,7 @@ function ProtocolRow({
   );
 }
 
-function parseProtocol(value: string): McpHttpProtocolValue {
+function parseProtocol(value: string): McpHttpProtocol {
   return value === McpHttpProtocol.SSE ? McpHttpProtocol.SSE : DEFAULT_PROTOCOL;
 }
 
@@ -517,14 +480,12 @@ function KeyValueRows({
   field,
   entries,
   onChange,
-  requireWriteOnlyValues,
-  setEntryValue,
+  isEdit,
 }: {
   field: "env" | "headers";
   entries: KeyValueEntry[];
   onChange: (entries: KeyValueEntry[]) => void;
-  requireWriteOnlyValues: boolean;
-  setEntryValue: (field: "env" | "headers", index: number, value: string) => void;
+  isEdit: boolean;
 }) {
   const isHeaders = field === "headers";
   return (
@@ -540,11 +501,11 @@ function KeyValueRows({
         addLabel={isHeaders ? "Add header" : "Add variable"}
         renderEntryHint={(entry, index) => (
           <EntryHint
-            field={field}
-            index={index}
             entry={entry}
-            requireWriteOnlyValue={requireWriteOnlyValues}
-            setEntryValue={setEntryValue}
+            requireWriteOnlyValue={isEdit}
+            onStoreSecret={(value) =>
+              onChange(entries.map((e, i) => (i === index ? { ...e, value } : e)))
+            }
           />
         )}
       />
@@ -553,17 +514,13 @@ function KeyValueRows({
 }
 
 function EntryHint({
-  field,
-  index,
   entry,
   requireWriteOnlyValue,
-  setEntryValue,
+  onStoreSecret,
 }: {
-  field: "env" | "headers";
-  index: number;
   entry: KeyValueEntry;
   requireWriteOnlyValue: boolean;
-  setEntryValue: (field: "env" | "headers", index: number, value: string) => void;
+  onStoreSecret: (value: string) => void;
 }) {
   const missingWriteOnlyValue = requireWriteOnlyValue && entry.key.trim() !== "" && entry.value === "";
   const credentialWarning = looksLikeCredential(entry.key, entry.value);
@@ -583,7 +540,7 @@ function EntryHint({
           <button
             type="button"
             onClick={() => {
-              setEntryValue(field, index, secretReference(secretName));
+              onStoreSecret(secretReference(secretName));
               openSecretCreateTab(secretName);
             }}
             className="font-medium text-amber underline underline-offset-2 hover:text-fg"
@@ -605,24 +562,4 @@ function openSecretCreateTab(secretName: string) {
   );
 }
 
-function Label({
-  children,
-  required,
-  optional,
-}: {
-  children: ReactNode;
-  required?: boolean;
-  optional?: boolean;
-}) {
-  return (
-    <span className="inline-flex items-baseline gap-1.5">
-      <span>{children}</span>
-      {required ? (
-        <span aria-label="required" className="text-coral">
-          *
-        </span>
-      ) : null}
-      {optional ? <span className="text-xs font-normal text-fg-muted">Optional</span> : null}
-    </span>
-  );
-}
+
