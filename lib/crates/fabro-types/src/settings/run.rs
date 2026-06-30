@@ -105,8 +105,7 @@ impl RunNamespace {
             substitute_option(&mut slack.channel, &mut lookup)?;
         }
         substitute_map(&mut self.integrations.github.permissions, &mut lookup)?;
-        // run.scm.owner/repository were demoted and removed from this pass
-        // (D2): values stay literal.
+        // run.scm.owner/repository are plain strings: values stay literal.
         for step in &mut self.prepare.steps {
             match &mut step.run {
                 PreparedStepRun::Script { script } => substitute_string(script, &mut lookup)?,
@@ -769,7 +768,7 @@ impl RunPrepareSettings {
 /// carried in source form out of the config resolve layer; their `{{ env.* }}`
 /// tokens resolve at the run boundary via
 /// [`RunPrepareSettings::resolve_step_env`].
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreparedStep {
     #[serde(flatten)]
     pub run: PreparedStepRun,
@@ -781,8 +780,8 @@ pub struct PreparedStep {
 /// distinction so each is treated correctly when assembled into the shell
 /// command that runs via `bash -c`:
 ///
-/// - [`Script`](PreparedStepRun::Script) is a raw shell snippet. It is kept
-///   verbatim — the shell interprets it as written.
+/// - [`Script`](PreparedStepRun::Script) is a raw shell snippet kept verbatim
+///   for the shell to interpret.
 /// - [`Command`](PreparedStepRun::Command) is an argv: a vector of element
 ///   source strings, neither pre-joined nor shell-quoted at config time. Its
 ///   `{{ env.* }}` tokens resolve per element at the run boundary, and only
@@ -794,14 +793,6 @@ pub struct PreparedStep {
 pub enum PreparedStepRun {
     Script { script: String },
     Command { command: Vec<String> },
-}
-
-impl Default for PreparedStepRun {
-    fn default() -> Self {
-        Self::Script {
-            script: String::new(),
-        }
-    }
 }
 
 impl PreparedStep {

@@ -14,14 +14,14 @@
 
 
 
-export interface PreparedStepOneOf {
-    'type': PreparedStepOneOfTypeEnum;
-    'script': string;
+export interface PreparedCommandStep {
+    'type': PreparedCommandStepTypeEnum;
+    'command': Array<string>;
     'env'?: { [key: string]: string; };
 }
 
-export const PreparedStepOneOfTypeEnum = {
-    SCRIPT: 'script'
+export const PreparedCommandStepTypeEnum = {
+    COMMAND: 'command'
 } as const;
 
-export type PreparedStepOneOfTypeEnum = typeof PreparedStepOneOfTypeEnum[keyof typeof PreparedStepOneOfTypeEnum];
+export type PreparedCommandStepTypeEnum = typeof PreparedCommandStepTypeEnum[keyof typeof PreparedCommandStepTypeEnum];

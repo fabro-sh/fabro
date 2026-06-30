@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use agent_client_protocol::schema::{McpServer, McpServerStdio};
 use agent_client_protocol_tokio::AcpAgent;
+use fabro_util::shell::shell_quote;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpProcessSpec {
@@ -169,13 +170,6 @@ fn parse_config_server(raw: &str) -> Result<McpServer, AcpCommandError> {
     }
 
     serde_json::from_value(value).map_err(AcpCommandError::InvalidConfigJson)
-}
-
-fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |quoted| quoted.to_string(),
-    )
 }
 
 #[cfg(test)]

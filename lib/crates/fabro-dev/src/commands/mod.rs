@@ -17,6 +17,7 @@ pub(crate) use bench_tests::{BenchTestsArgs, bench_tests};
 pub(crate) use build::{BuildArgs, build};
 pub(crate) use docker_build::{DockerBuildArgs, docker_build};
 pub(crate) use docs::{DocsArgs, docs};
+use fabro_util::shell::shell_quote;
 pub(crate) use release::{ReleaseArgs, release};
 pub(crate) use spa::{SpaArgs, spa};
 
@@ -188,11 +189,7 @@ fn is_cargo_build_env(key: &std::ffi::OsStr) -> bool {
 }
 
 pub(crate) fn shell_arg(arg: impl AsRef<str>) -> String {
-    let arg = arg.as_ref();
-    shlex::try_quote(arg).map_or_else(
-        |_| format!("'{}'", arg.replace('\'', "'\\''")),
-        std::borrow::Cow::into_owned,
-    )
+    shell_quote(arg.as_ref())
 }
 
 #[cfg(test)]

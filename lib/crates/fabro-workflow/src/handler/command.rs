@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use fabro_agent::CommandOutputCallback;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_types::{CommandTermination, StageTiming};
+use fabro_util::shell::shell_quote;
 
 use super::{EngineServices, Handler, NodeTimeoutPolicy};
 use crate::command_log::CommandLogRecorder;
@@ -14,14 +15,6 @@ use crate::outcome::{Outcome, OutcomeExt};
 
 fn timeout_ms(node: &Node) -> Option<u64> {
     node.timeout().map(crate::millis_u64)
-}
-
-/// Shell-escape a string using `shlex::try_quote` (POSIX-safe).
-fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |q| q.to_string(),
-    )
 }
 
 /// Executes an external script configured via node attributes.

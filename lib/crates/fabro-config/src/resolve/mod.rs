@@ -73,10 +73,10 @@ pub(crate) fn default_string(path: impl AsRef<std::path::Path>) -> String {
     path.as_ref().to_string_lossy().into_owned()
 }
 
-/// Warn when a field demoted out of the interpolation set (D2) still contains
-/// claimed template tokens. These fields are plain `String` now — `{{ vars.*
-/// }}` (which previously substituted via the run-scoped String pass, a
-/// now-removed accident) and `{{ env.* }}` are both treated as literal text.
+/// Warn when a field demoted out of the interpolation set still contains
+/// claimed template tokens. These fields are plain `String` now, so
+/// `{{ vars.* }}` (which previously substituted via the run-scoped String pass,
+/// a now-removed accident) and `{{ env.* }}` are both treated as literal text.
 /// Other plain-`String` fields still substitute `{{ vars.* }}` until the
 /// String pass itself is retired in a later slice. Unclaimed `{{ ... }}` text
 /// (jq programs, Go templates) never interpolated and does not warn.

@@ -11,7 +11,6 @@ default = ["runtime"]
 runtime = [
   "dep:fabro-sandbox",
   "dep:fabro-types",
-  "dep:fabro-util",
   "dep:futures",
   "dep:tokio",
   "dep:tokio-util",
@@ -30,7 +29,7 @@ agent-client-protocol.workspace = true
 agent-client-protocol-tokio.workspace = true
 fabro-sandbox = { path = "../fabro-sandbox", optional = true }
 fabro-types = { path = "../fabro-types", optional = true }
-fabro-util = { path = "../fabro-util", optional = true }
+fabro-util = { path = "../fabro-util" }
 serde_json.workspace = true
 shlex = "1"
 thiserror.workspace = true

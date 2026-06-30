@@ -13872,30 +13872,39 @@ components:
       type: object
       required: [type]
       oneOf:
-        - type: object
-          required: [type, script]
-          properties:
-            type:
-              type: string
-              enum: [script]
-            script:
-              type: string
-            env:
-              $ref: "#/components/schemas/StringMap"
-        - type: object
-          required: [type, command]
-          properties:
-            type:
-              type: string
-              enum: [command]
-            command:
-              type: array
-              items:
-                type: string
-            env:
-              $ref: "#/components/schemas/StringMap"
+        - $ref: "#/components/schemas/PreparedScriptStep"
+        - $ref: "#/components/schemas/PreparedCommandStep"
       discriminator:
         propertyName: type
+        mapping:
+          script: "#/components/schemas/PreparedScriptStep"
+          command: "#/components/schemas/PreparedCommandStep"
+
+    PreparedScriptStep:
+      type: object
+      required: [type, script]
+      properties:
+        type:
+          type: string
+          enum: [script]
+        script:
+          type: string
+        env:
+          $ref: "#/components/schemas/StringMap"
+
+    PreparedCommandStep:
+      type: object
+      required: [type, command]
+      properties:
+        type:
+          type: string
+          enum: [command]
+        command:
+          type: array
+          items:
+            type: string
+        env:
+          $ref: "#/components/schemas/StringMap"
 
     RunExecutionSettings:
       type: object
