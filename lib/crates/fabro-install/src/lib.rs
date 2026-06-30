@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use fabro_config::{Storage, envfile};
 use fabro_static::EnvVars;
+use fabro_types::settings::run::EnvironmentProvider;
 use fabro_util::dev_token;
 use fabro_vault::{SecretType as VaultSecretType, Vault};
 
@@ -139,6 +140,25 @@ impl std::error::Error for PersistInstallOutputsError {
 
 pub fn default_web_url() -> String {
     "http://127.0.0.1:32276".to_string()
+}
+
+pub async fn seed_environments_in_storage(storage_dir: &Path) -> Result<()> {
+    seed_default_environment_in_storage(storage_dir, EnvironmentProvider::Docker).await
+}
+
+pub async fn seed_default_environment_in_storage(
+    storage_dir: &Path,
+    provider: EnvironmentProvider,
+) -> Result<()> {
+    let database = open_migrated_database(storage_dir).await?;
+    fabro_environment::seed_default_environment(database.pool(), provider).await?;
+    Ok(())
+}
+
+async fn open_migrated_database(storage_dir: &Path) -> Result<fabro_db::Database> {
+    let database = fabro_db::Database::connect(Storage::new(storage_dir).sqlite_path()).await?;
+    database.migrate().await?;
+    Ok(database)
 }
 
 pub fn prepare_dev_token_write_for_install(path: &Path) -> Result<PreparedInstallDevToken> {

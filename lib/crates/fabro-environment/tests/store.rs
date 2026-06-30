@@ -294,7 +294,12 @@ async fn legacy_import_keeps_existing_sql_row_and_inlines_dockerfile_path() -> a
     fs::write(environment_dir.join("Dockerfile"), "FROM alpine\n").await?;
     fs::write(
         environment_dir.join("existing.toml"),
-        r#"provider = "docker""#,
+        r#"
+provider = "docker"
+
+[image.dockerfile]
+path = "missing.Dockerfile"
+"#,
     )
     .await?;
     fs::write(

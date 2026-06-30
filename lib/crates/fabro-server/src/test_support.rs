@@ -13,7 +13,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::{Router, middleware};
 use chrono::Duration as ChronoDuration;
-use fabro_config::{RunLayer, ServerSettingsBuilder, envfile};
+use fabro_config::{RunLayer, ServerSettingsBuilder, Storage, envfile};
 use fabro_db::DbPool;
 use fabro_interview::Interviewer;
 use fabro_model::catalog::{LlmCatalogSettings, ProviderCatalogSettings};
@@ -522,6 +522,16 @@ fn sqlite_path_for_vault_path(vault_path: &Path) -> PathBuf {
         .unwrap_or_else(|| Path::new("."))
         .join("db")
         .join("fabro.sqlite3")
+}
+
+pub async fn test_environment_from_storage_dir(
+    storage_dir: &Path,
+    id: &str,
+) -> anyhow::Result<Option<fabro_environment::Environment>> {
+    let database = fabro_db::Database::connect(Storage::new(storage_dir).sqlite_path()).await?;
+    let store = fabro_environment::EnvironmentStore::load(database.clone_pool(), false).await?;
+    let id = fabro_environment::EnvironmentId::new(id)?;
+    Ok(store.get(&id))
 }
 
 #[expect(

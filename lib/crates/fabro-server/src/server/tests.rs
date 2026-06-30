@@ -112,7 +112,7 @@ fn test_environment_store(
     })
     .join()
     .expect("environment store setup thread should not panic");
-    let store = EnvironmentStore::load_blocking(pool, local_enabled)
+    let store = load_environment_store_blocking(pool, local_enabled)
         .expect("test environment store should load");
     (temp, store)
 }

@@ -17,6 +17,7 @@ use fabro_model::ProviderId;
 use fabro_server::install::{
     InstallAppState, InstallFinishHook, InstallFinishInfo, build_install_router,
 };
+use fabro_server::test_support::test_environment_from_storage_dir;
 use fabro_util::Home;
 use fabro_vault::Vault;
 use httpmock::Method::GET;
@@ -57,15 +58,9 @@ fn assert_sandbox_provider_policy(
 async fn seeded_default_environment(
     temp_dir: &tempfile::TempDir,
 ) -> fabro_environment::Environment {
-    let storage = Storage::new(temp_dir.path());
-    let database = fabro_db::Database::connect(storage.sqlite_path())
+    test_environment_from_storage_dir(temp_dir.path(), "default")
         .await
-        .expect("install test database should connect");
-    let store = fabro_environment::EnvironmentStore::load(database.clone_pool(), false)
-        .await
-        .expect("install test environment store should load");
-    store
-        .get(&fabro_environment::EnvironmentId::new("default").expect("default id should parse"))
+        .expect("install test environment store should load")
         .expect("default environment should be seeded")
 }
 

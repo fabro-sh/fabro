@@ -20,8 +20,9 @@ use fabro_install::{
     GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, InstallListenConfig, InstallPersistencePlan,
     InstallSandboxSelection, OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV,
     PendingSettingsWrite, VaultSecretWrite, merge_server_settings,
-    prepare_dev_token_write_for_install, write_github_app_settings, write_object_store_settings,
-    write_sandbox_settings, write_token_settings,
+    prepare_dev_token_write_for_install, seed_default_environment_in_storage,
+    write_github_app_settings, write_object_store_settings, write_sandbox_settings,
+    write_token_settings,
 };
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
@@ -747,17 +748,6 @@ fn install_listen_config(bind: &Bind) -> InstallListenConfig {
         Bind::Tcp(address) => InstallListenConfig::Tcp(address.to_string()),
         Bind::Unix(path) => InstallListenConfig::Unix(path.clone()),
     }
-}
-
-async fn seed_default_environment_in_sqlite(
-    storage_dir: &Path,
-    provider: EnvironmentProvider,
-) -> anyhow::Result<()> {
-    let storage = Storage::new(storage_dir);
-    let database = fabro_db::Database::connect(storage.sqlite_path()).await?;
-    database.migrate().await?;
-    fabro_environment::seed_default_environment(database.pool(), provider).await?;
-    Ok(())
 }
 
 async fn health() -> Response {
@@ -1756,7 +1746,7 @@ async fn post_install_finish(
     // Seed the default environment in SQLite. The server does not seed on
     // startup, so install is the only place the default is written; existing
     // rows are preserved, so re-running install never clobbers edits.
-    if let Err(err) = seed_default_environment_in_sqlite(
+    if let Err(err) = seed_default_environment_in_storage(
         state.storage_dir.as_ref(),
         sandbox.to_environment_provider(),
     )

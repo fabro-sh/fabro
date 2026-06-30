@@ -125,6 +125,7 @@ use tempfile::NamedTempFile;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{
     Mutex as AsyncMutex, Notify, OwnedMutexGuard, RwLock as AsyncRwLock, Semaphore, broadcast,
@@ -2299,6 +2300,28 @@ fn mcp_server_dir_for_active_config(active_config_path: &std::path::Path) -> Pat
         .join("mcps")
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "synchronous app-state assembly may run inside an async runtime; a short-lived OS \
+              thread avoids nested Tokio runtimes"
+)]
+fn load_environment_store_blocking(
+    pool: DbPool,
+    local_enabled: bool,
+) -> anyhow::Result<EnvironmentStore> {
+    std::thread::spawn(move || {
+        let runtime = TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("build environment store runtime")?;
+        runtime
+            .block_on(EnvironmentStore::load(pool, local_enabled))
+            .map_err(anyhow::Error::new)
+    })
+    .join()
+    .expect("environment store load thread should not panic")
+}
+
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
@@ -2338,8 +2361,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         .local
         .enabled;
     let environment_store = Arc::new(
-        EnvironmentStore::load_blocking(db_pool.clone(), local_provider_enabled)
-            .map_err(anyhow::Error::new)
+        load_environment_store_blocking(db_pool.clone(), local_provider_enabled)
             .context("load environments")?,
     );
     let mcp_server_dir = mcp_server_dir_for_active_config(&active_config_path);

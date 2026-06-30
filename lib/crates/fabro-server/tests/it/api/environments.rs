@@ -6,6 +6,7 @@ use fabro_config::{RunEnvironmentLayer, RunLayer};
 use fabro_server::server::build_router;
 use fabro_server::test_support::{
     TestAppStateBuilder, build_test_router, default_test_server_settings, test_auth_mode,
+    test_environment_from_storage_dir,
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -141,13 +142,9 @@ async fn persisted_environment(
     temp_dir: &tempfile::TempDir,
     id: &str,
 ) -> Option<fabro_environment::Environment> {
-    let database = fabro_db::Database::connect(temp_dir.path().join("db/fabro.sqlite3"))
+    test_environment_from_storage_dir(temp_dir.path(), id)
         .await
-        .expect("environment test database should connect");
-    let store = fabro_environment::EnvironmentStore::load(database.clone_pool(), false)
-        .await
-        .expect("environment store should load from test database");
-    store.get(&fabro_environment::EnvironmentId::new(id).expect("environment id should be valid"))
+        .expect("environment store should load from test storage")
 }
 
 async fn system_info(app: &axum::Router) -> Value {

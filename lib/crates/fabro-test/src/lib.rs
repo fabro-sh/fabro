@@ -671,20 +671,17 @@ fn home_settings_path(home_dir: &Path) -> PathBuf {
 }
 
 fn seed_storage_environments(storage_dir: &Path) {
-    let sqlite_path = Storage::new(storage_dir).sqlite_path();
-    let display_path = sqlite_path.clone();
+    let storage_dir = storage_dir.to_path_buf();
+    let display_path = Storage::new(&storage_dir).sqlite_path();
     std::thread::spawn(move || {
         let runtime = TokioRuntimeBuilder::new_current_thread()
             .enable_all()
             .build()
             .expect("environment seed runtime should build");
         runtime
-            .block_on(async move {
-                let database = fabro_db::Database::connect(&sqlite_path).await?;
-                database.migrate().await?;
-                fabro_environment::seed_environments(database.pool()).await?;
-                anyhow::Ok(())
-            })
+            .block_on(
+                async move { fabro_install::seed_environments_in_storage(&storage_dir).await },
+            )
             .unwrap_or_else(|err| panic!("failed to seed {}: {err}", display_path.display()));
     })
     .join()

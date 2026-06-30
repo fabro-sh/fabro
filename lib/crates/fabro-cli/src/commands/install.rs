@@ -31,15 +31,14 @@ use fabro_install::{
     GITHUB_APP_VAULT_KEYS, GITHUB_INSTALL_SECRET_KEYS, InstallListenConfig, InstallPersistencePlan,
     PendingDevTokenWrite, PendingSettingsWrite, VaultSecretWrite,
     merge_server_settings as merge_server_settings_impl, prepare_dev_token_write_for_install,
-    restore_optional_file, rollback_dev_token_write, write_github_app_settings,
-    write_token_settings,
+    restore_optional_file, rollback_dev_token_write, seed_environments_in_storage,
+    write_github_app_settings, write_token_settings,
 };
 use fabro_model::catalog::CatalogProvider;
 use fabro_model::{Catalog, CredentialRef, ProviderId};
 use fabro_server::serve;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
-use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::settings::server::ServerAuthMethod;
 use fabro_types::settings::validate_public_url_with_label;
 use fabro_util::printer::Printer;
@@ -2017,15 +2016,7 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
     // Seed the default environment in SQLite. The server never seeds on
     // startup, so install is the only place the default is written; existing
     // rows are preserved, so re-running install never clobbers edits.
-    let environment_seed_result = async {
-        let database =
-            fabro_db::Database::connect(Storage::new(&storage_dir).sqlite_path()).await?;
-        database.migrate().await?;
-        fabro_environment::seed_default_environment(database.pool(), EnvironmentProvider::Docker)
-            .await?;
-        anyhow::Ok(())
-    }
-    .await;
+    let environment_seed_result = seed_environments_in_storage(&storage_dir).await;
     if let Err(err) = environment_seed_result {
         fabro_util::printerr!(
             printer,

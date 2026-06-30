@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::str::FromStr as _;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -16,7 +16,6 @@ use serde::de::DeserializeOwned;
 use sqlx::Row as _;
 use sqlx::sqlite::SqliteRow;
 use tokio::fs;
-use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::Mutex;
 use tracing::info;
 
@@ -86,10 +85,9 @@ stop_on_terminal = true
 
 #[derive(Debug)]
 pub struct EnvironmentStore {
-    pool:          DbPool,
-    local_enabled: bool,
-    mutations:     Mutex<()>,
-    state:         std::sync::RwLock<CatalogState>,
+    pool:      DbPool,
+    mutations: Mutex<()>,
+    state:     std::sync::RwLock<CatalogState>,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +112,21 @@ impl CatalogState {
             environments,
             catalog,
         }
+    }
+
+    fn insert(&mut self, environment: Environment) {
+        self.environments
+            .insert(environment.id.clone(), environment);
+        self.rebuild_catalog();
+    }
+
+    fn remove(&mut self, id: &EnvironmentId) {
+        self.environments.remove(id);
+        self.rebuild_catalog();
+    }
+
+    fn rebuild_catalog(&mut self) {
+        self.catalog = Arc::new(build_catalog_layer(&self.environments));
     }
 }
 
@@ -146,27 +159,9 @@ impl EnvironmentStore {
         let environments = load_environments(&pool, local_enabled).await?;
         Ok(Self {
             pool,
-            local_enabled,
             mutations: Mutex::new(()),
             state: std::sync::RwLock::new(CatalogState::new(environments)),
         })
-    }
-
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "synchronous server/test assembly may run inside an async runtime; a short-lived \
-                  OS thread avoids nested Tokio runtimes"
-    )]
-    pub fn load_blocking(pool: DbPool, local_enabled: bool) -> Result<Self, EnvironmentStoreError> {
-        std::thread::spawn(move || {
-            let runtime = TokioRuntimeBuilder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|source| EnvironmentStoreError::io("environment-store-runtime", source))?;
-            runtime.block_on(Self::load(pool, local_enabled))
-        })
-        .join()
-        .expect("environment store load thread should not panic")
     }
 
     fn read_state(&self) -> std::sync::RwLockReadGuard<'_, CatalogState> {
@@ -175,12 +170,6 @@ impl EnvironmentStore {
 
     fn write_state(&self) -> std::sync::RwLockWriteGuard<'_, CatalogState> {
         self.state.write().expect("environment store lock poisoned")
-    }
-
-    async fn refresh(&self) -> Result<(), EnvironmentStoreError> {
-        let environments = load_environments(&self.pool, self.local_enabled).await?;
-        *self.write_state() = CatalogState::new(environments);
-        Ok(())
     }
 
     pub fn list(&self) -> Vec<Environment> {
@@ -206,12 +195,11 @@ impl EnvironmentStore {
 
         let _mutation = self.mutations.lock().await;
         let mut transaction = self.pool.begin().await?;
-        if environment_exists(&mut transaction, &id).await? {
+        if !insert_environment_ignoring_conflict(&mut transaction, &environment).await? {
             return Err(EnvironmentStoreError::AlreadyExists { id });
         }
-        insert_environment(&mut transaction, &environment).await?;
         transaction.commit().await?;
-        self.refresh().await?;
+        self.write_state().insert(environment.clone());
         Ok(environment)
     }
 
@@ -228,10 +216,9 @@ impl EnvironmentStore {
 
         let _mutation = self.mutations.lock().await;
         let mut transaction = self.pool.begin().await?;
-        check_sql_revision(&mut transaction, id, expected).await?;
-        update_environment(&mut transaction, &environment).await?;
+        update_environment(&mut transaction, &environment, expected).await?;
         transaction.commit().await?;
-        self.refresh().await?;
+        self.write_state().insert(environment.clone());
         Ok(environment)
     }
 
@@ -249,13 +236,16 @@ impl EnvironmentStore {
 
         let _mutation = self.mutations.lock().await;
         let mut transaction = self.pool.begin().await?;
-        check_sql_revision(&mut transaction, id, expected).await?;
-        sqlx::query("DELETE FROM environments WHERE id = ?")
+        let result = sqlx::query("DELETE FROM environments WHERE id = ? AND revision = ?")
             .bind(id.as_str())
+            .bind(expected.as_str())
             .execute(&mut *transaction)
             .await?;
+        if result.rows_affected() == 0 {
+            return Err(revision_mismatch_error(&mut transaction, id, expected).await?);
+        }
         transaction.commit().await?;
-        self.refresh().await?;
+        self.write_state().remove(id);
         Ok(())
     }
 
@@ -370,10 +360,14 @@ fn resources_layer_from_row(
     Ok(Some(EnvironmentResourcesLayer { cpu, memory, disk }))
 }
 
-fn parse_size(
+fn parse_optional_field<T>(
     field: &'static str,
     value: Option<String>,
-) -> Result<Option<Size>, EnvironmentValidationError> {
+) -> Result<Option<T>, EnvironmentValidationError>
+where
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
     value
         .map(|value| {
             value
@@ -383,69 +377,78 @@ fn parse_size(
                 })
         })
         .transpose()
+}
+
+fn parse_size(
+    field: &'static str,
+    value: Option<String>,
+) -> Result<Option<Size>, EnvironmentValidationError> {
+    parse_optional_field(field, value)
 }
 
 fn parse_duration(
     field: &'static str,
     value: Option<String>,
 ) -> Result<Option<Duration>, EnvironmentValidationError> {
-    value
-        .map(|value| {
-            value
-                .parse()
-                .map_err(|err| EnvironmentValidationError::InvalidSettings {
-                    errors: vec![format!("environment.{field}: {err}")],
-                })
-        })
-        .transpose()
+    parse_optional_field(field, value)
 }
 
-async fn environment_exists(
+async fn current_revision(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: &EnvironmentId,
-) -> Result<bool, EnvironmentStoreError> {
-    let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM environments WHERE id = ?")
-        .bind(id.as_str())
-        .fetch_optional(&mut **transaction)
-        .await?;
-    Ok(exists.is_some())
-}
-
-async fn check_sql_revision(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    id: &EnvironmentId,
-    expected: &EnvironmentRevision,
-) -> Result<(), EnvironmentStoreError> {
+) -> Result<Option<EnvironmentRevision>, EnvironmentStoreError> {
     let current: Option<String> =
         sqlx::query_scalar("SELECT revision FROM environments WHERE id = ?")
             .bind(id.as_str())
             .fetch_optional(&mut **transaction)
             .await?;
-    let Some(current) = current else {
-        return Err(EnvironmentStoreError::NotFound { id: id.clone() });
-    };
-    if current != expected.as_str() {
-        let actual = EnvironmentRevision::from_str(&current).map_err(|source| {
-            EnvironmentStoreError::InvalidRevision {
-                id: id.clone(),
-                source,
-            }
-        })?;
-        return Err(EnvironmentStoreError::StaleRevision {
-            id: id.clone(),
-            expected: expected.clone(),
-            actual,
-        });
-    }
-    Ok(())
+    current
+        .map(|revision| {
+            EnvironmentRevision::from_str(&revision).map_err(|source| {
+                EnvironmentStoreError::InvalidRevision {
+                    id: id.clone(),
+                    source,
+                }
+            })
+        })
+        .transpose()
 }
 
-async fn insert_environment(
+async fn revision_mismatch_error(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: &EnvironmentId,
+    expected: &EnvironmentRevision,
+) -> Result<EnvironmentStoreError, EnvironmentStoreError> {
+    let Some(actual) = current_revision(transaction, id).await? else {
+        return Err(EnvironmentStoreError::NotFound { id: id.clone() });
+    };
+    Ok(EnvironmentStoreError::StaleRevision {
+        id: id.clone(),
+        expected: expected.clone(),
+        actual,
+    })
+}
+
+async fn insert_environment_ignoring_conflict(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     environment: &Environment,
-) -> Result<(), EnvironmentStoreError> {
+) -> Result<bool, EnvironmentStoreError> {
+    let result = execute_environment_insert_sql(
+        transaction,
+        environment,
+        INSERT_ENVIRONMENT_IGNORE_CONFLICT_SQL,
+    )
+    .await?;
+    Ok(result > 0)
+}
+
+async fn execute_environment_insert_sql(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    environment: &Environment,
+    sql: &'static str,
+) -> Result<u64, EnvironmentStoreError> {
     let row = EnvironmentSqlRow::from_environment(environment)?;
-    sqlx::query(INSERT_ENVIRONMENT_SQL)
+    let result = sqlx::query(sql)
         .bind(row.id)
         .bind(row.revision)
         .bind(row.provider)
@@ -464,15 +467,16 @@ async fn insert_environment(
         .bind(row.env_json)
         .execute(&mut **transaction)
         .await?;
-    Ok(())
+    Ok(result.rows_affected())
 }
 
 async fn update_environment(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     environment: &Environment,
+    expected: &EnvironmentRevision,
 ) -> Result<(), EnvironmentStoreError> {
     let row = EnvironmentSqlRow::from_environment(environment)?;
-    sqlx::query(UPDATE_ENVIRONMENT_SQL)
+    let result = sqlx::query(UPDATE_ENVIRONMENT_SQL)
         .bind(row.revision)
         .bind(row.provider)
         .bind(row.cwd)
@@ -489,12 +493,16 @@ async fn update_environment(
         .bind(row.labels_json)
         .bind(row.env_json)
         .bind(row.id)
+        .bind(expected.as_str())
         .execute(&mut **transaction)
         .await?;
+    if result.rows_affected() == 0 {
+        return Err(revision_mismatch_error(transaction, &environment.id, expected).await?);
+    }
     Ok(())
 }
 
-const INSERT_ENVIRONMENT_SQL: &str = r"
+const INSERT_ENVIRONMENT_IGNORE_CONFLICT_SQL: &str = r"
 INSERT INTO environments (
     id,
     revision,
@@ -514,6 +522,7 @@ INSERT INTO environments (
     env_json
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO NOTHING
 ";
 
 const UPDATE_ENVIRONMENT_SQL: &str = r"
@@ -533,7 +542,7 @@ UPDATE environments SET
     lifecycle_auto_stop = ?,
     labels_json = ?,
     env_json = ?
-WHERE id = ?
+WHERE id = ? AND revision = ?
 ";
 
 struct EnvironmentSqlRow {
@@ -615,49 +624,9 @@ pub async fn seed_default_environment(
         EnvironmentId::new(DEFAULT_ENVIRONMENT_ID).expect("default environment id is valid"),
         &settings,
     )?;
-    let row = EnvironmentSqlRow::from_environment(&environment)?;
-    sqlx::query(
-        r"
-        INSERT INTO environments (
-            id,
-            revision,
-            provider,
-            cwd,
-            image_docker,
-            image_dockerfile_inline,
-            resources_cpu,
-            resources_memory,
-            resources_disk,
-            network_mode,
-            network_allow_json,
-            lifecycle_preserve,
-            lifecycle_stop_on_terminal,
-            lifecycle_auto_stop,
-            labels_json,
-            env_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO NOTHING
-        ",
-    )
-    .bind(row.id)
-    .bind(row.revision)
-    .bind(row.provider)
-    .bind(row.cwd)
-    .bind(row.image_docker)
-    .bind(row.image_dockerfile_inline)
-    .bind(row.resources_cpu)
-    .bind(row.resources_memory)
-    .bind(row.resources_disk)
-    .bind(row.network_mode)
-    .bind(row.network_allow_json)
-    .bind(row.lifecycle_preserve)
-    .bind(row.lifecycle_stop_on_terminal)
-    .bind(row.lifecycle_auto_stop)
-    .bind(row.labels_json)
-    .bind(row.env_json)
-    .execute(pool)
-    .await?;
+    let mut transaction = pool.begin().await?;
+    insert_environment_ignoring_conflict(&mut transaction, &environment).await?;
+    transaction.commit().await?;
 
     Ok(())
 }
@@ -667,20 +636,21 @@ pub async fn import_legacy_directory_once(
     source_dir: impl AsRef<Path>,
 ) -> Result<Option<ImportReport>, EnvironmentStoreError> {
     let source_dir = source_dir.as_ref();
-    let candidates = read_legacy_environment_directory(source_dir).await?;
-    let Some(candidates) = candidates else {
+    let paths = legacy_environment_paths(source_dir).await?;
+    let Some(paths) = paths else {
         return Ok(None);
     };
+    let existing_ids = existing_environment_ids(pool).await?;
+    let candidates = read_legacy_environment_directory(paths, &existing_ids).await?;
 
     let mut transaction = pool.begin().await?;
     let mut imported_ids = Vec::new();
     let mut skipped_rows = candidates.skipped_rows;
     for environment in &candidates.environments {
-        if environment_exists(&mut transaction, &environment.id).await? {
+        if !insert_environment_ignoring_conflict(&mut transaction, environment).await? {
             skipped_rows += 1;
             continue;
         }
-        insert_environment(&mut transaction, environment).await?;
         imported_ids.push(environment.id.to_string());
     }
     transaction.commit().await?;
@@ -711,9 +681,14 @@ struct LegacyCandidates {
     skipped_rows: usize,
 }
 
-async fn read_legacy_environment_directory(
+struct LegacyEnvironmentPath {
+    id:   EnvironmentId,
+    path: PathBuf,
+}
+
+async fn legacy_environment_paths(
     source_dir: &Path,
-) -> Result<Option<LegacyCandidates>, EnvironmentStoreError> {
+) -> Result<Option<Vec<LegacyEnvironmentPath>>, EnvironmentStoreError> {
     let mut entries = match fs::read_dir(source_dir).await {
         Ok(entries) => entries,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -732,16 +707,24 @@ async fn read_legacy_environment_directory(
             .await
             .map_err(|source| EnvironmentStoreError::io(&path, source))?;
         if file_type.is_file() && is_toml_file(&path) {
-            paths.push(path);
+            paths.push(LegacyEnvironmentPath {
+                id: id_from_path(&path)?,
+                path,
+            });
         }
     }
-    paths.sort();
+    paths.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(Some(paths))
+}
 
+async fn read_legacy_environment_directory(
+    paths: Vec<LegacyEnvironmentPath>,
+    existing_ids: &HashSet<EnvironmentId>,
+) -> Result<LegacyCandidates, EnvironmentStoreError> {
     let mut environments = Vec::new();
     let mut skipped_rows = 0usize;
-    for path in paths {
-        let id = id_from_path(&path)?;
-        if id.as_str() == RESERVED_LOCAL_ID {
+    for LegacyEnvironmentPath { id, path } in paths {
+        if id.as_str() == RESERVED_LOCAL_ID || existing_ids.contains(&id) {
             skipped_rows += 1;
             continue;
         }
@@ -753,10 +736,21 @@ async fn read_legacy_environment_directory(
     }
     environments.sort_by(|left, right| left.id.cmp(&right.id));
 
-    Ok(Some(LegacyCandidates {
+    Ok(LegacyCandidates {
         environments,
         skipped_rows,
-    }))
+    })
+}
+
+async fn existing_environment_ids(
+    pool: &DbPool,
+) -> Result<HashSet<EnvironmentId>, EnvironmentStoreError> {
+    let rows = sqlx::query_scalar::<_, String>("SELECT id FROM environments")
+        .fetch_all(pool)
+        .await?;
+    rows.into_iter()
+        .map(|id| EnvironmentId::new(id).map_err(EnvironmentStoreError::from))
+        .collect()
 }
 
 async fn rename_imported_legacy_directory(
