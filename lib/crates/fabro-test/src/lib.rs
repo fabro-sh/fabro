@@ -643,7 +643,11 @@ fn settings_storage_dir(settings_path: &Path) -> Option<PathBuf> {
         return None;
     }
     let value = toml::from_str::<toml::Value>(&content).ok()?;
-    value
+    value.as_table().and_then(server_storage_root_from_table)
+}
+
+fn server_storage_root_from_table(table: &TomlMap<String, TomlValue>) -> Option<PathBuf> {
+    table
         .get("server")
         .and_then(toml::Value::as_table)
         .and_then(|server| server.get("storage"))
@@ -651,6 +655,15 @@ fn settings_storage_dir(settings_path: &Path) -> Option<PathBuf> {
         .and_then(|storage| storage.get("root"))
         .and_then(toml::Value::as_str)
         .map(PathBuf::from)
+}
+
+fn storage_dir_for_environment_seed(
+    table: &TomlMap<String, TomlValue>,
+    fallback: &Path,
+) -> PathBuf {
+    server_storage_root_from_table(table)
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| fallback.to_path_buf())
 }
 
 fn home_settings_path(home_dir: &Path) -> PathBuf {
@@ -828,12 +841,14 @@ fn sync_home_settings(
         ensure_parent_dir(settings_path);
         std::fs::write(settings_path, contents)
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", settings_path.display()));
-        seed_storage_environments(storage_dir);
+        let seed_storage_dir = storage_dir_for_environment_seed(&table, storage_dir);
+        seed_storage_environments(&seed_storage_dir);
         return;
     }
 
     write_settings_table(settings_path, &table);
-    seed_storage_environments(storage_dir);
+    let seed_storage_dir = storage_dir_for_environment_seed(&table, storage_dir);
+    seed_storage_environments(&seed_storage_dir);
 }
 
 fn has_explicit_server_auth_methods(table: &TomlMap<String, TomlValue>) -> bool {
@@ -883,7 +898,8 @@ fn ensure_home_server_auth_methods(
     };
 
     if has_explicit_server_auth_methods(&table) {
-        seed_storage_environments(storage_dir);
+        let seed_storage_dir = storage_dir_for_environment_seed(&table, storage_dir);
+        seed_storage_environments(&seed_storage_dir);
         return;
     }
 
@@ -896,13 +912,7 @@ fn ensure_home_server_auth_methods(
 }
 
 fn has_explicit_storage_root(table: &TomlMap<String, TomlValue>) -> bool {
-    table
-        .get("server")
-        .and_then(TomlValue::as_table)
-        .and_then(|server| server.get("storage"))
-        .and_then(TomlValue::as_table)
-        .and_then(|storage| storage.get("root"))
-        .is_some()
+    server_storage_root_from_table(table).is_some()
 }
 
 fn set_server_storage_root(table: &mut TomlMap<String, TomlValue>, storage_dir: &Path) {
