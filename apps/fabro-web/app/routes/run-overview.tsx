@@ -20,7 +20,7 @@ import {
   type RunGraphNodeHover,
 } from "../hooks/use-annotated-run-graph-svg";
 
-export const handle = { wide: true };
+export const handle = { wide: true, fullHeight: true };
 
 type Direction = "LR" | "TB";
 
@@ -113,15 +113,19 @@ export default function RunOverview() {
   }, []);
 
   return (
-    <div className="flex gap-6">
-      <StageSidebar stages={stages} runId={id!} />
+    <div className="flex min-h-0 flex-1 gap-6">
+      <div className="min-h-0 shrink-0 overflow-y-auto overflow-x-hidden pb-[var(--fabro-interview-dock-clearance,0px)]">
+        <StageSidebar stages={stages} runId={id!} />
+      </div>
 
-      <div className="min-w-0 flex-1 space-y-4">
-        <RunSummaryPanel runId={id!} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 pb-[var(--fabro-interview-dock-clearance,0px)]">
+        <div className="shrink-0">
+          <RunSummaryPanel runId={id!} />
+        </div>
         {graphSvg === undefined && graphQuery.isLoading ? (
-          <div className="py-12" />
+          <div className="flex-1" />
         ) : graphSvg ? (
-          <div className="graph-svg relative rounded-md border border-line bg-panel-alt">
+          <div className="graph-svg relative flex min-h-0 flex-1 flex-col rounded-md border border-line bg-panel-alt">
             <GraphToolbar
               direction={direction}
               setDirection={setDirection}
@@ -132,7 +136,7 @@ export default function RunOverview() {
 
             <div
               ref={containerRef}
-              className="overflow-hidden p-6"
+              className="min-h-0 flex-1 overflow-hidden p-6"
               style={{ cursor: dragState.current ? "grabbing" : "grab" }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -141,7 +145,7 @@ export default function RunOverview() {
             >
               <div
                 ref={innerRef}
-                className="flex items-center justify-center [&_svg]:mx-auto [&_svg]:block"
+                className="flex h-full items-center justify-center [&_svg]:mx-auto [&_svg]:block"
                 style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`, transformOrigin: "center center" }}
               />
             </div>
