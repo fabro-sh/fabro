@@ -2053,7 +2053,8 @@ fn build_github_app_manifest(
             "pull_requests": "write",
             "checks": "write",
             "issues": "write",
-            "emails": "read"
+            "emails": "read",
+            "vulnerability_alerts": "write"
         },
         "default_events": []
     })
