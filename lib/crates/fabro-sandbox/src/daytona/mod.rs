@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -29,7 +29,7 @@ use crate::redact::redact_auth_url;
 use crate::sandbox::{optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, StdioProcess, managed_labels, shell_quote,
+    SandboxEvent, SandboxEventCallback, StdioProcess, glob_match, managed_labels, shell_quote,
 };
 
 pub(crate) const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
@@ -491,6 +491,49 @@ impl DaytonaSandbox {
         self.sandbox.get().ok_or_else(|| {
             crate::Error::message("Daytona sandbox not initialized — call initialize() first")
         })
+    }
+
+    async fn list_files_recursive(&self, root: &str) -> crate::Result<Vec<String>> {
+        let sandbox = self.sandbox()?;
+        let fs_svc = sandbox
+            .fs()
+            .await
+            .map_err(|e| crate::Error::context("Failed to get Daytona fs service", e))?;
+        let mut candidates = Vec::new();
+        let mut stack = vec![root.to_string()];
+        let mut visited_dirs = HashSet::new();
+
+        while let Some(dir) = stack.pop() {
+            if !visited_dirs.insert(dir.clone()) {
+                continue;
+            }
+
+            let entries = match fs_svc.list_files(&dir).await {
+                Ok(entries) => entries,
+                Err(daytona_sdk::DaytonaError::NotFound { .. }) => continue,
+                Err(err) => {
+                    return Err(crate::Error::context(
+                        format!("Failed to list Daytona directory {dir}"),
+                        err,
+                    ));
+                }
+            };
+
+            for entry in entries {
+                if entry.name.is_empty() || entry.name == "." || entry.name == ".." {
+                    continue;
+                }
+
+                let child_path = glob_match::join_path(&dir, &entry.name);
+                if entry.is_dir {
+                    stack.push(child_path);
+                } else {
+                    candidates.push(child_path);
+                }
+            }
+        }
+
+        Ok(candidates)
     }
 
     /// Read-only access to the SDK sandbox once initialized. Returns `None`
@@ -1856,28 +1899,10 @@ impl Sandbox for DaytonaSandbox {
             |p| self.resolve_path(p),
         );
 
-        let cmd = format!(
-            "find {} -name {} -type f | sort",
-            shell_quote(&base),
-            shell_quote(pattern),
-        );
-
-        let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
-
-        if !result.is_success() {
-            return Err(crate::Error::message(format!(
-                "glob failed (exit {}): {}",
-                result.display_exit_code(),
-                result.stderr
-            )));
-        }
-
-        Ok(result
-            .stdout
-            .lines()
-            .filter(|l| !l.is_empty())
-            .map(String::from)
-            .collect())
+        let traversal_root = glob_match::traversal_root(&base, pattern);
+        let mut candidates = self.list_files_recursive(&traversal_root).await?;
+        candidates.sort();
+        glob_match::match_glob(&base, pattern, &candidates)
     }
 }
 

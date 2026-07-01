@@ -32,7 +32,8 @@ use crate::sandbox::{StdioProcessControl, optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
     ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, StderrCollector,
-    StdioProcess, StdioProcessHandle, StdioProcessTermination, format_lines_numbered, shell_quote,
+    StdioProcess, StdioProcessHandle, StdioProcessTermination, format_lines_numbered, glob_match,
+    shell_quote,
 };
 
 pub(crate) const WORKING_DIRECTORY: &str = "/workspace";
@@ -1847,11 +1848,9 @@ impl Sandbox for DockerSandbox {
             || self.working_directory().to_string(),
             |path| self.resolve_container_path(path),
         );
-        let command = format!(
-            "find {} -name {} -type f | sort",
-            shell_quote(&base_dir),
-            shell_quote(pattern)
-        );
+        let traversal_root = glob_match::traversal_root(&base_dir, pattern);
+        let quoted_root = shell_quote(&traversal_root);
+        let command = format!("if [ -e {quoted_root} ]; then find {quoted_root} -type f; fi");
         let result = self
             .docker_exec_shell(&command, 30_000, None, None, None)
             .await?;
@@ -1863,12 +1862,14 @@ impl Sandbox for DockerSandbox {
             )));
         }
 
-        Ok(result
+        let mut candidates = result
             .stdout
             .lines()
             .map(String::from)
             .filter(|line| !line.is_empty())
-            .collect())
+            .collect::<Vec<_>>();
+        candidates.sort();
+        glob_match::match_glob(&base_dir, pattern, &candidates)
     }
 
     fn working_directory(&self) -> &str {

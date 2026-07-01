@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use fabro_static::EnvVars;
@@ -16,7 +16,7 @@ use crate::sandbox::{StdioProcessControl, optional_timeout};
 use crate::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
     ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, StderrCollector,
-    StdioProcess, StdioProcessHandle, StdioProcessTermination,
+    StdioProcess, StdioProcessHandle, StdioProcessTermination, glob_match,
 };
 
 pub struct LocalSandbox {
@@ -627,27 +627,22 @@ impl Sandbox for LocalSandbox {
 
     async fn glob(&self, pattern: &str, path: Option<&str>) -> crate::Result<Vec<String>> {
         let base_dir =
-            path.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
-
-        let full_pattern = if Path::new(pattern).is_absolute() {
-            pattern.to_string()
-        } else {
-            format!("{}/{pattern}", base_dir.display())
-        };
-
-        let mut results: Vec<String> = glob::glob(&full_pattern)
-            .map_err(|e| crate::Error::context("Invalid glob pattern", e))?
-            .filter_map(Result::ok)
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect();
+            path.map_or_else(|| self.working_directory.clone(), |p| self.resolve_path(p));
+        let base = base_dir.to_string_lossy().into_owned();
+        let traversal_root = PathBuf::from(glob_match::traversal_root(&base, pattern));
+        let local_files = collect_local_files(traversal_root).await?;
+        let candidate_paths = local_files
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>();
+        let modified_by_path = local_files
+            .into_iter()
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut results = glob_match::match_glob(&base, pattern, &candidate_paths)?;
 
         // Sort by mtime (newest first), caching metadata to avoid O(n log n) syscalls
         results.sort_by_cached_key(|path| {
-            std::cmp::Reverse(
-                std::fs::metadata(path)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
-            )
+            std::cmp::Reverse(modified_by_path.get(path).copied().unwrap_or(UNIX_EPOCH))
         });
 
         Ok(results)
@@ -863,6 +858,52 @@ where
         output.extend_from_slice(&buf[..read]);
         output_callback(stream, buf[..read].to_vec()).await?;
     }
+}
+
+async fn collect_local_files(root: PathBuf) -> crate::Result<Vec<(String, SystemTime)>> {
+    let mut files = Vec::new();
+    let mut stack = vec![root];
+
+    while let Some(path) = stack.pop() {
+        let metadata = match fs::metadata(&path).await {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(crate::Error::context(
+                    format!("Failed to stat {}", path.display()),
+                    err,
+                ));
+            }
+        };
+
+        if metadata.is_file() {
+            files.push((
+                path.to_string_lossy().into_owned(),
+                metadata.modified().unwrap_or(UNIX_EPOCH),
+            ));
+        } else if metadata.is_dir() {
+            let mut entries = match fs::read_dir(&path).await {
+                Ok(entries) => entries,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => {
+                    return Err(crate::Error::context(
+                        format!("Failed to read directory {}", path.display()),
+                        err,
+                    ));
+                }
+            };
+            while let Some(entry) = entries.next_entry().await.map_err(|err| {
+                crate::Error::context(
+                    format!("Failed to read directory entry in {}", path.display()),
+                    err,
+                )
+            })? {
+                stack.push(entry.path());
+            }
+        }
+    }
+
+    Ok(files)
 }
 
 #[cfg(test)]
@@ -1349,6 +1390,64 @@ mod tests {
         let results = env.glob("*.rs", None).await.unwrap();
 
         assert_eq!(results.len(), 2);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn glob_resolves_relative_search_path_against_working_directory() {
+        let dir = temp_dir();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "").unwrap();
+
+        let env = LocalSandbox::new(dir.clone());
+        let results = env.glob("*.rs", Some("src")).await.unwrap();
+
+        assert_eq!(results, vec![
+            dir.join("src/lib.rs").to_string_lossy().into_owned()
+        ]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn glob_recursive_pattern_finds_files_at_any_depth() {
+        let dir = temp_dir();
+        std::fs::create_dir_all(dir.join("src/nested")).unwrap();
+        std::fs::write(dir.join("a.rs"), "").unwrap();
+        std::fs::write(dir.join("src/lib.rs"), "").unwrap();
+        std::fs::write(dir.join("src/nested/main.rs"), "").unwrap();
+        std::fs::write(dir.join("src/nested/readme.md"), "").unwrap();
+
+        let env = LocalSandbox::new(dir.clone());
+        let mut results = env.glob("**/*.rs", None).await.unwrap();
+        results.sort();
+
+        assert_eq!(results, vec![
+            dir.join("a.rs").to_string_lossy().into_owned(),
+            dir.join("src/lib.rs").to_string_lossy().into_owned(),
+            dir.join("src/nested/main.rs")
+                .to_string_lossy()
+                .into_owned(),
+        ]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn glob_finds_skill_files_one_level_below_search_dir() {
+        let dir = temp_dir();
+        let skills = dir.join(".fabro/skills");
+        std::fs::create_dir_all(skills.join("patch")).unwrap();
+        std::fs::create_dir_all(skills.join("nested/deeper")).unwrap();
+        std::fs::write(skills.join("SKILL.md"), "").unwrap();
+        std::fs::write(skills.join("patch/SKILL.md"), "").unwrap();
+        std::fs::write(skills.join("nested/deeper/SKILL.md"), "").unwrap();
+
+        let env = LocalSandbox::new(dir.clone());
+        let skills_path = skills.to_string_lossy().into_owned();
+        let results = env.glob("*/SKILL.md", Some(&skills_path)).await.unwrap();
+
+        assert_eq!(results, vec![
+            skills.join("patch/SKILL.md").to_string_lossy().into_owned()
+        ]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -2,6 +2,7 @@ pub mod config;
 pub mod error;
 #[cfg(any(feature = "docker", feature = "daytona"))]
 pub mod from_environment;
+mod glob_match;
 pub mod provider;
 pub mod sandbox;
 pub mod sandbox_spec;
