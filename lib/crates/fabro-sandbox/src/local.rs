@@ -630,22 +630,17 @@ impl Sandbox for LocalSandbox {
             path.map_or_else(|| self.working_directory.clone(), |p| self.resolve_path(p));
         let base = base_dir.to_string_lossy().into_owned();
         let traversal_root = PathBuf::from(glob_match::traversal_root(&base, pattern));
-        let local_files = collect_local_files(traversal_root).await?;
-        let candidate_paths = local_files
-            .iter()
-            .map(|(path, _)| path.clone())
-            .collect::<Vec<_>>();
-        let modified_by_path = local_files
+        let matcher = glob_match::GlobMatcher::new(&base, pattern)?;
+        let mut matches = collect_local_files(traversal_root)
+            .await?
             .into_iter()
-            .collect::<std::collections::HashMap<_, _>>();
-        let mut results = glob_match::match_glob(&base, pattern, &candidate_paths)?;
+            .filter(|(path, _)| matcher.matches(path))
+            .collect::<Vec<_>>();
 
-        // Sort by mtime (newest first), caching metadata to avoid O(n log n) syscalls
-        results.sort_by_cached_key(|path| {
-            std::cmp::Reverse(modified_by_path.get(path).copied().unwrap_or(UNIX_EPOCH))
-        });
+        // Sort by mtime (newest first) using the metadata collected during traversal.
+        matches.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
 
-        Ok(results)
+        Ok(matches.into_iter().map(|(path, _)| path).collect())
     }
 
     async fn download_file_to_local(

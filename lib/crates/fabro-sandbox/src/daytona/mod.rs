@@ -1900,9 +1900,15 @@ impl Sandbox for DaytonaSandbox {
         );
 
         let traversal_root = glob_match::traversal_root(&base, pattern);
-        let mut candidates = self.list_files_recursive(&traversal_root).await?;
-        candidates.sort();
-        glob_match::match_glob(&base, pattern, &candidates)
+        let matcher = glob_match::GlobMatcher::new(&base, pattern)?;
+        let mut matches = self
+            .list_files_recursive(&traversal_root)
+            .await?
+            .into_iter()
+            .filter(|path| matcher.matches(path))
+            .collect::<Vec<_>>();
+        matches.sort();
+        Ok(matches)
     }
 }
 

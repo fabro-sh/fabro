@@ -1862,14 +1862,15 @@ impl Sandbox for DockerSandbox {
             )));
         }
 
-        let mut candidates = result
+        let matcher = glob_match::GlobMatcher::new(&base_dir, pattern)?;
+        let mut matches = result
             .stdout
             .lines()
+            .filter(|line| !line.is_empty() && matcher.matches(line))
             .map(String::from)
-            .filter(|line| !line.is_empty())
             .collect::<Vec<_>>();
-        candidates.sort();
-        glob_match::match_glob(&base_dir, pattern, &candidates)
+        matches.sort();
+        Ok(matches)
     }
 
     fn working_directory(&self) -> &str {

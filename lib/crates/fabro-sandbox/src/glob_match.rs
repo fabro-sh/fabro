@@ -1,32 +1,20 @@
 use std::path::Path;
 
-struct GlobMatcher {
+pub(crate) struct GlobMatcher {
     pattern: glob::Pattern,
 }
 
 impl GlobMatcher {
-    fn new(base: &str, pattern: &str) -> crate::Result<Self> {
+    pub(crate) fn new(base: &str, pattern: &str) -> crate::Result<Self> {
         let full_pattern = full_pattern(base, pattern);
         let pattern = glob::Pattern::new(&full_pattern)
             .map_err(|err| crate::Error::context("Invalid glob pattern", err))?;
         Ok(Self { pattern })
     }
 
-    fn match_paths(&self, candidate_paths: &[String]) -> Vec<String> {
-        candidate_paths
-            .iter()
-            .filter(|path| self.pattern.matches_with(path, match_options()))
-            .cloned()
-            .collect()
+    pub(crate) fn matches(&self, path: &str) -> bool {
+        self.pattern.matches_with(path, match_options())
     }
-}
-
-pub(crate) fn match_glob(
-    base: &str,
-    pattern: &str,
-    candidate_paths: &[String],
-) -> crate::Result<Vec<String>> {
-    Ok(GlobMatcher::new(base, pattern)?.match_paths(candidate_paths))
 }
 
 pub(crate) fn traversal_root(base: &str, pattern: &str) -> String {
@@ -138,10 +126,23 @@ fn parent_path(path: &str) -> String {
 mod tests {
     use std::path::Path;
 
-    use super::match_glob;
+    use super::GlobMatcher;
 
     fn path_string(path: &Path) -> String {
         path.to_string_lossy().into_owned()
+    }
+
+    fn match_glob(
+        base: &str,
+        pattern: &str,
+        candidate_paths: &[String],
+    ) -> crate::Result<Vec<String>> {
+        let matcher = GlobMatcher::new(base, pattern)?;
+        Ok(candidate_paths
+            .iter()
+            .filter(|path| matcher.matches(path))
+            .cloned()
+            .collect())
     }
 
     #[test]
