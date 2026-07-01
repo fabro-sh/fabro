@@ -860,7 +860,7 @@ async fn collect_local_files(root: PathBuf) -> crate::Result<Vec<(String, System
     let mut stack = vec![root];
 
     while let Some(path) = stack.pop() {
-        let metadata = match fs::metadata(&path).await {
+        let metadata = match fs::symlink_metadata(&path).await {
             Ok(metadata) => metadata,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
             Err(err) => {
@@ -871,12 +871,13 @@ async fn collect_local_files(root: PathBuf) -> crate::Result<Vec<(String, System
             }
         };
 
-        if metadata.is_file() {
+        let file_type = metadata.file_type();
+        if file_type.is_file() {
             files.push((
                 path.to_string_lossy().into_owned(),
                 metadata.modified().unwrap_or(UNIX_EPOCH),
             ));
-        } else if metadata.is_dir() {
+        } else if file_type.is_dir() {
             let mut entries = match fs::read_dir(&path).await {
                 Ok(entries) => entries,
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
@@ -1443,6 +1444,22 @@ mod tests {
         assert_eq!(results, vec![
             skills.join("patch/SKILL.md").to_string_lossy().into_owned()
         ]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn glob_does_not_recurse_through_symlinked_directories() {
+        let dir = temp_dir();
+        let target = dir.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("lib.rs"), "").unwrap();
+        std::os::unix::fs::symlink(&target, dir.join("linked")).unwrap();
+
+        let env = LocalSandbox::new(dir.clone());
+        let results = env.glob("linked/**/*.rs", None).await.unwrap();
+
+        assert!(results.is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

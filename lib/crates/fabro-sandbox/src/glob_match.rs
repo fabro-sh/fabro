@@ -4,6 +4,12 @@ pub(crate) struct GlobMatcher {
     pattern: glob::Pattern,
 }
 
+const MATCH_OPTIONS: glob::MatchOptions = glob::MatchOptions {
+    case_sensitive:              true,
+    require_literal_separator:   true,
+    require_literal_leading_dot: false,
+};
+
 impl GlobMatcher {
     pub(crate) fn new(base: &str, pattern: &str) -> crate::Result<Self> {
         let full_pattern = full_pattern(base, pattern);
@@ -13,7 +19,7 @@ impl GlobMatcher {
     }
 
     pub(crate) fn matches(&self, path: &str) -> bool {
-        self.pattern.matches_with(path, match_options())
+        self.pattern.matches_with(path, MATCH_OPTIONS)
     }
 }
 
@@ -48,14 +54,6 @@ fn full_pattern(base: &str, pattern: &str) -> String {
 
 fn is_absolute(path: &str) -> bool {
     path.starts_with('/') || Path::new(path).is_absolute()
-}
-
-fn match_options() -> glob::MatchOptions {
-    glob::MatchOptions {
-        case_sensitive:              true,
-        require_literal_separator:   true,
-        require_literal_leading_dot: false,
-    }
 }
 
 fn literal_traversal_root(pattern: &str) -> String {
