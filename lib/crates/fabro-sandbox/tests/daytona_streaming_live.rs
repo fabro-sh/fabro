@@ -166,6 +166,90 @@ mod daytona_streaming_live {
         Ok(())
     }
 
+    // Regression test for glob patterns that contain a path separator. Before
+    // the glob fix, Daytona ran `find <base> -name <pattern>`, and `find -name`
+    // matches only the basename and rejects patterns containing `/`. So
+    // `*/SKILL.md` and `**/SKILL.md` silently returned an empty list even though
+    // the files existed. Both `glob` calls below fail against that old
+    // implementation and pass once traversal (the Daytona filesystem API) and
+    // matching (host-side) are split.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires live Daytona credentials and provisions a sandbox"]
+    async fn daytona_glob_matches_patterns_containing_a_path_separator() -> Result<()> {
+        ensure!(
+            daytona_api_key_present(),
+            "DAYTONA_API_KEY must be set to run this live glob test"
+        );
+
+        let sandbox = DaytonaSandbox::new(
+            DaytonaConfig {
+                skip_clone: true,
+                ..Default::default()
+            },
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await?;
+
+        sandbox.initialize().await?;
+
+        let glob_result = run_glob_checks(&sandbox).await;
+        let cleanup_result = sandbox.cleanup().await.context("clean up Daytona sandbox");
+
+        glob_result?;
+        cleanup_result?;
+
+        Ok(())
+    }
+
+    async fn run_glob_checks(sandbox: &DaytonaSandbox) -> Result<()> {
+        // Build a skills tree with a SKILL.md at the search root, one level
+        // below it, and two levels below it.
+        let seed = sandbox
+            .exec_command(
+                "mkdir -p skills/patch skills/nested/deeper && \
+                 touch skills/SKILL.md skills/patch/SKILL.md skills/nested/deeper/SKILL.md",
+                30_000,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        ensure!(
+            seed.is_success(),
+            "seeding the skills tree failed: stdout={} stderr={}",
+            seed.stdout,
+            seed.stderr
+        );
+
+        // `*/SKILL.md` matches exactly one path segment: only the file one level
+        // below the search directory, not the root file or the deeper one.
+        let one_level = sandbox.glob("*/SKILL.md", Some("skills")).await?;
+        ensure_eq(
+            &one_level.len(),
+            &1,
+            "`*/SKILL.md` should match exactly one level below the search dir",
+        )?;
+        ensure!(
+            one_level[0].ends_with("skills/patch/SKILL.md"),
+            "`*/SKILL.md` should match the one-level-deep file, got {one_level:?}"
+        );
+
+        // `**/SKILL.md` matches at any depth, including several levels down.
+        let recursive = sandbox.glob("**/SKILL.md", Some("skills")).await?;
+        ensure!(
+            recursive
+                .iter()
+                .any(|path| path.ends_with("skills/nested/deeper/SKILL.md")),
+            "`**/SKILL.md` should match files nested several levels deep, got {recursive:?}"
+        );
+
+        Ok(())
+    }
+
     async fn run_smoke(sandbox: Arc<DaytonaSandbox>) -> Result<()> {
         let chunks = Arc::new(Mutex::new(Vec::new()));
         let cancel_token = CancellationToken::new();
