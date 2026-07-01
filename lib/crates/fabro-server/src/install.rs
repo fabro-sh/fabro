@@ -2054,7 +2054,8 @@ fn build_github_app_manifest(
             "checks": "write",
             "issues": "write",
             "emails": "read",
-            "vulnerability_alerts": "write"
+            "vulnerability_alerts": "write",
+            "organization_projects": "write"
         },
         "default_events": []
     })

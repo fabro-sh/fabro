@@ -949,7 +949,8 @@ fn build_github_app_manifest(app_name: &str, port: u16, web_url: &str) -> serde_
             "checks": "write",
             "issues": "write",
             "emails": "read",
-            "vulnerability_alerts": "write"
+            "vulnerability_alerts": "write",
+            "organization_projects": "write"
         },
         "default_events": []
     })
@@ -2665,6 +2666,10 @@ client_id = "client-id"
         );
         assert_eq!(
             manifest["default_permissions"]["vulnerability_alerts"],
+            serde_json::json!("write"),
+        );
+        assert_eq!(
+            manifest["default_permissions"]["organization_projects"],
             serde_json::json!("write"),
         );
     }
