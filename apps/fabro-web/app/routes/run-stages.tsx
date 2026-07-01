@@ -1920,7 +1920,7 @@ export default function RunStages() {
 
   return (
     <div className="-mr-4 -mt-3 flex min-h-0 flex-1 sm:-mr-6 lg:-mr-8">
-      <div className="shrink-0 pb-6 pr-3 pt-3">
+      <div className="min-h-0 shrink-0 overflow-y-auto overflow-x-hidden pr-3 pt-3 pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]">
         <StageSidebar stages={stages} runId={id} selectedStageId={selectedStage.id} />
       </div>
 
@@ -1933,7 +1933,7 @@ export default function RunStages() {
 
       {isAgentStage && (
         <>
-          <div className="shrink-0 px-3 pb-6 pt-3">
+          <div className="min-h-0 shrink-0 overflow-y-auto overflow-x-hidden px-3 pt-3 pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]">
             <StageInsightsSidebar
               stage={stageProjection}
               contextWindow={contextWindowQuery.data}
