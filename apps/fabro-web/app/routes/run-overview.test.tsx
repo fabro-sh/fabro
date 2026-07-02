@@ -19,6 +19,7 @@ mock.module("../lib/queries", () => ({
     isLoading: currentGraphLoading,
     mutate:    graphMutateMock,
   }),
+  useRunGraphSource: () => ({ data: undefined }),
   useRunStageEvents: () => ({ data: [] }),
 }));
 
