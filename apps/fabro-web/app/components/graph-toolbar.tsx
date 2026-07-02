@@ -11,7 +11,7 @@ export function GraphToolbar({
   zoomIndex,
   setZoomIndex,
 }: {
-  direction: Direction;
+  direction: Direction | undefined;
   setDirection: (d: Direction) => void;
   fitToWindow: () => void;
   zoomIndex: number;

@@ -26,7 +26,7 @@ type Direction = "LR" | "TB";
 
 export default function RunOverview() {
   const { id } = useParams();
-  const [direction, setDirection] = useState<Direction>("LR");
+  const [direction, setDirection] = useState<Direction | undefined>(undefined);
   const stagesQuery = useRunStages(id);
   const graphQuery = useRunGraph(id, direction);
   const runQuery = useRun(id);
