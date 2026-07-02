@@ -5,6 +5,7 @@ use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use fabro_static::EnvVars;
+use sha2::{Digest, Sha256};
 use tokio::fs;
 
 use crate::csp;
@@ -125,7 +126,7 @@ async fn serve_with_mode(
     }
 
     if let Some(asset) = load_asset_for_mode(&normalized, mode, asset_root, dev_disk_only).await {
-        return asset_response(&normalized, asset);
+        return asset_response(&normalized, asset, headers);
     }
 
     // SPA fallback: serve index.html only for browser navigations that
@@ -136,7 +137,7 @@ async fn serve_with_mode(
         if let Some(index) =
             load_asset_for_mode("index.html", mode, asset_root, dev_disk_only).await
         {
-            return asset_response("index.html", index);
+            return asset_response("index.html", index, headers);
         }
         if dev_disk_only {
             return build_in_progress_response();
@@ -276,7 +277,26 @@ fn disk_asset_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../apps/fabro-web/dist")
 }
 
-fn asset_response(path: &str, bytes: Vec<u8>) -> Response {
+const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
+
+fn asset_response(path: &str, bytes: Vec<u8>, request_headers: &HeaderMap) -> Response {
+    let cache_control = cache_control(path);
+    // Mutable assets keep stable names across deploys, so their `no-cache`
+    // policy needs a validator to revalidate as a cheap 304 instead of a full
+    // body download on every use. Hashed immutable assets never revalidate,
+    // so hashing their (multi-megabyte) bytes per request would be waste.
+    let etag = (cache_control == REVALIDATE_CACHE_CONTROL).then(|| asset_etag(&bytes));
+
+    if let Some(etag) = &etag {
+        if if_none_match_matches(request_headers, etag) {
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::NOT_MODIFIED;
+            apply_cache_headers(response.headers_mut(), cache_control, Some(etag));
+            return response;
+        }
+    }
+
     let mime = mime_guess::from_path(path).first_or_octet_stream();
     let mut response = Response::new(Body::from(bytes));
     *response.status_mut() = StatusCode::OK;
@@ -285,32 +305,79 @@ fn asset_response(path: &str, bytes: Vec<u8>) -> Response {
         HeaderValue::from_str(mime.as_ref())
             .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
     );
-    response.headers_mut().insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static(cache_control(path)),
-    );
+    apply_cache_headers(response.headers_mut(), cache_control, etag.as_deref());
     response
 }
 
-fn cache_control(path: &str) -> &'static str {
-    if path.contains("/assets/") || path.contains('-') && has_hashed_extension(path) {
-        "public, max-age=31536000, immutable"
-    } else {
-        "no-cache"
+fn apply_cache_headers(headers: &mut HeaderMap, cache_control: &'static str, etag: Option<&str>) {
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control),
+    );
+    if let Some(etag) = etag {
+        if let Ok(value) = HeaderValue::from_str(etag) {
+            headers.insert(header::ETAG, value);
+        }
     }
 }
 
-fn has_hashed_extension(path: &str) -> bool {
-    Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            let mut parts = name.split('.');
-            let Some(stem) = parts.next() else {
-                return false;
-            };
-            stem.split('-').count() > 1
+fn asset_etag(bytes: &[u8]) -> String {
+    format!("\"{}\"", hex::encode(Sha256::digest(bytes)))
+}
+
+fn if_none_match_matches(headers: &HeaderMap, etag: &str) -> bool {
+    headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value.split(',').map(str::trim).any(|candidate| {
+                candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == etag
+            })
         })
+}
+
+fn cache_control(path: &str) -> &'static str {
+    if is_content_hashed(path) {
+        IMMUTABLE_CACHE_CONTROL
+    } else {
+        REVALIDATE_CACHE_CONTROL
+    }
+}
+
+/// True only for the bundler's content-hashed outputs: files directly under
+/// `assets/` named `<stem>-<hash>.js|css` with an 8-char lowercase base-36
+/// hash (e.g. `assets/entry-0sv53bs3.js`). Only those names change whenever
+/// their bytes change, which is what makes a year-long `immutable` policy
+/// safe.
+///
+/// Stable-named files must NOT match — `index.html`, `assets/app.css`, the
+/// pierre-diffs worker under `assets/pierre-diffs-worker/`, images — because
+/// caching those immutably pins stale copies in browsers across deploys.
+/// When in doubt this classifier says "not hashed": the cost of a false
+/// negative is one 304 revalidation, the cost of a false positive is a
+/// wrongly-pinned asset for up to a year.
+fn is_content_hashed(path: &str) -> bool {
+    let Some(file_name) = path.trim_start_matches('/').strip_prefix("assets/") else {
+        return false;
+    };
+    if file_name.contains('/') {
+        // Subdirectories under assets/ (the pierre-diffs worker) hold
+        // stable-named files copied verbatim from their package.
+        return false;
+    }
+    let Some((stem, extension)) = file_name.rsplit_once('.') else {
+        return false;
+    };
+    if !matches!(extension, "js" | "css") {
+        return false;
+    }
+    let Some((_, hash)) = stem.rsplit_once('-') else {
+        return false;
+    };
+    hash.len() == 8
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
 }
 
 fn is_source_map(path: &str) -> bool {
@@ -365,10 +432,124 @@ mod tests {
     #[test]
     fn hashed_assets_are_cached_immutably() {
         assert_eq!(
-            cache_control("assets/entry-abc123.js"),
+            cache_control("assets/entry-0sv53bs3.js"),
             "public, max-age=31536000, immutable"
         );
+        assert_eq!(
+            cache_control("assets/chunk-4tr91ktd.js"),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(
+            cache_control("assets/chunk-x912wb67.css"),
+            "public, max-age=31536000, immutable"
+        );
+    }
+
+    #[test]
+    fn stable_named_assets_must_revalidate() {
+        // Files whose names do NOT change when their bytes change would be
+        // pinned stale in browsers for a year if marked immutable.
         assert_eq!(cache_control("index.html"), "no-cache");
+        assert_eq!(cache_control("assets/app.css"), "no-cache");
+        assert_eq!(
+            cache_control("assets/pierre-diffs-worker/worker-portable.js"),
+            "no-cache"
+        );
+        assert_eq!(cache_control("images/apple-touch-icon.png"), "no-cache");
+        // Dash segment that isn't an 8-char lowercase base-36 hash.
+        assert_eq!(cache_control("assets/entry-abc123.js"), "no-cache");
+        // Right hash shape, but not a bundler output extension.
+        assert_eq!(cache_control("assets/photo-a1b2c3d4.png"), "no-cache");
+    }
+
+    #[tokio::test]
+    async fn mutable_assets_serve_etag_and_conditional_304() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let asset_path = temp_dir.path().join("assets/app.css");
+        std::fs::create_dir_all(asset_path.parent().unwrap()).unwrap();
+        std::fs::write(&asset_path, b"body { color: red }").unwrap();
+
+        let first = serve_with_asset_root(
+            "/assets/app.css",
+            &HeaderMap::new(),
+            Some(temp_dir.path()),
+            false,
+        )
+        .await;
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(
+            first.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-cache"
+        );
+        let etag = first
+            .headers()
+            .get(header::ETAG)
+            .expect("mutable assets should carry an ETag validator")
+            .clone();
+
+        let mut conditional = HeaderMap::new();
+        conditional.insert(header::IF_NONE_MATCH, etag.clone());
+        let second = serve_with_asset_root(
+            "/assets/app.css",
+            &conditional,
+            Some(temp_dir.path()),
+            false,
+        )
+        .await;
+        assert_eq!(second.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(second.headers().get(header::ETAG).unwrap(), &etag);
+        assert_eq!(
+            second.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-cache"
+        );
+        let bytes = axum::body::to_bytes(second.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(bytes.is_empty(), "304 must not carry a body");
+    }
+
+    #[tokio::test]
+    async fn stale_if_none_match_gets_full_response() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let asset_path = temp_dir.path().join("assets/app.css");
+        std::fs::create_dir_all(asset_path.parent().unwrap()).unwrap();
+        std::fs::write(&asset_path, b"body { color: red }").unwrap();
+
+        let mut conditional = HeaderMap::new();
+        conditional.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_static("\"0000stale0000\""),
+        );
+        let response = serve_with_asset_root(
+            "/assets/app.css",
+            &conditional,
+            Some(temp_dir.path()),
+            false,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().contains_key(header::ETAG));
+    }
+
+    #[tokio::test]
+    async fn immutable_assets_skip_etag() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let asset_path = temp_dir.path().join("assets/entry-0sv53bs3.js");
+        std::fs::create_dir_all(asset_path.parent().unwrap()).unwrap();
+        std::fs::write(&asset_path, b"console.log(1)").unwrap();
+
+        let response = serve_with_asset_root(
+            "/assets/entry-0sv53bs3.js",
+            &HeaderMap::new(),
+            Some(temp_dir.path()),
+            false,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            !response.headers().contains_key(header::ETAG),
+            "immutable assets never revalidate, so a validator is dead weight"
+        );
     }
 
     #[tokio::test]
