@@ -24,12 +24,12 @@ use crate::helpers::{api, test_app_state};
 /// Router serving an SPA shell comfortably above the compression size floor,
 /// through the same fallback service production uses for static assets.
 fn spa_router_with_big_index() -> (Router, TempDir) {
-    let temp_dir = tempfile::tempdir().unwrap();
+    let temp_dir = tempfile::tempdir().expect("SPA fixture tempdir should create");
     std::fs::write(
         temp_dir.path().join("index.html"),
         format!("<!doctype html><title>spa</title>{}", "x".repeat(8192)),
     )
-    .unwrap();
+    .expect("SPA fixture index.html should write");
     let app = fabro_server::test_support::build_test_router_with_options(
         test_app_state(),
         RouterOptions {
