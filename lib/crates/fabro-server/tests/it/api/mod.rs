@@ -1,6 +1,7 @@
 mod auth_sessions;
 mod automations;
 mod cli_auth_token;
+mod compression;
 mod docs;
 mod environments;
 mod events;

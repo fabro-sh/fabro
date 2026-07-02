@@ -52,7 +52,7 @@ use zeroize::Zeroizing;
 use crate::error::ApiError;
 use crate::serve::{self, DEFAULT_TCP_PORT};
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
-use crate::{security_headers, static_files};
+use crate::{security_headers, server, static_files};
 
 #[derive(Clone)]
 pub struct InstallAppState {
@@ -667,6 +667,10 @@ pub fn build_install_router(state: InstallAppState) -> Router {
                 }
             }
         }))
+        // Install mode serves the same multi-megabyte SPA bundle as the main
+        // router; a first-run setup over a slow link needs compression just
+        // as much.
+        .layer(server::compression_layer())
         .layer(middleware::from_fn(security_headers::layer))
 }
 

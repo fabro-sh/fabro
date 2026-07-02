@@ -137,6 +137,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tokio_util::sync::CancellationToken;
 use tower::{ServiceExt, service_fn};
+use tower_http::compression::{CompressionLayer, CompressionLevel};
 use tracing::{Instrument, debug, error, info, warn};
 use ulid::Ulid;
 
@@ -1852,6 +1853,10 @@ pub fn build_router_with_options(
     }
 
     router
+        // Innermost of the outer layers so every response body — static SPA
+        // assets and JSON API alike — is compressed before the header/log
+        // middlewares see it.
+        .layer(compression_layer())
         .layer(middleware::from_fn_with_state(
             canonical_host::Config {
                 state: state_for_canonical_host,
@@ -1862,6 +1867,17 @@ pub fn build_router_with_options(
         .layer(middleware::from_fn(security_headers::layer))
         .layer(middleware::from_fn(http_log_middleware))
         .layer(middleware::from_fn(request_id::layer))
+}
+
+/// Response-compression layer shared by the main and install-mode routers.
+///
+/// The default predicate skips streaming SSE (`text/event-stream`), gRPC,
+/// images, and tiny bodies. The quality is pinned because tower-http's
+/// default defers to each codec's own default, and brotli's is quality 11 —
+/// seconds of CPU on a multi-megabyte asset. Level 4 keeps both codecs fast
+/// at a near-optimal ratio.
+pub(crate) fn compression_layer() -> CompressionLayer {
+    CompressionLayer::new().quality(CompressionLevel::Precise(4))
 }
 
 async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Response {

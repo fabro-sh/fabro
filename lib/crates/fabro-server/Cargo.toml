@@ -62,7 +62,7 @@ cookie.workspace = true
 dirs.workspace = true
 globset.workspace = true
 tower = "0.5"
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.6", features = ["trace", "compression-br", "compression-gzip"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util.workspace = true
 base64.workspace = true
