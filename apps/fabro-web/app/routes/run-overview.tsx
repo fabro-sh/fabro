@@ -26,7 +26,7 @@ type Direction = "LR" | "TB";
 
 const RANKDIR_RE = /rankdir\s*=\s*(\w+)/;
 
-function parseSourceDirection(source: string | null | undefined): Direction | undefined {
+function parseSourceDirection(source: string | undefined): Direction | undefined {
   const value = source?.match(RANKDIR_RE)?.[1];
   return value === "LR" || value === "TB" ? value : undefined;
 }
@@ -35,7 +35,7 @@ export default function RunOverview() {
   const { id } = useParams();
   const [direction, setDirection] = useState<Direction | undefined>(undefined);
   const sourceQuery = useRunGraphSource(id, direction === undefined);
-  const activeDirection = direction ?? parseSourceDirection(sourceQuery.data) ?? "TB";
+  const activeDirection = direction ?? parseSourceDirection(sourceQuery.data ?? undefined) ?? "TB";
   const stagesQuery = useRunStages(id);
   const graphQuery = useRunGraph(id, direction);
   const runQuery = useRun(id);
