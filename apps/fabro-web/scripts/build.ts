@@ -79,7 +79,10 @@ async function buildOnce() {
   await copyPierreWorkerAssets(join(buildAssetsDir, "pierre-diffs-worker"));
   await writeIndexHtml(
     buildDir,
-    result.outputs.map((output: any) => relative(buildDir, output.path)),
+    result.outputs.map((output: any) => ({
+      kind: String(output.kind),
+      path: relative(buildDir, output.path),
+    })),
   );
 
   await publishBuild(buildDir);
@@ -100,15 +103,25 @@ async function copyPierreWorkerAssets(targetDir: string) {
   }
 }
 
-async function writeIndexHtml(buildDir: string, outputs: string[]) {
+type IndexHtmlOutput = { kind: string; path: string };
+
+async function writeIndexHtml(buildDir: string, outputs: IndexHtmlOutput[]) {
   const template = await readFile(templatePath, "utf8");
+  // Only entry points get <script> tags. Bun's `splitting: true` emits
+  // hundreds of chunks reachable from the entry through static and dynamic
+  // imports; listing every chunk here force-downloads the whole bundle
+  // (13+ MB) before first render, defeating the code splitting. The
+  // browser's module graph pulls static imports itself, and dynamic
+  // import() chunks load on demand.
   const scripts = outputs
-    .filter((path) => path.endsWith(".js"))
-    .map((path) => `<script type="module" src="/${path.replaceAll("\\\\", "/")}"></script>`)
+    .filter((output) => output.kind === "entry-point" && output.path.endsWith(".js"))
+    .map((output) => `<script type="module" src="/${output.path.replaceAll("\\\\", "/")}"></script>`)
     .join("\n    ");
   const styles = [
     "/assets/app.css",
-    ...outputs.filter((path) => path.endsWith(".css")).map((path) => `/${path.replaceAll("\\\\", "/")}`),
+    ...outputs
+      .filter((output) => output.path.endsWith(".css"))
+      .map((output) => `/${output.path.replaceAll("\\\\", "/")}`),
   ]
     .filter((value, index, array) => array.indexOf(value) === index)
     .map((path) => `<link rel="stylesheet" href="${path}" />`)
