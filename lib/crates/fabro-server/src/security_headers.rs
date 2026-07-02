@@ -72,9 +72,17 @@ fn apply_defaults(headers: &mut HeaderMap, is_https: bool) {
 
     // Conservative cache defaults. Routes that deliberately want to cache
     // (hashed static assets, public GETs) set their own Cache-Control before
-    // this middleware runs, which prevents the default from being applied.
-    set_default(headers, header::CACHE_CONTROL, "no-store");
-    set_default(headers, header::PRAGMA, "no-cache");
+    // this middleware runs. When they have, we must not also stamp the no-cache
+    // pair: `Pragma: no-cache` next to a long-lived `Cache-Control: immutable`
+    // is contradictory, and browsers resolve it by revalidating on every load.
+    // Since these assets carry no ETag/Last-Modified, that revalidation
+    // degrades into a full re-download each time. Apply the no-store/no-cache
+    // defaults only to responses that haven't opted into caching; a present
+    // Cache-Control is the signal that the handler chose its own policy.
+    if !headers.contains_key(header::CACHE_CONTROL) {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    }
     set_default(headers, header::VARY, "Accept-Encoding");
 
     // HSTS is a no-op over plain HTTP per RFC 6797, but only emit it on
@@ -202,7 +210,10 @@ mod tests {
     #[test]
     fn existing_cache_control_is_not_overridden() {
         // Static assets set their own cache-control with long immutability.
-        // The middleware default must not clobber it.
+        // The middleware default must not clobber it, and must not stamp a
+        // contradictory `Pragma: no-cache` alongside it — that combination
+        // forces browsers to revalidate (and, absent validators, re-download)
+        // supposedly-immutable assets on every load.
         let headers = headers_after(&req("/assets/app-abc.js", &[]), &[(
             "cache-control",
             "public, max-age=31536000, immutable",
@@ -210,6 +221,10 @@ mod tests {
         assert_eq!(
             headers.get("cache-control").unwrap(),
             "public, max-age=31536000, immutable"
+        );
+        assert!(
+            !headers.contains_key("pragma"),
+            "cacheable responses must not carry Pragma: no-cache"
         );
     }
 
