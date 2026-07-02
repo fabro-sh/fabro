@@ -24,6 +24,8 @@ export const handle = { wide: true };
 
 type Direction = "LR" | "TB";
 
+// Mirrors fabro-graphviz's RANKDIR_RE (lib/crates/fabro-graphviz/src/render.rs) —
+// keep the accepted `rankdir=` syntax in sync with that regex.
 const RANKDIR_RE = /rankdir\s*=\s*(\w+)/;
 
 function parseSourceDirection(source: string | undefined): Direction | undefined {
@@ -35,7 +37,11 @@ export default function RunOverview() {
   const { id } = useParams();
   const [direction, setDirection] = useState<Direction | undefined>(undefined);
   const sourceQuery = useRunGraphSource(id, direction === undefined);
-  const activeDirection = direction ?? parseSourceDirection(sourceQuery.data ?? undefined) ?? "TB";
+  const sourceDirection = useMemo(
+    () => parseSourceDirection(sourceQuery.data ?? undefined),
+    [sourceQuery.data],
+  );
+  const activeDirection = direction ?? sourceDirection ?? "TB";
   const stagesQuery = useRunStages(id);
   const graphQuery = useRunGraph(id, direction);
   const runQuery = useRun(id);
