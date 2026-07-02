@@ -37,11 +37,7 @@ export default function RunOverview() {
   const { id } = useParams();
   const [direction, setDirection] = useState<Direction | undefined>(undefined);
   const sourceQuery = useRunGraphSource(id, direction === undefined);
-  const sourceDirection = useMemo(
-    () => parseSourceDirection(sourceQuery.data ?? undefined),
-    [sourceQuery.data],
-  );
-  const activeDirection = direction ?? sourceDirection ?? "TB";
+  const activeDirection = direction ?? parseSourceDirection(sourceQuery.data ?? undefined) ?? "TB";
   const stagesQuery = useRunStages(id);
   const graphQuery = useRunGraph(id, direction);
   const runQuery = useRun(id);
