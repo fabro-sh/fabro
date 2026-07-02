@@ -8,24 +8,43 @@ use rust_embed::RustEmbed;
 #[exclude = "**/*.map"]
 struct EmbeddedAssets;
 
-pub struct AssetBytes(Cow<'static, [u8]>);
+pub struct AssetBytes {
+    data:   Cow<'static, [u8]>,
+    sha256: [u8; 32],
+}
 
 impl AssetBytes {
     #[must_use]
     pub fn into_vec(self) -> Vec<u8> {
-        self.0.into_owned()
+        self.data.into_owned()
+    }
+
+    #[must_use]
+    pub fn into_cow(self) -> Cow<'static, [u8]> {
+        self.data
+    }
+
+    /// SHA-256 of the asset bytes. rust-embed computes it at compile time in
+    /// release builds, so callers can use it as a validator without rehashing
+    /// the body per request.
+    #[must_use]
+    pub fn sha256(&self) -> [u8; 32] {
+        self.sha256
     }
 }
 
 impl AsRef<[u8]> for AssetBytes {
     fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
+        self.data.as_ref()
     }
 }
 
 #[must_use]
 pub fn get(path: &str) -> Option<AssetBytes> {
-    EmbeddedAssets::get(path).map(|file| AssetBytes(file.data))
+    EmbeddedAssets::get(path).map(|file| AssetBytes {
+        sha256: file.metadata.sha256_hash(),
+        data:   file.data,
+    })
 }
 
 #[cfg(test)]

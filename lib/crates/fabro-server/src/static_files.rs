@@ -1,7 +1,8 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use fabro_static::EnvVars;
@@ -101,9 +102,8 @@ async fn load_injected_install_shell(
     asset_root: Option<&Path>,
     dev_disk_only: bool,
 ) -> Option<Vec<u8>> {
-    Some(inject_install_mode(
-        load_asset("index.html", asset_root, dev_disk_only).await?,
-    ))
+    let shell = load_asset("index.html", asset_root, dev_disk_only).await?;
+    Some(inject_install_mode(shell.bytes.into()))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,7 +188,39 @@ fn normalize(path: &str) -> String {
     }
 }
 
-async fn load_asset(path: &str, asset_root: Option<&Path>, dev_disk_only: bool) -> Option<Vec<u8>> {
+/// An asset body plus, when the source precomputed it (the embedded SPA
+/// snapshot), its SHA-256. Carrying the hash lets mutable-asset ETags reuse
+/// rust-embed's compile-time digest instead of rehashing process-lifetime
+/// bytes on every revalidation.
+struct Asset {
+    bytes:  Bytes,
+    sha256: Option<[u8; 32]>,
+}
+
+impl Asset {
+    fn from_vec(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes:  bytes.into(),
+            sha256: None,
+        }
+    }
+
+    fn from_embedded(asset: fabro_spa::AssetBytes) -> Self {
+        let sha256 = asset.sha256();
+        let bytes = match asset.into_cow() {
+            // Release builds embed assets as statics; serve them without
+            // copying the (potentially multi-megabyte) body per request.
+            Cow::Borrowed(bytes) => Bytes::from_static(bytes),
+            Cow::Owned(bytes) => Bytes::from(bytes),
+        };
+        Self {
+            bytes,
+            sha256: Some(sha256),
+        }
+    }
+}
+
+async fn load_asset(path: &str, asset_root: Option<&Path>, dev_disk_only: bool) -> Option<Asset> {
     if spa_assets_disabled_for_test() {
         return None;
     }
@@ -197,11 +229,11 @@ async fn load_asset(path: &str, asset_root: Option<&Path>, dev_disk_only: bool) 
     // workspace's live `dist/` fallback or test isolation breaks.
     if let Some(root) = asset_root {
         if let Some(bytes) = read_disk_asset_from_root(root, path).await {
-            return Some(bytes);
+            return Some(Asset::from_vec(bytes));
         }
     } else if cfg!(debug_assertions) {
         if let Some(bytes) = read_disk_asset(path).await {
-            return Some(bytes);
+            return Some(Asset::from_vec(bytes));
         }
     }
 
@@ -212,7 +244,7 @@ async fn load_asset(path: &str, asset_root: Option<&Path>, dev_disk_only: bool) 
         return None;
     }
 
-    fabro_spa::get(path).map(fabro_spa::AssetBytes::into_vec)
+    fabro_spa::get(path).map(Asset::from_embedded)
 }
 
 async fn load_asset_for_mode(
@@ -220,9 +252,11 @@ async fn load_asset_for_mode(
     mode: SpaMode,
     asset_root: Option<&Path>,
     dev_disk_only: bool,
-) -> Option<Vec<u8>> {
+) -> Option<Asset> {
     if mode == SpaMode::Install && path == "index.html" {
-        return cached_install_mode_shell(asset_root, dev_disk_only).await;
+        return cached_install_mode_shell(asset_root, dev_disk_only)
+            .await
+            .map(Asset::from_vec);
     }
     load_asset(path, asset_root, dev_disk_only).await
 }
@@ -280,13 +314,14 @@ fn disk_asset_root() -> PathBuf {
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL: &str = "no-cache";
 
-fn asset_response(path: &str, bytes: Vec<u8>, request_headers: &HeaderMap) -> Response {
-    let cache_control = cache_control(path);
+fn asset_response(path: &str, asset: Asset, request_headers: &HeaderMap) -> Response {
+    let content_hashed = is_content_hashed(path);
+    let cache_control = cache_control(content_hashed);
     // Mutable assets keep stable names across deploys, so their `no-cache`
     // policy needs a validator to revalidate as a cheap 304 instead of a full
     // body download on every use. Hashed immutable assets never revalidate,
-    // so hashing their (multi-megabyte) bytes per request would be waste.
-    let etag = (cache_control == REVALIDATE_CACHE_CONTROL).then(|| asset_etag(&bytes));
+    // so an ETag would be dead weight.
+    let etag = (!content_hashed).then(|| asset_etag(&asset));
 
     if let Some(etag) = &etag {
         if if_none_match_matches(request_headers, etag) {
@@ -298,7 +333,7 @@ fn asset_response(path: &str, bytes: Vec<u8>, request_headers: &HeaderMap) -> Re
     }
 
     let mime = mime_guess::from_path(path).first_or_octet_stream();
-    let mut response = Response::new(Body::from(bytes));
+    let mut response = Response::new(Body::from(asset.bytes));
     *response.status_mut() = StatusCode::OK;
     response.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -321,8 +356,11 @@ fn apply_cache_headers(headers: &mut HeaderMap, cache_control: &'static str, eta
     }
 }
 
-fn asset_etag(bytes: &[u8]) -> String {
-    format!("\"{}\"", hex::encode(Sha256::digest(bytes)))
+fn asset_etag(asset: &Asset) -> String {
+    let digest = asset
+        .sha256
+        .unwrap_or_else(|| Sha256::digest(&asset.bytes).into());
+    format!("\"{}\"", hex::encode(digest))
 }
 
 fn if_none_match_matches(headers: &HeaderMap, etag: &str) -> bool {
@@ -336,8 +374,8 @@ fn if_none_match_matches(headers: &HeaderMap, etag: &str) -> bool {
         })
 }
 
-fn cache_control(path: &str) -> &'static str {
-    if is_content_hashed(path) {
+fn cache_control(content_hashed: bool) -> &'static str {
+    if content_hashed {
         IMMUTABLE_CACHE_CONTROL
     } else {
         REVALIDATE_CACHE_CONTROL
@@ -395,8 +433,8 @@ mod tests {
     use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::{
-        accepts_html, cache_control, inject_install_mode, is_source_map, read_disk_asset_from_root,
-        serve_with_asset_root,
+        accepts_html, cache_control, inject_install_mode, is_content_hashed, is_source_map,
+        read_disk_asset_from_root, serve_with_asset_root,
     };
 
     fn headers_with_accept(value: &str) -> HeaderMap {
@@ -431,35 +469,36 @@ mod tests {
 
     #[test]
     fn hashed_assets_are_cached_immutably() {
-        assert_eq!(
-            cache_control("assets/entry-0sv53bs3.js"),
-            "public, max-age=31536000, immutable"
-        );
-        assert_eq!(
-            cache_control("assets/chunk-4tr91ktd.js"),
-            "public, max-age=31536000, immutable"
-        );
-        assert_eq!(
-            cache_control("assets/chunk-x912wb67.css"),
-            "public, max-age=31536000, immutable"
-        );
+        for path in [
+            "assets/entry-0sv53bs3.js",
+            "assets/chunk-4tr91ktd.js",
+            "assets/chunk-x912wb67.css",
+        ] {
+            assert!(is_content_hashed(path), "{path} should be content-hashed");
+        }
+        assert_eq!(cache_control(true), "public, max-age=31536000, immutable");
     }
 
     #[test]
     fn stable_named_assets_must_revalidate() {
         // Files whose names do NOT change when their bytes change would be
         // pinned stale in browsers for a year if marked immutable.
-        assert_eq!(cache_control("index.html"), "no-cache");
-        assert_eq!(cache_control("assets/app.css"), "no-cache");
-        assert_eq!(
-            cache_control("assets/pierre-diffs-worker/worker-portable.js"),
-            "no-cache"
-        );
-        assert_eq!(cache_control("images/apple-touch-icon.png"), "no-cache");
-        // Dash segment that isn't an 8-char lowercase base-36 hash.
-        assert_eq!(cache_control("assets/entry-abc123.js"), "no-cache");
-        // Right hash shape, but not a bundler output extension.
-        assert_eq!(cache_control("assets/photo-a1b2c3d4.png"), "no-cache");
+        for path in [
+            "index.html",
+            "assets/app.css",
+            "assets/pierre-diffs-worker/worker-portable.js",
+            "images/apple-touch-icon.png",
+            // Dash segment that isn't an 8-char lowercase base-36 hash.
+            "assets/entry-abc123.js",
+            // Right hash shape, but not a bundler output extension.
+            "assets/photo-a1b2c3d4.png",
+        ] {
+            assert!(
+                !is_content_hashed(path),
+                "{path} should not be content-hashed"
+            );
+        }
+        assert_eq!(cache_control(false), "no-cache");
     }
 
     #[tokio::test]

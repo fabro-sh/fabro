@@ -10,12 +10,49 @@
     reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
 )]
 
+use std::net::SocketAddr;
+
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use fabro_server::server::RouterOptions;
+use tempfile::TempDir;
 use tower::ServiceExt;
 
 use crate::helpers::{api, test_app_state};
+
+/// Router serving an SPA shell comfortably above the compression size floor,
+/// through the same fallback service production uses for static assets.
+fn spa_router_with_big_index() -> (Router, TempDir) {
+    let temp_dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp_dir.path().join("index.html"),
+        format!("<!doctype html><title>spa</title>{}", "x".repeat(8192)),
+    )
+    .unwrap();
+    let app = fabro_server::test_support::build_test_router_with_options(
+        test_app_state(),
+        RouterOptions {
+            web_enabled: true,
+            static_asset_root: Some(temp_dir.path().to_path_buf()),
+            ..RouterOptions::default()
+        },
+    );
+    (app, temp_dir)
+}
+
+async fn serve_on_ephemeral_port(app: Router) -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test TCP listener should bind");
+    let addr = listener
+        .local_addr()
+        .expect("test TCP listener should have a local address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    addr
+}
 
 fn openapi_request(accept_encoding: Option<&str>) -> Request<Body> {
     let mut builder = Request::builder().method("GET").uri(api("/openapi.json"));
@@ -67,21 +104,7 @@ async fn spa_assets_are_compressed() {
     // SPA assets are served by the router's fallback service, not a regular
     // route — this test pins that compression covers that path too, since the
     // multi-megabyte JS bundle is the single largest thing the server sends.
-    let temp_dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        temp_dir.path().join("index.html"),
-        format!("<!doctype html><title>spa</title>{}", "x".repeat(8192)),
-    )
-    .unwrap();
-
-    let app = fabro_server::test_support::build_test_router_with_options(
-        test_app_state(),
-        RouterOptions {
-            web_enabled: true,
-            static_asset_root: Some(temp_dir.path().to_path_buf()),
-            ..RouterOptions::default()
-        },
-    );
+    let (app, _temp_dir) = spa_router_with_big_index();
     let request = Request::builder()
         .method("GET")
         .uri("/")
@@ -107,16 +130,8 @@ async fn compression_applies_over_a_real_tcp_connection() {
     // `oneshot` exercises the tower stack directly; this pins the same
     // behavior through hyper's real connection handling, matching how the
     // production server actually serves (`axum::serve`).
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("test TCP listener should bind");
-    let addr = listener
-        .local_addr()
-        .expect("test TCP listener should have a local address");
     let app = fabro_server::test_support::build_test_router(test_app_state());
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
+    let addr = serve_on_ephemeral_port(app).await;
 
     let response = fabro_test::test_http_client()
         .get(format!("http://{addr}/api/v1/openapi.json"))
@@ -142,25 +157,8 @@ async fn compression_applies_over_a_real_tcp_connection() {
 async fn spa_assets_compress_over_a_real_tcp_connection() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let temp_dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        temp_dir.path().join("index.html"),
-        format!("<!doctype html><title>spa</title>{}", "x".repeat(8192)),
-    )
-    .unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let app = fabro_server::test_support::build_test_router_with_options(
-        test_app_state(),
-        RouterOptions {
-            web_enabled: true,
-            static_asset_root: Some(temp_dir.path().to_path_buf()),
-            ..RouterOptions::default()
-        },
-    );
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
+    let (app, _temp_dir) = spa_router_with_big_index();
+    let addr = serve_on_ephemeral_port(app).await;
 
     // Raw HTTP/1.1 over the socket: no client-side redirect following or
     // transparent decompression can distort what the server actually sent.

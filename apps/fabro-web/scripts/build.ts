@@ -80,7 +80,7 @@ async function buildOnce() {
   await writeIndexHtml(
     buildDir,
     result.outputs.map((output: any) => ({
-      kind: String(output.kind),
+      kind: output.kind,
       path: relative(buildDir, output.path),
     })),
   );
@@ -103,7 +103,12 @@ async function copyPierreWorkerAssets(targetDir: string) {
   }
 }
 
-type IndexHtmlOutput = { kind: string; path: string };
+// `kind` mirrors Bun's `BuildArtifact.kind`; the union keeps the
+// "entry-point" comparison below typo-safe.
+type IndexHtmlOutput = {
+  kind: "entry-point" | "chunk" | "asset" | "sourcemap" | "bytecode";
+  path: string;
+};
 
 async function writeIndexHtml(buildDir: string, outputs: IndexHtmlOutput[]) {
   const template = await readFile(templatePath, "utf8");
