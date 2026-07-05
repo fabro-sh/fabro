@@ -541,8 +541,9 @@ mod run_namespace_variable_substitution_tests {
     fn substitutes_variables_in_string_backed_settings_families() {
         let mut run = RunNamespace {
             checkpoint: RunCheckpointSettings {
-                exclude_globs:  vec!["tmp/{{ vars.ENV }}/**".to_string()],
-                skip_git_hooks: false,
+                exclude_globs:     vec!["tmp/{{ vars.ENV }}/**".to_string()],
+                skip_git_hooks:    false,
+                commit_timeout_ms: 30_000,
             },
             environment: RunEnvironmentSettings {
                 image: EnvironmentImageSettings {
@@ -835,15 +836,33 @@ impl Default for RunExecutionSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCheckpointSettings {
-    pub exclude_globs:  Vec<String>,
+    pub exclude_globs:     Vec<String>,
     /// When `true`, Fabro-managed run-branch checkpoint commits bypass
     /// local Git commit hooks (e.g. `pre-commit`, `commit-msg`). This does
     /// not affect Fabro workflow `[[run.hooks]]` or metadata-branch
     /// snapshots, which already bypass repository hooks.
     #[serde(default)]
-    pub skip_git_hooks: bool,
+    pub skip_git_hooks:    bool,
+    /// Timeout (ms) for the per-node run-branch checkpoint commit, which runs
+    /// repository commit hooks unless `skip_git_hooks` is set. Default 30_000.
+    #[serde(default = "default_checkpoint_commit_timeout_ms")]
+    pub commit_timeout_ms: u64,
+}
+
+fn default_checkpoint_commit_timeout_ms() -> u64 {
+    30_000
+}
+
+impl Default for RunCheckpointSettings {
+    fn default() -> Self {
+        Self {
+            exclude_globs:     Vec::new(),
+            skip_git_hooks:    false,
+            commit_timeout_ms: default_checkpoint_commit_timeout_ms(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

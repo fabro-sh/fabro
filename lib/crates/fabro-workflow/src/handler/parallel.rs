@@ -196,6 +196,7 @@ impl Handler for ParallelHandler {
                 &gs.checkpoint_exclude_globs,
                 &gs.git_author,
                 gs.checkpoint_skip_git_hooks,
+                gs.checkpoint_commit_timeout_ms,
             )
             .await;
             match result {

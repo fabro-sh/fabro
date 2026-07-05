@@ -283,6 +283,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             &self.run_options.checkpoint_exclude_globs(),
             &git_author,
             self.run_options.checkpoint_skip_git_hooks(),
+            self.run_options.checkpoint_commit_timeout_ms(),
         )
         .await;
 

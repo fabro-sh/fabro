@@ -223,12 +223,15 @@ fn resolve_execution(execution: Option<&RunExecutionLayer>) -> RunExecutionSetti
 
 fn resolve_checkpoint(checkpoint: Option<&RunCheckpointLayer>) -> RunCheckpointSettings {
     RunCheckpointSettings {
-        exclude_globs:  checkpoint
+        exclude_globs:     checkpoint
             .map(|checkpoint| checkpoint.exclude_globs.clone())
             .unwrap_or_default(),
-        skip_git_hooks: checkpoint
+        skip_git_hooks:    checkpoint
             .and_then(|checkpoint| checkpoint.skip_git_hooks)
             .unwrap_or(false),
+        commit_timeout_ms: checkpoint
+            .and_then(|checkpoint| checkpoint.commit_timeout_ms)
+            .unwrap_or(30_000),
     }
 }
 

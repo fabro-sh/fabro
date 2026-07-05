@@ -148,7 +148,8 @@ fn inspect_resolves_selector_via_server_endpoint() {
               },
               "checkpoint": {
                 "exclude_globs": [],
-                "skip_git_hooks": false
+                "skip_git_hooks": false,
+                "commit_timeout_ms": 30000
               },
               "clone": {
                 "enabled": true

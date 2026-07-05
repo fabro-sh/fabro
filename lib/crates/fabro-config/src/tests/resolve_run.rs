@@ -917,8 +917,8 @@ fabro_tools = true
     }
 }
 
-mod run_checkpoint_skip_git_hooks {
-    //! Layer + resolver tests for `[run.checkpoint] skip_git_hooks`.
+mod run_checkpoint {
+    //! Layer + resolver tests for `[run.checkpoint]`.
 
     use crate::SettingsLayer;
     use crate::layers::Combine;
@@ -955,6 +955,31 @@ skip_git_hooks = true
     }
 
     #[test]
+    fn resolves_commit_timeout_default_when_omitted() {
+        let settings = super::workflow_settings_from_layer(SettingsLayer::default())
+            .expect("empty settings should resolve")
+            .run;
+
+        assert_eq!(settings.checkpoint.commit_timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn resolves_commit_timeout_when_set() {
+        let settings = super::workflow_settings_from_toml(
+            r"
+_version = 1
+
+[run.checkpoint]
+commit_timeout_ms = 600000
+",
+        )
+        .expect("settings should resolve")
+        .run;
+
+        assert_eq!(settings.checkpoint.commit_timeout_ms, 600_000);
+    }
+
+    #[test]
     fn higher_layer_false_overrides_lower_layer_true() {
         let workflow = parse_settings(
             r"
@@ -979,6 +1004,33 @@ skip_git_hooks = true
             .run;
 
         assert!(!settings.checkpoint.skip_git_hooks);
+    }
+
+    #[test]
+    fn higher_layer_commit_timeout_overrides_lower_layer() {
+        let workflow = parse_settings(
+            r"
+_version = 1
+
+[run.checkpoint]
+commit_timeout_ms = 600000
+",
+        );
+        let user = parse_settings(
+            r"
+_version = 1
+
+[run.checkpoint]
+commit_timeout_ms = 30000
+",
+        );
+        let merged = workflow.combine(user);
+
+        let settings = super::workflow_settings_from_layer(merged)
+            .expect("merged settings should resolve")
+            .run;
+
+        assert_eq!(settings.checkpoint.commit_timeout_ms, 600_000);
     }
 
     #[test]

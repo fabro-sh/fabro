@@ -22,13 +22,14 @@ pub struct GitCommandError {
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
 pub struct GitState {
-    pub run_id:                    RunId,
-    pub base_sha:                  String,
-    pub run_branch:                Option<String>,
-    pub meta_branch:               Option<String>,
-    pub checkpoint_exclude_globs:  Vec<String>,
+    pub run_id: RunId,
+    pub base_sha: String,
+    pub run_branch: Option<String>,
+    pub meta_branch: Option<String>,
+    pub checkpoint_exclude_globs: Vec<String>,
     pub checkpoint_skip_git_hooks: bool,
-    pub git_author:                GitAuthor,
+    pub checkpoint_commit_timeout_ms: u64,
+    pub git_author: GitAuthor,
 }
 
 pub const GIT_REMOTE: &str =
@@ -70,6 +71,7 @@ pub async fn git_checkpoint(
     exclude_globs: &[String],
     author: &GitAuthor,
     skip_git_hooks: bool,
+    commit_timeout_ms: u64,
 ) -> std::result::Result<String, GitCommandError> {
     let mut all_excludes: Vec<String> = artifact_snapshot::EXCLUDE_DIRS
         .iter()
@@ -83,7 +85,7 @@ pub async fn git_checkpoint(
         .collect();
     let add_cmd = format!("{GIT_REMOTE} add -A -- . {}", pathspecs.join(" "));
     let add_result = sandbox
-        .exec_command(&add_cmd, 30_000, None, None, None)
+        .exec_command(&add_cmd, commit_timeout_ms, None, None, None)
         .await;
     match add_result {
         Ok(r) if r.is_success() => {}
@@ -134,7 +136,7 @@ pub async fn git_checkpoint(
         email = shell_quote(&author.email),
     );
     let commit_result = sandbox
-        .exec_command(&commit_cmd, 30_000, None, None, None)
+        .exec_command(&commit_cmd, commit_timeout_ms, None, None, None)
         .await;
     let _ = sandbox.delete_file(&msg_path).await;
     match commit_result {
@@ -178,6 +180,7 @@ pub(crate) async fn checked_git_checkpoint(
     exclude_globs: &[String],
     author: &GitAuthor,
     skip_git_hooks: bool,
+    commit_timeout_ms: u64,
 ) -> std::result::Result<String, SharedError> {
     runtime.ensure_git_available(sandbox).await.map_err(|err| {
         SharedError::new(anyhow::Error::new(err).context("sandbox git unavailable"))
@@ -192,6 +195,7 @@ pub(crate) async fn checked_git_checkpoint(
         exclude_globs,
         author,
         skip_git_hooks,
+        commit_timeout_ms,
     )
     .await
     .map_err(|err| SharedError::new(anyhow::Error::new(err)))
@@ -877,6 +881,7 @@ mod tests {
     struct ScriptedSandbox {
         exec_results: Mutex<VecDeque<ExecResult>>,
         commands:     Mutex<Vec<String>>,
+        timeouts:     Mutex<Vec<u64>>,
         write_paths:  Mutex<Vec<String>>,
         delete_paths: Mutex<Vec<String>>,
     }
@@ -886,6 +891,7 @@ mod tests {
             Self {
                 exec_results: Mutex::new(exec_results.into()),
                 commands:     Mutex::new(Vec::new()),
+                timeouts:     Mutex::new(Vec::new()),
                 write_paths:  Mutex::new(Vec::new()),
                 delete_paths: Mutex::new(Vec::new()),
             }
@@ -895,6 +901,13 @@ mod tests {
             self.commands
                 .lock()
                 .expect("commands lock poisoned")
+                .clone()
+        }
+
+        fn timeouts(&self) -> Vec<u64> {
+            self.timeouts
+                .lock()
+                .expect("timeouts lock poisoned")
                 .clone()
         }
 
@@ -950,7 +963,7 @@ mod tests {
         async fn exec_command(
             &self,
             command: &str,
-            _timeout_ms: u64,
+            timeout_ms: u64,
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
             _cancel_token: Option<CancellationToken>,
@@ -959,6 +972,10 @@ mod tests {
                 .lock()
                 .expect("commands lock poisoned")
                 .push(command.to_string());
+            self.timeouts
+                .lock()
+                .expect("timeouts lock poisoned")
+                .push(timeout_ms);
             self.exec_results
                 .lock()
                 .expect("exec_results lock poisoned")
@@ -1069,6 +1086,7 @@ mod tests {
             &[],
             &crate::git::GitAuthor::default(),
             false,
+            30_000,
         )
         .await
         .unwrap_err();
@@ -1096,6 +1114,7 @@ mod tests {
             &[],
             &crate::git::GitAuthor::default(),
             false,
+            30_000,
         )
         .await
         .unwrap_err();
@@ -1127,6 +1146,7 @@ mod tests {
             &[],
             &crate::git::GitAuthor::default(),
             false,
+            30_000,
         )
         .await
         .unwrap_err();
@@ -1147,6 +1167,7 @@ mod tests {
             &[],
             &crate::git::GitAuthor::default(),
             false,
+            30_000,
         )
         .await
         .unwrap_err();
@@ -1176,6 +1197,7 @@ mod tests {
             &[],
             &author,
             false,
+            30_000,
         )
         .await;
         let second = git_checkpoint(
@@ -1188,6 +1210,7 @@ mod tests {
             &[],
             &author,
             false,
+            30_000,
         )
         .await;
 
@@ -1223,6 +1246,27 @@ mod tests {
                 "expected commit command to use {path:?}, got {command:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn git_checkpoint_uses_configured_timeout_for_add_and_commit() {
+        let sandbox = ScriptedSandbox::new(vec![exec_ok(), exec_ok(), exec_ok()]);
+        git_checkpoint(
+            &sandbox,
+            "run1",
+            "work",
+            "success",
+            1,
+            None,
+            &[],
+            &crate::git::GitAuthor::default(),
+            false,
+            600_000,
+        )
+        .await
+        .expect("checkpoint should succeed");
+
+        assert_eq!(sandbox.timeouts(), vec![600_000, 600_000, 10_000]);
     }
 
     #[tokio::test]
@@ -1263,6 +1307,7 @@ mod tests {
             &[],
             &crate::git::GitAuthor::default(),
             true,
+            30_000,
         )
         .await
         .expect("checkpoint should succeed");
@@ -1291,6 +1336,7 @@ mod tests {
             &[],
             &crate::git::GitAuthor::default(),
             false,
+            30_000,
         )
         .await
         .expect("checkpoint should succeed");
@@ -1353,6 +1399,7 @@ mod tests {
             &[],
             &author,
             false,
+            30_000,
         )
         .await;
         assert!(result.is_ok(), "git_checkpoint failed: {:?}", result.err());
