@@ -7,11 +7,8 @@ import { RunSummaryPanel } from "../components/run-summary-panel";
 import { StagePopover } from "../components/stage-popover";
 import { StageSidebar } from "../components/stage-sidebar";
 import {
-  GRAPH_DEFAULT_ZOOM,
   GRAPH_MAX_ZOOM,
   GRAPH_MIN_ZOOM,
-  GRAPH_ZOOM_BUTTON_FACTOR,
-  GRAPH_ZOOM_WHEEL_SENSITIVITY,
   clampZoom,
   zoomAtPoint,
   type GraphView,
@@ -40,6 +37,12 @@ function parseSourceDirection(source: string | undefined): Direction | undefined
   return value === "LR" || value === "TB" ? value : undefined;
 }
 
+// Initial zoom shown when the graph first loads, in percent.
+const GRAPH_DEFAULT_ZOOM = 75;
+// Toolbar +/- step. Using 1/1.25 for zoom-out keeps it symmetric with zoom-in.
+const GRAPH_ZOOM_BUTTON_FACTOR = 1.25;
+// How fast ⌘-scroll zooms; tune to taste. exp() keeps it symmetric and always above 0.
+const GRAPH_ZOOM_WHEEL_SENSITIVITY = 0.002;
 // Zoom toward the container center. The toolbar +/- buttons anchor here, not the cursor.
 const CENTER = { x: 0, y: 0 };
 // Non-passive so the wheel handler can call preventDefault on the browser's own ⌘-zoom.

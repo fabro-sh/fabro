@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import {
   GRAPH_MAX_ZOOM,
   GRAPH_MIN_ZOOM,
-  GRAPH_ZOOM_BUTTON_FACTOR,
   clampZoom,
   zoomAtPoint,
   type GraphView,
@@ -42,8 +41,9 @@ describe("zoomAtPoint", () => {
 
   test("center-anchored zoom in then out is a round trip", () => {
     const start: GraphView = { zoom: 80, pan: { x: 12, y: -6 } };
-    const zoomedIn = zoomAtPoint(start, GRAPH_ZOOM_BUTTON_FACTOR, { x: 0, y: 0 });
-    const roundTrip = zoomAtPoint(zoomedIn, 1 / GRAPH_ZOOM_BUTTON_FACTOR, { x: 0, y: 0 });
+    const factor = 1.25;
+    const zoomedIn = zoomAtPoint(start, factor, { x: 0, y: 0 });
+    const roundTrip = zoomAtPoint(zoomedIn, 1 / factor, { x: 0, y: 0 });
     expect(roundTrip.zoom).toBeCloseTo(start.zoom);
     expect(roundTrip.pan.x).toBeCloseTo(start.pan.x);
     expect(roundTrip.pan.y).toBeCloseTo(start.pan.y);

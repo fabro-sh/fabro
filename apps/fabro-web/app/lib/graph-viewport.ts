@@ -8,12 +8,6 @@
 
 export const GRAPH_MIN_ZOOM = 25; // percent; the clamp bounds. Widen if you want more range.
 export const GRAPH_MAX_ZOOM = 200;
-// Initial zoom shown when the graph first loads, in percent.
-export const GRAPH_DEFAULT_ZOOM = 75;
-// Toolbar +/- step. Using 1/1.25 for zoom-out keeps it symmetric with zoom-in.
-export const GRAPH_ZOOM_BUTTON_FACTOR = 1.25;
-// How fast ⌘-scroll zooms; tune to taste. exp() keeps it symmetric and always above 0.
-export const GRAPH_ZOOM_WHEEL_SENSITIVITY = 0.002;
 
 export type GraphView = { zoom: number; pan: { x: number; y: number } };
 
