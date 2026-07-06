@@ -717,7 +717,17 @@ pub struct GitAuthorSettings {
     pub email: Option<String>,
 }
 
+// `#[serde(default)]` at the container level: these settings are persisted
+// inside the `run.created` event, so they must stay readable for events written
+// by older fabro versions. `steps` replaced a `commands: Vec<String>` field in
+// #530, so runs created before that have a `prepare` object with no `steps`
+// key. Without a default, the whole run fails to deserialize during projection
+// cache warmup and silently disappears from the run list. Falling back to the
+// `Default` impl (empty steps, product-default timeout) keeps historical runs
+// loadable; new runs always serialize explicit values, so nothing changes for
+// them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RunPrepareSettings {
     pub steps:      Vec<PreparedStep>,
     pub timeout_ms: u64,
@@ -1870,6 +1880,35 @@ mod resolve_step_env_tests {
             },
             env,
         }
+    }
+
+    // Regression for the projection-cache-warmup drop: runs created before #530
+    // persisted `prepare` inside the `run.created` event as
+    // `{ "commands": [...], "timeout_ms": N }` — no `steps` key. Those old
+    // events must still deserialize (as an empty prepare phase) instead of
+    // failing the whole run's projection and silently vanishing from the run
+    // list.
+    #[test]
+    fn deserializes_pre_530_prepare_without_steps() {
+        let old = serde_json::json!({
+            "commands":   ["echo build", "echo test"],
+            "timeout_ms": 60_000,
+        });
+
+        let settings: RunPrepareSettings = serde_json::from_value(old).unwrap();
+
+        assert!(settings.steps.is_empty());
+        assert_eq!(settings.timeout_ms, 60_000);
+    }
+
+    // Any absent field falls back to the product default, so no missing field
+    // can ever hide a run.
+    #[test]
+    fn deserializes_prepare_missing_every_field() {
+        let settings: RunPrepareSettings =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+
+        assert_eq!(settings, RunPrepareSettings::default());
     }
 
     #[test]
