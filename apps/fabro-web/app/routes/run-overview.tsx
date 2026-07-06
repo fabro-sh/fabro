@@ -7,9 +7,16 @@ import { RunSummaryPanel } from "../components/run-summary-panel";
 import { StagePopover } from "../components/stage-popover";
 import { StageSidebar } from "../components/stage-sidebar";
 import {
-  GRAPH_DEFAULT_ZOOM_INDEX,
-  GRAPH_ZOOM_STEPS,
-} from "../components/graph-toolbar-constants";
+  GRAPH_DEFAULT_ZOOM,
+  GRAPH_MAX_ZOOM,
+  GRAPH_MIN_ZOOM,
+  GRAPH_ZOOM_BUTTON_FACTOR,
+  GRAPH_ZOOM_WHEEL_SENSITIVITY,
+  clampZoom,
+  zoomAtPoint,
+  type GraphView,
+} from "../lib/graph-viewport";
+import { useElementEvent } from "../hooks/effects";
 import { GraphToolbar } from "../components/graph-toolbar";
 import { EmptyState, ErrorState } from "../components/state";
 import {
@@ -32,6 +39,13 @@ function parseSourceDirection(source: string | undefined): Direction | undefined
   const value = source?.match(RANKDIR_RE)?.[1];
   return value === "LR" || value === "TB" ? value : undefined;
 }
+
+// Zoom toward the container center. The toolbar +/- buttons anchor here, not the cursor.
+const CENTER = { x: 0, y: 0 };
+// Non-passive so the wheel handler can call preventDefault on the browser's own ⌘-zoom.
+// Kept at module scope for a stable identity, since the effect resubscribes when its
+// options object changes.
+const WHEEL_LISTENER_OPTS: AddEventListenerOptions = { passive: false };
 
 export default function RunOverview() {
   const { id } = useParams();
@@ -63,10 +77,8 @@ export default function RunOverview() {
   const innerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const navigate = useNavigate();
-  const [zoomIndex, setZoomIndex] = useState(GRAPH_DEFAULT_ZOOM_INDEX);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [view, setView] = useState<GraphView>({ zoom: GRAPH_DEFAULT_ZOOM, pan: { x: 0, y: 0 } });
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
-  const zoom = GRAPH_ZOOM_STEPS[zoomIndex];
   const [hoveredNode, setHoveredNode] = useState<RunGraphNodeHover | null>(null);
 
   const openStage = useCallback(
@@ -87,21 +99,43 @@ export default function RunOverview() {
     if ((e.target as HTMLElement).closest("button")) return;
     if ((e.target as HTMLElement).closest(".node")) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragState.current = { startX: e.clientX, startY: e.clientY, startPanX: pan.x, startPanY: pan.y };
-  }, [pan]);
+    dragState.current = { startX: e.clientX, startY: e.clientY, startPanX: view.pan.x, startPanY: view.pan.y };
+  }, [view.pan]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const drag = dragState.current;
     if (!drag) return;
-    setPan({
-      x: drag.startPanX + e.clientX - drag.startX,
-      y: drag.startPanY + e.clientY - drag.startY,
-    });
+    setView((v) => ({
+      ...v,
+      pan: {
+        x: drag.startPanX + e.clientX - drag.startX,
+        y: drag.startPanY + e.clientY - drag.startY,
+      },
+    }));
   }, []);
 
   const onPointerUp = useCallback(() => {
     dragState.current = null;
   }, []);
+
+  // Two-finger scroll pans; ⌘/Ctrl + scroll (and trackpad pinch, which arrives as
+  // ctrl+wheel) zooms anchored at the cursor. Native listener so preventDefault sticks.
+  const onWheel = useCallback((e: WheelEvent) => {
+    const el = containerRef.current;
+    if (!el) return;
+    if ((e.target as HTMLElement).closest('[role="toolbar"]')) return;
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      const r = el.getBoundingClientRect();
+      const cursor = { x: e.clientX - (r.left + r.width / 2), y: e.clientY - (r.top + r.height / 2) };
+      setView((v) => zoomAtPoint(v, Math.exp(-e.deltaY * GRAPH_ZOOM_WHEEL_SENSITIVITY), cursor));
+    } else {
+      setView((v) => ({ ...v, pan: { x: v.pan.x - e.deltaX, y: v.pan.y - e.deltaY } }));
+    }
+  }, []);
+  // The container only exists once the graph has loaded, so gate the listener on
+  // graphSvg. The effect then re-runs and binds once the container is on the page.
+  useElementEvent(containerRef, "wheel", onWheel, WHEEL_LISTENER_OPTS, Boolean(graphSvg));
 
   const fitToWindow = useCallback(() => {
     const svg = svgRef.current;
@@ -115,12 +149,7 @@ export default function RunOverview() {
     const containerH = container.clientHeight - padPx;
 
     const fitPct = Math.min(containerW / svgW, containerH / svgH) * 100;
-    let best = 0;
-    for (let i = GRAPH_ZOOM_STEPS.length - 1; i >= 0; i--) {
-      if (GRAPH_ZOOM_STEPS[i] <= fitPct) { best = i; break; }
-    }
-    setZoomIndex(best);
-    setPan({ x: 0, y: 0 });
+    setView({ zoom: clampZoom(fitPct), pan: { x: 0, y: 0 } });
   }, []);
 
   return (
@@ -141,13 +170,15 @@ export default function RunOverview() {
               direction={activeDirection}
               setDirection={setDirection}
               fitToWindow={fitToWindow}
-              zoomIndex={zoomIndex}
-              setZoomIndex={setZoomIndex}
+              onZoomIn={() => setView((v) => zoomAtPoint(v, GRAPH_ZOOM_BUTTON_FACTOR, CENTER))}
+              onZoomOut={() => setView((v) => zoomAtPoint(v, 1 / GRAPH_ZOOM_BUTTON_FACTOR, CENTER))}
+              canZoomIn={view.zoom < GRAPH_MAX_ZOOM}
+              canZoomOut={view.zoom > GRAPH_MIN_ZOOM}
             />
 
             <div
               ref={containerRef}
-              className="min-h-0 flex-1 overflow-hidden p-6"
+              className="min-h-0 flex-1 touch-none overflow-hidden overscroll-contain p-6"
               style={{ cursor: dragState.current ? "grabbing" : "grab" }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -157,7 +188,7 @@ export default function RunOverview() {
               <div
                 ref={innerRef}
                 className="flex h-full items-center justify-center [&_svg]:mx-auto [&_svg]:block"
-                style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`, transformOrigin: "center center" }}
+                style={{ transform: `translate(${view.pan.x}px, ${view.pan.y}px) scale(${view.zoom / 100})`, transformOrigin: "center center" }}
               />
             </div>
           </div>

@@ -118,6 +118,33 @@ export function useDocumentEvent<K extends keyof DocumentEventMap>(
 }
 
 /**
+ * Synchronizes React with an event listener on a ref'd element. The listener is
+ * removed before resubscribe and on unmount; the handler sees the latest render.
+ * Unlike a JSX event prop, this can pass `{ passive: false }` so the handler may
+ * `preventDefault()` (e.g. to own wheel/⌘-scroll instead of the browser).
+ */
+export function useElementEvent<K extends keyof HTMLElementEventMap>(
+  ref: RefObject<HTMLElement | null>,
+  type: K,
+  handler: (event: HTMLElementEventMap[K]) => void,
+  options?: AddEventListenerOptions | boolean,
+  active = true,
+): void {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!active || !el) return undefined;
+    const listener = (event: HTMLElementEventMap[K]) => handlerRef.current(event);
+    el.addEventListener(type, listener as EventListener, options);
+    return () => {
+      el.removeEventListener(type, listener as EventListener, options);
+    };
+  }, [active, options, ref, type]);
+}
+
+/**
  * Synchronizes React with `document.title`. The previous title is restored when
  * the title changes or the component unmounts.
  */
