@@ -86,7 +86,7 @@ export function automationFormValuesFromRun(
     name,
     repository,
     ref:        cloneBranch ?? EMPTY_AUTOMATION_FORM.ref,
-    workflow:   run.workflow.slug?.trim() || snakeify(workflowName),
+    workflow:   run.workflow.slug?.trim() || kebabify(workflowName),
   };
 }
 
@@ -122,14 +122,6 @@ export function kebabify(value: string): string {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
-}
-
-export function snakeify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "");
 }
 
 function firstPresentString(...values: Array<string | null | undefined>): string {
@@ -300,15 +292,15 @@ export function AutomationFormFields({
         </Row>
         <Row
           title={<Label required>Workflow slug</Label>}
-          help="Snake-case identifier used in the workflow file name (e.g. fix_build.fabro)."
+          help="Dash-separated identifier matching the workflow directory name (e.g. patch-cves)."
         >
           <input
             type="text"
             name="workflow_slug"
             aria-label="Workflow slug"
             value={values.workflow}
-            onChange={(e) => patch({ workflow: snakeify(e.target.value) })}
-            placeholder="fix_build"
+            onChange={(e) => patch({ workflow: kebabify(e.target.value) })}
+            placeholder="patch-cves"
             autoComplete="off"
             spellCheck={false}
             className={`${INPUT_CLASS} font-mono`}

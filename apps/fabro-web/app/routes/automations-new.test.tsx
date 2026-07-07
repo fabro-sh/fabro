@@ -109,7 +109,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
     goal:             "Fix CI",
     title:            "Fix failing tests",
     workflow:         {
-      slug:       "fix_ci",
+      slug:       "fix-ci",
       name:       "Fix CI",
       graph_name: "ci_graph",
       node_count: 0,
@@ -219,6 +219,18 @@ function fieldValue(renderer: TestRenderer.ReactTestRenderer, label: string) {
   return renderer.root.findByProps({ "aria-label": label }).props.value;
 }
 
+function changeField(
+  renderer: TestRenderer.ReactTestRenderer,
+  label: string,
+  value: string,
+) {
+  act(() => {
+    renderer.root.findByProps({ "aria-label": label }).props.onChange({
+      target: { value },
+    });
+  });
+}
+
 function switchChecked(renderer: TestRenderer.ReactTestRenderer, label: string) {
   const props = renderer.root.findByProps({ "aria-label": label }).props;
   return props["aria-checked"] ?? props.checked;
@@ -265,6 +277,16 @@ describe("AutomationsNew", () => {
     expect(switchChecked(renderer, "Enable scheduled triggers")).toBe(false);
   });
 
+  test("workflow slug input normalizes to kebab-case and preserves dashes", async () => {
+    const { renderer } = await renderAutomationsNew("/automations/new");
+
+    changeField(renderer, "Workflow slug", "patch-cves");
+    expect(fieldValue(renderer, "Workflow slug")).toBe("patch-cves");
+
+    changeField(renderer, "Workflow slug", "Patch CVEs");
+    expect(fieldValue(renderer, "Workflow slug")).toBe("patch-cves");
+  });
+
   test("/automations/new?from_run=run_1 pre-populates from run and settings data", async () => {
     currentRun = makeRun();
     currentRunSettings = makeRunSettings();
@@ -275,7 +297,7 @@ describe("AutomationsNew", () => {
     expect(fieldValue(renderer, "Automation slug")).toBe("fix-failing-tests");
     expect(fieldValue(renderer, "Repository")).toBe("qltysh/fabro");
     expect(fieldValue(renderer, "Default branch")).toBe("feature/from-run");
-    expect(fieldValue(renderer, "Workflow slug")).toBe("fix_ci");
+    expect(fieldValue(renderer, "Workflow slug")).toBe("fix-ci");
     expect(switchChecked(renderer, "Enable manual and API triggers")).toBe(true);
     expect(switchChecked(renderer, "Enable scheduled triggers")).toBe(false);
     expect(
@@ -283,6 +305,22 @@ describe("AutomationsNew", () => {
     ).toHaveLength(0);
     expect(queryCalls).toContainEqual({ hook: "useRun", id: "run_1" });
     expect(queryCalls).toContainEqual({ hook: "useRunSettings", id: "run_1" });
+  });
+
+  test("/automations/new?from_run=run_1 kebab-cases workflow name fallback", async () => {
+    currentRun = makeRun({
+      workflow: {
+        slug:       "",
+        name:       "Patch CVEs",
+        graph_name: "PatchCves",
+        node_count: 0,
+        edge_count: 0,
+      },
+    });
+
+    const { renderer } = await renderAutomationsNew("/automations/new?from_run=run_1");
+
+    expect(fieldValue(renderer, "Workflow slug")).toBe("patch-cves");
   });
 
   test("missing source run data renders an editable empty form with a non-blocking error", async () => {
