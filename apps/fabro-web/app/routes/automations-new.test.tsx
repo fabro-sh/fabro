@@ -100,6 +100,7 @@ mock.module("swr", () => ({
 }));
 
 const { default: AutomationsNew } = await import("./automations-new");
+const { automationFormValuesFromRun } = await import("../components/automation-form");
 mock.restore();
 
 function makeRun(overrides: Record<string, unknown> = {}) {
@@ -215,8 +216,12 @@ async function renderAutomationsNew(initialEntry: string) {
   return { renderer, router };
 }
 
+function byLabel(renderer: TestRenderer.ReactTestRenderer, label: string) {
+  return renderer.root.findByProps({ "aria-label": label });
+}
+
 function fieldValue(renderer: TestRenderer.ReactTestRenderer, label: string) {
-  return renderer.root.findByProps({ "aria-label": label }).props.value;
+  return byLabel(renderer, label).props.value;
 }
 
 function changeField(
@@ -225,14 +230,12 @@ function changeField(
   value: string,
 ) {
   act(() => {
-    renderer.root.findByProps({ "aria-label": label }).props.onChange({
-      target: { value },
-    });
+    byLabel(renderer, label).props.onChange({ target: { value } });
   });
 }
 
 function switchChecked(renderer: TestRenderer.ReactTestRenderer, label: string) {
-  const props = renderer.root.findByProps({ "aria-label": label }).props;
+  const props = byLabel(renderer, label).props;
   return props["aria-checked"] ?? props.checked;
 }
 
@@ -307,8 +310,8 @@ describe("AutomationsNew", () => {
     expect(queryCalls).toContainEqual({ hook: "useRunSettings", id: "run_1" });
   });
 
-  test("/automations/new?from_run=run_1 kebab-cases workflow name fallback", async () => {
-    currentRun = makeRun({
+  test("automationFormValuesFromRun kebab-cases the workflow name fallback", () => {
+    const run = makeRun({
       workflow: {
         slug:       "",
         name:       "Patch CVEs",
@@ -318,9 +321,7 @@ describe("AutomationsNew", () => {
       },
     });
 
-    const { renderer } = await renderAutomationsNew("/automations/new?from_run=run_1");
-
-    expect(fieldValue(renderer, "Workflow slug")).toBe("patch-cves");
+    expect(automationFormValuesFromRun(run as any).workflow).toBe("patch-cves");
   });
 
   test("missing source run data renders an editable empty form with a non-blocking error", async () => {

@@ -116,7 +116,7 @@ export function isFormValid(values: AutomationFormValues): boolean {
   );
 }
 
-export function kebabify(value: string): string {
+function kebabify(value: string): string {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
