@@ -1,0 +1,23 @@
+digraph PrSimplify {
+    graph [
+        goal="Run the simplify code-review pass on PR #{{ inputs.pr }}: review the changes for reuse, quality, and efficiency, apply the fixes, and update the existing PR in place.",
+        // Default the whole pass (orchestrator + review subagents) to Fable.
+        // `default_model` is beaten by a run-config model / `--model`, so it is
+        // a floor, not a pin — override per run with `--model <id>`.
+        default_model="claude-fable-5",
+        rankdir=LR
+    ]
+
+    start    [shape=Mdiamond, label="Start"]
+    exit     [shape=Msquare, label="Exit"]
+
+    // One agent node runs the whole simplify pass. It uses the spawn_agent tool
+    // to fan out the three reviews in parallel and wait for their results —
+    // sub-agent results return directly to the orchestrator, which is the clean
+    // way to AGGREGATE several perspectives. (A fork + tripleoctagon fan-in is
+    // the wrong tool here: fan-in selects one "best" branch and merges only its
+    // worktree; it does not merge several distinct review outputs.)
+    simplify [label="Simplify Pass", prompt="@prompts/simplify.md"]
+
+    start -> simplify -> exit
+}

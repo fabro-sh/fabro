@@ -1,0 +1,31 @@
+_version = 1
+
+# PR simplify workflow. Runs the "simplify" code-review pass on an existing PR:
+# one agent reviews the diff for reuse, quality, and efficiency (fanning the
+# three reviews out in parallel via spawn_agent subagents and aggregating their
+# results), applies the fixes, and updates the PR in place (commit + push +
+# comment + label).
+#
+# Required input — the PR number — is passed at run time:
+#
+#     fabro run pr-simplify -I pr=547                 # defaults to Fable
+#     fabro run pr-simplify -I pr=547 --model gpt-55  # override the model
+#
+# The graph sets default_model=claude-fable-5, so every stage (orchestrator +
+# review subagents) runs on Fable unless you pass --model, which wins over the
+# default (configured model / --model beats the graph default_model, which
+# beats the catalog default). The apply stage reads the model it is actually
+# running as and labels the PR `simplify:<that-model>`, so the label always
+# matches the real run with nothing to keep in sync.
+
+# Fabro's built-in flow opens a NEW PR from the run branch when enabled, and
+# this repo's .fabro/project.toml turns that on by default. Turn it off here:
+# pr-simplify updates the EXISTING PR in place (the agent pushes onto the PR's
+# own branch), so Fabro must not open a second PR afterward.
+[run.pull_request]
+enabled = false
+
+[run.integrations.github.permissions]
+contents = "write"       # push the fixup commit to the PR branch
+pull_requests = "write"  # gh pr checkout / comment on the PR
+issues = "write"         # add the simplify:<model> label (labels use the issues API)
