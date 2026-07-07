@@ -1,0 +1,19 @@
+digraph PatchCves {
+    graph [
+        goal="Triage GitHub Dependabot alerts and open verified dependency-patch PRs",
+        model_stylesheet="
+            * { model: claude-opus-4-8; }
+        "
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Single agent stage. The CVE-patching instructions live in a bundled prompt
+    // file (@prompts/patch-cves.md) that travels in the run manifest, keeping the
+    // workflow self-contained — no external skill or runtime discovery required.
+    patch [label="Patch CVEs", prompt="@prompts/patch-cves.md"]
+
+    start -> patch -> exit
+}
