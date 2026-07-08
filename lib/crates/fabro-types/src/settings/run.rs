@@ -1110,7 +1110,7 @@ impl RunEnvironmentSettings {
         for (name, value) in &self.env {
             let references_secrets = value.references(Namespace::Secrets);
             let resolved_value = match value.resolve_with(&mut ctx) {
-                Ok(resolved) => resolved.value,
+                Ok(resolved) => resolved,
                 Err(err) if err.namespace == Namespace::Env && !references_secrets => {
                     #[expect(
                         clippy::disallowed_methods,
@@ -1654,7 +1654,7 @@ fn resolve_env_string(
     let mut ctx = ResolveCtx::new()
         .with_env(&mut *env_lookup)
         .with_secrets(&mut *secrets_lookup);
-    *value = InterpString::parse(value).resolve_with(&mut ctx)?.value;
+    *value = InterpString::parse(value).resolve_with(&mut ctx)?;
     Ok(())
 }
 
@@ -2347,21 +2347,22 @@ pub struct ArtifactsSettings {
 }
 /// Outcome of resolving a [`RunGoal`] to its final goal text.
 ///
-/// Carries provenance alongside the text so downstream consumers (e.g. the
-/// run manifest builder) can distinguish inline goals from file-sourced goals.
+/// Carries source metadata alongside the text so downstream consumers (e.g.
+/// the run manifest builder) can distinguish inline goals from file-sourced
+/// goals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRunGoal {
     pub text:   String,
     pub source: ResolvedGoalSource,
 }
 
-/// Provenance of a [`ResolvedRunGoal`].
+/// Source metadata for a [`ResolvedRunGoal`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedGoalSource {
     /// Goal text came from a literal `run.goal = "..."` value.
     Inline,
     /// Goal text was read from a file on disk. The absolute path of that
-    /// file is carried for provenance / error reporting.
+    /// file is carried for source / error reporting.
     File { path: std::path::PathBuf },
 }
 

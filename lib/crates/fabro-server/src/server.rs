@@ -1037,7 +1037,7 @@ fn resolve_slack_lifecycle_route_channel(
     };
 
     let resolved = match channel.resolve(|name| (state.env_lookup)(name)) {
-        Ok(resolved) => resolved.value,
+        Ok(resolved) => resolved,
         Err(err) => {
             warn!(
                 run_id = %run_id,
@@ -2425,12 +2425,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             let default_channel = slack_settings
                 .default_channel
                 .as_ref()
-                .map(|value| {
-                    value
-                        .resolve(process_env_var)
-                        .map(|resolved| resolved.value)
-                        .map_err(anyhow::Error::from)
-                })
+                .map(|value| value.resolve(process_env_var).map_err(anyhow::Error::from))
                 .transpose()?;
             let vault_guard = vault.try_read().ok();
             match resolve_slack_credentials_status_with_lookup(|name| {

@@ -121,7 +121,7 @@ fn resolve_goal_file(
     let resolved = file
         .resolve(process_env_var)
         .map_err(|err| ResolveRunGoalError::EnvLookup { var: err.name })?;
-    let path = resolve_goal_file_path(&resolved.value, base_dir);
+    let path = resolve_goal_file_path(&resolved, base_dir);
     let text = std::fs::read_to_string(&path).map_err(|source| ResolveRunGoalError::Io {
         path: path.clone(),
         source,

@@ -77,9 +77,7 @@ fn resolve_interp<E>(value: &InterpString, env: &E) -> Result<String, ResolveErr
 where
     E: Env + ?Sized,
 {
-    value
-        .resolve(|name| env.var(name).ok())
-        .map(|resolved| resolved.value)
+    value.resolve(|name| env.var(name).ok())
 }
 
 #[expect(

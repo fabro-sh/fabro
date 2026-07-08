@@ -14,8 +14,9 @@
 //! Resolution timing is split: `vars` substitutes early (server-side, at run
 //! creation) via [`InterpString::substitute_with`], while `env`/`secrets`
 //! resolve late, at consumption time in the process that owns
-//! the value, via [`InterpString::resolve_with`]. Provenance tracking lets
-//! outward-facing renderers redact env- and secret-sourced values uniformly.
+//! the value, via [`InterpString::resolve_with`]. Declared-secret values are
+//! intended to be registered into a per-run exact-value redactor where secrets
+//! resolve; sensitivity is not tracked on resolved strings.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -283,10 +284,8 @@ impl InterpString {
     /// rather than pass through as literal text. A lookup miss fails with
     /// [`ResolveErrorKind::Missing`] — there is no fallback to the raw
     /// source.
-    pub fn resolve_with(&self, ctx: &mut ResolveCtx<'_>) -> Result<Resolved, ResolveError> {
+    pub fn resolve_with(&self, ctx: &mut ResolveCtx<'_>) -> Result<String, ResolveError> {
         let mut value = String::new();
-        let mut env_names = Vec::new();
-        let mut secret_names = Vec::new();
         for seg in &self.segments {
             match seg {
                 Segment::Literal(text) => value.push_str(text),
@@ -298,19 +297,11 @@ impl InterpString {
                         return Err(ResolveError::missing(*namespace, name));
                     };
                     value.push_str(&resolved);
-                    match namespace {
-                        Namespace::Env => env_names.push(name.clone()),
-                        Namespace::Secrets => secret_names.push(name.clone()),
-                        Namespace::Vars | Namespace::Inputs => {}
-                    }
                 }
             }
         }
 
-        Ok(Resolved {
-            value,
-            provenance: Provenance::from_names(env_names, secret_names),
-        })
+        Ok(value)
     }
 
     /// Substitute tokens for the namespaces `ctx` provides, preserving tokens
@@ -347,7 +338,7 @@ impl InterpString {
     /// `lookup` should return the current value for a given env var name (or
     /// `None` if unset). Tokens in any other namespace fail with
     /// [`ResolveErrorKind::Unavailable`].
-    pub fn resolve<F>(&self, lookup: F) -> Result<Resolved, ResolveError>
+    pub fn resolve<F>(&self, lookup: F) -> Result<String, ResolveError>
     where
         F: FnMut(&str) -> Option<String>,
     {
@@ -368,8 +359,7 @@ impl InterpString {
     where
         F: FnMut(&str) -> Option<String>,
     {
-        self.resolve(lookup)
-            .map_or_else(|_| self.as_source(), |resolved| resolved.value)
+        self.resolve(lookup).unwrap_or_else(|_| self.as_source())
     }
 
     /// Substitute only `{{ vars.* }}` tokens while preserving all other
@@ -423,40 +413,6 @@ impl From<String> for InterpString {
 impl From<&str> for InterpString {
     fn from(value: &str) -> Self {
         Self::parse(value)
-    }
-}
-
-/// The outcome of a successful interpolation resolution.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Resolved {
-    pub value:      String,
-    pub provenance: Provenance,
-}
-
-/// Provenance metadata for resolved config values.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Provenance {
-    /// No env var or secret contributed to this value.
-    Literal,
-    /// One or more env vars and/or secrets contributed to this value. Used by
-    /// outward-facing renderers to redact sensitive-sourced values uniformly.
-    /// `vars`/`inputs` are non-sensitive and do not mark a value as sourced.
-    Sourced {
-        env_names:    Vec<String>,
-        secret_names: Vec<String>,
-    },
-}
-
-impl Provenance {
-    fn from_names(env_names: Vec<String>, secret_names: Vec<String>) -> Self {
-        if env_names.is_empty() && secret_names.is_empty() {
-            Self::Literal
-        } else {
-            Self::Sourced {
-                env_names,
-                secret_names,
-            }
-        }
     }
 }
 
@@ -614,8 +570,7 @@ mod tests {
     fn resolve_literal_string() {
         let s = InterpString::parse("static");
         let resolved = s.resolve(lookup_from(&[])).unwrap();
-        assert_eq!(resolved.value, "static");
-        assert_eq!(resolved.provenance, Provenance::Literal);
+        assert_eq!(resolved, "static");
     }
 
     #[test]
@@ -624,18 +579,14 @@ mod tests {
         let resolved = s
             .resolve(lookup_from(&[("API_KEY", "secret-123")]))
             .unwrap();
-        assert_eq!(resolved.value, "secret-123");
-        assert_eq!(resolved.provenance, Provenance::Sourced {
-            env_names:    vec!["API_KEY".into()],
-            secret_names: vec![],
-        });
+        assert_eq!(resolved, "secret-123");
     }
 
     #[test]
     fn resolve_substring() {
         let s = InterpString::parse("Bearer {{ env.TOKEN }}");
         let resolved = s.resolve(lookup_from(&[("TOKEN", "abc")])).unwrap();
-        assert_eq!(resolved.value, "Bearer abc");
+        assert_eq!(resolved, "Bearer abc");
     }
 
     #[test]
@@ -644,11 +595,7 @@ mod tests {
         let resolved = s
             .resolve(lookup_from(&[("USER", "root"), ("HOST", "example.com")]))
             .unwrap();
-        assert_eq!(resolved.value, "root@example.com");
-        assert_eq!(resolved.provenance, Provenance::Sourced {
-            env_names:    vec!["USER".into(), "HOST".into()],
-            secret_names: vec![],
-        });
+        assert_eq!(resolved, "root@example.com");
     }
 
     #[test]
@@ -668,8 +615,7 @@ mod tests {
     fn unterminated_token_treated_as_literal() {
         let s = InterpString::parse("{{ env.OPEN");
         let resolved = s.resolve(lookup_from(&[])).unwrap();
-        assert_eq!(resolved.value, "{{ env.OPEN");
-        assert_eq!(resolved.provenance, Provenance::Literal);
+        assert_eq!(resolved, "{{ env.OPEN");
     }
 
     #[test]
@@ -685,7 +631,7 @@ mod tests {
             let s = InterpString::parse(raw);
             assert!(s.is_literal(), "{raw} should stay literal");
             let resolved = s.resolve(lookup_from(&[])).unwrap();
-            assert_eq!(resolved.value, raw);
+            assert_eq!(resolved, raw);
         }
     }
 
@@ -736,11 +682,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(resolved.value, "https://us-east-1.example.com");
-        assert_eq!(resolved.provenance, Provenance::Sourced {
-            env_names:    vec!["REGION".into()],
-            secret_names: vec![],
-        });
+        assert_eq!(resolved, "https://us-east-1.example.com");
     }
 
     #[test]
@@ -796,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_with_secrets_tracks_provenance() {
+    fn resolve_with_substitutes_secrets_and_env() {
         let s = InterpString::parse("Bearer {{ secrets.API_KEY }} via {{ env.PROXY }}");
 
         let resolved = s
@@ -807,11 +749,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(resolved.value, "Bearer vault-value via proxy.internal");
-        assert_eq!(resolved.provenance, Provenance::Sourced {
-            env_names:    vec!["PROXY".into()],
-            secret_names: vec!["API_KEY".into()],
-        });
+        assert_eq!(resolved, "Bearer vault-value via proxy.internal");
     }
 
     #[test]
