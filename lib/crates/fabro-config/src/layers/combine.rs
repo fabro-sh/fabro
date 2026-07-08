@@ -168,11 +168,11 @@ impl Combine for RunCheckpointLayer {
             self.exclude_globs
         };
         let skip_git_hooks = self.skip_git_hooks.or(other.skip_git_hooks);
-        let commit_timeout_ms = self.commit_timeout_ms.or(other.commit_timeout_ms);
+        let commit_timeout = self.commit_timeout.or(other.commit_timeout);
         Self {
             exclude_globs,
             skip_git_hooks,
-            commit_timeout_ms,
+            commit_timeout,
         }
     }
 }

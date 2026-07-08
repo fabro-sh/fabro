@@ -230,8 +230,10 @@ fn resolve_checkpoint(checkpoint: Option<&RunCheckpointLayer>) -> RunCheckpointS
             .and_then(|checkpoint| checkpoint.skip_git_hooks)
             .unwrap_or(false),
         commit_timeout_ms: checkpoint
-            .and_then(|checkpoint| checkpoint.commit_timeout_ms)
-            .unwrap_or(30_000),
+            .and_then(|checkpoint| checkpoint.commit_timeout)
+            .map_or(30_000, |timeout| {
+                u64::try_from(timeout.as_std().as_millis()).unwrap_or(u64::MAX)
+            }),
     }
 }
 

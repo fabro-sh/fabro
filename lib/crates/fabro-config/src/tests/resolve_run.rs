@@ -966,12 +966,12 @@ skip_git_hooks = true
     #[test]
     fn resolves_commit_timeout_when_set() {
         let settings = super::workflow_settings_from_toml(
-            r"
+            r#"
 _version = 1
 
 [run.checkpoint]
-commit_timeout_ms = 600000
-",
+commit_timeout = "10m"
+"#,
         )
         .expect("settings should resolve")
         .run;
@@ -1009,20 +1009,20 @@ skip_git_hooks = true
     #[test]
     fn higher_layer_commit_timeout_overrides_lower_layer() {
         let workflow = parse_settings(
-            r"
+            r#"
 _version = 1
 
 [run.checkpoint]
-commit_timeout_ms = 600000
-",
+commit_timeout = "10m"
+"#,
         );
         let user = parse_settings(
-            r"
+            r#"
 _version = 1
 
 [run.checkpoint]
-commit_timeout_ms = 30000
-",
+commit_timeout = "30s"
+"#,
         );
         let merged = workflow.combine(user);
 
