@@ -1905,8 +1905,7 @@ mod resolve_step_env_tests {
     // can ever hide a run.
     #[test]
     fn deserializes_prepare_missing_every_field() {
-        let settings: RunPrepareSettings =
-            serde_json::from_value(serde_json::json!({})).unwrap();
+        let settings: RunPrepareSettings = serde_json::from_value(serde_json::json!({})).unwrap();
 
         assert_eq!(settings, RunPrepareSettings::default());
     }
