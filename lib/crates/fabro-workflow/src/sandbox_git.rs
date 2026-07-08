@@ -5,6 +5,7 @@ use fabro_checkpoint::trailer as trailerlink;
 use fabro_checkpoint::trailer::Trailer;
 use fabro_sandbox::shell_quote;
 use fabro_types::RunId;
+use fabro_types::settings::run::RunCheckpointSettings;
 use fabro_util::error::SharedError;
 
 use crate::artifact_snapshot;
@@ -22,14 +23,12 @@ pub struct GitCommandError {
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
 pub struct GitState {
-    pub run_id: RunId,
-    pub base_sha: String,
-    pub run_branch: Option<String>,
+    pub run_id:      RunId,
+    pub base_sha:    String,
+    pub run_branch:  Option<String>,
     pub meta_branch: Option<String>,
-    pub checkpoint_exclude_globs: Vec<String>,
-    pub checkpoint_skip_git_hooks: bool,
-    pub checkpoint_commit_timeout_ms: u64,
-    pub git_author: GitAuthor,
+    pub checkpoint:  RunCheckpointSettings,
+    pub git_author:  GitAuthor,
 }
 
 pub const GIT_REMOTE: &str =
@@ -59,7 +58,7 @@ pub(crate) fn exec_err(label: &str, r: fabro_sandbox::ExecResult) -> GitCommandE
 /// Run a git checkpoint commit via the sandbox.
 #[allow(
     clippy::too_many_arguments,
-    reason = "Checkpointing needs explicit run metadata, excludes, and author inputs."
+    reason = "Checkpointing needs explicit run metadata, checkpoint settings, and author inputs."
 )]
 pub async fn git_checkpoint(
     sandbox: &dyn Sandbox,
@@ -68,16 +67,14 @@ pub async fn git_checkpoint(
     status: &str,
     completed_count: usize,
     shadow_sha: Option<String>,
-    exclude_globs: &[String],
+    checkpoint: &RunCheckpointSettings,
     author: &GitAuthor,
-    skip_git_hooks: bool,
-    commit_timeout_ms: u64,
 ) -> std::result::Result<String, GitCommandError> {
     let mut all_excludes: Vec<String> = artifact_snapshot::EXCLUDE_DIRS
         .iter()
         .map(|d| format!("**/{d}/**"))
         .collect();
-    all_excludes.extend(exclude_globs.iter().cloned());
+    all_excludes.extend(checkpoint.exclude_globs.iter().cloned());
 
     let pathspecs: Vec<String> = all_excludes
         .iter()
@@ -85,7 +82,7 @@ pub async fn git_checkpoint(
         .collect();
     let add_cmd = format!("{GIT_REMOTE} add -A -- . {}", pathspecs.join(" "));
     let add_result = sandbox
-        .exec_command(&add_cmd, commit_timeout_ms, None, None, None)
+        .exec_command(&add_cmd, checkpoint.commit_timeout_ms, None, None, None)
         .await;
     match add_result {
         Ok(r) if r.is_success() => {}
@@ -129,14 +126,18 @@ pub async fn git_checkpoint(
     }
 
     let msg_path_q = shell_quote(&msg_path);
-    let no_verify = if skip_git_hooks { " --no-verify" } else { "" };
+    let no_verify = if checkpoint.skip_git_hooks {
+        " --no-verify"
+    } else {
+        ""
+    };
     let commit_cmd = format!(
         "{GIT_REMOTE} -c user.name={name} -c user.email={email} commit --allow-empty{no_verify} -F {msg_path_q}",
         name = shell_quote(&author.name),
         email = shell_quote(&author.email),
     );
     let commit_result = sandbox
-        .exec_command(&commit_cmd, commit_timeout_ms, None, None, None)
+        .exec_command(&commit_cmd, checkpoint.commit_timeout_ms, None, None, None)
         .await;
     let _ = sandbox.delete_file(&msg_path).await;
     match commit_result {
@@ -167,7 +168,7 @@ pub async fn git_checkpoint(
 /// Run a git checkpoint after the per-run sandbox git capability probe.
 #[allow(
     clippy::too_many_arguments,
-    reason = "Checkpointing needs explicit run metadata, excludes, and author inputs."
+    reason = "Checkpointing needs explicit run metadata, checkpoint settings, and author inputs."
 )]
 pub(crate) async fn checked_git_checkpoint(
     runtime: &SandboxGitRuntime,
@@ -177,10 +178,8 @@ pub(crate) async fn checked_git_checkpoint(
     status: &str,
     completed_count: usize,
     shadow_sha: Option<String>,
-    exclude_globs: &[String],
+    checkpoint: &RunCheckpointSettings,
     author: &GitAuthor,
-    skip_git_hooks: bool,
-    commit_timeout_ms: u64,
 ) -> std::result::Result<String, SharedError> {
     runtime.ensure_git_available(sandbox).await.map_err(|err| {
         SharedError::new(anyhow::Error::new(err).context("sandbox git unavailable"))
@@ -192,10 +191,8 @@ pub(crate) async fn checked_git_checkpoint(
         status,
         completed_count,
         shadow_sha,
-        exclude_globs,
+        checkpoint,
         author,
-        skip_git_hooks,
-        commit_timeout_ms,
     )
     .await
     .map_err(|err| SharedError::new(anyhow::Error::new(err)))
@@ -1083,10 +1080,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &RunCheckpointSettings::default(),
             &crate::git::GitAuthor::default(),
-            false,
-            30_000,
         )
         .await
         .unwrap_err();
@@ -1111,10 +1106,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &RunCheckpointSettings::default(),
             &crate::git::GitAuthor::default(),
-            false,
-            30_000,
         )
         .await
         .unwrap_err();
@@ -1143,10 +1136,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &RunCheckpointSettings::default(),
             &crate::git::GitAuthor::default(),
-            false,
-            30_000,
         )
         .await
         .unwrap_err();
@@ -1164,10 +1155,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &RunCheckpointSettings::default(),
             &crate::git::GitAuthor::default(),
-            false,
-            30_000,
         )
         .await
         .unwrap_err();
@@ -1194,10 +1183,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &RunCheckpointSettings::default(),
             &author,
-            false,
-            30_000,
         )
         .await;
         let second = git_checkpoint(
@@ -1207,10 +1194,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &RunCheckpointSettings::default(),
             &author,
-            false,
-            30_000,
         )
         .await;
 
@@ -1251,6 +1236,10 @@ mod tests {
     #[tokio::test]
     async fn git_checkpoint_uses_configured_timeout_for_add_and_commit() {
         let sandbox = ScriptedSandbox::new(vec![exec_ok(), exec_ok(), exec_ok()]);
+        let checkpoint = RunCheckpointSettings {
+            commit_timeout_ms: 600_000,
+            ..RunCheckpointSettings::default()
+        };
         git_checkpoint(
             &sandbox,
             "run1",
@@ -1258,10 +1247,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &checkpoint,
             &crate::git::GitAuthor::default(),
-            false,
-            600_000,
         )
         .await
         .expect("checkpoint should succeed");
@@ -1297,6 +1284,10 @@ mod tests {
     async fn git_checkpoint_appends_no_verify_when_skip_hooks_enabled() {
         // add, commit, rev-parse
         let sandbox = ScriptedSandbox::new(vec![exec_ok(), exec_ok(), exec_ok()]);
+        let checkpoint = RunCheckpointSettings {
+            skip_git_hooks: true,
+            ..RunCheckpointSettings::default()
+        };
         git_checkpoint(
             &sandbox,
             "run1",
@@ -1304,10 +1295,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &checkpoint,
             &crate::git::GitAuthor::default(),
-            true,
-            30_000,
         )
         .await
         .expect("checkpoint should succeed");
@@ -1333,10 +1322,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &RunCheckpointSettings::default(),
             &crate::git::GitAuthor::default(),
-            false,
-            30_000,
         )
         .await
         .expect("checkpoint should succeed");
@@ -1396,10 +1383,8 @@ mod tests {
             "success",
             1,
             None,
-            &[],
+            &RunCheckpointSettings::default(),
             &author,
-            false,
-            30_000,
         )
         .await;
         assert!(result.is_ok(), "git_checkpoint failed: {:?}", result.err());

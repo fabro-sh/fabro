@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use fabro_types::settings::run::RunMode;
+use fabro_types::settings::run::{RunCheckpointSettings, RunMode};
 use fabro_types::{ForkSourceRef, GitContext, RunId, WorkflowSettings};
 use tokio_util::sync::CancellationToken;
 
@@ -50,16 +50,8 @@ impl RunOptions {
         self.settings.run.execution.mode == RunMode::DryRun
     }
 
-    pub fn checkpoint_exclude_globs(&self) -> Vec<String> {
-        self.settings.run.checkpoint.exclude_globs.clone()
-    }
-
-    pub fn checkpoint_skip_git_hooks(&self) -> bool {
-        self.settings.run.checkpoint.skip_git_hooks
-    }
-
-    pub fn checkpoint_commit_timeout_ms(&self) -> u64 {
-        self.settings.run.checkpoint.commit_timeout_ms
+    pub fn checkpoint(&self) -> &RunCheckpointSettings {
+        &self.settings.run.checkpoint
     }
 
     pub fn git_author(&self) -> GitAuthor {

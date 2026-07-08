@@ -35,6 +35,12 @@ impl Duration {
     pub const fn from_millis(millis: u64) -> Self {
         Self(StdDuration::from_millis(millis))
     }
+
+    /// Total milliseconds, saturating at `u64::MAX`.
+    #[must_use]
+    pub fn as_millis(&self) -> u64 {
+        u64::try_from(self.0.as_millis()).unwrap_or(u64::MAX)
+    }
 }
 
 impl From<StdDuration> for Duration {

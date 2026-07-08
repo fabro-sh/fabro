@@ -202,9 +202,9 @@ fn resolve_prepare(
 
     RunPrepareSettings {
         steps,
-        timeout_ms: prepare.timeout.map_or(300_000, |timeout| {
-            u64::try_from(timeout.as_std().as_millis()).unwrap_or(u64::MAX)
-        }),
+        timeout_ms: prepare
+            .timeout
+            .map_or(300_000, |timeout| timeout.as_millis()),
     }
 }
 
@@ -231,9 +231,10 @@ fn resolve_checkpoint(checkpoint: Option<&RunCheckpointLayer>) -> RunCheckpointS
             .unwrap_or(false),
         commit_timeout_ms: checkpoint
             .and_then(|checkpoint| checkpoint.commit_timeout)
-            .map_or(30_000, |timeout| {
-                u64::try_from(timeout.as_std().as_millis()).unwrap_or(u64::MAX)
-            }),
+            .map_or(
+                RunCheckpointSettings::DEFAULT_COMMIT_TIMEOUT_MS,
+                |timeout| timeout.as_millis(),
+            ),
     }
 }
 
@@ -519,9 +520,7 @@ fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) 
         hook_type,
         matcher: hook.matcher.clone(),
         blocking: hook.blocking,
-        timeout_ms: hook
-            .timeout
-            .map(|timeout| u64::try_from(timeout.as_std().as_millis()).unwrap_or(u64::MAX)),
+        timeout_ms: hook.timeout.map(|timeout| timeout.as_millis()),
         sandbox: hook.sandbox,
     }
 }

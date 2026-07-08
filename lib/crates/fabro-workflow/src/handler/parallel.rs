@@ -193,10 +193,8 @@ impl Handler for ParallelHandler {
                 "parallel_base",
                 0,
                 None,
-                &gs.checkpoint_exclude_globs,
+                &gs.checkpoint,
                 &gs.git_author,
-                gs.checkpoint_skip_git_hooks,
-                gs.checkpoint_commit_timeout_ms,
             )
             .await;
             match result {
@@ -321,9 +319,10 @@ impl Handler for ParallelHandler {
                 .as_ref()
                 .map(|gs| gs.git_author.clone())
                 .unwrap_or_default();
-            let skip_git_hooks = git_state
+            let checkpoint = git_state
                 .as_ref()
-                .is_some_and(|gs| gs.checkpoint_skip_git_hooks);
+                .map(|gs| gs.checkpoint.clone())
+                .unwrap_or_default();
             let group_id = parallel_group_id.clone();
             let branch_scope = StageScope::for_parallel_branch(
                 setup.target_id.clone(),
@@ -408,7 +407,7 @@ impl Handler for ParallelHandler {
                     let add_cmd = format!("{git_r} add -A");
                     let add_result = setup
                         .sandbox
-                        .exec_command(&add_cmd, 30_000, None, None, None)
+                        .exec_command(&add_cmd, checkpoint.commit_timeout_ms, None, None, None)
                         .await;
                     if add_result
                         .as_ref()
@@ -420,11 +419,17 @@ impl Handler for ParallelHandler {
                             &git_author.name,
                             &git_author.email,
                             &msg,
-                            skip_git_hooks,
+                            checkpoint.skip_git_hooks,
                         );
                         let _ = setup
                             .sandbox
-                            .exec_command(&commit_cmd, 30_000, None, None, None)
+                            .exec_command(
+                                &commit_cmd,
+                                checkpoint.commit_timeout_ms,
+                                None,
+                                None,
+                                None,
+                            )
                             .await;
                     }
                     let sha_cmd = format!("{git_r} rev-parse HEAD");

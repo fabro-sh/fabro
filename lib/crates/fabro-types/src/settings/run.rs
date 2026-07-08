@@ -851,8 +851,12 @@ pub struct RunCheckpointSettings {
     pub commit_timeout_ms: u64,
 }
 
+impl RunCheckpointSettings {
+    pub const DEFAULT_COMMIT_TIMEOUT_MS: u64 = 30_000;
+}
+
 fn default_checkpoint_commit_timeout_ms() -> u64 {
-    30_000
+    RunCheckpointSettings::DEFAULT_COMMIT_TIMEOUT_MS
 }
 
 impl Default for RunCheckpointSettings {
