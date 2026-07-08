@@ -2362,7 +2362,7 @@ pub enum ResolvedGoalSource {
     /// Goal text came from a literal `run.goal = "..."` value.
     Inline,
     /// Goal text was read from a file on disk. The absolute path of that
-    /// file is carried for source / error reporting.
+    /// file is carried for error reporting.
     File { path: std::path::PathBuf },
 }
 
