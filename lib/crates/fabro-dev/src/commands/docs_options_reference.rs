@@ -231,9 +231,9 @@ aliases = ["gateway"]
 credentials = ["env:ACME_GATEWAY_API_KEY", "vault:ACME_GATEWAY_API_KEY"]
 
 [llm.providers.proxy.extra_headers]
-x-portkey-api-key = { env = "PORTKEY_API_KEY" }
-x-portkey-config = { literal = "@bedrock-prod" }
-x-team-secret = { vault = "gateway_team_secret" }
+x-portkey-api-key = "{{ env.PORTKEY_API_KEY }}"
+x-portkey-config = "@bedrock-prod"
+x-team-secret = "{{ secrets.gateway_team_secret }}"
 ```
 
 | Key | Type / values | Default | Description |
@@ -246,7 +246,7 @@ x-team-secret = { vault = "gateway_team_secret" }
 | `auth` | table | omitted | API-key auth config. Omit the table entirely for providers that need no API key; any `extra_headers` are still attached. |
 | `auth.credentials` | array<string> | required when `auth` present | Ordered credential refs. Accepted forms are `vault:<NAME>`, `env:<NAME>`, and `aws_sigv4` (sign requests from the AWS default credential chain — Bedrock). Literal secret strings are rejected. |
 | `auth.header` | `"bearer"` or `{ custom = "Header-Name" }` | `"bearer"` | Primary API-key header policy. Omit when the provider uses a standard bearer token. |
-| `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values must be typed refs: `{ literal = "..." }`, `{ env = "NAME" }`, or `{ vault = "NAME" }`. |
+| `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values are interpolation strings: literal text, an `{{ env.NAME }}` token, or a `{{ secrets.NAME }}` token. Put credentials in a secret and reference them with a `{{ secrets.NAME }}` token, not a bare literal. |
 | `priority` | integer | `0` | Higher-priority configured providers win default selection; ties use canonical provider ID. |
 | `enabled` | boolean | `true` | Set `false` to disable a provider after lower-precedence layers define it. |
 | `aliases` | array<string> | `[]` | Additional provider names accepted by model routing and fallback config. |

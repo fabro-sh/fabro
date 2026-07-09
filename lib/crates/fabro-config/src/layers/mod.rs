@@ -21,9 +21,9 @@ pub use environment::{
     EnvironmentNetworkLayer, EnvironmentResourcesLayer, RunEnvironmentLayer,
 };
 pub use llm::{
-    CostRates, CredentialRef, CredentialRefParseError, HeaderValueRef, LlmLayer, ModelControls,
-    ModelCostTable, ModelFeatures as LlmModelFeatures, ModelLimits as LlmModelLimits,
-    ModelSettings, ProviderSettings, ReasoningEffortFeature,
+    CostRates, CredentialRef, CredentialRefParseError, LlmLayer, ModelControls, ModelCostTable,
+    ModelFeatures as LlmModelFeatures, ModelLimits as LlmModelLimits, ModelSettings,
+    ProviderSettings, ReasoningEffortFeature,
 };
 pub use log_filter::LogFilter;
 pub use maps::{MergeMap, ReplaceMap, StickyMap};

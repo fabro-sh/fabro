@@ -54,8 +54,8 @@ aliases = ["gateway"]
 credentials = ["env:ACME_GATEWAY_API_KEY", "vault:ACME_GATEWAY_API_KEY"]
 
 [llm.providers.proxy.extra_headers]
-x-portkey-api-key = { env = "PORTKEY_API_KEY" }
-x-portkey-config = { literal = "@bedrock-prod" }
+x-portkey-api-key = "{{ env.PORTKEY_API_KEY }}"
+x-portkey-config = "@bedrock-prod"
 
 [llm.models."team-code-large"]
 provider = "proxy"
@@ -122,7 +122,7 @@ reasoning = false
 
 Model roles are separate: `default = true` controls normal model selection for workflow execution, while `small_default = true` marks the provider's small/cheap utility model for metadata tasks such as generated run titles. If a provider has no small default, Fabro falls back to that provider's normal default.
 
-Provider auth is declared in `[llm.providers.<id>.auth]` with ordered `env:<NAME>` or `vault:<NAME>` refs. The primary auth header defaults to `bearer`; override with `header = { custom = "Header-Name" }` for providers like Anthropic that use `x-api-key`. Omit the `[llm.providers.<id>.auth]` block entirely for providers that need no API key (e.g. Ollama). Custom headers for any provider — including providers that need only typed headers and no API-key auth — go in `extra_headers` as `{ env = "NAME" }`, `{ vault = "NAME" }`, or `{ literal = "value" }`.
+Provider auth is declared in `[llm.providers.<id>.auth]` with ordered `env:<NAME>` or `vault:<NAME>` refs. The primary auth header defaults to `bearer`; override with `header = { custom = "Header-Name" }` for providers like Anthropic that use `x-api-key`. Omit the `[llm.providers.<id>.auth]` block entirely for providers that need no API key (e.g. Ollama). Custom headers for any provider — including providers that need only interpolation headers and no API-key auth — go in `extra_headers` as literal text, `{{ env.NAME }}` tokens, or `{{ secrets.NAME }}` tokens. Put credentials in secrets and reference them with `{{ secrets.NAME }}` instead of a bare literal.
 
 Provider `agent_profile` defaults from `adapter` and controls profile-specific behavior such as project-memory filenames, CLI/ACP command selection, and native session routing. Valid values are `anthropic`, `openai`, and `gemini`; model-level values override provider-level values.
 

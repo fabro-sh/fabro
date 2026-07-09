@@ -58,7 +58,7 @@ pub struct ProviderCatalogSettings {
     #[serde(default)]
     pub base_url:       Option<String>,
     #[serde(default)]
-    pub extra_headers:  Option<HashMap<String, HeaderValueRef>>,
+    pub extra_headers:  Option<HashMap<String, String>>,
     #[serde(default)]
     pub priority:       Option<i32>,
     #[serde(default)]
@@ -344,119 +344,6 @@ pub enum BillingPolicy {
     None,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HeaderValueRef {
-    Literal(String),
-    Env(String),
-    Vault(String),
-}
-
-impl Serialize for HeaderValueRef {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        use serde::ser::SerializeMap;
-
-        let mut map = serializer.serialize_map(Some(1))?;
-        match self {
-            Self::Literal(value) => map.serialize_entry("literal", value)?,
-            Self::Env(value) => map.serialize_entry("env", value)?,
-            Self::Vault(value) => map.serialize_entry("vault", value)?,
-        }
-        map.end()
-    }
-}
-
-impl std::fmt::Display for HeaderValueRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Literal(_) => f.write_str("literal:<redacted>"),
-            Self::Env(name) => write!(f, "env:{name}"),
-            Self::Vault(id) => write!(f, "vault:{id}"),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum HeaderValueRefInput {
-    Table(HeaderValueRefSerde),
-    BareString(String),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HeaderValueRefSerde {
-    #[serde(default)]
-    literal: Option<String>,
-    #[serde(default)]
-    env:     Option<String>,
-    #[serde(default)]
-    vault:   Option<String>,
-}
-
-impl<'de> Deserialize<'de> for HeaderValueRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error as _;
-
-        match HeaderValueRefInput::deserialize(deserializer)? {
-            HeaderValueRefInput::BareString(value) => {
-                drop(value);
-                Err(D::Error::custom("header value must be a table"))
-            }
-            HeaderValueRefInput::Table(value) => value.try_into().map_err(D::Error::custom),
-        }
-    }
-}
-
-impl TryFrom<HeaderValueRefSerde> for HeaderValueRef {
-    type Error = HeaderValueRefParseError;
-
-    fn try_from(value: HeaderValueRefSerde) -> Result<Self, Self::Error> {
-        let populated = [
-            value.literal.as_ref(),
-            value.env.as_ref(),
-            value.vault.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        .count();
-        if populated != 1 {
-            return Err(HeaderValueRefParseError::WrongFieldCount);
-        }
-        if let Some(value) = value.literal {
-            return non_empty_header_value(value).map(Self::Literal);
-        }
-        if let Some(value) = value.env {
-            return non_empty_header_value(value).map(Self::Env);
-        }
-        if let Some(value) = value.vault {
-            return non_empty_header_value(value).map(Self::Vault);
-        }
-        unreachable!("populated field count was already checked");
-    }
-}
-
-fn non_empty_header_value(value: String) -> Result<String, HeaderValueRefParseError> {
-    if value.is_empty() {
-        Err(HeaderValueRefParseError::EmptyValue)
-    } else {
-        Ok(value)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum HeaderValueRefParseError {
-    #[error("header value must contain exactly one of `literal`, `env`, or `vault`")]
-    WrongFieldCount,
-    #[error("header value reference must not be empty")]
-    EmptyValue,
-}
-
 pub fn deserialize_knowledge_cutoff<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -512,7 +399,7 @@ pub struct CatalogProvider {
     pub billing_policy: BillingPolicy,
     pub api_key_url:    Option<String>,
     pub base_url:       Option<String>,
-    pub extra_headers:  HashMap<String, HeaderValueRef>,
+    pub extra_headers:  HashMap<String, String>,
     pub priority:       i32,
     pub aliases:        Vec<String>,
 }

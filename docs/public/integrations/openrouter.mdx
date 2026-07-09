@@ -137,8 +137,8 @@ Fabro does not send OpenRouter's optional attribution headers (`HTTP-Referer`, `
 
 ```toml title="settings.toml"
 [llm.providers.openrouter.extra_headers]
-"HTTP-Referer" = { literal = "https://your-site.example" }
-"X-Title" = { literal = "Your App" }
+"HTTP-Referer" = "https://your-site.example"
+"X-Title" = "Your App"
 ```
 
 ## Troubleshooting

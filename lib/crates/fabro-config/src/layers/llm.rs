@@ -30,9 +30,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use fabro_model::catalog::deserialize_knowledge_cutoff;
 use fabro_model::{AgentProfileKind, BillingPolicy, CodecKind, ProviderAuthConfig};
-pub use fabro_model::{
-    CredentialRef, CredentialRefParseError, HeaderValueRef, ReasoningEffortFeature,
-};
+pub use fabro_model::{CredentialRef, CredentialRefParseError, ReasoningEffortFeature};
+use fabro_types::settings::InterpString;
 use serde::{Deserialize, Serialize};
 
 use super::maps::MergeMap;
@@ -75,10 +74,12 @@ pub struct ProviderSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url:       Option<String>,
     /// Extra HTTP headers attached to every outgoing provider request after
-    /// credential resolution. Header values are typed so secret-bearing values
-    /// stay as references until a later resolution phase.
+    /// credential resolution. Values are interpolation strings: literal text,
+    /// `{{ env.NAME }}`, or `{{ secrets.NAME }}`. Put credentials in a secret
+    /// and reference them with a `{{ secrets.NAME }}` token, not a bare
+    /// literal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extra_headers:  Option<HashMap<String, HeaderValueRef>>,
+    pub extra_headers:  Option<HashMap<String, InterpString>>,
     /// Higher wins; missing → `0`; ties broken by canonical provider ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority:       Option<i32>,
@@ -400,137 +401,14 @@ agent_profile = "gemini"
         );
     }
 
-    // ---- HeaderValueRef --------------------------------------------------
+    // ---- Provider extra headers ------------------------------------------
 
-    #[test]
-    fn header_value_ref_parses_literal_form() {
-        let parsed: HeaderValueRef = toml::from_str(r#"value = { literal = "@bedrock-prod" }"#)
-            .map(|v: toml::Value| {
-                v.as_table()
-                    .unwrap()
-                    .get("value")
-                    .unwrap()
-                    .clone()
-                    .try_into()
-                    .unwrap()
-            })
-            .unwrap();
-
-        assert_eq!(parsed, HeaderValueRef::Literal("@bedrock-prod".to_string()));
-        assert_eq!(parsed.to_string(), "literal:<redacted>");
-    }
-
-    #[test]
-    fn header_value_ref_parses_env_form() {
-        let parsed: HeaderValueRef = toml::from_str(r#"value = { env = "PORTKEY_API_KEY" }"#)
-            .map(|v: toml::Value| {
-                v.as_table()
-                    .unwrap()
-                    .get("value")
-                    .unwrap()
-                    .clone()
-                    .try_into()
-                    .unwrap()
-            })
-            .unwrap();
-
-        assert_eq!(parsed, HeaderValueRef::Env("PORTKEY_API_KEY".to_string()));
-        assert_eq!(parsed.to_string(), "env:PORTKEY_API_KEY");
-    }
-
-    #[test]
-    fn header_value_ref_parses_vault_form() {
-        let parsed: HeaderValueRef = toml::from_str(r#"value = { vault = "portkey_config" }"#)
-            .map(|v: toml::Value| {
-                v.as_table()
-                    .unwrap()
-                    .get("value")
-                    .unwrap()
-                    .clone()
-                    .try_into()
-                    .unwrap()
-            })
-            .unwrap();
-
-        assert_eq!(parsed, HeaderValueRef::Vault("portkey_config".to_string()));
-        assert_eq!(parsed.to_string(), "vault:portkey_config");
-    }
-
-    #[test]
-    fn header_value_ref_rejects_bare_string() {
-        #[derive(Debug, Deserialize)]
-        struct Wrap {
-            #[expect(
-                dead_code,
-                reason = "field exists only to drive the deserializer; we assert on the parse error"
-            )]
-            value: HeaderValueRef,
-        }
-
-        let err = toml::from_str::<Wrap>(r#"value = "sk-portkey-literal""#).unwrap_err();
-        let message = err.message();
-
-        assert!(message.contains("header value"));
-        assert!(
-            !message.contains("sk-portkey-literal"),
-            "deserializer message must not echo a possible literal secret",
-        );
-    }
-
-    #[test]
-    fn header_value_ref_rejects_ambiguous_table() {
-        #[derive(Debug, Deserialize)]
-        struct Wrap {
-            #[expect(
-                dead_code,
-                reason = "field exists only to drive the deserializer; we assert on the parse error"
-            )]
-            value: HeaderValueRef,
-        }
-
-        let err = toml::from_str::<Wrap>(
-            r#"value = { env = "PORTKEY_API_KEY", literal = "@bedrock-prod" }"#,
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("exactly one"));
-    }
-
-    #[test]
-    fn header_value_ref_rejects_unknown_keys() {
-        #[derive(Deserialize)]
-        #[expect(
-            dead_code,
-            reason = "field exists only to drive the deserializer; we assert on the parse error"
-        )]
-        struct Wrap {
-            value: HeaderValueRef,
-        }
-
-        let err: Result<Wrap, _> = toml::from_str(r#"value = { secret = "PORTKEY_API_KEY" }"#);
-
-        assert!(err.is_err(), "unknown header value keys must fail");
-    }
-
-    #[test]
-    fn header_value_ref_rejects_empty_values() {
-        #[derive(Debug, Deserialize)]
-        struct Wrap {
-            #[expect(
-                dead_code,
-                reason = "field exists only to drive the deserializer; we assert on the parse error"
-            )]
-            value: HeaderValueRef,
-        }
-
-        for source in [
-            r#"value = { literal = "" }"#,
-            r#"value = { env = "" }"#,
-            r#"value = { vault = "" }"#,
-        ] {
-            let err = toml::from_str::<Wrap>(source).unwrap_err();
-            assert!(err.to_string().contains("must not be empty"));
-        }
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "tests assert unresolved interpolation header source round-trips"
+    )]
+    fn interp_source(value: &InterpString) -> String {
+        value.as_source()
     }
 
     // ---- LlmLayer parsing -------------------------------------------------
@@ -568,7 +446,7 @@ credentials = ["env:KIMI_API_KEY", "vault:KIMI_API_KEY"]
     }
 
     #[test]
-    fn parses_provider_extra_headers() {
+    fn provider_extra_headers_parse_interp_tokens() {
         let toml = r#"
 [providers.portkey]
 display_name = "Portkey Bedrock"
@@ -576,9 +454,9 @@ adapter = "anthropic"
 base_url = "https://api.portkey.ai/v1"
 
 [providers.portkey.extra_headers]
-x-portkey-api-key = { env = "PORTKEY_API_KEY" }
-x-portkey-provider = { literal = "@bedrock-prod" }
-x-portkey-config = { vault = "portkey_config" }
+x-title = "My App"
+x-portkey-api-key = "{{ env.PORTKEY_API_KEY }}"
+x-team-secret = "{{ secrets.gateway_team_secret }}"
 "#;
 
         let layer: LlmLayer = toml::from_str(toml).unwrap();
@@ -587,34 +465,46 @@ x-portkey-config = { vault = "portkey_config" }
         assert!(portkey.auth.is_none());
         let headers = portkey.extra_headers.as_ref().unwrap();
         assert_eq!(
-            headers.get("x-portkey-api-key"),
-            Some(&HeaderValueRef::Env("PORTKEY_API_KEY".to_string())),
+            interp_source(headers.get("x-title").expect("x-title header should parse")),
+            "My App",
         );
         assert_eq!(
-            headers.get("x-portkey-provider"),
-            Some(&HeaderValueRef::Literal("@bedrock-prod".to_string())),
+            interp_source(
+                headers
+                    .get("x-portkey-api-key")
+                    .expect("x-portkey-api-key header should parse")
+            ),
+            "{{ env.PORTKEY_API_KEY }}",
         );
         assert_eq!(
-            headers.get("x-portkey-config"),
-            Some(&HeaderValueRef::Vault("portkey_config".to_string())),
+            interp_source(
+                headers
+                    .get("x-team-secret")
+                    .expect("x-team-secret header should parse")
+            ),
+            "{{ secrets.gateway_team_secret }}",
         );
     }
 
     #[test]
-    fn provider_extra_headers_reject_bare_string_values() {
+    fn provider_extra_headers_accepts_bare_string_literal() {
         let toml = r#"
 [providers.portkey.extra_headers]
 x-portkey-api-key = "sk-portkey-literal"
 "#;
 
-        let err = toml::from_str::<LlmLayer>(toml).unwrap_err();
-        let message = err.message();
+        let layer: LlmLayer = toml::from_str(toml).unwrap();
+        let headers = layer
+            .providers
+            .get("portkey")
+            .unwrap()
+            .extra_headers
+            .as_ref()
+            .unwrap();
+        let header = headers.get("x-portkey-api-key").unwrap();
 
-        assert!(message.contains("header value"));
-        assert!(
-            !message.contains("sk-portkey-literal"),
-            "deserializer message must not echo a possible literal secret",
-        );
+        assert!(header.is_literal());
+        assert_eq!(interp_source(header), "sk-portkey-literal");
     }
 
     #[test]
@@ -866,7 +756,7 @@ mystery = 1
         let high = ProviderSettings {
             extra_headers: Some(HashMap::from([(
                 "x-portkey-provider".to_string(),
-                HeaderValueRef::Literal("@bedrock-prod".to_string()),
+                InterpString::from("@bedrock-prod"),
             )])),
             ..ProviderSettings::default()
         };
@@ -874,11 +764,11 @@ mystery = 1
             extra_headers: Some(HashMap::from([
                 (
                     "x-portkey-api-key".to_string(),
-                    HeaderValueRef::Env("PORTKEY_API_KEY".to_string()),
+                    InterpString::from("{{ env.PORTKEY_API_KEY }}"),
                 ),
                 (
                     "x-portkey-provider".to_string(),
-                    HeaderValueRef::Literal("@bedrock-default".to_string()),
+                    InterpString::from("@bedrock-default"),
                 ),
             ])),
             ..ProviderSettings::default()
@@ -890,7 +780,7 @@ mystery = 1
         assert_eq!(headers.len(), 1);
         assert_eq!(
             headers.get("x-portkey-provider"),
-            Some(&HeaderValueRef::Literal("@bedrock-prod".to_string())),
+            Some(&InterpString::from("@bedrock-prod")),
         );
         assert!(!headers.contains_key("x-portkey-api-key"));
     }
@@ -901,7 +791,7 @@ mystery = 1
         let low = ProviderSettings {
             extra_headers: Some(HashMap::from([(
                 "x-portkey-api-key".to_string(),
-                HeaderValueRef::Env("PORTKEY_API_KEY".to_string()),
+                InterpString::from("{{ env.PORTKEY_API_KEY }}"),
             )])),
             ..ProviderSettings::default()
         };
@@ -910,7 +800,7 @@ mystery = 1
 
         assert_eq!(
             merged.extra_headers.unwrap().get("x-portkey-api-key"),
-            Some(&HeaderValueRef::Env("PORTKEY_API_KEY".to_string())),
+            Some(&InterpString::from("{{ env.PORTKEY_API_KEY }}")),
         );
     }
 
@@ -923,7 +813,7 @@ mystery = 1
         let low = ProviderSettings {
             extra_headers: Some(HashMap::from([(
                 "x-portkey-api-key".to_string(),
-                HeaderValueRef::Env("PORTKEY_API_KEY".to_string()),
+                InterpString::from("{{ env.PORTKEY_API_KEY }}"),
             )])),
             ..ProviderSettings::default()
         };

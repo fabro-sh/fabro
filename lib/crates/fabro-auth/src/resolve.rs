@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, ProviderId};
+use fabro_model::{ApiKeyHeaderPolicy, Catalog, CredentialRef, ProviderId};
 use fabro_static::EnvVars;
+use fabro_types::settings::{InterpString, ResolveCtx, ResolveError as InterpResolveError};
 use fabro_vault::{SecretType, Vault};
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::task::spawn_blocking;
@@ -128,6 +129,12 @@ pub enum ResolvedCredential {
 pub enum ResolveError {
     #[error("{0} is not configured")]
     NotConfigured(ProviderId),
+    #[error("{provider} header interpolation failed: {source}")]
+    Interpolation {
+        provider: ProviderId,
+        #[source]
+        source:   InterpResolveError,
+    },
     #[error("{provider} vault credential '{name}' has schema {actual:?}, expected Token or Oauth")]
     VaultSchemaMismatch {
         provider: ProviderId,
@@ -157,6 +164,9 @@ pub fn auth_issue_message(provider: &ProviderId, err: &ResolveError) -> String {
     match err {
         ResolveError::NotConfigured(_) => {
             format!("{provider_name} is not configured")
+        }
+        ResolveError::Interpolation { source, .. } => {
+            format!("{provider_name} header interpolation failed: {source}")
         }
         ResolveError::VaultSchemaMismatch { name, actual, .. } => {
             format!(
@@ -364,13 +374,20 @@ impl CredentialResolver {
         catalog_provider
             .extra_headers
             .iter()
-            .map(|(name, value_ref)| {
-                let value = match value_ref {
-                    HeaderValueRef::Literal(value) => Some(value.clone()),
-                    HeaderValueRef::Env(name) => self.lookup_env(name),
-                    HeaderValueRef::Vault(name) => vault.get(name).map(str::to_string),
-                }
-                .ok_or_else(|| ResolveError::NotConfigured(provider.clone()))?;
+            .map(|(name, source)| {
+                // Provider header secrets resolve outside the run-boundary
+                // redactor registration path. Keep this path free of value
+                // logging until exact-match registration is threaded through.
+                let mut ctx = ResolveCtx::new()
+                    .with_env(|env_name| self.lookup_env(env_name))
+                    .with_secrets(|secret_name| vault_get_token(vault, secret_name).ok().flatten());
+                let value =
+                    InterpString::parse(source)
+                        .resolve_with(&mut ctx)
+                        .map_err(|source| ResolveError::Interpolation {
+                            provider: provider.clone(),
+                            source,
+                        })?;
                 Ok((name.clone(), value))
             })
             .collect()
@@ -504,6 +521,8 @@ pub async fn configured_providers_from_process_env(
 }
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
+
     use chrono::{Duration, Utc};
     use fabro_model::catalog::LlmCatalogSettings;
     use httpmock::Method::POST;
@@ -845,6 +864,225 @@ reasoning = false
         assert_eq!(resolver.configured_providers(&vault, &catalog), vec![
             ProviderId::openai()
         ]);
+    }
+
+    #[tokio::test]
+    async fn vault_source_resolves_secret_header_token() {
+        let catalog = catalog_with(
+            r#"
+[providers.portkey]
+display_name = "Portkey Bedrock"
+adapter = "anthropic"
+agent_profile = "anthropic"
+base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.extra_headers]
+x-team-secret = "{{ secrets.gateway_team_secret }}"
+
+[models."portkey-claude"]
+provider = "portkey"
+display_name = "Portkey Claude"
+family = "claude"
+default = true
+
+[models."portkey-claude".limits]
+context_window = 200000
+
+[models."portkey-claude".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+"#,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_token(&mut vault, "gateway_team_secret", "s3cr3t").unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+
+        let resolved = resolver
+            .resolve(
+                ProviderId::new("portkey"),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
+            .await
+            .unwrap();
+
+        let ResolvedCredential::Api(api) = resolved;
+        assert_eq!(
+            api.extra_headers.get("x-team-secret"),
+            Some(&"s3cr3t".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_multi_segment_header_token() {
+        let catalog = catalog_with(
+            r#"
+[providers.portkey]
+display_name = "Portkey Bedrock"
+adapter = "anthropic"
+agent_profile = "anthropic"
+base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.extra_headers]
+authorization = "Bearer {{ secrets.TOKEN }}"
+
+[models."portkey-claude"]
+provider = "portkey"
+display_name = "Portkey Claude"
+family = "claude"
+default = true
+
+[models."portkey-claude".limits]
+context_window = 200000
+
+[models."portkey-claude".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+"#,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_token(&mut vault, "TOKEN", "gateway-token").unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+
+        let resolved = resolver
+            .resolve(
+                ProviderId::new("portkey"),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
+            .await
+            .unwrap();
+
+        let ResolvedCredential::Api(api) = resolved;
+        assert_eq!(
+            api.extra_headers.get("authorization"),
+            Some(&"Bearer gateway-token".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_secret_header_fails_without_echoing_value() {
+        let catalog = catalog_with(
+            r#"
+[providers.portkey]
+display_name = "Portkey Bedrock"
+adapter = "anthropic"
+agent_profile = "anthropic"
+base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.extra_headers]
+x-team-secret = "{{ secrets.MISSING }}"
+
+[models."portkey-claude"]
+provider = "portkey"
+display_name = "Portkey Claude"
+family = "claude"
+default = true
+
+[models."portkey-claude".limits]
+context_window = 200000
+
+[models."portkey-claude".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+"#,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_token(&mut vault, "OTHER_SECRET", "should-not-leak").unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+
+        let err = resolver
+            .resolve(
+                ProviderId::new("portkey"),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ResolveError::Interpolation { ref provider, .. }
+                if provider == &ProviderId::new("portkey")
+        ));
+        let source = err
+            .source()
+            .expect("interpolation errors should preserve the source error");
+        assert!(source.to_string().contains("MISSING"));
+        let message = err.to_string();
+        assert!(message.contains("MISSING"));
+        assert!(!message.contains("should-not-leak"));
+    }
+
+    #[tokio::test]
+    async fn header_with_file_or_oauth_vault_entry_fails_closed() {
+        let catalog = catalog_with(
+            r#"
+[providers.portkey]
+display_name = "Portkey Bedrock"
+adapter = "anthropic"
+agent_profile = "anthropic"
+base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.extra_headers]
+x-team-secret = "{{ secrets.gateway_team_secret }}"
+
+[models."portkey-claude"]
+provider = "portkey"
+display_name = "Portkey Claude"
+family = "claude"
+default = true
+
+[models."portkey-claude".limits]
+context_window = 200000
+
+[models."portkey-claude".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+"#,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_oauth(
+            &mut vault,
+            "gateway_team_secret",
+            &oauth_credential(
+                "https://auth.openai.com/oauth/token".to_string(),
+                Utc::now() + Duration::hours(1),
+            ),
+        )
+        .unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+
+        let err = resolver
+            .resolve(
+                ProviderId::new("portkey"),
+                CredentialUsage::ApiRequest,
+                &catalog,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ResolveError::Interpolation { ref provider, .. }
+                if provider == &ProviderId::new("portkey")
+        ));
+        let message = err.to_string();
+        assert!(message.contains("gateway_team_secret"));
+        assert!(!message.contains("expired-access"));
+        assert!(!message.contains("refresh-token"));
     }
 
     #[tokio::test]

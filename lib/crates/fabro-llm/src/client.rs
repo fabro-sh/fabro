@@ -1650,7 +1650,7 @@ agent_profile = "anthropic"
 base_url = "https://api.portkey.ai/v1"
 
 [providers.portkey.extra_headers]
-x-portkey-api-key = { literal = "pk-live" }
+x-portkey-api-key = "pk-live"
 
 [models."portkey-claude"]
 provider = "portkey"

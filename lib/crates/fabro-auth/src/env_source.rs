@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, HeaderValueRef, ProviderId};
+use fabro_model::{Catalog, CredentialRef, ProviderId};
 use fabro_static::EnvVars;
+use fabro_types::settings::{InterpString, ResolveCtx};
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
 use crate::resolve::{apply_openai_api_env_context, apply_openai_codex_api_context};
@@ -81,13 +82,15 @@ impl EnvCredentialSource {
         provider
             .extra_headers
             .iter()
-            .map(|(name, value_ref)| {
-                let value = match value_ref {
-                    HeaderValueRef::Literal(value) => Some(value.clone()),
-                    HeaderValueRef::Env(name) => self.lookup(name),
-                    HeaderValueRef::Vault(_) => None,
-                }
-                .ok_or_else(|| ResolveError::NotConfigured(provider.id.clone()))?;
+            .map(|(name, source)| {
+                let mut ctx = ResolveCtx::new().with_env(|env_name| self.lookup(env_name));
+                let value =
+                    InterpString::parse(source)
+                        .resolve_with(&mut ctx)
+                        .map_err(|source| ResolveError::Interpolation {
+                            provider: provider.id.clone(),
+                            source,
+                        })?;
                 Ok((name.clone(), value))
             })
             .collect()
@@ -117,7 +120,8 @@ impl CredentialSource for EnvCredentialSource {
             match self.credential_for(provider) {
                 Ok(Some(credential)) => credentials.push(credential),
                 Ok(None) => {}
-                Err(ResolveError::NotConfigured(_)) if provider.auth.is_some() => {}
+                Err(ResolveError::NotConfigured(_) | ResolveError::Interpolation { .. })
+                    if provider.auth.is_some() => {}
                 Err(err) => auth_issues.push((provider.id.clone(), err)),
             }
         }
@@ -280,7 +284,7 @@ reasoning = false
     }
 
     #[tokio::test]
-    async fn resolve_registers_no_auth_provider_with_env_extra_headers() {
+    async fn env_source_resolves_literal_and_env_header_tokens() {
         let catalog = catalog_with(
             r#"
 [providers.portkey]
@@ -290,8 +294,8 @@ agent_profile = "anthropic"
 base_url = "https://api.portkey.ai/v1"
 
 [providers.portkey.extra_headers]
-x-portkey-api-key = { env = "PORTKEY_API_KEY" }
-x-portkey-provider = { literal = "@bedrock-prod" }
+x-portkey-api-key = "{{ env.PORTKEY_API_KEY }}"
+x-portkey-provider = "@bedrock-prod"
 
 [models."portkey-claude"]
 provider = "portkey"
@@ -330,7 +334,7 @@ reasoning_effort = "levels"
     }
 
     #[tokio::test]
-    async fn resolve_reports_missing_required_header_for_no_auth_provider() {
+    async fn env_source_secrets_header_token_is_unavailable() {
         let catalog = catalog_with(
             r#"
 [providers.portkey]
@@ -340,7 +344,59 @@ agent_profile = "anthropic"
 base_url = "https://api.portkey.ai/v1"
 
 [providers.portkey.extra_headers]
-x-portkey-api-key = { env = "PORTKEY_API_KEY" }
+x-team-secret = "{{ secrets.gateway_team_secret }}"
+
+[models."portkey-claude"]
+provider = "portkey"
+display_name = "Portkey Claude"
+family = "claude"
+default = true
+
+[models."portkey-claude".limits]
+context_window = 200000
+
+[models."portkey-claude".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+"#,
+        );
+        let source = test_source(&[]);
+
+        let resolved = source.resolve(&catalog).await.unwrap();
+
+        assert!(
+            !resolved
+                .credentials
+                .iter()
+                .any(|credential| credential.provider == ProviderId::new("portkey"))
+        );
+        let (_, issue) = resolved
+            .auth_issues
+            .iter()
+            .find(|(provider, _)| provider == &ProviderId::new("portkey"))
+            .expect("secrets token should surface as an auth issue");
+        assert!(matches!(
+            issue,
+            crate::ResolveError::Interpolation { provider, .. }
+                if provider == &ProviderId::new("portkey")
+        ));
+        assert!(!issue.to_string().contains("s3cr3t"));
+    }
+
+    #[tokio::test]
+    async fn env_source_reports_missing_env_header_for_no_auth_provider() {
+        let catalog = catalog_with(
+            r#"
+[providers.portkey]
+display_name = "Portkey Bedrock"
+adapter = "anthropic"
+agent_profile = "anthropic"
+base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.extra_headers]
+x-portkey-api-key = "{{ env.PORTKEY_API_KEY }}"
 
 [models."portkey-claude"]
 provider = "portkey"
@@ -373,7 +429,15 @@ reasoning_effort = "levels"
                 .auth_issues
                 .iter()
                 .any(|(provider, issue)| provider == &ProviderId::new("portkey")
-                    && matches!(issue, crate::ResolveError::NotConfigured(_)))
+                    && matches!(issue, crate::ResolveError::Interpolation { .. }))
         );
+        let message = resolved
+            .auth_issues
+            .iter()
+            .find(|(provider, _)| provider == &ProviderId::new("portkey"))
+            .map(|(_, issue)| issue.to_string())
+            .expect("missing env header should surface as an auth issue");
+        assert!(message.contains("PORTKEY_API_KEY"));
+        assert!(!message.contains("pk-live"));
     }
 }

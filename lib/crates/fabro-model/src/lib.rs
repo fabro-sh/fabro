@@ -19,7 +19,7 @@ pub use billing::{
 };
 pub use catalog::{
     ApiKeyHeaderPolicy, BillingPolicy, Catalog, CredentialRef, CredentialRefParseError,
-    FallbackTarget, HeaderValueRef, ProviderAuthConfig,
+    FallbackTarget, ProviderAuthConfig,
 };
 pub use codec::CodecKind;
 pub use ids::{ModelId, ProviderId};

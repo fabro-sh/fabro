@@ -326,6 +326,11 @@ fn llm_layer_to_catalog_settings(llm: LlmLayer) -> model_catalog::LlmCatalogSett
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "collapse the authoring InterpString header values to their catalog source strings; \
+              they are re-parsed and resolved at the credential boundary"
+)]
 fn provider_settings_to_catalog(
     settings: ProviderSettings,
 ) -> model_catalog::ProviderCatalogSettings {
@@ -338,7 +343,12 @@ fn provider_settings_to_catalog(
         billing_policy: settings.billing_policy,
         api_key_url:    settings.api_key_url,
         base_url:       settings.base_url,
-        extra_headers:  settings.extra_headers,
+        extra_headers:  settings.extra_headers.map(|headers| {
+            headers
+                .into_iter()
+                .map(|(name, value)| (name, value.as_source()))
+                .collect()
+        }),
         priority:       settings.priority,
         enabled:        settings.enabled,
         aliases:        settings.aliases,
@@ -860,6 +870,51 @@ reasoning = false
             catalog
                 .effective_agent_profile(&fabro_model::ProviderId::new("acme"), Some("acme-large")),
             Some(fabro_model::AgentProfileKind::Gemini)
+        );
+    }
+
+    #[test]
+    fn server_runtime_settings_preserves_extra_header_sources() {
+        let settings = server_runtime_settings_from_toml(
+            r#"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[llm.providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+base_url = "https://api.acme.test/v1"
+
+[llm.providers.acme.extra_headers]
+x-title = "My App"
+x-api-key = "{{ env.ACME_GATEWAY_API_KEY }}"
+x-team-secret = "Bearer {{ secrets.ACME_GATEWAY_TOKEN }}"
+"#,
+            None,
+            None,
+        )
+        .expect("server runtime settings should resolve");
+
+        let provider = settings
+            .llm_catalog_settings
+            .providers
+            .get("acme")
+            .expect("provider settings should be present");
+        let headers = provider
+            .extra_headers
+            .as_ref()
+            .expect("extra header settings should be present");
+
+        assert_eq!(headers.get("x-title").map(String::as_str), Some("My App"));
+        assert_eq!(
+            headers.get("x-api-key").map(String::as_str),
+            Some("{{ env.ACME_GATEWAY_API_KEY }}")
+        );
+        assert_eq!(
+            headers.get("x-team-secret").map(String::as_str),
+            Some("Bearer {{ secrets.ACME_GATEWAY_TOKEN }}")
         );
     }
 }

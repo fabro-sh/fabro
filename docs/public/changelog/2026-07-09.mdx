@@ -1,0 +1,10 @@
+---
+title: "Provider header interpolation"
+date: "2026-07-09"
+---
+
+## Provider header interpolation
+
+Provider `extra_headers` now use interpolation strings instead of typed `{ literal = ... }`, `{ env = ... }`, and `{ vault = ... }` tables. Write literal header values as plain strings, replace `{ env = "X" }` with a `{{ env.X }}` token, and replace `{ vault = "X" }` with a `{{ secrets.X }}` token. Secret header tokens resolve only token-style vault entries, so file and OAuth vault entries fail closed.
+
+This also enables mixed literal and secret values such as `Authorization = "Bearer {{ secrets.GATEWAY_TOKEN }}"`. Bare string header values are now accepted; put credentials in secrets and reference them with `{{ secrets.NAME }}` instead of pasting a credential as a literal. Provider `base_url` remains a plain literal string for now and is not interpolated.

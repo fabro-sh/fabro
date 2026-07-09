@@ -15,7 +15,7 @@ use fabro_types::settings::{Duration, InterpString, Size};
 use super::LogFilter;
 use super::cli::{CliAuthLayer, CliLoggingLayer, CliTargetLayer};
 use super::environment::EnvironmentDockerfileLayer;
-use super::llm::{CostRates, CredentialRef, HeaderValueRef, ReasoningEffortFeature};
+use super::llm::{CostRates, CredentialRef, ReasoningEffortFeature};
 use super::run::{
     HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer, ModelRefOrSplice,
     NotificationProviderLayer, RunArtifactsLayer, RunCheckpointLayer, RunGoalLayer,
@@ -122,7 +122,7 @@ impl Combine for Option<HashMap<String, toml::Value>> {
     }
 }
 
-impl Combine for Option<HashMap<String, HeaderValueRef>> {
+impl Combine for Option<HashMap<String, InterpString>> {
     fn combine(self, other: Self) -> Self {
         self.or(other)
     }
