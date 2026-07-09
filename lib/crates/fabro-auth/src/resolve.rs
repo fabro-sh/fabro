@@ -427,12 +427,14 @@ impl CredentialResolver {
                 Ok(cred)
             }
             ResolvedSecret::OAuth { credential, .. } => {
-                let mut extra_headers =
-                    self.resolved_extra_headers_for_catalog(vault, provider_id, catalog)?;
                 let mut api_credential = ApiCredential {
                     provider: provider_id.clone(),
                     auth_header: Some(ApiKeyHeader::Bearer(credential.tokens.access_token.clone())),
-                    extra_headers: std::mem::take(&mut extra_headers),
+                    extra_headers: self.resolved_extra_headers_for_catalog(
+                        vault,
+                        provider_id,
+                        catalog,
+                    )?,
                     base_url,
                     codex_mode: false,
                     org_id: None,
@@ -910,33 +912,7 @@ reasoning = false
 
     #[tokio::test]
     async fn vault_source_resolves_secret_header_token() {
-        let catalog = catalog_with(
-            r#"
-[providers.portkey]
-display_name = "Portkey Bedrock"
-adapter = "anthropic"
-agent_profile = "anthropic"
-base_url = "https://api.portkey.ai/v1"
-
-[providers.portkey.extra_headers]
-x-team-secret = "{{ secrets.gateway_team_secret }}"
-
-[models."portkey-claude"]
-provider = "portkey"
-display_name = "Portkey Claude"
-family = "claude"
-default = true
-
-[models."portkey-claude".limits]
-context_window = 200000
-
-[models."portkey-claude".features]
-tools = true
-vision = true
-reasoning = true
-reasoning_effort = "levels"
-"#,
-        );
+        let catalog = portkey_catalog(r#"x-team-secret = "{{ secrets.gateway_team_secret }}""#);
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_token(&mut vault, "gateway_team_secret", "s3cr3t").unwrap();
@@ -984,33 +960,7 @@ reasoning_effort = "levels"
 
     #[tokio::test]
     async fn missing_secret_header_fails_without_echoing_value() {
-        let catalog = catalog_with(
-            r#"
-[providers.portkey]
-display_name = "Portkey Bedrock"
-adapter = "anthropic"
-agent_profile = "anthropic"
-base_url = "https://api.portkey.ai/v1"
-
-[providers.portkey.extra_headers]
-x-team-secret = "{{ secrets.MISSING }}"
-
-[models."portkey-claude"]
-provider = "portkey"
-display_name = "Portkey Claude"
-family = "claude"
-default = true
-
-[models."portkey-claude".limits]
-context_window = 200000
-
-[models."portkey-claude".features]
-tools = true
-vision = true
-reasoning = true
-reasoning_effort = "levels"
-"#,
-        );
+        let catalog = portkey_catalog(r#"x-team-secret = "{{ secrets.MISSING }}""#);
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_token(&mut vault, "OTHER_SECRET", "should-not-leak").unwrap();
@@ -1041,33 +991,7 @@ reasoning_effort = "levels"
 
     #[tokio::test]
     async fn header_with_file_or_oauth_vault_entry_fails_closed() {
-        let catalog = catalog_with(
-            r#"
-[providers.portkey]
-display_name = "Portkey Bedrock"
-adapter = "anthropic"
-agent_profile = "anthropic"
-base_url = "https://api.portkey.ai/v1"
-
-[providers.portkey.extra_headers]
-x-team-secret = "{{ secrets.gateway_team_secret }}"
-
-[models."portkey-claude"]
-provider = "portkey"
-display_name = "Portkey Claude"
-family = "claude"
-default = true
-
-[models."portkey-claude".limits]
-context_window = 200000
-
-[models."portkey-claude".features]
-tools = true
-vision = true
-reasoning = true
-reasoning_effort = "levels"
-"#,
-        );
+        let catalog = portkey_catalog(r#"x-team-secret = "{{ secrets.gateway_team_secret }}""#);
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_oauth(

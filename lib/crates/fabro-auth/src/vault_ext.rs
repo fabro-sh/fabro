@@ -38,7 +38,7 @@ pub fn vault_get_token(vault: &Vault, name: &str) -> Result<Option<String>, Vaul
 /// missing or non-Token entry becomes `None`, so interpolation fails closed
 /// with a missing-secret error instead of resolving a wrong-schema value.
 #[must_use]
-pub fn vault_token_lookup(vault: &Vault, name: &str) -> Option<String> {
+pub(crate) fn vault_token_lookup(vault: &Vault, name: &str) -> Option<String> {
     vault_get_token(vault, name).ok().flatten()
 }
 
