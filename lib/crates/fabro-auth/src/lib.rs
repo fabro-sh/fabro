@@ -26,6 +26,7 @@ pub use strategy::{
 };
 pub use vault_ext::{
     VaultLookupError, vault_get_oauth, vault_get_token, vault_set_oauth, vault_set_token,
+    vault_token_lookup,
 };
 pub use vault_source::VaultCredentialSource;
 

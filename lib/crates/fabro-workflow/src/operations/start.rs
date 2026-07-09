@@ -563,7 +563,7 @@ fn process_env_var(name: &str) -> Option<String> {
 }
 
 fn vault_token_lookup(vault: Option<&Vault>, name: &str) -> Option<String> {
-    vault.and_then(|vault| fabro_auth::vault_get_token(vault, name).ok().flatten())
+    vault.and_then(|vault| fabro_auth::vault_token_lookup(vault, name))
 }
 
 async fn load_accepted_run_definition(

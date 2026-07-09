@@ -326,32 +326,33 @@ fn llm_layer_to_catalog_settings(llm: LlmLayer) -> model_catalog::LlmCatalogSett
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "collapse the authoring InterpString header values to their catalog source strings; \
-              they are re-parsed and resolved at the credential boundary"
-)]
 fn provider_settings_to_catalog(
     settings: ProviderSettings,
 ) -> model_catalog::ProviderCatalogSettings {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "collapse the authoring InterpString header values to their catalog source \
+                  strings; they are re-parsed and resolved at the credential boundary"
+    )]
+    let extra_headers = settings.extra_headers.map(|headers| {
+        headers
+            .into_iter()
+            .map(|(name, value)| (name, value.as_source()))
+            .collect()
+    });
     model_catalog::ProviderCatalogSettings {
-        display_name:   settings.display_name,
-        adapter:        settings.adapter,
-        codec:          settings.codec,
-        agent_profile:  settings.agent_profile,
-        auth:           settings.auth,
+        display_name: settings.display_name,
+        adapter: settings.adapter,
+        codec: settings.codec,
+        agent_profile: settings.agent_profile,
+        auth: settings.auth,
         billing_policy: settings.billing_policy,
-        api_key_url:    settings.api_key_url,
-        base_url:       settings.base_url,
-        extra_headers:  settings.extra_headers.map(|headers| {
-            headers
-                .into_iter()
-                .map(|(name, value)| (name, value.as_source()))
-                .collect()
-        }),
-        priority:       settings.priority,
-        enabled:        settings.enabled,
-        aliases:        settings.aliases,
+        api_key_url: settings.api_key_url,
+        base_url: settings.base_url,
+        extra_headers,
+        priority: settings.priority,
+        enabled: settings.enabled,
+        aliases: settings.aliases,
     }
 }
 

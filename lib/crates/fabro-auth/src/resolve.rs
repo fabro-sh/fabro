@@ -13,7 +13,9 @@ use crate::credential::{ApiKeyHeader, OAuthCredential};
 use crate::credential_source::CredentialSource;
 use crate::env_source::EnvCredentialSource;
 use crate::refresh::refresh_oauth_credential;
-use crate::vault_ext::{VaultLookupError, vault_get_oauth, vault_get_token, vault_set_oauth};
+use crate::vault_ext::{
+    VaultLookupError, vault_get_oauth, vault_get_token, vault_set_oauth, vault_token_lookup,
+};
 
 pub type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
@@ -371,26 +373,10 @@ impl CredentialResolver {
         let Some(catalog_provider) = catalog.provider(provider) else {
             return Ok(HashMap::new());
         };
-        catalog_provider
-            .extra_headers
-            .iter()
-            .map(|(name, source)| {
-                // Provider header secrets resolve outside the run-boundary
-                // redactor registration path. Keep this path free of value
-                // logging until exact-match registration is threaded through.
-                let mut ctx = ResolveCtx::new()
-                    .with_env(|env_name| self.lookup_env(env_name))
-                    .with_secrets(|secret_name| vault_get_token(vault, secret_name).ok().flatten());
-                let value =
-                    InterpString::parse(source)
-                        .resolve_with(&mut ctx)
-                        .map_err(|source| ResolveError::Interpolation {
-                            provider: provider.clone(),
-                            source,
-                        })?;
-                Ok((name.clone(), value))
-            })
-            .collect()
+        let mut ctx = ResolveCtx::new()
+            .with_env(|env_name| self.lookup_env(env_name))
+            .with_secrets(|secret_name| vault_token_lookup(vault, secret_name));
+        resolve_extra_headers(provider, &catalog_provider.extra_headers, &mut ctx)
     }
 
     fn to_api_credential(
@@ -487,6 +473,30 @@ impl CredentialResolver {
     }
 }
 
+/// Resolve a provider's `extra_headers` interpolation sources with `ctx`.
+///
+/// Provider header secrets resolve outside the run-boundary redactor
+/// registration path. Keep this path free of value logging until exact-match
+/// registration is threaded through.
+pub(crate) fn resolve_extra_headers(
+    provider: &ProviderId,
+    headers: &HashMap<String, String>,
+    ctx: &mut ResolveCtx<'_>,
+) -> Result<HashMap<String, String>, ResolveError> {
+    headers
+        .iter()
+        .map(|(name, source)| {
+            let value = InterpString::parse(source)
+                .resolve_with(ctx)
+                .map_err(|source| ResolveError::Interpolation {
+                    provider: provider.clone(),
+                    source,
+                })?;
+            Ok((name.clone(), value))
+        })
+        .collect()
+}
+
 fn vault_lookup_error(provider: &ProviderId, name: &str, err: VaultLookupError) -> ResolveError {
     match err {
         VaultLookupError::SchemaMismatch { actual, .. } => ResolveError::VaultSchemaMismatch {
@@ -562,6 +572,38 @@ mod tests {
 
     fn default_catalog() -> Catalog {
         catalog_with("")
+    }
+
+    /// A no-auth portkey provider whose only variation is its `extra_headers`
+    /// TOML lines.
+    fn portkey_catalog(extra_headers: &str) -> Catalog {
+        catalog_with(&format!(
+            r#"
+[providers.portkey]
+display_name = "Portkey Bedrock"
+adapter = "anthropic"
+agent_profile = "anthropic"
+base_url = "https://api.portkey.ai/v1"
+
+[providers.portkey.extra_headers]
+{extra_headers}
+
+[models."portkey-claude"]
+provider = "portkey"
+display_name = "Portkey Claude"
+family = "claude"
+default = true
+
+[models."portkey-claude".limits]
+context_window = 200000
+
+[models."portkey-claude".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+"#
+        ))
     }
 
     #[tokio::test]
@@ -918,33 +960,7 @@ reasoning_effort = "levels"
 
     #[tokio::test]
     async fn resolve_multi_segment_header_token() {
-        let catalog = catalog_with(
-            r#"
-[providers.portkey]
-display_name = "Portkey Bedrock"
-adapter = "anthropic"
-agent_profile = "anthropic"
-base_url = "https://api.portkey.ai/v1"
-
-[providers.portkey.extra_headers]
-authorization = "Bearer {{ secrets.TOKEN }}"
-
-[models."portkey-claude"]
-provider = "portkey"
-display_name = "Portkey Claude"
-family = "claude"
-default = true
-
-[models."portkey-claude".limits]
-context_window = 200000
-
-[models."portkey-claude".features]
-tools = true
-vision = true
-reasoning = true
-reasoning_effort = "levels"
-"#,
-        );
+        let catalog = portkey_catalog(r#"authorization = "Bearer {{ secrets.TOKEN }}""#);
         let dir = tempfile::tempdir().unwrap();
         let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
         vault_set_token(&mut vault, "TOKEN", "gateway-token").unwrap();
