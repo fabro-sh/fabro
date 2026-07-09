@@ -146,6 +146,55 @@ _version = 1
 }
 
 #[test]
+fn resolve_slack_default_channel_passes_literal_through() {
+    let settings = resolve_server(&parse(
+        r##"
+_version = 1
+
+[server.integrations.slack]
+default_channel = "#releases"
+"##,
+    ));
+
+    assert_eq!(
+        settings.integrations.slack.default_channel.as_deref(),
+        Some("#releases")
+    );
+    // Wire shape is unchanged by the plain-string demotion: the field still
+    // serializes as its raw string.
+    let slack = serde_json::to_value(&settings.integrations.slack)
+        .expect("slack settings should serialize");
+    assert_eq!(
+        slack,
+        serde_json::json!({
+            "enabled": true,
+            "default_channel": "#releases",
+        })
+    );
+}
+
+#[test]
+fn resolve_slack_default_channel_keeps_template_token_literal() {
+    // `server.integrations.slack.default_channel` is a plain literal now: a
+    // `{{ env.* }}` token is stored verbatim and never interpolated. Per-run
+    // Slack channels (`run.notifications`, `run.interviews.slack`) remain the
+    // interpolating surface.
+    let settings = resolve_server(&parse(
+        r#"
+_version = 1
+
+[server.integrations.slack]
+default_channel = "{{ env.SLACK_DEFAULT_CHANNEL }}"
+"#,
+    ));
+
+    assert_eq!(
+        settings.integrations.slack.default_channel.as_deref(),
+        Some("{{ env.SLACK_DEFAULT_CHANNEL }}")
+    );
+}
+
+#[test]
 fn server_sandbox_defaults_all_providers_enabled() {
     let settings = ServerSettingsBuilder::from_toml(
         r#"

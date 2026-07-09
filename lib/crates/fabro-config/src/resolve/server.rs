@@ -364,9 +364,15 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                     enabled:         false,
                     default_channel: None,
                 },
-                |slack| SlackIntegrationSettings {
-                    enabled:         slack.enabled.unwrap_or(true),
-                    default_channel: slack.default_channel.clone(),
+                |slack| {
+                    warn_if_demoted_template(
+                        "server.integrations.slack.default_channel",
+                        slack.default_channel.as_deref(),
+                    );
+                    SlackIntegrationSettings {
+                        enabled:         slack.enabled.unwrap_or(true),
+                        default_channel: slack.default_channel.clone(),
+                    }
                 },
             ),
     }

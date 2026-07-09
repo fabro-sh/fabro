@@ -2073,23 +2073,24 @@ fn slack_app_state_with_settings_and_secret_sources(
     .expect("slack test app state should build")
 }
 
+fn slack_test_vault_tokens() -> [(&'static str, &'static str, SecretType); 2] {
+    [
+        (
+            EnvVars::FABRO_SLACK_BOT_TOKEN,
+            "xoxb-test",
+            SecretType::Token,
+        ),
+        (
+            EnvVars::FABRO_SLACK_APP_TOKEN,
+            "xapp-test",
+            SecretType::Token,
+        ),
+    ]
+}
+
 #[test]
 fn slack_service_ignores_vault_tokens_when_config_is_absent() {
-    let state = slack_app_state_with_secret_sources(
-        &[
-            (
-                EnvVars::FABRO_SLACK_BOT_TOKEN,
-                "xoxb-test",
-                SecretType::Token,
-            ),
-            (
-                EnvVars::FABRO_SLACK_APP_TOKEN,
-                "xapp-test",
-                SecretType::Token,
-            ),
-        ],
-        HashMap::new(),
-    );
+    let state = slack_app_state_with_secret_sources(&slack_test_vault_tokens(), HashMap::new());
 
     assert!(state.slack_service.is_none());
 }
@@ -2132,6 +2133,33 @@ enabled = true
     assert_eq!(connection.status, IntegrationConnectionState::Connecting);
     assert!(connection.last_connected_at.is_none());
     assert!(connection.last_error.is_none());
+    assert!(service.default_channel.is_none());
+}
+
+#[test]
+fn slack_service_receives_configured_default_channel_verbatim() {
+    let state = slack_app_state_with_settings_and_secret_sources(
+        server_settings_from_toml(
+            r##"
+_version = 1
+
+[server.auth]
+methods = ["dev-token"]
+
+[server.integrations.slack]
+enabled = true
+default_channel = "#releases"
+"##,
+        ),
+        &slack_test_vault_tokens(),
+        HashMap::new(),
+    );
+
+    let service = state
+        .slack_service
+        .as_ref()
+        .expect("slack service should be enabled by config and vault tokens");
+    assert_eq!(service.default_channel.as_deref(), Some("#releases"));
 }
 
 #[test]

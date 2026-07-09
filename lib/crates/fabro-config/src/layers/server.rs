@@ -234,7 +234,7 @@ pub struct SlackIntegrationLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled:         Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_channel: Option<InterpString>,
+    pub default_channel: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]

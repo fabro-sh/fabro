@@ -12,7 +12,6 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::duration::Duration;
-use super::interp::InterpString;
 
 /// A structurally resolved `[server]` view for consumers.
 ///
@@ -258,7 +257,7 @@ pub struct GithubIntegrationSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlackIntegrationSettings {
     pub enabled:         bool,
-    pub default_channel: Option<InterpString>,
+    pub default_channel: Option<String>,
 }
 
 impl Default for SlackIntegrationSettings {

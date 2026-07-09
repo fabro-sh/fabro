@@ -7,7 +7,6 @@ use fabro_slack::config::{
     resolve_credentials_status_with_lookup as resolve_slack_credentials_status_with_lookup,
 };
 use fabro_static::EnvVars;
-use fabro_types::settings::InterpString;
 use fabro_types::settings::server::GithubIntegrationSettings;
 
 use super::super::{
@@ -181,18 +180,11 @@ fn github_integration_status(
     )
 }
 
-fn display_interp(state: &AppState, value: &InterpString) -> String {
-    value.resolve_or_source(|name| (state.env_lookup)(name))
-}
-
 fn slack_integration_status(state: &AppState) -> SystemIntegrationStatus {
     let settings = &state.server_settings().server.integrations.slack;
     let mut metadata = BTreeMap::new();
     if let Some(default_channel) = settings.default_channel.as_ref() {
-        metadata.insert(
-            "default_channel".to_string(),
-            display_interp(state, default_channel),
-        );
+        metadata.insert("default_channel".to_string(), default_channel.clone());
     }
 
     if !settings.enabled {

@@ -2422,11 +2422,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     let slack_service = {
         let slack_settings = &current_server_settings.server.integrations.slack;
         if slack_settings.enabled {
-            let default_channel = slack_settings
-                .default_channel
-                .as_ref()
-                .map(|value| value.resolve(process_env_var).map_err(anyhow::Error::from))
-                .transpose()?;
+            let default_channel = slack_settings.default_channel.clone();
             let vault_guard = vault.try_read().ok();
             match resolve_slack_credentials_status_with_lookup(|name| {
                 vault_guard
