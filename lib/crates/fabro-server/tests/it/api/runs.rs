@@ -1,5 +1,6 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use fabro_model::{Catalog, ProviderId};
 use fabro_types::settings::run::EnvironmentProvider;
 use tower::ServiceExt;
 
@@ -160,7 +161,13 @@ _version = 1
         created["ask_fabro"]["unavailable_reason"],
         "sandbox_not_ready"
     );
-    assert_eq!(created["ask_fabro"]["default_model"], "gpt-5.6-sol");
+    let default_openai_model = Catalog::builtin()
+        .default_for_provider(&ProviderId::openai())
+        .expect("the built-in OpenAI provider should have a default model");
+    assert_eq!(
+        created["ask_fabro"]["default_model"].as_str(),
+        Some(default_openai_model.id())
+    );
 
     let get_request = Request::builder()
         .method("GET")

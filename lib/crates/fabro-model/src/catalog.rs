@@ -2137,7 +2137,8 @@ enabled = true
         let m = Catalog::builtin()
             .default_for_provider(&ProviderId::openai())
             .unwrap();
-        assert_eq!(m.id, "gpt-5.6-sol");
+        assert_eq!(m.provider, ProviderId::openai());
+        assert!(m.default);
 
         let m = Catalog::builtin()
             .default_for_provider(&ProviderId::gemini())
@@ -2910,12 +2911,10 @@ probe = false
         ))
         .expect("sparse built-in model override should build");
 
+        let openai = ProviderId::openai();
         assert_eq!(
-            catalog
-                .probe_for_provider(&ProviderId::openai())
-                .unwrap()
-                .id,
-            "gpt-5.6-sol"
+            catalog.probe_for_provider(&openai).unwrap().id,
+            catalog.default_for_provider(&openai).unwrap().id
         );
     }
 
@@ -3319,12 +3318,10 @@ small_default = false
         ))
         .expect("sparse built-in model override should build");
 
+        let openai = ProviderId::openai();
         assert_eq!(
-            catalog
-                .small_default_for_provider(&ProviderId::openai())
-                .unwrap()
-                .id,
-            "gpt-5.6-sol"
+            catalog.small_default_for_provider(&openai).unwrap().id,
+            catalog.default_for_provider(&openai).unwrap().id
         );
     }
 
