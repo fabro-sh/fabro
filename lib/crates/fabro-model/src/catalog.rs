@@ -2137,7 +2137,7 @@ enabled = true
         let m = Catalog::builtin()
             .default_for_provider(&ProviderId::openai())
             .unwrap();
-        assert_eq!(m.id, "gpt-5.5");
+        assert_eq!(m.id, "gpt-5.6-sol");
 
         let m = Catalog::builtin()
             .default_for_provider(&ProviderId::gemini())
@@ -2915,7 +2915,7 @@ probe = false
                 .probe_for_provider(&ProviderId::openai())
                 .unwrap()
                 .id,
-            "gpt-5.5"
+            "gpt-5.6-sol"
         );
     }
 
@@ -3324,7 +3324,7 @@ small_default = false
                 .small_default_for_provider(&ProviderId::openai())
                 .unwrap()
                 .id,
-            "gpt-5.5"
+            "gpt-5.6-sol"
         );
     }
 
@@ -4447,6 +4447,9 @@ sampling_params = false
             "gpt-5.4",
             "gpt-5.4-mini",
             "gpt-5.5",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
         ] {
             assert_eq!(
                 catalog.get(model).unwrap().context_window(),

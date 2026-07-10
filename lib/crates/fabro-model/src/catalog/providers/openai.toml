@@ -8,6 +8,82 @@ priority = 90
 [providers.openai.auth]
 credentials = ["env:OPENAI_API_KEY", "vault:OPENAI_API_KEY", "vault:OPENAI_CODEX"]
 
+[models."gpt-5.6-sol"]
+provider = "openai"
+api_id = "gpt-5.6-sol"
+display_name = "GPT-5.6 Sol"
+family = "gpt-5"
+training = "2026-02-16"
+knowledge_cutoff = "February 16, 2026"
+default = true
+aliases = ["gpt56-sol", "gpt-56-sol", "gpt-5.6", "gpt56", "gpt-56"]
+
+[models."gpt-5.6-sol".limits]
+context_window = 272000
+max_output = 128000
+
+[models."gpt-5.6-sol".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[models."gpt-5.6-sol".costs]
+input_cost_per_mtok = 5.0
+output_cost_per_mtok = 30.0
+cache_input_cost_per_mtok = 0.5
+
+[models."gpt-5.6-terra"]
+provider = "openai"
+api_id = "gpt-5.6-terra"
+display_name = "GPT-5.6 Terra"
+family = "gpt-5"
+training = "2026-02-16"
+knowledge_cutoff = "February 16, 2026"
+aliases = ["gpt56-terra", "gpt-56-terra"]
+
+[models."gpt-5.6-terra".limits]
+context_window = 272000
+max_output = 128000
+
+[models."gpt-5.6-terra".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[models."gpt-5.6-terra".costs]
+input_cost_per_mtok = 2.5
+output_cost_per_mtok = 15.0
+cache_input_cost_per_mtok = 0.25
+
+[models."gpt-5.6-luna"]
+provider = "openai"
+api_id = "gpt-5.6-luna"
+display_name = "GPT-5.6 Luna"
+family = "gpt-5"
+training = "2026-02-16"
+knowledge_cutoff = "February 16, 2026"
+aliases = ["gpt56-luna", "gpt-56-luna"]
+
+[models."gpt-5.6-luna".limits]
+context_window = 272000
+max_output = 128000
+
+[models."gpt-5.6-luna".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[models."gpt-5.6-luna".costs]
+input_cost_per_mtok = 1.0
+output_cost_per_mtok = 6.0
+cache_input_cost_per_mtok = 0.1
+
 [models."gpt-5.4"]
 provider = "openai"
 api_id = "gpt-5.4"
@@ -40,7 +116,6 @@ display_name = "GPT-5.5"
 family = "gpt-5"
 training = "2025-12-01"
 knowledge_cutoff = "December 2025"
-default = true
 estimated_output_tps = 70
 aliases = ["gpt55", "gpt-55"]
 
