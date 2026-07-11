@@ -477,9 +477,10 @@ impl CredentialResolver {
 
 /// Resolve a provider's `extra_headers` interpolation sources with `ctx`.
 ///
-/// Provider header secrets resolve outside the run-boundary redactor
-/// registration path. Keep this path free of value logging until exact-match
-/// registration is threaded through.
+/// Resolved header values may contain secrets; keep this path free of value
+/// logging. Content-based redaction covers credential-shaped values on output
+/// surfaces, but no mechanism redacts these exact values, so a low-entropy
+/// header value that does not look like a credential is not caught.
 pub(crate) fn resolve_extra_headers(
     provider: &ProviderId,
     headers: &HashMap<String, String>,

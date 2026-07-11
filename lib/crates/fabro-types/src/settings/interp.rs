@@ -14,9 +14,10 @@
 //! Resolution timing is split: `vars` substitutes early (server-side, at run
 //! creation) via [`InterpString::substitute_with`], while `env`/`secrets`
 //! resolve late, at consumption time in the process that owns
-//! the value, via [`InterpString::resolve_with`]. Declared-secret values are
-//! intended to be registered into a per-run exact-value redactor where secrets
-//! resolve; sensitivity is not tracked on resolved strings.
+//! the value, via [`InterpString::resolve_with`]. Resolved secret values are
+//! plain strings; sensitivity is not tracked. Redaction of run output is
+//! content-based (entropy analysis plus credential patterns), applied where
+//! output is serialized.
 
 use std::borrow::Cow;
 use std::fmt;
