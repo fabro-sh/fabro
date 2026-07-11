@@ -56,7 +56,9 @@ export function RunTableRow({
       {show("created_by") && (
         <td className="relative z-10 w-8 whitespace-nowrap px-3 py-2.5">
           <Tooltip label={creator.label}>
-            <span aria-label={`Created by ${creator.label}`}>{creator.glyph}</span>
+            <span className="inline-flex shrink-0" aria-label={`Created by ${creator.label}`}>
+              {creator.glyph}
+            </span>
           </Tooltip>
         </td>
       )}
