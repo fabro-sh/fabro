@@ -40,8 +40,65 @@ const CHOICE_BUTTON_SELECTED =
 
 type SubmitInterviewAnswer = SubmitInterviewAnswerArg["answer"];
 
-function loadDockHeight(): string {
+export function clampDockHeight(height: string): string {
+  // Parse the height value
+  const match = height.match(/^(\d+(?:\.\d+)?)(rem|px|vh)$/);
+  if (!match) return DEFAULT_DOCK_HEIGHT;
+
+  const [, valueStr, unit] = match;
+  const value = parseFloat(valueStr);
+
+  // Handle different units
+  if (unit === "rem") {
+    const minRem = parseFloat(MIN_DOCK_HEIGHT);
+    if (value < minRem) return MIN_DOCK_HEIGHT;
+
+    // Convert 80vh to rem for comparison (assuming 16px = 1rem, 1vh = 1% of viewport)
+    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 1000;
+    const maxPx = (viewportHeight * MAX_DOCK_HEIGHT_VH) / 100;
+    const maxRem = maxPx / 16;
+    if (value > maxRem) return `${maxRem}rem`;
+
+    return height;
+  }
+
+  if (unit === "px") {
+    const minPx = parseFloat(MIN_DOCK_HEIGHT) * 16; // 12rem = 192px
+    if (value < minPx) return MIN_DOCK_HEIGHT;
+
+    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 1000;
+    const maxPx = (viewportHeight * MAX_DOCK_HEIGHT_VH) / 100;
+    if (value > maxPx) return `${maxPx}px`;
+
+    return height;
+  }
+
+  if (unit === "vh") {
+    if (value > MAX_DOCK_HEIGHT_VH) return `${MAX_DOCK_HEIGHT_VH}vh`;
+
+    // Check if vh value would be below minimum
+    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 1000;
+    const actualPx = (viewportHeight * value) / 100;
+    const minPx = parseFloat(MIN_DOCK_HEIGHT) * 16;
+    if (actualPx < minPx) return MIN_DOCK_HEIGHT;
+
+    return height;
+  }
+
   return DEFAULT_DOCK_HEIGHT;
+}
+
+export function loadDockHeight(): string {
+  if (typeof window === "undefined") return DEFAULT_DOCK_HEIGHT;
+
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) return DEFAULT_DOCK_HEIGHT;
+
+    return clampDockHeight(stored);
+  } catch {
+    return DEFAULT_DOCK_HEIGHT;
+  }
 }
 
 export interface InterviewDockProps {

@@ -12,6 +12,8 @@ import {
   MIN_DOCK_HEIGHT,
   MAX_DOCK_HEIGHT_VH,
   STORAGE_KEY,
+  loadDockHeight,
+  clampDockHeight,
 } from "./interview-dock";
 import { displayLabel } from "./interview-label";
 import { generatedAxios } from "../lib/api-client";
@@ -269,6 +271,102 @@ describe("InterviewDock", () => {
     const text = textContent(tree.toJSON());
     expect(text).toContain("Context from preceding stage");
     expect(text).toContain("1. Deploy");
+  });
+});
+
+describe("loadDockHeight", () => {
+  test("returns default height when localStorage is empty", () => {
+    const storage = new Map<string, string>();
+    globalThis.window = {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+      innerHeight: 1000,
+    } as any;
+
+    expect(loadDockHeight()).toBe(DEFAULT_DOCK_HEIGHT);
+  });
+
+  test("returns stored valid height", () => {
+    const storage = new Map<string, string>([[STORAGE_KEY, "24rem"]]);
+    globalThis.window = {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+      innerHeight: 1000,
+    } as any;
+
+    expect(loadDockHeight()).toBe("24rem");
+  });
+
+  test("returns default when stored value is invalid", () => {
+    const storage = new Map<string, string>([[STORAGE_KEY, "invalid"]]);
+    globalThis.window = {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+      innerHeight: 1000,
+    } as any;
+
+    expect(loadDockHeight()).toBe(DEFAULT_DOCK_HEIGHT);
+  });
+
+  test("clamps out-of-bounds height below minimum", () => {
+    const storage = new Map<string, string>([[STORAGE_KEY, "8rem"]]);
+    globalThis.window = {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+      innerHeight: 1000,
+    } as any;
+
+    expect(loadDockHeight()).toBe(MIN_DOCK_HEIGHT);
+  });
+
+  test("clamps out-of-bounds height above maximum vh", () => {
+    const storage = new Map<string, string>([[STORAGE_KEY, "90vh"]]);
+    globalThis.window = {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+      innerHeight: 1000,
+    } as any;
+
+    const result = loadDockHeight();
+    expect(result).toBe("80vh");
+  });
+});
+
+describe("clampDockHeight", () => {
+  test("returns valid rem value within bounds", () => {
+    expect(clampDockHeight("18rem")).toBe("18rem");
+  });
+
+  test("clamps rem value below minimum to minimum", () => {
+    expect(clampDockHeight("8rem")).toBe(MIN_DOCK_HEIGHT);
+  });
+
+  test("clamps vh value above maximum to maximum", () => {
+    expect(clampDockHeight("90vh")).toBe("80vh");
+  });
+
+  test("returns default for invalid format", () => {
+    expect(clampDockHeight("invalid")).toBe(DEFAULT_DOCK_HEIGHT);
+    expect(clampDockHeight("")).toBe(DEFAULT_DOCK_HEIGHT);
+    expect(clampDockHeight("100")).toBe(DEFAULT_DOCK_HEIGHT);
+  });
+
+  test("handles px values", () => {
+    expect(clampDockHeight("300px")).toBe("300px");
+  });
+
+  test("clamps px values below minimum", () => {
+    expect(clampDockHeight("100px")).toBe(MIN_DOCK_HEIGHT);
   });
 });
 
