@@ -167,6 +167,21 @@ export function InterviewDock({
     onDockHeightChange?.(dockHeight);
   }, [dockHeight, onDockHeightChange]);
 
+  // Re-clamp dock height on viewport resize
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+
+    const handleResize = () => {
+      const clamped = clampDockHeight(dockHeight);
+      if (clamped !== dockHeight) {
+        setDockHeight(clamped);
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [dockHeight]);
+
   const safeIndex = activeIndex < questions.length ? activeIndex : 0;
   const question = questions[safeIndex];
 
