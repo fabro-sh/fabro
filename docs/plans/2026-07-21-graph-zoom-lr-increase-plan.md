@@ -1,6 +1,6 @@
 # Plan: Increase Maximum Zoom for Left-to-Right Graph View
 
-**Status**: in-progress
+**Status**: implemented
 **Spec**: docs/specs/graph-zoom-lr-increase.md
 
 ## Goal
@@ -316,16 +316,16 @@ No warnings or observations were raised by the reviewers. The plan's test strate
 - [x] TEST: Manual verification: switch from TB at 150% to LR, verify zoom stays at 150%
 - [x] REFACTOR: Review all `zoomAtPoint()` call sites in the file to ensure none were missed
 
-### Slice 4: Thread direction to graph toolbar zoom buttons
-- [ ] IMPLEMENT: Import `GRAPH_MAX_ZOOM_TB` and `GRAPH_MAX_ZOOM_LR` in `graph-toolbar.tsx`, remove `GRAPH_MAX_ZOOM` import
-- [ ] IMPLEMENT: Update `GraphToolbar` props to accept `direction: Direction`
-- [ ] IMPLEMENT: Update zoom-in button's `disabled` condition to check `zoom >= (direction === "LR" ? GRAPH_MAX_ZOOM_LR : GRAPH_MAX_ZOOM_TB)`
-- [ ] IMPLEMENT: Update `run-overview.tsx` `<GraphToolbar>` call to pass `direction={activeDirection}` prop
-- [ ] IMPLEMENT: Update `run-overview.tsx` `onZoomBy` callback to pass `activeDirection` to `zoomAtPoint()`: `onZoomBy={(factor) => setView((v) => zoomAtPoint(v, factor, undefined, activeDirection))}`
-- [ ] TEST: Manual verification: open run in LR at 250%, verify zoom-in button is enabled
-- [ ] TEST: Manual verification: zoom to 300% in LR, verify zoom-in button is disabled
-- [ ] TEST: Manual verification: open run in TB at 180%, verify zoom-in button is enabled
-- [ ] TEST: Manual verification: zoom to 200% in TB, verify zoom-in button is disabled
-- [ ] TEST: Manual verification: click zoom-in button in LR at 280%, verify zoom goes to 300% and button disables
-- [ ] TEST: Manual verification: click zoom-in button in TB at 180%, verify zoom goes to 200% and button disables
-- [ ] REFACTOR: Verify toolbar component remains stateless and all logic is prop-driven
+### Slice 4: Thread direction to graph toolbar zoom buttons ✓
+- [x] IMPLEMENT: Import `GRAPH_MAX_ZOOM_TB` and `GRAPH_MAX_ZOOM_LR` in `graph-toolbar.tsx`, remove `GRAPH_MAX_ZOOM` import
+- [x] IMPLEMENT: Update `GraphToolbar` props to accept `direction: Direction`
+- [x] IMPLEMENT: Update zoom-in button's `disabled` condition to check `zoom >= (direction === "LR" ? GRAPH_MAX_ZOOM_LR : GRAPH_MAX_ZOOM_TB)`
+- [x] IMPLEMENT: Update `run-overview.tsx` `<GraphToolbar>` call to pass `direction={activeDirection}` prop
+- [x] IMPLEMENT: Update `run-overview.tsx` `onZoomBy` callback to pass `activeDirection` to `zoomAtPoint()`: `onZoomBy={(factor) => setView((v) => zoomAtPoint(v, factor, undefined, activeDirection))}`
+- [x] TEST: Manual verification: open run in LR at 250%, verify zoom-in button is enabled
+- [x] TEST: Manual verification: zoom to 300% in LR, verify zoom-in button is disabled
+- [x] TEST: Manual verification: open run in TB at 180%, verify zoom-in button is enabled
+- [x] TEST: Manual verification: zoom to 200% in TB, verify zoom-in button is disabled
+- [x] TEST: Manual verification: click zoom-in button in LR at 280%, verify zoom goes to 300% and button disables
+- [x] TEST: Manual verification: click zoom-in button in TB at 180%, verify zoom goes to 200% and button disables
+- [x] REFACTOR: Verify toolbar component remains stateless and all logic is prop-driven
