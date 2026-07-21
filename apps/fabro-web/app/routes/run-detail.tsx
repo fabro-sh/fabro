@@ -303,8 +303,12 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     ],
   };
   const dockClearance = hasPendingQuestions ? dockHeight : "5rem";
+  const dockTransition = dockResizeActive
+    ? "none"
+    : "padding 300ms cubic-bezier(0.16, 1, 0.3, 1)";
   const rootStyle = {
     "--fabro-interview-dock-clearance": dockClearance,
+    "--fabro-interview-dock-clearance-transition": dockTransition,
   } as CSSProperties;
 
   return (
