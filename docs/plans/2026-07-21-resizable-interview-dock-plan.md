@@ -404,12 +404,12 @@ No warnings or low-priority observations were raised. The plan is ready for impl
   - [x] Step 7: Add `onResizeActiveChange` callback prop
 
 ### Wave 3
-- [ ] Slice 3: Dynamic CSS Variable and Transition Suppression
-  - [ ] Step 1: Update `RunDetailDockedControls` to accept and pass props
-  - [ ] Step 2: Replace hardcoded `dockClearance` with dynamic value
-  - [ ] Step 3: Add `--fabro-interview-dock-clearance-transition` CSS variable
-  - [ ] Step 4: Update scrollable content panes to use transition variable
-  - [ ] Step 5: Add `useEffect` for viewport resize listener
+- [x] Slice 3: Dynamic CSS Variable and Transition Suppression
+  - [x] Step 1: Update `RunDetailDockedControls` to accept and pass props
+  - [x] Step 2: Replace hardcoded `dockClearance` with dynamic value
+  - [x] Step 3: Add `--fabro-interview-dock-clearance-transition` CSS variable
+  - [x] Step 4: Update scrollable content panes to use transition variable
+  - [x] Step 5: Add `useEffect` for viewport resize listener
 
 ### Wave 4
 - [ ] Slice 4: Scroll Behavior Verification and Edge Case Handling
