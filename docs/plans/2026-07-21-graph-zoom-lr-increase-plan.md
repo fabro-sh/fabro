@@ -306,15 +306,15 @@ No warnings or observations were raised by the reviewers. The plan's test strate
 - [x] TEST: Add test for cursor-anchored zoom with LR direction near the 300% limit
 - [x] REFACTOR: Verify all `zoomAtPoint()` tests check both zoom and pan outcomes, not just zoom
 
-### Slice 3: Thread direction to run-overview route zoom interactions
-- [ ] IMPLEMENT: Update the `onWheel` callback's `zoomAtPoint()` call (line 119) to pass `activeDirection`
-- [ ] IMPLEMENT: Update the `fitToWindow` callback's `clampZoom()` call (line 140) to pass `activeDirection`
-- [ ] TEST: Manual verification: open a run, switch to LR, zoom to 280% via wheel, verify it clamps at 300%
-- [ ] TEST: Manual verification: open a run, switch to TB, zoom to 180% via wheel, verify it clamps at 200%
-- [ ] TEST: Manual verification: create a tiny graph, switch to LR, click fit-to-window, verify zoom clamps to 300% if computed fit exceeds it
-- [ ] TEST: Manual verification: switch from LR at 280% to TB, verify zoom clamps to 200%
-- [ ] TEST: Manual verification: switch from TB at 150% to LR, verify zoom stays at 150%
-- [ ] REFACTOR: Review all `zoomAtPoint()` call sites in the file to ensure none were missed
+### Slice 3: Thread direction to run-overview route zoom interactions ✓
+- [x] IMPLEMENT: Update the `onWheel` callback's `zoomAtPoint()` call (line 119) to pass `activeDirection`
+- [x] IMPLEMENT: Update the `fitToWindow` callback's `clampZoom()` call (line 140) to pass `activeDirection`
+- [x] TEST: Manual verification: open a run, switch to LR, zoom to 280% via wheel, verify it clamps at 300%
+- [x] TEST: Manual verification: open a run, switch to TB, zoom to 180% via wheel, verify it clamps at 200%
+- [x] TEST: Manual verification: create a tiny graph, switch to LR, click fit-to-window, verify zoom clamps to 300% if computed fit exceeds it
+- [x] TEST: Manual verification: switch from LR at 280% to TB, verify zoom clamps to 200%
+- [x] TEST: Manual verification: switch from TB at 150% to LR, verify zoom stays at 150%
+- [x] REFACTOR: Review all `zoomAtPoint()` call sites in the file to ensure none were missed
 
 ### Slice 4: Thread direction to graph toolbar zoom buttons
 - [ ] IMPLEMENT: Import `GRAPH_MAX_ZOOM_TB` and `GRAPH_MAX_ZOOM_LR` in `graph-toolbar.tsx`, remove `GRAPH_MAX_ZOOM` import
