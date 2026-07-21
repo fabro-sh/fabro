@@ -273,6 +273,30 @@ describe("InterviewDock", () => {
     expect(tree.toJSON()).toBeNull();
   });
 
+  test("invokes onDockHeightChange callback with initial height on mount", () => {
+    const storage = new Map<string, string>();
+    globalThis.window = {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+      innerHeight: 1000,
+    } as any;
+
+    const heights: string[] = [];
+    const onDockHeightChange = (height: string) => heights.push(height);
+
+    render(
+      <InterviewDock
+        runId="run-1"
+        questions={[makeQuestion()]}
+        onDockHeightChange={onDockHeightChange}
+      />,
+    );
+
+    expect(heights).toEqual([DEFAULT_DOCK_HEIGHT]);
+  });
+
   test("renders the optional context_display section", () => {
     const question = makeQuestion({
       context_display: "Plan:\n1. Deploy\n2. Verify",

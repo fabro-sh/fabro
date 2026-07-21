@@ -100,6 +100,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const { mutate } = useSWRConfig();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
+  const [dockHeight, setDockHeight] = useState("18rem");
   const { push, dismiss } = useToast();
   const lifecycleToastStateRef = useRef(createLifecycleToastState());
   const filesCount = runQuery.data?.diff?.files_changed ?? null;
@@ -366,6 +367,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
             sidebarWidth={sidebarWidth}
             isResizing={isResizing}
             steerBarRef={steerBarRef}
+            onDockHeightChange={setDockHeight}
           />
         </div>
       )}

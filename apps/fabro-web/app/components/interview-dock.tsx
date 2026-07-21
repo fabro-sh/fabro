@@ -116,12 +116,19 @@ export function saveDockHeight(height: string): void {
 export interface InterviewDockProps {
   runId: string;
   questions: ApiQuestion[];
+  onDockHeightChange?: (height: string) => void;
 }
 
-export function InterviewDock({ runId, questions }: InterviewDockProps) {
+export function InterviewDock({ runId, questions, onDockHeightChange }: InterviewDockProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [dockHeight, setDockHeight] = useState(loadDockHeight);
   const isFirstMount = useRef(true);
+
+  // Notify parent of initial height on mount
+  useEffect(() => {
+    onDockHeightChange?.(dockHeight);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Persist dock height to localStorage (skip initial mount to avoid writing default)
   useEffect(() => {
@@ -130,7 +137,8 @@ export function InterviewDock({ runId, questions }: InterviewDockProps) {
       return;
     }
     saveDockHeight(dockHeight);
-  }, [dockHeight]);
+    onDockHeightChange?.(dockHeight);
+  }, [dockHeight, onDockHeightChange]);
 
   const safeIndex = activeIndex < questions.length ? activeIndex : 0;
   const question = questions[safeIndex];
