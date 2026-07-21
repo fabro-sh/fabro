@@ -101,6 +101,16 @@ export function loadDockHeight(): string {
   }
 }
 
+export function saveDockHeight(height: string): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY, height);
+  } catch {
+    // Ignore localStorage quota errors - dock height is non-critical state
+  }
+}
+
 export interface InterviewDockProps {
   runId: string;
   questions: ApiQuestion[];

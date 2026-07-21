@@ -14,6 +14,7 @@ import {
   STORAGE_KEY,
   loadDockHeight,
   clampDockHeight,
+  saveDockHeight,
 } from "./interview-dock";
 import { displayLabel } from "./interview-label";
 import { generatedAxios } from "../lib/api-client";
@@ -339,6 +340,34 @@ describe("loadDockHeight", () => {
 
     const result = loadDockHeight();
     expect(result).toBe("80vh");
+  });
+});
+
+describe("saveDockHeight", () => {
+  test("writes height to localStorage under correct key", () => {
+    const storage = new Map<string, string>();
+    globalThis.window = {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+      innerHeight: 1000,
+    } as any;
+
+    saveDockHeight("24rem");
+    expect(storage.get(STORAGE_KEY)).toBe("24rem");
+  });
+
+  test("does not throw when localStorage is unavailable", () => {
+    globalThis.window = {
+      localStorage: {
+        getItem: () => { throw new Error("Quota exceeded"); },
+        setItem: () => { throw new Error("Quota exceeded"); },
+      },
+      innerHeight: 1000,
+    } as any;
+
+    expect(() => saveDockHeight("24rem")).not.toThrow();
   });
 });
 
