@@ -10,6 +10,7 @@ import {
   ArrowPathIcon,
   ArrowRightIcon,
   ArrowUturnLeftIcon,
+  Bars2Icon,
   CheckIcon,
 } from "@heroicons/react/20/solid";
 import { QuestionType } from "@qltysh/fabro-api-client";
@@ -239,8 +240,8 @@ function InterviewQuestionDock({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging || !dragOrigin.current) return;
     const origin = dragOrigin.current;
-    if (!origin) return;
     // For a bottom-docked panel with top resize handle: dragging upward
     // (clientY decreasing) increases height
     const delta = origin.y - event.clientY;
@@ -283,11 +284,15 @@ function InterviewQuestionDock({
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className="group relative h-2 cursor-ns-resize touch-none"
+        className="group relative h-2 cursor-ns-resize touch-none flex items-center justify-center"
       >
         <span
           aria-hidden
           className="absolute inset-x-0 top-0 h-0.5 transition-colors bg-transparent group-hover:bg-teal-500/60"
+        />
+        <Bars2Icon
+          className="size-4 text-fg-muted/40 transition-colors group-hover:text-teal-500/80"
+          aria-hidden="true"
         />
       </div>
       <DockHeader
