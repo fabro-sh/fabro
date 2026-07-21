@@ -286,16 +286,16 @@ No warnings or observations were raised by the reviewers. The plan's test strate
 
 ## Build Progress
 
-### Slice 1: Direction-aware zoom constants and clampZoom function
-- [ ] IMPLEMENT: Export `GRAPH_MAX_ZOOM_TB = 200` and `GRAPH_MAX_ZOOM_LR = 300` constants in `graph-viewport.ts`, replacing `GRAPH_MAX_ZOOM`
-- [ ] TEST: Add unit tests verifying both constants have the expected values (200 and 300)
-- [ ] REFACTOR: Ensure export names are clear and aligned with spec naming convention
-- [ ] IMPLEMENT: Update `clampZoom(zoom: number, direction?: "LR" | "TB"): number` to select max based on direction, defaulting to TB
-- [ ] TEST: Add unit tests for `clampZoom()` with TB direction (max 200)
-- [ ] TEST: Add unit tests for `clampZoom()` with LR direction (max 300)
-- [ ] TEST: Add unit test for `clampZoom()` without direction parameter (backward compat, defaults to 200)
-- [ ] TEST: Add unit test verifying minimum zoom (25%) applies to both directions
-- [ ] REFACTOR: Review test coverage for edge cases (exactly at limits, just under, just over)
+### Slice 1: Direction-aware zoom constants and clampZoom function ✓
+- [x] IMPLEMENT: Export `GRAPH_MAX_ZOOM_TB = 200` and `GRAPH_MAX_ZOOM_LR = 300` constants in `graph-viewport.ts`, replacing `GRAPH_MAX_ZOOM`
+- [x] TEST: Add unit tests verifying both constants have the expected values (200 and 300)
+- [x] REFACTOR: Ensure export names are clear and aligned with spec naming convention
+- [x] IMPLEMENT: Update `clampZoom(zoom: number, direction?: "LR" | "TB"): number` to select max based on direction, defaulting to TB
+- [x] TEST: Add unit tests for `clampZoom()` with TB direction (max 200)
+- [x] TEST: Add unit tests for `clampZoom()` with LR direction (max 300)
+- [x] TEST: Add unit test for `clampZoom()` without direction parameter (backward compat, defaults to 200)
+- [x] TEST: Add unit test verifying minimum zoom (25%) applies to both directions
+- [x] REFACTOR: Review test coverage for edge cases (exactly at limits, just under, just over)
 
 ### Slice 2: Direction-aware zoomAtPoint function
 - [ ] IMPLEMENT: Update `zoomAtPoint()` signature to accept optional `direction?: "LR" | "TB"` parameter
