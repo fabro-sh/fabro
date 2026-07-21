@@ -1,6 +1,6 @@
 # Plan: Resizable Interview Dock with Background Scroll
 
-**Status**: approved
+**Status**: in-progress
 **Spec**: docs/superpowers/specs/2026-07-21-resizable-interview-dock.md
 
 ## Goal
@@ -381,3 +381,41 @@ No changes were required. The plan already addressed all potential concerns:
 ### Warnings and Observations
 
 No warnings or low-priority observations were raised. The plan is ready for implementation.
+
+## Build Progress
+
+### Wave 1
+- [ ] Slice 1: localStorage Height Persistence Infrastructure
+  - [ ] Step 1: Add constants `DEFAULT_DOCK_HEIGHT`, `MIN_DOCK_HEIGHT`, `MAX_DOCK_HEIGHT_VH`, `STORAGE_KEY`
+  - [ ] Step 2: Add `useState` hook for dock height
+  - [ ] Step 3: Create `loadDockHeight()` helper
+  - [ ] Step 4: Create `saveDockHeight(height: string)` helper
+  - [ ] Step 5: Add `useEffect` that persists height to localStorage
+  - [ ] Step 6: Pass height state up to `RunDetail` via `onDockHeightChange` callback
+
+### Wave 2
+- [ ] Slice 2: Resize Handle and Drag Interaction
+  - [ ] Step 1: Add horizontal resize handle `<div>` with ARIA attributes
+  - [ ] Step 2: Style the handle with hover state
+  - [ ] Step 3: Add `useState` for `isDragging` and `useRef` for `dragOrigin`
+  - [ ] Step 4: Add `onPointerDown` handler
+  - [ ] Step 5: Add `onPointerMove` handler
+  - [ ] Step 6: Add `onPointerUp` and `onPointerCancel` handlers
+  - [ ] Step 7: Add `onResizeActiveChange` callback prop
+
+### Wave 3
+- [ ] Slice 3: Dynamic CSS Variable and Transition Suppression
+  - [ ] Step 1: Update `RunDetailDockedControls` to accept and pass props
+  - [ ] Step 2: Replace hardcoded `dockClearance` with dynamic value
+  - [ ] Step 3: Add `--fabro-interview-dock-clearance-transition` CSS variable
+  - [ ] Step 4: Update scrollable content panes to use transition variable
+  - [ ] Step 5: Add `useEffect` for viewport resize listener
+
+### Wave 4
+- [ ] Slice 4: Scroll Behavior Verification and Edge Case Handling
+  - [ ] Step 1: Integration test for Overview tab scroll behavior
+  - [ ] Step 2: Integration test for Stages sidebar scroll behavior
+  - [ ] Step 3: Integration test for Files Changed list scroll behavior
+  - [ ] Step 4: Integration test for Events tab scroll behavior
+  - [ ] Step 5: Edge case test for viewport resize
+  - [ ] Step 6: Edge case test for run switching
