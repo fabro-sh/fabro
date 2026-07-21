@@ -308,6 +308,17 @@ describe("InterviewDock", () => {
     expect(text).toContain("Context from preceding stage");
     expect(text).toContain("1. Deploy");
   });
+
+  test("renders resize handle with correct ARIA attributes", () => {
+    const tree = render(
+      <InterviewDock runId="run-1" questions={[makeQuestion()]} />,
+    );
+    const handles = tree.root.findAllByProps({ role: "separator" });
+    expect(handles).toHaveLength(1);
+    const handle = handles[0];
+    expect(handle.props["aria-orientation"]).toBe("horizontal");
+    expect(handle.props["aria-label"]).toBe("Resize interview dock");
+  });
 });
 
 describe("loadDockHeight", () => {

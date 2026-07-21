@@ -189,6 +189,11 @@ function InterviewQuestionDock({
 
   return (
     <section aria-label="Interview question">
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize interview dock"
+      />
       <DockHeader
         stage={question.stage}
         moreCount={moreCount}
