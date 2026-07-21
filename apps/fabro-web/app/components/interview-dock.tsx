@@ -193,7 +193,13 @@ function InterviewQuestionDock({
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize interview dock"
-      />
+        className="group relative h-2 cursor-ns-resize touch-none"
+      >
+        <span
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-0.5 transition-colors bg-transparent group-hover:bg-teal-500/60"
+        />
+      </div>
       <DockHeader
         stage={question.stage}
         moreCount={moreCount}

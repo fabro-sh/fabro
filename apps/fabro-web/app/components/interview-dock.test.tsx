@@ -319,6 +319,21 @@ describe("InterviewDock", () => {
     expect(handle.props["aria-orientation"]).toBe("horizontal");
     expect(handle.props["aria-label"]).toBe("Resize interview dock");
   });
+
+  test("resize handle has hover state styling", () => {
+    const tree = render(
+      <InterviewDock runId="run-1" questions={[makeQuestion()]} />,
+    );
+    const handles = tree.root.findAllByProps({ role: "separator" });
+    expect(handles).toHaveLength(1);
+    const handle = handles[0];
+    expect(handle.props.className).toContain("cursor-ns-resize");
+    expect(handle.props.className).toContain("group");
+    // Verify the visual indicator span exists
+    const spans = handle.findAllByType("span");
+    expect(spans).toHaveLength(1);
+    expect(spans[0].props.className).toContain("group-hover:bg-teal-500/60");
+  });
 });
 
 describe("loadDockHeight", () => {
