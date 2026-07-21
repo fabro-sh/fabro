@@ -297,14 +297,14 @@ No warnings or observations were raised by the reviewers. The plan's test strate
 - [x] TEST: Add unit test verifying minimum zoom (25%) applies to both directions
 - [x] REFACTOR: Review test coverage for edge cases (exactly at limits, just under, just over)
 
-### Slice 2: Direction-aware zoomAtPoint function
-- [ ] IMPLEMENT: Update `zoomAtPoint()` signature to accept optional `direction?: "LR" | "TB"` parameter
-- [ ] IMPLEMENT: Pass `direction` to the `clampZoom()` call inside `zoomAtPoint()`
-- [ ] TEST: Update existing test "clamps zoom and applies the clamped ratio to pan" to verify TB behavior (max 200)
-- [ ] TEST: Add test for LR clamping in `zoomAtPoint()` (max 300, verify pan adjustment with k = 300/initial)
-- [ ] TEST: Add test for `zoomAtPoint()` without direction parameter (backward compat, max 200)
-- [ ] TEST: Add test for cursor-anchored zoom with LR direction near the 300% limit
-- [ ] REFACTOR: Verify all `zoomAtPoint()` tests check both zoom and pan outcomes, not just zoom
+### Slice 2: Direction-aware zoomAtPoint function ✓
+- [x] IMPLEMENT: Update `zoomAtPoint()` signature to accept optional `direction?: "LR" | "TB"` parameter
+- [x] IMPLEMENT: Pass `direction` to the `clampZoom()` call inside `zoomAtPoint()`
+- [x] TEST: Update existing test "clamps zoom and applies the clamped ratio to pan" to verify TB behavior (max 200)
+- [x] TEST: Add test for LR clamping in `zoomAtPoint()` (max 300, verify pan adjustment with k = 300/initial)
+- [x] TEST: Add test for `zoomAtPoint()` without direction parameter (backward compat, max 200)
+- [x] TEST: Add test for cursor-anchored zoom with LR direction near the 300% limit
+- [x] REFACTOR: Verify all `zoomAtPoint()` tests check both zoom and pan outcomes, not just zoom
 
 ### Slice 3: Thread direction to run-overview route zoom interactions
 - [ ] IMPLEMENT: Update the `onWheel` callback's `zoomAtPoint()` call (line 119) to pass `activeDirection`
