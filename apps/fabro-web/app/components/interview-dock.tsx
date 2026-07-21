@@ -117,9 +117,15 @@ export interface InterviewDockProps {
   runId: string;
   questions: ApiQuestion[];
   onDockHeightChange?: (height: string) => void;
+  onResizeActiveChange?: (active: boolean) => void;
 }
 
-export function InterviewDock({ runId, questions, onDockHeightChange }: InterviewDockProps) {
+export function InterviewDock({
+  runId,
+  questions,
+  onDockHeightChange,
+  onResizeActiveChange,
+}: InterviewDockProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [dockHeight, setDockHeight] = useState(loadDockHeight);
   const isFirstMount = useRef(true);
@@ -156,6 +162,7 @@ export function InterviewDock({ runId, questions, onDockHeightChange }: Intervie
       onCycle={() =>
         setActiveIndex((index) => (index + 1) % questions.length)
       }
+      onResizeActiveChange={onResizeActiveChange}
     />
   );
 }
@@ -165,17 +172,32 @@ function InterviewQuestionDock({
   question,
   moreCount,
   onCycle,
+  onResizeActiveChange,
 }: {
   runId: string;
   question: ApiQuestion;
   moreCount: number;
   onCycle: () => void;
+  onResizeActiveChange?: (active: boolean) => void;
 }) {
   const submitMutation = useSubmitInterviewAnswer(runId);
   const [error, setError] = useState<string | null>(null);
   const submitting = submitMutation.isMutating;
   const [isDragging, setIsDragging] = useState(false);
   const dragOrigin = useRef<{ y: number; height: number } | null>(null);
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    // For a bottom-docked panel with top resize handle, we need to track the
+    // current height. Since we don't have the dockHeight state in this component
+    // yet, we'll use a placeholder of 288px (18rem * 16px/rem).
+    // This will be wired properly when we thread the height state through.
+    const currentHeight = 288; // 18rem default
+    dragOrigin.current = { y: event.clientY, height: currentHeight };
+    setIsDragging(true);
+    onResizeActiveChange?.(true);
+  };
 
   const submit = useCallback(
     async (answer: SubmitInterviewAnswer) => {
@@ -195,6 +217,7 @@ function InterviewQuestionDock({
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize interview dock"
+        onPointerDown={handlePointerDown}
         className="group relative h-2 cursor-ns-resize touch-none"
       >
         <span

@@ -346,6 +346,37 @@ describe("InterviewDock", () => {
     const section = tree.root.findByProps({ "aria-label": "Interview question" });
     expect(section).toBeDefined();
   });
+
+  test("onPointerDown captures pointer and invokes resize active callback", () => {
+    const resizeActiveCalls: boolean[] = [];
+    const tree = render(
+      <InterviewDock
+        runId="run-1"
+        questions={[makeQuestion()]}
+        onResizeActiveChange={(active) => resizeActiveCalls.push(active)}
+      />,
+    );
+    const handle = tree.root.findByProps({ role: "separator" });
+
+    let preventDefaultCalled = false;
+    let capturedPointerId: number | null = null;
+    const mockEvent = {
+      preventDefault: () => { preventDefaultCalled = true; },
+      pointerId: 123,
+      clientY: 500,
+      currentTarget: {
+        setPointerCapture: (id: number) => { capturedPointerId = id; },
+      },
+    };
+
+    act(() => {
+      handle.props.onPointerDown(mockEvent);
+    });
+
+    expect(preventDefaultCalled).toBe(true);
+    expect(capturedPointerId).toBe(123);
+    expect(resizeActiveCalls).toEqual([true]);
+  });
 });
 
 describe("loadDockHeight", () => {
