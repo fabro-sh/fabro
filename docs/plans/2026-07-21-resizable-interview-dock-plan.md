@@ -412,10 +412,10 @@ No warnings or low-priority observations were raised. The plan is ready for impl
   - [x] Step 5: Add `useEffect` for viewport resize listener
 
 ### Wave 4
-- [ ] Slice 4: Scroll Behavior Verification and Edge Case Handling
-  - [ ] Step 1: Integration test for Overview tab scroll behavior
-  - [ ] Step 2: Integration test for Stages sidebar scroll behavior
-  - [ ] Step 3: Integration test for Files Changed list scroll behavior
-  - [ ] Step 4: Integration test for Events tab scroll behavior
-  - [ ] Step 5: Edge case test for viewport resize
-  - [ ] Step 6: Edge case test for run switching
+- [x] Slice 4: Scroll Behavior Verification and Edge Case Handling
+  - [x] Step 1: Integration test for Overview tab scroll behavior
+  - [x] Step 2: Integration test for Stages sidebar scroll behavior
+  - [x] Step 3: Integration test for Files Changed list scroll behavior
+  - [x] Step 4: Integration test for Events tab scroll behavior
+  - [x] Step 5: Edge case test for viewport resize
+  - [x] Step 6: Edge case test for run switching
