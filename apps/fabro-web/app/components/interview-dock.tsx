@@ -40,6 +40,10 @@ const CHOICE_BUTTON_SELECTED =
 
 type SubmitInterviewAnswer = SubmitInterviewAnswerArg["answer"];
 
+function loadDockHeight(): string {
+  return DEFAULT_DOCK_HEIGHT;
+}
+
 export interface InterviewDockProps {
   runId: string;
   questions: ApiQuestion[];
@@ -47,6 +51,7 @@ export interface InterviewDockProps {
 
 export function InterviewDock({ runId, questions }: InterviewDockProps) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [dockHeight, setDockHeight] = useState(loadDockHeight);
 
   const safeIndex = activeIndex < questions.length ? activeIndex : 0;
   const question = questions[safeIndex];
