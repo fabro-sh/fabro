@@ -1,6 +1,6 @@
 # Plan: Resizable Interview Dock with Background Scroll
 
-**Status**: in-progress
+**Status**: implemented
 **Spec**: docs/superpowers/specs/2026-07-21-resizable-interview-dock.md
 
 ## Goal
