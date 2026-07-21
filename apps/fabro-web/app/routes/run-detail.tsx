@@ -302,7 +302,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         : []),
     ],
   };
-  const dockClearance = hasPendingQuestions ? "18rem" : "5rem";
+  const dockClearance = hasPendingQuestions ? dockHeight : "5rem";
   const rootStyle = {
     "--fabro-interview-dock-clearance": dockClearance,
   } as CSSProperties;
