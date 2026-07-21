@@ -6,7 +6,13 @@ import {
   QuestionType,
 } from "@qltysh/fabro-api-client";
 
-import { InterviewDock } from "./interview-dock";
+import {
+  InterviewDock,
+  DEFAULT_DOCK_HEIGHT,
+  MIN_DOCK_HEIGHT,
+  MAX_DOCK_HEIGHT_VH,
+  STORAGE_KEY,
+} from "./interview-dock";
 import { displayLabel } from "./interview-label";
 import { generatedAxios } from "../lib/api-client";
 
@@ -62,6 +68,24 @@ function makeQuestion(overrides: Partial<ApiQuestion> = {}): ApiQuestion {
     ...overrides,
   };
 }
+
+describe("InterviewDock constants", () => {
+  test("DEFAULT_DOCK_HEIGHT is 18rem", () => {
+    expect(DEFAULT_DOCK_HEIGHT).toBe("18rem");
+  });
+
+  test("MIN_DOCK_HEIGHT is 12rem", () => {
+    expect(MIN_DOCK_HEIGHT).toBe("12rem");
+  });
+
+  test("MAX_DOCK_HEIGHT_VH is 80", () => {
+    expect(MAX_DOCK_HEIGHT_VH).toBe(80);
+  });
+
+  test("STORAGE_KEY is fabro.interviewDock.height", () => {
+    expect(STORAGE_KEY).toBe("fabro.interviewDock.height");
+  });
+});
 
 describe("InterviewDock", () => {
   test("renders question text and stage in the header", () => {

@@ -24,6 +24,11 @@ import { ApiError } from "../lib/api-client";
 import { displayLabel } from "./interview-label";
 import { ErrorMessage } from "./ui";
 
+export const DEFAULT_DOCK_HEIGHT = "18rem";
+export const MIN_DOCK_HEIGHT = "12rem";
+export const MAX_DOCK_HEIGHT_VH = 80;
+export const STORAGE_KEY = "fabro.interviewDock.height";
+
 const PRIMARY_BUTTON =
   "inline-flex items-center justify-center gap-1.5 rounded-lg bg-teal-500 px-3.5 py-2 text-sm font-medium text-on-primary transition-colors hover:bg-teal-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-teal-500";
 
