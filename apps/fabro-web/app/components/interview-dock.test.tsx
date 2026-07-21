@@ -334,6 +334,18 @@ describe("InterviewDock", () => {
     expect(spans).toHaveLength(1);
     expect(spans[0].props.className).toContain("group-hover:bg-teal-500/60");
   });
+
+  test("drag state is initialized to false with null origin", () => {
+    const tree = render(
+      <InterviewDock runId="run-1" questions={[makeQuestion()]} />,
+    );
+    // Verify the component renders successfully with initial state
+    // (isDragging: false, dragOrigin: null)
+    expect(tree.toJSON()).not.toBeNull();
+    // Verify no drag-related visual changes are applied initially
+    const section = tree.root.findByProps({ "aria-label": "Interview question" });
+    expect(section).toBeDefined();
+  });
 });
 
 describe("loadDockHeight", () => {

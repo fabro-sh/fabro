@@ -174,6 +174,8 @@ function InterviewQuestionDock({
   const submitMutation = useSubmitInterviewAnswer(runId);
   const [error, setError] = useState<string | null>(null);
   const submitting = submitMutation.isMutating;
+  const [isDragging, setIsDragging] = useState(false);
+  const dragOrigin = useRef<{ y: number; height: number } | null>(null);
 
   const submit = useCallback(
     async (answer: SubmitInterviewAnswer) => {
