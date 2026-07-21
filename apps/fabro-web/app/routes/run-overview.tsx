@@ -67,27 +67,12 @@ export default function RunOverview() {
   const innerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const navigate = useNavigate();
-  const [view, setView] = useRememberedGraphView(id);
+  const [viewTB, setViewTB] = useRememberedGraphView(id ? `${id}-TB` : undefined);
+  const [viewLR, setViewLR] = useRememberedGraphView(id ? `${id}-LR` : undefined);
+  const view = activeDirection === "LR" ? viewLR : viewTB;
+  const setView = activeDirection === "LR" ? setViewLR : setViewTB;
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const [hoveredNode, setHoveredNode] = useState<RunGraphNodeHover | null>(null);
-  // Separate zoom levels for TB and LR modes, persisted per direction
-  const zoomByDirection = useRef<{ TB: number; LR: number }>({ TB: view.zoom, LR: view.zoom });
-  const prevDirection = useRef<Direction>(activeDirection);
-
-  // Persist and restore zoom when switching direction
-  useEffect(() => {
-    if (prevDirection.current !== activeDirection) {
-      setView((v) => {
-        // Save current zoom for the previous direction before switching
-        zoomByDirection.current[prevDirection.current] = v.zoom;
-        // Get the zoom for the new direction, or use current if not set yet
-        const newZoom = zoomByDirection.current[activeDirection] ?? v.zoom;
-        // Update the previous direction tracker
-        prevDirection.current = activeDirection;
-        return { ...v, zoom: newZoom };
-      });
-    }
-  }, [activeDirection, setView]);
 
   const openStage = useCallback(
     (stageId: string) => navigate(`/runs/${id}/stages/${stageId}`),
@@ -119,7 +104,7 @@ export default function RunOverview() {
         y: drag.startPanY + e.clientY - drag.startY,
       },
     }));
-  }, []);
+  }, [setView]);
 
   const onPointerUp = useCallback(() => {
     dragState.current = null;
@@ -138,7 +123,7 @@ export default function RunOverview() {
     } else {
       setView((v) => ({ ...v, pan: { x: v.pan.x - e.deltaX, y: v.pan.y - e.deltaY } }));
     }
-  }, [activeDirection]);
+  }, [activeDirection, setView]);
   // The container only exists once the graph has loaded, so gate the listener on
   // graphSvg. The effect then re-runs and binds once the container is on the page.
   useElementEvent(containerRef, "wheel", onWheel, WHEEL_LISTENER_OPTS, Boolean(graphSvg));
@@ -156,7 +141,7 @@ export default function RunOverview() {
 
     const fitPct = Math.min(containerW / svgW, containerH / svgH) * 100;
     setView({ zoom: clampZoom(fitPct, activeDirection), pan: { x: 0, y: 0 } });
-  }, [activeDirection]);
+  }, [activeDirection, setView]);
 
   return (
     <div className="flex min-h-0 flex-1 gap-6">
