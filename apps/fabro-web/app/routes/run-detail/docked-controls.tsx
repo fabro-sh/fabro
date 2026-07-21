@@ -131,6 +131,7 @@ export function RunDetailDockedControls({
   hasPendingQuestions,
   pendingQuestions,
   sidebarWidth,
+  dockHeight,
   isResizing,
   steerBarRef,
   onDockHeightChange,
@@ -141,6 +142,7 @@ export function RunDetailDockedControls({
   hasPendingQuestions: boolean;
   pendingQuestions: ApiQuestion[];
   sidebarWidth: number;
+  dockHeight?: string;
   isResizing: boolean;
   steerBarRef: RefObject<SteerBarHandle | null>;
   onDockHeightChange?: (height: string) => void;
@@ -155,7 +157,7 @@ export function RunDetailDockedControls({
           ? ""
           : "transition-[right] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
       }`}
-      style={{ right: sidebarWidth }}
+      style={{ right: sidebarWidth, height: dockHeight }}
     >
       {hasPendingQuestions ? (
         <InterviewDock

@@ -275,7 +275,7 @@ function InterviewQuestionDock({
   );
 
   return (
-    <section aria-label="Interview question">
+    <section aria-label="Interview question" className="flex h-full flex-col">
       <div
         role="separator"
         aria-orientation="horizontal"
@@ -288,10 +288,18 @@ function InterviewQuestionDock({
       >
         <span
           aria-hidden
-          className="absolute inset-x-0 top-0 h-0.5 transition-colors bg-transparent group-hover:bg-teal-500/60"
+          className={`absolute inset-x-0 top-0 h-0.5 transition-colors ${
+            isDragging
+              ? "bg-teal-500"
+              : "bg-line-strong group-hover:bg-teal-500/60"
+          }`}
         />
         <Bars2Icon
-          className="size-4 text-fg-muted/40 transition-colors group-hover:text-teal-500/80"
+          className={`size-4 transition-colors ${
+            isDragging
+              ? "text-teal-500"
+              : "text-fg-muted group-hover:text-teal-500/80"
+          }`}
           aria-hidden="true"
         />
       </div>
@@ -300,7 +308,7 @@ function InterviewQuestionDock({
         moreCount={moreCount}
         onCycle={onCycle}
       />
-      <div className="space-y-5 px-5 py-4 sm:px-6">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4 sm:px-6">
         <div>
           <p className="text-pretty text-base/6 font-medium text-fg">
             {question.text}

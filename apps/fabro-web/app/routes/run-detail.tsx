@@ -370,6 +370,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
             hasPendingQuestions={hasPendingQuestions}
             pendingQuestions={pendingQuestions}
             sidebarWidth={sidebarWidth}
+            dockHeight={dockHeight}
             isResizing={isResizing}
             steerBarRef={steerBarRef}
             onDockHeightChange={setDockHeight}
