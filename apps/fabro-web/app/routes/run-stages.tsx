@@ -1503,7 +1503,12 @@ function StageActivityBody({
   stages: Stage[];
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto pt-6 pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]">
+    <div
+      className="min-h-0 flex-1 overflow-y-auto pt-6 pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]"
+      style={{
+        transition: "var(--fabro-interview-dock-clearance-transition, padding 300ms cubic-bezier(0.16, 1, 0.3, 1))",
+      }}
+    >
       {effectiveTab === "primary" ? (
         renderer === "agent" ? (
           turns.length > 0 && filteredTurns.length === 0 ? (

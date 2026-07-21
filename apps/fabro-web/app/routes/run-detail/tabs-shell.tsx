@@ -123,6 +123,14 @@ export function RunDetailTabsAndOutlet({
               ? "pt-3"
               : "pt-3 pb-[var(--fabro-interview-dock-clearance)]"
         }
+        style={
+          !fullHeight && (hasPendingQuestions || !hideSteerBar)
+            ? {
+                transition:
+                  "var(--fabro-interview-dock-clearance-transition, padding 300ms cubic-bezier(0.16, 1, 0.3, 1))",
+              }
+            : undefined
+        }
       >
         <Outlet />
       </div>
