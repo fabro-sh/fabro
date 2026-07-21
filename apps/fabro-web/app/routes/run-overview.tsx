@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { ApiError } from "../lib/api-client";
 import { useRun, useRunGraph, useRunGraphSource, useRunStages } from "../lib/queries";
@@ -71,6 +71,14 @@ export default function RunOverview() {
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const [hoveredNode, setHoveredNode] = useState<RunGraphNodeHover | null>(null);
 
+  // Clamp zoom when switching from LR to TB (if above 200%)
+  useEffect(() => {
+    setView((v) => ({
+      ...v,
+      zoom: clampZoom(v.zoom, activeDirection),
+    }));
+  }, [activeDirection, setView]);
+
   const openStage = useCallback(
     (stageId: string) => navigate(`/runs/${id}/stages/${stageId}`),
     [id, navigate],
@@ -116,11 +124,11 @@ export default function RunOverview() {
     if (e.ctrlKey || e.metaKey) {
       const r = el.getBoundingClientRect();
       const cursor = { x: e.clientX - (r.left + r.width / 2), y: e.clientY - (r.top + r.height / 2) };
-      setView((v) => zoomAtPoint(v, wheelZoomFactor(e.deltaY), cursor));
+      setView((v) => zoomAtPoint(v, wheelZoomFactor(e.deltaY), cursor, activeDirection));
     } else {
       setView((v) => ({ ...v, pan: { x: v.pan.x - e.deltaX, y: v.pan.y - e.deltaY } }));
     }
-  }, []);
+  }, [activeDirection]);
   // The container only exists once the graph has loaded, so gate the listener on
   // graphSvg. The effect then re-runs and binds once the container is on the page.
   useElementEvent(containerRef, "wheel", onWheel, WHEEL_LISTENER_OPTS, Boolean(graphSvg));
@@ -137,8 +145,8 @@ export default function RunOverview() {
     const containerH = container.clientHeight - padPx;
 
     const fitPct = Math.min(containerW / svgW, containerH / svgH) * 100;
-    setView({ zoom: clampZoom(fitPct), pan: { x: 0, y: 0 } });
-  }, []);
+    setView({ zoom: clampZoom(fitPct, activeDirection), pan: { x: 0, y: 0 } });
+  }, [activeDirection]);
 
   return (
     <div className="flex min-h-0 flex-1 gap-6">
