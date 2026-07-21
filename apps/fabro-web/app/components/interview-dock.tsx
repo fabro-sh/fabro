@@ -1,5 +1,7 @@
 import {
   useCallback,
+  useEffect,
+  useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
@@ -119,6 +121,16 @@ export interface InterviewDockProps {
 export function InterviewDock({ runId, questions }: InterviewDockProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [dockHeight, setDockHeight] = useState(loadDockHeight);
+  const isFirstMount = useRef(true);
+
+  // Persist dock height to localStorage (skip initial mount to avoid writing default)
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    saveDockHeight(dockHeight);
+  }, [dockHeight]);
 
   const safeIndex = activeIndex < questions.length ? activeIndex : 0;
   const question = questions[safeIndex];

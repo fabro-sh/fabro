@@ -92,6 +92,15 @@ describe("InterviewDock constants", () => {
 
 describe("InterviewDock", () => {
   test("uses default dock height of 18rem when localStorage is empty", () => {
+    const storage = new Map<string, string>();
+    globalThis.window = {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+      innerHeight: 1000,
+    } as any;
+
     const tree = render(
       <InterviewDock runId="run-1" questions={[makeQuestion()]} />,
     );
@@ -99,6 +108,8 @@ describe("InterviewDock", () => {
     // We can verify this by checking that the component renders successfully
     // (the actual CSS variable will be tested in later slices)
     expect(tree.toJSON()).not.toBeNull();
+    // Should not write to localStorage on initial mount
+    expect(storage.has(STORAGE_KEY)).toBe(false);
   });
 
   test("renders question text and stage in the header", () => {
