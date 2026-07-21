@@ -385,13 +385,13 @@ No warnings or low-priority observations were raised. The plan is ready for impl
 ## Build Progress
 
 ### Wave 1
-- [ ] Slice 1: localStorage Height Persistence Infrastructure
-  - [ ] Step 1: Add constants `DEFAULT_DOCK_HEIGHT`, `MIN_DOCK_HEIGHT`, `MAX_DOCK_HEIGHT_VH`, `STORAGE_KEY`
-  - [ ] Step 2: Add `useState` hook for dock height
-  - [ ] Step 3: Create `loadDockHeight()` helper
-  - [ ] Step 4: Create `saveDockHeight(height: string)` helper
-  - [ ] Step 5: Add `useEffect` that persists height to localStorage
-  - [ ] Step 6: Pass height state up to `RunDetail` via `onDockHeightChange` callback
+- [x] Slice 1: localStorage Height Persistence Infrastructure
+  - [x] Step 1: Add constants `DEFAULT_DOCK_HEIGHT`, `MIN_DOCK_HEIGHT`, `MAX_DOCK_HEIGHT_VH`, `STORAGE_KEY`
+  - [x] Step 2: Add `useState` hook for dock height
+  - [x] Step 3: Create `loadDockHeight()` helper
+  - [x] Step 4: Create `saveDockHeight(height: string)` helper
+  - [x] Step 5: Add `useEffect` that persists height to localStorage
+  - [x] Step 6: Pass height state up to `RunDetail` via `onDockHeightChange` callback
 
 ### Wave 2
 - [ ] Slice 2: Resize Handle and Drag Interaction
