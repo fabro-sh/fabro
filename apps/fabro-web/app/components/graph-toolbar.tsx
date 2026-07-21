@@ -1,6 +1,6 @@
 import { ArrowDownIcon, ArrowRightIcon, MinusIcon, PlusIcon } from "@heroicons/react/20/solid";
 
-import { GRAPH_MAX_ZOOM, GRAPH_MIN_ZOOM } from "../lib/graph-viewport";
+import { GRAPH_MAX_ZOOM_TB, GRAPH_MAX_ZOOM_LR, GRAPH_MIN_ZOOM } from "../lib/graph-viewport";
 
 type Direction = "LR" | "TB";
 
@@ -81,7 +81,7 @@ export function GraphToolbar({
           type="button"
           title="Zoom in"
           onClick={() => onZoomBy(ZOOM_STEP_FACTOR)}
-          disabled={zoom >= GRAPH_MAX_ZOOM}
+          disabled={zoom >= (direction === "LR" ? GRAPH_MAX_ZOOM_LR : GRAPH_MAX_ZOOM_TB)}
           className={`${btn} ${btnDisabled}`}
         >
           <PlusIcon className="size-4" aria-hidden="true" />

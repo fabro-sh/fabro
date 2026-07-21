@@ -167,7 +167,7 @@ export default function RunOverview() {
               setDirection={setDirection}
               fitToWindow={fitToWindow}
               zoom={view.zoom}
-              onZoomBy={(factor) => setView((v) => zoomAtPoint(v, factor))}
+              onZoomBy={(factor) => setView((v) => zoomAtPoint(v, factor, undefined, activeDirection))}
             />
 
             <div
