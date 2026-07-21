@@ -113,6 +113,27 @@ export function saveDockHeight(height: string): void {
   }
 }
 
+export function parseDockHeightToPx(height: string): number {
+  const match = height.match(/^(\d+(?:\.\d+)?)(rem|px|vh)$/);
+  if (!match) return 288; // Default to 18rem = 288px
+
+  const [, valueStr, unit] = match;
+  const value = parseFloat(valueStr);
+
+  if (unit === "rem") {
+    return value * 16;
+  }
+  if (unit === "px") {
+    return value;
+  }
+  if (unit === "vh") {
+    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 1000;
+    return (viewportHeight * value) / 100;
+  }
+
+  return 288;
+}
+
 export interface InterviewDockProps {
   runId: string;
   questions: ApiQuestion[];
@@ -162,6 +183,8 @@ export function InterviewDock({
       onCycle={() =>
         setActiveIndex((index) => (index + 1) % questions.length)
       }
+      dockHeight={dockHeight}
+      onDockHeightChange={setDockHeight}
       onResizeActiveChange={onResizeActiveChange}
     />
   );
@@ -172,12 +195,16 @@ function InterviewQuestionDock({
   question,
   moreCount,
   onCycle,
+  dockHeight,
+  onDockHeightChange,
   onResizeActiveChange,
 }: {
   runId: string;
   question: ApiQuestion;
   moreCount: number;
   onCycle: () => void;
+  dockHeight: string;
+  onDockHeightChange: (height: string) => void;
   onResizeActiveChange?: (active: boolean) => void;
 }) {
   const submitMutation = useSubmitInterviewAnswer(runId);
@@ -189,14 +216,26 @@ function InterviewQuestionDock({
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    // For a bottom-docked panel with top resize handle, we need to track the
-    // current height. Since we don't have the dockHeight state in this component
-    // yet, we'll use a placeholder of 288px (18rem * 16px/rem).
-    // This will be wired properly when we thread the height state through.
-    const currentHeight = 288; // 18rem default
-    dragOrigin.current = { y: event.clientY, height: currentHeight };
+    // Convert dockHeight to pixels for drag calculation
+    const currentHeightPx = parseDockHeightToPx(dockHeight);
+    dragOrigin.current = { y: event.clientY, height: currentHeightPx };
     setIsDragging(true);
     onResizeActiveChange?.(true);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const origin = dragOrigin.current;
+    if (!origin) return;
+    // For a bottom-docked panel with top resize handle: dragging upward
+    // (clientY decreasing) increases height
+    const delta = origin.y - event.clientY;
+    const nextPx = origin.height + delta;
+    // Clamp to bounds
+    const minPx = parseFloat(MIN_DOCK_HEIGHT) * 16; // 12rem = 192px
+    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 1000;
+    const maxPx = (viewportHeight * MAX_DOCK_HEIGHT_VH) / 100;
+    const clampedPx = Math.min(maxPx, Math.max(minPx, nextPx));
+    onDockHeightChange(`${clampedPx}px`);
   };
 
   const submit = useCallback(
@@ -218,6 +257,7 @@ function InterviewQuestionDock({
         aria-orientation="horizontal"
         aria-label="Resize interview dock"
         onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
         className="group relative h-2 cursor-ns-resize touch-none"
       >
         <span

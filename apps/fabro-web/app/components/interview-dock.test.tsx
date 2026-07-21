@@ -377,6 +377,52 @@ describe("InterviewDock", () => {
     expect(capturedPointerId).toBe(123);
     expect(resizeActiveCalls).toEqual([true]);
   });
+
+  test("onPointerMove computes height delta and clamps to bounds", () => {
+    globalThis.window = {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => {},
+      },
+      innerHeight: 1000,
+    } as any;
+
+    const heightChanges: string[] = [];
+    const tree = render(
+      <InterviewDock
+        runId="run-1"
+        questions={[makeQuestion()]}
+        onDockHeightChange={(height) => heightChanges.push(height)}
+      />,
+    );
+    const handle = tree.root.findByProps({ role: "separator" });
+
+    // Start drag at clientY=500, initial height is 18rem = 288px
+    act(() => {
+      handle.props.onPointerDown({
+        preventDefault: () => {},
+        pointerId: 1,
+        clientY: 500,
+        currentTarget: { setPointerCapture: () => {} },
+      });
+    });
+
+    // Move upward by 100px (clientY=400) should increase height by 100px
+    act(() => {
+      handle.props.onPointerMove({ clientY: 400 });
+    });
+
+    // Last height change should be 288 + 100 = 388px
+    expect(heightChanges[heightChanges.length - 1]).toBe("388px");
+
+    // Move downward by 200px (clientY=700) should decrease height
+    act(() => {
+      handle.props.onPointerMove({ clientY: 700 });
+    });
+
+    // Height should be 288 - 200 = 88px, but clamped to minimum 12rem = 192px
+    expect(heightChanges[heightChanges.length - 1]).toBe("192px");
+  });
 });
 
 describe("loadDockHeight", () => {
