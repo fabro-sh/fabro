@@ -72,22 +72,21 @@ export default function RunOverview() {
   const [hoveredNode, setHoveredNode] = useState<RunGraphNodeHover | null>(null);
   // Separate zoom levels for TB and LR modes, persisted per direction
   const zoomByDirection = useRef<{ TB: number; LR: number }>({ TB: view.zoom, LR: view.zoom });
+  const prevDirection = useRef<Direction>(activeDirection);
 
   // Persist and restore zoom when switching direction
   useEffect(() => {
-    setView((v) => {
-      // Save current zoom for the old direction
-      const oldZoom = v.zoom;
-      // Get the zoom for the new direction, or use current if switching for first time
-      const newZoom = zoomByDirection.current[activeDirection] ?? oldZoom;
-      // Update the ref to track both
-      const otherDirection = activeDirection === "TB" ? "LR" : "TB";
-      zoomByDirection.current = {
-        [activeDirection]: newZoom,
-        [otherDirection]: oldZoom,
-      } as { TB: number; LR: number };
-      return { ...v, zoom: newZoom };
-    });
+    if (prevDirection.current !== activeDirection) {
+      setView((v) => {
+        // Save current zoom for the previous direction before switching
+        zoomByDirection.current[prevDirection.current] = v.zoom;
+        // Get the zoom for the new direction, or use current if not set yet
+        const newZoom = zoomByDirection.current[activeDirection] ?? v.zoom;
+        // Update the previous direction tracker
+        prevDirection.current = activeDirection;
+        return { ...v, zoom: newZoom };
+      });
+    }
   }, [activeDirection, setView]);
 
   const openStage = useCallback(
