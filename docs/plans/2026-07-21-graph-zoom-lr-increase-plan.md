@@ -38,8 +38,8 @@ Replace the single `GRAPH_MAX_ZOOM` constant with direction-aware constants and 
 - Given the zoom direction is LR
 - When clamping zoom at 250%
 - Then the zoom remains 250%
-- When clamping zoom at 350%
-- Then the zoom is clamped to 300%
+- When clamping zoom at 450%
+- Then the zoom is clamped to 400%
 
 **Scenario: Backward compatibility with no direction**
 - When clamping zoom at 150% without specifying direction
@@ -85,7 +85,7 @@ Thread the direction parameter through `zoomAtPoint()` so it can forward it to t
 - Then the zoom is clamped to 200%
 - And the pan adjusts based on the clamped ratio (k = 200/180)
 
-**Scenario: zoomAtPoint with LR direction clamps to 300%**
+**Scenario: zoomAtPoint with LR direction clamps to 400%**
 - Given a view at 250% zoom
 - And the direction is LR
 - When zooming by factor 1.5 at the center
@@ -163,8 +163,8 @@ Update the run overview route to pass `activeDirection` to `zoomAtPoint()` and `
 
 1. IMPLEMENT: Update the `onWheel` callback's `zoomAtPoint()` call to pass `activeDirection`
 2. IMPLEMENT: Update the `fitToWindow` callback's `clampZoom()` call to pass `activeDirection`
-3. IMPLEMENT: Add zoom persistence per direction using a ref to track TB and LR zoom levels separately
-4. IMPLEMENT: Add useEffect to restore zoom when switching direction
+3. IMPLEMENT: Hold a separate remembered view per direction via `useRememberedGraphView`, keyed `<runId>-TB` and `<runId>-LR`
+4. IMPLEMENT: Select the active view from the two per-direction states, so switching direction needs no restore effect
 5. TEST: Manual verification: open a run, switch to LR, zoom to 380% via wheel, verify it clamps at 400%
 6. TEST: Manual verification: open a run, switch to TB, zoom to 180% via wheel, verify it clamps at 200%
 7. TEST: Manual verification: create a tiny graph, switch to LR, click fit-to-window, verify zoom clamps to 400% if computed fit exceeds it
@@ -258,7 +258,7 @@ None. All acceptance criteria map to testable scenarios with observable outcomes
 
 1. **Performance at 400% zoom**: Rendering performance at 400% zoom for large graphs has not been validated. The spec initially assumed 1.5x increase (300%) was conservative, but was increased to 2x (400%) based on user feedback. Performance should be monitored during manual testing. If performance degrades, the LR max may need adjustment.
 
-2. **Zoom persistence behavior**: The implementation now maintains separate zoom levels for TB and LR directions using a ref. When switching between directions, the zoom level you previously used for that direction is restored. This improves the user experience by preserving the zoom state per direction, even when switching back and forth multiple times.
+2. **Zoom persistence behavior**: The implementation now maintains separate zoom levels for TB and LR directions, each remembered per run under its own key. When switching between directions, the zoom level you previously used for that direction is restored. This improves the user experience by preserving the zoom state per direction, even when switching back and forth multiple times.
 
 3. **Test coverage gap**: The plan includes manual verification steps because there are no existing integration or E2E tests for the graph toolbar and zoom interactions. Adding automated tests for these would improve confidence but is out of scope for this feature (no existing test infrastructure for React component interactions in this codebase).
 
@@ -291,12 +291,12 @@ No warnings or observations were raised by the reviewers. The plan's test strate
 ## Build Progress
 
 ### Slice 1: Direction-aware zoom constants and clampZoom function ✓
-- [x] IMPLEMENT: Export `GRAPH_MAX_ZOOM_TB = 200` and `GRAPH_MAX_ZOOM_LR = 300` constants in `graph-viewport.ts`, replacing `GRAPH_MAX_ZOOM`
-- [x] TEST: Add unit tests verifying both constants have the expected values (200 and 300)
+- [x] IMPLEMENT: Export `GRAPH_MAX_ZOOM_TB = 200` and `GRAPH_MAX_ZOOM_LR = 400` constants in `graph-viewport.ts`, replacing `GRAPH_MAX_ZOOM`
+- [x] TEST: Add unit tests verifying both constants have the expected values (200 and 400)
 - [x] REFACTOR: Ensure export names are clear and aligned with spec naming convention
 - [x] IMPLEMENT: Update `clampZoom(zoom: number, direction?: "LR" | "TB"): number` to select max based on direction, defaulting to TB
 - [x] TEST: Add unit tests for `clampZoom()` with TB direction (max 200)
-- [x] TEST: Add unit tests for `clampZoom()` with LR direction (max 300)
+- [x] TEST: Add unit tests for `clampZoom()` with LR direction (max 400)
 - [x] TEST: Add unit test for `clampZoom()` without direction parameter (backward compat, defaults to 200)
 - [x] TEST: Add unit test verifying minimum zoom (25%) applies to both directions
 - [x] REFACTOR: Review test coverage for edge cases (exactly at limits, just under, just over)
@@ -305,19 +305,19 @@ No warnings or observations were raised by the reviewers. The plan's test strate
 - [x] IMPLEMENT: Update `zoomAtPoint()` signature to accept optional `direction?: "LR" | "TB"` parameter
 - [x] IMPLEMENT: Pass `direction` to the `clampZoom()` call inside `zoomAtPoint()`
 - [x] TEST: Update existing test "clamps zoom and applies the clamped ratio to pan" to verify TB behavior (max 200)
-- [x] TEST: Add test for LR clamping in `zoomAtPoint()` (max 300, verify pan adjustment with k = 300/initial)
+- [x] TEST: Add test for LR clamping in `zoomAtPoint()` (max 400, verify pan adjustment with k = 400/initial)
 - [x] TEST: Add test for `zoomAtPoint()` without direction parameter (backward compat, max 200)
-- [x] TEST: Add test for cursor-anchored zoom with LR direction near the 300% limit
+- [x] TEST: Add test for cursor-anchored zoom with LR direction near the 400% limit
 - [x] REFACTOR: Verify all `zoomAtPoint()` tests check both zoom and pan outcomes, not just zoom
 
 ### Slice 3: Thread direction to run-overview route zoom interactions ✓
 - [x] IMPLEMENT: Update the `onWheel` callback's `zoomAtPoint()` call (line 119) to pass `activeDirection`
 - [x] IMPLEMENT: Update the `fitToWindow` callback's `clampZoom()` call (line 140) to pass `activeDirection`
-- [x] TEST: Manual verification: open a run, switch to LR, zoom to 280% via wheel, verify it clamps at 300%
+- [x] TEST: Manual verification: open a run, switch to LR, zoom to 380% via wheel, verify it clamps at 400%
 - [x] TEST: Manual verification: open a run, switch to TB, zoom to 180% via wheel, verify it clamps at 200%
-- [x] TEST: Manual verification: create a tiny graph, switch to LR, click fit-to-window, verify zoom clamps to 300% if computed fit exceeds it
-- [x] TEST: Manual verification: switch from LR at 280% to TB, verify zoom clamps to 200%
-- [x] TEST: Manual verification: switch from TB at 150% to LR, verify zoom stays at 150%
+- [x] TEST: Manual verification: create a tiny graph, switch to LR, click fit-to-window, verify zoom clamps to 400% if computed fit exceeds it
+- [x] TEST: Manual verification: switch from LR at 380% to TB, verify TB shows its own remembered zoom rather than 380%
+- [x] TEST: Manual verification: switch from TB at 150% to LR, verify LR restores the zoom it was last left at
 - [x] REFACTOR: Review all `zoomAtPoint()` call sites in the file to ensure none were missed
 
 ### Slice 4: Thread direction to graph toolbar zoom buttons ✓
@@ -327,10 +327,10 @@ No warnings or observations were raised by the reviewers. The plan's test strate
 - [x] IMPLEMENT: Update `run-overview.tsx` `<GraphToolbar>` call to pass `direction={activeDirection}` prop
 - [x] IMPLEMENT: Update `run-overview.tsx` `onZoomBy` callback to pass `activeDirection` to `zoomAtPoint()`: `onZoomBy={(factor) => setView((v) => zoomAtPoint(v, factor, undefined, activeDirection))}`
 - [x] TEST: Manual verification: open run in LR at 250%, verify zoom-in button is enabled
-- [x] TEST: Manual verification: zoom to 300% in LR, verify zoom-in button is disabled
+- [x] TEST: Manual verification: zoom to 400% in LR, verify zoom-in button is disabled
 - [x] TEST: Manual verification: open run in TB at 180%, verify zoom-in button is enabled
 - [x] TEST: Manual verification: zoom to 200% in TB, verify zoom-in button is disabled
-- [x] TEST: Manual verification: click zoom-in button in LR at 280%, verify zoom goes to 300% and button disables
+- [x] TEST: Manual verification: click zoom-in button in LR at 380%, verify zoom goes to 400% and button disables
 - [x] TEST: Manual verification: click zoom-in button in TB at 180%, verify zoom goes to 200% and button disables
 - [x] REFACTOR: Verify toolbar component remains stateless and all logic is prop-driven
 

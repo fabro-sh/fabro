@@ -20,7 +20,7 @@ This change increases the maximum zoom ceiling for the LR graph direction to pro
 - Thread the active direction (`activeDirection: "LR" | "TB"`) to `clampZoom()` calls
 - Relevant call sites: `fitToWindow()` callback and zoom interactions via `zoomAtPoint()`
 - Pass direction to `zoomAtPoint()` so it can forward it to `clampZoom()`
-- Add separate zoom persistence for TB and LR modes using a `useRef` to track zoom levels by direction
+- Hold a separate remembered view per direction via `useRememberedGraphView`, keyed `<runId>-TB` and `<runId>-LR`
 - Restore the appropriate zoom level when switching between TB and LR orientations
 
 **`apps/fabro-web/app/components/graph-toolbar.tsx`**
