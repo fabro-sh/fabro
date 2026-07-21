@@ -45,8 +45,9 @@ export function zoomAtPoint(
   view: GraphView,
   factor: number,
   cursor: { x: number; y: number } = { x: 0, y: 0 },
+  direction?: "LR" | "TB",
 ): GraphView {
-  const zoom = clampZoom(view.zoom * factor);
+  const zoom = clampZoom(view.zoom * factor, direction);
   const k = zoom / view.zoom; // applied ratio after clamping
   return {
     zoom,

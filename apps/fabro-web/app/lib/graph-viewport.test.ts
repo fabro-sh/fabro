@@ -50,6 +50,46 @@ describe("zoomAtPoint", () => {
     expect(roundTrip.pan.x).toBeCloseTo(start.pan.x);
     expect(roundTrip.pan.y).toBeCloseTo(start.pan.y);
   });
+
+  describe("direction-aware clamping", () => {
+    test("TB direction clamps to 200%", () => {
+      const view: GraphView = { zoom: 180, pan: { x: 0, y: 0 } };
+      const after = zoomAtPoint(view, 1.5, { x: 0, y: 0 }, "TB");
+      expect(after.zoom).toBe(200); // 180 * 1.5 = 270, clamped to 200
+      // k = 200/180 = 1.111..., pan adjustment reflects clamped ratio
+      const k = 200 / 180;
+      expect(after.pan.x).toBeCloseTo(0 * (1 - k) + k * 0);
+      expect(after.pan.y).toBeCloseTo(0 * (1 - k) + k * 0);
+    });
+
+    test("LR direction clamps to 300%", () => {
+      const view: GraphView = { zoom: 250, pan: { x: 0, y: 0 } };
+      const after = zoomAtPoint(view, 1.5, { x: 0, y: 0 }, "LR");
+      expect(after.zoom).toBe(300); // 250 * 1.5 = 375, clamped to 300
+      const k = 300 / 250; // 1.2
+      expect(after.pan.x).toBeCloseTo(0 * (1 - k) + k * 0);
+      expect(after.pan.y).toBeCloseTo(0 * (1 - k) + k * 0);
+    });
+
+    test("without direction defaults to TB (max 200%)", () => {
+      const view: GraphView = { zoom: 180, pan: { x: 0, y: 0 } };
+      const after = zoomAtPoint(view, 1.5, { x: 0, y: 0 });
+      expect(after.zoom).toBe(200);
+      const k = 200 / 180;
+      expect(after.pan.x).toBeCloseTo(0);
+      expect(after.pan.y).toBeCloseTo(0);
+    });
+
+    test("LR cursor-anchored zoom near 300% limit", () => {
+      const view: GraphView = { zoom: 280, pan: { x: 50, y: 40 } };
+      const cursor = { x: 50, y: 40 };
+      const after = zoomAtPoint(view, 1.2, cursor, "LR");
+      expect(after.zoom).toBe(300); // 280 * 1.2 = 336, clamped to 300
+      const k = 300 / 280;
+      expect(after.pan.x).toBeCloseTo(cursor.x * (1 - k) + k * view.pan.x);
+      expect(after.pan.y).toBeCloseTo(cursor.y * (1 - k) + k * view.pan.y);
+    });
+  });
 });
 
 describe("zoom constants", () => {
