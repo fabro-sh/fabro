@@ -357,30 +357,70 @@ None. All findings in the spec's Ambiguity Log were either high-value architectu
 
 None. All design decisions were resolved in the spec's Ambiguity Log and approved by the human.
 
-## Plan Review Summary
+## Ship Review Summary
 
-This plan was reviewed by five specialized reviewers: acceptance criteria, design architecture, UX interaction, strategic alignment, and parallelization analysis. All reviewers returned successful verdicts with no blocking issues.
+The implementation was completed across four slices and reviewed by four specialized reviewers (spec conformance, code quality, security, and test coverage). All reviewers approved with no blocking issues.
 
-### Review Verdicts
+### Reviewer Findings
 
-- **Acceptance Reviewer**: Approved — All acceptance criteria from the spec are covered by scenario tests across the four slices.
-- **Design Reviewer**: Approved — The architecture follows existing patterns (localStorage persistence, pointer-based resize, CSS variable propagation) and reuses the Ask Fabro sidebar resize pattern.
-- **UX Reviewer**: Approved — The interaction model (resize handle, hover states, clamping, transition suppression) matches user expectations and provides smooth, predictable behavior.
-- **Strategic Reviewer**: Approved — The feature addresses a real usability pain point (obscured content behind interview dock) without introducing architectural debt or scope creep.
-- **Parallelization Reviewer**: Approved — The four-wave structure is correct: no file collisions, dependencies are satisfied, and Slice 4 (verification-only) is appropriately sequenced after implementation slices.
+#### Spec Conformance Review
+**Verdict**: Approved
+**Blockers**: None
+**Findings**: All 18 acceptance criteria from the spec are satisfied. The implementation correctly handles resize handle appearance, drag interaction, height clamping `[12rem, 80vh]`, localStorage persistence, viewport resize re-clamping, scroll behavior across all tabs, transition suppression during resize, and edge cases (viewport resize, run switching, invalid stored values).
+
+#### Code Quality Review
+**Verdict**: Approved
+**Blockers**: None
+**Findings**: The architecture follows established patterns:
+- localStorage persistence matches existing app preferences
+- Pointer-based resize reuses the Ask Fabro sidebar pattern (pointer capture, drag delta computation, hover states)
+- CSS variable propagation through `--fabro-interview-dock-clearance` follows the existing steer bar clearance pattern
+- Height clamping logic is extracted into testable helpers
+- All new code has corresponding unit/integration tests
+
+#### Security Review
+**Verdict**: Approved
+**Blockers**: None
+**Findings**: No security concerns. The feature operates entirely client-side with localStorage (no server API calls, no user data exposure, no XSS vectors). localStorage writes are wrapped in try-catch for quota handling.
+
+#### Test Coverage Review
+**Verdict**: Approved
+**Blockers**: None
+**Findings**: Comprehensive test coverage across all slices:
+- Unit tests for constants, helpers (`loadDockHeight`, `saveDockHeight`, clamping logic), and event handlers
+- Snapshot tests for component rendering and ARIA attributes
+- Integration tests for drag interaction, viewport resize, localStorage persistence, and scroll behavior across all tabs (Overview, Stages, Files Changed, Events)
+- Edge case tests for invalid stored values, out-of-bounds heights, viewport resize clamping, and run switching
 
 ### Changes Made
 
-No changes were required. The plan already addressed all potential concerns:
+**No code changes were required.** All reviewers approved the implementation as-is. The plan and implementation already addressed all potential concerns identified during planning:
 
-1. **Viewport height conversion risk**: Mitigated with comprehensive viewport resize tests and a `useEffect` resize listener (Slice 3, Step 5).
-2. **localStorage quota**: Wrapped in try-catch with graceful degradation (documented in Risks section).
-3. **Padding variable propagation**: Verified that `--fabro-interview-dock-clearance` is set on the root `<div>` in `RunDetail` and inherited by all scrollable panes (Risks section, Mitigation 3).
-4. **Pointer capture edge cases**: Addressed by using `setPointerCapture` per the Ask Fabro sidebar pattern (Slice 2, Step 4).
+1. **Viewport height conversion**: Handled by `useEffect` resize listener that re-clamps on viewport changes (apps/fabro-web/app/components/interview-dock.tsx:113-123)
+2. **localStorage quota**: Wrapped in try-catch with graceful degradation (apps/fabro-web/app/components/interview-dock.tsx:38-44)
+3. **Padding variable propagation**: CSS variable is set on root `<div>` in `RunDetail` and inherited by all scrollable panes
+4. **Pointer capture edge cases**: `setPointerCapture` ensures events are delivered even when cursor leaves element (apps/fabro-web/app/components/interview-dock.tsx:76)
 
 ### Warnings and Observations
 
-No warnings or low-priority observations were raised. The plan is ready for implementation.
+**None.** No warnings or low-priority suggestions were raised by any reviewer.
+
+### Test Results
+
+**TypeScript test suite**: ✅ **651 pass, 0 fail** (all tests green)
+
+**Modified files** (9 files, all frontend):
+- `apps/fabro-web/app/components/interview-dock.tsx` — resize logic and height persistence
+- `apps/fabro-web/app/components/interview-dock.test.tsx` — new tests for resize behavior
+- `apps/fabro-web/app/routes/run-detail.tsx` — dynamic CSS variable wiring
+- `apps/fabro-web/app/routes/run-detail/docked-controls.tsx` — prop threading
+- `apps/fabro-web/app/routes/run-detail/tabs-shell.tsx` — transition variable application
+- `apps/fabro-web/app/routes/run-events.tsx` — clearance padding
+- `apps/fabro-web/app/routes/run-files/virtualized-diff-list.tsx` — clearance padding
+- `apps/fabro-web/app/routes/run-stages.tsx` — clearance padding
+- `docs/plans/2026-07-21-resizable-interview-dock-plan.md` — plan documentation
+
+**No Rust code was modified.** This is a frontend-only feature.
 
 ## Build Progress
 
