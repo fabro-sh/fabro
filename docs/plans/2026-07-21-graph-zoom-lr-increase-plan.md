@@ -1,6 +1,6 @@
 # Plan: Increase Maximum Zoom for Left-to-Right Graph View
 
-**Status**: approved
+**Status**: in-progress
 **Spec**: docs/specs/graph-zoom-lr-increase.md
 
 ## Goal
@@ -283,3 +283,49 @@ None. The plan had no blockers or critical warnings requiring changes.
 ### Warnings and Observations
 
 No warnings or observations were raised by the reviewers. The plan's test strategy (mix of automated unit tests and manual verification) was accepted as appropriate given the current test infrastructure. The direction-aware zoom limit architecture was validated against the spec's acceptance criteria.
+
+## Build Progress
+
+### Slice 1: Direction-aware zoom constants and clampZoom function
+- [ ] IMPLEMENT: Export `GRAPH_MAX_ZOOM_TB = 200` and `GRAPH_MAX_ZOOM_LR = 300` constants in `graph-viewport.ts`, replacing `GRAPH_MAX_ZOOM`
+- [ ] TEST: Add unit tests verifying both constants have the expected values (200 and 300)
+- [ ] REFACTOR: Ensure export names are clear and aligned with spec naming convention
+- [ ] IMPLEMENT: Update `clampZoom(zoom: number, direction?: "LR" | "TB"): number` to select max based on direction, defaulting to TB
+- [ ] TEST: Add unit tests for `clampZoom()` with TB direction (max 200)
+- [ ] TEST: Add unit tests for `clampZoom()` with LR direction (max 300)
+- [ ] TEST: Add unit test for `clampZoom()` without direction parameter (backward compat, defaults to 200)
+- [ ] TEST: Add unit test verifying minimum zoom (25%) applies to both directions
+- [ ] REFACTOR: Review test coverage for edge cases (exactly at limits, just under, just over)
+
+### Slice 2: Direction-aware zoomAtPoint function
+- [ ] IMPLEMENT: Update `zoomAtPoint()` signature to accept optional `direction?: "LR" | "TB"` parameter
+- [ ] IMPLEMENT: Pass `direction` to the `clampZoom()` call inside `zoomAtPoint()`
+- [ ] TEST: Update existing test "clamps zoom and applies the clamped ratio to pan" to verify TB behavior (max 200)
+- [ ] TEST: Add test for LR clamping in `zoomAtPoint()` (max 300, verify pan adjustment with k = 300/initial)
+- [ ] TEST: Add test for `zoomAtPoint()` without direction parameter (backward compat, max 200)
+- [ ] TEST: Add test for cursor-anchored zoom with LR direction near the 300% limit
+- [ ] REFACTOR: Verify all `zoomAtPoint()` tests check both zoom and pan outcomes, not just zoom
+
+### Slice 3: Thread direction to run-overview route zoom interactions
+- [ ] IMPLEMENT: Update the `onWheel` callback's `zoomAtPoint()` call (line 119) to pass `activeDirection`
+- [ ] IMPLEMENT: Update the `fitToWindow` callback's `clampZoom()` call (line 140) to pass `activeDirection`
+- [ ] TEST: Manual verification: open a run, switch to LR, zoom to 280% via wheel, verify it clamps at 300%
+- [ ] TEST: Manual verification: open a run, switch to TB, zoom to 180% via wheel, verify it clamps at 200%
+- [ ] TEST: Manual verification: create a tiny graph, switch to LR, click fit-to-window, verify zoom clamps to 300% if computed fit exceeds it
+- [ ] TEST: Manual verification: switch from LR at 280% to TB, verify zoom clamps to 200%
+- [ ] TEST: Manual verification: switch from TB at 150% to LR, verify zoom stays at 150%
+- [ ] REFACTOR: Review all `zoomAtPoint()` call sites in the file to ensure none were missed
+
+### Slice 4: Thread direction to graph toolbar zoom buttons
+- [ ] IMPLEMENT: Import `GRAPH_MAX_ZOOM_TB` and `GRAPH_MAX_ZOOM_LR` in `graph-toolbar.tsx`, remove `GRAPH_MAX_ZOOM` import
+- [ ] IMPLEMENT: Update `GraphToolbar` props to accept `direction: Direction`
+- [ ] IMPLEMENT: Update zoom-in button's `disabled` condition to check `zoom >= (direction === "LR" ? GRAPH_MAX_ZOOM_LR : GRAPH_MAX_ZOOM_TB)`
+- [ ] IMPLEMENT: Update `run-overview.tsx` `<GraphToolbar>` call to pass `direction={activeDirection}` prop
+- [ ] IMPLEMENT: Update `run-overview.tsx` `onZoomBy` callback to pass `activeDirection` to `zoomAtPoint()`: `onZoomBy={(factor) => setView((v) => zoomAtPoint(v, factor, undefined, activeDirection))}`
+- [ ] TEST: Manual verification: open run in LR at 250%, verify zoom-in button is enabled
+- [ ] TEST: Manual verification: zoom to 300% in LR, verify zoom-in button is disabled
+- [ ] TEST: Manual verification: open run in TB at 180%, verify zoom-in button is enabled
+- [ ] TEST: Manual verification: zoom to 200% in TB, verify zoom-in button is disabled
+- [ ] TEST: Manual verification: click zoom-in button in LR at 280%, verify zoom goes to 300% and button disables
+- [ ] TEST: Manual verification: click zoom-in button in TB at 180%, verify zoom goes to 200% and button disables
+- [ ] REFACTOR: Verify toolbar component remains stateless and all logic is prop-driven
