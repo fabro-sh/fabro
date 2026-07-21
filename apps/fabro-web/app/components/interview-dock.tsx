@@ -238,6 +238,14 @@ function InterviewQuestionDock({
     onDockHeightChange(`${clampedPx}px`);
   };
 
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragOrigin.current) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    dragOrigin.current = null;
+    setIsDragging(false);
+    onResizeActiveChange?.(false);
+  };
+
   const submit = useCallback(
     async (answer: SubmitInterviewAnswer) => {
       setError(null);
@@ -258,6 +266,8 @@ function InterviewQuestionDock({
         aria-label="Resize interview dock"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
         className="group relative h-2 cursor-ns-resize touch-none"
       >
         <span

@@ -423,6 +423,98 @@ describe("InterviewDock", () => {
     // Height should be 288 - 200 = 88px, but clamped to minimum 12rem = 192px
     expect(heightChanges[heightChanges.length - 1]).toBe("192px");
   });
+
+  test("onPointerUp releases pointer and invokes resize active callback with false", () => {
+    globalThis.window = {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => {},
+      },
+      innerHeight: 1000,
+    } as any;
+
+    const resizeActiveCalls: boolean[] = [];
+    const tree = render(
+      <InterviewDock
+        runId="run-1"
+        questions={[makeQuestion()]}
+        onResizeActiveChange={(active) => resizeActiveCalls.push(active)}
+      />,
+    );
+    const handle = tree.root.findByProps({ role: "separator" });
+
+    // Start drag
+    act(() => {
+      handle.props.onPointerDown({
+        preventDefault: () => {},
+        pointerId: 123,
+        clientY: 500,
+        currentTarget: { setPointerCapture: () => {} },
+      });
+    });
+
+    expect(resizeActiveCalls).toEqual([true]);
+
+    // End drag
+    let releasedPointerId: number | null = null;
+    act(() => {
+      handle.props.onPointerUp({
+        pointerId: 123,
+        currentTarget: {
+          releasePointerCapture: (id: number) => { releasedPointerId = id; },
+        },
+      });
+    });
+
+    expect(releasedPointerId).toBe(123);
+    expect(resizeActiveCalls).toEqual([true, false]);
+  });
+
+  test("onPointerCancel releases pointer and resets drag state", () => {
+    globalThis.window = {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => {},
+      },
+      innerHeight: 1000,
+    } as any;
+
+    const resizeActiveCalls: boolean[] = [];
+    const tree = render(
+      <InterviewDock
+        runId="run-1"
+        questions={[makeQuestion()]}
+        onResizeActiveChange={(active) => resizeActiveCalls.push(active)}
+      />,
+    );
+    const handle = tree.root.findByProps({ role: "separator" });
+
+    // Start drag
+    act(() => {
+      handle.props.onPointerDown({
+        preventDefault: () => {},
+        pointerId: 456,
+        clientY: 500,
+        currentTarget: { setPointerCapture: () => {} },
+      });
+    });
+
+    expect(resizeActiveCalls).toEqual([true]);
+
+    // Cancel drag
+    let releasedPointerId: number | null = null;
+    act(() => {
+      handle.props.onPointerCancel({
+        pointerId: 456,
+        currentTarget: {
+          releasePointerCapture: (id: number) => { releasedPointerId = id; },
+        },
+      });
+    });
+
+    expect(releasedPointerId).toBe(456);
+    expect(resizeActiveCalls).toEqual([true, false]);
+  });
 });
 
 describe("loadDockHeight", () => {
