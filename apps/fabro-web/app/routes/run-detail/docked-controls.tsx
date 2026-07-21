@@ -134,6 +134,7 @@ export function RunDetailDockedControls({
   isResizing,
   steerBarRef,
   onDockHeightChange,
+  onResizeActiveChange,
 }: {
   runId: string;
   hideSteerBar: boolean;
@@ -143,6 +144,7 @@ export function RunDetailDockedControls({
   isResizing: boolean;
   steerBarRef: RefObject<SteerBarHandle | null>;
   onDockHeightChange?: (height: string) => void;
+  onResizeActiveChange?: (active: boolean) => void;
 }) {
   if (hideSteerBar && !hasPendingQuestions) return null;
 
@@ -160,6 +162,7 @@ export function RunDetailDockedControls({
           runId={runId}
           questions={pendingQuestions}
           onDockHeightChange={onDockHeightChange}
+          onResizeActiveChange={onResizeActiveChange}
         />
       ) : (
         <SteerBar ref={steerBarRef} runId={runId} />

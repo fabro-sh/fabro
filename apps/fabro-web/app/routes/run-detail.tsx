@@ -101,6 +101,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const [dockHeight, setDockHeight] = useState("18rem");
+  const [dockResizeActive, setDockResizeActive] = useState(false);
   const { push, dismiss } = useToast();
   const lifecycleToastStateRef = useRef(createLifecycleToastState());
   const filesCount = runQuery.data?.diff?.files_changed ?? null;
@@ -368,6 +369,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
             isResizing={isResizing}
             steerBarRef={steerBarRef}
             onDockHeightChange={setDockHeight}
+            onResizeActiveChange={setDockResizeActive}
           />
         </div>
       )}
