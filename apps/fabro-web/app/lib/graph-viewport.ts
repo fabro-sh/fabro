@@ -7,15 +7,19 @@
 // zoom, it can import this module.
 
 export const GRAPH_MIN_ZOOM = 25; // percent; the clamp bounds. Widen if you want more range.
-export const GRAPH_MAX_ZOOM = 200;
+export const GRAPH_MAX_ZOOM_TB = 200; // top-down orientation
+export const GRAPH_MAX_ZOOM_LR = 300; // left-right orientation
+export const GRAPH_MAX_ZOOM = GRAPH_MAX_ZOOM_TB; // backward compat alias, defaults to TB
 
 export type GraphView = { zoom: number; pan: { x: number; y: number } };
 
 // Initial viewport shown when a graph first loads: 75% zoom, centered.
 export const DEFAULT_GRAPH_VIEW: GraphView = { zoom: 75, pan: { x: 0, y: 0 } };
 
-export const clampZoom = (zoom: number): number =>
-  Math.min(GRAPH_MAX_ZOOM, Math.max(GRAPH_MIN_ZOOM, zoom));
+export const clampZoom = (zoom: number, direction?: "LR" | "TB"): number => {
+  const max = direction === "LR" ? GRAPH_MAX_ZOOM_LR : GRAPH_MAX_ZOOM_TB;
+  return Math.min(max, Math.max(GRAPH_MIN_ZOOM, zoom));
+};
 
 // How fast wheel/pinch input zooms; tune to taste.
 const WHEEL_SENSITIVITY = 0.002;

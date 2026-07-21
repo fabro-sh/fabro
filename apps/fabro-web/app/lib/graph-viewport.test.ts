@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  GRAPH_MAX_ZOOM,
+  GRAPH_MAX_ZOOM_TB,
+  GRAPH_MAX_ZOOM_LR,
   GRAPH_MIN_ZOOM,
   clampZoom,
   wheelZoomFactor,
@@ -34,9 +35,9 @@ describe("zoomAtPoint", () => {
   });
 
   test("clamps zoom and applies the clamped ratio to pan", () => {
-    const view: GraphView = { zoom: GRAPH_MAX_ZOOM, pan: { x: 10, y: 10 } };
+    const view: GraphView = { zoom: GRAPH_MAX_ZOOM_TB, pan: { x: 10, y: 10 } };
     const after = zoomAtPoint(view, 4, { x: 0, y: 0 }); // wants 800%, must clamp to max
-    expect(after.zoom).toBe(GRAPH_MAX_ZOOM);
+    expect(after.zoom).toBe(GRAPH_MAX_ZOOM_TB);
     expect(after.pan).toEqual({ x: 10, y: 10 }); // k == 1, pan unchanged toward center
   });
 
@@ -51,10 +52,82 @@ describe("zoomAtPoint", () => {
   });
 });
 
+describe("zoom constants", () => {
+  test("TB max zoom is 200", () => {
+    expect(GRAPH_MAX_ZOOM_TB).toBe(200);
+  });
+
+  test("LR max zoom is 300", () => {
+    expect(GRAPH_MAX_ZOOM_LR).toBe(300);
+  });
+});
+
 test("clampZoom respects bounds", () => {
   expect(clampZoom(10)).toBe(GRAPH_MIN_ZOOM);
-  expect(clampZoom(500)).toBe(GRAPH_MAX_ZOOM);
+  expect(clampZoom(500)).toBe(GRAPH_MAX_ZOOM_TB);
   expect(clampZoom(75)).toBe(75);
+});
+
+describe("clampZoom with direction", () => {
+  describe("TB direction", () => {
+    test("clamps zoom above 200% to 200%", () => {
+      expect(clampZoom(250, "TB")).toBe(200);
+    });
+
+    test("preserves zoom at 150%", () => {
+      expect(clampZoom(150, "TB")).toBe(150);
+    });
+
+    test("preserves zoom exactly at 200%", () => {
+      expect(clampZoom(200, "TB")).toBe(200);
+    });
+
+    test("clamps zoom just over 200%", () => {
+      expect(clampZoom(200.1, "TB")).toBe(200);
+    });
+  });
+
+  describe("LR direction", () => {
+    test("clamps zoom above 300% to 300%", () => {
+      expect(clampZoom(350, "LR")).toBe(300);
+    });
+
+    test("preserves zoom at 250%", () => {
+      expect(clampZoom(250, "LR")).toBe(250);
+    });
+
+    test("preserves zoom exactly at 300%", () => {
+      expect(clampZoom(300, "LR")).toBe(300);
+    });
+
+    test("clamps zoom just over 300%", () => {
+      expect(clampZoom(300.1, "LR")).toBe(300);
+    });
+
+    test("preserves zoom just under 300%", () => {
+      expect(clampZoom(299.9, "LR")).toBe(299.9);
+    });
+  });
+
+  describe("backward compatibility", () => {
+    test("defaults to TB max (200%) when no direction specified", () => {
+      expect(clampZoom(250)).toBe(200);
+    });
+
+    test("preserves zoom at 150% when no direction specified", () => {
+      expect(clampZoom(150)).toBe(150);
+    });
+  });
+
+  describe("minimum zoom", () => {
+    test("clamps to 25% for TB direction", () => {
+      expect(clampZoom(10, "TB")).toBe(25);
+    });
+
+    test("clamps to 25% for LR direction", () => {
+      expect(clampZoom(10, "LR")).toBe(25);
+    });
+  });
 });
 
 test("wheelZoomFactor is positive and symmetric: equal scrolls up and down cancel", () => {
