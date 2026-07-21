@@ -394,14 +394,14 @@ No warnings or low-priority observations were raised. The plan is ready for impl
   - [x] Step 6: Pass height state up to `RunDetail` via `onDockHeightChange` callback
 
 ### Wave 2
-- [ ] Slice 2: Resize Handle and Drag Interaction
-  - [ ] Step 1: Add horizontal resize handle `<div>` with ARIA attributes
-  - [ ] Step 2: Style the handle with hover state
-  - [ ] Step 3: Add `useState` for `isDragging` and `useRef` for `dragOrigin`
-  - [ ] Step 4: Add `onPointerDown` handler
-  - [ ] Step 5: Add `onPointerMove` handler
-  - [ ] Step 6: Add `onPointerUp` and `onPointerCancel` handlers
-  - [ ] Step 7: Add `onResizeActiveChange` callback prop
+- [x] Slice 2: Resize Handle and Drag Interaction
+  - [x] Step 1: Add horizontal resize handle `<div>` with ARIA attributes
+  - [x] Step 2: Style the handle with hover state
+  - [x] Step 3: Add `useState` for `isDragging` and `useRef` for `dragOrigin`
+  - [x] Step 4: Add `onPointerDown` handler
+  - [x] Step 5: Add `onPointerMove` handler
+  - [x] Step 6: Add `onPointerUp` and `onPointerCancel` handlers
+  - [x] Step 7: Add `onResizeActiveChange` callback prop
 
 ### Wave 3
 - [ ] Slice 3: Dynamic CSS Variable and Transition Suppression
