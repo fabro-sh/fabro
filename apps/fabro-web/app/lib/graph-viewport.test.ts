@@ -62,11 +62,11 @@ describe("zoomAtPoint", () => {
       expect(after.pan.y).toBeCloseTo(0 * (1 - k) + k * 0);
     });
 
-    test("LR direction clamps to 300%", () => {
-      const view: GraphView = { zoom: 250, pan: { x: 0, y: 0 } };
+    test("LR direction clamps to 400%", () => {
+      const view: GraphView = { zoom: 350, pan: { x: 0, y: 0 } };
       const after = zoomAtPoint(view, 1.5, { x: 0, y: 0 }, "LR");
-      expect(after.zoom).toBe(300); // 250 * 1.5 = 375, clamped to 300
-      const k = 300 / 250; // 1.2
+      expect(after.zoom).toBe(400); // 350 * 1.5 = 525, clamped to 400
+      const k = 400 / 350;
       expect(after.pan.x).toBeCloseTo(0 * (1 - k) + k * 0);
       expect(after.pan.y).toBeCloseTo(0 * (1 - k) + k * 0);
     });
@@ -80,12 +80,12 @@ describe("zoomAtPoint", () => {
       expect(after.pan.y).toBeCloseTo(0);
     });
 
-    test("LR cursor-anchored zoom near 300% limit", () => {
-      const view: GraphView = { zoom: 280, pan: { x: 50, y: 40 } };
+    test("LR cursor-anchored zoom near 400% limit", () => {
+      const view: GraphView = { zoom: 380, pan: { x: 50, y: 40 } };
       const cursor = { x: 50, y: 40 };
       const after = zoomAtPoint(view, 1.2, cursor, "LR");
-      expect(after.zoom).toBe(300); // 280 * 1.2 = 336, clamped to 300
-      const k = 300 / 280;
+      expect(after.zoom).toBe(400); // 380 * 1.2 = 456, clamped to 400
+      const k = 400 / 380;
       expect(after.pan.x).toBeCloseTo(cursor.x * (1 - k) + k * view.pan.x);
       expect(after.pan.y).toBeCloseTo(cursor.y * (1 - k) + k * view.pan.y);
     });
@@ -97,8 +97,8 @@ describe("zoom constants", () => {
     expect(GRAPH_MAX_ZOOM_TB).toBe(200);
   });
 
-  test("LR max zoom is 300", () => {
-    expect(GRAPH_MAX_ZOOM_LR).toBe(300);
+  test("LR max zoom is 400", () => {
+    expect(GRAPH_MAX_ZOOM_LR).toBe(400);
   });
 });
 
@@ -128,24 +128,24 @@ describe("clampZoom with direction", () => {
   });
 
   describe("LR direction", () => {
-    test("clamps zoom above 300% to 300%", () => {
-      expect(clampZoom(350, "LR")).toBe(300);
+    test("clamps zoom above 400% to 400%", () => {
+      expect(clampZoom(450, "LR")).toBe(400);
     });
 
     test("preserves zoom at 250%", () => {
       expect(clampZoom(250, "LR")).toBe(250);
     });
 
-    test("preserves zoom exactly at 300%", () => {
-      expect(clampZoom(300, "LR")).toBe(300);
+    test("preserves zoom exactly at 400%", () => {
+      expect(clampZoom(400, "LR")).toBe(400);
     });
 
-    test("clamps zoom just over 300%", () => {
-      expect(clampZoom(300.1, "LR")).toBe(300);
+    test("clamps zoom just over 400%", () => {
+      expect(clampZoom(400.1, "LR")).toBe(400);
     });
 
-    test("preserves zoom just under 300%", () => {
-      expect(clampZoom(299.9, "LR")).toBe(299.9);
+    test("preserves zoom just under 400%", () => {
+      expect(clampZoom(399.9, "LR")).toBe(399.9);
     });
   });
 

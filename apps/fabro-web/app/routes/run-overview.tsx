@@ -70,13 +70,24 @@ export default function RunOverview() {
   const [view, setView] = useRememberedGraphView(id);
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const [hoveredNode, setHoveredNode] = useState<RunGraphNodeHover | null>(null);
+  // Separate zoom levels for TB and LR modes, persisted per direction
+  const zoomByDirection = useRef<{ TB: number; LR: number }>({ TB: view.zoom, LR: view.zoom });
 
-  // Clamp zoom when switching from LR to TB (if above 200%)
+  // Persist and restore zoom when switching direction
   useEffect(() => {
-    setView((v) => ({
-      ...v,
-      zoom: clampZoom(v.zoom, activeDirection),
-    }));
+    setView((v) => {
+      // Save current zoom for the old direction
+      const oldZoom = v.zoom;
+      // Get the zoom for the new direction, or use current if switching for first time
+      const newZoom = zoomByDirection.current[activeDirection] ?? oldZoom;
+      // Update the ref to track both
+      const otherDirection = activeDirection === "TB" ? "LR" : "TB";
+      zoomByDirection.current = {
+        [activeDirection]: newZoom,
+        [otherDirection]: oldZoom,
+      } as { TB: number; LR: number };
+      return { ...v, zoom: newZoom };
+    });
   }, [activeDirection, setView]);
 
   const openStage = useCallback(

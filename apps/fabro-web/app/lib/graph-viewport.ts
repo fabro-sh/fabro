@@ -8,7 +8,7 @@
 
 export const GRAPH_MIN_ZOOM = 25; // percent; the clamp bounds. Widen if you want more range.
 export const GRAPH_MAX_ZOOM_TB = 200; // top-down orientation
-export const GRAPH_MAX_ZOOM_LR = 300; // left-right orientation
+export const GRAPH_MAX_ZOOM_LR = 400; // left-right orientation
 export const GRAPH_MAX_ZOOM = GRAPH_MAX_ZOOM_TB; // backward compat alias, defaults to TB
 
 export type GraphView = { zoom: number; pan: { x: number; y: number } };
