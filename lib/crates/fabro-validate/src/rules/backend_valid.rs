@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use fabro_acp::{AcpCommandError, AcpProcessSpec};
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_types::AgentBackend;
 
-use crate::{Diagnostic, LintRule, Severity};
+use crate::{Diagnostic, LintRule, RelatedDiagnostic, Severity};
 
 pub(super) fn rule() -> Box<dyn LintRule> {
     Box::new(Rule)
@@ -34,8 +36,14 @@ impl LintRule for Rule {
                 }
             }
         }
+        diagnostics.extend(validate_acp_thread_process_consistency(self.name(), graph));
         diagnostics
     }
+}
+
+struct AcpThreadProcess {
+    node_id: String,
+    spec:    AcpProcessSpec,
 }
 
 fn unsupported_backend_diagnostic(rule: &str, node: &Node, backend: &str) -> Diagnostic {
@@ -111,6 +119,71 @@ fn validate_acp_node(rule: &str, node: &Node) -> Vec<Diagnostic> {
 
             ..Diagnostic::default()
         });
+    }
+
+    diagnostics
+}
+
+fn validate_acp_thread_process_consistency(rule: &str, graph: &Graph) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let graph_default_full = graph.default_fidelity() == Some("full");
+    let graph_default_thread = graph.default_thread();
+    let mut by_thread: HashMap<String, AcpThreadProcess> = HashMap::new();
+
+    for node in graph.nodes.values() {
+        if !matches!(node.agent_backend(), Some(Ok(AgentBackend::Acp))) {
+            continue;
+        }
+        if node.fidelity() != Some("full") && !graph_default_full {
+            continue;
+        }
+        let Some(thread_id) = node.thread_id().or(graph_default_thread) else {
+            continue;
+        };
+        let Ok(spec) = AcpProcessSpec::from_attrs(
+            node.legacy_acp_command_attr(),
+            node.acp_command_attr(),
+            node.acp_config_attr(),
+        ) else {
+            continue;
+        };
+
+        match by_thread.get(thread_id) {
+            Some(first) if first.spec != spec => diagnostics.push(Diagnostic {
+                rule: rule.to_string(),
+                severity: Severity::Error,
+                message: format!(
+                    "backend=\"acp\" full-fidelity nodes sharing thread_id \"{thread_id}\" must \
+                     use the same acp.command/acp.config"
+                ),
+                node_id: Some(node.id.clone()),
+                edge: None,
+                fix: Some(
+                    "Use the same ACP process configuration for that thread_id, or choose a \
+                     different thread_id"
+                        .to_string(),
+                ),
+                related: vec![RelatedDiagnostic {
+                    message:     format!(
+                        "First ACP process configuration for thread_id \"{thread_id}\" is on node \
+                         '{}'",
+                        first.node_id
+                    ),
+                    source_path: None,
+                    line:        None,
+                    column:      None,
+                }],
+
+                ..Diagnostic::default()
+            }),
+            Some(_) => {}
+            None => {
+                by_thread.insert(thread_id.to_string(), AcpThreadProcess {
+                    node_id: node.id.clone(),
+                    spec,
+                });
+            }
+        }
     }
 
     diagnostics
@@ -258,6 +331,67 @@ mod tests {
             AttrValue::String("agent-acp".to_string()),
         );
         graph.nodes.insert("work".to_string(), node);
+
+        assert!(Rule.apply(&graph).is_empty());
+    }
+
+    #[test]
+    fn backend_valid_rejects_mismatched_full_acp_thread_process_configs() {
+        let mut graph = minimal_graph();
+        for (id, command) in [
+            ("plan", "agent-acp --model a"),
+            ("code", "agent-acp --model b"),
+        ] {
+            let mut node = Node::new(id);
+            node.attrs
+                .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+            node.attrs.insert(
+                "acp.command".to_string(),
+                AttrValue::String(command.to_string()),
+            );
+            node.attrs.insert(
+                "fidelity".to_string(),
+                AttrValue::String("full".to_string()),
+            );
+            node.attrs.insert(
+                "thread_id".to_string(),
+                AttrValue::String("shared".to_string()),
+            );
+            graph.nodes.insert(id.to_string(), node);
+        }
+
+        let diagnostics = Rule.apply(&graph);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("sharing thread_id \"shared\" must use the same acp.command/acp.config")
+        );
+        assert_eq!(diagnostics[0].related.len(), 1);
+    }
+
+    #[test]
+    fn backend_valid_accepts_matching_full_acp_thread_process_configs() {
+        let mut graph = minimal_graph();
+        for id in ["plan", "code"] {
+            let mut node = Node::new(id);
+            node.attrs
+                .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+            node.attrs.insert(
+                "acp.command".to_string(),
+                AttrValue::String("agent-acp --model a".to_string()),
+            );
+            node.attrs.insert(
+                "fidelity".to_string(),
+                AttrValue::String("full".to_string()),
+            );
+            node.attrs.insert(
+                "thread_id".to_string(),
+                AttrValue::String("shared".to_string()),
+            );
+            graph.nodes.insert(id.to_string(), node);
+        }
 
         assert!(Rule.apply(&graph).is_empty());
     }

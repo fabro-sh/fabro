@@ -36,6 +36,9 @@ pub enum AcpError {
     #[error("ACP turn was cancelled")]
     Cancelled,
 
+    #[error("ACP session closed")]
+    SessionClosed,
+
     #[error("ACP turn timed out")]
     TimedOut {
         exec_output_tail: Option<ExecOutputTail>,

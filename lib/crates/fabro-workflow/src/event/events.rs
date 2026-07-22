@@ -697,6 +697,8 @@ pub enum Event {
         command:     String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         config_name: Option<String>,
+        #[serde(default)]
+        reused:      bool,
     },
     AgentAcpCompleted {
         node_id:     String,
@@ -1506,9 +1508,10 @@ impl Event {
                 node_id,
                 command,
                 config_name,
+                reused,
                 ..
             } => {
-                debug!(node_id, command, ?config_name, "Agent ACP started");
+                debug!(node_id, command, ?config_name, reused, "Agent ACP started");
             }
             Self::AgentAcpCompleted {
                 node_id,

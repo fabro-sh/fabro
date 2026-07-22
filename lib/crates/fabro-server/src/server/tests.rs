@@ -11883,6 +11883,7 @@ async fn steer_with_active_acp_session_forwards_to_worker() {
         visit:       1,
         command:     "python fake_agent.py".to_string(),
         config_name: None,
+        reused:      false,
     });
     update_live_run_from_event(&state, run_id, &started);
     let activated =
@@ -11983,6 +11984,7 @@ async fn active_acp_steerable_marker_clears_on_terminal_paths() {
             visit:       1,
             command:     "python fake_agent.py".to_string(),
             config_name: None,
+            reused:      false,
         });
         update_live_run_from_event(&state, run_id, &started);
         let activated =

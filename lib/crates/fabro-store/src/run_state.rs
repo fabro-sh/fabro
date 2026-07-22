@@ -2084,6 +2084,7 @@ mod tests {
                     visit:       1,
                     command:     "python fake_agent.py".to_string(),
                     config_name: Some("fake".to_string()),
+                    reused:      false,
                 }),
                 stage_id.clone(),
             ))
@@ -2106,6 +2107,7 @@ mod tests {
                     visit:       1,
                     command:     "python fake_agent.py".to_string(),
                     config_name: Some("fake".to_string()),
+                    reused:      false,
                 }),
                 stage_id.clone(),
             ))
