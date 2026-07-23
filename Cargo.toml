@@ -64,6 +64,18 @@ git2 = { version = "0.20", default-features = false, features = ["vendored-libgi
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"
+# Opt-in OTLP/HTTP export of fabro's existing `tracing` spans (see
+# fabro-cli/src/otel.rs). Additive and inert unless an OTLP endpoint env is set.
+# Uses the BLOCKING OTLP client (the crate's own default) so the SDK batch
+# processor's dedicated export thread needs no async runtime. NOTE:
+# opentelemetry-otlp's `http-proto`/`http-json` features enable `metrics`
+# unconditionally, so the trace+metrics SDK is compiled regardless — a trace-only
+# reduction is not achievable while using the HTTP exporter. `opentelemetry-otlp`
+# keeps `default-features = false` only to drop its unused OTLP logs exporter.
+opentelemetry = "0.30"
+opentelemetry_sdk = "0.30"
+opentelemetry-otlp = { version = "0.30", default-features = false, features = ["trace", "http-proto", "http-json", "reqwest-blocking-client"] }
+tracing-opentelemetry = "0.31"
 rmcp = { version = "1.4", default-features = false }
 walkdir = "2"
 regex = "1"

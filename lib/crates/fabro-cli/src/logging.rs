@@ -22,6 +22,8 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
 
+use crate::otel;
+
 const LOG_RETENTION_DAYS: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -362,6 +364,8 @@ where
                 .with_target(true)
                 .with_ansi(false),
         )
+        // Additive OTLP export: no-op unless an OTLP endpoint env is set.
+        .with(otel::otel_layer())
         .init();
 }
 
@@ -384,6 +388,8 @@ where
                 .with_ansi(ansi)
                 .event_format(TtyLogFormat::new(ansi)),
         )
+        // Additive OTLP export: no-op unless an OTLP endpoint env is set.
+        .with(otel::otel_layer())
         .init();
 }
 
@@ -409,6 +415,8 @@ fn init_worker_subscriber<ServerWriter, RunWriter>(
                 .with_target(true)
                 .with_ansi(false),
         )
+        // Additive OTLP export: no-op unless an OTLP endpoint env is set.
+        .with(otel::otel_layer())
         .init();
 }
 
@@ -441,6 +449,8 @@ fn init_worker_stdout_subscriber<ServerWriter, RunWriter>(
                 .with_target(true)
                 .with_ansi(false),
         )
+        // Additive OTLP export: no-op unless an OTLP endpoint env is set.
+        .with(otel::otel_layer())
         .init();
 }
 

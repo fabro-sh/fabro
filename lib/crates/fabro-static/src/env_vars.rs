@@ -140,6 +140,15 @@ impl EnvVars {
     pub const TWIN_OPENAI_REQUIRE_AUTH: &'static str = "TWIN_OPENAI_REQUIRE_AUTH";
     pub const USER: &'static str = "USER";
     pub const ZDOTDIR: &'static str = "ZDOTDIR";
+
+    // Observability / OTLP export
+    pub const OTEL_EXPORTER_OTLP_ENDPOINT: &'static str = "OTEL_EXPORTER_OTLP_ENDPOINT";
+    pub const OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: &'static str =
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT";
+    pub const OTEL_EXPORTER_OTLP_PROTOCOL: &'static str = "OTEL_EXPORTER_OTLP_PROTOCOL";
+    pub const OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: &'static str =
+        "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL";
+    pub const OTEL_SERVICE_NAME: &'static str = "OTEL_SERVICE_NAME";
 }
 
 #[cfg(test)]
@@ -277,6 +286,11 @@ mod tests {
             EnvVars::TWIN_OPENAI_REQUIRE_AUTH,
             EnvVars::USER,
             EnvVars::ZDOTDIR,
+            EnvVars::OTEL_EXPORTER_OTLP_ENDPOINT,
+            EnvVars::OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+            EnvVars::OTEL_EXPORTER_OTLP_PROTOCOL,
+            EnvVars::OTEL_EXPORTER_OTLP_TRACES_PROTOCOL,
+            EnvVars::OTEL_SERVICE_NAME,
         ];
 
         for value in values {
