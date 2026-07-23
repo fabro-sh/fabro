@@ -17,6 +17,8 @@ pub enum SandboxProviderKind {
     Docker,
     /// Run tools inside a Daytona cloud sandbox.
     Daytona,
+    /// Run tools inside a Forkd Firecracker microVM sandbox.
+    Forkd,
 }
 
 impl SandboxProviderKind {
@@ -31,7 +33,7 @@ impl SandboxProviderKind {
     /// True for providers that clone repository sources into their workspace.
     #[must_use]
     pub fn is_clone_based(&self) -> bool {
-        matches!(self, Self::Docker | Self::Daytona)
+        matches!(self, Self::Docker | Self::Daytona | Self::Forkd)
     }
 
     /// Coerce non-local providers to `Local` under dry-run; otherwise

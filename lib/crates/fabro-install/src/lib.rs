@@ -492,6 +492,8 @@ fn write_sandbox_provider_policy(
             SandboxProviderKind::Local => allow_local,
             SandboxProviderKind::Docker => selection == InstallSandboxSelection::Docker,
             SandboxProviderKind::Daytona => selection == InstallSandboxSelection::Daytona,
+            // Forkd is configured via settings/env, not the install wizard.
+            SandboxProviderKind::Forkd => false,
         };
         let entry = ensure_table(providers, &provider.to_string())?;
         entry.insert("enabled".to_string(), toml::Value::Boolean(enabled));

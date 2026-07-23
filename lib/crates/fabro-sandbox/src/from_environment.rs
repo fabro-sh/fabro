@@ -14,10 +14,16 @@ use fabro_types::settings::run::{EnvironmentNetworkMode, RunEnvironmentSettings}
 use crate::config::{
     DaytonaNetwork, DaytonaSnapshotSettings, DockerfileSource as SandboxDockerfileSource,
 };
+#[cfg(feature = "forkd")]
+use crate::config::{ForkdNetwork, ForkdSettings, ForkdSnapshotSettings};
 #[cfg(feature = "daytona")]
 use crate::daytona::DaytonaConfig;
 #[cfg(feature = "docker")]
 use crate::docker::DockerSandboxOptions;
+#[cfg(feature = "forkd")]
+use crate::forkd::DEFAULT_SNAPSHOT_TAG;
+#[cfg(feature = "forkd")]
+use crate::forkd::ForkdConfig;
 
 #[cfg(feature = "daytona")]
 #[must_use]
@@ -133,6 +139,77 @@ fn docker_config_from_environment_env(
     }
 }
 
+/// Build a [`ForkdConfig`] from the current run environment settings and
+/// process environment variables.
+///
+/// - `FORKD_URL`   — controller base URL (default: `http://127.0.0.1:8889`)
+/// - `FORKD_TOKEN` — bearer token       (default: `forkd-local-token`)
+#[cfg(feature = "forkd")]
+#[must_use]
+pub fn forkd_config_from_environment(
+    settings: &RunEnvironmentSettings,
+    skip_clone: bool,
+) -> ForkdConfig {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Forkd config resolves server-level credentials from the process environment."
+    )]
+    let forkd_url =
+        std::env::var("FORKD_URL").unwrap_or_else(|_| "http://127.0.0.1:8889".to_string());
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Forkd config resolves server-level credentials from the process environment."
+    )]
+    let forkd_token =
+        std::env::var("FORKD_TOKEN").unwrap_or_else(|_| "forkd-local-token".to_string());
+
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "environment memory limits are configured well within u32 MiB range"
+    )]
+    let mem_mib = settings
+        .resources
+        .memory
+        .map(|size| (size.as_bytes() / (1024 * 1024)) as u32);
+
+    let snapshot = ForkdSnapshotSettings {
+        image: settings.image.docker.clone(),
+        kernel: None, // resolved from FORKD_KERNEL by ForkdConfig::effective_kernel()
+        mem_mib,
+        extra_packages: None,
+    };
+
+    let network = match settings.network.mode {
+        EnvironmentNetworkMode::Block => ForkdNetwork::Block,
+        EnvironmentNetworkMode::AllowAll => ForkdNetwork::AllowAll,
+        EnvironmentNetworkMode::CidrAllowList => {
+            ForkdNetwork::AllowList(settings.network.allow.clone())
+        }
+    };
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Forkd config resolves snapshot tag from the process environment."
+    )]
+    let snapshot_tag =
+        std::env::var("FORKD_SNAPSHOT_TAG").unwrap_or_else(|_| DEFAULT_SNAPSHOT_TAG.to_string());
+
+    ForkdConfig {
+        forkd_url,
+        forkd_token,
+        settings: ForkdSettings {
+            snapshot_tag,
+            snapshot: Some(snapshot),
+            network: Some(network),
+            skip_clone,
+            auto_stop_minutes: settings
+                .lifecycle
+                .auto_stop
+                .map(|d| duration_to_minutes_i32(d.as_std())),
+        },
+    }
+}
+
 pub fn local_working_directory_from_environment(
     settings: &RunEnvironmentSettings,
     source_directory: Option<&Path>,
@@ -166,7 +243,7 @@ fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-#[cfg(feature = "daytona")]
+#[cfg(any(feature = "daytona", feature = "forkd"))]
 fn duration_to_minutes_i32(duration: std::time::Duration) -> i32 {
     let minutes = duration.as_secs() / 60;
     i32::try_from(minutes).unwrap_or(i32::MAX)

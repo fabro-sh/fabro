@@ -12,6 +12,8 @@ use crate::SandboxEventCallback;
 use crate::daytona::DaytonaSandbox;
 #[cfg(feature = "docker")]
 use crate::docker::DockerSandbox;
+#[cfg(feature = "forkd")]
+use crate::forkd::{ForkdConfig, ForkdSandbox};
 use crate::local::LocalSandbox;
 
 /// Reconnect to a sandbox from a saved record.
@@ -106,5 +108,20 @@ pub async fn reconnect_for_run_with_callback(
         }
         #[cfg(not(feature = "daytona"))]
         SandboxProviderKind::Daytona => bail!("Daytona sandbox support is not enabled"),
+        #[cfg(feature = "forkd")]
+        SandboxProviderKind::Forkd => {
+            let mut sandbox = ForkdSandbox::new(
+                ForkdConfig::from_env(),
+                run_id,
+                runtime.clone_origin_url.clone(),
+                runtime.clone_branch.clone(),
+            );
+            if let Some(callback) = event_callback {
+                sandbox.set_event_callback(callback);
+            }
+            Ok(Box::new(sandbox))
+        }
+        #[cfg(not(feature = "forkd"))]
+        SandboxProviderKind::Forkd => bail!("Forkd sandbox support is not enabled"),
     }
 }

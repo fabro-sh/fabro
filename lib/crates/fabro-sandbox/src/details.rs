@@ -41,6 +41,13 @@ pub async fn sandbox_details(
             "Sandbox provider '{}' has no details implementation",
             record.provider
         )),
+        #[cfg(feature = "forkd")]
+        SandboxProviderKind::Forkd => Ok(forkd::forkd_details(record)),
+        #[cfg(not(feature = "forkd"))]
+        SandboxProviderKind::Forkd => Err(anyhow::anyhow!(
+            "Sandbox provider '{}' has no details implementation",
+            record.provider
+        )),
     }
 }
 
@@ -802,6 +809,57 @@ pub(crate) mod daytona {
             let network = daytona_network(false, None);
             assert_eq!(network.egress, SandboxNetworkPolicy::open());
             assert_eq!(network.ingress, SandboxNetworkPolicy::blocked());
+        }
+    }
+}
+
+#[cfg(feature = "forkd")]
+pub(crate) mod forkd {
+    use std::collections::BTreeMap;
+
+    use fabro_types::{
+        RunSandboxInstance, SandboxInfo, SandboxNetwork, SandboxProviderKind, SandboxResources,
+        SandboxState, SandboxTimestamps,
+    };
+
+    use crate::forkd::WORKING_DIRECTORY;
+
+    /// Build a minimal [`SandboxInfo`] for a named forkd VM.
+    ///
+    /// The forkd REST API does not expose resource or timestamp metadata in its
+    /// VM list response, so non-identity fields default to "unknown".
+    pub(crate) fn forkd_info_from_name(name: &str) -> SandboxInfo {
+        SandboxInfo {
+            provider:          SandboxProviderKind::Forkd,
+            id:                name.to_string(),
+            display_name:      Some(name.to_string()),
+            state:             SandboxState::Running,
+            native_state:      None,
+            image:             None,
+            snapshot:          None,
+            region:            None,
+            web_url:           None,
+            working_directory: Some(WORKING_DIRECTORY.to_string()),
+            resources:         SandboxResources::default(),
+            network:           SandboxNetwork::unknown(),
+            labels:            BTreeMap::new(),
+            timestamps:        SandboxTimestamps::default(),
+        }
+    }
+
+    /// Build minimal `SandboxDetails` for a forkd sandbox from its persisted
+    /// runtime record.
+    pub(super) fn forkd_details(record: &RunSandboxInstance) -> fabro_types::SandboxDetails {
+        fabro_types::SandboxDetails {
+            sandbox:      record.clone(),
+            state:        SandboxState::Running,
+            native_state: None,
+            region:       None,
+            web_url:      None,
+            resources:    SandboxResources::default(),
+            network:      SandboxNetwork::unknown(),
+            labels:       BTreeMap::new(),
+            timestamps:   SandboxTimestamps::default(),
         }
     }
 }

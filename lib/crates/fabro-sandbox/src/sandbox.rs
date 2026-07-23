@@ -1052,8 +1052,8 @@ pub trait Sandbox: Send + Sync {
 }
 
 /// Resolve a path: relative paths are prepended with the working directory.
-/// Used by the Daytona sandbox implementation.
-#[cfg(any(feature = "docker", feature = "daytona"))]
+/// Used by the Daytona and Forkd sandbox implementations.
+#[cfg(any(feature = "docker", feature = "daytona", feature = "forkd"))]
 pub(crate) fn resolve_path(path: &str, working_dir: &str) -> String {
     if std::path::Path::new(path).is_absolute() {
         path.to_string()

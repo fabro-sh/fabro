@@ -9,6 +9,8 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{Catalog, FallbackTarget, ProviderId};
 use fabro_sandbox::daytona::DaytonaConfig;
+#[cfg(feature = "forkd")]
+use fabro_sandbox::from_environment::forkd_config_from_environment;
 use fabro_sandbox::from_environment::{
     daytona_config_from_environment, docker_config_from_environment_with_secrets,
     local_working_directory_from_environment,
@@ -439,6 +441,17 @@ impl RunSession {
                     api_key,
                 }
             }
+            #[cfg(feature = "forkd")]
+            SandboxProviderKind::Forkd => SandboxSpec::Forkd {
+                config:           Box::new(resolve_forkd_config(resolved)),
+                run_id:           Some(record.run_id),
+                clone_origin_url: record.repo_origin_url().map(str::to_string),
+                clone_branch:     record.base_branch().map(str::to_string),
+            },
+            #[cfg(not(feature = "forkd"))]
+            SandboxProviderKind::Forkd => {
+                return Err(Error::engine("Forkd sandbox support is not enabled"));
+            }
         };
 
         let toml_env = resolved
@@ -600,6 +613,11 @@ fn resolve_docker_config(
         secrets_lookup,
     )
     .map_err(|err| Error::engine_with_source("failed to resolve Docker environment config", err))
+}
+
+#[cfg(feature = "forkd")]
+fn resolve_forkd_config(settings: &ResolvedRunSettings) -> fabro_sandbox::ForkdConfig {
+    forkd_config_from_environment(&settings.environment, !settings.clone.enabled)
 }
 
 fn resolve_start_llm(

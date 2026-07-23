@@ -11,12 +11,14 @@ use fabro_github::GitHubCredentials;
 )]
 use fabro_types::{RunId, RunSandboxInstance, RunSandboxRuntime, SandboxProviderKind};
 
-#[cfg(any(feature = "docker", feature = "daytona"))]
+#[cfg(any(feature = "docker", feature = "daytona", feature = "forkd"))]
 use crate::clone_source;
 #[cfg(feature = "daytona")]
 use crate::daytona::{self, DaytonaConfig, DaytonaSandbox};
 #[cfg(feature = "docker")]
 use crate::docker::{self, DockerSandbox, DockerSandboxOptions};
+#[cfg(feature = "forkd")]
+use crate::forkd::{self, ForkdConfig, ForkdSandbox};
 use crate::local::LocalSandbox;
 use crate::{Sandbox, SandboxEventCallback};
 
@@ -42,6 +44,13 @@ pub enum SandboxSpec {
         clone_branch:     Option<String>,
         api_key:          Option<String>,
     },
+    #[cfg(feature = "forkd")]
+    Forkd {
+        config:           Box<ForkdConfig>,
+        run_id:           Option<RunId>,
+        clone_origin_url: Option<String>,
+        clone_branch:     Option<String>,
+    },
 }
 
 impl SandboxSpec {
@@ -52,6 +61,8 @@ impl SandboxSpec {
             Self::Docker { .. } => SandboxProviderKind::Docker,
             #[cfg(feature = "daytona")]
             Self::Daytona { .. } => SandboxProviderKind::Daytona,
+            #[cfg(feature = "forkd")]
+            Self::Forkd { .. } => SandboxProviderKind::Forkd,
         }
     }
 
@@ -60,6 +71,7 @@ impl SandboxSpec {
             SandboxProviderKind::Local => "local",
             SandboxProviderKind::Docker => "docker",
             SandboxProviderKind::Daytona => "daytona",
+            SandboxProviderKind::Forkd => "forkd",
         }
     }
 
@@ -160,6 +172,46 @@ impl SandboxSpec {
                     },
                 }
             }
+            #[cfg(feature = "forkd")]
+            Self::Forkd {
+                config,
+                clone_origin_url,
+                clone_branch,
+                ..
+            } => {
+                let repo_cloned = clone_source::repo_cloned_for_record(
+                    config.settings.skip_clone,
+                    clone_origin_url.as_deref(),
+                );
+                let layout = runtime_layout_metadata(
+                    repo_cloned,
+                    clone_origin_url.as_deref(),
+                    forkd::WORKING_DIRECTORY,
+                    forkd::REPOS_ROOT,
+                );
+                RunSandboxInstance {
+                    provider: self.provider(),
+                    image:    None,
+                    snapshot: Some(config.settings.snapshot_tag.clone()),
+                    runtime:  RunSandboxRuntime {
+                        id,
+                        working_directory: working_directory.clone(),
+                        repo_cloned,
+                        clone_origin_url: clone_source::clean_clone_origin_for_record(
+                            clone_origin_url.as_deref(),
+                        ),
+                        clone_branch: clone_branch.clone(),
+                        workspace_root: Some(forkd::WORKING_DIRECTORY.to_string()),
+                        repos_root: Some(forkd::REPOS_ROOT.to_string()),
+                        primary_repo_path: layout
+                            .as_ref()
+                            .map(|layout| layout.primary_repo_path.clone()),
+                        primary_repo_link: layout
+                            .as_ref()
+                            .map(|layout| layout.primary_repo_link.clone()),
+                    },
+                }
+            }
             _ => RunSandboxInstance {
                 provider: self.provider(),
                 image:    None,
@@ -235,6 +287,24 @@ impl SandboxSpec {
                 )
                 .await
                 .map_err(anyhow::Error::new)?;
+                if let Some(callback) = event_callback {
+                    sandbox.set_event_callback(callback);
+                }
+                Ok(Arc::new(sandbox))
+            }
+            #[cfg(feature = "forkd")]
+            Self::Forkd {
+                config,
+                run_id,
+                clone_origin_url,
+                clone_branch,
+            } => {
+                let mut sandbox = ForkdSandbox::new(
+                    config.as_ref().clone(),
+                    *run_id,
+                    clone_origin_url.clone(),
+                    clone_branch.clone(),
+                );
                 if let Some(callback) = event_callback {
                     sandbox.set_event_callback(callback);
                 }

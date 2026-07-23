@@ -242,6 +242,7 @@ fn validate_provider_capabilities(
                 });
             }
         }
-        EnvironmentProvider::Daytona => {}
+        // Daytona and Forkd are full VMs/cloud sandboxes and can enforce any network mode.
+        EnvironmentProvider::Daytona | EnvironmentProvider::Forkd => {}
     }
 }

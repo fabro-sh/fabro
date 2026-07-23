@@ -11,6 +11,7 @@ default = ["local"]
 local = []
 docker = ["dep:bollard", "dep:tar", "dep:fabro-github"]
 daytona = ["dep:daytona-sdk", "dep:daytona-api-client", "dep:git2", "dep:fabro-github", "dep:fabro-config", "dep:fabro-http", "dep:reqwest-middleware", "dep:rand", "dep:tokio-tungstenite", "dep:futures-util", "dep:rustls"]
+forkd = ["dep:reqwest", "dep:rand", "dep:fabro-http"]
 test-support = []
 
 [lib]
@@ -61,6 +62,7 @@ daytona-sdk = { workspace = true, optional = true }
 daytona-api-client = { workspace = true, optional = true }
 git2 = { workspace = true, optional = true }
 fabro-http = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["json"], optional = true }
 reqwest-middleware = { version = "0.5", features = ["json", "multipart", "form", "query"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }

@@ -446,6 +446,24 @@ async fn insert_minimal_environment(
 }
 
 #[tokio::test]
+async fn environments_schema_accepts_forkd_provider() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let database = fabro_db::Database::connect(dir.path().join("fabro.sqlite3")).await?;
+    database.migrate().await?;
+
+    insert_minimal_environment(database.pool(), "valid-forkd", "forkd", "allow_all").await?;
+
+    let result =
+        insert_minimal_environment(database.pool(), "bad-provider", "bogus", "allow_all").await;
+    assert!(
+        result.is_err(),
+        "provider='bogus' should still be rejected after the forkd CHECK migration"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn variables_schema_enforces_env_style_names() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let database = fabro_db::Database::connect(dir.path().join("fabro.sqlite3")).await?;

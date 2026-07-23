@@ -1,6 +1,6 @@
 pub mod config;
 pub mod error;
-#[cfg(any(feature = "docker", feature = "daytona"))]
+#[cfg(any(feature = "docker", feature = "daytona", feature = "forkd"))]
 pub mod from_environment;
 mod glob_match;
 pub mod provider;
@@ -34,6 +34,9 @@ pub mod docker;
 #[cfg(feature = "daytona")]
 pub mod daytona;
 
+#[cfg(feature = "forkd")]
+pub mod forkd;
+
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
@@ -42,11 +45,15 @@ pub use details::sandbox_details;
 pub use docker::{DockerSandbox, DockerSandboxOptions};
 pub use error::{Error, Result, default_redacted_output_tail, display_for_log};
 pub use fabro_types::{RunSandboxInstance, SandboxProviderKind};
+#[cfg(feature = "forkd")]
+pub use forkd::{ForkdConfig, ForkdSandbox};
 pub use local::LocalSandbox;
 #[cfg(feature = "daytona")]
 pub use provider::daytona::DaytonaSandboxProvider;
 #[cfg(feature = "docker")]
 pub use provider::docker::DockerSandboxProvider;
+#[cfg(feature = "forkd")]
+pub use provider::forkd::ForkdSandboxProvider;
 pub use provider::{
     LocalSandboxProvider, SandboxCreateSpec, SandboxLookupError, SandboxProvider,
     SandboxProviderRegistry,

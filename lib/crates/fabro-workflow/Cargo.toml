@@ -16,6 +16,9 @@ doctest = false
 [lints]
 workspace = true
 
+[features]
+forkd = ["fabro-sandbox/forkd"]
+
 [dependencies]
 anyhow.workspace = true
 fabro-auth = { path = "../fabro-auth" }

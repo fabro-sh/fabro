@@ -940,6 +940,7 @@ pub enum EnvironmentProvider {
     Local,
     Docker,
     Daytona,
+    Forkd,
 }
 
 impl EnvironmentProvider {
@@ -950,7 +951,9 @@ impl EnvironmentProvider {
 
     #[must_use]
     pub fn is_clone_based(self) -> bool {
-        matches!(self, Self::Docker | Self::Daytona)
+        // Forkd provisions an isolated remote microVM, so the workspace is
+        // cloned into it like the Docker/Daytona clone-based providers.
+        matches!(self, Self::Docker | Self::Daytona | Self::Forkd)
     }
 }
 
@@ -960,6 +963,7 @@ impl From<EnvironmentProvider> for crate::SandboxProviderKind {
             EnvironmentProvider::Local => Self::Local,
             EnvironmentProvider::Docker => Self::Docker,
             EnvironmentProvider::Daytona => Self::Daytona,
+            EnvironmentProvider::Forkd => Self::Forkd,
         }
     }
 }

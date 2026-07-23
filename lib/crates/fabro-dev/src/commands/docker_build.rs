@@ -22,6 +22,9 @@ pub(crate) struct DockerBuildArgs {
     /// Print the Docker commands instead of running them.
     #[arg(long)]
     dry_run:      bool,
+    /// Comma-separated cargo features to enable on fabro-cli (e.g. `forkd`).
+    #[arg(long)]
+    features:     Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -68,6 +71,7 @@ struct DockerBuildPlan {
     compile_only:   bool,
     tag:            String,
     workspace_root: PathBuf,
+    features:       Option<String>,
 }
 
 #[expect(
@@ -80,6 +84,7 @@ pub(crate) fn docker_build(args: DockerBuildArgs) -> Result<()> {
         compile_only:   args.compile_only,
         tag:            args.tag,
         workspace_root: workspace_root(),
+        features:       args.features,
     };
 
     if args.dry_run {
@@ -182,7 +187,7 @@ impl DockerBuildPlan {
             .arg("rust:1-bookworm")
             .arg("bash")
             .arg("-c")
-            .arg(build_script(target, zig_arch))
+            .arg(build_script(target, zig_arch, self.features.as_deref()))
     }
 
     fn extract_command(&self) -> PlannedCommand {
@@ -224,7 +229,8 @@ impl DockerBuildPlan {
     }
 }
 
-fn build_script(target: &str, zig_arch: &str) -> String {
+fn build_script(target: &str, zig_arch: &str, features: Option<&str>) -> String {
+    let features_flag = features.map_or_else(String::new, |list| format!(" --features {list}"));
     format!(
         "set -e; \
          apt-get update -qq && apt-get install -y -qq pkg-config perl make cmake xz-utils curl >/dev/null; \
@@ -236,6 +242,6 @@ fn build_script(target: &str, zig_arch: &str) -> String {
          cargo install --locked --root /opt/cargo-tools cargo-zigbuild; \
          fi; \
          rustup target add {target}; \
-         cargo zigbuild --locked --release -p fabro-cli --target {target}"
+         cargo zigbuild --locked --release -p fabro-cli --target {target}{features_flag}"
     )
 }

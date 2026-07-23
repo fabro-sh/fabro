@@ -48,6 +48,9 @@ pub fn seeded_catalog_layer() -> MergeMap<EnvironmentLayer> {
     let local: EnvironmentLayer = toml::from_str(LOCAL_ENVIRONMENT_TOML)
         .expect("built-in local environment seed should parse");
     catalog.insert(RESERVED_LOCAL_ID.to_string(), local);
+    let forkd: EnvironmentLayer = toml::from_str(FORKD_DEFAULT_ENVIRONMENT_TOML)
+        .expect("built-in forkd environment seed should parse");
+    catalog.insert("forkd".to_string(), forkd);
     MergeMap::from(catalog)
 }
 
@@ -55,6 +58,17 @@ const DEFAULT_ENVIRONMENT_TOML: &str = r#"provider = "docker"
 
 [image]
 docker = "buildpack-deps:noble"
+
+[resources]
+cpu = 2
+memory = "4GB"
+
+[lifecycle]
+preserve = false
+stop_on_terminal = true
+"#;
+
+const FORKD_DEFAULT_ENVIRONMENT_TOML: &str = r#"provider = "forkd"
 
 [resources]
 cpu = 2
@@ -608,6 +622,7 @@ pub async fn seed_default_environment(
     let content = match provider {
         EnvironmentProvider::Docker => DEFAULT_ENVIRONMENT_TOML,
         EnvironmentProvider::Daytona => DAYTONA_DEFAULT_ENVIRONMENT_TOML,
+        EnvironmentProvider::Forkd => FORKD_DEFAULT_ENVIRONMENT_TOML,
         EnvironmentProvider::Local => LOCAL_ENVIRONMENT_TOML,
     };
     let layer: EnvironmentLayer = toml::from_str(content).map_err(|source| {

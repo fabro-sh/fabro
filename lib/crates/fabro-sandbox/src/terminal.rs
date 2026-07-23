@@ -103,6 +103,9 @@ pub async fn open_terminal_for_run(
         SandboxProviderKind::Docker => Err(crate::Error::message(
             "Docker sandbox support is not enabled",
         )),
+        SandboxProviderKind::Forkd => Err(crate::Error::message(
+            "Forkd sandboxes do not support embedded terminals",
+        )),
         SandboxProviderKind::Local => Err(crate::Error::message(
             "Local sandboxes do not support embedded terminals",
         )),

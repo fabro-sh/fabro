@@ -13,6 +13,7 @@ categories = ["api-bindings"]
 [features]
 default = ["docker"]
 docker = ["fabro-sandbox/docker"]
+forkd = ["fabro-sandbox/forkd"]
 quarantine = []
 
 [lib]

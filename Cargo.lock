@@ -2964,6 +2964,7 @@ dependencies = [
  "hmac 0.12.1",
  "httpmock",
  "rand 0.9.4",
+ "reqwest 0.13.2",
  "reqwest-middleware",
  "rustls",
  "serde",
