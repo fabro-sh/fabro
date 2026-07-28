@@ -8,6 +8,7 @@ pub trait Transform {
     fn apply(&self, graph: Graph) -> Result<Graph, Error>;
 }
 
+mod acp_defaults;
 mod file_inlining;
 mod import;
 mod importable_field;
@@ -17,6 +18,7 @@ pub mod stylesheet;
 mod stylesheet_application;
 pub mod variable_expansion;
 
+pub use acp_defaults::AcpDefaultsTransform;
 pub use file_inlining::FileInliningTransform;
 pub use import::ImportTransform;
 pub use model_resolution::ModelResolutionTransform;

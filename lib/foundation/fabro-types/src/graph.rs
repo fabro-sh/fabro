@@ -450,6 +450,18 @@ impl Graph {
             .unwrap_or(0)
     }
 
+    /// Graph-level `acp.command`, the default for ACP nodes that set neither
+    /// ACP process attribute themselves.
+    pub fn acp_command_attr(&self) -> Option<&str> {
+        self.attrs.get("acp.command").and_then(AttrValue::as_str)
+    }
+
+    /// Graph-level `acp.config`, the default for ACP nodes that set neither
+    /// ACP process attribute themselves.
+    pub fn acp_config_attr(&self) -> Option<&str> {
+        self.attrs.get("acp.config").and_then(AttrValue::as_str)
+    }
+
     /// Graph-level `retry_target`.
     pub fn retry_target(&self) -> Option<&str> {
         self.attrs.get("retry_target").and_then(AttrValue::as_str)

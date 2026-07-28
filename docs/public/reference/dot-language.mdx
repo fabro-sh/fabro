@@ -79,6 +79,8 @@ rankdir=LR
 | `default_max_retries` | Integer | Default retry count for all nodes (default: 0) |
 | `retry_target` | String | Default node ID to jump to on retry |
 | `fallback_retry_target` | String | Fallback retry target if primary target fails |
+| `acp.command` | String | Default shell command for every `backend="acp"` node that sets neither ACP attribute itself. Mutually exclusive with `acp.config` |
+| `acp.config` | String | Default JSON stdio ACP config for every `backend="acp"` node that sets neither ACP attribute itself. Mutually exclusive with `acp.command` |
 | `default_fidelity` | String | Default [fidelity level](/execution/context) for all nodes |
 | `default_thread` | String | Default thread ID for all nodes |
 | `max_node_visits` | Integer | Max visits per node across the run (0 = unlimited) |
@@ -209,8 +211,10 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `output_schema` | String | Optional structured output validation. Use `routing` for Fabro's built-in routing directive schema, `@path/to/schema.json` for a JSON Schema file, or an inline JSON Schema object string. Supported on agent, prompt, and command nodes. |
 | `output_retries` | Integer | Corrective structured-output turns inside the same prompt conversation or agent session. Default `2`; `0` validates once and fails without repair; negative values are treated as `0`. Separate from `max_retries`. |
 | `backend` | String | Agent execution backend: `api` (default) or `acp`. `api` runs Fabro's tool loop through provider APIs; `acp` runs an Agent Client Protocol stdio agent inside the active sandbox. Prompt nodes are API-only. See [Agents — Backends](/core-concepts/agents#backends). |
-| `acp.command` | String | Shell command for nodes with `backend="acp"`. Mutually exclusive with `acp.config`. The value is always parsed as a command string, not JSON. |
-| `acp.config` | String | JSON stdio ACP config for nodes with `backend="acp"`. Mutually exclusive with `acp.command`. |
+| `acp.command` | String | Shell command for nodes with `backend="acp"`. Mutually exclusive with `acp.config`. The value is always parsed as a command string, not JSON. Falls back to the graph attribute of the same name. |
+| `acp.config` | String | JSON stdio ACP config for nodes with `backend="acp"`. Mutually exclusive with `acp.command`. Falls back to the graph attribute of the same name. |
+
+Setting either attribute on a node suppresses *both* graph-level defaults, so a node can name its own process without inheriting a conflicting one. See [Agents — Sharing one agent across nodes](/core-concepts/agents#sharing-one-agent-across-nodes).
 
 #### Structured output validation
 

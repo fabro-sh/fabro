@@ -88,6 +88,63 @@ fn acp_backend_workflow() {
 }
 
 #[test]
+fn graph_level_acp_config_is_shared_by_every_acp_node() {
+    let mut context = test_context!();
+    context.write_home(
+        ".fabro/settings.toml",
+        "[server.auth]\nmethods = [\"dev-token\"]\n",
+    );
+    context.isolated_server();
+    let fake_agent = write_fake_acp_agent(&context);
+    let acp_config = fake_acp_config_attr(&fake_agent);
+    let workflow = context.temp_dir.join("acp_graph_default.fabro");
+    context.write_temp(
+        "acp_graph_default.fabro",
+        format!(
+            r#"digraph ACPGraphDefault {{
+  graph [goal="Exercise graph-level ACP defaults", acp.config={acp_config}]
+  start [shape=Mdiamond]
+  first [type="agent", backend="acp", prompt="write hello.txt"]
+  second [type="agent", backend="acp", prompt="write hello.txt"]
+  exit [shape=Msquare]
+  start -> first
+  first -> second
+  second -> exit
+}}"#
+        ),
+    );
+    init_git_repo(&context.temp_dir);
+
+    context
+        .run_cmd()
+        .args(["--auto-approve", "--environment", "local"])
+        .arg(&workflow)
+        .assert()
+        .success();
+
+    let run_dir = find_run_dir(&context);
+    let conclusion = read_conclusion(&run_dir);
+    assert_eq!(conclusion["status"].as_str(), Some("succeeded"));
+
+    // Both nodes launched the ACP process named only at the graph level.
+    let events = run_events(&run_dir);
+    for node_id in ["first", "second"] {
+        let completed = events
+            .iter()
+            .find_map(|event| match &event.event.body {
+                EventBody::StageCompleted(props)
+                    if event.event.node_id.as_deref() == Some(node_id) =>
+                {
+                    Some(props)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{node_id} stage should complete"));
+        assert_eq!(completed.response.as_deref(), Some("hello from acp"));
+    }
+}
+
+#[test]
 fn acp_backend_does_not_inject_registered_provider_credentials() {
     let mut context = test_context!();
     context.write_home(

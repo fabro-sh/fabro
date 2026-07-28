@@ -50,6 +50,32 @@ implement [
 ]
 ```
 
+#### Sharing one agent across nodes
+
+When several nodes run the same ACP agent, set `acp.command` or `acp.config` once as a graph attribute instead of repeating it on every node:
+
+```dot
+digraph Review {
+    graph [
+        goal="Plan, implement, and review a change"
+        acp.command="python3 tools/fake_acp_agent.py"
+    ]
+
+    start [shape=Mdiamond]
+    exit  [shape=Msquare]
+
+    plan      [label="Plan",      backend="acp"]
+    implement [label="Implement", backend="acp"]
+    review    [label="Review",    backend="acp", acp.command="python3 tools/reviewer.py"]
+
+    start -> plan -> implement -> review -> exit
+}
+```
+
+Only nodes with `backend="acp"` inherit the graph-level value, so it never lands on `start`, `exit`, or API nodes.
+
+The two attributes stay mutually exclusive, and they are inherited as a pair: a node that sets *either* one keeps its own and inherits neither. In the example above, `review` uses its own command; had it set `acp.config` instead, it would use that alone rather than combining it with the graph's `acp.command`.
+
 Fabro does not install ACP agents, Node.js, npm, or `npx` at runtime. Commands must already be available in the sandbox image, repository, or setup steps. You can use `npx ...@latest` as an explicit `acp.command` if that is the behavior you want, but Fabro will treat it like any other user-supplied command.
 
 The legacy `acp_command` attribute is rejected; use `acp.command` for shell commands or `acp.config` for JSON stdio configs. ACP is supported with local and Docker sandboxes; Daytona does not expose bidirectional stdio yet, so ACP nodes fail there with an explicit unsupported-provider error.

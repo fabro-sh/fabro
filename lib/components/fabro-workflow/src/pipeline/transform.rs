@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::types::{Parsed, TransformOptions, Transformed};
 use crate::error::Error;
 use crate::transforms::{
-    FileInliningTransform, ImportTransform, ModelResolutionTransform,
+    AcpDefaultsTransform, FileInliningTransform, ImportTransform, ModelResolutionTransform,
     StylesheetApplicationTransform, TemplateTransform, Transform,
 };
 
@@ -63,6 +63,9 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
     .apply_with_diagnostics(graph)?;
     diagnostics.extend(transform_diagnostics);
     let graph = StylesheetApplicationTransform.apply(graph)?;
+    // After ImportTransform, so imported nodes inherit the parent graph's ACP
+    // defaults like any other node in the merged graph.
+    let graph = AcpDefaultsTransform.apply(graph)?;
     let graph = ModelResolutionTransform::for_eligible(
         Arc::clone(&options.catalog),
         options.eligible_providers.clone(),
