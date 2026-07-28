@@ -19,7 +19,7 @@
  */
 export interface CreateRunPullRequestRequest {
     /**
-     * Create the pull request even if the run did not finish with succeeded or partially_succeeded.
+     * Create from a non-successful conclusion, or from the latest committed snapshot when the run is running, blocked, or paused.
      */
     'force': boolean;
     /**

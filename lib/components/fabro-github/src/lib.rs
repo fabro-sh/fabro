@@ -67,6 +67,30 @@ pub enum PullRequestApiError {
         repo:   String,
         number: u64,
     },
+    #[error(
+        "Found {count} open pull requests in {owner}/{repo} for {head} into {base}; expected at most one"
+    )]
+    AmbiguousMatch {
+        owner: String,
+        repo:  String,
+        base:  String,
+        head:  String,
+        count: usize,
+    },
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+/// Errors returned while creating a pull request.
+///
+/// GitHub uses `422 Unprocessable Entity` both for validation failures and
+/// for the "a pull request already exists for this branch" race. Callers that
+/// reconcile by branch need to distinguish that status from transport and
+/// authentication failures without parsing an error string.
+#[derive(Debug, thiserror::Error)]
+pub enum CreatePullRequestError {
+    #[error("GitHub rejected pull request creation (422): {details}")]
+    UnprocessableEntity { details: String },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -627,10 +651,18 @@ pub async fn create_installation_access_token_for_pr(
 }
 
 /// Result of a successful pull request creation.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatedPullRequest {
     pub html_url: String,
     pub number:   u64,
     pub node_id:  String,
+}
+
+/// Minimal result for an existing open pull request matched by head and base.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchingPullRequest {
+    pub html_url: String,
+    pub number:   u64,
 }
 
 /// Create a pull request on GitHub.
@@ -650,8 +682,8 @@ pub async fn create_pull_request(
     title: &str,
     body: &str,
     draft: bool,
-) -> anyhow::Result<CreatedPullRequest> {
-    let client = ctx.http_client()?;
+) -> Result<CreatedPullRequest, CreatePullRequestError> {
+    let client = ctx.http_client().map_err(CreatePullRequestError::Other)?;
     create_pull_request_with_client(&client, ctx, owner, repo, base, head, title, body, draft).await
 }
 
@@ -669,7 +701,7 @@ pub async fn create_pull_request_with_client(
     title: &str,
     body: &str,
     draft: bool,
-) -> anyhow::Result<CreatedPullRequest> {
+) -> Result<CreatedPullRequest, CreatePullRequestError> {
     #[derive(Deserialize)]
     struct PullRequestResponse {
         html_url: String,
@@ -713,20 +745,24 @@ pub async fn create_pull_request_with_client(
     match resp.status {
         201 => {}
         422 => {
-            bail!("Pull request could not be created (422): {}", resp.text());
+            return Err(CreatePullRequestError::UnprocessableEntity {
+                details: resp.text().to_string(),
+            });
         }
         401 | 403 => {
-            bail!(
+            return Err(anyhow!(
                 "Authentication failed creating pull request ({})",
                 resp.status
-            );
+            )
+            .into());
         }
         _ => {
-            bail!(
+            return Err(anyhow!(
                 "Unexpected status {} creating pull request: {}",
                 resp.status,
                 resp.text()
-            );
+            )
+            .into());
         }
     }
 
@@ -739,6 +775,91 @@ pub async fn create_pull_request_with_client(
         number:   pr.number,
         node_id:  pr.node_id,
     })
+}
+
+/// Find an open pull request whose head and base branches match exactly.
+pub async fn find_open_pull_request(
+    ctx: &GitHubContext<'_>,
+    owner: &str,
+    repo: &str,
+    base: &str,
+    head: &str,
+) -> Result<Option<MatchingPullRequest>, PullRequestApiError> {
+    let client = ctx.http_client()?;
+    find_open_pull_request_with_client(&client, ctx, owner, repo, base, head).await
+}
+
+pub async fn find_open_pull_request_with_client(
+    client: &impl HttpClient,
+    ctx: &GitHubContext<'_>,
+    owner: &str,
+    repo: &str,
+    base: &str,
+    head: &str,
+) -> Result<Option<MatchingPullRequest>, PullRequestApiError> {
+    #[derive(Deserialize)]
+    struct PullRequestResponse {
+        html_url: String,
+        number:   u64,
+    }
+
+    let token = ctx
+        .creds
+        .resolve_bearer_token(
+            client,
+            owner,
+            repo,
+            ctx.base_url,
+            serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+        )
+        .await?;
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("state", "open")
+        .append_pair("head", &format!("{owner}:{head}"))
+        .append_pair("base", base)
+        .append_pair("per_page", "2")
+        .finish();
+    let url = format!("{}/repos/{owner}/{repo}/pulls?{query}", ctx.base_url);
+    let auth = format!("Bearer {token}");
+    let resp = client
+        .request(HttpMethod::Get, &url, &github_headers(&auth), None)
+        .await
+        .context("Failed to find matching pull request")?;
+
+    match resp.status {
+        200 => {}
+        401 | 403 => {
+            return Err(anyhow!(
+                "Authentication failed finding matching pull request ({})",
+                resp.status
+            )
+            .into());
+        }
+        status => {
+            return Err(anyhow!(
+                "Unexpected status {status} finding matching pull request: {}",
+                resp.text()
+            )
+            .into());
+        }
+    }
+
+    let mut pull_requests = resp
+        .json::<Vec<PullRequestResponse>>()
+        .context("Failed to parse matching pull request response")?;
+    if pull_requests.len() > 1 {
+        return Err(PullRequestApiError::AmbiguousMatch {
+            owner: owner.to_string(),
+            repo:  repo.to_string(),
+            base:  base.to_string(),
+            head:  head.to_string(),
+            count: pull_requests.len(),
+        });
+    }
+    Ok(pull_requests.pop().map(|pull_request| MatchingPullRequest {
+        html_url: pull_request.html_url,
+        number:   pull_request.number,
+    }))
 }
 
 fn merge_method_as_graphql_value(method: MergeStrategy) -> &'static str {
@@ -1708,6 +1829,122 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn find_open_pull_request_matches_encoded_head_and_base() {
+        let mock = MockHttpClient::new()
+            .on(
+                HttpMethod::Get,
+                "/repos/owner/repo/pulls?state=open&head=owner%3Afabro%2Frun%2F123&base=main&per_page=2",
+                200,
+                r#"[{"html_url":"https://github.com/owner/repo/pull/42","number":42}]"#,
+            )
+            .with_req_header("Authorization", "Bearer ghu_test");
+        let creds = GitHubCredentials::Pat("ghu_test".to_string());
+
+        let pull_request = find_open_pull_request_with_client(
+            &mock,
+            &GitHubContext::new(&creds, ""),
+            "owner",
+            "repo",
+            "main",
+            "fabro/run/123",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            pull_request,
+            Some(MatchingPullRequest {
+                html_url: "https://github.com/owner/repo/pull/42".to_string(),
+                number:   42,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn find_open_pull_request_returns_none_for_empty_list() {
+        let mock = MockHttpClient::new().on(
+            HttpMethod::Get,
+            "/repos/owner/repo/pulls?state=open&head=owner%3Afeature&base=main&per_page=2",
+            200,
+            "[]",
+        );
+        let creds = GitHubCredentials::Pat("ghu_test".to_string());
+
+        let pull_request = find_open_pull_request_with_client(
+            &mock,
+            &GitHubContext::new(&creds, ""),
+            "owner",
+            "repo",
+            "main",
+            "feature",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(pull_request, None);
+    }
+
+    #[tokio::test]
+    async fn find_open_pull_request_rejects_ambiguous_matches() {
+        let mock = MockHttpClient::new().on(
+            HttpMethod::Get,
+            "/repos/owner/repo/pulls?state=open&head=owner%3Afeature&base=main&per_page=2",
+            200,
+            r#"[
+                {"html_url":"https://github.com/owner/repo/pull/41","number":41},
+                {"html_url":"https://github.com/owner/repo/pull/42","number":42}
+            ]"#,
+        );
+        let creds = GitHubCredentials::Pat("ghu_test".to_string());
+
+        let error = find_open_pull_request_with_client(
+            &mock,
+            &GitHubContext::new(&creds, ""),
+            "owner",
+            "repo",
+            "main",
+            "feature",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, PullRequestApiError::AmbiguousMatch {
+            count: 2,
+            ..
+        }));
+    }
+
+    #[tokio::test]
+    async fn create_pull_request_exposes_unprocessable_entity_status() {
+        let mock = MockHttpClient::new().on(
+            HttpMethod::Post,
+            "/repos/owner/repo/pulls",
+            422,
+            r#"{"message":"A pull request already exists"}"#,
+        );
+        let creds = GitHubCredentials::Pat("ghu_test".to_string());
+
+        let error = create_pull_request_with_client(
+            &mock,
+            &GitHubContext::new(&creds, ""),
+            "owner",
+            "repo",
+            "main",
+            "feature",
+            "Title",
+            "Body",
+            true,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CreatePullRequestError::UnprocessableEntity { .. }
+        ));
     }
 
     // -----------------------------------------------------------------------

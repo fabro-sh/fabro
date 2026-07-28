@@ -83,6 +83,18 @@ pub struct FabroRunToolServices {
     pub user_settings_path: PathBuf,
 }
 
+/// Run-scoped inputs used by the built-in `pull_request` node.
+#[derive(Clone)]
+pub(crate) struct PullRequestRuntime {
+    pub github:          Option<fabro_github::GitHubCredentials>,
+    pub github_base_url: String,
+    pub origin_url:      Option<String>,
+    pub base_branch:     Option<String>,
+    pub head_branch:     Option<String>,
+    pub base_sha:        Option<String>,
+    pub push_enabled:    bool,
+}
+
 /// Services shared across workflow phases.
 ///
 /// Production construction is expected to happen from pipeline initialization
@@ -107,6 +119,7 @@ pub struct RunServices {
     pub(crate) metadata_runtime:  Arc<RunMetadataRuntime>,
     pub(crate) metadata_writer:   Option<RunMetadataWriterHandle>,
     pub(crate) interview_blocker: Arc<RunInterviewBlocker>,
+    pub(crate) pull_request:      Option<PullRequestRuntime>,
     /// Run-scoped stage execution allocator, shared between the core
     /// lifecycle and direct-dispatch handlers such as parallel branches.
     pub(crate) stage_executions:  StageExecutionTracker,
@@ -145,6 +158,7 @@ impl RunServices {
             metadata_runtime,
             metadata_writer,
             interview_blocker: Arc::new(RunInterviewBlocker::new()),
+            pull_request: None,
             stage_executions,
         })
     }
@@ -208,6 +222,17 @@ impl RunServices {
     ) -> Arc<Self> {
         Arc::new(Self {
             cancel_token,
+            ..self.as_ref().clone()
+        })
+    }
+
+    #[must_use]
+    pub(crate) fn with_pull_request(
+        self: &Arc<Self>,
+        pull_request: PullRequestRuntime,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            pull_request: Some(pull_request),
             ..self.as_ref().clone()
         })
     }

@@ -46,6 +46,18 @@ Agents can also emit arbitrary context updates by including a JSON object with a
 |---|---|
 | `command.output` | The command's ordered output stream. Durable context stores this as a `blob://sha256/...` ref after the command completes; downstream prompts resolve it back to text. |
 
+### Pull request nodes
+
+| Key | Value |
+|---|---|
+| `pull_request.url` | Public GitHub pull request URL |
+| `pull_request.number` | Pull request number |
+| `pull_request.owner` | Repository owner |
+| `pull_request.repo` | Repository name |
+| `pull_request.base_branch` | PR base branch |
+| `pull_request.head_branch` | Managed run branch |
+| `pull_request.draft` | `true` for PRs created by this node |
+
 ### Human gates
 
 | Key | Value |

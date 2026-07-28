@@ -226,6 +226,10 @@ push = true
 | `enabled` | When `false`, Fabro does not create the managed run branch or checkpoint commits. This also disables metadata branch writes. |
 | `push` | When `false`, Fabro creates local checkpoint commits but does not push `fabro/run/<id>` to the remote. |
 
+The built-in `type="pull_request"` workflow node requires both fields to be
+`true`, because it creates the PR from the latest committed and pushed run
+snapshot.
+
 ### `[run.meta_branch]`
 
 Configure Fabro's managed `fabro/meta/<id>` metadata branch.
@@ -496,6 +500,10 @@ The `sandbox` transport runs the MCP server inside the workflow's sandbox. This 
 ### `[run.pull_request]`
 
 Automatically open a GitHub pull request when the workflow run completes successfully. Requires a [GitHub App](/integrations/github) to be configured.
+
+To open a draft PR earlier and use it in later workflow stages, add an explicit
+`type="pull_request"` node instead. That node is independently opt-in and does
+not require this section.
 
 ```toml title="run.toml"
 [run.pull_request]

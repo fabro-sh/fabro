@@ -162,6 +162,7 @@ Each node's `shape` attribute determines its execution behavior. See [Nodes & St
 | `box` (default) | agent | Multi-turn LLM with tool access |
 | `tab` | prompt | Single LLM call, no tools |
 | `parallelogram` | command | Execute a shell script |
+| *(explicit `type` only)* | pull_request | Create or adopt a draft pull request during the run |
 | `hexagon` | human | Human-in-the-loop decision gate |
 | `diamond` | conditional | Route based on conditions |
 | `component` | parallel | Fan-out to concurrent branches |
@@ -247,6 +248,14 @@ audit [
 | `script` | String | Shell command to execute |
 | `language` | String | `"shell"` (default) or `"python"` |
 | `output_schema` | String | Optional structured output validation. Accepts `routing`, `@path/to/schema.json`, or an inline JSON Schema object string. See [Structured output validation](#structured-output-validation). |
+
+### Pull request nodes
+
+Set `type="pull_request"` explicitly; there is no shape alias. The node creates
+or adopts a draft GitHub PR from the committed `base_sha..HEAD` snapshot and
+stores its coordinates in `pull_request.*` context keys. It requires an enabled,
+pushed run branch and cannot execute inside a parallel branch. Dirty and
+untracked files are not included.
 
 ### Parallel (fan-out) nodes
 

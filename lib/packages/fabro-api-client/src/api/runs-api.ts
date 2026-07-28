@@ -409,7 +409,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Creates a pull request for a completed run on GitHub and persists the record on the server.
+         * Creates a pull request on GitHub and persists the record on the server. By default the run must have a successful conclusion. With force=true, failed conclusions are accepted and running, blocked, or paused runs use their latest committed snapshot.
          * @summary Create Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {CreateRunPullRequestRequest} createRunPullRequestRequest
@@ -1646,7 +1646,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a pull request for a completed run on GitHub and persists the record on the server.
+         * Creates a pull request on GitHub and persists the record on the server. By default the run must have a successful conclusion. With force=true, failed conclusions are accepted and running, blocked, or paused runs use their latest committed snapshot.
          * @summary Create Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {CreateRunPullRequestRequest} createRunPullRequestRequest
@@ -2090,7 +2090,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.createRun(runManifest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a pull request for a completed run on GitHub and persists the record on the server.
+         * Creates a pull request on GitHub and persists the record on the server. By default the run must have a successful conclusion. With force=true, failed conclusions are accepted and running, blocked, or paused runs use their latest committed snapshot.
          * @summary Create Run Pull Request
          * @param {string} id Unique run identifier (ULID).
          * @param {CreateRunPullRequestRequest} createRunPullRequestRequest
@@ -2462,7 +2462,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Creates a pull request for a completed run on GitHub and persists the record on the server.
+     * Creates a pull request on GitHub and persists the record on the server. By default the run must have a successful conclusion. With force=true, failed conclusions are accepted and running, blocked, or paused runs use their latest committed snapshot.
      * @summary Create Run Pull Request
      * @param {string} id Unique run identifier (ULID).
      * @param {CreateRunPullRequestRequest} createRunPullRequestRequest

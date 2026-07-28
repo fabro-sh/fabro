@@ -30,7 +30,8 @@ use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_br
 use crate::run_options::{GitCheckpointOptions, RunOptions};
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{
-    EngineServices, FabroRunToolServices, RunLocations, RunServices, WorkflowToolEnvProvider,
+    EngineServices, FabroRunToolServices, PullRequestRuntime, RunLocations, RunServices,
+    WorkflowToolEnvProvider,
 };
 use crate::stage_execution::{StageExecutionSeed, StageExecutionTracker};
 use crate::steering_hub::SteeringHub;
@@ -610,6 +611,19 @@ pub async fn initialize(
         }
     };
 
+    let pull_request_runtime = PullRequestRuntime {
+        github:          options.run_options.github_app.clone(),
+        github_base_url: fabro_github::github_api_base_url(),
+        origin_url:      options.sandbox_env.origin_url.clone(),
+        base_branch:     options.run_options.base_branch.clone(),
+        head_branch:     options.run_options.run_branch().map(str::to_string),
+        base_sha:        options
+            .run_options
+            .git
+            .as_ref()
+            .and_then(|git| git.base_sha.clone()),
+        push_enabled:    options.run_options.settings.run.run_branch.push,
+    };
     let run_services = RunServices::new(
         options.run_store.clone(),
         Arc::clone(&options.emitter),
@@ -625,7 +639,8 @@ pub async fn initialize(
         metadata_runtime,
         metadata_writer,
         StageExecutionTracker::seeded(stage_executions),
-    );
+    )
+    .with_pull_request(pull_request_runtime);
     let engine = Arc::new(EngineServices {
         run: Arc::clone(&run_services),
         registry,

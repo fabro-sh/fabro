@@ -9,6 +9,7 @@ fn stage_handler_serializes_canonical_wire_values() {
         (StageHandler::Agent, "agent"),
         (StageHandler::Prompt, "prompt"),
         (StageHandler::Command, "command"),
+        (StageHandler::PullRequest, "pull_request"),
         (StageHandler::Human, "human"),
         (StageHandler::Conditional, "conditional"),
         (StageHandler::Parallel, "parallel"),
@@ -39,6 +40,10 @@ fn stage_handler_maps_current_handler_types_and_defaults_to_agent() {
     assert_eq!(
         StageHandler::from_handler_type(Some("tool")),
         StageHandler::Command
+    );
+    assert_eq!(
+        StageHandler::from_handler_type(Some("pull_request")),
+        StageHandler::PullRequest
     );
     assert_eq!(
         StageHandler::from_handler_type(Some("parallel.fan_in")),

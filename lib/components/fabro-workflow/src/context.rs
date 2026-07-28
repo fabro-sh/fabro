@@ -48,6 +48,15 @@ pub mod keys {
     pub const HUMAN_GATE_LABEL: &str = "human.gate.label";
     pub const HUMAN_GATE_TEXT: &str = "human.gate.text";
 
+    // --- pull_request.* keys ---
+    pub const PULL_REQUEST_URL: &str = "pull_request.url";
+    pub const PULL_REQUEST_NUMBER: &str = "pull_request.number";
+    pub const PULL_REQUEST_OWNER: &str = "pull_request.owner";
+    pub const PULL_REQUEST_REPO: &str = "pull_request.repo";
+    pub const PULL_REQUEST_BASE_BRANCH: &str = "pull_request.base_branch";
+    pub const PULL_REQUEST_HEAD_BRANCH: &str = "pull_request.head_branch";
+    pub const PULL_REQUEST_DRAFT: &str = "pull_request.draft";
+
     // --- parallel.* keys ---
     pub const PARALLEL_RESULTS: &str = "parallel.results";
     pub const PARALLEL_BRANCH_COUNT: &str = "parallel.branch_count";

@@ -17,6 +17,7 @@ fn stage_handler_serializes_openapi_wire_values() {
         (StageHandler::Agent, "agent"),
         (StageHandler::Prompt, "prompt"),
         (StageHandler::Command, "command"),
+        (StageHandler::PullRequest, "pull_request"),
         (StageHandler::Human, "human"),
         (StageHandler::Conditional, "conditional"),
         (StageHandler::Parallel, "parallel"),

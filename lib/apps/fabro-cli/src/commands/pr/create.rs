@@ -16,7 +16,7 @@ pub(super) async fn create_command(args: PrCreateArgs, base_ctx: &CommandContext
         number = record.number,
         owner = %record.owner,
         repo = %record.repo,
-        "Created pull request"
+        "Created or linked pull request"
     );
 
     if ctx.json_output() {

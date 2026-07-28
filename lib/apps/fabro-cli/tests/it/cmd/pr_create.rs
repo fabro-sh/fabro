@@ -18,7 +18,7 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Create a pull request from a completed run
+    Create a pull request from a run
 
     Usage: fabro pr create [OPTIONS] <RUN_ID>
 
@@ -30,7 +30,7 @@ fn help() {
           --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --model <MODEL>     LLM model for generating PR description
-      -f, --force             Create PR even if the run status is not succeeded/partially_succeeded
+      -f, --force             Use a non-successful conclusion or an active run's committed snapshot
           --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet             Suppress non-essential output [env: FABRO_QUIET=]
           --verbose           Enable verbose output [env: FABRO_VERBOSE=]

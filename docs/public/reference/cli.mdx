@@ -766,7 +766,7 @@ fabro pr [OPTIONS] <COMMAND>
 | Command | Description |
 | --- | --- |
 | `fabro pr close` | Close a pull request |
-| `fabro pr create` | Create a pull request from a completed run |
+| `fabro pr create` | Create a pull request from a run |
 | `fabro pr link` | Link or replace the GitHub pull request associated with a run |
 | `fabro pr merge` | Merge a pull request |
 | `fabro pr unlink` | Unlink the pull request associated with a run |
@@ -794,7 +794,9 @@ fabro pr close [OPTIONS] <RUN_ID>
 
 #### `fabro pr create`
 
-Create a pull request from a completed run
+Create a pull request from a run. By default, the run must have completed
+successfully. Pass `--force` to use a failed conclusion or the latest committed
+snapshot of a running, blocked, or paused run.
 
 ```bash
 fabro pr create [OPTIONS] <RUN_ID>
@@ -810,7 +812,7 @@ fabro pr create [OPTIONS] <RUN_ID>
 
 | Option | Description |
 | --- | --- |
-| `-f, --force` | Create PR even if the run status is not succeeded/partially_succeeded |
+| `-f, --force` | Use a non-successful conclusion or an active run's latest committed snapshot |
 | `--model <model>` | LLM model for generating PR description |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 

@@ -1,4 +1,5 @@
 pub use crate::pipeline::{
-    AutoMergeOptions, CreatedPullRequest, OpenPullRequestRequest, PrContent, build_pr_content,
-    maybe_open_pull_request,
+    AutoMergeOptions, CommittedPullRequestSnapshot, CommittedPullRequestSnapshotError,
+    CreatedPullRequest, OpenPullRequestRequest, PrContent, PullRequestDisposition,
+    build_pr_content, maybe_open_pull_request, prepare_committed_pull_request_snapshot,
 };

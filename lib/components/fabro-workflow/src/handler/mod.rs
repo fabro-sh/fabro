@@ -8,6 +8,7 @@ pub mod llm;
 pub mod manager_loop;
 pub mod parallel;
 pub mod prompt;
+pub mod pull_request;
 pub mod start;
 pub mod structured_output;
 pub mod wait;
@@ -178,6 +179,7 @@ pub fn default_registry(
     registry.register("human", Box::new(human::HumanHandler::new(interviewer)));
     registry.register("command", Box::new(command::CommandHandler));
     registry.register("tool", Box::new(command::CommandHandler));
+    registry.register("pull_request", Box::new(pull_request::PullRequestHandler));
     registry.register("parallel", Box::new(parallel::ParallelHandler));
     registry.register(
         "parallel.fan_in",

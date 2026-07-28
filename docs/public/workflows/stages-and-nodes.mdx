@@ -11,7 +11,9 @@ This distinction matters for observability and debugging: the workflow graph sho
 
 ## Node types
 
-Every node's Graphviz `shape` attribute determines its execution behavior. If no shape is specified, the node defaults to an agent.
+Most nodes use a Graphviz `shape` to select their execution behavior. A node
+can instead set `type` explicitly. If neither selects a handler, the node
+defaults to an agent.
 
 ### Start
 
@@ -106,6 +108,39 @@ test [label="Run Tests", shape=parallelogram, script="cargo test 2>&1 || true"]
 |---|---|
 | `script` | The shell command to execute |
 | `language` | `"shell"` (default) or `"python"` |
+
+### Pull request
+
+**Type:** `pull_request` (explicit only)
+
+Creates or adopts a draft GitHub pull request during the run, so downstream
+nodes can work with it:
+
+```dot
+implement [label="Implement"]
+create_pr [label="Open draft PR", type="pull_request"]
+comment   [label="Comment on PR"]
+
+implement -> create_pr -> comment
+```
+
+The node snapshots committed work from the run's base SHA through one captured
+`HEAD`, pushes that exact commit to the managed run branch without force, and
+opens a draft PR. Dirty and untracked files are excluded. Later checkpoint
+pushes update the same PR branch. Retries are idempotent: Fabro reuses the
+stored PR or adopts a matching open GitHub PR instead of creating a duplicate.
+
+This node requires a GitHub origin, configured GitHub credentials, and
+`[run.run_branch] enabled = true, push = true`. It cannot run inside a parallel
+branch. Dry runs are side-effect free and return placeholder context values.
+Set the optional `model` attribute to override the run model used to generate
+the PR title and body.
+
+Use this node rather than invoking `fabro pr create` from a command node. Fabro
+does not expose the worker API token inside the sandbox. The draft remains open
+if a later node fails. It does not use `[run.pull_request]`; that setting remains
+the separate end-of-run PR mode. In this initial behavior, end-of-run processing
+does not refresh the in-run PR body, mark it ready, or enable auto-merge.
 
 ### Human
 

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use super::super::{
@@ -6,6 +7,7 @@ use super::super::{
     PullRequestLink, RequireRunScoped, Response, Router, RunId, State, StatusCode, get,
     lock_pull_request_create, post, pull_request, warn, workflow_event,
 };
+use crate::run_files;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -165,9 +167,18 @@ struct RunPrInputs<'a> {
     goal:              &'a str,
     base_branch:       &'a str,
     run_branch:        &'a str,
-    diff:              &'a str,
-    conclusion:        &'a fabro_types::Conclusion,
+    snapshot:          PullRequestSnapshotPolicy<'a>,
     normalized_origin: String,
+}
+
+enum PullRequestSnapshotPolicy<'a> {
+    Conclusion {
+        diff:       &'a str,
+        conclusion: &'a fabro_types::Conclusion,
+    },
+    LatestCommitted {
+        base_sha: &'a str,
+    },
 }
 
 impl<'a> RunPrInputs<'a> {
@@ -180,6 +191,67 @@ impl<'a> RunPrInputs<'a> {
             ));
         }
         let run_spec = &run_state.spec;
+        let active_base_sha = if run_state.conclusion.is_none() {
+            if !force {
+                return Err(ApiError::with_code(
+                    StatusCode::BAD_REQUEST,
+                    "Run is not finished yet. Pass --force to use its latest committed snapshot.",
+                    "run_not_finished",
+                ));
+            }
+            match run_state.status {
+                fabro_types::RunStatus::Running
+                | fabro_types::RunStatus::Blocked { .. }
+                | fabro_types::RunStatus::Paused { .. } => {}
+                fabro_types::RunStatus::Submitted
+                | fabro_types::RunStatus::Pending { .. }
+                | fabro_types::RunStatus::Runnable
+                | fabro_types::RunStatus::Starting => {
+                    return Err(ApiError::with_code(
+                        StatusCode::CONFLICT,
+                        format!(
+                            "Run status is '{}'; no committed active snapshot is ready yet.",
+                            run_state.status
+                        ),
+                        "run_not_ready",
+                    ));
+                }
+                fabro_types::RunStatus::Removing
+                | fabro_types::RunStatus::Succeeded { .. }
+                | fabro_types::RunStatus::Failed { .. }
+                | fabro_types::RunStatus::Dead => {
+                    return Err(ApiError::with_code(
+                        StatusCode::CONFLICT,
+                        format!(
+                            "Run status is '{}'; active pull request creation is not available.",
+                            run_state.status
+                        ),
+                        "run_not_eligible",
+                    ));
+                }
+            }
+            if !run_spec.settings.run.run_branch.push {
+                return Err(ApiError::with_code(
+                    StatusCode::CONFLICT,
+                    "Active pull request creation requires run.run_branch.push = true.",
+                    "run_branch_not_pushed",
+                ));
+            }
+            let base_sha = run_state
+                .start
+                .as_ref()
+                .and_then(|start| start.base_sha.as_deref())
+                .ok_or_else(|| {
+                    ApiError::with_code(
+                        StatusCode::BAD_REQUEST,
+                        "Run has no committed base SHA.",
+                        "missing_base_sha",
+                    )
+                })?;
+            Some(base_sha)
+        } else {
+            None
+        };
         let origin_url = run_spec.repo_origin_url().ok_or_else(|| {
             ApiError::with_code(
                 StatusCode::BAD_REQUEST,
@@ -205,43 +277,47 @@ impl<'a> RunPrInputs<'a> {
                     "missing_run_branch",
                 )
             })?;
-        let diff = run_state
-            .conclusion
-            .as_ref()
-            .and_then(|conclusion| conclusion.diff.patch.as_deref())
-            .filter(|d| !d.trim().is_empty())
-            .ok_or_else(|| {
+        let snapshot = if let Some(conclusion) = run_state.conclusion.as_ref() {
+            if !force && !conclusion.status.is_successful() {
+                return Err(ApiError::with_code(
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "Run status is '{}', expected succeeded or partially_succeeded",
+                        conclusion.status
+                    ),
+                    "run_not_successful",
+                ));
+            }
+            let diff = conclusion
+                .diff
+                .patch
+                .as_deref()
+                .filter(|diff| !diff.trim().is_empty())
+                .ok_or_else(|| {
+                    ApiError::with_code(
+                        StatusCode::BAD_REQUEST,
+                        "Stored diff is empty — nothing to create a PR for",
+                        "empty_diff",
+                    )
+                })?;
+            PullRequestSnapshotPolicy::Conclusion { diff, conclusion }
+        } else {
+            let base_sha = active_base_sha.ok_or_else(|| {
                 ApiError::with_code(
                     StatusCode::BAD_REQUEST,
-                    "Stored diff is empty — nothing to create a PR for",
-                    "empty_diff",
+                    "Run has no committed base SHA.",
+                    "missing_base_sha",
                 )
             })?;
-        let conclusion = run_state.conclusion.as_ref().ok_or_else(|| {
-            ApiError::with_code(
-                StatusCode::BAD_REQUEST,
-                "Run is not finished yet.",
-                "run_not_finished",
-            )
-        })?;
-        if !force && !conclusion.status.is_successful() {
-            return Err(ApiError::with_code(
-                StatusCode::BAD_REQUEST,
-                format!(
-                    "Run status is '{}', expected succeeded or partially_succeeded",
-                    conclusion.status
-                ),
-                "run_not_successful",
-            ));
-        }
+            PullRequestSnapshotPolicy::LatestCommitted { base_sha }
+        };
         let normalized_origin = fabro_github::normalize_repo_origin_url(origin_url);
         parse_github_owner_repo_from_url(&normalized_origin, "repo origin URL")?;
         Ok(Self {
             goal: run_spec.graph.goal(),
             base_branch,
             run_branch,
-            diff,
-            conclusion,
+            snapshot,
             normalized_origin,
         })
     }
@@ -297,6 +373,97 @@ async fn create_run_pull_request(
         Ok(inputs) => inputs,
         Err(err) => return err.into_response(),
     };
+    let snapshot_policy = match &inputs.snapshot {
+        PullRequestSnapshotPolicy::Conclusion { .. } => "conclusion",
+        PullRequestSnapshotPolicy::LatestCommitted { .. } => "latest_committed",
+    };
+    tracing::debug!(
+        force = body.force,
+        run_status = %run_state.status,
+        snapshot_policy,
+        "Preparing pull request snapshot"
+    );
+    let (diff, conclusion) = match inputs.snapshot {
+        PullRequestSnapshotPolicy::Conclusion { diff, conclusion } => {
+            (Cow::Borrowed(diff), Some(conclusion))
+        }
+        PullRequestSnapshotPolicy::LatestCommitted { base_sha } => {
+            let sandbox = match run_files::reconnect_run_sandbox(&state, &id, run_state).await {
+                Ok(sandbox) => sandbox,
+                Err(err) => {
+                    warn!(
+                        status = %err.status(),
+                        "Failed to reconnect active run sandbox for pull request creation"
+                    );
+                    let response = if err.status() == StatusCode::NOT_FOUND {
+                        ApiError::with_code(
+                            StatusCode::CONFLICT,
+                            "The active run sandbox is not ready.",
+                            "run_not_ready",
+                        )
+                    } else {
+                        ApiError::with_code(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "The active run sandbox is unavailable.",
+                            "snapshot_unavailable",
+                        )
+                    };
+                    return response.into_response();
+                }
+            };
+            let snapshot = match pull_request::prepare_committed_pull_request_snapshot(
+                sandbox.as_ref(),
+                base_sha,
+                inputs.run_branch,
+            )
+            .await
+            {
+                Ok(snapshot) => snapshot,
+                Err(err) => {
+                    warn!(
+                        error = %err,
+                        "Failed to prepare active pull request snapshot"
+                    );
+                    let response = match err {
+                        pull_request::CommittedPullRequestSnapshotError::Push { .. }
+                        | pull_request::CommittedPullRequestSnapshotError::RemoteBranchMissingCommit => {
+                            ApiError::with_code(
+                                StatusCode::CONFLICT,
+                                "The captured commit is not available on the remote run branch.",
+                                "run_branch_not_pushed",
+                            )
+                        }
+                        pull_request::CommittedPullRequestSnapshotError::Sandbox { .. }
+                        | pull_request::CommittedPullRequestSnapshotError::Command { .. }
+                        | pull_request::CommittedPullRequestSnapshotError::InvalidHead => {
+                            ApiError::with_code(
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "The latest committed run snapshot could not be prepared.",
+                                "snapshot_unavailable",
+                            )
+                        }
+                        pull_request::CommittedPullRequestSnapshotError::InvalidBase => {
+                            ApiError::with_code(
+                                StatusCode::BAD_REQUEST,
+                                "Run has an invalid committed base SHA.",
+                                "invalid_base_sha",
+                            )
+                        }
+                    };
+                    return response.into_response();
+                }
+            };
+            if snapshot.diff.trim().is_empty() {
+                return ApiError::with_code(
+                    StatusCode::BAD_REQUEST,
+                    "Committed diff is empty — nothing to create a PR for",
+                    "empty_committed_diff",
+                )
+                .into_response();
+            }
+            (Cow::Owned(snapshot.diff), None)
+        }
+    };
     let creds = match load_server_github_credentials(state.as_ref()).await {
         Ok(creds) => creds,
         Err(err) => return err.into_response(),
@@ -324,14 +491,14 @@ async fn create_run_pull_request(
         base_branch: inputs.base_branch,
         head_branch: inputs.run_branch,
         goal: inputs.goal,
-        diff: inputs.diff,
+        diff: diff.as_ref(),
         model: &model,
         draft: true,
         auto_merge: None,
         run_store: &run_store_handle,
         llm_source: state.llm_source.as_ref(),
         catalog,
-        conclusion: Some(inputs.conclusion),
+        conclusion,
         run_state: Some(run_state),
     };
     let created_pull_request = match pull_request::maybe_open_pull_request(request).await {
@@ -343,16 +510,33 @@ async fn create_run_pull_request(
             )
             .into_response();
         }
-        Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+        Err(err) => {
+            warn!(
+                error = %err,
+                "Pull request creation failed"
+            );
+            return ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "GitHub pull request creation failed.",
+            )
+            .into_response();
+        }
     };
 
-    let event = workflow_event::Event::pull_request_created(
-        &created_pull_request.link,
-        &created_pull_request.base_branch,
-        &created_pull_request.head_branch,
-        &created_pull_request.title,
-        true,
-    );
+    let event = match created_pull_request.disposition {
+        pull_request::PullRequestDisposition::Created => {
+            workflow_event::Event::pull_request_created(
+                &created_pull_request.link,
+                &created_pull_request.base_branch,
+                &created_pull_request.head_branch,
+                &created_pull_request.title,
+                true,
+            )
+        }
+        pull_request::PullRequestDisposition::Linked => workflow_event::Event::PullRequestLinked {
+            pull_request: created_pull_request.link.clone(),
+        },
+    };
     if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
@@ -520,5 +704,97 @@ async fn close_run_pull_request(
             github_pull_request_not_found_error(ctx.number).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn submitted_projection() -> fabro_store::RunProjection {
+        fabro_store::RunProjection::new(
+            "Test run".to_string(),
+            fabro_types::RunSpec {
+                run_id:           fabro_types::fixtures::RUN_1,
+                settings:         fabro_types::WorkflowSettings::default(),
+                graph:            fabro_types::Graph::new("test"),
+                graph_source:     None,
+                workflow_slug:    None,
+                automation:       None,
+                source_directory: None,
+                labels:           std::collections::HashMap::new(),
+                provenance:       fabro_types::test_support::test_run_provenance(),
+                manifest_blob:    None,
+                definition_blob:  None,
+                git:              None,
+                fork_source_ref:  None,
+            },
+            chrono::Utc::now(),
+        )
+    }
+
+    #[test]
+    fn active_run_without_force_is_classified_before_git_metadata() {
+        let projection = submitted_projection();
+        let Err(error) = RunPrInputs::extract(&projection, false) else {
+            panic!("submitted run should not be eligible");
+        };
+
+        assert_eq!(error.code(), Some("run_not_finished"));
+    }
+
+    #[test]
+    fn force_distinguishes_not_ready_and_ineligible_states() {
+        let mut projection = submitted_projection();
+        let Err(not_ready) = RunPrInputs::extract(&projection, true) else {
+            panic!("submitted run should not have a ready snapshot");
+        };
+        assert_eq!(not_ready.code(), Some("run_not_ready"));
+
+        projection.status = fabro_types::RunStatus::Dead;
+        let Err(not_eligible) = RunPrInputs::extract(&projection, true) else {
+            panic!("dead run should not be eligible");
+        };
+        assert_eq!(not_eligible.code(), Some("run_not_eligible"));
+    }
+
+    #[test]
+    fn force_accepts_running_blocked_and_paused_snapshots() {
+        let eligible = [
+            fabro_types::RunStatus::Running,
+            fabro_types::RunStatus::Blocked {
+                blocked_reason: fabro_types::BlockedReason::HumanInputRequired,
+            },
+            fabro_types::RunStatus::Paused {
+                prior_block: Some(fabro_types::BlockedReason::HumanInputRequired),
+            },
+        ];
+
+        for status in eligible {
+            let mut projection = submitted_projection();
+            projection.status = status;
+            projection.spec.git = Some(fabro_types::GitContext {
+                origin_url:   "https://github.com/acme/widgets.git".to_string(),
+                branch:       "main".to_string(),
+                sha:          Some("0123456789abcdef".to_string()),
+                dirty:        fabro_types::DirtyStatus::Clean,
+                push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+            });
+            projection.start = Some(fabro_types::StartRecord {
+                start_time: chrono::Utc::now(),
+                run_branch: Some("fabro/run/test".to_string()),
+                base_sha:   Some("0123456789abcdef".to_string()),
+            });
+
+            let Ok(inputs) = RunPrInputs::extract(&projection, true) else {
+                panic!("{status} should be eligible");
+            };
+            assert!(matches!(
+                inputs.snapshot,
+                PullRequestSnapshotPolicy::LatestCommitted {
+                    base_sha: "0123456789abcdef",
+                }
+            ));
+        }
     }
 }

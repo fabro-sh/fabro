@@ -929,7 +929,7 @@ pub(crate) struct PrCreateArgs {
     /// LLM model for generating PR description
     #[arg(long)]
     pub(crate) model:  Option<String>,
-    /// Create PR even if the run status is not succeeded/partially_succeeded
+    /// Use a non-successful conclusion or an active run's committed snapshot
     #[arg(short, long)]
     pub(crate) force:  bool,
 }
@@ -1453,7 +1453,7 @@ pub(crate) struct PrNamespace {
 
 #[derive(Subcommand)]
 pub(crate) enum PrCommand {
-    /// Create a pull request from a completed run
+    /// Create a pull request from a run
     Create(PrCreateArgs),
     /// Link or replace the GitHub pull request associated with a run
     Link(PrLinkArgs),

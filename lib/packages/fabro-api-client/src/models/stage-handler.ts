@@ -24,6 +24,7 @@ export const StageHandler = {
     AGENT: 'agent',
     PROMPT: 'prompt',
     COMMAND: 'command',
+    PULL_REQUEST: 'pull_request',
     HUMAN: 'human',
     CONDITIONAL: 'conditional',
     PARALLEL: 'parallel',

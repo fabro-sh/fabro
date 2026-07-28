@@ -26,6 +26,7 @@ tracing.workspace = true
 tokio = { workspace = true }
 base64.workspace = true
 thiserror.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 fabro-macros = { path = "../../foundation/fabro-macros" }

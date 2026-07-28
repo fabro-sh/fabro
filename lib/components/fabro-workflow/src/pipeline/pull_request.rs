@@ -1,12 +1,15 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context as _;
+use fabro_agent::Sandbox;
 use fabro_auth::CredentialSource;
 use fabro_github::{self as github_app, ssh_url_to_https};
 use fabro_graphviz::parser;
 use fabro_llm::client::Client;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_model::{Catalog, ProviderId};
+use fabro_sandbox::shell_quote;
 use fabro_store::RunProjection;
 use fabro_types::PullRequestLink;
 use fabro_types::settings::run::MergeStrategy;
@@ -483,6 +486,233 @@ pub struct CreatedPullRequest {
     pub title:       String,
     pub base_branch: String,
     pub head_branch: String,
+    pub disposition: PullRequestDisposition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestDisposition {
+    Created,
+    Linked,
+}
+
+/// A stable, committed snapshot used to create a pull request while a run is
+/// still active.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedPullRequestSnapshot {
+    pub head_sha: String,
+    pub diff:     String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CommittedPullRequestSnapshotError {
+    #[error("failed to execute {operation}")]
+    Sandbox {
+        operation: &'static str,
+        #[source]
+        source:    fabro_sandbox::Error,
+    },
+    #[error("{operation} failed")]
+    Command {
+        operation: &'static str,
+        #[source]
+        source:    fabro_sandbox::Error,
+    },
+    #[error("run base SHA is not a full git object ID")]
+    InvalidBase,
+    #[error("sandbox HEAD did not resolve to a commit SHA")]
+    InvalidHead,
+    #[error("failed to push committed snapshot to the run branch")]
+    Push {
+        #[source]
+        source: fabro_sandbox::Error,
+    },
+    #[error("remote run branch does not contain the captured commit")]
+    RemoteBranchMissingCommit,
+}
+
+fn is_full_git_object_id(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+async fn remote_branch_contains_commit(
+    sandbox: &dyn Sandbox,
+    head_sha: &str,
+    remote_ref: &str,
+) -> bool {
+    const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0 -c core.hooksPath=/dev/null -c core.fsmonitor=false";
+    let remote_ref = shell_quote(remote_ref);
+    let Ok(remote_result) = sandbox
+        .exec_command(
+            &format!("{GIT} ls-remote --heads origin {remote_ref}"),
+            30_000,
+            None,
+            None,
+            None,
+        )
+        .await
+    else {
+        return false;
+    };
+    if !remote_result.is_success() {
+        return false;
+    }
+    let Some(remote_sha) = remote_result
+        .stdout
+        .split_whitespace()
+        .next()
+        .filter(|sha| is_full_git_object_id(sha))
+    else {
+        return false;
+    };
+    if remote_sha == head_sha {
+        return true;
+    }
+
+    let remote_commit = shell_quote(&format!("{remote_sha}^{{commit}}"));
+    let remote_is_available = sandbox
+        .exec_command(
+            &format!("{GIT} cat-file -e {remote_commit}"),
+            10_000,
+            None,
+            None,
+            None,
+        )
+        .await
+        .is_ok_and(|result| result.is_success());
+    if !remote_is_available {
+        let Ok(fetch_result) = sandbox
+            .exec_command(
+                &format!(
+                    "{GIT} fetch --no-tags --no-recurse-submodules --no-write-fetch-head origin {remote_ref}"
+                ),
+                30_000,
+                None,
+                None,
+                None,
+            )
+            .await
+        else {
+            return false;
+        };
+        if !fetch_result.is_success() {
+            return false;
+        }
+    }
+
+    let head_sha = shell_quote(head_sha);
+    let remote_sha = shell_quote(remote_sha);
+    sandbox
+        .exec_command(
+            &format!("{GIT} merge-base --is-ancestor {head_sha} {remote_sha}"),
+            10_000,
+            None,
+            None,
+            None,
+        )
+        .await
+        .is_ok_and(|result| result.is_success())
+}
+
+/// Capture the sandbox's committed `HEAD`, compute the cumulative diff from
+/// `base_sha` to that exact commit, and ensure that commit is present on the
+/// remote run branch. Dirty and untracked work is intentionally excluded.
+pub async fn prepare_committed_pull_request_snapshot(
+    sandbox: &dyn Sandbox,
+    base_sha: &str,
+    head_branch: &str,
+) -> Result<CommittedPullRequestSnapshot, CommittedPullRequestSnapshotError> {
+    const GIT: &str = "git -c maintenance.auto=0 -c gc.auto=0 -c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.file.allow=never -c core.quotePath=false";
+
+    if !is_full_git_object_id(base_sha) {
+        return Err(CommittedPullRequestSnapshotError::InvalidBase);
+    }
+
+    let head_result = sandbox
+        .exec_command(
+            &format!("{GIT} rev-parse --verify HEAD^{{commit}}"),
+            10_000,
+            None,
+            None,
+            None,
+        )
+        .await
+        .map_err(|source| CommittedPullRequestSnapshotError::Sandbox {
+            operation: "git rev-parse HEAD",
+            source,
+        })?;
+    if !head_result.is_success() {
+        return Err(CommittedPullRequestSnapshotError::Command {
+            operation: "git rev-parse HEAD",
+            source:    fabro_sandbox::Error::exec("git rev-parse HEAD", head_result),
+        });
+    }
+    let head_sha = head_result.stdout.trim().to_ascii_lowercase();
+    if !is_full_git_object_id(&head_sha) {
+        return Err(CommittedPullRequestSnapshotError::InvalidHead);
+    }
+    debug!(
+        head_sha = %head_sha.get(..12).unwrap_or(&head_sha),
+        head_branch,
+        "Captured committed pull request snapshot"
+    );
+
+    let base_sha = shell_quote(base_sha);
+    let quoted_head = shell_quote(&head_sha);
+    let diff_result = sandbox
+        .exec_command(
+            &format!("{GIT} diff --binary --full-index {base_sha}..{quoted_head}"),
+            30_000,
+            None,
+            None,
+            None,
+        )
+        .await
+        .map_err(|source| CommittedPullRequestSnapshotError::Sandbox {
+            operation: "git diff for pull request",
+            source,
+        })?;
+    if !diff_result.is_success() {
+        return Err(CommittedPullRequestSnapshotError::Command {
+            operation: "git diff for pull request",
+            source:    fabro_sandbox::Error::exec("git diff for pull request", diff_result),
+        });
+    }
+    if diff_result.stdout.trim().is_empty() {
+        debug!(
+            head_sha = %head_sha.get(..12).unwrap_or(&head_sha),
+            "Committed pull request snapshot has no diff"
+        );
+        return Ok(CommittedPullRequestSnapshot {
+            head_sha,
+            diff: diff_result.stdout,
+        });
+    }
+
+    let remote_ref = format!("refs/heads/{head_branch}");
+    let push_error = sandbox
+        .git_push_ref(&format!("{head_sha}:{remote_ref}"))
+        .await
+        .err();
+    let remote_contains_commit =
+        remote_branch_contains_commit(sandbox, &head_sha, &remote_ref).await;
+    debug!(
+        head_sha = %head_sha.get(..12).unwrap_or(&head_sha),
+        head_branch,
+        push_failed = push_error.is_some(),
+        remote_contains_commit,
+        "Verified committed pull request snapshot on remote branch"
+    );
+    if !remote_contains_commit {
+        if let Some(source) = push_error {
+            return Err(CommittedPullRequestSnapshotError::Push { source });
+        }
+        return Err(CommittedPullRequestSnapshotError::RemoteBranchMissingCommit);
+    }
+
+    Ok(CommittedPullRequestSnapshot {
+        head_sha,
+        diff: diff_result.stdout,
+    })
 }
 
 /// Optionally open a pull request after a successful workflow run.
@@ -491,7 +721,7 @@ pub struct CreatedPullRequest {
 /// the diff was empty, or `Err` on failure.
 pub async fn maybe_open_pull_request(
     req: OpenPullRequestRequest<'_>,
-) -> Result<Option<CreatedPullRequest>, String> {
+) -> anyhow::Result<Option<CreatedPullRequest>> {
     if req.diff.is_empty() {
         debug!("Empty diff, skipping pull request creation");
         return Ok(None);
@@ -499,7 +729,36 @@ pub async fn maybe_open_pull_request(
 
     let https_url = ssh_url_to_https(req.origin_url);
     let (owner, repo) =
-        github_app::parse_github_owner_repo(&https_url).map_err(|err| format!("{err:#}"))?;
+        github_app::parse_github_owner_repo(&https_url).context("Failed to parse GitHub origin")?;
+
+    if let Some(existing) = github_app::find_open_pull_request(
+        &req.github,
+        &owner,
+        &repo,
+        req.base_branch,
+        req.head_branch,
+    )
+    .await
+    .context("Failed to reconcile an existing pull request")?
+    {
+        info!(
+            owner,
+            repo,
+            pr_number = existing.number,
+            "Existing pull request linked"
+        );
+        return Ok(Some(CreatedPullRequest {
+            link:        PullRequestLink {
+                owner,
+                repo,
+                number: existing.number,
+            },
+            title:       String::new(),
+            base_branch: req.base_branch.to_string(),
+            head_branch: req.head_branch.to_string(),
+            disposition: PullRequestDisposition::Linked,
+        }));
+    }
 
     let content = build_pr_content(
         req.diff,
@@ -512,11 +771,12 @@ pub async fn maybe_open_pull_request(
         req.run_state,
     )
     .await
-    .map_err(|err| format!("{err:#}"))?;
+    .map_err(anyhow::Error::msg)
+    .context("Failed to build pull request content")?;
     let body = truncate_pr_body(&content.body);
     let title = content.title;
 
-    let created = github_app::create_pull_request(
+    let created = match github_app::create_pull_request(
         &req.github,
         &owner,
         &repo,
@@ -527,7 +787,39 @@ pub async fn maybe_open_pull_request(
         req.draft,
     )
     .await
-    .map_err(|err| format!("{err:#}"))?;
+    {
+        Ok(created) => created,
+        Err(github_app::CreatePullRequestError::UnprocessableEntity { .. }) => {
+            let existing = github_app::find_open_pull_request(
+                &req.github,
+                &owner,
+                &repo,
+                req.base_branch,
+                req.head_branch,
+            )
+            .await
+            .context("Failed to reconcile pull request after GitHub returned 422")?
+            .ok_or_else(|| anyhow::anyhow!("GitHub rejected pull request creation (422)"))?;
+            info!(
+                owner,
+                repo,
+                pr_number = existing.number,
+                "Concurrent pull request creation reconciled"
+            );
+            return Ok(Some(CreatedPullRequest {
+                link: PullRequestLink {
+                    owner,
+                    repo,
+                    number: existing.number,
+                },
+                title,
+                base_branch: req.base_branch.to_string(),
+                head_branch: req.head_branch.to_string(),
+                disposition: PullRequestDisposition::Linked,
+            }));
+        }
+        Err(err) => return Err(anyhow::Error::new(err).context("Failed to create pull request")),
+    };
 
     info!(pr_url = %created.html_url, created.number, "Pull request created");
 
@@ -565,6 +857,7 @@ pub async fn maybe_open_pull_request(
         title,
         base_branch: req.base_branch.to_string(),
         head_branch: req.head_branch.to_string(),
+        disposition: PullRequestDisposition::Created,
     }))
 }
 
@@ -581,73 +874,90 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
         services,
     } = concluded;
 
-    let mut pr_url = None;
-    if let Some(pr_cfg) = &options.pr_config {
-        if run_options.dry_run_enabled() {
-            tracing::debug!("Skipping PR creation: run is in dry-run mode");
-        } else if let Err(ref e) = outcome {
-            tracing::debug!(error = %e, "Skipping PR creation: engine returned an error");
-        } else if let Ok(ref result) = outcome {
-            if matches!(
-                result.status,
-                StageOutcome::Succeeded | StageOutcome::PartiallySucceeded
-            ) {
-                let diff = load_pull_request_diff(&services.run_store).await;
-                if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
-                    &run_options.base_branch,
-                    run_options.run_branch(),
-                    &options.github_app,
-                    &options.origin_url,
+    let mut pr_url = services
+        .run_store
+        .state()
+        .await
+        .ok()
+        .and_then(|state| state.pull_request.as_ref().map(PullRequestLink::html_url));
+    if pr_url.is_none() {
+        if let Some(pr_cfg) = &options.pr_config {
+            if run_options.dry_run_enabled() {
+                tracing::debug!("Skipping PR creation: run is in dry-run mode");
+            } else if let Err(ref e) = outcome {
+                tracing::debug!(error = %e, "Skipping PR creation: engine returned an error");
+            } else if let Ok(ref result) = outcome {
+                if matches!(
+                    result.status,
+                    StageOutcome::Succeeded | StageOutcome::PartiallySucceeded
                 ) {
-                    let auto_merge = if pr_cfg.auto_merge {
-                        Some(AutoMergeOptions {
-                            merge_strategy: pr_cfg.merge_strategy,
-                        })
-                    } else {
-                        None
-                    };
+                    let diff = load_pull_request_diff(&services.run_store).await;
+                    if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
+                        &run_options.base_branch,
+                        run_options.run_branch(),
+                        &options.github_app,
+                        &options.origin_url,
+                    ) {
+                        let auto_merge = if pr_cfg.auto_merge {
+                            Some(AutoMergeOptions {
+                                merge_strategy: pr_cfg.merge_strategy,
+                            })
+                        } else {
+                            None
+                        };
 
-                    match maybe_open_pull_request(OpenPullRequestRequest {
-                        github: github_app::GitHubContext::new(
-                            creds,
-                            &github_app::github_api_base_url(),
-                        ),
-                        origin_url: origin,
-                        base_branch,
-                        head_branch: run_branch,
-                        goal: graph.goal(),
-                        diff: &diff,
-                        model: &options.model,
-                        draft: pr_cfg.draft,
-                        auto_merge,
-                        run_store: &services.run_store,
-                        llm_source: services.llm_source.as_ref(),
-                        catalog: Arc::clone(&services.catalog),
-                        conclusion: Some(&conclusion),
-                        run_state: None,
-                    })
-                    .await
-                    {
-                        Ok(Some(created)) => {
-                            services.emitter.emit(&Event::pull_request_created(
-                                &created.link,
-                                &created.base_branch,
-                                &created.head_branch,
-                                &created.title,
-                                pr_cfg.draft,
-                            ));
-                            pr_url = Some(created.link.html_url());
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            services
-                                .emitter
-                                .emit(&Event::PullRequestFailed { error: e.clone() });
-                            services.emitter.notice(
-                                RunNoticeLevel::Warn,
-                                RunNoticeCode::PullRequestFailed,
-                                format!("PR creation failed: {e}"),
-                            );
+                        match maybe_open_pull_request(OpenPullRequestRequest {
+                            github: github_app::GitHubContext::new(
+                                creds,
+                                &github_app::github_api_base_url(),
+                            ),
+                            origin_url: origin,
+                            base_branch,
+                            head_branch: run_branch,
+                            goal: graph.goal(),
+                            diff: &diff,
+                            model: &options.model,
+                            draft: pr_cfg.draft,
+                            auto_merge,
+                            run_store: &services.run_store,
+                            llm_source: services.llm_source.as_ref(),
+                            catalog: Arc::clone(&services.catalog),
+                            conclusion: Some(&conclusion),
+                            run_state: None,
+                        })
+                        .await
+                        {
+                            Ok(Some(created)) => {
+                                match created.disposition {
+                                    PullRequestDisposition::Created => {
+                                        services.emitter.emit(&Event::pull_request_created(
+                                            &created.link,
+                                            &created.base_branch,
+                                            &created.head_branch,
+                                            &created.title,
+                                            pr_cfg.draft,
+                                        ));
+                                    }
+                                    PullRequestDisposition::Linked => {
+                                        services.emitter.emit(&Event::PullRequestLinked {
+                                            pull_request: created.link.clone(),
+                                        });
+                                    }
+                                }
+                                pr_url = Some(created.link.html_url());
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                let error = e.to_string();
+                                services.emitter.emit(&Event::PullRequestFailed {
+                                    error: error.clone(),
+                                });
+                                services.emitter.notice(
+                                    RunNoticeLevel::Warn,
+                                    RunNoticeCode::PullRequestFailed,
+                                    format!("PR creation failed: {error}"),
+                                );
+                            }
                         }
                     }
                 }
@@ -691,7 +1001,7 @@ mod tests {
     };
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
-    use httpmock::Method::POST;
+    use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
     use object_store::memory::InMemory;
     use tokio::sync::RwLock as AsyncRwLock;
@@ -820,6 +1130,27 @@ mod tests {
 
     fn test_llm_source() -> Arc<dyn CredentialSource> {
         Arc::new(EnvCredentialSource::new())
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Temporary git fixture setup is intentionally synchronous."
+    )]
+    fn git(repo: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .expect("git should execute");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("git output should be UTF-8")
+            .trim()
+            .to_string()
     }
 
     fn test_projection() -> RunProjection {
@@ -957,6 +1288,96 @@ mod tests {
         .await;
 
         assert_eq!(finalized.pushed_branch, None);
+    }
+
+    #[tokio::test]
+    async fn post_run_phase_reuses_pull_request_created_inside_run() {
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let settings = WorkflowSettings::default();
+        let graph = Graph::new("test");
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:           fixtures::RUN_1,
+            title:            None,
+            settings:         serde_json::to_value(&settings).unwrap(),
+            graph:            serde_json::to_value(&graph).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           std::collections::BTreeMap::new(),
+            run_dir:          "/tmp/test".to_string(),
+            source_directory: None,
+            workflow_slug:    Some("test".to_string()),
+            automation:       None,
+            db_prefix:        None,
+            provenance:       test_support::test_run_provenance(),
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            retried_from:     None,
+            parent_id:        None,
+            web_url:          None,
+        })
+        .await
+        .unwrap();
+        let link = PullRequestLink {
+            owner:  "acme".to_string(),
+            repo:   "widgets".to_string(),
+            number: 42,
+        };
+        append_event(
+            &run_store,
+            &fixtures::RUN_1,
+            &Event::pull_request_created(
+                &link,
+                "main",
+                "fabro/run/test",
+                "Draft from workflow",
+                true,
+            ),
+        )
+        .await
+        .unwrap();
+        let event_count = run_store.list_events().await.unwrap().len();
+        let services = EngineServices::test_default()
+            .run
+            .with_run_store(run_store.clone().into());
+        let temp = tempfile::tempdir().unwrap();
+        let run_options = RunOptions {
+            settings,
+            run_dir: temp.path().to_path_buf(),
+            cancel_token: CancellationToken::new(),
+            run_id: fixtures::RUN_1,
+            labels: HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            pre_run_git: None,
+            fork_source_ref: None,
+            base_branch: Some("main".to_string()),
+            display_base_sha: None,
+            git: Some(GitCheckpointOptions {
+                base_sha:    None,
+                run_branch:  Some("fabro/run/test".to_string()),
+                meta_branch: None,
+            }),
+        };
+        let concluded = Concluded {
+            outcome: Ok(Outcome::success()),
+            conclusion: make_test_conclusion(),
+            graph,
+            run_options,
+            services,
+        };
+
+        let finalized = pull_request(concluded, &PullRequestOptions {
+            pr_config:  None,
+            github_app: None,
+            origin_url: None,
+            model:      "test-model".to_string(),
+        })
+        .await;
+
+        assert_eq!(finalized.pr_url, Some(link.html_url()));
+        assert_eq!(run_store.list_events().await.unwrap().len(), event_count);
     }
 
     // ── format_arc_details_section tests ────────────────────────────────
@@ -1576,6 +1997,289 @@ mod tests {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Temporary git fixture setup is intentionally synchronous."
+    )]
+    async fn committed_snapshot_excludes_dirty_and_untracked_work_and_pushes_captured_head() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let remote_dir = tempfile::tempdir().unwrap();
+        git(repo_dir.path(), &["init", "-b", "main"]);
+        git(repo_dir.path(), &[
+            "config",
+            "user.email",
+            "fabro@example.test",
+        ]);
+        git(repo_dir.path(), &["config", "user.name", "Fabro Test"]);
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "base"]);
+        let base_sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\ncommitted\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "committed"]);
+        let head_sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+
+        std::fs::write(
+            repo_dir.path().join("tracked.txt"),
+            "base\ncommitted\ndirty\n",
+        )
+        .unwrap();
+        std::fs::write(repo_dir.path().join("untracked.txt"), "untracked\n").unwrap();
+        git(remote_dir.path(), &["init", "--bare"]);
+        git(repo_dir.path(), &[
+            "remote",
+            "add",
+            "origin",
+            remote_dir.path().to_str().unwrap(),
+        ]);
+
+        let sandbox = fabro_agent::LocalSandbox::new(repo_dir.path().to_path_buf());
+        let snapshot =
+            prepare_committed_pull_request_snapshot(&sandbox, &base_sha, "fabro/run/snapshot-test")
+                .await
+                .unwrap();
+
+        assert_eq!(snapshot.head_sha, head_sha);
+        assert!(snapshot.diff.contains("+committed"));
+        assert!(!snapshot.diff.contains("+dirty"));
+        assert!(!snapshot.diff.contains("untracked.txt"));
+        assert_eq!(
+            git(remote_dir.path(), &[
+                "rev-parse",
+                "refs/heads/fabro/run/snapshot-test"
+            ]),
+            head_sha
+        );
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Temporary git fixture setup is intentionally synchronous."
+    )]
+    async fn committed_snapshot_accepts_remote_branch_that_already_contains_captured_head() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let remote_dir = tempfile::tempdir().unwrap();
+        let advance_dir = tempfile::tempdir().unwrap();
+        git(repo_dir.path(), &["init", "-b", "main"]);
+        git(repo_dir.path(), &[
+            "config",
+            "user.email",
+            "fabro@example.test",
+        ]);
+        git(repo_dir.path(), &["config", "user.name", "Fabro Test"]);
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "base"]);
+        let base_sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\ncaptured\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "captured"]);
+        let captured_sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+
+        git(remote_dir.path(), &["init", "--bare"]);
+        git(repo_dir.path(), &[
+            "remote",
+            "add",
+            "origin",
+            remote_dir.path().to_str().unwrap(),
+        ]);
+        git(repo_dir.path(), &[
+            "push",
+            "origin",
+            "HEAD:refs/heads/fabro/run/snapshot-test",
+        ]);
+
+        git(advance_dir.path(), &[
+            "clone",
+            remote_dir.path().to_str().unwrap(),
+            ".",
+        ]);
+        git(advance_dir.path(), &[
+            "checkout",
+            "-b",
+            "advance",
+            "origin/fabro/run/snapshot-test",
+        ]);
+        git(advance_dir.path(), &[
+            "config",
+            "user.email",
+            "fabro@example.test",
+        ]);
+        git(advance_dir.path(), &["config", "user.name", "Fabro Test"]);
+        std::fs::write(
+            advance_dir.path().join("tracked.txt"),
+            "base\ncaptured\nnewer\n",
+        )
+        .unwrap();
+        git(advance_dir.path(), &["add", "tracked.txt"]);
+        git(advance_dir.path(), &["commit", "-m", "newer"]);
+        let remote_head = git(advance_dir.path(), &["rev-parse", "HEAD"]);
+        git(advance_dir.path(), &[
+            "push",
+            "origin",
+            "HEAD:refs/heads/fabro/run/snapshot-test",
+        ]);
+
+        let sandbox = fabro_agent::LocalSandbox::new(repo_dir.path().to_path_buf());
+        let snapshot =
+            prepare_committed_pull_request_snapshot(&sandbox, &base_sha, "fabro/run/snapshot-test")
+                .await
+                .unwrap();
+
+        assert_eq!(snapshot.head_sha, captured_sha);
+        assert_eq!(
+            git(remote_dir.path(), &[
+                "rev-parse",
+                "refs/heads/fabro/run/snapshot-test"
+            ]),
+            remote_head
+        );
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Temporary git fixture setup is intentionally synchronous."
+    )]
+    async fn committed_snapshot_rejects_divergent_remote_branch() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let remote_dir = tempfile::tempdir().unwrap();
+        git(repo_dir.path(), &["init", "-b", "main"]);
+        git(repo_dir.path(), &[
+            "config",
+            "user.email",
+            "fabro@example.test",
+        ]);
+        git(repo_dir.path(), &["config", "user.name", "Fabro Test"]);
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "base"]);
+        let base_sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\ncaptured\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "captured"]);
+        let captured_sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+
+        git(repo_dir.path(), &["checkout", "-b", "divergent", &base_sha]);
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\ndivergent\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "divergent"]);
+        git(remote_dir.path(), &["init", "--bare"]);
+        git(repo_dir.path(), &[
+            "remote",
+            "add",
+            "origin",
+            remote_dir.path().to_str().unwrap(),
+        ]);
+        git(repo_dir.path(), &[
+            "push",
+            "origin",
+            "HEAD:refs/heads/fabro/run/snapshot-test",
+        ]);
+        git(repo_dir.path(), &["checkout", "--detach", &captured_sha]);
+
+        let sandbox = fabro_agent::LocalSandbox::new(repo_dir.path().to_path_buf());
+        let error =
+            prepare_committed_pull_request_snapshot(&sandbox, &base_sha, "fabro/run/snapshot-test")
+                .await
+                .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommittedPullRequestSnapshotError::Push { .. }
+        ));
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Temporary git fixture setup is intentionally synchronous."
+    )]
+    async fn committed_snapshot_rejects_missing_remote_branch() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        git(repo_dir.path(), &["init", "-b", "main"]);
+        git(repo_dir.path(), &[
+            "config",
+            "user.email",
+            "fabro@example.test",
+        ]);
+        git(repo_dir.path(), &["config", "user.name", "Fabro Test"]);
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "base"]);
+        let base_sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\ncommitted\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "committed"]);
+
+        let sandbox = fabro_agent::LocalSandbox::new(repo_dir.path().to_path_buf());
+        let error =
+            prepare_committed_pull_request_snapshot(&sandbox, &base_sha, "fabro/run/snapshot-test")
+                .await
+                .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommittedPullRequestSnapshotError::RemoteBranchMissingCommit
+        ));
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "Temporary git fixture setup is intentionally synchronous."
+    )]
+    async fn committed_snapshot_ignores_dirty_only_changes_without_pushing() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        git(repo_dir.path(), &["init", "-b", "main"]);
+        git(repo_dir.path(), &[
+            "config",
+            "user.email",
+            "fabro@example.test",
+        ]);
+        git(repo_dir.path(), &["config", "user.name", "Fabro Test"]);
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\n").unwrap();
+        git(repo_dir.path(), &["add", "tracked.txt"]);
+        git(repo_dir.path(), &["commit", "-m", "base"]);
+        let base_sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+        std::fs::write(repo_dir.path().join("tracked.txt"), "base\ndirty\n").unwrap();
+        std::fs::write(repo_dir.path().join("untracked.txt"), "untracked\n").unwrap();
+
+        let sandbox = fabro_agent::LocalSandbox::new(repo_dir.path().to_path_buf());
+        let snapshot =
+            prepare_committed_pull_request_snapshot(&sandbox, &base_sha, "fabro/run/snapshot-test")
+                .await
+                .unwrap();
+
+        assert_eq!(snapshot.head_sha, base_sha);
+        assert!(snapshot.diff.is_empty());
+    }
+
+    #[tokio::test]
+    async fn committed_snapshot_rejects_non_oid_base_before_running_git() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let sandbox = fabro_agent::LocalSandbox::new(repo_dir.path().to_path_buf());
+
+        let error = prepare_committed_pull_request_snapshot(
+            &sandbox,
+            "--output=/tmp/not-allowed",
+            "fabro/run/snapshot-test",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommittedPullRequestSnapshotError::InvalidBase
+        ));
+    }
+
+    #[tokio::test]
     async fn load_pull_request_diff_uses_store_without_disk_patch() {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
@@ -1800,23 +2504,27 @@ mod tests {
     /// client from the credential source, so the in-process MockProvider
     /// cannot intercept — we mock the OpenAI HTTP endpoint instead.
     struct FallbackHarness {
-        _vault_dir:     tempfile::TempDir,
+        _vault_dir:          tempfile::TempDir,
         // Held to keep the mock listener alive for the duration of the test;
         // the test interacts with it via `Client::from_source` (which goes
         // out via HTTP to the mock URL stored in `llm_source`).
-        openai_server:  MockServer,
-        github_server:  MockServer,
-        openai_mock_id: usize,
-        github_mock_id: usize,
-        llm_source:     Arc<dyn CredentialSource>,
-        catalog:        Arc<Catalog>,
-        creds:          fabro_github::GitHubCredentials,
-        run_store:      RunStoreHandle,
+        openai_server:       MockServer,
+        github_server:       MockServer,
+        openai_mock_id:      usize,
+        github_find_mock_id: usize,
+        github_mock_id:      usize,
+        llm_source:          Arc<dyn CredentialSource>,
+        catalog:             Arc<Catalog>,
+        creds:               fabro_github::GitHubCredentials,
+        run_store:           RunStoreHandle,
     }
 
     impl FallbackHarness {
         async fn assert_mocks_called_once(&self) {
             httpmock::Mock::new(self.openai_mock_id, &self.openai_server)
+                .assert_async()
+                .await;
+            httpmock::Mock::new(self.github_find_mock_id, &self.github_server)
                 .assert_async()
                 .await;
             httpmock::Mock::new(self.github_mock_id, &self.github_server)
@@ -1843,6 +2551,20 @@ mod tests {
             .await;
 
         let github_server = MockServer::start_async().await;
+        let github_find_mock = github_server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/repos/owner/repo/pulls")
+                    .query_param("state", "open")
+                    .query_param("head", "owner:fabro/run/123")
+                    .query_param("base", "main")
+                    .query_param("per_page", "2")
+                    .header("authorization", "Bearer test-token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!([]));
+            })
+            .await;
         let github_mock = github_server
             .mock_async(|when, then| {
                 when.method(POST)
@@ -1947,6 +2669,7 @@ mod tests {
         .unwrap();
 
         let openai_mock_id = openai_mock.id;
+        let github_find_mock_id = github_find_mock.id;
         let github_mock_id = github_mock.id;
 
         FallbackHarness {
@@ -1954,6 +2677,7 @@ mod tests {
             openai_server,
             github_server,
             openai_mock_id,
+            github_find_mock_id,
             github_mock_id,
             llm_source,
             catalog,

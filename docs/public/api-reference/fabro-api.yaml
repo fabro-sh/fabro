@@ -2575,7 +2575,11 @@ paths:
       operationId: createRunPullRequest
       tags: [Runs]
       summary: Create Run Pull Request
-      description: Creates a pull request for a completed run on GitHub and persists the record on the server.
+      description: >-
+        Creates a pull request on GitHub and persists the record on the
+        server. By default the run must have a successful conclusion. With
+        force=true, failed conclusions are accepted and running, blocked, or
+        paused runs use their latest committed snapshot.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -2586,7 +2590,7 @@ paths:
               $ref: "#/components/schemas/CreateRunPullRequestRequest"
       responses:
         "200":
-          description: Pull request created
+          description: Pull request created or an existing matching pull request linked
           content:
             application/json:
               schema:
@@ -2611,8 +2615,9 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: >-
-            Pull request already exists for this run. Clients can GET
-            /runs/{id}/pull_request to retrieve the stored record.
+            Pull request already exists for this run, or the requested active
+            snapshot is not ready, eligible, or available on the remote run
+            branch.
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2630,7 +2635,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: GitHub integration is unavailable on the server
+          description: GitHub integration or the active run snapshot is unavailable
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -12168,7 +12173,9 @@ components:
       properties:
         force:
           type: boolean
-          description: Create the pull request even if the run did not finish with succeeded or partially_succeeded.
+          description: >-
+            Create from a non-successful conclusion, or from the latest
+            committed snapshot when the run is running, blocked, or paused.
           example: false
         model:
           type: ["string", "null"]
@@ -12592,6 +12599,7 @@ components:
         - agent
         - prompt
         - command
+        - pull_request
         - human
         - conditional
         - parallel

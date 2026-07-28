@@ -6528,6 +6528,27 @@ async fn create_completed_run_ready_for_pull_request(
     .await;
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Temporary git fixture setup is intentionally synchronous."
+)]
+fn pr_test_git(repo: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .expect("git should execute");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("git output should be UTF-8")
+        .trim()
+        .to_string()
+}
+
 fn test_event_envelope(seq: u32, run_id: RunId, body: EventBody) -> EventEnvelope {
     EventEnvelope {
         seq,
@@ -9058,6 +9079,18 @@ async fn get_run_pull_request_returns_stored_github_association_when_github_pr_i
 #[tokio::test]
 async fn create_run_pull_request_creates_and_persists_record() {
     let github = MockServer::start();
+    let find_mock = github.mock(|when, then| {
+        when.method("GET")
+            .path("/repos/acme/widgets/pulls")
+            .query_param("state", "open")
+            .query_param("head", "acme:fabro/run/42")
+            .query_param("base", "main")
+            .query_param("per_page", "2")
+            .header("authorization", "Bearer ghu_test");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body("[]");
+    });
     let create_mock = github.mock(|when, then| {
         when.method("POST")
             .path("/repos/acme/widgets/pulls")
@@ -9155,7 +9188,260 @@ async fn create_run_pull_request_creates_and_persists_record() {
     assert_eq!(state_body["pull_request"]["repo"], "widgets");
 
     response_mock.assert_async().await;
+    find_mock.assert();
     create_mock.assert();
+}
+
+#[tokio::test]
+async fn create_run_pull_request_adopts_matching_open_pull_request() {
+    let github = MockServer::start();
+    let find_mock = github.mock(|when, then| {
+        when.method("GET")
+            .path("/repos/acme/widgets/pulls")
+            .query_param("state", "open")
+            .query_param("head", "acme:fabro/run/42")
+            .query_param("base", "main")
+            .query_param("per_page", "2")
+            .header("authorization", "Bearer ghu_test");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(
+                json!([{
+                    "html_url": "https://github.com/acme/widgets/pull/42",
+                    "number": 42
+                }])
+                .to_string(),
+            );
+    });
+    let (state, app, run_id) = Box::pin(pr_test_app_with_completed_run(
+        Some("ghu_test"),
+        Some(github.base_url()),
+        Some("https://github.com/acme/widgets.git"),
+    ))
+    .await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "force": false, "model": null }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    assert_eq!(body["number"], 42);
+    let projection = state.cached_run(&run_id).await.unwrap();
+    assert_eq!(
+        projection.projection.pull_request,
+        Some(PullRequestLink {
+            owner:  "acme".to_string(),
+            repo:   "widgets".to_string(),
+            number: 42,
+        })
+    );
+    find_mock.assert();
+}
+
+#[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Temporary git fixture setup is intentionally synchronous."
+)]
+async fn create_run_pull_request_force_uses_running_runs_latest_committed_snapshot() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    let remote_dir = tempfile::tempdir().unwrap();
+    pr_test_git(repo_dir.path(), &["init", "-b", "main"]);
+    pr_test_git(repo_dir.path(), &[
+        "config",
+        "user.email",
+        "fabro@example.test",
+    ]);
+    pr_test_git(repo_dir.path(), &["config", "user.name", "Fabro Test"]);
+    std::fs::write(repo_dir.path().join("tracked.txt"), "base\n").unwrap();
+    pr_test_git(repo_dir.path(), &["add", "tracked.txt"]);
+    pr_test_git(repo_dir.path(), &["commit", "-m", "base"]);
+    let base_sha = pr_test_git(repo_dir.path(), &["rev-parse", "HEAD"]);
+    std::fs::write(repo_dir.path().join("tracked.txt"), "base\ncommitted\n").unwrap();
+    pr_test_git(repo_dir.path(), &["add", "tracked.txt"]);
+    pr_test_git(repo_dir.path(), &["commit", "-m", "committed"]);
+    let head_sha = pr_test_git(repo_dir.path(), &["rev-parse", "HEAD"]);
+    std::fs::write(
+        repo_dir.path().join("tracked.txt"),
+        "base\ncommitted\ndirty\n",
+    )
+    .unwrap();
+    pr_test_git(remote_dir.path(), &["init", "--bare"]);
+    pr_test_git(repo_dir.path(), &[
+        "remote",
+        "add",
+        "origin",
+        remote_dir.path().to_str().unwrap(),
+    ]);
+
+    let github = MockServer::start();
+    let find_mock = github.mock(|when, then| {
+        when.method("GET")
+            .path("/repos/acme/widgets/pulls")
+            .query_param("state", "open")
+            .query_param("head", "acme:fabro/run/active")
+            .query_param("base", "main")
+            .query_param("per_page", "2")
+            .header("authorization", "Bearer ghu_test");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body("[]");
+    });
+    let create_mock = github.mock(|when, then| {
+        when.method("POST")
+            .path("/repos/acme/widgets/pulls")
+            .header("authorization", "Bearer ghu_test");
+        then.status(201)
+            .header("content-type", "application/json")
+            .body(
+                json!({
+                    "html_url": "https://github.com/acme/widgets/pull/77",
+                    "number": 77,
+                    "node_id": "PR_kwDOActive"
+                })
+                .to_string(),
+            );
+    });
+    let llm = MockServer::start_async().await;
+    let response_mock = llm
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/v1/responses")
+                .header("authorization", "Bearer openai-key");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(openai_responses_payload(
+                    &serde_json::to_string(&json!({
+                        "title": "Active snapshot",
+                        "body": "Created while the run is active.",
+                    }))
+                    .unwrap(),
+                ));
+        })
+        .await;
+    let state = create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
+        Some("ghu_test"),
+        Some(github.base_url()),
+        |_| None,
+        llm_catalog_settings_with_provider_base_url("openai", llm.url("/v1")),
+    );
+    state
+        .stores
+        .vault
+        .set("OPENAI_API_KEY", "openai-key", SecretType::Token, None)
+        .await
+        .unwrap();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    let mut settings = WorkflowSettings::default();
+    settings.run.run_branch.enabled = true;
+    settings.run.run_branch.push = true;
+    let mut graph = Graph::new("active-pr");
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Open an active pull request".to_string()),
+    );
+    let git = fabro_types::GitContext {
+        origin_url:   "https://github.com/acme/widgets.git".to_string(),
+        branch:       "main".to_string(),
+        sha:          Some(base_sha.clone()),
+        dirty:        fabro_types::DirtyStatus::Clean,
+        push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+    };
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunCreated {
+            run_id,
+            title: None,
+            settings: serde_json::to_value(&settings).unwrap(),
+            graph: serde_json::to_value(&graph).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: std::collections::BTreeMap::default(),
+            run_dir: repo_dir.path().display().to_string(),
+            source_directory: Some(repo_dir.path().display().to_string()),
+            workflow_slug: Some("active-pr".to_string()),
+            automation: None,
+            db_prefix: None,
+            provenance: test_support::test_run_provenance(),
+            manifest_blob: None,
+            git: Some(git),
+            fork_source_ref: None,
+            retried_from: None,
+            parent_id: None,
+            web_url: None,
+        },
+        workflow_event::Event::RunSubmitted {
+            definition_blob: None,
+        },
+        workflow_event::Event::RunRunnable {
+            source: fabro_types::RunRunnableSource::StartRequested,
+            actor:  None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::WorkflowRunStarted {
+            name: "active-pr".to_string(),
+            run_id,
+            base_branch: Some("main".to_string()),
+            base_sha: Some(base_sha.clone()),
+            run_branch: Some("fabro/run/active".to_string()),
+            worktree_dir: None,
+            goal: Some("Open an active pull request".to_string()),
+        },
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::SandboxInitialized {
+            working_directory: repo_dir.path().display().to_string(),
+            provider:          SandboxProviderKind::Local,
+            id:                "active-pr-local".to_string(),
+            image:             None,
+            snapshot:          None,
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
+            workspace_root:    None,
+            repos_root:        None,
+            primary_repo_path: None,
+            primary_repo_link: None,
+        },
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/pull_request")))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "force": true, "model": "gpt-5.4" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+
+    assert_eq!(body["number"], 77);
+    assert_eq!(
+        pr_test_git(remote_dir.path(), &[
+            "rev-parse",
+            "refs/heads/fabro/run/active"
+        ]),
+        head_sha
+    );
+    find_mock.assert();
+    create_mock.assert();
+    response_mock.assert_async().await;
 }
 
 #[tokio::test]

@@ -14,7 +14,7 @@ fn help() {
     Usage: fabro pr [OPTIONS] <COMMAND>
 
     Commands:
-      create  Create a pull request from a completed run
+      create  Create a pull request from a run
       link    Link or replace the GitHub pull request associated with a run
       unlink  Unlink the pull request associated with a run
       view    View pull request details

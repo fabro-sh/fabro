@@ -86,6 +86,7 @@ pub const KNOWN_HANDLER_TYPES: &[&str] = &[
     "parallel.fan_in",
     "command",
     "tool",
+    "pull_request",
     "stack.manager_loop",
     "wait",
 ];

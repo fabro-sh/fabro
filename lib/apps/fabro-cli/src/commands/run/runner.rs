@@ -21,7 +21,7 @@ use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_tool::fabro_client::ClientBackend;
 use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{
-    ArtifactUpload, EventBody, FailureReason, Principal, RunBlobId, RunEvent, RunId,
+    ArtifactUpload, EventBody, FailureReason, Graph, Principal, RunBlobId, RunEvent, RunId,
     WorkflowSettings,
 };
 use fabro_vault::{SecretStore, Vault};
@@ -143,7 +143,7 @@ pub(crate) async fn execute(
             Some(arc) => Some(arc.read().await),
             None => None,
         };
-        maybe_build_github_credentials(&run_spec.settings, vault_guard.as_deref())?
+        maybe_build_github_credentials(&run_spec.settings, &run_spec.graph, vault_guard.as_deref())?
     };
     let services = StartServices {
         run_id,
@@ -1112,6 +1112,7 @@ fn stamp_system_worker(mut event: RunEvent) -> RunEvent {
 
 fn maybe_build_github_credentials(
     settings: &WorkflowSettings,
+    graph: &Graph,
     vault: Option<&fabro_vault::Vault>,
 ) -> Result<Option<fabro_github::GitHubCredentials>> {
     let resolved_run = &settings.run;
@@ -1127,8 +1128,8 @@ fn maybe_build_github_credentials(
         return build_github_credentials(strategy, app_id.as_deref(), app_slug.as_deref(), vault);
     }
 
-    let pull_request_enabled =
-        resolved_run.execution.mode != RunMode::DryRun && resolved_run.pull_request.is_some();
+    let pull_request_enabled = resolved_run.execution.mode != RunMode::DryRun
+        && (resolved_run.pull_request.is_some() || graph_has_pull_request_node(graph));
     if pull_request_enabled {
         return Ok(build_github_credentials(
             strategy,
@@ -1141,6 +1142,13 @@ fn maybe_build_github_credentials(
     }
 
     Ok(None)
+}
+
+fn graph_has_pull_request_node(graph: &Graph) -> bool {
+    graph
+        .nodes
+        .values()
+        .any(|node| node.node_type() == Some("pull_request"))
 }
 
 #[expect(
@@ -1766,8 +1774,9 @@ mod tests {
             EnvironmentProvider, RunIntegrationsGithubSettings, RunIntegrationsSettings, RunMode,
             RunNamespace,
         };
+        use fabro_types::{AttrValue, Graph, Node};
 
-        use super::super::requires_github_credentials;
+        use super::super::{graph_has_pull_request_node, requires_github_credentials};
 
         fn run_with(
             permissions: HashMap<String, InterpString>,
@@ -1813,6 +1822,19 @@ mod tests {
         fn does_not_require_github_credentials_for_clone_provider_in_dry_run() {
             let run = run_with(HashMap::new(), "docker", RunMode::DryRun);
             assert!(!requires_github_credentials(&run));
+        }
+
+        #[test]
+        fn detects_explicit_pull_request_node_for_soft_credential_loading() {
+            let mut graph = Graph::new("test");
+            let mut node = Node::new("create_pr");
+            node.attrs.insert(
+                "type".to_string(),
+                AttrValue::String("pull_request".to_string()),
+            );
+            graph.nodes.insert(node.id.clone(), node);
+
+            assert!(graph_has_pull_request_node(&graph));
         }
     }
 }

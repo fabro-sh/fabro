@@ -1198,7 +1198,7 @@ async fn load_projection(
     Ok(state.cached_run(run_id).await?.projection)
 }
 
-async fn reconnect_run_sandbox(
+pub(crate) async fn reconnect_run_sandbox(
     state: &Arc<AppState>,
     run_id: &RunId,
     projection: &fabro_store::RunProjection,
