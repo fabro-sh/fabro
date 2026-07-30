@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use fabro_api::types;
 use fabro_config::project::{self, WorkflowLocation, discover_project_config};
 use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
@@ -33,6 +33,10 @@ use fabro_workflow::git::{
 use fabro_workflow::static_reference::{
     AttributeScope, ReferenceKind, reference_kind_for_attribute,
 };
+use fabro_workflow::workflow_bundle::{
+    MAX_WORKFLOW_RUNTIME_BYTES, MAX_WORKFLOW_RUNTIME_FILES, WORKFLOW_PACKAGE_DIR_NAMES,
+};
+use walkdir::WalkDir;
 
 #[derive(Debug, Default)]
 pub struct ManifestBuildInput {
@@ -136,10 +140,13 @@ pub fn build_sparse_run_overrides(input: RunOverrideInput<'_>) -> Option<RunLaye
 }
 
 struct CollectContext<'a> {
-    cwd:               &'a Path,
-    inputs:            HashMap<String, toml::Value>,
-    workflows:         HashMap<String, types::ManifestWorkflow>,
-    visited_workflows: HashSet<String>,
+    cwd:                &'a Path,
+    canonical_cwd:      PathBuf,
+    inputs:             HashMap<String, toml::Value>,
+    workflows:          HashMap<String, types::ManifestWorkflow>,
+    visited_workflows:  HashSet<String>,
+    runtime_file_count: usize,
+    runtime_file_bytes: usize,
 }
 
 #[derive(Clone)]
@@ -198,10 +205,14 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     let target_key = target_manifest_path.to_string();
 
     let mut context = CollectContext {
-        cwd:               &input.cwd,
-        inputs:            workflow_settings.run.inputs.clone(),
-        workflows:         HashMap::new(),
-        visited_workflows: HashSet::new(),
+        cwd:                &input.cwd,
+        canonical_cwd:      std::fs::canonicalize(&input.cwd)
+            .with_context(|| format!("Failed to resolve {}", input.cwd.display()))?,
+        inputs:             workflow_settings.run.inputs.clone(),
+        workflows:          HashMap::new(),
+        visited_workflows:  HashSet::new(),
+        runtime_file_count: 0,
+        runtime_file_bytes: 0,
     };
     collect_workflow_entry(&mut context, &input.workflow, &input.cwd)?;
     if let Some((_, config_path, source)) = project_config_source.as_ref() {
@@ -251,6 +262,16 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     let git = build_git_context(&working_directory, configured_repo_origin_url.as_deref());
     let args = input.args.filter(|args| !manifest_args_is_empty(args));
 
+    let version = if context
+        .workflows
+        .values()
+        .any(|workflow| !workflow.runtime_files.is_empty())
+    {
+        2
+    } else {
+        1
+    };
+
     Ok(BuiltManifest {
         manifest: types::RunManifest {
             args,
@@ -265,7 +286,7 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
                 identifier: input.workflow.display().to_string(),
                 path:       target_key,
             },
-            version: 1,
+            version,
             workflows: context.workflows,
         },
         target_path,
@@ -306,12 +327,14 @@ fn collect_workflow_entry(
         None
     };
 
+    let workflow_dir = location.dir.clone();
     let scan = WorkflowScanInput {
         absolute_dot_path: location.graph,
         dot_path,
         source: source.clone(),
     };
     let mut files = HashMap::new();
+    let mut runtime_files = HashMap::new();
     let mut visited_imports = HashSet::new();
     if let Some(config) = config.as_ref() {
         let config_path = ManifestPath::from_wire(&config.path)
@@ -319,12 +342,118 @@ fn collect_workflow_entry(
         collect_config_dockerfile(context.cwd, &config_path, &config.source, &mut files)?;
     }
     collect_workflow_files(context, &scan, &mut files, &mut visited_imports)?;
+    collect_workflow_runtime_files(context, &workflow_dir, &mut runtime_files)?;
 
     context.workflows.insert(dot_key, types::ManifestWorkflow {
         config,
         files,
+        runtime_files,
         source,
     });
+
+    Ok(())
+}
+
+fn collect_workflow_runtime_files(
+    context: &mut CollectContext<'_>,
+    workflow_dir: &Path,
+    runtime_files: &mut HashMap<String, String>,
+) -> Result<()> {
+    for package_dir_name in WORKFLOW_PACKAGE_DIR_NAMES {
+        let package_dir = workflow_dir.join(package_dir_name);
+        let metadata = match std::fs::symlink_metadata(&package_dir) {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("Failed to inspect {}", package_dir.display()));
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            bail!(
+                "workflow package directory cannot be a symlink: {}",
+                package_dir.display()
+            );
+        }
+        if !metadata.is_dir() {
+            bail!(
+                "workflow package path must be a directory: {}",
+                package_dir.display()
+            );
+        }
+
+        for entry in WalkDir::new(&package_dir)
+            .follow_links(false)
+            .sort_by_file_name()
+        {
+            let entry = entry
+                .map_err(anyhow::Error::new)
+                .with_context(|| format!("Failed to walk {}", package_dir.display()))?;
+            let file_type = entry.file_type();
+            if file_type.is_dir() {
+                continue;
+            }
+            if file_type.is_symlink() {
+                bail!(
+                    "workflow package files cannot be symlinks: {}",
+                    entry.path().display()
+                );
+            }
+            if !file_type.is_file() {
+                bail!(
+                    "workflow package entries must be regular files: {}",
+                    entry.path().display()
+                );
+            }
+
+            let canonical_path = std::fs::canonicalize(entry.path())
+                .with_context(|| format!("Failed to resolve {}", entry.path().display()))?;
+            if !canonical_path.starts_with(&context.canonical_cwd) {
+                bail!(
+                    "workflow package file must be inside the working directory: {}",
+                    entry.path().display()
+                );
+            }
+
+            let metadata = entry
+                .metadata()
+                .map_err(anyhow::Error::new)
+                .with_context(|| format!("Failed to inspect {}", entry.path().display()))?;
+            let metadata_size = usize::try_from(metadata.len())
+                .context("workflow package file size does not fit in memory")?;
+            validate_runtime_file_limits(context, metadata_size)?;
+
+            let content = std::fs::read_to_string(entry.path())
+                .with_context(|| format!("Failed to read {}", entry.path().display()))?;
+            validate_runtime_file_limits(context, content.len())?;
+
+            let path = manifest_path_from_absolute(entry.path(), context.cwd)?;
+            let content_bytes = content.len();
+            runtime_files.insert(path.to_string(), content);
+            context.runtime_file_count += 1;
+            context.runtime_file_bytes += content_bytes;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_runtime_file_limits(context: &CollectContext<'_>, file_bytes: usize) -> Result<()> {
+    let file_count = context
+        .runtime_file_count
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("workflow package file count overflow"))?;
+    if file_count > MAX_WORKFLOW_RUNTIME_FILES {
+        bail!("workflow packages contain more than {MAX_WORKFLOW_RUNTIME_FILES} runtime files");
+    }
+
+    let total_bytes = context
+        .runtime_file_bytes
+        .checked_add(file_bytes)
+        .ok_or_else(|| anyhow!("workflow package byte count overflow"))?;
+    if total_bytes > MAX_WORKFLOW_RUNTIME_BYTES {
+        bail!("workflow package files exceed the {MAX_WORKFLOW_RUNTIME_BYTES} byte limit");
+    }
 
     Ok(())
 }
@@ -913,6 +1042,23 @@ mod tests {
         )]))
     }
 
+    fn write_minimal_workflow(project: &Path, name: &str) -> PathBuf {
+        let workflow_dir = project.join(".fabro/workflows").join(name);
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::write(project.join(".fabro/project.toml"), "_version = 1\n").unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+        workflow_dir
+    }
+
     fn assert_manifest_bundles_output_schema_file(node_attributes: &str) {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
@@ -1040,6 +1186,142 @@ mod tests {
     }
 
     #[test]
+    fn build_manifest_bundles_conventional_workflow_runtime_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let workflow_dir = write_minimal_workflow(project, "security-review");
+        std::fs::create_dir_all(workflow_dir.join("scripts/lib")).unwrap();
+        std::fs::create_dir_all(workflow_dir.join("references")).unwrap();
+        std::fs::create_dir_all(workflow_dir.join("assets/fixtures")).unwrap();
+        std::fs::create_dir_all(workflow_dir.join("other")).unwrap();
+        std::fs::write(
+            workflow_dir.join("scripts/security_review.py"),
+            "print('review')\n",
+        )
+        .unwrap();
+        std::fs::write(workflow_dir.join("scripts/lib/check.py"), "CHECK = True\n").unwrap();
+        std::fs::write(workflow_dir.join("references/policy.md"), "# Policy\n").unwrap();
+        std::fs::write(
+            workflow_dir.join("assets/fixtures/input.json"),
+            "{\"known\":true}\n",
+        )
+        .unwrap();
+        std::fs::write(workflow_dir.join("other/ignored.txt"), "ignored\n").unwrap();
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from(".fabro/workflows/security-review/workflow.toml"),
+            cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(built.manifest.version, 2);
+        let workflow = &built.manifest.workflows[".fabro/workflows/security-review/workflow.fabro"];
+        assert_eq!(
+            workflow.runtime_files,
+            HashMap::from([
+                (
+                    ".fabro/workflows/security-review/scripts/security_review.py".to_string(),
+                    "print('review')\n".to_string(),
+                ),
+                (
+                    ".fabro/workflows/security-review/scripts/lib/check.py".to_string(),
+                    "CHECK = True\n".to_string(),
+                ),
+                (
+                    ".fabro/workflows/security-review/references/policy.md".to_string(),
+                    "# Policy\n".to_string(),
+                ),
+                (
+                    ".fabro/workflows/security-review/assets/fixtures/input.json".to_string(),
+                    "{\"known\":true}\n".to_string(),
+                ),
+            ])
+        );
+        assert!(
+            !workflow
+                .runtime_files
+                .contains_key(".fabro/workflows/security-review/other/ignored.txt")
+        );
+    }
+
+    #[test]
+    fn build_manifest_without_workflow_runtime_files_stays_at_version_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        write_minimal_workflow(project, "demo");
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(built.manifest.version, 1);
+        assert!(
+            built.manifest.workflows[".fabro/workflows/demo/workflow.fabro"]
+                .runtime_files
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn build_manifest_rejects_non_utf8_workflow_runtime_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let workflow_dir = write_minimal_workflow(project, "demo");
+        std::fs::create_dir_all(workflow_dir.join("assets")).unwrap();
+        std::fs::write(workflow_dir.join("assets/binary.dat"), [0xff, 0xfe]).unwrap();
+
+        let err = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(err.chain().any(|cause| {
+            cause
+                .to_string()
+                .contains("stream did not contain valid UTF-8")
+        }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_manifest_rejects_symlinks_in_workflow_package_directories() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let workflow_dir = write_minimal_workflow(project, "demo");
+        std::fs::create_dir_all(workflow_dir.join("scripts")).unwrap();
+        std::fs::write(workflow_dir.join("target.py"), "print('target')\n").unwrap();
+        symlink(
+            workflow_dir.join("target.py"),
+            workflow_dir.join("scripts/review.py"),
+        )
+        .unwrap();
+
+        let err = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from(".fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            environment_defaults: test_environment_defaults(),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("workflow package files cannot be symlinks")
+        );
+    }
+
+    #[test]
     fn build_manifest_bundles_imports_prompts_and_children() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
@@ -1047,7 +1329,7 @@ mod tests {
         let child_dir = project.join(".fabro/workflows/child");
         std::fs::create_dir_all(workflow_dir.join("prompts")).unwrap();
         std::fs::create_dir_all(workflow_dir.join("imports")).unwrap();
-        std::fs::create_dir_all(&child_dir).unwrap();
+        std::fs::create_dir_all(child_dir.join("scripts")).unwrap();
         std::fs::write(project.join(".fabro/project.toml"), "_version = 1\n").unwrap();
         std::fs::write(
             workflow_dir.join("workflow.toml"),
@@ -1083,6 +1365,11 @@ mod tests {
         std::fs::write(
             child_dir.join("workflow.fabro"),
             r"digraph Child { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+        std::fs::write(
+            child_dir.join("scripts/child.py"),
+            "print('child package')\n",
         )
         .unwrap();
 
@@ -1122,6 +1409,10 @@ mod tests {
                 .manifest
                 .workflows
                 .contains_key(".fabro/workflows/child/workflow.fabro")
+        );
+        assert_eq!(
+            built.manifest.workflows[".fabro/workflows/child/workflow.fabro"].runtime_files[".fabro/workflows/child/scripts/child.py"],
+            "print('child package')\n"
         );
     }
 

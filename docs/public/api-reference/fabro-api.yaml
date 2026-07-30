@@ -9003,7 +9003,7 @@ components:
       properties:
         version:
           type: integer
-          description: Manifest schema version.
+          description: Manifest schema version. Version 2 adds workflow runtime files.
           example: 1
         run_id:
           type: ["string", "null"]
@@ -9288,6 +9288,11 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/ManifestFileEntry"
+        runtime_files:
+          description: UTF-8 files from the workflow package that Fabro writes into fresh remote sandboxes before preparation.
+          type: object
+          additionalProperties:
+            type: string
 
     PreflightResponse:
       type: object

@@ -37,7 +37,7 @@ import type { ManifestWorkflow } from './manifest-workflow';
  */
 export interface RunManifest {
     /**
-     * Manifest schema version.
+     * Manifest schema version. Version 2 adds workflow runtime files.
      */
     'version': number;
     /**

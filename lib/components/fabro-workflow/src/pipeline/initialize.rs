@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -33,6 +33,7 @@ use crate::services::{
 };
 use crate::stage_execution::{StageExecutionSeed, StageExecutionTracker};
 use crate::steering_hub::SteeringHub;
+use crate::workflow_bundle::WorkflowBundle;
 
 type BuiltSandboxEnv = (HashMap<String, String>, Option<Arc<GitHubTokenSource>>);
 
@@ -46,6 +47,38 @@ async fn run_hooks(
         return HookDecision::Proceed;
     };
     runner.run(hook_context, sandbox, execution_context).await
+}
+
+async fn materialize_workflow_runtime_files(
+    sandbox: &dyn Sandbox,
+    workflow_bundle: &WorkflowBundle,
+) -> Result<(), Error> {
+    let mut runtime_files = BTreeMap::new();
+    for workflow in workflow_bundle.workflows().values() {
+        for (path, content) in &workflow.runtime_files {
+            let path = path.to_string();
+            if let Some(previous) = runtime_files.get(&path) {
+                if *previous != content.as_str() {
+                    return Err(Error::Precondition(format!(
+                        "conflicting workflow runtime file contents for path: {path}"
+                    )));
+                }
+            } else {
+                runtime_files.insert(path, content.as_str());
+            }
+        }
+    }
+
+    for (path, content) in runtime_files {
+        sandbox.write_file(&path, content).await.map_err(|err| {
+            Error::engine_with_source(
+                format!("Failed to materialize workflow runtime file {path}"),
+                err,
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 fn git_setup_intent(run_options: &RunOptions) -> GitSetupIntent {
@@ -319,7 +352,9 @@ pub async fn initialize(
         options.emitter.notice(
             RunNoticeLevel::Warn,
             RunNoticeCode::DirtyWorktree,
-            "Uncommitted changes will not be included in the remote sandbox.",
+            "Uncommitted project changes will not be included in the remote sandbox. Files under \
+             workflow package scripts/, references/, and assets/ directories are bundled \
+             separately.",
         );
     }
 
@@ -387,6 +422,12 @@ pub async fn initialize(
             .initialize()
             .await
             .map_err(|e| Error::engine_with_source("Failed to initialize sandbox", e))?;
+    }
+
+    if !attach_existing && !matches!(&options.sandbox, SandboxSpec::Local { .. }) {
+        if let Some(workflow_bundle) = options.workflow_bundle.as_deref() {
+            materialize_workflow_runtime_files(sandbox.as_ref(), workflow_bundle).await?;
+        }
     }
 
     let locations = RunLocations::for_sandbox(host_source_dir, sandbox.as_ref(), run_dir.clone());
@@ -653,9 +694,12 @@ mod tests {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
+    use fabro_sandbox::test_support::MockSandbox;
     use fabro_store::Database;
     use fabro_types::settings::run::RunModelControls;
-    use fabro_types::{EventBody, RunEvent, RunId, WorkflowSettings, fixtures, test_support};
+    use fabro_types::{
+        EventBody, ManifestPath, RunEvent, RunId, WorkflowSettings, fixtures, test_support,
+    };
     use fabro_vault::{SecretType, Vault};
     use object_store::memory::InMemory;
     use tokio::fs::{create_dir_all, write};
@@ -667,6 +711,7 @@ mod tests {
     use crate::pipeline::types::InitOptions;
     use crate::records::RunSpec;
     use crate::run_options::RunOptions;
+    use crate::workflow_bundle::BundledWorkflow;
 
     fn test_run_id() -> RunId {
         fixtures::RUN_1
@@ -677,6 +722,46 @@ mod tests {
             command: command.to_string(),
             env:     HashMap::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn materialize_workflow_runtime_files_writes_each_destination_in_path_order() {
+        let workflow_path =
+            ManifestPath::from_wire(".fabro/workflows/demo/workflow.fabro").unwrap();
+        let workflow_bundle =
+            WorkflowBundle::new(HashMap::from([(workflow_path.clone(), BundledWorkflow {
+                path:          workflow_path,
+                source:        "digraph Demo {}".to_string(),
+                config:        None,
+                files:         HashMap::new(),
+                runtime_files: HashMap::from([
+                    (
+                        ManifestPath::from_wire(".fabro/workflows/demo/scripts/z-last.py").unwrap(),
+                        "print('last')\n".to_string(),
+                    ),
+                    (
+                        ManifestPath::from_wire(".fabro/workflows/demo/assets/a-first.txt")
+                            .unwrap(),
+                        "first\n".to_string(),
+                    ),
+                ]),
+            })]));
+        let sandbox = MockSandbox::default();
+
+        materialize_workflow_runtime_files(&sandbox, &workflow_bundle)
+            .await
+            .unwrap();
+
+        assert_eq!(*sandbox.written_files.lock().unwrap(), vec![
+            (
+                ".fabro/workflows/demo/assets/a-first.txt".to_string(),
+                "first\n".to_string(),
+            ),
+            (
+                ".fabro/workflows/demo/scripts/z-last.py".to_string(),
+                "print('last')\n".to_string(),
+            ),
+        ]);
     }
 
     fn test_catalog() -> Arc<Catalog> {

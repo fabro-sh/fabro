@@ -597,10 +597,11 @@ mod tests {
         services.workflow_bundle = Some(Arc::new(WorkflowBundle::new(HashMap::from([(
             ManifestPath::from_wire("children/review.fabro").unwrap(),
             BundledWorkflow {
-                path:   ManifestPath::from_wire("children/review.fabro").unwrap(),
-                source: child_dot_succeeds().to_string(),
-                config: None,
-                files:  HashMap::new(),
+                path:          ManifestPath::from_wire("children/review.fabro").unwrap(),
+                source:        child_dot_succeeds().to_string(),
+                config:        None,
+                files:         HashMap::new(),
+                runtime_files: HashMap::new(),
             },
         )]))));
 

@@ -2804,6 +2804,7 @@ dependencies = [
  "temp-env",
  "tempfile",
  "toml 0.8.23",
+ "walkdir",
 ]
 
 [[package]]

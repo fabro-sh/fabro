@@ -40,7 +40,9 @@ use fabro_workflow::operations::{
 };
 use fabro_workflow::pipeline::Validated;
 use fabro_workflow::run_materialization::materialize_run_with_ready_providers;
-use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig, WorkflowBundle};
+use fabro_workflow::workflow_bundle::{
+    self, BundledWorkflow, ParsedWorkflowConfig, WorkflowBundle,
+};
 use futures_util::stream::{self, StreamExt};
 use tokio::process::Command;
 use tokio::time;
@@ -81,8 +83,16 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
     manifest_mcp_server_catalog: &HashMap<String, McpServerSettings>,
     manifest: &types::RunManifest,
 ) -> Result<PreparedManifest> {
-    if manifest.version != 1 {
+    if !matches!(manifest.version, 1 | 2) {
         bail!("unsupported manifest version {}", manifest.version);
+    }
+    if manifest.version == 1
+        && manifest
+            .workflows
+            .values()
+            .any(|workflow| !workflow.runtime_files.is_empty())
+    {
+        bail!("workflow runtime files require manifest version 2");
     }
 
     let cwd = PathBuf::from(&manifest.cwd);
@@ -302,6 +312,9 @@ pub fn workflow_bundle_from_manifest(
 ) -> Result<WorkflowBundle> {
     let mut bundled = HashMap::new();
     let mut workflow_wire_keys = HashMap::new();
+    let mut runtime_destinations = HashMap::new();
+    let mut runtime_file_count = 0usize;
+    let mut runtime_file_bytes = 0usize;
 
     for (wire_key, workflow) in workflows {
         let path = ManifestPath::from_wire(wire_key)
@@ -315,6 +328,35 @@ pub fn workflow_bundle_from_manifest(
         workflow_wire_keys.insert(path.clone(), wire_key.clone());
 
         let files = workflow_files_from_manifest(&workflow.files)?;
+        let runtime_files = workflow_runtime_files_from_manifest(&path, &workflow.runtime_files)?;
+        for (runtime_path, content) in &runtime_files {
+            runtime_file_count = runtime_file_count
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("workflow runtime file count overflow"))?;
+            if runtime_file_count > workflow_bundle::MAX_WORKFLOW_RUNTIME_FILES {
+                bail!(
+                    "workflow manifest contains more than {} runtime files",
+                    workflow_bundle::MAX_WORKFLOW_RUNTIME_FILES
+                );
+            }
+            runtime_file_bytes = runtime_file_bytes
+                .checked_add(content.len())
+                .ok_or_else(|| anyhow!("workflow runtime file byte count overflow"))?;
+            if runtime_file_bytes > workflow_bundle::MAX_WORKFLOW_RUNTIME_BYTES {
+                bail!(
+                    "workflow runtime files exceed the {} byte limit",
+                    workflow_bundle::MAX_WORKFLOW_RUNTIME_BYTES
+                );
+            }
+
+            if let Some(previous) = runtime_destinations.get(runtime_path) {
+                if previous != content {
+                    bail!("conflicting workflow runtime file contents for path: {runtime_path}");
+                }
+            } else {
+                runtime_destinations.insert(runtime_path.clone(), content.clone());
+            }
+        }
         let config = workflow
             .config
             .as_ref()
@@ -334,10 +376,42 @@ pub fn workflow_bundle_from_manifest(
             source: workflow.source.clone(),
             config,
             files,
+            runtime_files,
         });
     }
 
     Ok(WorkflowBundle::new(bundled))
+}
+
+fn workflow_runtime_files_from_manifest(
+    workflow_path: &ManifestPath,
+    files: &HashMap<String, String>,
+) -> Result<HashMap<ManifestPath, String>> {
+    let mut bundled = HashMap::new();
+    let mut file_wire_keys = HashMap::new();
+
+    for (wire_key, content) in files {
+        if wire_key.split('/').any(|segment| segment == "..")
+            || wire_key.chars().any(char::is_control)
+        {
+            bail!("invalid workflow runtime file path: {wire_key:?}");
+        }
+        let path = ManifestPath::from_wire(wire_key)
+            .ok_or_else(|| anyhow!("invalid workflow runtime file path: {wire_key:?}"))?;
+        if !workflow_bundle::is_workflow_runtime_file_path(workflow_path, &path) {
+            bail!("workflow runtime file path is outside the package directories: {wire_key:?}");
+        }
+        if let Some(previous) = file_wire_keys.get(&path) {
+            bail!(
+                "duplicate canonical workflow runtime file path: {path} (from wire keys \
+                 {previous:?} and {wire_key:?})"
+            );
+        }
+        file_wire_keys.insert(path.clone(), wire_key.clone());
+        bundled.insert(path, content.clone());
+    }
+
+    Ok(bundled)
 }
 
 fn workflow_files_from_manifest(
@@ -1419,8 +1493,9 @@ mod tests {
             },
             version:   1,
             workflows: HashMap::from([("workflow.fabro".to_string(), types::ManifestWorkflow {
-                config: None,
-                files:  HashMap::new(),
+                config:        None,
+                files:         HashMap::new(),
+                runtime_files: HashMap::new(),
                 source:
                     "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
                         .to_string(),
@@ -1431,9 +1506,10 @@ mod tests {
     fn invalid_manifest() -> types::RunManifest {
         types::RunManifest {
             workflows: HashMap::from([("workflow.fabro".to_string(), types::ManifestWorkflow {
-                config: None,
-                files:  HashMap::new(),
-                source: "digraph Invalid { exit [shape=Msquare] orphan exit -> orphan }"
+                config:        None,
+                files:         HashMap::new(),
+                runtime_files: HashMap::new(),
+                source:        "digraph Invalid { exit [shape=Msquare] orphan exit -> orphan }"
                     .to_string(),
             })]),
             ..minimal_manifest()
@@ -1591,10 +1667,12 @@ digraph Demo {{
 
     fn manifest_workflow() -> types::ManifestWorkflow {
         types::ManifestWorkflow {
-            config: None,
-            files:  HashMap::new(),
-            source: "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
-                .to_string(),
+            config:        None,
+            files:         HashMap::new(),
+            runtime_files: HashMap::new(),
+            source:
+                "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+                    .to_string(),
         }
     }
 
@@ -1607,6 +1685,147 @@ digraph Demo {{
                 type_:    types::ManifestFileRefType::FileInline,
             },
         }
+    }
+
+    #[test]
+    fn manifest_version_two_preserves_valid_workflow_runtime_files() {
+        let mut manifest = minimal_manifest();
+        manifest.version = 2;
+        manifest
+            .workflows
+            .get_mut("workflow.fabro")
+            .unwrap()
+            .runtime_files
+            .insert(
+                "scripts/security_review.py".to_string(),
+                "print('review')\n".to_string(),
+            );
+
+        let bundle = workflow_bundle_from_manifest(&manifest.workflows).unwrap();
+        let workflow = bundle
+            .workflow(&ManifestPath::from_wire("workflow.fabro").unwrap())
+            .unwrap();
+
+        assert_eq!(
+            workflow
+                .runtime_files
+                .get(&ManifestPath::from_wire("scripts/security_review.py").unwrap())
+                .map(String::as_str),
+            Some("print('review')\n")
+        );
+    }
+
+    #[test]
+    fn manifest_version_one_rejects_workflow_runtime_files() {
+        let mut manifest = minimal_manifest();
+        manifest
+            .workflows
+            .get_mut("workflow.fabro")
+            .unwrap()
+            .runtime_files
+            .insert(
+                "scripts/review.py".to_string(),
+                "print('review')\n".to_string(),
+            );
+
+        let result = prepare_manifest(
+            &manifest_run_defaults(Some(&default_settings_fixture())),
+            &manifest,
+        );
+        let Err(err) = result else {
+            panic!("manifest version 1 should reject workflow runtime files");
+        };
+
+        assert_eq!(
+            err.to_string(),
+            "workflow runtime files require manifest version 2"
+        );
+    }
+
+    #[test]
+    fn workflow_runtime_files_reject_parent_traversal() {
+        let mut workflow = manifest_workflow();
+        workflow
+            .runtime_files
+            .insert("../scripts/review.py".to_string(), "unsafe".to_string());
+
+        let err = workflow_bundle_from_manifest(&HashMap::from([(
+            "workflow.fabro".to_string(),
+            workflow,
+        )]))
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("invalid workflow runtime file path")
+        );
+    }
+
+    #[test]
+    fn workflow_runtime_files_reject_paths_outside_package_directories() {
+        let mut workflow = manifest_workflow();
+        workflow
+            .runtime_files
+            .insert("prompts/review.md".to_string(), "unsafe".to_string());
+
+        let err = workflow_bundle_from_manifest(&HashMap::from([(
+            "workflow.fabro".to_string(),
+            workflow,
+        )]))
+        .unwrap_err();
+
+        assert!(err.to_string().contains("outside the package directories"));
+    }
+
+    #[test]
+    fn workflow_runtime_files_reject_conflicting_destinations() {
+        let mut first = manifest_workflow();
+        first
+            .runtime_files
+            .insert("scripts/review.py".to_string(), "first".to_string());
+        let mut second = manifest_workflow();
+        second
+            .runtime_files
+            .insert("scripts/review.py".to_string(), "second".to_string());
+
+        let err = workflow_bundle_from_manifest(&HashMap::from([
+            ("first.fabro".to_string(), first),
+            ("second.fabro".to_string(), second),
+        ]))
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("conflicting workflow runtime file contents")
+        );
+    }
+
+    #[test]
+    fn workflow_runtime_files_enforce_count_and_size_limits() {
+        let mut too_many = manifest_workflow();
+        for index in 0..=workflow_bundle::MAX_WORKFLOW_RUNTIME_FILES {
+            too_many
+                .runtime_files
+                .insert(format!("assets/file-{index}.txt"), String::new());
+        }
+        let count_err = workflow_bundle_from_manifest(&HashMap::from([(
+            "workflow.fabro".to_string(),
+            too_many,
+        )]))
+        .unwrap_err();
+        assert!(count_err.to_string().contains("runtime files"));
+
+        let mut too_large = manifest_workflow();
+        too_large.runtime_files.insert(
+            "assets/large.txt".to_string(),
+            "x".repeat(workflow_bundle::MAX_WORKFLOW_RUNTIME_BYTES + 1),
+        );
+        let size_err = workflow_bundle_from_manifest(&HashMap::from([(
+            "workflow.fabro".to_string(),
+            too_large,
+        )]))
+        .unwrap_err();
+        assert!(size_err.to_string().contains("runtime files exceed"));
     }
 
     fn git_context(origin_url: &str, branch: &str) -> types::GitContext {
@@ -2759,14 +2978,16 @@ digraph Demo {
 
         fn workflow_with_config(source: &str) -> BundledWorkflow {
             BundledWorkflow {
-                path:   ManifestPath::from_wire("workflow.fabro").expect("path should be valid"),
-                source: "digraph G {}".to_string(),
-                config: Some(ParsedWorkflowConfig {
+                path:          ManifestPath::from_wire("workflow.fabro")
+                    .expect("path should be valid"),
+                source:        "digraph G {}".to_string(),
+                config:        Some(ParsedWorkflowConfig {
                     path:   ManifestPath::from_wire("workflow.toml")
                         .expect("config path should be valid"),
                     source: source.to_string(),
                 }),
-                files:  std::collections::HashMap::new(),
+                files:         std::collections::HashMap::new(),
+                runtime_files: std::collections::HashMap::new(),
             }
         }
 

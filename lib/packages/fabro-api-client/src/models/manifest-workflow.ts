@@ -24,4 +24,8 @@ export interface ManifestWorkflow {
     'source': string;
     'config'?: ManifestWorkflowConfig;
     'files'?: { [key: string]: ManifestFileEntry; };
+    /**
+     * UTF-8 files from the workflow package that Fabro writes into fresh remote sandboxes before preparation.
+     */
+    'runtime_files'?: { [key: string]: string; };
 }

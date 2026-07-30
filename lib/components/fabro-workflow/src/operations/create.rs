@@ -1242,8 +1242,8 @@ reasoning = false
     fn validate_from_bundle_resolves_nested_import_files_relative_to_imported_graph() {
         let validated = validate(ValidateInput {
             workflow:          WorkflowInput::Bundled(BundledWorkflow {
-                path:   ManifestPath::from_wire("workflow.fabro").unwrap(),
-                source: r#"digraph Test {
+                path:          ManifestPath::from_wire("workflow.fabro").unwrap(),
+                source:        r#"digraph Test {
                     graph [goal="Ship"]
                     start [shape=Mdiamond]
                     validate [import="./child/validate.fabro"]
@@ -1251,8 +1251,8 @@ reasoning = false
                     start -> validate -> exit
                 }"#
                 .to_string(),
-                config: None,
-                files:  HashMap::from([
+                config:        None,
+                files:         HashMap::from([
                     (
                         ManifestPath::from_wire("child/validate.fabro").unwrap(),
                         r#"digraph Validate {
@@ -1268,6 +1268,7 @@ reasoning = false
                         "Lint {{ goal }}".to_string(),
                     ),
                 ]),
+                runtime_files: HashMap::new(),
             }),
             settings:          WorkflowSettings::default(),
             vars:              HashMap::new(),
@@ -1290,8 +1291,8 @@ reasoning = false
     fn validate_from_bundle_resolves_minijinja_includes_in_prompt_and_goal_files() {
         let validated = validate(ValidateInput {
             workflow:          WorkflowInput::Bundled(BundledWorkflow {
-                path:   ManifestPath::from_wire("workflow.fabro").unwrap(),
-                source: r#"digraph Test {
+                path:          ManifestPath::from_wire("workflow.fabro").unwrap(),
+                source:        r#"digraph Test {
                     graph [goal="@goals/goal.md"]
                     start [shape=Mdiamond]
                     work [prompt="@prompts/work.md"]
@@ -1299,8 +1300,8 @@ reasoning = false
                     start -> work -> exit
                 }"#
                 .to_string(),
-                config: None,
-                files:  HashMap::from([
+                config:        None,
+                files:         HashMap::from([
                     (
                         ManifestPath::from_wire("goals/goal.md").unwrap(),
                         r#"{% include "goal.tpl.md" %}"#.to_string(),
@@ -1318,6 +1319,7 @@ reasoning = false
                         "Bundled prompt".to_string(),
                     ),
                 ]),
+                runtime_files: HashMap::new(),
             }),
             settings:          WorkflowSettings::default(),
             vars:              HashMap::new(),

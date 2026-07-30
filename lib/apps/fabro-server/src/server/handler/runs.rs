@@ -38,10 +38,11 @@ use tokio::fs;
 use tracing::info;
 
 use super::super::{
-    AppState, DeleteRunOutcome, ListResponse, RunExecutionMode, VariableError, answer_from_request,
-    api_question_from_pending_interview, clamp_page_limit, clamp_page_offset, default_page_limit,
-    delete_run_internal, load_pending_interview, managed_run, parse_run_id_path,
-    parse_stage_id_path, reject_if_archived, submit_pending_interview_answer, workflow_event,
+    AppState, DefaultBodyLimit, DeleteRunOutcome, ListResponse, RunExecutionMode, VariableError,
+    answer_from_request, api_question_from_pending_interview, clamp_page_limit, clamp_page_offset,
+    default_page_limit, delete_run_internal, load_pending_interview, managed_run,
+    parse_run_id_path, parse_stage_id_path, reject_if_archived, submit_pending_interview_answer,
+    workflow_event,
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
@@ -55,15 +56,23 @@ use crate::run_title_generation::{self, GenerateTitleInput, TitlePromptInput, Wo
 #[cfg(any(test, feature = "test-support"))]
 use crate::test_support as server_test_support;
 
+const RUN_MANIFEST_BODY_LIMIT: usize = 10 * 1024 * 1024;
+
 pub(super) fn manifest_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/preflight", post(run_preflight))
         .route("/validate", post(validate_run_manifest))
+        .layer(DefaultBodyLimit::max(RUN_MANIFEST_BODY_LIMIT))
 }
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/runs", get(list_runs).post(create_run))
+        .route(
+            "/runs",
+            get(list_runs)
+                .post(create_run)
+                .layer(DefaultBodyLimit::max(RUN_MANIFEST_BODY_LIMIT)),
+        )
         .route("/runs/resolve", get(resolve_run))
         .route(
             "/runs/{id}",

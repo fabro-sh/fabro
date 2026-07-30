@@ -2891,8 +2891,8 @@ reasoning = false
             (
                 ManifestPath::from_wire("workflow.fabro").unwrap(),
                 BundledWorkflow {
-                    path:   ManifestPath::from_wire("workflow.fabro").unwrap(),
-                    source: r#"digraph Root {
+                    path:          ManifestPath::from_wire("workflow.fabro").unwrap(),
+                    source:        r#"digraph Root {
                         graph [goal="Bundle child"]
                         start [shape=Mdiamond]
                         manager [
@@ -2905,22 +2905,24 @@ reasoning = false
                         start -> manager -> exit
                     }"#
                     .to_string(),
-                    config: None,
-                    files:  HashMap::new(),
+                    config:        None,
+                    files:         HashMap::new(),
+                    runtime_files: HashMap::new(),
                 },
             ),
             (
                 ManifestPath::from_wire("children/review.fabro").unwrap(),
                 BundledWorkflow {
-                    path:   ManifestPath::from_wire("children/review.fabro").unwrap(),
-                    source: r"digraph Review {
+                    path:          ManifestPath::from_wire("children/review.fabro").unwrap(),
+                    source:        r"digraph Review {
                         start [shape=Mdiamond]
                         exit [shape=Msquare]
                         start -> exit
                     }"
                     .to_string(),
-                    config: None,
-                    files:  HashMap::new(),
+                    config:        None,
+                    files:         HashMap::new(),
+                    runtime_files: HashMap::new(),
                 },
             ),
         ]));
