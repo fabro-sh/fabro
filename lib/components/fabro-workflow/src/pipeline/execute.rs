@@ -21,6 +21,19 @@ use crate::node_handler::WorkflowNodeHandler;
 use crate::outcome::Outcome;
 use crate::records::Checkpoint;
 
+const DEFAULT_NODE_STALL_TIMEOUT: Duration = Duration::from_secs(3 * 60 * 60);
+const MAX_NODE_STALL_TIMEOUT: Duration = Duration::from_secs(72 * 60 * 60);
+
+fn node_stall_timeout(graph: &fabro_graphviz::graph::types::Graph, node_id: &str) -> Duration {
+    graph
+        .nodes
+        .get(node_id)
+        .and_then(|node| node.attrs.get("stall_timeout"))
+        .and_then(fabro_graphviz::graph::types::AttrValue::as_duration)
+        .unwrap_or(DEFAULT_NODE_STALL_TIMEOUT)
+        .min(MAX_NODE_STALL_TIMEOUT)
+}
+
 fn seed_context_from_checkpoint(checkpoint: Option<&Checkpoint>) -> Context {
     let context = Context::new();
     if let Some(cp) = checkpoint {
@@ -42,7 +55,7 @@ struct StallWatchdog {
 
 impl StallWatchdog {
     fn spawn(
-        stall_timeout: Duration,
+        stall_timeouts: watch::Receiver<Duration>,
         emitter: Arc<Emitter>,
         interview_blocks: watch::Receiver<InterviewBlockState>,
     ) -> Self {
@@ -50,7 +63,7 @@ impl StallWatchdog {
         let shutdown = CancellationToken::new();
         emitter.touch();
         let task = tokio::spawn(monitor_for_stall(
-            stall_timeout,
+            stall_timeouts,
             stall_token.clone(),
             shutdown.clone(),
             emitter,
@@ -83,12 +96,13 @@ impl StallWatchdog {
 /// agent stream delta. The deadline instead re-reads `Emitter::last_activity()`
 /// when it fires and re-arms if the run was active in the meantime.
 async fn monitor_for_stall(
-    stall_timeout: Duration,
+    mut stall_timeouts: watch::Receiver<Duration>,
     stall_token: CancellationToken,
     shutdown: CancellationToken,
     emitter: Arc<Emitter>,
     mut interview_blocks: watch::Receiver<InterviewBlockState>,
 ) {
+    let mut stall_timeout = *stall_timeouts.borrow_and_update();
     let mut deadline = emitter.last_activity() + stall_timeout;
 
     loop {
@@ -96,6 +110,14 @@ async fn monitor_for_stall(
         tokio::select! {
             biased;
             () = shutdown.cancelled() => return,
+            changed = stall_timeouts.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                stall_timeout = *stall_timeouts.borrow_and_update();
+                emitter.touch();
+                deadline = TokioInstant::now() + stall_timeout;
+            }
             changed = interview_blocks.changed() => {
                 if changed.is_err() {
                     return;
@@ -141,6 +163,17 @@ pub async fn execute(init: Initialized) -> Executed {
     let start = Instant::now();
     let graph_arc = Arc::new(graph.clone());
     let wf_graph = WorkflowGraph(Arc::clone(&graph_arc));
+    let (stall_timeout_tx, stall_timeout_rx) =
+        watch::channel(DEFAULT_NODE_STALL_TIMEOUT);
+    let node_timeout_tx = stall_timeout_tx.clone();
+    let node_timeout_graph = Arc::clone(&graph_arc);
+    let original_on_node = on_node;
+    let on_node: crate::OnNodeCallback = Some(Arc::new(move |node_id: &str| {
+        node_timeout_tx.send_replace(node_stall_timeout(&node_timeout_graph, node_id));
+        if let Some(callback) = &original_on_node {
+            callback(node_id);
+        }
+    }));
 
     let handler = Arc::new(WorkflowNodeHandler {
         services: Arc::clone(&engine),
@@ -273,21 +306,18 @@ pub async fn execute(init: Initialized) -> Executed {
         None
     };
 
-    let stall_watchdog = graph.stall_timeout().map(|stall_timeout| {
-        StallWatchdog::spawn(
-            stall_timeout,
-            Arc::clone(&engine.run.emitter),
-            engine.run.interview_blocker.subscribe(),
-        )
-    });
+    let _stall_timeout_sender = stall_timeout_tx;
+    let stall_watchdog = StallWatchdog::spawn(
+        stall_timeout_rx,
+        Arc::clone(&engine.run.emitter),
+        engine.run.interview_blocker.subscribe(),
+    );
 
     let mut builder = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<WorkflowGraph>>)
         .lifecycle(Box::new(lifecycle));
 
     builder = builder.cancel_token(run_options.cancel_token.clone());
-    if let Some(token) = stall_watchdog.as_ref().map(StallWatchdog::stall_token) {
-        builder = builder.stall_token(token);
-    }
+    builder = builder.stall_token(stall_watchdog.stall_token());
     if let Some(limit) = max_node_visits {
         builder = builder.max_node_visits(limit);
     }
@@ -295,9 +325,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let executor = builder.build();
     let result = executor.run(&wf_graph, state).await;
 
-    if let Some(watchdog) = stall_watchdog {
-        watchdog.stop().await;
-    }
+    stall_watchdog.stop().await;
 
     let (outcome, final_context) = match result {
         Ok((core_outcome, final_state)) => {
@@ -312,7 +340,7 @@ pub async fn execute(init: Initialized) -> Executed {
             (Ok(result), ctx)
         }
         Err(fabro_core::Error::StallTimeout { node_id }) => {
-            let stall_timeout = graph.stall_timeout().unwrap_or_default();
+            let stall_timeout = node_stall_timeout(&graph, &node_id);
             let idle_secs = stall_timeout.as_secs();
             engine.run.emitter.emit(&Event::StallWatchdogTimeout {
                 node:         node_id.clone(),
