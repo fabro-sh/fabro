@@ -239,6 +239,9 @@ pub struct LlmSpec {
     pub provider_id:    ProviderId,
     pub fallbacks:      ModelFallbackPolicy,
     pub mcp_servers:    Vec<McpServerSettings>,
+    /// Extra skill discovery directories from `[run.agent] skill_dirs`,
+    /// searched in addition to the agent's convention directories.
+    pub skill_dirs:     Vec<String>,
     pub model_controls: RunModelControls,
     pub dry_run:        bool,
 }

@@ -44,7 +44,7 @@ use crate::profiles::EnvContext;
 use crate::question_tools::AgentToolRuntime;
 use crate::sandbox::Sandbox;
 use crate::skills::{
-    ExpandedInput, Skill, default_skill_dirs, discover_skills, expand_skill,
+    ExpandedInput, Skill, default_skill_dirs, discover_skills, expand_skill, extend_skill_dirs,
     make_use_skill_tool_for_vocabulary,
 };
 use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentSupervisor};
@@ -655,13 +655,14 @@ impl Session {
             });
 
         // Discover skills
-        let skill_dirs = if let Some(dirs) = &self.config.skill_dirs {
+        let mut skill_dirs = if let Some(dirs) = &self.config.skill_dirs {
             dirs.clone()
         } else {
             let skills_dir = fabro_util::Home::from_env().skills_dir();
             let skills_str = skills_dir.to_string_lossy().to_string();
             default_skill_dirs(Some(&skills_str), Some(&doc_root))
         };
+        extend_skill_dirs(&mut skill_dirs, &self.config.extra_skill_dirs, &doc_root);
         self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs, &cancel_token).await?;
         debug!(skill_count = self.skills.len(), "Skills discovered");
 
@@ -5968,6 +5969,75 @@ mod tests {
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "commit");
         assert_eq!(skills[0].description, "Make a commit");
+    }
+
+    /// `extra_skill_dirs` (what `[run.agent] skill_dirs` feeds) adds to the
+    /// convention directories instead of replacing them, resolves a relative
+    /// entry against the git root, and is searched last so its skills win.
+    #[tokio::test]
+    async fn initialize_appends_extra_skill_dirs_to_the_convention_dirs() {
+        let sandbox = Arc::new(MockSandbox::linux());
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            extra_skill_dirs: vec![".agents/skills".into(), "/opt/shared/skills".into()],
+            ..Default::default()
+        };
+        let mut session = build_initialized_session(sandbox, config).await;
+        let mut rx = session.subscribe();
+        session.initialize().await.unwrap();
+
+        let mut source_dirs = None;
+        while let Ok(envelope) = rx.try_recv() {
+            if let AgentEvent::SkillsDiscovered {
+                source_dirs: dirs, ..
+            } = envelope.event
+            {
+                source_dirs = Some(dirs);
+                break;
+            }
+        }
+        let source_dirs = source_dirs.expect("SkillsDiscovered must be emitted");
+        assert_eq!(&source_dirs[source_dirs.len() - 4..], [
+            "/home/test/.fabro/skills".to_string(),
+            "/home/test/skills".to_string(),
+            "/home/test/.agents/skills".to_string(),
+            "/opt/shared/skills".to_string(),
+        ]);
+    }
+
+    /// An explicit `skill_dirs` override still gets the extra directories
+    /// appended, so the two knobs compose rather than shadowing each other.
+    #[tokio::test]
+    async fn initialize_appends_extra_skill_dirs_to_an_explicit_override() {
+        let sandbox = Arc::new(MockSandbox::linux());
+        let config = SessionOptions {
+            git_root: Some("/home/test".into()),
+            skill_dirs: Some(vec!["/skills".into()]),
+            extra_skill_dirs: vec!["/skills".into(), ".agents/skills".into()],
+            ..Default::default()
+        };
+        let mut session = build_initialized_session(sandbox, config).await;
+        let mut rx = session.subscribe();
+        session.initialize().await.unwrap();
+
+        let mut source_dirs = None;
+        while let Ok(envelope) = rx.try_recv() {
+            if let AgentEvent::SkillsDiscovered {
+                source_dirs: dirs, ..
+            } = envelope.event
+            {
+                source_dirs = Some(dirs);
+                break;
+            }
+        }
+        // `/skills` is already in the list, so it is not globbed twice.
+        assert_eq!(
+            source_dirs.expect("SkillsDiscovered must be emitted"),
+            vec![
+                "/skills".to_string(),
+                "/home/test/.agents/skills".to_string()
+            ]
+        );
     }
 
     #[tokio::test]

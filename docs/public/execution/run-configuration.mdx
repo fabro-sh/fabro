@@ -480,13 +480,21 @@ Configure workflow agent behavior that is not tied to a single stage.
 ```toml title="run.toml"
 [run.agent]
 fabro_tools = true
+skill_dirs = [".agents/skills"]
 ```
+
+| Field | Description |
+|---|---|
+| `fabro_tools` | Allow the run's agents to use the Fabro run-management tools. Defaults to `false`. |
+| `skill_dirs` | Extra [skill](/agents/skills) discovery directories, added to the convention directories. Defaults to none. |
 
 `fabro_tools` defaults to `false`. Set it to `true` only for runs whose agents should be able to use the same Fabro run-management MCP tool catalog exposed to human MCP clients: create, search, get, interact, gather, events, and pair.
 
 One workflow-agent exception is intentional: `fabro_run_create` always creates [child runs](/execution/child-runs) parented to the current run. If an agent supplies `parent_id`, it must match the current run ID.
 
-This setting is independent of `[run.agent.mcps]`, which configures external MCP servers available to the agent.
+`skill_dirs` is searched **after** the convention directories (`~/.fabro/skills`, `{git_root}/.fabro/skills`, `{git_root}/skills`), so a skill defined in a configured directory overrides a same-named convention skill. Relative entries resolve against the repository root; absolute entries are used verbatim. Agent stages and their subagents both see the extra directories. As with other list settings, a higher layer's list replaces a lower layer's unless it splices the inherited entries in with `"..."`.
+
+These settings are independent of `[run.agent.mcps]`, which configures external MCP servers available to the agent.
 
 ### `[run.agent.mcps]`
 

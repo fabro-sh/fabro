@@ -971,6 +971,96 @@ fabro_tools = true
 
         assert!(!settings.agent.fabro_tools);
     }
+
+    #[test]
+    fn skill_dirs_default_to_empty() {
+        let settings = super::workflow_settings_from_layer(SettingsLayer::default())
+            .expect("empty settings should resolve")
+            .run;
+
+        assert!(settings.agent.skill_dirs.is_empty());
+    }
+
+    #[test]
+    fn resolves_skill_dirs_in_declared_order() {
+        let settings = super::workflow_settings_from_toml(
+            r#"
+_version = 1
+
+[run.agent]
+skill_dirs = [".agents/skills", "/opt/shared/skills"]
+"#,
+        )
+        .expect("run.agent.skill_dirs should resolve");
+
+        assert_eq!(settings.run.agent.skill_dirs, vec![
+            ".agents/skills".to_string(),
+            "/opt/shared/skills".to_string(),
+        ]);
+    }
+
+    /// A higher layer's list replaces the lower layer's, matching every other
+    /// splice-aware list setting.
+    #[test]
+    fn higher_layer_skill_dirs_replace_lower_layer() {
+        let workflow = parse_settings(
+            r#"
+_version = 1
+
+[run.agent]
+skill_dirs = [".agents/skills"]
+"#,
+        );
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.agent]
+skill_dirs = ["/home/user/skills"]
+"#,
+        );
+        let merged = workflow.combine(user);
+
+        let settings = super::workflow_settings_from_layer(merged)
+            .expect("merged settings should resolve")
+            .run;
+
+        assert_eq!(settings.agent.skill_dirs, vec![
+            ".agents/skills".to_string()
+        ]);
+    }
+
+    /// `"..."` splices the lower layer's entries in place, so a project can add
+    /// a directory without restating the ones it inherits.
+    #[test]
+    fn splice_marker_expands_the_lower_layer_skill_dirs() {
+        let workflow = parse_settings(
+            r#"
+_version = 1
+
+[run.agent]
+skill_dirs = ["...", ".agents/skills"]
+"#,
+        );
+        let user = parse_settings(
+            r#"
+_version = 1
+
+[run.agent]
+skill_dirs = ["/home/user/skills"]
+"#,
+        );
+        let merged = workflow.combine(user);
+
+        let settings = super::workflow_settings_from_layer(merged)
+            .expect("merged settings should resolve")
+            .run;
+
+        assert_eq!(settings.agent.skill_dirs, vec![
+            "/home/user/skills".to_string(),
+            ".agents/skills".to_string(),
+        ]);
+    }
 }
 
 mod run_checkpoint {

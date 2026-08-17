@@ -324,6 +324,14 @@ fn resolve_agent(
 
     RunAgentSettings {
         fabro_tools: agent.fabro_tools.unwrap_or(false),
+        skill_dirs:  agent
+            .skill_dirs
+            .iter()
+            .filter_map(|dir| match dir {
+                StringOrSplice::Value(value) => Some(value.clone()),
+                StringOrSplice::Splice => None,
+            })
+            .collect(),
         mcps:        resolve_mcp_entries(&agent.mcps, mcp_server_catalog, errors),
     }
 }

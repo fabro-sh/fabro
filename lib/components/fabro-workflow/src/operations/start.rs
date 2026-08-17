@@ -480,6 +480,7 @@ impl RunSession {
                 provider_id: llm.provider_id.clone(),
                 fallbacks: llm.fallbacks.policy,
                 mcp_servers,
+                skill_dirs: resolved.agent.skill_dirs.clone(),
                 model_controls: resolved.model.controls.clone(),
                 dry_run: resolved.execution.mode == RunMode::DryRun,
             },
@@ -1534,6 +1535,41 @@ reasoning = false
             env.get("MCP_TOKEN").map(String::as_str),
             Some("vault-token")
         );
+    }
+
+    /// `[run.agent] skill_dirs` has to reach the LLM spec, which is what hands
+    /// the directories to every agent session the run creates.
+    #[tokio::test]
+    async fn run_session_new_carries_run_agent_skill_dirs_into_the_llm_spec() {
+        let temp = tempfile::tempdir().unwrap();
+        let (storage_root, _run_dir) = storage_root_and_run_dir(&temp);
+        let mut settings = settings_from_run_layer(RunLayer {
+            execution: Some(RunExecutionLayer {
+                mode: Some(RunMode::DryRun),
+                ..RunExecutionLayer::default()
+            }),
+            ..RunLayer::default()
+        });
+        settings.run.agent.skill_dirs = vec![
+            ".agents/skills".to_string(),
+            "/opt/shared/skills".to_string(),
+        ];
+        let (persisted, store) =
+            persisted_workflow_with_settings(MINIMAL_DOT, &storage_root, settings).await;
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
+        let registry = Arc::new(test_registry());
+
+        let session = RunSession::new(
+            &persisted,
+            test_start_services(&store, &storage_root, emitter, registry).await,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(session.llm.skill_dirs, vec![
+            ".agents/skills".to_string(),
+            "/opt/shared/skills".to_string(),
+        ]);
     }
 
     #[tokio::test]

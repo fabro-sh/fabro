@@ -19,5 +19,9 @@ import type { McpServerSettings } from './mcp-server-settings';
 
 export interface RunAgentSettings {
     'fabro_tools': boolean;
+    /**
+     * Extra skill discovery directories, searched after the convention directories. Relative entries resolve against the repository root.
+     */
+    'skill_dirs': Array<string>;
     'mcps': { [key: string]: McpServerSettings; };
 }

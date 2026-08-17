@@ -171,6 +171,7 @@ async fn build_registry(
         let provider_id = spec.provider_id.clone();
         let fallbacks = spec.fallbacks.clone();
         let mcp_servers = spec.mcp_servers.clone();
+        let skill_dirs = spec.skill_dirs.clone();
         let model_controls = spec.model_controls.clone();
         let tool_secrets_for_api = tool_secrets.clone();
         let llm_source_for_api = Arc::clone(&llm_source);
@@ -191,7 +192,8 @@ async fn build_registry(
             .with_run_model_controls(model_controls.clone())
             .with_tool_env_provider(tool_env_provider.clone())
             .with_tool_secrets(tool_secrets_for_api.clone())
-            .with_mcp_servers(mcp_servers.clone());
+            .with_mcp_servers(mcp_servers.clone())
+            .with_skill_dirs(skill_dirs.clone());
             if let Some(services) = fabro_run_tools_for_api.clone() {
                 api = api.with_fabro_run_tools(services);
             }
@@ -806,6 +808,7 @@ mod tests {
                 provider_id:    fabro_model::ProviderId::anthropic(),
                 fallbacks:      ModelFallbackPolicy::default(),
                 mcp_servers:    Vec::new(),
+                skill_dirs:     Vec::new(),
                 model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
@@ -1133,6 +1136,7 @@ mod tests {
                 provider_id:    fabro_model::ProviderId::anthropic(),
                 fallbacks:      ModelFallbackPolicy::default(),
                 mcp_servers:    Vec::new(),
+                skill_dirs:     Vec::new(),
                 model_controls: RunModelControls::default(),
                 dry_run:        false,
             },
@@ -1255,6 +1259,7 @@ mod tests {
                 provider_id:    fabro_model::ProviderId::openai(),
                 fallbacks:      ModelFallbackPolicy::default(),
                 mcp_servers:    Vec::new(),
+                skill_dirs:     Vec::new(),
                 model_controls: RunModelControls::default(),
                 dry_run:        false,
             },
@@ -1350,6 +1355,7 @@ mod tests {
                 provider_id:    fabro_model::ProviderId::anthropic(),
                 fallbacks:      ModelFallbackPolicy::default(),
                 mcp_servers:    Vec::new(),
+                skill_dirs:     Vec::new(),
                 model_controls: RunModelControls::default(),
                 dry_run:        true,
             },
@@ -1492,6 +1498,7 @@ mod tests {
                 provider_id:    fabro_model::ProviderId::anthropic(),
                 fallbacks:      ModelFallbackPolicy::default(),
                 mcp_servers:    Vec::new(),
+                skill_dirs:     Vec::new(),
                 model_controls: RunModelControls::default(),
                 dry_run:        true,
             },

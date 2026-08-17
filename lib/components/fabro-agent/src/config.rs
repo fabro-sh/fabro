@@ -187,6 +187,14 @@ pub struct SessionOptions {
     /// Skill directories. `None` = use convention defaults, `Some(dirs)` = use
     /// these instead.
     pub skill_dirs: Option<Vec<String>>,
+    /// Extra skill directories appended to `skill_dirs` (or, when that is
+    /// `None`, to the convention defaults). Searched last, so a skill defined
+    /// here wins over a same-named skill from an earlier directory. Relative
+    /// entries resolve against the git root, falling back to the sandbox
+    /// working directory. This is what `[run.agent] skill_dirs` configures for
+    /// workflow and automation runs, which need to *add* a discovery directory
+    /// without restating the conventions.
+    pub extra_skill_dirs: Vec<String>,
     /// MCP server configurations to connect to on session startup.
     pub mcp_servers: Vec<McpServerSettings>,
     /// Wall-clock timeout for the entire `process_input` call.
@@ -224,6 +232,7 @@ impl std::fmt::Debug for SessionOptions {
             )
             .field("compaction_preserve_turns", &self.compaction_preserve_turns)
             .field("skill_dirs", &self.skill_dirs)
+            .field("extra_skill_dirs", &self.extra_skill_dirs)
             .field("mcp_servers", &self.mcp_servers.len())
             .field("wall_clock_timeout", &self.wall_clock_timeout)
             .finish()
@@ -251,6 +260,7 @@ impl Default for SessionOptions {
             compaction_threshold_percent: 80,
             compaction_preserve_turns: 6,
             skill_dirs: None,
+            extra_skill_dirs: Vec::new(),
             mcp_servers: Vec::new(),
             wall_clock_timeout: None,
         }

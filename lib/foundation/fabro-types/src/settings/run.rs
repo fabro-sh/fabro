@@ -1350,6 +1350,16 @@ pub struct InterviewProviderSettings {
 pub struct RunAgentSettings {
     #[serde(default)]
     pub fabro_tools: bool,
+    /// Extra skill discovery directories, searched in addition to the
+    /// convention directories (`~/.fabro/skills`, `{git_root}/.fabro/skills`,
+    /// `{git_root}/skills`) and after them, so a skill defined here wins over a
+    /// same-named convention skill. Relative entries resolve against the
+    /// repository root.
+    ///
+    /// `#[serde(default)]`: run specs persisted before this field existed have
+    /// no `skill_dirs` key, and they must stay loadable.
+    #[serde(default)]
+    pub skill_dirs:  Vec<String>,
     pub mcps:        HashMap<String, ResolvedMcpEntry>,
 }
 
