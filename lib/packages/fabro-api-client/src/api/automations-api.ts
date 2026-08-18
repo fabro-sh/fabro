@@ -32,6 +32,8 @@ import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { PaginatedRunList } from '../models';
 // @ts-ignore
+import type { PlaneDispatchListResponse } from '../models';
+// @ts-ignore
 import type { ReplaceAutomationRequest } from '../models';
 // @ts-ignore
 import type { Run } from '../models';
@@ -158,6 +160,46 @@ export const AutomationsApiAxiosParamCreator = function (configuration?: Configu
             if (ifMatch != null) {
                 localVarHeaderParameter['If-Match'] = String(ifMatch);
             }
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns recent Plane ticket dispatch records for this automation.
+         * @summary List Automation Plane Dispatches
+         * @param {string} id Unique automation identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listAutomationPlaneDispatches: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listAutomationPlaneDispatches', 'id', id)
+            const localVarPath = `/api/v1/automations/{id}/plane-dispatches`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
@@ -394,6 +436,19 @@ export const AutomationsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Returns recent Plane ticket dispatch records for this automation.
+         * @summary List Automation Plane Dispatches
+         * @param {string} id Unique automation identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listAutomationPlaneDispatches(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PlaneDispatchListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listAutomationPlaneDispatches(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AutomationsApi.listAutomationPlaneDispatches']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns durable runs created by one automation.
          * @summary List automation runs
          * @param {string} id Unique automation identifier.
@@ -489,6 +544,16 @@ export const AutomationsApiFactory = function (configuration?: Configuration, ba
             return localVarFp.deleteAutomation(id, ifMatch, options).then((request) => request(axios, basePath));
         },
         /**
+         * Returns recent Plane ticket dispatch records for this automation.
+         * @summary List Automation Plane Dispatches
+         * @param {string} id Unique automation identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listAutomationPlaneDispatches(id: string, options?: RawAxiosRequestConfig): AxiosPromise<PlaneDispatchListResponse> {
+            return localVarFp.listAutomationPlaneDispatches(id, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns durable runs created by one automation.
          * @summary List automation runs
          * @param {string} id Unique automation identifier.
@@ -570,6 +635,17 @@ export class AutomationsApi extends BaseAPI {
      */
     public deleteAutomation(id: string, ifMatch: string, options?: RawAxiosRequestConfig) {
         return AutomationsApiFp(this.configuration).deleteAutomation(id, ifMatch, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns recent Plane ticket dispatch records for this automation.
+     * @summary List Automation Plane Dispatches
+     * @param {string} id Unique automation identifier.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listAutomationPlaneDispatches(id: string, options?: RawAxiosRequestConfig) {
+        return AutomationsApiFp(this.configuration).listAutomationPlaneDispatches(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

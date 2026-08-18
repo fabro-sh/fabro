@@ -138,6 +138,7 @@ const INFERENCE_TIMING_EVENTS = new Set([
 const TOOL_TIMING_EVENTS = new Set([
   "agent.tool.started",
   "agent.tool.completed",
+  "agent.skill.activated",
 ]);
 const ACP_TIMING_EVENTS = new Set([
   "agent.acp.started",

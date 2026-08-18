@@ -25,6 +25,8 @@ impl EnvVars {
     pub const FABRO_PUSH_CRED_REFRESH_AHEAD: &'static str = "FABRO_PUSH_CRED_REFRESH_AHEAD";
     pub const FABRO_PUSH_CRED_REFRESH_INTERVAL_SECONDS: &'static str =
         "FABRO_PUSH_CRED_REFRESH_INTERVAL_SECONDS";
+    pub const FABRO_EXTERNAL_AGENT_HARNESS: &'static str = "FABRO_EXTERNAL_AGENT_HARNESS";
+    pub const FABRO_EXTERNAL_AGENTS: &'static str = "FABRO_EXTERNAL_AGENTS";
     pub const FABRO_QUIET: &'static str = "FABRO_QUIET";
     pub const FABRO_SERVER: &'static str = "FABRO_SERVER";
     pub const FABRO_SERVER_MAX_CONCURRENT_RUNS: &'static str = "FABRO_SERVER_MAX_CONCURRENT_RUNS";
@@ -83,6 +85,7 @@ impl EnvVars {
     pub const OAUTH_PORT: &'static str = "OAUTH_PORT";
     pub const OAUTH_SCOPE: &'static str = "OAUTH_SCOPE";
     pub const SLACK_BASE_URL: &'static str = "SLACK_BASE_URL";
+    pub const PLANE_API_KEY: &'static str = "PLANE_API_KEY";
 
     // Server, sandbox, and cloud provider integration
     pub const AWS_ACCESS_KEY_ID: &'static str = "AWS_ACCESS_KEY_ID";
@@ -231,6 +234,7 @@ mod tests {
             EnvVars::OAUTH_PORT,
             EnvVars::OAUTH_SCOPE,
             EnvVars::SLACK_BASE_URL,
+            EnvVars::PLANE_API_KEY,
             EnvVars::AWS_ACCESS_KEY_ID,
             EnvVars::AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE,
             EnvVars::AWS_CONTAINER_CREDENTIALS_FULL_URI,

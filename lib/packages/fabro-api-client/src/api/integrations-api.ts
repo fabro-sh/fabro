@@ -21,11 +21,93 @@ import globalAxios from 'axios';
 import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObject, setBearerAuthToObject, setOAuthToObject, setSearchParams, serializeDataIfNeeded, toPathString, createRequestFunction, replaceWithSerializableTypeIfNeeded } from '../common';
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
+// @ts-ignore
+import type { ErrorResponse } from '../models';
+// @ts-ignore
+import type { PlaneProjectMetadataResponse } from '../models';
+// @ts-ignore
+import type { PlaneProjectsResponse } from '../models';
 /**
  * IntegrationsApi - axios parameter creator
  */
 export const IntegrationsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
+        /**
+         * Returns states and labels for a Plane project.
+         * @summary Retrieve Plane Project Metadata
+         * @param {string} projectId Plane project ID
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getPlaneProjectMetadata: async (projectId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'projectId' is not null or undefined
+            assertParamExists('getPlaneProjectMetadata', 'projectId', projectId)
+            const localVarPath = `/api/v1/integrations/plane/projects/{project_id}/metadata`
+                .replace(`{${"project_id"}}`, encodeURIComponent(String(projectId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns list of accessible Plane projects for automation configuration.
+         * @summary List Plane Projects
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listPlaneProjects: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/integrations/plane/projects`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
         /**
          * Receives GitHub App webhook deliveries. Requests are authenticated by `X-Hub-Signature-256`, not API bearer auth.
          * @summary Receive GitHub Webhook
@@ -70,6 +152,31 @@ export const IntegrationsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = IntegrationsApiAxiosParamCreator(configuration)
     return {
         /**
+         * Returns states and labels for a Plane project.
+         * @summary Retrieve Plane Project Metadata
+         * @param {string} projectId Plane project ID
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getPlaneProjectMetadata(projectId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PlaneProjectMetadataResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getPlaneProjectMetadata(projectId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['IntegrationsApi.getPlaneProjectMetadata']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns list of accessible Plane projects for automation configuration.
+         * @summary List Plane Projects
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listPlaneProjects(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PlaneProjectsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listPlaneProjects(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['IntegrationsApi.listPlaneProjects']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Receives GitHub App webhook deliveries. Requests are authenticated by `X-Hub-Signature-256`, not API bearer auth.
          * @summary Receive GitHub Webhook
          * @param {{ [key: string]: any; }} requestBody
@@ -92,6 +199,25 @@ export const IntegrationsApiFactory = function (configuration?: Configuration, b
     const localVarFp = IntegrationsApiFp(configuration)
     return {
         /**
+         * Returns states and labels for a Plane project.
+         * @summary Retrieve Plane Project Metadata
+         * @param {string} projectId Plane project ID
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getPlaneProjectMetadata(projectId: string, options?: RawAxiosRequestConfig): AxiosPromise<PlaneProjectMetadataResponse> {
+            return localVarFp.getPlaneProjectMetadata(projectId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns list of accessible Plane projects for automation configuration.
+         * @summary List Plane Projects
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listPlaneProjects(options?: RawAxiosRequestConfig): AxiosPromise<PlaneProjectsResponse> {
+            return localVarFp.listPlaneProjects(options).then((request) => request(axios, basePath));
+        },
+        /**
          * Receives GitHub App webhook deliveries. Requests are authenticated by `X-Hub-Signature-256`, not API bearer auth.
          * @summary Receive GitHub Webhook
          * @param {{ [key: string]: any; }} requestBody
@@ -108,6 +234,27 @@ export const IntegrationsApiFactory = function (configuration?: Configuration, b
  * IntegrationsApi - object-oriented interface
  */
 export class IntegrationsApi extends BaseAPI {
+    /**
+     * Returns states and labels for a Plane project.
+     * @summary Retrieve Plane Project Metadata
+     * @param {string} projectId Plane project ID
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getPlaneProjectMetadata(projectId: string, options?: RawAxiosRequestConfig) {
+        return IntegrationsApiFp(this.configuration).getPlaneProjectMetadata(projectId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns list of accessible Plane projects for automation configuration.
+     * @summary List Plane Projects
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listPlaneProjects(options?: RawAxiosRequestConfig) {
+        return IntegrationsApiFp(this.configuration).listPlaneProjects(options).then((request) => request(this.axios, this.basePath));
+    }
+
     /**
      * Receives GitHub App webhook deliveries. Requests are authenticated by `X-Hub-Signature-256`, not API bearer auth.
      * @summary Receive GitHub Webhook

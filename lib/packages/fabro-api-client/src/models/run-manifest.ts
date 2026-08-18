@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { ExternalAgentHarness } from './external-agent-harness';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { GitContext } from './git-context';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -58,4 +61,5 @@ export interface RunManifest {
     'target': ManifestTarget;
     'configs'?: Array<ManifestConfig>;
     'workflows': { [key: string]: ManifestWorkflow; };
+    'external_agent_harness'?: ExternalAgentHarness;
 }

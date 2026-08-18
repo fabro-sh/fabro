@@ -50,6 +50,7 @@ fabro-api = { path = "../../foundation/fabro-api" }
 fabro-client = { path = "../../foundation/fabro-client" }
 fabro-db = { path = "../../foundation/fabro-db" }
 fabro-store = { path = "../../components/fabro-store" }
+fabro-tracker = { path = "../../components/fabro-tracker" }
 fabro-vault = { path = "../../foundation/fabro-vault" }
 fabro-variable = { path = "../../components/fabro-variable" }
 fabro-http.workspace = true

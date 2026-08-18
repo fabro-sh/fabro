@@ -151,6 +151,12 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
     {
         settings.run.goal = Some(RunGoal::Inline(InterpString::parse(&goal.text)));
     }
+    if let Some(harness) = manifest.external_agent_harness.as_ref() {
+        settings
+            .run
+            .metadata
+            .insert("agent.harness".to_string(), harness.as_str().to_string());
+    }
     manifest
         .title
         .as_ref()
@@ -1392,24 +1398,28 @@ mod tests {
 
     fn minimal_manifest() -> types::RunManifest {
         types::RunManifest {
-            args:      None,
-            configs:   Vec::new(),
-            cwd:       "/tmp/project".to_string(),
-            git:       None,
-            goal:      None,
-            parent_id: None,
-            title:     None,
-            target:    types::ManifestTarget {
+            args:                   None,
+            configs:                Vec::new(),
+            cwd:                    "/tmp/project".to_string(),
+            git:                    None,
+            goal:                   None,
+            parent_id:              None,
+            title:                  None,
+            external_agent_harness: None,
+            target:                 types::ManifestTarget {
                 path: "workflow.fabro".to_string(),
             },
-            version:   1,
-            workflows: HashMap::from([("workflow.fabro".to_string(), types::ManifestWorkflow {
-                config: None,
-                files:  HashMap::new(),
-                source:
-                    "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
-                        .to_string(),
-            })]),
+            version:                1,
+            workflows:              HashMap::from([(
+                "workflow.fabro".to_string(),
+                types::ManifestWorkflow {
+                    config: None,
+                    files:  HashMap::new(),
+                    source:
+                        "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+                            .to_string(),
+                },
+            )]),
         }
     }
 

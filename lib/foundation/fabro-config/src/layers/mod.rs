@@ -38,7 +38,8 @@ pub use run::{
     StringOrSplice,
 };
 pub use server::{
-    GithubIntegrationLayer, IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer,
+    ExternalAgentProfileLayer, ExternalAgentsLayer, GithubIntegrationLayer,
+    IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, PlaneIntegrationLayer,
     ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer, ServerAuthLayer,
     ServerIntegrationsLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
     ServerSandboxLayer, ServerSandboxProviderLayer, ServerSandboxProvidersLayer,

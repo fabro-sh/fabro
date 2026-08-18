@@ -1,0 +1,24 @@
+---
+title: "2026-08-18"
+description: "Plane ticket automations, external-agent harness profiles, and ACP tool/skill telemetry"
+---
+
+## Plane ticket automations
+
+Automations can now include a `plane` trigger. The server polls one Plane project, claims ready tickets, and starts runs through the existing materializer.
+
+New API:
+
+- `GET /api/v1/integrations/plane/projects`
+- `GET /api/v1/integrations/plane/projects/{project_id}/metadata`
+- `GET /api/v1/automations/{automation_id}/plane-dispatches`
+
+`PLANE_API_KEY` is a vault-only integration secret.
+
+## Run manifest
+
+`RunManifest.external_agent_harness` is an optional `codex` | `omp` field. It applies only to `backend="acp"` nodes. Existing `acp.command` / `acp.config` behavior is unchanged when the field is absent.
+
+## ACP observability
+
+ACP `ToolCall` / `ToolCallUpdate` notifications now emit the same durable `agent.tool.started` / `agent.tool.completed` events as the native agent. `skill://` inputs and explicit skill tools emit `agent.skill.activated` once per skill per stage visit.

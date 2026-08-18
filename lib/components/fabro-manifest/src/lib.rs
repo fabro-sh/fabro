@@ -224,6 +224,7 @@ pub fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
             goal,
             parent_id: None,
             title: None,
+            external_agent_harness: None,
             target: types::ManifestTarget { path: target_key },
             version: 1,
             workflows,

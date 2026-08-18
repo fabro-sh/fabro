@@ -29,6 +29,7 @@ pub struct SystemIntegrationStatus {
 pub enum IntegrationProvider {
     Github,
     Slack,
+    Plane,
 }
 
 #[derive(

@@ -51,6 +51,7 @@ async fn stdio_spawn_failure_returns_sandbox_error() {
         cancel_token: CancellationToken::new(),
         on_activity: None,
         live_control: None,
+        on_session_activity: None,
     })
     .await;
     let Err(error) = result else {
@@ -85,6 +86,7 @@ async fn clean_stdio_exit_after_final_response_completes_turn() {
         cancel_token: CancellationToken::new(),
         on_activity: None,
         live_control: None,
+        on_session_activity: None,
     })
     .await
     .expect("clean ACP process exit should not preempt final protocol response");
@@ -119,6 +121,7 @@ async fn session_lifecycle_initializes_sends_prompt_and_aggregates_text() {
         cancel_token: CancellationToken::new(),
         on_activity: None,
         live_control: None,
+        on_session_activity: None,
     })
     .await
     .expect("run ACP turn");
@@ -152,6 +155,7 @@ async fn steering_sends_followup_session_prompt_over_acp() {
     let queued_for_activity = Arc::clone(&queued);
 
     let result = run_acp_turn(AcpRunRequest {
+        on_session_activity: None,
         command,
         prompt: "hello".to_string(),
         cwd: tempdir.path().to_string_lossy().into_owned(),
@@ -215,6 +219,7 @@ async fn interrupt_then_steer_sends_cancel_then_followup_session_prompt_over_acp
     let queued_for_activity = Arc::clone(&queued);
 
     let result = run_acp_turn(AcpRunRequest {
+        on_session_activity: None,
         command,
         prompt: "hello".to_string(),
         cwd: tempdir.path().to_string_lossy().into_owned(),
@@ -290,6 +295,7 @@ async fn inline_interrupt_terminates_agent_that_ignores_cancel() {
     let interrupted_for_activity = Arc::clone(&interrupted);
 
     let err = run_acp_turn(AcpRunRequest {
+        on_session_activity: None,
         command,
         prompt: "hello".to_string(),
         cwd: tempdir.path().to_string_lossy().into_owned(),
@@ -684,6 +690,7 @@ async fn run_fake_agent_with_activity(
         cancel_token,
         on_activity,
         live_control: None,
+        on_session_activity: None,
     })
     .await
 }

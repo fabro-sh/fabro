@@ -95,6 +95,11 @@ export const queryKeys = {
     detail: (id: string) => ["automations", "detail", id] as const,
     runs: (id: string, opts: { limit?: number; offset?: number } = {}) =>
       ["automations", "runs", id, opts.limit ?? null, opts.offset ?? null] as const,
+    planeDispatches: (id: string) => ["automations", "plane-dispatches", id] as const,
+  },
+  plane: {
+    projects: () => ["plane", "projects"] as const,
+    metadata: (projectId: string) => ["plane", "metadata", projectId] as const,
   },
   insights: {
     queries: () => ["insights", "queries"] as const,

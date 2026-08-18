@@ -94,6 +94,16 @@ impl AcpProcessSpec {
     }
 
     #[must_use]
+    pub fn from_profile(
+        name: impl Into<String>,
+        program: impl Into<PathBuf>,
+        args: Vec<String>,
+        env: HashMap<String, String>,
+    ) -> Self {
+        Self::from_stdio_parts(Some(name.into()), program.into(), args, env)
+    }
+
+    #[must_use]
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }

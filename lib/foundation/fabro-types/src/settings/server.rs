@@ -12,7 +12,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::duration::Duration;
-
+use crate::external_agent::ExternalAgentsSettings;
 /// A structurally resolved `[server]` view for consumers.
 ///
 /// `Default` is intentionally not derived: any "default" `ServerNamespace`
@@ -22,17 +22,19 @@ use super::duration::Duration;
 /// (tests).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerNamespace {
-    pub listen:       ServerListenSettings,
-    pub api:          ServerApiSettings,
-    pub web:          ServerWebSettings,
-    pub auth:         ServerAuthSettings,
-    pub sandbox:      ServerSandboxSettings,
-    pub storage:      ServerStorageSettings,
-    pub artifacts:    ServerArtifactsSettings,
-    pub slatedb:      ServerSlateDbSettings,
-    pub scheduler:    ServerSchedulerSettings,
-    pub logging:      ServerLoggingSettings,
-    pub integrations: ServerIntegrationsSettings,
+    pub listen:          ServerListenSettings,
+    pub api:             ServerApiSettings,
+    pub web:             ServerWebSettings,
+    pub auth:            ServerAuthSettings,
+    pub sandbox:         ServerSandboxSettings,
+    pub storage:         ServerStorageSettings,
+    pub artifacts:       ServerArtifactsSettings,
+    pub slatedb:         ServerSlateDbSettings,
+    pub scheduler:       ServerSchedulerSettings,
+    pub logging:         ServerLoggingSettings,
+    pub integrations:    ServerIntegrationsSettings,
+    #[serde(default)]
+    pub external_agents: ExternalAgentsSettings,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -43,17 +45,18 @@ impl ServerNamespace {
     #[must_use]
     pub fn test_default() -> Self {
         Self {
-            listen:       ServerListenSettings::default(),
-            api:          ServerApiSettings::default(),
-            web:          ServerWebSettings::default(),
-            auth:         ServerAuthSettings::default(),
-            sandbox:      ServerSandboxSettings::default(),
-            storage:      ServerStorageSettings::default(),
-            artifacts:    ServerArtifactsSettings::default(),
-            slatedb:      ServerSlateDbSettings::default(),
-            scheduler:    ServerSchedulerSettings::default(),
-            logging:      ServerLoggingSettings::default(),
-            integrations: ServerIntegrationsSettings::default(),
+            listen:          ServerListenSettings::default(),
+            api:             ServerApiSettings::default(),
+            web:             ServerWebSettings::default(),
+            auth:            ServerAuthSettings::default(),
+            sandbox:         ServerSandboxSettings::default(),
+            storage:         ServerStorageSettings::default(),
+            artifacts:       ServerArtifactsSettings::default(),
+            slatedb:         ServerSlateDbSettings::default(),
+            scheduler:       ServerSchedulerSettings::default(),
+            logging:         ServerLoggingSettings::default(),
+            integrations:    ServerIntegrationsSettings::default(),
+            external_agents: ExternalAgentsSettings::default(),
         }
     }
 }
@@ -242,6 +245,8 @@ pub struct ServerLoggingSettings {
 pub struct ServerIntegrationsSettings {
     pub github: GithubIntegrationSettings,
     pub slack:  SlackIntegrationSettings,
+    #[serde(default)]
+    pub plane:  PlaneIntegrationSettings,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +272,14 @@ impl Default for SlackIntegrationSettings {
             default_channel: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaneIntegrationSettings {
+    #[serde(default)]
+    pub enabled:   bool,
+    pub api_base:  Option<String>,
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

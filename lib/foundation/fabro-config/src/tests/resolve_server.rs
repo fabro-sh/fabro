@@ -127,6 +127,11 @@ fn resolved_server_integrations_disable_slack_when_config_is_absent() {
                 "enabled": false,
                 "default_channel": null,
             },
+            "plane": {
+                "enabled": false,
+                "api_base": null,
+                "workspace": null,
+            },
         })
     );
 }

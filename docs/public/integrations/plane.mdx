@@ -1,0 +1,49 @@
+---
+title: "Plane"
+description: "Connect Plane as a first-class automation source for ready tickets"
+---
+
+Plane is a first-class automation source. Fabro polls one operator-selected project, claims ready tickets, runs the automation's repository/workflow through Codex or OMP over ACP, and reconciles the result back to Plane.
+
+## Server configuration
+
+```toml
+[server.integrations.plane]
+enabled = true
+api_base = "https://plane.artesanosdigitales.cloud/api/v1"
+workspace = "artesanos-digitales-workspace"
+
+[server.external_agents.codex]
+command = "codex-acp"
+
+[server.external_agents.omp]
+command = "omp"
+args = ["acp"]
+```
+
+Store `PLANE_API_KEY` in the server vault (`fabro secret set PLANE_API_KEY`). The key is never serialized into automations, run manifests, events, logs, or browser responses.
+
+Required Plane endpoints:
+
+- `GET /workspaces/{workspace}/projects/`
+- `GET /workspaces/{workspace}/projects/{id}/states/`
+- `GET /workspaces/{workspace}/projects/{id}/labels/`
+- `GET /workspaces/{workspace}/projects/{id}/issues/`
+- `PATCH /workspaces/{workspace}/projects/{id}/issues/{issue_id}/`
+- `POST /workspaces/{workspace}/projects/{id}/issues/{issue_id}/comments/`
+
+HTML SPA fallbacks on those `/api/*` paths are rejected.
+
+## Lifecycle
+
+Configured Ready → In Progress on claim → Done only after a successful run and a linked draft PR. A cancelled Fabro run maps to the configured Cancelled state unless a human already moved the ticket.
+
+Failure policy: two total attempts. After the second failure, leave the ticket In Progress, post a failure comment, mark the dispatch failed, and optionally apply the failure label.
+
+## Sandbox recipe
+
+Use an operator-controlled sandbox image that installs `codex-acp` and `omp`, then mount or copy only the credentials and skill directories each harness needs. Do not bake personal credentials into a committed image.
+
+## Single-server limitation
+
+v1 claiming is local to one Fabro server and its SQLite store. Multi-replica distributed claiming is out of scope.

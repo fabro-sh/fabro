@@ -62,6 +62,7 @@ models/auth-sessions-response.ts
 models/automation-api-trigger.ts
 models/automation-list-meta.ts
 models/automation-list-response.ts
+models/automation-plane-trigger.ts
 models/automation-ref.ts
 models/automation-schedule-trigger.ts
 models/automation-target.ts
@@ -147,6 +148,7 @@ models/exec-output-tail.ts
 models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts
+models/external-agent-harness.ts
 models/failure-category.ts
 models/failure-detail.ts
 models/failure-reason.ts
@@ -273,6 +275,14 @@ models/parallel-branch-result.ts
 models/pending-interview-record.ts
 models/pending-reason.ts
 models/permission-level.ts
+models/plane-dispatch-list-response.ts
+models/plane-dispatch-status.ts
+models/plane-dispatch.ts
+models/plane-label.ts
+models/plane-project-metadata-response.ts
+models/plane-project.ts
+models/plane-projects-response.ts
+models/plane-state.ts
 models/preflight-check-detail.ts
 models/preflight-check-report.ts
 models/preflight-check-result.ts

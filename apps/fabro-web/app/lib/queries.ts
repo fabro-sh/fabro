@@ -22,6 +22,9 @@ import type {
   PaginatedRunList,
   PaginatedRunStageList,
   PaginatedWorkflowListResponse,
+  PlaneDispatchListResponse,
+  PlaneProjectMetadataResponse,
+  PlaneProjectsResponse,
   ProviderList,
   PullRequestResponse,
   RunArtifactListResponse,
@@ -51,6 +54,7 @@ import {
   authApi,
   automationsApi,
   environmentsApi,
+  integrationsApi,
   fetchAllPages,
   fetchAllStageEvents,
   generatedAxios,
@@ -443,6 +447,29 @@ export function useAutomationRuns(id: string | undefined, opts: AutomationRunsPa
     id ? queryKeys.automations.runs(id, opts) : null,
     () => apiNullableData(() => automationsApi.listAutomationRuns(id!, opts.limit, opts.offset)),
     { keepPreviousData: true },
+  );
+}
+
+export function useAutomationPlaneDispatches(id: string | undefined) {
+  return useSWR<PlaneDispatchListResponse | null>(
+    id ? queryKeys.automations.planeDispatches(id) : null,
+    () => apiNullableData(() => automationsApi.listAutomationPlaneDispatches(id!)),
+  );
+}
+
+export function usePlaneProjects(enabled: boolean) {
+  return useSWR<PlaneProjectsResponse | null>(
+    enabled ? queryKeys.plane.projects() : null,
+    () => apiNullableData(() => integrationsApi.listPlaneProjects()),
+    { shouldRetryOnError: false },
+  );
+}
+
+export function usePlaneProjectMetadata(projectId: string | undefined) {
+  return useSWR<PlaneProjectMetadataResponse | null>(
+    projectId ? queryKeys.plane.metadata(projectId) : null,
+    () => apiNullableData(() => integrationsApi.getPlaneProjectMetadata(projectId!)),
+    { shouldRetryOnError: false },
   );
 }
 

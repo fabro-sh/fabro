@@ -4401,6 +4401,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+
+  /api/v1/automations/{id}/plane-dispatches:
+    get:
+      operationId: listAutomationPlaneDispatches
+      tags: [Automations]
+      summary: List Automation Plane Dispatches
+      description: Returns recent Plane ticket dispatch records for this automation.
+      parameters:
+        - $ref: "#/components/parameters/AutomationId"
+      responses:
+        "200":
+          description: List of Plane dispatches
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaneDispatchListResponse"
+        "404":
+          description: Automation not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   # ── MCP Servers ──────────────────────────────────────────────────────
 
   /api/v1/mcp-servers:
@@ -5273,6 +5298,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SystemIntegrationsResponse"
+
+  /api/v1/integrations/plane/projects:
+    get:
+      operationId: listPlaneProjects
+      tags: [Integrations]
+      summary: List Plane Projects
+      description: Returns list of accessible Plane projects for automation configuration.
+      responses:
+        "200":
+          description: List of Plane projects
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaneProjectsResponse"
+        "400":
+          description: Plane integration not configured or disabled
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/integrations/plane/projects/{project_id}/metadata:
+    get:
+      operationId: getPlaneProjectMetadata
+      tags: [Integrations]
+      summary: Retrieve Plane Project Metadata
+      description: Returns states and labels for a Plane project.
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          description: Plane project ID
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Project states and labels
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaneProjectMetadataResponse"
+        "400":
+          description: Plane integration not configured or project metadata error
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/system/df:
     get:
@@ -6754,11 +6832,13 @@ components:
       oneOf:
         - $ref: "#/components/schemas/AutomationApiTrigger"
         - $ref: "#/components/schemas/AutomationScheduleTrigger"
+        - $ref: "#/components/schemas/AutomationPlaneTrigger"
       discriminator:
         propertyName: type
         mapping:
           api: "#/components/schemas/AutomationApiTrigger"
           schedule: "#/components/schemas/AutomationScheduleTrigger"
+          plane: "#/components/schemas/AutomationPlaneTrigger"
 
     AutomationApiTrigger:
       description: Trigger that allows callers to create runs through the automation API.
@@ -6804,6 +6884,77 @@ components:
           type: string
           description: Five-field cron expression evaluated in UTC.
           example: "0 3 * * *"
+
+    AutomationPlaneTrigger:
+      description: Plane ticket polling trigger.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - enabled
+        - project_id
+        - ready_state_id
+        - in_progress_state_id
+        - done_state_id
+        - cancelled_state_id
+        - default_harness
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{0,62}$"
+          example: plane-tickets
+        type:
+          type: string
+          enum: [plane]
+        enabled:
+          type: boolean
+          example: true
+        project_id:
+          type: string
+          description: Plane project ID.
+          example: "0194e43b-252a-7ad2-a50e-7d6f5fb47db3"
+        ready_state_id:
+          type: string
+          description: Plane Ready state ID.
+        in_progress_state_id:
+          type: string
+          description: Plane In Progress state ID.
+        done_state_id:
+          type: string
+          description: Plane Done state ID.
+        cancelled_state_id:
+          type: string
+          description: Plane Cancelled state ID.
+        failure_label_id:
+          type: ["string", "null"]
+          description: Optional failure label ID applied after retries are exhausted.
+        default_harness:
+          $ref: "#/components/schemas/ExternalAgentHarness"
+        codex_label_id:
+          type: ["string", "null"]
+          description: Optional label ID selecting Codex harness.
+        omp_label_id:
+          type: ["string", "null"]
+          description: Optional label ID selecting OMP harness.
+        poll_interval_seconds:
+          type: integer
+          minimum: 15
+          maximum: 3600
+          default: 60
+          example: 60
+        max_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 3
+          example: 3
+        max_retries:
+          type: integer
+          minimum: 1
+          maximum: 1
+          default: 1
+          example: 1
 
     CreateAutomationRequest:
       description: Request body for creating an automation.
@@ -9248,6 +9399,8 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/ManifestWorkflow"
 
+        external_agent_harness:
+          $ref: "#/components/schemas/ExternalAgentHarness"
     GitContext:
       description: Observable git state captured before the run starts.
       type: object
@@ -15819,3 +15972,158 @@ components:
           type: string
           description: User's login identifier (e.g. GitHub username).
           example: octocat
+
+    ExternalAgentHarness:
+      description: Selected ACP harness profile for external coding agents.
+      type: string
+      enum:
+        - codex
+        - omp
+
+    PlaneProject:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        identifier:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+
+    PlaneProjectsResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaneProject"
+
+    PlaneState:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        group:
+          type: ["string", "null"]
+        color:
+          type: ["string", "null"]
+        sequence:
+          type: ["number", "null"]
+
+    PlaneLabel:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        color:
+          type: ["string", "null"]
+
+    PlaneProjectMetadataResponse:
+      type: object
+      required:
+        - states
+        - labels
+      properties:
+        states:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaneState"
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaneLabel"
+
+    PlaneDispatchStatus:
+      type: string
+      enum:
+        - pending
+        - claimed
+        - running
+        - retry_pending
+        - succeeded
+        - failed
+        - cancelled
+
+    PlaneDispatch:
+      description: Durable state of a Plane ticket automation dispatch.
+      type: object
+      required:
+        - automation_id
+        - trigger_id
+        - issue_id
+        - issue_identifier
+        - status
+        - harness
+        - attempt
+        - run_ids
+        - created_at
+        - updated_at
+      properties:
+        automation_id:
+          type: string
+        trigger_id:
+          type: string
+        issue_id:
+          type: string
+        issue_identifier:
+          type: string
+        issue_title:
+          type: ["string", "null"]
+        issue_url:
+          type: ["string", "null"]
+        status:
+          $ref: "#/components/schemas/PlaneDispatchStatus"
+        harness:
+          $ref: "#/components/schemas/ExternalAgentHarness"
+        attempt:
+          type: integer
+          minimum: 1
+        run_ids:
+          type: array
+          items:
+            type: string
+        current_run_id:
+          type: ["string", "null"]
+        pull_request_url:
+          type: ["string", "null"]
+        last_error:
+          type: ["string", "null"]
+        claimed_at:
+          type: ["string", "null"]
+          format: date-time
+        completed_at:
+          type: ["string", "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PlaneDispatchListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaneDispatch"

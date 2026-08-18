@@ -7,10 +7,11 @@ import type {
   WorkflowSettings,
 } from "@qltysh/fabro-api-client";
 
-import { findApiTrigger, findScheduleTrigger } from "../lib/automation";
+import { findApiTrigger, findPlaneTrigger, findScheduleTrigger } from "../lib/automation";
 import { Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
 import { sandboxRuntime } from "../lib/run-sandbox-lifecycle";
+import { usePlaneProjectMetadata, usePlaneProjects } from "../lib/queries";
 
 export interface AutomationFormValues {
   id: string;
@@ -22,18 +23,42 @@ export interface AutomationFormValues {
   manualEnabled: boolean;
   scheduleEnabled: boolean;
   cron: string;
+  planeEnabled: boolean;
+  planeProjectId: string;
+  planeReadyStateId: string;
+  planeInProgressStateId: string;
+  planeDoneStateId: string;
+  planeCancelledStateId: string;
+  planeFailureLabelId: string;
+  planeDefaultHarness: "codex" | "omp";
+  planeCodexLabelId: string;
+  planeOmpLabelId: string;
+  planePollIntervalSeconds: string;
+  planeMaxConcurrency: string;
 }
 
 export const EMPTY_AUTOMATION_FORM: AutomationFormValues = {
-  id:              "",
-  name:            "",
-  description:     "",
-  repository:      "",
-  ref:             "main",
-  workflow:        "",
-  manualEnabled:   true,
-  scheduleEnabled: false,
-  cron:            "0 9 * * 1-5",
+  id:                        "",
+  name:                      "",
+  description:               "",
+  repository:                "",
+  ref:                       "main",
+  workflow:                  "",
+  manualEnabled:             true,
+  scheduleEnabled:           false,
+  cron:                      "0 9 * * 1-5",
+  planeEnabled:              false,
+  planeProjectId:            "",
+  planeReadyStateId:         "",
+  planeInProgressStateId:    "",
+  planeDoneStateId:          "",
+  planeCancelledStateId:     "",
+  planeFailureLabelId:       "",
+  planeDefaultHarness:       "codex",
+  planeCodexLabelId:         "",
+  planeOmpLabelId:           "",
+  planePollIntervalSeconds:  "60",
+  planeMaxConcurrency:       "3",
 };
 
 const CRON_PRESETS: ReadonlyArray<{ label: string; value: string }> = [
@@ -46,16 +71,29 @@ const CRON_PRESETS: ReadonlyArray<{ label: string; value: string }> = [
 export function automationToFormValues(automation: Automation): AutomationFormValues {
   const apiTrigger = findApiTrigger(automation);
   const scheduleTrigger = findScheduleTrigger(automation);
+  const planeTrigger = findPlaneTrigger(automation);
   return {
-    id:              automation.id,
-    name:            automation.name,
-    description:     automation.description ?? "",
-    repository:      automation.target.repository,
-    ref:             automation.target.ref,
-    workflow:        automation.target.workflow,
-    manualEnabled:   apiTrigger?.enabled ?? false,
-    scheduleEnabled: scheduleTrigger?.enabled ?? false,
-    cron:            scheduleTrigger?.expression ?? "0 9 * * 1-5",
+    id:                       automation.id,
+    name:                     automation.name,
+    description:              automation.description ?? "",
+    repository:               automation.target.repository,
+    ref:                      automation.target.ref,
+    workflow:                 automation.target.workflow,
+    manualEnabled:            apiTrigger?.enabled ?? false,
+    scheduleEnabled:          scheduleTrigger?.enabled ?? false,
+    cron:                     scheduleTrigger?.expression ?? "0 9 * * 1-5",
+    planeEnabled:             planeTrigger?.enabled ?? false,
+    planeProjectId:           planeTrigger?.project_id ?? "",
+    planeReadyStateId:        planeTrigger?.ready_state_id ?? "",
+    planeInProgressStateId:   planeTrigger?.in_progress_state_id ?? "",
+    planeDoneStateId:         planeTrigger?.done_state_id ?? "",
+    planeCancelledStateId:    planeTrigger?.cancelled_state_id ?? "",
+    planeFailureLabelId:      planeTrigger?.failure_label_id ?? "",
+    planeDefaultHarness:      planeTrigger?.default_harness === "omp" ? "omp" : "codex",
+    planeCodexLabelId:        planeTrigger?.codex_label_id ?? "",
+    planeOmpLabelId:          planeTrigger?.omp_label_id ?? "",
+    planePollIntervalSeconds: String(planeTrigger?.poll_interval_seconds ?? 60),
+    planeMaxConcurrency:      String(planeTrigger?.max_concurrency ?? 3),
   };
 }
 
@@ -103,16 +141,43 @@ export function triggersFromFormValues(values: AutomationFormValues): Automation
       expression: values.cron.trim(),
     });
   }
+  if (values.planeEnabled) {
+    triggers.push({
+      id:                    "plane-tickets",
+      type:                  "plane",
+      enabled:               true,
+      project_id:            values.planeProjectId.trim(),
+      ready_state_id:        values.planeReadyStateId.trim(),
+      in_progress_state_id:  values.planeInProgressStateId.trim(),
+      done_state_id:         values.planeDoneStateId.trim(),
+      cancelled_state_id:    values.planeCancelledStateId.trim(),
+      failure_label_id:      values.planeFailureLabelId.trim() || null,
+      default_harness:       values.planeDefaultHarness,
+      codex_label_id:        values.planeCodexLabelId.trim() || null,
+      omp_label_id:          values.planeOmpLabelId.trim() || null,
+      poll_interval_seconds: Number(values.planePollIntervalSeconds) || 60,
+      max_concurrency:       Number(values.planeMaxConcurrency) || 3,
+      max_retries:           1,
+    });
+  }
   return triggers;
 }
 
 export function isFormValid(values: AutomationFormValues): boolean {
-  return (
+  const baseValid =
     values.id.trim() !== "" &&
     values.name.trim() !== "" &&
     values.repository.trim() !== "" &&
     values.ref.trim() !== "" &&
-    values.workflow.trim() !== ""
+    values.workflow.trim() !== "";
+  if (!values.planeEnabled) return baseValid;
+  return (
+    baseValid &&
+    values.planeProjectId.trim() !== "" &&
+    values.planeReadyStateId.trim() !== "" &&
+    values.planeInProgressStateId.trim() !== "" &&
+    values.planeDoneStateId.trim() !== "" &&
+    values.planeCancelledStateId.trim() !== ""
   );
 }
 
@@ -368,7 +433,121 @@ export function AutomationFormFields({
             </div>
           </Row>
         ) : null}
+        <Row title="Plane tickets" help="Poll a Plane project for ready tickets and start runs automatically.">
+          <ToggleSwitch
+            checked={values.planeEnabled}
+            onChange={(planeEnabled) => patch({ planeEnabled })}
+            label="Enable Plane ticket trigger"
+          />
+        </Row>
+        {values.planeEnabled ? (
+          <PlaneTriggerFields values={values} patch={patch} />
+        ) : null}
       </Panel>
+    </>
+  );
+}
+
+function PlaneTriggerFields({
+  values,
+  patch,
+}: {
+  values: AutomationFormValues;
+  patch: (next: Partial<AutomationFormValues>) => void;
+}) {
+  const projectsQuery = usePlaneProjects(true);
+  const metadataQuery = usePlaneProjectMetadata(values.planeProjectId || undefined);
+  const projects = projectsQuery.data?.data ?? [];
+  const states = metadataQuery.data?.states ?? [];
+  const labels = metadataQuery.data?.labels ?? [];
+  const loadError =
+    projectsQuery.error instanceof Error
+      ? projectsQuery.error.message
+      : metadataQuery.error instanceof Error
+        ? metadataQuery.error.message
+        : null;
+
+  return (
+    <>
+      {loadError ? (
+        <Row title="Plane status" help="Fix the Plane integration before enabling this trigger.">
+          <p className="text-sm text-coral">{loadError}</p>
+        </Row>
+      ) : null}
+      <Row title="Project" help="Plane project to poll for ready tickets.">
+        <select
+          aria-label="Plane project"
+          value={values.planeProjectId}
+          onChange={(event) => patch({
+            planeProjectId: event.target.value,
+            planeReadyStateId: "",
+            planeInProgressStateId: "",
+            planeDoneStateId: "",
+            planeCancelledStateId: "",
+          })}
+          className={INPUT_CLASS}
+        >
+          <option value="">Select a project</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.identifier ? `${project.identifier} — ${project.name}` : project.name}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row title="Lifecycle states" help="Exact Ready, In Progress, Done, and Cancelled state IDs.">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <select aria-label="Ready state" value={values.planeReadyStateId} onChange={(event) => patch({ planeReadyStateId: event.target.value })} className={INPUT_CLASS}>
+            <option value="">Ready</option>
+            {states.map((state) => <option key={state.id} value={state.id}>{state.name}</option>)}
+          </select>
+          <select aria-label="In Progress state" value={values.planeInProgressStateId} onChange={(event) => patch({ planeInProgressStateId: event.target.value })} className={INPUT_CLASS}>
+            <option value="">In Progress</option>
+            {states.map((state) => <option key={state.id} value={state.id}>{state.name}</option>)}
+          </select>
+          <select aria-label="Done state" value={values.planeDoneStateId} onChange={(event) => patch({ planeDoneStateId: event.target.value })} className={INPUT_CLASS}>
+            <option value="">Done</option>
+            {states.map((state) => <option key={state.id} value={state.id}>{state.name}</option>)}
+          </select>
+          <select aria-label="Cancelled state" value={values.planeCancelledStateId} onChange={(event) => patch({ planeCancelledStateId: event.target.value })} className={INPUT_CLASS}>
+            <option value="">Cancelled</option>
+            {states.map((state) => <option key={state.id} value={state.id}>{state.name}</option>)}
+          </select>
+        </div>
+      </Row>
+      <Row title="Default harness" help="Used unless a ticket has a configured Codex or OMP override label.">
+        <select
+          aria-label="Default harness"
+          value={values.planeDefaultHarness}
+          onChange={(event) => patch({ planeDefaultHarness: event.target.value === "omp" ? "omp" : "codex" })}
+          className={INPUT_CLASS}
+        >
+          <option value="codex">Codex</option>
+          <option value="omp">OMP</option>
+        </select>
+      </Row>
+      <Row title="Harness labels" help="Optional labels that override the default harness. Leave empty to use the default only.">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <select aria-label="Codex label" value={values.planeCodexLabelId} onChange={(event) => patch({ planeCodexLabelId: event.target.value })} className={INPUT_CLASS}>
+            <option value="">Codex label</option>
+            {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
+          </select>
+          <select aria-label="OMP label" value={values.planeOmpLabelId} onChange={(event) => patch({ planeOmpLabelId: event.target.value })} className={INPUT_CLASS}>
+            <option value="">OMP label</option>
+            {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
+          </select>
+        </div>
+      </Row>
+      <Row title="Polling" help="Interval 15–3600 seconds. Concurrency 1–10.">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <input aria-label="Poll interval seconds" value={values.planePollIntervalSeconds} onChange={(event) => patch({ planePollIntervalSeconds: event.target.value })} className={INPUT_CLASS} />
+          <input aria-label="Max concurrency" value={values.planeMaxConcurrency} onChange={(event) => patch({ planeMaxConcurrency: event.target.value })} className={INPUT_CLASS} />
+          <select aria-label="Failure label" value={values.planeFailureLabelId} onChange={(event) => patch({ planeFailureLabelId: event.target.value })} className={INPUT_CLASS}>
+            <option value="">Failure label</option>
+            {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
+          </select>
+        </div>
+      </Row>
     </>
   );
 }

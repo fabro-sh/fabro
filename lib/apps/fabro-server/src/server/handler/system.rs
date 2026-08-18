@@ -7,7 +7,7 @@ use fabro_slack::config::{
     resolve_credentials_status_with_lookup as resolve_slack_credentials_status_with_lookup,
 };
 use fabro_static::EnvVars;
-use fabro_types::settings::server::GithubIntegrationSettings;
+use fabro_types::settings::server::{GithubIntegrationSettings, PlaneIntegrationSettings};
 use fabro_vault::Vault;
 
 use super::super::{
@@ -34,6 +34,11 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/system/repair/runs", get(get_system_repair_runs))
         .route("/system/prune/runs", post(prune_runs))
         .route("/billing", get(get_aggregate_billing))
+        .route("/integrations/plane/projects", get(list_plane_projects))
+        .route(
+            "/integrations/plane/projects/{project_id}/metadata",
+            get(get_plane_project_metadata),
+        )
 }
 
 pub(in crate::server) async fn health() -> Response {
@@ -108,10 +113,108 @@ async fn get_system_integrations(
     };
     let github = github_integration_status(&settings.server.integrations.github, &vault);
     let slack = slack_integration_status(state.as_ref(), &vault);
+    let plane = plane_integration_status(&settings.server.integrations.plane, &vault);
     let response = SystemIntegrationsResponse {
-        data: vec![github, slack],
+        data: vec![github, slack, plane],
     };
     (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn list_plane_projects(_auth: RequiredUser, State(state): State<Arc<AppState>>) -> Response {
+    match plane_client_for_api(&state).await {
+        Ok(client) => match client.list_projects().await {
+            Ok(projects) => {
+                let data = projects
+                    .into_iter()
+                    .map(|project| fabro_types::PlaneProjectResponse {
+                        id:          project.id,
+                        name:        project.name,
+                        identifier:  project.identifier,
+                        description: project.description,
+                    })
+                    .collect();
+                (
+                    StatusCode::OK,
+                    Json(fabro_types::PlaneProjectsResponse { data }),
+                )
+                    .into_response()
+            }
+            Err(err) => ApiError::new(StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+        },
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn get_plane_project_metadata(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(project_id): Path<String>,
+) -> Response {
+    match plane_client_for_api(&state).await {
+        Ok(client) => {
+            let states = client.list_states(&project_id).await;
+            let labels = client.list_labels(&project_id).await;
+            match (states, labels) {
+                (Ok(states), Ok(labels)) => {
+                    let response = fabro_types::PlaneProjectMetadataResponse {
+                        states: states
+                            .into_iter()
+                            .map(|state| fabro_types::PlaneStateResponse {
+                                id:       state.id,
+                                name:     state.name,
+                                group:    state.group,
+                                color:    state.color,
+                                sequence: state.sequence,
+                            })
+                            .collect(),
+                        labels: labels
+                            .into_iter()
+                            .map(|label| fabro_types::PlaneLabelResponse {
+                                id:    label.id,
+                                name:  label.name,
+                                color: label.color,
+                            })
+                            .collect(),
+                    };
+                    (StatusCode::OK, Json(response)).into_response()
+                }
+                (Err(err), _) | (_, Err(err)) => {
+                    ApiError::new(StatusCode::BAD_REQUEST, err.to_string()).into_response()
+                }
+            }
+        }
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn plane_client_for_api(state: &AppState) -> Result<fabro_tracker::PlaneClient, ApiError> {
+    let settings = state.server_settings().server.integrations.plane.clone();
+    if !settings.enabled {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "Plane integration is disabled",
+        ));
+    }
+    let api_base = settings
+        .api_base
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            ApiError::new(StatusCode::BAD_REQUEST, "Plane api_base is not configured")
+        })?;
+    let workspace = settings
+        .workspace
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            ApiError::new(StatusCode::BAD_REQUEST, "Plane workspace is not configured")
+        })?;
+    let api_key = state
+        .vault_secret(EnvVars::PLANE_API_KEY)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "PLANE_API_KEY is missing"))?;
+    Ok(fabro_tracker::PlaneClient::new(
+        fabro_tracker::PlaneOptions::new(api_base, workspace, api_key),
+    ))
 }
 
 fn github_integration_status(
@@ -246,6 +349,64 @@ fn slack_integration_status(state: &AppState, vault: &Vault) -> SystemIntegratio
         connection,
         metadata,
     }
+}
+
+fn plane_integration_status(
+    settings: &PlaneIntegrationSettings,
+    vault: &Vault,
+) -> SystemIntegrationStatus {
+    let mut metadata = BTreeMap::new();
+    if let Some(api_base) = settings.api_base.as_ref() {
+        metadata.insert("api_base".to_string(), api_base.clone());
+    }
+    if let Some(workspace) = settings.workspace.as_ref() {
+        metadata.insert("workspace".to_string(), workspace.clone());
+    }
+
+    if !settings.enabled {
+        return integration_status(
+            IntegrationProvider::Plane,
+            false,
+            false,
+            IntegrationStatus::Disabled,
+            Vec::new(),
+            metadata,
+        );
+    }
+
+    let mut missing = Vec::new();
+    if settings
+        .api_base
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("server.integrations.plane.api_base".to_string());
+    }
+    if settings
+        .workspace
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("server.integrations.plane.workspace".to_string());
+    }
+    if missing_vault_secret(vault, EnvVars::PLANE_API_KEY) {
+        missing.push(EnvVars::PLANE_API_KEY.to_string());
+    }
+    missing.sort();
+
+    let configured = missing.is_empty();
+    integration_status(
+        IntegrationProvider::Plane,
+        true,
+        configured,
+        if configured {
+            IntegrationStatus::Configured
+        } else {
+            IntegrationStatus::MissingCredentials
+        },
+        missing,
+        metadata,
+    )
 }
 
 fn integration_status(

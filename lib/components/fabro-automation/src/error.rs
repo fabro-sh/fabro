@@ -36,6 +36,29 @@ pub enum AutomationValidationError {
         #[source]
         source:     CronError,
     },
+    #[error("plane trigger {trigger_id:?} project_id must not be empty")]
+    EmptyPlaneProjectId { trigger_id: String },
+    #[error(
+        "plane trigger {trigger_id:?} lifecycle state IDs must all be distinct, found duplicate {state_id:?}"
+    )]
+    DuplicatePlaneStateId {
+        trigger_id: String,
+        state_id:   String,
+    },
+    #[error("plane trigger {trigger_id:?} has conflicting harness override label {label_id:?}")]
+    ConflictingPlaneHarnessLabels {
+        trigger_id: String,
+        label_id:   String,
+    },
+    #[error(
+        "plane trigger {trigger_id:?} poll interval {seconds}s must be between 15 and 3600 seconds"
+    )]
+    InvalidPlanePollInterval { trigger_id: String, seconds: u64 },
+    #[error("plane trigger {trigger_id:?} max concurrency {concurrency} must be between 1 and 10")]
+    InvalidPlaneConcurrency {
+        trigger_id:  String,
+        concurrency: usize,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

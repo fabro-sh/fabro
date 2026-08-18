@@ -18,8 +18,8 @@ import type {
 
 import { toRunWithStatus } from "../data/runs";
 import { ApiError, apiData, automationsApi } from "../lib/api-client";
-import { findApiTrigger, findScheduleTrigger } from "../lib/automation";
-import { useAutomation, useAutomationRuns } from "../lib/queries";
+import { findApiTrigger, findPlaneTrigger, findScheduleTrigger } from "../lib/automation";
+import { useAutomation, useAutomationPlaneDispatches, useAutomationRuns } from "../lib/queries";
 import { queryKeys } from "../lib/query-keys";
 import { useDataUpdatedAt } from "../hooks/use-data-updated-at";
 import { useTickingNow } from "../lib/time";
@@ -80,6 +80,7 @@ export default function AutomationDetail() {
   return (
     <div>
       <AutomationHeader automation={automationQuery.data} />
+      <PlaneDispatchTable automationId={automationQuery.data.id} />
       <AutomationRunsList automationId={automationQuery.data.id} />
     </div>
   );
@@ -93,6 +94,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
 
   const scheduleTrigger = findScheduleTrigger(automation);
   const apiTrigger = findApiTrigger(automation);
+  const planeTrigger = findPlaneTrigger(automation);
   const canRun = apiTrigger?.enabled === true;
 
   async function onRun() {
@@ -146,6 +148,11 @@ function AutomationHeader({ automation }: { automation: Automation }) {
             {scheduleTrigger ? (
               <Chip icon={ClockIcon}>{scheduleTrigger.expression}</Chip>
             ) : null}
+            {planeTrigger ? (
+              <Chip icon={RectangleStackIcon}>
+                Plane · {planeTrigger.default_harness} · {planeTrigger.max_concurrency ?? 3} concurrent
+              </Chip>
+            ) : null}
           </div>
           {automation.description ? (
             <p className="mt-3 max-w-prose text-sm leading-relaxed text-fg-3">
@@ -189,6 +196,64 @@ function Chip({
       <Icon className="size-3.5" aria-hidden="true" />
       {children}
     </span>
+  );
+}
+
+function PlaneDispatchTable({ automationId }: { automationId: string }) {
+  const query = useAutomationPlaneDispatches(automationId);
+  const rows = query.data?.data ?? [];
+  if (rows.length === 0) return null;
+
+  return (
+    <section className="mb-8">
+      <h3 className="mb-3 text-sm font-semibold text-fg">Recent Plane dispatches</h3>
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-overlay text-xs uppercase text-fg-muted">
+            <tr>
+              <th className="px-3 py-2">Ticket</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">Harness</th>
+              <th className="px-3 py-2">Attempt</th>
+              <th className="px-3 py-2">Run</th>
+              <th className="px-3 py-2">PR</th>
+              <th className="px-3 py-2">Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.trigger_id}:${row.issue_id}`} className="border-t border-border">
+                <td className="px-3 py-2 font-mono">
+                  {row.issue_url ? (
+                    <a href={row.issue_url} className="text-teal-300 hover:underline">
+                      {row.issue_identifier}
+                    </a>
+                  ) : (
+                    row.issue_identifier
+                  )}
+                </td>
+                <td className="px-3 py-2">{row.status}</td>
+                <td className="px-3 py-2 uppercase">{row.harness}</td>
+                <td className="px-3 py-2">{row.attempt}</td>
+                <td className="px-3 py-2 font-mono">
+                  {row.current_run_id ? (
+                    <Link to={`/runs/${row.current_run_id}`} className="text-teal-300 hover:underline">
+                      {row.current_run_id.slice(0, 8)}
+                    </Link>
+                  ) : "—"}
+                </td>
+                <td className="px-3 py-2">
+                  {row.pull_request_url ? (
+                    <a href={row.pull_request_url} className="text-teal-300 hover:underline">PR</a>
+                  ) : "—"}
+                </td>
+                <td className="max-w-xs truncate px-3 py-2 text-coral">{row.last_error ?? ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

@@ -58,6 +58,16 @@ mock.module("../lib/queries", () => ({
       isLoading: false,
     };
   },
+  usePlaneProjects: () => ({
+    data: { data: [] },
+    error: null,
+    isLoading: false,
+  }),
+  usePlaneProjectMetadata: () => ({
+    data: { states: [], labels: [] },
+    error: null,
+    isLoading: false,
+  }),
 }));
 
 mock.module("../lib/api-client", () => ({

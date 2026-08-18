@@ -7,10 +7,11 @@ use std::path::Path;
 
 use fabro_automation::{
     ApiTrigger, AutomationDraft, AutomationId, AutomationReplace, AutomationStore,
-    AutomationStoreError, AutomationTarget, AutomationTrigger, AutomationTriggerId,
+    AutomationStoreError, AutomationTarget, AutomationTrigger, AutomationTriggerId, PlaneTrigger,
     ScheduleTrigger,
 };
 use fabro_db::Database;
+use fabro_types::ExternalAgentHarness;
 use tokio::fs;
 
 async fn test_database() -> (tempfile::TempDir, Database) {
@@ -107,6 +108,50 @@ async fn crud_normalizes_api_and_schedule_order() {
         .await
         .unwrap();
     assert!(store.get(&replaced.id).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn plane_trigger_round_trips_through_sqlite() {
+    let (_dir, database) = test_database().await;
+    let store = AutomationStore::new(database.clone_pool());
+    let created = store
+        .create(AutomationDraft {
+            id:          AutomationId::new("plane-loop").unwrap(),
+            name:        "Plane Loop".to_string(),
+            description: None,
+            target:      target(),
+            triggers:    vec![
+                AutomationTrigger::Api(ApiTrigger {
+                    id:      AutomationTriggerId::new("manual").unwrap(),
+                    enabled: true,
+                }),
+                AutomationTrigger::Plane(PlaneTrigger {
+                    id:                    AutomationTriggerId::new("tickets").unwrap(),
+                    enabled:               true,
+                    project_id:            "proj-1".to_string(),
+                    ready_state_id:        "ready".to_string(),
+                    in_progress_state_id:  "progress".to_string(),
+                    done_state_id:         "done".to_string(),
+                    cancelled_state_id:    "cancelled".to_string(),
+                    failure_label_id:      Some("failed".to_string()),
+                    default_harness:       ExternalAgentHarness::Omp,
+                    codex_label_id:        Some("codex".to_string()),
+                    omp_label_id:          Some("omp".to_string()),
+                    poll_interval_seconds: 45,
+                    max_concurrency:       2,
+                    max_retries:           1,
+                }),
+            ],
+        })
+        .await
+        .unwrap();
+
+    let fetched = store.get(&created.id).await.unwrap().unwrap();
+    assert_eq!(fetched, created);
+    let plane = fetched.enabled_plane_triggers().next().unwrap();
+    assert_eq!(plane.project_id, "proj-1");
+    assert_eq!(plane.default_harness, ExternalAgentHarness::Omp);
+    assert_eq!(plane.poll_interval_seconds, 45);
 }
 
 #[tokio::test]

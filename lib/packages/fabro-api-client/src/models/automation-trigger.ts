@@ -18,10 +18,16 @@
 import type { AutomationApiTrigger } from './automation-api-trigger';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { AutomationPlaneTrigger } from './automation-plane-trigger';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { AutomationScheduleTrigger } from './automation-schedule-trigger';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ExternalAgentHarness } from './external-agent-harness';
 
 /**
  * @type AutomationTrigger
  * Automation trigger configuration. Unknown `type` discriminator values are reported by handlers as domain validation errors with HTTP 422.
  */
-export type AutomationTrigger = { type: 'api' } & AutomationApiTrigger | { type: 'schedule' } & AutomationScheduleTrigger;
+export type AutomationTrigger = { type: 'api' } & AutomationApiTrigger | { type: 'plane' } & AutomationPlaneTrigger | { type: 'schedule' } & AutomationScheduleTrigger;

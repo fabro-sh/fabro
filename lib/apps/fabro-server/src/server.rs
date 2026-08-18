@@ -50,7 +50,7 @@ pub use fabro_api::types::{
     WriteBlobResponse,
 };
 use fabro_auth::{CredentialSource, SqlVaultCredentialSource, auth_issue_message};
-use fabro_automation::AutomationStore;
+use fabro_automation::{AutomationStore, PlaneDispatchStore};
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{RunLayer, Storage, WorkflowSettingsBuilder};
 use fabro_db::DbPool;
@@ -171,12 +171,14 @@ use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
 };
 
+mod automation_plane;
 mod automation_scheduler;
 mod handler;
 mod pull_request_supervisor;
 mod resource_sampler;
 mod session_runtime;
 
+pub(crate) use automation_plane::spawn_plane_dispatcher;
 pub(crate) use automation_scheduler::spawn_automation_scheduler;
 pub(crate) use handler::events::EventListParams;
 #[cfg(test)]
@@ -1151,18 +1153,23 @@ pub struct AppState {
 }
 
 pub(crate) struct AppStores {
-    pub(crate) runs:          Arc<Database>,
-    pub(crate) run_summaries: Arc<RunSummaryStore>,
-    pub(crate) automations:   Arc<AutomationStore>,
-    pub(crate) environments:  Arc<EnvironmentStore>,
-    pub(crate) mcp_servers:   Arc<McpServerStore>,
-    pub(crate) vault:         Arc<SecretStore>,
-    pub(crate) variables:     Arc<VariableStore>,
+    pub(crate) runs:             Arc<Database>,
+    pub(crate) run_summaries:    Arc<RunSummaryStore>,
+    pub(crate) automations:      Arc<AutomationStore>,
+    pub(crate) plane_dispatches: Arc<PlaneDispatchStore>,
+    pub(crate) environments:     Arc<EnvironmentStore>,
+    pub(crate) mcp_servers:      Arc<McpServerStore>,
+    pub(crate) vault:            Arc<SecretStore>,
+    pub(crate) variables:        Arc<VariableStore>,
 }
 
 impl AppState {
     pub(crate) fn automation_store(&self) -> &AutomationStore {
         &self.stores.automations
+    }
+
+    pub(crate) fn plane_dispatch_store(&self) -> &PlaneDispatchStore {
+        &self.stores.plane_dispatches
     }
 
     pub(crate) fn environment_store(&self) -> &EnvironmentStore {
@@ -2397,6 +2404,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     } = config;
 
     let automation_store = Arc::new(AutomationStore::new(db_pool.clone()));
+    let plane_dispatch_store = Arc::new(PlaneDispatchStore::new(db_pool.clone()));
     let local_provider_enabled = resolved_settings
         .server_settings
         .server
@@ -2522,6 +2530,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             runs: store,
             run_summaries,
             automations: automation_store,
+            plane_dispatches: plane_dispatch_store,
             environments: environment_store,
             mcp_servers: mcp_server_store,
             vault: secret_store,
@@ -3629,6 +3638,7 @@ fn worker_launch_spec(
     run_dir: &std::path::Path,
     agent_fabro_tools_enabled: bool,
     github_app_private_key: Option<String>,
+    external_agent_harness: Option<String>,
 ) -> anyhow::Result<WorkerLaunchSpec> {
     let current_exe = std::env::current_exe().context("reading current executable path")?;
     let executable =
@@ -3667,6 +3677,11 @@ fn worker_launch_spec(
         fabro_log,
         active_config_path: state.active_config_path().to_path_buf(),
         github_app_private_key,
+        external_agent_harness,
+        external_agents_json: serde_json::to_string(
+            &state.server_settings().server.external_agents,
+        )
+        .ok(),
     })
 }
 
@@ -4295,6 +4310,13 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
+    let external_agent_harness = run_state
+        .spec
+        .settings
+        .run
+        .metadata
+        .get("agent.harness")
+        .cloned();
     let state_for_build = Arc::clone(&state);
     let run_dir_for_build = run_dir.clone();
     let start_result = spawn_blocking(move || {
@@ -4305,6 +4327,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             &run_dir_for_build,
             agent_fabro_tools_enabled,
             github_app_private_key,
+            external_agent_harness,
         )
     })
     .await

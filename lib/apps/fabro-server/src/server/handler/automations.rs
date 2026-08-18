@@ -39,6 +39,10 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             get(list_automation_runs).post(create_automation_run),
         )
         .route(
+            "/automations/{id}/plane-dispatches",
+            get(list_automation_plane_dispatches),
+        )
+        .route(
             "/automations/{id}",
             get(get_automation)
                 .put(replace_automation)
@@ -88,6 +92,35 @@ async fn list_automation_runs(
         ..RunSummaryListQuery::default()
     };
     runs::run_summary_page_response(&state, &query).await
+}
+
+async fn list_automation_plane_dispatches(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let id = parse_path_id(id)?;
+    match state.automation_store().exists(&id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(ApiError::not_found(format!("automation not found: {id}")));
+        }
+        Err(err) => return Err(ApiError::from(err)),
+    }
+    let records = state
+        .plane_dispatch_store()
+        .list_for_automation(&id)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let data = records
+        .into_iter()
+        .map(|record| record.dispatch)
+        .collect::<Vec<_>>();
+    Ok((
+        StatusCode::OK,
+        Json(fabro_types::PlaneDispatchListResponse { data }),
+    )
+        .into_response())
 }
 
 async fn create_automation_run(

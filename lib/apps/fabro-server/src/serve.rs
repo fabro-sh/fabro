@@ -36,7 +36,8 @@ use crate::interp::process_env_var;
 use crate::server::{
     self, AppState, AppStateConfig, ResolvedAppStateSettings, RouterOptions, build_app_state,
     build_router_with_options, reconcile_incomplete_runs_on_startup, shutdown_active_workers,
-    spawn_automation_scheduler, spawn_pull_request_creation_supervisor, spawn_scheduler,
+    spawn_automation_scheduler, spawn_plane_dispatcher, spawn_pull_request_creation_supervisor,
+    spawn_scheduler,
 };
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::startup::{migrate_startup_vault, resolve_startup, validate_startup_configuration};
@@ -826,6 +827,7 @@ where
     }
     spawn_scheduler(Arc::clone(&state));
     spawn_automation_scheduler(Arc::clone(&state));
+    spawn_plane_dispatcher(Arc::clone(&state));
     let pull_request_creation_supervisor =
         spawn_pull_request_creation_supervisor(Arc::clone(&state));
     let router = build_router_with_options(Arc::clone(&state), &auth_mode, RouterOptions {

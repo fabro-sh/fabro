@@ -48,6 +48,13 @@ pub(crate) struct WorkerLaunchSpec {
     pub(crate) fabro_log:              Option<String>,
     pub(crate) active_config_path:     PathBuf,
     pub(crate) github_app_private_key: Option<String>,
+    /// Selected external-agent harness (codex|omp) for this run, if any.
+    /// Injected as `FABRO_EXTERNAL_AGENT_HARNESS` so the worker's ACP backend
+    /// resolves the matching server profile instead of node-level attrs.
+    pub(crate) external_agent_harness: Option<String>,
+    /// Serialized `ExternalAgentsSettings` JSON injected as
+    /// `FABRO_EXTERNAL_AGENTS`.
+    pub(crate) external_agents_json:   Option<String>,
 }
 
 pub(crate) struct StartedWorker {
@@ -103,6 +110,12 @@ impl LocalWorkerRuntime {
         cmd.env(EnvVars::FABRO_WORKER_TOKEN, &spec.worker_token);
         if let Some(pem) = spec.github_app_private_key.as_deref() {
             cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
+        }
+        if let Some(harness) = spec.external_agent_harness.as_deref() {
+            cmd.env(EnvVars::FABRO_EXTERNAL_AGENT_HARNESS, harness);
+        }
+        if let Some(profiles) = spec.external_agents_json.as_deref() {
+            cmd.env(EnvVars::FABRO_EXTERNAL_AGENTS, profiles);
         }
 
         #[cfg(unix)]

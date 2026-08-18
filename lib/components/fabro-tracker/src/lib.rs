@@ -3,9 +3,14 @@ use async_trait::async_trait;
 
 pub mod github;
 pub mod linear;
+pub mod plane;
 
 pub use github::GitHubTracker;
 pub use linear::{LINEAR_API_ENDPOINT, LinearOptions, LinearTracker};
+pub use plane::{
+    PlaneClient, PlaneComment, PlaneIssue, PlaneLabel, PlaneOptions, PlaneProject, PlaneState,
+    PlaneTracker,
+};
 
 /// Shared GraphQL execution used by both provider modules.
 ///

@@ -8,32 +8,35 @@ use fabro_types::settings::{Duration, InterpString};
 use serde::{Deserialize, Serialize};
 
 use super::LogFilter;
+use super::maps::StickyMap;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct ServerLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub listen:       Option<ServerListenLayer>,
+    pub listen:          Option<ServerListenLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api:          Option<ServerApiLayer>,
+    pub api:             Option<ServerApiLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web:          Option<ServerWebLayer>,
+    pub web:             Option<ServerWebLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth:         Option<ServerAuthLayer>,
+    pub auth:            Option<ServerAuthLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sandbox:      Option<ServerSandboxLayer>,
+    pub sandbox:         Option<ServerSandboxLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub storage:      Option<ServerStorageLayer>,
+    pub storage:         Option<ServerStorageLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifacts:    Option<ServerArtifactsLayer>,
+    pub artifacts:       Option<ServerArtifactsLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slatedb:      Option<ServerSlateDbLayer>,
+    pub slatedb:         Option<ServerSlateDbLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scheduler:    Option<ServerSchedulerLayer>,
+    pub scheduler:       Option<ServerSchedulerLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logging:      Option<ServerLoggingLayer>,
+    pub logging:         Option<ServerLoggingLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub integrations: Option<ServerIntegrationsLayer>,
+    pub integrations:    Option<ServerIntegrationsLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_agents: Option<ExternalAgentsLayer>,
 }
 
 /// `[server.listen]` — shared bind transport.
@@ -206,6 +209,8 @@ pub struct ServerIntegrationsLayer {
     pub github: Option<GithubIntegrationLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slack:  Option<SlackIntegrationLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane:  Option<PlaneIntegrationLayer>,
 }
 
 /// `[server.integrations.github]` — GitHub App, credentials, and inbound
@@ -235,6 +240,40 @@ pub struct SlackIntegrationLayer {
     pub enabled:         Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_channel: Option<String>,
+}
+
+/// `[server.integrations.plane]` — Plane workspace credentials and endpoints.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct PlaneIntegrationLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled:   Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base:  Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+/// `[server.external_agents]` — server-configured external agent profiles
+/// (Codex, OMP).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalAgentsLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex: Option<ExternalAgentProfileLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omp:   Option<ExternalAgentProfileLayer>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalAgentProfileLayer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args:    Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
+    pub env:     StickyMap<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]

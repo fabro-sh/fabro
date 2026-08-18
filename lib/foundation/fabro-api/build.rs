@@ -693,6 +693,46 @@ fn main() {
             "fabro_automation::AutomationReplace",
             &[],
         ),
+        (
+            "ExternalAgentHarness",
+            "fabro_types::ExternalAgentHarness",
+            &[],
+        ),
+        (
+            "AutomationPlaneTrigger",
+            "fabro_automation::PlaneTrigger",
+            &[],
+        ),
+        ("AutomationApiTrigger", "fabro_automation::ApiTrigger", &[]),
+        (
+            "AutomationScheduleTrigger",
+            "fabro_automation::ScheduleTrigger",
+            &[],
+        ),
+        (
+            "PlaneDispatchStatus",
+            "fabro_types::PlaneDispatchStatus",
+            &[],
+        ),
+        ("PlaneDispatch", "fabro_types::PlaneDispatch", &[]),
+        (
+            "PlaneDispatchListResponse",
+            "fabro_types::PlaneDispatchListResponse",
+            &[],
+        ),
+        ("PlaneProject", "fabro_types::PlaneProjectResponse", &[]),
+        (
+            "PlaneProjectsResponse",
+            "fabro_types::PlaneProjectsResponse",
+            &[],
+        ),
+        ("PlaneState", "fabro_types::PlaneStateResponse", &[]),
+        ("PlaneLabel", "fabro_types::PlaneLabelResponse", &[]),
+        (
+            "PlaneProjectMetadataResponse",
+            "fabro_types::PlaneProjectMetadataResponse",
+            &[],
+        ),
         // MCP server catalog wire types reuse the domain model rather than
         // generating parallel DTOs. The integer formats in the spec generate as
         // `i64`/`i32`, but the domain types use `u64`/`u16`; the replacements

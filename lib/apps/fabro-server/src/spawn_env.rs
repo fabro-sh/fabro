@@ -18,6 +18,8 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     // reach the refresh-ahead loop in the ACP handler.
     EnvVars::FABRO_PUSH_CRED_REFRESH_AHEAD,
     EnvVars::FABRO_PUSH_CRED_REFRESH_INTERVAL_SECONDS,
+    EnvVars::FABRO_EXTERNAL_AGENT_HARNESS,
+    EnvVars::FABRO_EXTERNAL_AGENTS,
     #[cfg(feature = "test-support")]
     "FABRO_TEST_ASSUME_LLM_READY",
     EnvVars::TERM,

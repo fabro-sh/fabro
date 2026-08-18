@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use croner::Cron;
 use croner::errors::CronError;
 use croner::parser::{CronParser, Seconds, Year};
-use fabro_types::{GitHubRepositorySlug, repository};
+use fabro_types::{ExternalAgentHarness, GitHubRepositorySlug, repository};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -114,10 +114,27 @@ impl Automation {
             })
     }
 
+    /// Iterate the enabled plane triggers.
+    pub fn enabled_plane_triggers(&self) -> impl Iterator<Item = &PlaneTrigger> {
+        self.triggers
+            .iter()
+            .filter_map(move |trigger| match trigger {
+                AutomationTrigger::Plane(trigger) if trigger.enabled => Some(trigger),
+                _ => None,
+            })
+    }
+
     pub(crate) fn schedule_triggers(&self) -> impl Iterator<Item = &ScheduleTrigger> {
         self.triggers.iter().filter_map(|trigger| match trigger {
             AutomationTrigger::Schedule(trigger) => Some(trigger),
-            AutomationTrigger::Api(_) => None,
+            _ => None,
+        })
+    }
+
+    pub(crate) fn plane_triggers(&self) -> impl Iterator<Item = &PlaneTrigger> {
+        self.triggers.iter().filter_map(|trigger| match trigger {
+            AutomationTrigger::Plane(trigger) => Some(trigger),
+            _ => None,
         })
     }
 
@@ -164,6 +181,7 @@ pub struct AutomationTarget {
 pub enum AutomationTrigger {
     Api(ApiTrigger),
     Schedule(ScheduleTrigger),
+    Plane(PlaneTrigger),
 }
 
 impl AutomationTrigger {
@@ -172,6 +190,7 @@ impl AutomationTrigger {
         match self {
             Self::Api(trigger) => &trigger.id,
             Self::Schedule(trigger) => &trigger.id,
+            Self::Plane(trigger) => &trigger.id,
         }
     }
 
@@ -180,6 +199,7 @@ impl AutomationTrigger {
         match self {
             Self::Api(trigger) => trigger.enabled,
             Self::Schedule(trigger) => trigger.enabled,
+            Self::Plane(trigger) => trigger.enabled,
         }
     }
 }
@@ -209,6 +229,53 @@ pub struct ScheduleTrigger {
     pub id:         AutomationTriggerId,
     pub enabled:    bool,
     pub expression: String,
+}
+
+pub(crate) const DEFAULT_PLANE_POLL_INTERVAL_SECONDS: u64 = 60;
+pub(crate) const MIN_PLANE_POLL_INTERVAL_SECONDS: u64 = 15;
+pub(crate) const MAX_PLANE_POLL_INTERVAL_SECONDS: u64 = 3600;
+
+pub(crate) const DEFAULT_PLANE_MAX_CONCURRENCY: usize = 3;
+pub(crate) const MIN_PLANE_MAX_CONCURRENCY: usize = 1;
+pub(crate) const MAX_PLANE_MAX_CONCURRENCY: usize = 10;
+
+pub(crate) const DEFAULT_PLANE_MAX_RETRIES: usize = 1;
+
+fn default_plane_poll_interval_seconds() -> u64 {
+    DEFAULT_PLANE_POLL_INTERVAL_SECONDS
+}
+
+fn default_plane_max_concurrency() -> usize {
+    DEFAULT_PLANE_MAX_CONCURRENCY
+}
+
+fn default_plane_max_retries() -> usize {
+    DEFAULT_PLANE_MAX_RETRIES
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlaneTrigger {
+    pub id:                    AutomationTriggerId,
+    pub enabled:               bool,
+    pub project_id:            String,
+    pub ready_state_id:        String,
+    pub in_progress_state_id:  String,
+    pub done_state_id:         String,
+    pub cancelled_state_id:    String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_label_id:      Option<String>,
+    pub default_harness:       ExternalAgentHarness,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_label_id:        Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omp_label_id:          Option<String>,
+    #[serde(default = "default_plane_poll_interval_seconds")]
+    pub poll_interval_seconds: u64,
+    #[serde(default = "default_plane_max_concurrency")]
+    pub max_concurrency:       usize,
+    #[serde(default = "default_plane_max_retries")]
+    pub max_retries:           usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,37 +383,46 @@ fn normalize_replace(
         .triggers
         .iter()
         .any(|trigger| matches!(trigger, AutomationTrigger::Api(trigger) if trigger.enabled));
-    let mut schedules = value
-        .triggers
-        .into_iter()
-        .filter_map(|trigger| match trigger {
-            AutomationTrigger::Schedule(trigger) => Some(trigger),
-            AutomationTrigger::Api(_) => None,
-        })
-        .collect::<Vec<_>>();
+    let mut schedules = Vec::new();
+    let mut planes = Vec::new();
+
+    for trigger in value.triggers {
+        match trigger {
+            AutomationTrigger::Api(_) => {}
+            AutomationTrigger::Schedule(trigger) => schedules.push(trigger),
+            AutomationTrigger::Plane(trigger) => planes.push(trigger),
+        }
+    }
+
     schedules.sort_by(|left, right| left.id.cmp(&right.id));
+    planes.sort_by(|left, right| left.id.cmp(&right.id));
 
     // Canonicalization renames the enabled API trigger to `manual`, which can
-    // collide with a schedule trigger id even when the input ids were unique.
+    // collide with a schedule/plane trigger id even when the input ids were unique.
     if api_enabled
-        && schedules
+        && (schedules
             .iter()
             .any(|schedule| schedule.id.as_str() == MANUAL_TRIGGER_ID)
+            || planes
+                .iter()
+                .any(|plane| plane.id.as_str() == MANUAL_TRIGGER_ID))
     {
         return Err(AutomationValidationError::DuplicateTriggerId {
             id: MANUAL_TRIGGER_ID.to_string(),
         });
     }
 
-    let mut triggers = Vec::with_capacity(schedules.len() + usize::from(api_enabled));
+    let mut triggers =
+        Vec::with_capacity(schedules.len() + planes.len() + usize::from(api_enabled));
     if api_enabled {
         triggers.push(AutomationTrigger::Api(ApiTrigger::manual()));
     }
     triggers.extend(schedules.into_iter().map(AutomationTrigger::Schedule));
+    triggers.extend(planes.into_iter().map(AutomationTrigger::Plane));
+
     value.triggers = triggers;
     Ok(value)
 }
-
 pub fn parse_github_repository_slug(
     value: &str,
 ) -> Result<GitHubRepositorySlug, AutomationValidationError> {
@@ -424,6 +500,53 @@ fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationVal
                     }
                 })?;
             }
+            AutomationTrigger::Plane(trigger) => {
+                if trigger.project_id.trim().is_empty() {
+                    return Err(AutomationValidationError::EmptyPlaneProjectId {
+                        trigger_id: id.to_string(),
+                    });
+                }
+                if !(MIN_PLANE_POLL_INTERVAL_SECONDS..=MAX_PLANE_POLL_INTERVAL_SECONDS)
+                    .contains(&trigger.poll_interval_seconds)
+                {
+                    return Err(AutomationValidationError::InvalidPlanePollInterval {
+                        trigger_id: id.to_string(),
+                        seconds:    trigger.poll_interval_seconds,
+                    });
+                }
+                if !(MIN_PLANE_MAX_CONCURRENCY..=MAX_PLANE_MAX_CONCURRENCY)
+                    .contains(&trigger.max_concurrency)
+                {
+                    return Err(AutomationValidationError::InvalidPlaneConcurrency {
+                        trigger_id:  id.to_string(),
+                        concurrency: trigger.max_concurrency,
+                    });
+                }
+
+                let mut state_ids = HashSet::new();
+                for state_id in [
+                    &trigger.ready_state_id,
+                    &trigger.in_progress_state_id,
+                    &trigger.done_state_id,
+                    &trigger.cancelled_state_id,
+                ] {
+                    if state_id.trim().is_empty() || !state_ids.insert(state_id) {
+                        return Err(AutomationValidationError::DuplicatePlaneStateId {
+                            trigger_id: id.to_string(),
+                            state_id:   (*state_id).clone(),
+                        });
+                    }
+                }
+
+                if let (Some(c), Some(o)) = (&trigger.codex_label_id, &trigger.omp_label_id) {
+                    if !c.is_empty() && c == o {
+                        return Err(AutomationValidationError::ConflictingPlaneHarnessLabels {
+                            trigger_id: id.to_string(),
+                            label_id:   c.clone(),
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -432,9 +555,13 @@ fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationVal
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::ExternalAgentHarness;
+
+    use super::validate_triggers;
     use crate::{
         ApiTrigger, Automation, AutomationId, AutomationReplace, AutomationTarget,
-        AutomationTrigger, AutomationTriggerId, AutomationValidationError, ScheduleTrigger,
+        AutomationTrigger, AutomationTriggerId, AutomationValidationError, PlaneTrigger,
+        ScheduleTrigger,
     };
 
     fn target() -> AutomationTarget {
@@ -653,6 +780,122 @@ enabled = true
         for case in cases {
             assert!(Automation::from_replace(AutomationId::new("test").unwrap(), case).is_err());
         }
+    }
+
+    fn sample_plane_trigger(id: &str) -> AutomationTrigger {
+        AutomationTrigger::Plane(PlaneTrigger {
+            id:                    AutomationTriggerId::new(id).unwrap(),
+            enabled:               true,
+            project_id:            "0194e43b-252a-7ad2-a50e-7d6f5fb47db3".to_string(),
+            ready_state_id:        "state-ready".to_string(),
+            in_progress_state_id:  "state-in-progress".to_string(),
+            done_state_id:         "state-done".to_string(),
+            cancelled_state_id:    "state-cancelled".to_string(),
+            failure_label_id:      Some("label-failed".to_string()),
+            default_harness:       ExternalAgentHarness::Codex,
+            codex_label_id:        Some("label-codex".to_string()),
+            omp_label_id:          Some("label-omp".to_string()),
+            poll_interval_seconds: 60,
+            max_concurrency:       3,
+            max_retries:           1,
+        })
+    }
+
+    #[test]
+    fn plane_trigger_toml_round_trip() {
+        let automation = AutomationReplace {
+            name:        "Plane Loop".to_string(),
+            description: Some("Polls Plane for ready tickets".to_string()),
+            target:      target(),
+            triggers:    vec![api_trigger("manual"), sample_plane_trigger("plane-tickets")],
+        };
+
+        let (auto, persisted) =
+            Automation::from_replace(AutomationId::new("plane-auto").unwrap(), automation.clone())
+                .unwrap();
+        let toml_str = std::str::from_utf8(&persisted).unwrap();
+        assert!(toml_str.contains("type = \"plane\""));
+        assert!(toml_str.contains("project_id = \"0194e43b-252a-7ad2-a50e-7d6f5fb47db3\""));
+        assert!(toml_str.contains("default_harness = \"codex\""));
+
+        let parsed =
+            Automation::from_toml_bytes(AutomationId::new("plane-auto").unwrap(), &persisted)
+                .unwrap();
+        assert_eq!(auto.name, parsed.name);
+        assert_eq!(auto.triggers.len(), 2);
+        assert_eq!(auto.triggers[1], parsed.triggers[1]);
+    }
+
+    #[test]
+    fn plane_trigger_validation_rejects_invalid_fields() {
+        let AutomationTrigger::Plane(mut trigger) = sample_plane_trigger("plane-test") else {
+            unreachable!();
+        };
+
+        // Empty project id
+        trigger.project_id = "   ".to_string();
+        let res = validate_triggers(&[AutomationTrigger::Plane(trigger.clone())]);
+        assert!(matches!(
+            res,
+            Err(AutomationValidationError::EmptyPlaneProjectId { .. })
+        ));
+        trigger.project_id = "proj-1".to_string();
+
+        // Poll interval too low
+        trigger.poll_interval_seconds = 10;
+        let res = validate_triggers(&[AutomationTrigger::Plane(trigger.clone())]);
+        assert!(matches!(
+            res,
+            Err(AutomationValidationError::InvalidPlanePollInterval { .. })
+        ));
+        trigger.poll_interval_seconds = 60;
+
+        // Poll interval too high
+        trigger.poll_interval_seconds = 4000;
+        let res = validate_triggers(&[AutomationTrigger::Plane(trigger.clone())]);
+        assert!(matches!(
+            res,
+            Err(AutomationValidationError::InvalidPlanePollInterval { .. })
+        ));
+        trigger.poll_interval_seconds = 60;
+
+        // Concurrency 0
+        trigger.max_concurrency = 0;
+        let res = validate_triggers(&[AutomationTrigger::Plane(trigger.clone())]);
+        assert!(matches!(
+            res,
+            Err(AutomationValidationError::InvalidPlaneConcurrency { .. })
+        ));
+        trigger.max_concurrency = 3;
+
+        // Concurrency 11
+        trigger.max_concurrency = 11;
+        let res = validate_triggers(&[AutomationTrigger::Plane(trigger.clone())]);
+        assert!(matches!(
+            res,
+            Err(AutomationValidationError::InvalidPlaneConcurrency { .. })
+        ));
+        trigger.max_concurrency = 3;
+
+        // Duplicate state IDs
+        trigger.ready_state_id = "same-state".to_string();
+        trigger.done_state_id = "same-state".to_string();
+        let res = validate_triggers(&[AutomationTrigger::Plane(trigger.clone())]);
+        assert!(matches!(
+            res,
+            Err(AutomationValidationError::DuplicatePlaneStateId { .. })
+        ));
+        trigger.ready_state_id = "state-ready".to_string();
+        trigger.done_state_id = "state-done".to_string();
+
+        // Conflicting harness override labels
+        trigger.codex_label_id = Some("same-label".to_string());
+        trigger.omp_label_id = Some("same-label".to_string());
+        let res = validate_triggers(&[AutomationTrigger::Plane(trigger.clone())]);
+        assert!(matches!(
+            res,
+            Err(AutomationValidationError::ConflictingPlaneHarnessLabels { .. })
+        ));
     }
 
     fn top_level_lines(toml: &str) -> impl Iterator<Item = &str> {

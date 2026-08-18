@@ -58,6 +58,15 @@ expression = "0 9 * * 1-5"
 
 The server fires each enabled schedule trigger at its next occurrence and creates and starts a run. Creating, editing, or deleting an automation takes effect immediately — no restart needed. If a fire fails (for example, the clone or workflow resolution errors), Fabro logs a warning and waits for the next occurrence rather than retrying.
 
+### Plane ticket triggers
+
+A Plane trigger polls one configured Plane project for tickets in a Ready state, claims them, and starts runs through the same materialization path as API and schedule triggers. Lifecycle state IDs are exact Plane UUIDs. The trigger default harness is `codex` or `omp`; optional label IDs can override that default. Ticket text never becomes a command.
+
+v1 retry policy is one automatic retry. After the second failure the ticket stays In Progress, Fabro posts a failure comment, and the optional failure label is applied. Completion requires a successful run plus a linked draft PR; Fabro does not wait for merge or CI.
+
+v1 is single-server only. Do not run two Fabro servers against the same store for claiming.
+
+
 ## Web UI
 
 The `/automations` area lists automations with create, edit, delete, and Run actions. Saves are revision-checked, so concurrent edits fail loudly instead of silently overwriting each other. The detail page shows the automation's configuration and its run history with status, time, and repo filters.
@@ -66,4 +75,4 @@ To bootstrap an automation from work you have already run, open a run's actions 
 
 ## API
 
-`/api/v1/automations` provides full CRUD: list, create, fetch, replace, and delete. Responses carry an `ETag` revision; `PUT` and `DELETE` require a matching `If-Match` header. `GET /api/v1/automations/{id}/runs` lists the automation's runs newest-first with standard pagination.
+`/api/v1/automations` provides full CRUD: list, create, fetch, replace, and delete. Responses carry an `ETag` revision; `PUT` and `DELETE` require a matching `If-Match` header. `GET /api/v1/automations/{id}/runs` lists the automation's runs newest-first with standard pagination. `GET /api/v1/automations/{id}/plane-dispatches` lists recent Plane ticket dispatches.

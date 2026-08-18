@@ -2,13 +2,14 @@ use std::path::Path;
 
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, IntegrationWebhooksSettings,
-    ObjectStoreProvider, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,
-    ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings, ServerIntegrationsSettings,
-    ServerListenSettings, ServerLoggingSettings, ServerNamespace, ServerSandboxProviderSettings,
-    ServerSandboxProvidersSettings, ServerSandboxSettings, ServerSchedulerSettings,
-    ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
-    WebhookStrategy,
+    ObjectStoreProvider, ObjectStoreSettings, PlaneIntegrationSettings, ServerApiSettings,
+    ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
+    ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings, ServerNamespace,
+    ServerSandboxProviderSettings, ServerSandboxProvidersSettings, ServerSandboxSettings,
+    ServerSchedulerSettings, ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings,
+    SlackIntegrationSettings, WebhookStrategy,
 };
+use fabro_types::{ExternalAgentProfile, ExternalAgentsSettings};
 use fabro_util::Home;
 
 use super::{
@@ -17,7 +18,8 @@ use super::{
 };
 use crate::user::default_storage_dir;
 use crate::{
-    IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer,
+    ExternalAgentProfileLayer, ExternalAgentsLayer, IntegrationWebhooksLayer,
+    ObjectStoreLocalLayer, ObjectStoreS3Layer, PlaneIntegrationLayer, ServerApiLayer,
     ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerLayer, ServerListenLayer,
     ServerSandboxLayer, ServerSandboxProviderLayer, ServerSlateDbLayer, ServerStorageLayer,
     ServerWebLayer,
@@ -63,6 +65,7 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
                 .unwrap_or_default(),
         },
         integrations,
+        external_agents: resolve_external_agents(layer.external_agents.as_ref()),
     }
 }
 
@@ -375,6 +378,45 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                     }
                 },
             ),
+        plane:  layer
+            .and_then(|integrations| integrations.plane.as_ref())
+            .map(resolve_plane)
+            .unwrap_or_default(),
+    }
+}
+
+fn resolve_plane(layer: &PlaneIntegrationLayer) -> PlaneIntegrationSettings {
+    warn_if_demoted_template(
+        "server.integrations.plane.api_base",
+        layer.api_base.as_deref(),
+    );
+    warn_if_demoted_template(
+        "server.integrations.plane.workspace",
+        layer.workspace.as_deref(),
+    );
+    PlaneIntegrationSettings {
+        enabled:   layer.enabled.unwrap_or(false),
+        api_base:  layer.api_base.clone(),
+        workspace: layer.workspace.clone(),
+    }
+}
+
+fn resolve_external_agents(layer: Option<&ExternalAgentsLayer>) -> ExternalAgentsSettings {
+    ExternalAgentsSettings {
+        codex: layer
+            .and_then(|agents| agents.codex.as_ref())
+            .map(resolve_external_agent_profile),
+        omp:   layer
+            .and_then(|agents| agents.omp.as_ref())
+            .map(resolve_external_agent_profile),
+    }
+}
+
+fn resolve_external_agent_profile(layer: &ExternalAgentProfileLayer) -> ExternalAgentProfile {
+    ExternalAgentProfile {
+        command: layer.command.clone().unwrap_or_default(),
+        args:    layer.args.clone().unwrap_or_default(),
+        env:     layer.env.0.clone().into_iter().collect(),
     }
 }
 

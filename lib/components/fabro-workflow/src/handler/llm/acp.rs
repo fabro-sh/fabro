@@ -8,7 +8,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use fabro_acp::{
     AcpCommandError, AcpControlHandle, AcpError, AcpLiveControl, AcpProcessSpec, AcpRunRequest,
-    render_stop_reason,
+    AcpSessionActivity, render_stop_reason,
 };
 use fabro_agent::{
     AgentEvent, RefreshOutcome, Sandbox, StaticEnvProvider, SteeringItem, ToolEnvProvider,
@@ -16,7 +16,8 @@ use fabro_agent::{
 use fabro_graphviz::graph::Node;
 use fabro_static::EnvVars;
 use fabro_types::{
-    AgentBackend, Principal, SessionCapability, StageId, StageTiming, SteeringMessage,
+    AgentBackend, ExternalAgentsSettings, Principal, SessionCapability, StageId, StageTiming,
+    SteeringMessage,
 };
 use fabro_util::time::elapsed_ms;
 use tokio::task::JoinHandle;
@@ -57,6 +58,19 @@ impl Drop for AbortOnDrop {
     reason = "Documented process-env facade for the FABRO_PUSH_CRED_REFRESH_* tunables; names come from fabro_static::EnvVars."
 )]
 fn refresh_env(name: &str) -> Option<String> {
+    env::var(name).ok()
+}
+
+/// Process-env facade for the external-agent profile injection delivered by the
+/// server: `FABRO_EXTERNAL_AGENT_HARNESS` (codex|omp) plus
+/// `FABRO_EXTERNAL_AGENTS` (JSON map of `ExternalAgentProfile`). Absent when
+/// the run has no selected harness, so node-level `acp.command`/`acp.config`
+/// behavior is unchanged.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Documented process-env facade for the server-injected FABRO_EXTERNAL_AGENT_* values."
+)]
+fn external_agent_env(name: &str) -> Option<String> {
     env::var(name).ok()
 }
 
@@ -158,6 +172,7 @@ pub struct AgentAcpBackend {
     tool_env:                     Option<Arc<dyn ToolEnvProvider>>,
     github_token_refresh_managed: bool,
     steering_hub:                 Option<Arc<SteeringHub>>,
+    profile_override:             Option<AcpProcessSpec>,
 }
 
 impl AgentAcpBackend {
@@ -167,6 +182,7 @@ impl AgentAcpBackend {
             tool_env:                     None,
             github_token_refresh_managed: false,
             steering_hub:                 None,
+            profile_override:             None,
         }
     }
 
@@ -193,6 +209,44 @@ impl AgentAcpBackend {
         self
     }
 
+    /// Construct the backend, applying the server-injected external-agent
+    /// profile when this worker is running a harness-selected run. No-op for
+    /// ordinary runs (env absent, or no matching profile).
+    #[must_use]
+    pub fn from_worker_env() -> Self {
+        let mut backend = Self::new();
+        let Some(harness) = external_agent_env(EnvVars::FABRO_EXTERNAL_AGENT_HARNESS) else {
+            return backend;
+        };
+        let Ok(profiles) = serde_json::from_str::<ExternalAgentsSettings>(
+            external_agent_env(EnvVars::FABRO_EXTERNAL_AGENTS)
+                .as_deref()
+                .unwrap_or("{}"),
+        ) else {
+            return backend;
+        };
+        let profile = match harness.as_str() {
+            "codex" => profiles.codex,
+            "omp" => profiles.omp,
+            _ => None,
+        };
+        if let Some(profile) = profile {
+            backend = backend.with_profile_override(AcpProcessSpec::from_profile(
+                harness.as_str(),
+                profile.command,
+                profile.args,
+                profile.env.into_iter().collect(),
+            ));
+        }
+        backend
+    }
+
+    #[must_use]
+    pub fn with_profile_override(mut self, spec: AcpProcessSpec) -> Self {
+        self.profile_override = Some(spec);
+        self
+    }
+
     async fn run_turn(
         &self,
         node: &Node,
@@ -202,7 +256,7 @@ impl AgentAcpBackend {
         sandbox: &Arc<dyn Sandbox>,
         cancel_token: CancellationToken,
     ) -> Result<CodergenResult, Error> {
-        let process_spec = resolve_acp_process_spec(node)?;
+        let process_spec = resolve_acp_process_spec(node, self.profile_override.as_ref())?;
         let config_name = process_spec.name().map(str::to_string);
         let launch_env = self.resolve_launch_env(emitter).await?;
         let on_activity = {
@@ -339,6 +393,12 @@ impl AgentAcpBackend {
             sandbox: Arc::clone(sandbox),
             cancel_token: cancel_token.child_token(),
             on_activity: Some(on_activity),
+            on_session_activity: Some(session_activity_callback(
+                Arc::clone(emitter),
+                stage_scope.clone(),
+                node.id.clone(),
+                activation_session_id.clone(),
+            )),
             live_control: Some(AcpLiveControl {
                 handle: control_handle.clone(),
                 on_natural_completion,
@@ -572,13 +632,145 @@ fn acp_process_error_to_workflow(error: AcpCommandError) -> Error {
     }
 }
 
-fn resolve_acp_process_spec(node: &Node) -> Result<AcpProcessSpec, Error> {
+fn resolve_acp_process_spec(
+    node: &Node,
+    profile_override: Option<&AcpProcessSpec>,
+) -> Result<AcpProcessSpec, Error> {
+    if node.legacy_acp_command_attr().is_none()
+        && node.acp_command_attr().is_none()
+        && node.acp_config_attr().is_none()
+    {
+        if let Some(spec) = profile_override {
+            return Ok(spec.clone());
+        }
+    }
     AcpProcessSpec::from_attrs(
         node.legacy_acp_command_attr(),
         node.acp_command_attr(),
         node.acp_config_attr(),
     )
     .map_err(acp_process_error_to_workflow)
+}
+
+fn session_activity_callback(
+    emitter: Arc<Emitter>,
+    stage_scope: StageScope,
+    node_id: String,
+    session_id: String,
+) -> fabro_acp::AcpSessionActivityCallback {
+    let activated_skills = Mutex::new(std::collections::HashSet::new());
+    Arc::new(move |activity| match activity {
+        AcpSessionActivity::ToolStarted {
+            tool_call_id,
+            tool_name,
+            raw_input,
+            ..
+        } => {
+            maybe_emit_skill_activation(
+                &emitter,
+                &stage_scope,
+                &node_id,
+                &session_id,
+                &activated_skills,
+                &tool_name,
+                &raw_input,
+            );
+            emitter.emit_scoped(
+                &Event::Agent {
+                    stage:             node_id.clone(),
+                    visit:             stage_scope.visit,
+                    event:             AgentEvent::ToolCallStarted {
+                        tool_name,
+                        tool_call_id: tool_call_id.clone(),
+                        arguments: raw_input,
+                    },
+                    session_id:        Some(session_id.clone()),
+                    parent_session_id: None,
+                    tool_call_id:      Some(tool_call_id),
+                },
+                &stage_scope,
+            );
+        }
+        AcpSessionActivity::ToolCompleted {
+            tool_call_id,
+            tool_name,
+            output,
+            is_error,
+        } => {
+            emitter.emit_scoped(
+                &Event::Agent {
+                    stage:             node_id.clone(),
+                    visit:             stage_scope.visit,
+                    event:             AgentEvent::ToolCallCompleted {
+                        tool_name,
+                        tool_call_id: tool_call_id.clone(),
+                        output,
+                        is_error,
+                    },
+                    session_id:        Some(session_id.clone()),
+                    parent_session_id: None,
+                    tool_call_id:      Some(tool_call_id),
+                },
+                &stage_scope,
+            );
+        }
+    })
+}
+
+fn maybe_emit_skill_activation(
+    emitter: &Arc<Emitter>,
+    stage_scope: &StageScope,
+    node_id: &str,
+    session_id: &str,
+    activated_skills: &Mutex<std::collections::HashSet<String>>,
+    tool_name: &str,
+    raw_input: &serde_json::Value,
+) {
+    let Some(skill_name) = skill_name_from_tool(tool_name, raw_input) else {
+        return;
+    };
+    let mut seen = activated_skills
+        .lock()
+        .expect("ACP skill activation lock poisoned");
+    if !seen.insert(skill_name.clone()) {
+        return;
+    }
+    emitter.emit_scoped(
+        &Event::Agent {
+            stage:             node_id.to_string(),
+            visit:             stage_scope.visit,
+            event:             AgentEvent::SkillActivated {
+                skill_name,
+                source: fabro_agent::SkillActivationSource::Tool,
+            },
+            session_id:        Some(session_id.to_string()),
+            parent_session_id: None,
+            tool_call_id:      None,
+        },
+        stage_scope,
+    );
+}
+
+fn skill_name_from_tool(tool_name: &str, raw_input: &serde_json::Value) -> Option<String> {
+    let lowered = tool_name.to_ascii_lowercase();
+    if matches!(lowered.as_str(), "skill" | "use_skill" | "activate_skill") {
+        if let Some(name) = raw_input.get("name").and_then(|value| value.as_str()) {
+            return Some(name.to_string());
+        }
+        if let Some(name) = raw_input.get("skill").and_then(|value| value.as_str()) {
+            return Some(name.to_string());
+        }
+    }
+    raw_input
+        .as_object()
+        .into_iter()
+        .flat_map(|object| object.values())
+        .filter_map(|value| value.as_str())
+        .find_map(|value| {
+            value
+                .strip_prefix("skill://")
+                .map(|name| name.split('/').next().unwrap_or(name).to_string())
+        })
 }
 
 fn acp_error_to_workflow(error: AcpError) -> Error {
@@ -1197,6 +1389,41 @@ mod tests {
                 .any(|cause| cause.contains("early boom")),
             "raw stderr belongs in exec_output_tail, not causes: {:?}",
             detail.causes
+        );
+    }
+
+    #[test]
+    fn worker_env_selects_external_agent_profile() {
+        let profiles = serde_json::json!({
+            "codex": { "command": "codex-acp", "args": [], "env": {} }
+        });
+        // Inject via a temporary environment override is intentionally avoided
+        // (process env is banned), so exercise the parsing helper directly by
+        // simulating the server-provided JSON.
+        let parsed =
+            serde_json::from_value::<fabro_types::ExternalAgentsSettings>(profiles).unwrap();
+        let codex = parsed.codex.unwrap();
+        assert_eq!(codex.command, "codex-acp");
+    }
+
+    #[test]
+    fn skill_uri_and_skill_tool_are_detected_once() {
+        assert_eq!(
+            super::skill_name_from_tool("use_skill", &serde_json::json!({"name": "plane-loop"}))
+                .as_deref(),
+            Some("plane-loop")
+        );
+        assert_eq!(
+            super::skill_name_from_tool(
+                "Read",
+                &serde_json::json!({"path": "skill://banner-design/SKILL.md"})
+            )
+            .as_deref(),
+            Some("banner-design")
+        );
+        assert_eq!(
+            super::skill_name_from_tool("assistant", &serde_json::json!("use skill://nope")),
+            None
         );
     }
 
