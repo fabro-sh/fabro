@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256px" height="256px" viewBox="0 0 256 256" version="1.1" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid">
+    <title>Plane</title>
+    <g>
+        <rect width="256" height="256" rx="44" fill="#3F76FF"/>
+        <path d="M56 132 L200 92 C208 89 214 95 210 103 L178 166 C176 170 171 172 167 170 L134 156 L112 196 C110 200 104 200 103 195 L96 152 L60 141 C54 139 52 134 56 132 Z" fill="#FFFFFF"/>
+    </g>
+</svg>

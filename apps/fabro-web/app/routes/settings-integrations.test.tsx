@@ -68,6 +68,18 @@ function sampleIntegrations(
         metadata: { default_channel: "#fabro" },
         ...slack,
       }),
+      sampleStatus({
+        provider:            "plane",
+        enabled:             true,
+        configured:          true,
+        status:              "configured",
+        missing_credentials: [],
+        connection:          null,
+        metadata:            {
+          api_base:  "https://plane.artesanosdigitales.cloud/api/v1",
+          workspace: "artesanos-digitales-workspace",
+        },
+      }),
     ],
   };
 }
@@ -113,5 +125,48 @@ describe("SettingsIntegrations route", () => {
 
     expect(text).toContain("Missing credentials");
     expect(text).toContain("missing: SLACK_APP_TOKEN, SLACK_BOT_TOKEN");
+  });
+
+  test("renders Plane workspace and api base when configured", () => {
+    systemIntegrations = sampleIntegrations();
+
+    const renderer = renderSettingsIntegrations();
+    const text = textContent(renderer.toJSON());
+
+    expect(text).toContain("Plane");
+    expect(text).toContain("Configured");
+    expect(text).toContain(
+      "artesanos-digitales-workspace · https://plane.artesanosdigitales.cloud/api/v1",
+    );
+  });
+
+  test("renders missing Plane credential names", () => {
+    systemIntegrations = sampleIntegrations();
+    systemIntegrations.data[2] = sampleStatus({
+      provider:            "plane",
+      enabled:             true,
+      configured:          false,
+      status:              "missing_credentials",
+      missing_credentials: ["PLANE_API_KEY"],
+      connection:          null,
+      metadata:            {},
+    });
+
+    const renderer = renderSettingsIntegrations();
+    const text = textContent(renderer.toJSON());
+
+    expect(text).toContain("Plane");
+    expect(text).toContain("missing: PLANE_API_KEY");
+  });
+
+  test("shows configuration hint when Plane status is absent", () => {
+    systemIntegrations = {
+      data: [systemIntegrations?.data[0] ?? sampleStatus({ provider: "github" })],
+    };
+
+    const renderer = renderSettingsIntegrations();
+    const text = textContent(renderer.toJSON());
+
+    expect(text).toContain("Configure [server.integrations.plane] to enable");
   });
 });

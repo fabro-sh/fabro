@@ -15285,7 +15285,7 @@ components:
     IntegrationProvider:
       description: Server integration provider.
       type: string
-      enum: [github, slack]
+      enum: [github, slack, plane]
 
     IntegrationStatus:
       description: Computed runtime integration status.

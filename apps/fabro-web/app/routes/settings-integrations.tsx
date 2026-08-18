@@ -29,7 +29,7 @@ export default function SettingsIntegrations() {
   const integrations = integrationsQuery.data?.data;
   const github = integrations?.find((status) => status.provider === "github");
   const slack = integrations?.find((status) => status.provider === "slack");
-
+  const plane = integrations?.find((status) => status.provider === "plane");
   return (
     <div className="space-y-6">
       <SettingsPageIntro description={DESCRIPTION} />
@@ -44,14 +44,27 @@ export default function SettingsIntegrations() {
           <PanelSkeleton />
         </>
       )}
-      <ProjectManagementPanel />
+      <ProjectManagementPanel plane={plane} />
     </div>
   );
 }
 
-function ProjectManagementPanel() {
+function ProjectManagementPanel({ plane }: { plane?: SystemIntegrationStatus }) {
   return (
     <Panel title="Project Management">
+      <IntegrationRow
+        slug="plane"
+        name="Plane"
+        help="Ticket automation source for Plane projects."
+      >
+        {plane ? (
+          <IntegrationValue status={plane} detail={planeDetail(plane)} />
+        ) : (
+          <span className="text-sm text-fg-muted">
+            Configure [server.integrations.plane] to enable
+          </span>
+        )}
+      </IntegrationRow>
       <IntegrationRow
         slug="linear"
         name="Linear"
@@ -232,6 +245,17 @@ function githubDetail(status: SystemIntegrationStatus): string | undefined {
   if (metadata.app_id) return `app id: ${metadata.app_id}`;
   if (metadata.strategy) return `strategy: ${metadata.strategy}`;
   return missingCredentialsDetail(status);
+}
+
+function planeDetail(status: SystemIntegrationStatus): string | undefined {
+  const missing = missingCredentialsDetail(status);
+  if (missing) return missing;
+  const metadata = status.metadata ?? {};
+  const workspace = metadata.workspace;
+  const apiBase = metadata.api_base;
+  if (workspace && apiBase) return `${workspace} · ${apiBase}`;
+  if (workspace) return workspace;
+  return undefined;
 }
 
 function slackDetail(status: SystemIntegrationStatus): string | undefined {
