@@ -355,7 +355,14 @@ pub fn error_from_status_code(
     // error types
     let kind = match status_code {
         401 => ProviderErrorKind::Authentication,
-        403 => ProviderErrorKind::AccessDenied,
+        // A 412 is never about the request: no LLM request carries
+        // conditional-request preconditions. Fireworks documents it as
+        // "Account is suspended or there's an issue with account status",
+        // also emitted for a LoRA model that failed to load
+        // (https://docs.fireworks.ai/guides/inference-error-codes). The same
+        // family as `account_deactivated`: deterministic here, but another
+        // provider has independent billing and model inventory.
+        403 | 412 => ProviderErrorKind::AccessDenied,
         404 => ProviderErrorKind::NotFound,
         408 => {
             return Error::RequestTimeout {
@@ -726,6 +733,53 @@ mod tests {
             None,
         );
         assert_eq!(err.provider_kind(), Some(ProviderErrorKind::QuotaExceeded));
+    }
+
+    /// Fireworks reports an account suspension (spending cap reached or
+    /// unpaid invoices) as HTTP 412 with `code: "PRECONDITION_FAILED"` in
+    /// the body. A chat completion carries no conditional-request
+    /// preconditions, so a 412 is always an account-level lockout, never a
+    /// defect in the request: it must not classify as `InvalidRequest`, and
+    /// a fallback provider with independent billing must stay eligible.
+    #[test]
+    fn account_suspension_412_is_failover_eligible() {
+        let err = error_from_status_code(
+            412,
+            "Account lithoscomputer is suspended, possibly due to reaching \
+             the monthly spending limit or failure to pay past invoices."
+                .into(),
+            "fireworks".into(),
+            // The openai_compatible dialect reads `error.type` as the code,
+            // so the discriminating `PRECONDITION_FAILED` only reaches this
+            // mapping through the status code.
+            Some("error".into()),
+            Some(serde_json::json!({
+                "error": {
+                    "message": "Account lithoscomputer is suspended, possibly due to reaching the monthly spending limit or failure to pay past invoices. Please go to https://fireworks.ai/account/billing for more information.",
+                    "param": null,
+                    "code": "PRECONDITION_FAILED",
+                    "type": "error"
+                },
+                "request_id": "chatcmpl-d9652b89a6604931ac27dddd5ef5bdc0"
+            })),
+            None,
+        );
+
+        assert_eq!(err.provider_kind(), Some(ProviderErrorKind::AccessDenied));
+        assert!(!err.retryable());
+        assert!(err.failover_eligible());
+
+        // A bare 412 with no parseable body classifies the same way.
+        let err = error_from_status_code(
+            412,
+            "Precondition Failed".into(),
+            "fireworks".into(),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(err.provider_kind(), Some(ProviderErrorKind::AccessDenied));
+        assert!(err.failover_eligible());
     }
 
     #[test]

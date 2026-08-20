@@ -84,6 +84,8 @@ const TRANSIENT_INFRA_HINTS: &[&str] = &[
     "cross-device link",
     "invalid cross-device link",
     "os error 18",
+    "state change in progress",
+    "sandbox stop still in progress",
 ];
 
 const BUDGET_EXHAUSTED_HINTS: &[&str] = &[
@@ -844,6 +846,18 @@ mod tests {
     }
 
     #[test]
+    fn engine_error_with_sandbox_state_change_cause_classifies_transient() {
+        let source = TestOuterError {
+            message: "Failed to start Daytona sandbox",
+            source:  TestCause("Sandbox state change in progress"),
+        };
+        let err = Error::engine_with_source("Pipeline lifecycle operation failed", source);
+
+        assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
+        assert!(err.is_retryable());
+    }
+
+    #[test]
     fn handler_error_display() {
         let err = Error::handler("LLM call failed");
         assert_eq!(err.to_string(), "Handler error: LLM call failed");
@@ -1317,7 +1331,7 @@ mod tests {
 
     #[test]
     fn transient_infra_hints_count() {
-        assert_eq!(TRANSIENT_INFRA_HINTS.len(), 38);
+        assert_eq!(TRANSIENT_INFRA_HINTS.len(), 40);
     }
 
     #[test]
@@ -1482,6 +1496,25 @@ mod tests {
     fn classify_reason_connection_reset() {
         assert_eq!(
             classify_failure_reason("connection reset by peer"),
+            FailureCategory::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_sandbox_state_change_in_progress() {
+        assert_eq!(
+            classify_failure_reason(
+                "Pipeline lifecycle operation failed: failed to activate sandbox after node \
+                 attempt survey: Failed to start Daytona sandbox: Sandbox state change in progress"
+            ),
+            FailureCategory::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_sandbox_stop_still_in_progress() {
+        assert_eq!(
+            classify_failure_reason("Daytona sandbox stop still in progress after 120s"),
             FailureCategory::TransientInfra
         );
     }

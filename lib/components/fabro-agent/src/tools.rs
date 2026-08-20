@@ -226,7 +226,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                 };
 
                 ctx.env
-                    .write_file(file_path, &new_content)
+                    .write_existing_file(file_path, &new_content)
                     .await
                     .map_err(|e| e.display_with_causes())?;
                 Ok(format!("Successfully edited {file_path}"))
@@ -1002,6 +1002,7 @@ mod tests {
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully wrote to /out.txt");
+        assert_eq!(env.existing_file_write_count(), 0);
         let written = env.written_files.lock().unwrap();
         assert_eq!(written.len(), 1);
         assert_eq!(written[0].0, "/out.txt");
@@ -1036,6 +1037,7 @@ mod tests {
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully edited /f.txt");
+        assert_eq!(env.existing_file_write_count(), 1);
         let written = env.written_files.lock().unwrap();
         assert_eq!(written.len(), 1);
         assert_eq!(written[0].1, "goodbye world");

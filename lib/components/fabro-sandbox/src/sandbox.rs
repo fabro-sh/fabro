@@ -1088,6 +1088,16 @@ pub trait Sandbox: Send + Sync {
     }
 
     async fn write_file(&self, path: &str, content: &str) -> crate::Result<()>;
+
+    /// Write a file that the caller has already confirmed exists.
+    ///
+    /// Providers can override this method to skip setup that is only needed
+    /// when creating a new path. The default preserves the behavior of
+    /// [`Sandbox::write_file`].
+    async fn write_existing_file(&self, path: &str, content: &str) -> crate::Result<()> {
+        self.write_file(path, content).await
+    }
+
     async fn delete_file(&self, path: &str) -> crate::Result<()>;
     async fn file_exists(&self, path: &str) -> crate::Result<bool>;
     async fn list_directory(

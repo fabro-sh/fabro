@@ -321,7 +321,7 @@ memory = "8GB"
 | `network.allow` | CIDRs for `cidr_allow_list`; entries are validated as CIDRs. |
 | `lifecycle.preserve` | Keep the created sandbox after the run finishes. |
 | `lifecycle.stop_on_terminal` | Stop the sandbox when the run reaches a terminal state. |
-| `lifecycle.auto_stop` | Daytona auto-stop duration, such as `"30m"`. |
+| `lifecycle.auto_stop` | Daytona auto-stop duration, such as `"30m"`. Defaults to `"120m"`; `"0s"` disables auto-stop. |
 | `labels` | Provider labels. Merge by key across layers. |
 | `env` | Environment variables passed to command and agent execution. Merge by key across layers. |
 

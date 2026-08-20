@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -29,6 +29,8 @@ pub struct MockSandbox {
     pub os_version_str:        String,
     /// Captures (path, content) pairs from `write_file` calls.
     pub written_files:         Mutex<Vec<(String, String)>>,
+    /// Counts calls to `write_existing_file`.
+    pub existing_file_writes:  AtomicUsize,
     /// Captures the `timeout_ms` argument from `exec_command` calls.
     pub captured_timeout:      Mutex<Option<u64>>,
     /// Captures the `command` argument from `exec_command` calls (last only).
@@ -104,6 +106,10 @@ impl MockSandbox {
             .expect("delete_calls lock poisoned")
     }
 
+    pub fn existing_file_write_count(&self) -> usize {
+        self.existing_file_writes.load(Ordering::Relaxed)
+    }
+
     pub fn set_stdio_process(&self, process: MockStdioProcess) {
         *self
             .stdio_process
@@ -156,6 +162,7 @@ impl Default for MockSandbox {
             platform_str:          "darwin",
             os_version_str:        "Darwin 24.0.0".into(),
             written_files:         Mutex::new(Vec::new()),
+            existing_file_writes:  AtomicUsize::new(0),
             captured_timeout:      Mutex::new(None),
             captured_command:      Mutex::new(None),
             captured_commands:     Mutex::new(Vec::new()),
@@ -248,6 +255,11 @@ impl Sandbox for MockSandbox {
             .expect("written_files lock poisoned")
             .push((path.to_string(), content.to_string()));
         Ok(())
+    }
+
+    async fn write_existing_file(&self, path: &str, content: &str) -> crate::Result<()> {
+        self.existing_file_writes.fetch_add(1, Ordering::Relaxed);
+        self.write_file(path, content).await
     }
 
     async fn delete_file(&self, _path: &str) -> crate::Result<()> {
