@@ -14,9 +14,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-async-trait.workspace = true
 serde.workspace = true
-strum.workspace = true
 serde_json.workspace = true
 fabro-http.workspace = true
 fabro-redact.workspace = true

@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use fabro_dump::RunDump;
 use fabro_hooks::{HookContext, HookEvent};
-use fabro_sandbox::git_retry;
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
 use fabro_types::{BilledTokenCounts, DiffSummary, EventBody, RunFailure, RunProjection};
 use fabro_util::error::collect_causes;
@@ -203,7 +202,7 @@ pub async fn write_finalize_commit(
     services: &RunServices,
     conclusion: &Conclusion,
 ) {
-    if services.metadata_runtime.metadata_suspended() {
+    if services.metadata_runtime.metadata_degraded() {
         return;
     }
     let Some(writer) = services.metadata_writer.as_ref() else {
@@ -241,7 +240,6 @@ pub async fn write_finalize_commit(
                 services,
                 RunNoticeCode::CheckpointMetadataWriteFailed,
                 message,
-                false,
             );
             return;
         }
@@ -267,7 +265,6 @@ pub async fn write_finalize_commit(
                 services,
                 RunNoticeCode::CheckpointMetadataWriteFailed,
                 message,
-                false,
             );
             return;
         }
@@ -293,10 +290,8 @@ pub async fn write_finalize_commit(
                     services,
                     RunNoticeCode::CheckpointMetadataPushFailed,
                     message,
-                    metadata_push_failure_is_transient(detail, snapshot.token.as_ref()),
                 );
             } else {
-                services.metadata_runtime.clear_metadata_degraded();
                 emit_metadata_snapshot_completed(services, phase, meta_branch, started, &snapshot);
             }
         }
@@ -318,7 +313,6 @@ pub async fn write_finalize_commit(
                 services,
                 RunNoticeCode::CheckpointMetadataWriteFailed,
                 message,
-                false,
             );
         }
     }
@@ -382,23 +376,8 @@ fn emit_metadata_snapshot_failed(
     });
 }
 
-/// Whether a metadata push failure leaves the writer eligible for re-probing.
-/// See `lifecycle::git`: only retryable push classifications qualify.
-fn metadata_push_failure_is_transient(
-    detail: &str,
-    token: Option<&fabro_sandbox::TokenSnapshot>,
-) -> bool {
-    let cred = fabro_sandbox::CredentialContext::from_snapshot(token);
-    git_retry::classify_failure(detail, cred).is_some()
-}
-
-fn emit_metadata_warning(
-    services: &RunServices,
-    code: RunNoticeCode,
-    message: String,
-    transient: bool,
-) {
-    if services.metadata_runtime.mark_metadata_degraded(transient) {
+fn emit_metadata_warning(services: &RunServices, code: RunNoticeCode, message: String) {
+    if services.metadata_runtime.mark_metadata_degraded() {
         services.emitter.notice(RunNoticeLevel::Warn, code, message);
     }
 }
@@ -1278,7 +1257,7 @@ mod tests {
         let emitter = Arc::new(Emitter::new(test_run_id()));
         let events = record_events(&emitter);
         let runtime = Arc::new(RunMetadataRuntime::new());
-        runtime.mark_metadata_degraded(false);
+        runtime.mark_metadata_degraded();
         let services = test_services(
             RunStoreHandle::local(run_store),
             emitter,
@@ -1482,18 +1461,7 @@ mod tests {
         );
         let events = events.lock().unwrap();
         let names = events.iter().map(RunEvent::event_name).collect::<Vec<_>>();
-        // Exactly one durable git.push event per high-level push — retries
-        // nest inside it as attempts, never as extra events.
         assert_eq!(names, vec!["git.push", "run.failed"]);
-        match &events.first().unwrap().body {
-            EventBody::GitPush(props) => {
-                assert!(!props.success);
-                // MockSandbox's default git_push_ref fails before any attempt
-                // runs, so the nested history is empty here.
-                assert!(props.attempts.is_empty());
-            }
-            other => panic!("expected git.push, got {other:?}"),
-        }
         match &events.last().unwrap().body {
             EventBody::RunFailed(props) => {
                 assert_eq!(props.failure.reason, FailureReason::PublishFailed);

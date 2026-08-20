@@ -10,7 +10,7 @@ mod test_support;
 
 pub use fabro_types::{EventBody, RunNoticeCode, RunNoticeLevel};
 
-pub use self::convert::{git_push_attempt_props, to_run_event, to_run_event_at};
+pub use self::convert::{to_run_event, to_run_event_at};
 pub use self::emitter::Emitter;
 pub use self::events::Event;
 pub use self::names::event_name;

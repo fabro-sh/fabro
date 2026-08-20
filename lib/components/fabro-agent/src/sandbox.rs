@@ -3,8 +3,7 @@
 // `crate::delegate_sandbox!` invocations continue to work.
 pub use fabro_sandbox::{
     CommandOutputCallback, DirEntry, ExecResult, ExecStreamingRequest, ExecStreamingResult,
-    GrepOptions, RefreshOutcome, RemoteCredentialAction, Sandbox, SandboxEvent,
-    SandboxEventCallback, SandboxFile, StderrCollector, StdioProcess, StdioProcessHandle,
-    StdioProcessTermination, TokenProvenance, TokenSnapshot, WalkOptions, delegate_sandbox,
-    format_lines_numbered, shell_quote,
+    GrepOptions, RefreshOutcome, Sandbox, SandboxEvent, SandboxEventCallback, SandboxFile,
+    StderrCollector, StdioProcess, StdioProcessHandle, StdioProcessTermination, WalkOptions,
+    delegate_sandbox, format_lines_numbered, shell_quote,
 };

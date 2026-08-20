@@ -2654,7 +2654,6 @@ name = "fabro-github"
 version = "0.331.0-nightly.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "base64",
  "chrono",
  "fabro-http",
@@ -2666,7 +2665,6 @@ dependencies = [
  "jsonwebtoken",
  "serde",
  "serde_json",
- "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

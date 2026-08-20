@@ -13,8 +13,8 @@ use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
 use crate::sandbox::{
-    self, BASH_ENV_VAR, BASH_PROBE_SCRIPT, BASH_PROBE_TIMEOUT_MS, StdioProcessControl,
-    optional_timeout, validate_bash_probe, write_process_stdin,
+    BASH_ENV_VAR, BASH_PROBE_SCRIPT, BASH_PROBE_TIMEOUT_MS, StdioProcessControl, optional_timeout,
+    validate_bash_probe, write_process_stdin,
 };
 use crate::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
@@ -878,31 +878,20 @@ impl Sandbox for LocalSandbox {
         Ok(())
     }
 
-    async fn git_push_ref(
-        &self,
-        refspec: &str,
-        plan: &crate::RetryPlan,
-    ) -> Result<crate::PushReport, crate::PushError> {
+    async fn git_push_ref(&self, refspec: &str) -> crate::Result<()> {
         let has_origin = match self
             .exec_command("git remote get-url origin", 10_000, None, None, None)
             .await
         {
             Ok(result) if result.is_success() => true,
             Ok(_) => false,
-            Err(err) => {
-                return Err(crate::PushError {
-                    report: crate::PushReport::default(),
-                    error:  crate::Error::context("git remote get-url origin", err),
-                });
-            }
+            Err(err) => return Err(crate::Error::context("git remote get-url origin", err)),
         };
         if !has_origin {
-            return Ok(crate::PushReport::default());
+            return Ok(());
         }
 
-        // Local pushes use whatever credentials the host repository already
-        // carries; there is no managed credential state to lease.
-        sandbox::git_push_via_exec(self, None, refspec, plan).await
+        crate::git_push_via_exec(self, refspec).await
     }
 
     async fn cleanup(&self) -> crate::Result<()> {

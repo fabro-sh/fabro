@@ -309,10 +309,6 @@ pub enum Error {
         message:          String,
         failure_class:    FailureCategory,
         exec_output_tail: Option<ExecOutputTail>,
-        /// Structured context lines appended after the source chain in
-        /// `causes()` — e.g. one line per push attempt on a publish push
-        /// failure.
-        extra_causes:     Vec<String>,
         #[source]
         source:           Option<SharedError>,
     },
@@ -361,7 +357,6 @@ impl Error {
             message,
             failure_class,
             exec_output_tail,
-            extra_causes: Vec::new(),
             source: None,
         }
     }
@@ -383,7 +378,6 @@ impl Error {
             message,
             failure_class,
             exec_output_tail,
-            extra_causes: Vec::new(),
             source: Some(source),
         }
     }
@@ -460,42 +454,12 @@ impl Error {
         Self::stage_with_source(ErrorStage::Publish, message, source, exec_output_tail)
     }
 
-    /// Build a publish error with an explicitly determined failure category,
-    /// for callers that know more than message sniffing can recover — e.g.
-    /// exhausted push retries whose attempts all classified as transient.
-    /// `extra_causes` lines land after the source chain in the failure
-    /// detail (one line per push attempt).
-    pub fn publish_with_source_and_class(
-        message: impl Into<String>,
-        source: impl Into<anyhow::Error>,
-        failure_class: FailureCategory,
-        exec_output_tail: Option<ExecOutputTail>,
-        extra_causes: Vec<String>,
-    ) -> Self {
-        Self::Stage {
-            stage: ErrorStage::Publish,
-            message: message.into(),
-            failure_class,
-            exec_output_tail,
-            extra_causes,
-            source: Some(SharedError::new(source.into())),
-        }
-    }
-
     #[must_use]
     pub fn causes(&self) -> Vec<String> {
         match self {
-            Self::Stage {
-                source,
-                extra_causes,
-                ..
-            } => {
-                let mut causes = source
-                    .as_ref()
-                    .map_or_else(Vec::new, |source| collect_chain(source));
-                causes.extend(extra_causes.iter().cloned());
-                causes
-            }
+            Self::Stage { source, .. } => source
+                .as_ref()
+                .map_or_else(Vec::new, |source| collect_chain(source)),
             Self::Template { source, .. } => collect_chain(source),
             Self::ScriptInterpolation { source, .. } => collect_chain(source),
             Self::Llm(err) => collect_causes(err),

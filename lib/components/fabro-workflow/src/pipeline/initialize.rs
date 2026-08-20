@@ -600,21 +600,20 @@ pub async fn initialize(
         });
     }
 
-    let metadata_writer =
-        match build_metadata_writer(&options.run_options, sandbox.push_token_source()) {
-            Ok(writer) => writer,
-            Err(err) => {
-                let message = format!("failed to initialize checkpoint metadata writer: {err}");
-                if metadata_runtime.mark_metadata_degraded(false) {
-                    options.emitter.notice(
-                        RunNoticeLevel::Warn,
-                        RunNoticeCode::CheckpointMetadataWriteFailed,
-                        message,
-                    );
-                }
-                None
+    let metadata_writer = match build_metadata_writer(&options.run_options) {
+        Ok(writer) => writer,
+        Err(err) => {
+            let message = format!("failed to initialize checkpoint metadata writer: {err}");
+            if metadata_runtime.mark_metadata_degraded() {
+                options.emitter.notice(
+                    RunNoticeLevel::Warn,
+                    RunNoticeCode::CheckpointMetadataWriteFailed,
+                    message,
+                );
             }
-        };
+            None
+        }
+    };
 
     let run_services = RunServices::new(
         options.run_store.clone(),

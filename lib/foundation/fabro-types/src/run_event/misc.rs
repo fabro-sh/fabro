@@ -112,56 +112,12 @@ pub struct GitCommitProps {
     pub sha: String,
 }
 
-/// One attempt of a retried git push, nested inside [`GitPushProps`].
-///
-/// The durable projection of the sandbox layer's runtime attempt record.
-/// Token identity is flattened into the three `token_*` fields — a nested
-/// provenance enum never appears in stored events. `classified_reason` is the
-/// retry classifier's verdict for a failed attempt (the terminal attempt
-/// carries its classification too); whether an attempt was actually retried
-/// is positional — every entry except the last.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GitPushAttemptProps {
-    /// 1-based attempt number within this push operation.
-    pub attempt:           u32,
-    pub started_at:        chrono::DateTime<chrono::Utc>,
-    pub success:           bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub classified_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exec_output_tail:  Option<ExecOutputTail>,
-    /// Generation of the token embedded during this attempt (0 for static
-    /// credentials).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_generation:  Option<u64>,
-    /// `minted`, `reused`, or `static`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_provenance:  Option<String>,
-    /// Token age at the attempt; absent for static credentials.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_age_ms:      Option<u64>,
-    /// What the credential refresh did to the remote this attempt:
-    /// `embedded`, `unchanged`, or `none`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credential_action: Option<String>,
-    /// A credential `mint` or `set_url` failure this attempt pushed through.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refresh_error:     Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitPushProps {
     pub branch:           String,
-    /// Final outcome of the whole push operation — one `git.push` event per
-    /// high-level push, so finality is unambiguous.
     pub success:          bool,
-    /// The final attempt's output tail, unchanged for existing consumers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exec_output_tail: Option<ExecOutputTail>,
-    /// Per-attempt history. Absent on events stored before attempts were
-    /// recorded.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attempts:         Vec<GitPushAttemptProps>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

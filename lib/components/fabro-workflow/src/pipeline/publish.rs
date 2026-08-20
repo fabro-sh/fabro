@@ -1,13 +1,9 @@
-use std::fmt::Write as _;
 use std::sync::Arc;
-
-use fabro_types::ExecOutputTail;
-use fabro_types::run_event::GitPushAttemptProps;
 
 use super::pull_request::{AutoMergeOptions, OpenPullRequestRequest, open_pull_request};
 use super::types::{Concluded, PublishOptions, PublishOutcome, Published};
-use crate::error::{Error, FailureCategory, classify_failure_reason};
-use crate::event::{Event, git_push_attempt_props};
+use crate::error::Error;
+use crate::event::Event;
 use crate::lifecycle::git::push_run_branch;
 
 /// PUBLISH phase: push the final run commit and, when configured, open a pull
@@ -37,76 +33,6 @@ pub async fn publish(concluded: Concluded, options: &PublishOptions) -> Publishe
         run_options,
         services,
     }
-}
-
-/// Build the terminal publish error from a failed push operation.
-///
-/// Retries exhausted on transient classifications stay `TransientInfra`: a
-/// mature-token 404 is not proof of permanent access loss — a service-side
-/// failure presents the same surface — so `Deterministic` would need
-/// independent evidence this path does not gather. Each attempt becomes one
-/// bounded cause line in the failure detail; git output stays inside the
-/// exec output tail.
-fn publish_push_error(
-    run_branch: &str,
-    push_error: fabro_sandbox::PushError,
-    exec_output_tail: Option<ExecOutputTail>,
-    attempts: &[GitPushAttemptProps],
-    last_successful_push_at: Option<chrono::DateTime<chrono::Utc>>,
-) -> Error {
-    let message = match last_successful_push_at {
-        Some(at) => format!(
-            "failed to push run branch '{run_branch}' (last successful push at {})",
-            at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-        ),
-        None => format!("failed to push run branch '{run_branch}'"),
-    };
-    let failure_class = match push_error
-        .report
-        .attempts
-        .last()
-        .and_then(|attempt| attempt.retry_reason)
-    {
-        Some(_) => FailureCategory::TransientInfra,
-        None => classify_failure_reason(&format!(
-            "{message}: {}",
-            fabro_sandbox::display_for_log(&push_error.error)
-        )),
-    };
-    let causes = attempts.iter().map(push_attempt_cause).collect();
-    Error::publish_with_source_and_class(
-        message,
-        push_error,
-        failure_class,
-        exec_output_tail,
-        causes,
-    )
-}
-
-/// One bounded line per push attempt for the failure detail.
-fn push_attempt_cause(attempt: &GitPushAttemptProps) -> String {
-    let outcome = if attempt.success {
-        "succeeded"
-    } else {
-        attempt
-            .classified_reason
-            .as_deref()
-            .unwrap_or("unclassified")
-    };
-    let mut line = format!(
-        "push attempt {} at {}: {outcome}",
-        attempt.attempt,
-        attempt
-            .started_at
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-    );
-    if let Some(age_ms) = attempt.token_age_ms {
-        let _ = write!(line, " (token age {age_ms}ms)");
-    }
-    if let Some(refresh_error) = &attempt.refresh_error {
-        let _ = write!(line, ", refresh error: {refresh_error}");
-    }
-    line
 }
 
 impl Concluded {
@@ -233,36 +159,26 @@ impl Concluded {
     }
 
     async fn push_final_commit(&self, run_branch: &str) -> Result<(), Error> {
-        // The terminal push guards the whole run's value, so it gets a real
-        // retry budget; attempts are nearly free at this point.
-        let plan = fabro_sandbox::RetryPlan::publish_push();
-        match push_run_branch(self.services.sandbox.as_ref(), run_branch, &plan).await {
-            Ok(report) => {
-                self.services.sandbox_git.record_successful_push();
+        match push_run_branch(self.services.sandbox.as_ref(), run_branch).await {
+            Ok(()) => {
                 self.services.emitter.emit(&Event::GitPush {
                     branch:           run_branch.to_string(),
                     success:          true,
                     exec_output_tail: None,
-                    attempts:         git_push_attempt_props(&report.attempts),
                 });
                 Ok(())
             }
-            Err(push_error) => {
-                let exec_output_tail =
-                    fabro_sandbox::default_redacted_output_tail(&push_error.error);
-                let attempts = git_push_attempt_props(&push_error.report.attempts);
+            Err(error) => {
+                let exec_output_tail = fabro_sandbox::default_redacted_output_tail(&error);
                 self.services.emitter.emit(&Event::GitPush {
                     branch:           run_branch.to_string(),
                     success:          false,
                     exec_output_tail: exec_output_tail.clone(),
-                    attempts:         attempts.clone(),
                 });
-                Err(publish_push_error(
-                    run_branch,
-                    push_error,
+                Err(Error::publish_with_source_and_exec_output_tail(
+                    format!("failed to push run branch '{run_branch}'"),
+                    error,
                     exec_output_tail,
-                    &attempts,
-                    self.services.sandbox_git.last_successful_push_at(),
                 ))
             }
         }
@@ -274,134 +190,5 @@ impl Concluded {
             error:       message.to_string(),
         });
         Error::publish(message)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use chrono::Utc;
-    use fabro_types::run_event::GitPushAttemptProps;
-
-    use super::*;
-    use crate::error::FailureCategory;
-
-    fn attempt_props(
-        attempt: u32,
-        classified_reason: Option<&str>,
-        token_age_ms: Option<u64>,
-        refresh_error: Option<&str>,
-    ) -> GitPushAttemptProps {
-        GitPushAttemptProps {
-            attempt,
-            started_at: Utc::now(),
-            success: false,
-            classified_reason: classified_reason.map(str::to_string),
-            exec_output_tail: None,
-            token_generation: Some(14),
-            token_provenance: Some("minted".to_string()),
-            token_age_ms,
-            credential_action: Some("unchanged".to_string()),
-            refresh_error: refresh_error.map(str::to_string),
-        }
-    }
-
-    fn push_error_with_reasons(
-        reasons: &[Option<fabro_sandbox::GitRetryReason>],
-    ) -> fabro_sandbox::PushError {
-        let attempts = reasons
-            .iter()
-            .enumerate()
-            .map(|(index, reason)| fabro_sandbox::PushAttempt {
-                attempt:           u32::try_from(index).unwrap() + 1,
-                started_at:        Utc::now(),
-                success:           false,
-                retry_reason:      *reason,
-                exec_output_tail:  None,
-                token:             None,
-                credential_action: None,
-                refresh_error:     None,
-            })
-            .collect();
-        fabro_sandbox::PushError {
-            report: fabro_sandbox::PushReport { attempts },
-            error:  fabro_sandbox::Error::message("remote: Repository not found."),
-        }
-    }
-
-    /// Exhausted retries on a retryable classification are transient
-    /// infrastructure, not deterministic: the same push succeeded manually an
-    /// hour after run 01M0DH033P2XSTHAGVBHG6922F failed, with no
-    /// configuration change.
-    #[test]
-    fn exhausted_transient_retries_classify_as_transient_infra() {
-        let error = publish_push_error(
-            "fabro/run/test",
-            push_error_with_reasons(&[
-                Some(fabro_sandbox::GitRetryReason::TokenReplication),
-                Some(fabro_sandbox::GitRetryReason::TokenReplication),
-            ]),
-            None,
-            &[],
-            None,
-        );
-        assert_eq!(error.failure_category(), FailureCategory::TransientInfra);
-    }
-
-    #[test]
-    fn permanently_classified_push_falls_back_to_message_sniffing() {
-        let error = publish_push_error(
-            "fabro/run/test",
-            push_error_with_reasons(&[None]),
-            None,
-            &[],
-            None,
-        );
-        // "Repository not found." carries no transient hint for the
-        // heuristic, so the fallback stays deterministic.
-        assert_eq!(error.failure_category(), FailureCategory::Deterministic);
-    }
-
-    #[test]
-    fn failure_detail_renders_one_cause_line_per_attempt() {
-        let attempts = vec![
-            attempt_props(1, Some("token_replication"), Some(180), None),
-            attempt_props(2, Some("token_replication"), Some(3320), Some("set_url")),
-        ];
-        let last_push = Utc::now() - chrono::Duration::seconds(67);
-        let error = publish_push_error(
-            "fabro/run/test",
-            push_error_with_reasons(&[
-                Some(fabro_sandbox::GitRetryReason::TokenReplication),
-                Some(fabro_sandbox::GitRetryReason::TokenReplication),
-            ]),
-            None,
-            &attempts,
-            Some(last_push),
-        );
-
-        let detail = error.to_failure_detail();
-        assert!(
-            detail.message.contains("last successful push at"),
-            "{}",
-            detail.message
-        );
-        let attempt_lines: Vec<&String> = detail
-            .causes
-            .iter()
-            .filter(|cause| cause.starts_with("push attempt"))
-            .collect();
-        assert_eq!(attempt_lines.len(), 2);
-        assert!(
-            attempt_lines[0].contains("token_replication"),
-            "{attempt_lines:?}"
-        );
-        assert!(
-            attempt_lines[0].contains("(token age 180ms)"),
-            "{attempt_lines:?}"
-        );
-        assert!(
-            attempt_lines[1].contains("refresh error: set_url"),
-            "{attempt_lines:?}"
-        );
     }
 }

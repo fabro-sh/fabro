@@ -6,33 +6,14 @@ use tokio::sync::OnceCell;
 use crate::sandbox_git::{GIT_REMOTE, exec_err};
 
 pub(crate) struct SandboxGitRuntime {
-    probe:                   OnceCell<Result<(), SharedError>>,
-    /// When the run last pushed its branch successfully (checkpoint or
-    /// publish). Read by the publish failure report so "last success 67s
-    /// before the failure" is visible from the run conclusion.
-    last_successful_push_at: std::sync::Mutex<Option<chrono::DateTime<chrono::Utc>>>,
+    probe: OnceCell<Result<(), SharedError>>,
 }
 
 impl SandboxGitRuntime {
     pub(crate) fn new() -> Self {
         Self {
-            probe:                   OnceCell::new(),
-            last_successful_push_at: std::sync::Mutex::new(None),
+            probe: OnceCell::new(),
         }
-    }
-
-    pub(crate) fn record_successful_push(&self) {
-        *self
-            .last_successful_push_at
-            .lock()
-            .expect("last push timestamp mutex poisoned") = Some(chrono::Utc::now());
-    }
-
-    pub(crate) fn last_successful_push_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
-        *self
-            .last_successful_push_at
-            .lock()
-            .expect("last push timestamp mutex poisoned")
     }
 
     pub(crate) async fn ensure_git_available(
