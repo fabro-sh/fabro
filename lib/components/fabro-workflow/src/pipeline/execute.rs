@@ -13,7 +13,7 @@ use super::types::{Executed, Initialized};
 use crate::artifact;
 use crate::context::{self, Context};
 use crate::error::Error;
-use crate::event::{Emitter, Event};
+use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::interview_runtime::InterviewBlockState;
 use crate::lifecycle::WorkflowLifecycle;
@@ -139,6 +139,34 @@ pub async fn execute(init: Initialized) -> Executed {
     }
 
     let start = Instant::now();
+
+    // Budget gate: a run whose seeded spend (a resume after a budget failure)
+    // already exceeds `[run.limits]` fails before the first node. Seeded 80%
+    // warnings drain here so they surface once at start.
+    if let Some(budget) = engine.run.run_budget() {
+        for warning in budget.take_pending_warnings() {
+            engine.run.emitter.notice(
+                RunNoticeLevel::Warn,
+                RunNoticeCode::BudgetNearlyExhausted,
+                warning.warning_message(),
+            );
+        }
+        if let Some(exceeded) = budget.exceeded() {
+            return Executed {
+                graph,
+                outcome: Err(Error::BudgetExhausted(format!(
+                    "{} — raise [run.limits] to resume",
+                    exceeded.exceeded_message()
+                ))),
+                run_options,
+                wall_time_ms: crate::millis_u64(start.elapsed()),
+                final_context: seed_context_from_checkpoint(checkpoint.as_ref()),
+                engine,
+                model,
+            };
+        }
+    }
+
     let graph_arc = Arc::new(graph.clone());
     let wf_graph = WorkflowGraph(Arc::clone(&graph_arc));
 
@@ -326,6 +354,9 @@ pub async fn execute(init: Initialized) -> Executed {
             )
         }
         Err(fabro_core::Error::Cancelled) => (Err(Error::Cancelled), initial_context),
+        Err(fabro_core::Error::BudgetExhausted { message }) => {
+            (Err(Error::BudgetExhausted(message)), initial_context)
+        }
         Err(fabro_core::Error::Blocked { message }) => {
             (Err(Error::engine(message)), initial_context)
         }

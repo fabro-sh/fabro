@@ -57,6 +57,9 @@ import type { RunIntegrationsSettings } from './run-integrations-settings';
 import type { RunInterviewsSettings } from './run-interviews-settings';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunLimitsSettings } from './run-limits-settings';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunMetaBranchSettings } from './run-meta-branch-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -80,6 +83,7 @@ export interface RunNamespace {
     'git': RunGitSettings;
     'prepare': RunPrepareSettings;
     'execution': RunExecutionSettings;
+    'limits': RunLimitsSettings;
     'checkpoint': RunCheckpointSettings;
     'clone': RunCloneSettings;
     'run_branch': RunBranchSettings;

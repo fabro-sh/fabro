@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use fabro_llm::types::{ReasoningEffort, Speed};
 use fabro_mcp::config::McpServerSettings;
-use fabro_model::AgentProfileKind;
+use fabro_model::{AgentProfileKind, RunBudget};
 use fabro_types::PermissionLevel;
 
 /// Callback invoked before each tool execution. Return `Ok(())` to allow,
@@ -192,6 +192,10 @@ pub struct SessionOptions {
     /// Wall-clock timeout for the entire `process_input` call.
     /// When set, the session's cancel token is triggered after this duration.
     pub wall_clock_timeout: Option<Duration>,
+    /// Shared run budget. When set, every LLM response's usage is charged
+    /// here, and the session interrupts with
+    /// `InterruptReason::BudgetExhausted` once a limit is exceeded.
+    pub run_budget: Option<Arc<RunBudget>>,
 }
 
 impl std::fmt::Debug for SessionOptions {
@@ -226,6 +230,7 @@ impl std::fmt::Debug for SessionOptions {
             .field("skill_dirs", &self.skill_dirs)
             .field("mcp_servers", &self.mcp_servers.len())
             .field("wall_clock_timeout", &self.wall_clock_timeout)
+            .field("run_budget", &self.run_budget.is_some())
             .finish()
     }
 }
@@ -253,6 +258,7 @@ impl Default for SessionOptions {
             skill_dirs: None,
             mcp_servers: Vec::new(),
             wall_clock_timeout: None,
+            run_budget: None,
         }
     }
 }

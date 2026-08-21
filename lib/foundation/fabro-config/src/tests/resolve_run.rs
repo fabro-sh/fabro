@@ -1,3 +1,4 @@
+use fabro_types::billing::UsdMicros;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     ApprovalMode, EnvironmentNetworkMode, EnvironmentProvider, RunGoal, RunMode,
@@ -1480,4 +1481,78 @@ command = ["fs-server"]
             "a higher-layer `enabled = false` should shadow and disable the lower-layer entry"
         );
     }
+}
+
+#[test]
+fn run_limits_resolve_to_usd_micros() {
+    let settings = workflow_settings_from_toml(
+        r"
+_version = 1
+
+[run.limits]
+max_cost = 25.50
+max_tokens = 5000000
+",
+    )
+    .expect("[run.limits] should resolve")
+    .run;
+
+    assert_eq!(settings.limits.max_cost, Some(UsdMicros(25_500_000)));
+    assert_eq!(settings.limits.max_tokens, Some(5_000_000));
+    assert!(!settings.limits.is_unlimited());
+}
+
+#[test]
+fn run_limits_accept_integer_max_cost() {
+    let settings = workflow_settings_from_toml(
+        r"
+_version = 1
+
+[run.limits]
+max_cost = 25
+",
+    )
+    .expect("an integer max_cost should resolve")
+    .run;
+
+    assert_eq!(settings.limits.max_cost, Some(UsdMicros(25_000_000)));
+    assert_eq!(settings.limits.max_tokens, None);
+}
+
+#[test]
+fn run_limits_default_to_unlimited() {
+    let settings = workflow_settings_from_layer(SettingsLayer::default())
+        .expect("empty settings should resolve")
+        .run;
+
+    assert!(settings.limits.max_cost.is_none());
+    assert!(settings.limits.max_tokens.is_none());
+    assert!(settings.limits.is_unlimited());
+}
+
+#[test]
+fn run_limits_reject_non_positive_values() {
+    let error = workflow_settings_from_toml(
+        r"
+_version = 1
+
+[run.limits]
+max_cost = -1.0
+max_tokens = 0
+",
+    )
+    .expect_err("non-positive limits should not resolve");
+
+    let errors = match error {
+        crate::Error::Resolve { errors, .. } => errors,
+        other => panic!("expected structured resolve errors, got {other:#}"),
+    };
+    let paths = errors
+        .into_iter()
+        .map(|error| match error {
+            crate::ResolveError::Invalid { path, .. } => path,
+            other => panic!("expected invalid-value error, got {other}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec!["run.limits.max_cost", "run.limits.max_tokens"]);
 }

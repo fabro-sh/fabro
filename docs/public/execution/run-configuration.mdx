@@ -409,6 +409,30 @@ commit_timeout = "30s"
 
 `exclude_globs` replaces across layers — the higher-precedence layer wins wholesale. `skip_git_hooks` and `commit_timeout` use normal override semantics: the highest layer that sets the field wins.
 
+### `[run.limits]`
+
+Cap a run's total LLM spend. When accumulated spend exceeds either limit, the run halts immediately and fails with the `budget_exhausted` failure reason. Both limits are optional; an absent limit means unlimited.
+
+```toml title="run.toml"
+[run.limits]
+max_cost = 25.00
+max_tokens = 5000000
+```
+
+| Field | Description |
+|---|---|
+| `max_cost` | Maximum total LLM cost for the run, in USD. Uses provider-reported cost when available (for example, OpenRouter reports authoritative cost on every response) and model catalog prices otherwise. |
+| `max_tokens` | Maximum total LLM tokens for the run, counting all token buckets: input, output, reasoning, cache reads, and cache writes. |
+
+Notes:
+
+- Fabro checks the budget as each LLM response reports its usage, so a run can exceed the budget by the requests already in flight before it halts.
+- When a response reports no cost and the model has no catalog price, `max_cost` cannot observe that spend. Set `max_tokens` as a backstop when you use unpriced models.
+- The budget covers agent stages (including subagents, context compaction, and `web_fetch` summarization), prompt stages, and `[[run.hooks]]` prompt/agent hooks. Once the budget is exhausted, prompt/agent hooks stop firing and proceed without evaluating. It cannot observe spend from external agents driven over ACP, because those agents do not report per-response usage to Fabro, or from post-run pull-request content generation.
+- Fabro emits a warning notice when spend crosses 80% of either limit.
+- A budget-exhausted run keeps its last checkpoint. Resuming it fails immediately until you raise or remove the limit, because the spent totals carry forward from the run's billing history.
+- Child runs are budgeted independently: a parent's budget does not count usage from runs it spawns.
+
 ### `[run.inputs]`
 
 Define inputs that are rendered into final workflow string attributes. See [Variables](/workflows/variables) for the full reference.

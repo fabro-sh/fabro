@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use fabro_types::billing::UsdMicros;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
@@ -7,8 +8,9 @@ use fabro_types::settings::run::{
     NotificationRouteSettings, PreparedStep, PreparedStepRun, PullRequestSettings,
     ResolvedMcpEntry, RunAgentSettings, RunBranchSettings, RunCheckpointSettings, RunCloneSettings,
     RunExecutionSettings, RunGitSettings, RunGoal, RunIntegrationsGithubSettings,
-    RunIntegrationsSettings, RunInterviewsSettings, RunMetaBranchSettings, RunModelControls,
-    RunModelSettings, RunNamespace, RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
+    RunIntegrationsSettings, RunInterviewsSettings, RunLimitsSettings, RunMetaBranchSettings,
+    RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings, RunScmSettings,
+    ScmGitHubSettings, TlsMode,
 };
 use fabro_util::workspace_glob::WorkspaceGlob;
 
@@ -17,7 +19,7 @@ use crate::{
     EnvironmentLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
     InterviewsLayer, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
     NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
-    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer,
+    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer, RunLimitsLayer,
     RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer,
     RunScmLayer, StickyMap, StringOrSplice,
 };
@@ -64,6 +66,7 @@ pub fn resolve_run(
         git: resolve_git(layer.git.as_ref()),
         prepare: resolve_prepare(layer.prepare.as_ref(), errors),
         execution: resolve_execution(layer.execution.as_ref()),
+        limits: resolve_limits(layer.limits.as_ref(), errors),
         checkpoint: resolve_checkpoint(layer.checkpoint.as_ref()),
         clone,
         run_branch,
@@ -224,6 +227,43 @@ fn resolve_execution(execution: Option<&RunExecutionLayer>) -> RunExecutionSetti
         approval: execution
             .approval
             .expect("defaults.toml should provide run.execution.approval"),
+    }
+}
+
+fn resolve_limits(
+    limits: Option<&RunLimitsLayer>,
+    errors: &mut Vec<ResolveError>,
+) -> RunLimitsSettings {
+    let Some(limits) = limits else {
+        return RunLimitsSettings::default();
+    };
+
+    let max_cost = match limits.max_cost {
+        Some(cost) if !cost.is_finite() || cost <= 0.0 => {
+            errors.push(ResolveError::Invalid {
+                path:   "run.limits.max_cost".to_string(),
+                reason: "must be a positive amount in USD".to_string(),
+            });
+            None
+        }
+        Some(cost) => Some(UsdMicros::from_usd(cost)),
+        None => None,
+    };
+
+    let max_tokens = match limits.max_tokens {
+        Some(0) => {
+            errors.push(ResolveError::Invalid {
+                path:   "run.limits.max_tokens".to_string(),
+                reason: "must be a positive token count".to_string(),
+            });
+            None
+        }
+        other => other,
+    };
+
+    RunLimitsSettings {
+        max_cost,
+        max_tokens,
     }
 }
 

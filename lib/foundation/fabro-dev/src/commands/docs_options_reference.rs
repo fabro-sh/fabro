@@ -129,6 +129,12 @@ email = "fabro-bot@company.com""#,
             r"[run.pull_request]
 enabled = true",
         ),
+        Section::of::<fabro_config::RunLimitsLayer>(
+            "[run.limits]",
+            r"[run.limits]
+max_cost = 25.00
+max_tokens = 5000000",
+        ),
         Section::of::<fabro_config::RunAgentLayer>(
             "[run.agent]",
             r"[run.agent]

@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Duration as StdDuration;
 
+use fabro_model::UsdMicros;
 use fabro_util::shell;
 use serde::de::{self, Deserializer};
 use serde::ser::SerializeStruct;
@@ -31,6 +32,8 @@ pub struct RunNamespace {
     pub git:           RunGitSettings,
     pub prepare:       RunPrepareSettings,
     pub execution:     RunExecutionSettings,
+    #[serde(default)]
+    pub limits:        RunLimitsSettings,
     pub checkpoint:    RunCheckpointSettings,
     pub clone:         RunCloneSettings,
     pub run_branch:    RunBranchSettings,
@@ -61,6 +64,7 @@ impl Default for RunNamespace {
             git:           RunGitSettings::default(),
             prepare:       RunPrepareSettings::default(),
             execution:     RunExecutionSettings::default(),
+            limits:        RunLimitsSettings::default(),
             checkpoint:    RunCheckpointSettings::default(),
             clone:         RunCloneSettings::default(),
             run_branch:    RunBranchSettings::default(),
@@ -922,6 +926,33 @@ impl Default for RunExecutionSettings {
             mode:     RunMode::Normal,
             approval: ApprovalMode::Prompt,
         }
+    }
+}
+
+/// `[run.limits]` — resolved run budget limits. An absent value means
+/// unlimited. When a run's accumulated LLM spend exceeds either limit, the
+/// run halts and fails with `FailureReason::BudgetExhausted`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunLimitsSettings {
+    /// Maximum total LLM cost for the run. Serialized as USD micros.
+    #[serde(
+        default,
+        rename = "max_cost_usd_micros",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_cost:   Option<UsdMicros>,
+    /// Maximum total LLM tokens for the run, compared against
+    /// `TokenCounts::total_tokens()` (all five buckets, including cache
+    /// reads and writes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
+}
+
+impl RunLimitsSettings {
+    /// Whether any budget limit is configured.
+    #[must_use]
+    pub fn is_unlimited(&self) -> bool {
+        self.max_cost.is_none() && self.max_tokens.is_none()
     }
 }
 

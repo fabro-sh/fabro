@@ -2,6 +2,7 @@ use std::fmt::Write;
 
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message as LlmMessage, Request};
+use fabro_model::{RunBudget, UsdMicros};
 use tracing::debug;
 
 use crate::agent_profile::AgentProfile;
@@ -85,6 +86,7 @@ pub(crate) async fn compact_context(
     estimate: ContextEstimate,
     emitter: &Emitter,
     session_id: &str,
+    run_budget: Option<&RunBudget>,
 ) -> Result<(), Error> {
     let original_turn_count = history.turns().len();
     let preserve_start = history.compact_preserve_start(preserve_count);
@@ -164,6 +166,15 @@ function names, error messages, and exact values. Omit pleasantries and conversa
         .complete(&summary_request)
         .await
         .map_err(CompactionError::Llm)?;
+
+    // Summarization spend counts against the run budget. A trip here is only
+    // charged; the session's next per-turn check halts it.
+    if let Some(budget) = run_budget {
+        let _ = budget.charge(
+            response.usage.total_tokens(),
+            response.cost_usd.map(UsdMicros::from_usd),
+        );
+    }
 
     let response_text = response.text();
     let summary_text = response_text.trim();
@@ -759,6 +770,7 @@ mod tests {
             },
             &emitter,
             "sess",
+            None,
         )
         .await;
 

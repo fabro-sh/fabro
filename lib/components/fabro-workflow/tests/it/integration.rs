@@ -1125,6 +1125,123 @@ impl Handler for AlwaysFailHandler {
     }
 }
 
+/// A handler that reports the run budget as exhausted, as the LLM paths do
+/// when accumulated usage passes `[run.limits]`.
+struct BudgetExhaustedHandler;
+
+#[async_trait::async_trait]
+impl Handler for BudgetExhaustedHandler {
+    async fn execute(
+        &self,
+        _node: &Node,
+        _context: &fabro_workflow::context::Context,
+        _graph: &Graph,
+        _run_dir: &Path,
+        _services: &fabro_workflow::handler::EngineServices,
+    ) -> Result<Outcome, fabro_workflow::error::Error> {
+        Err(fabro_workflow::error::Error::BudgetExhausted(
+            "run used 150 tokens, exceeding run.limits.max_tokens 100".to_string(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn budget_exhausted_ends_the_run_without_following_fail_edges() {
+    // burn has an explicit fail edge to recover. A normal stage failure would
+    // route there; budget exhaustion must terminate the run instead, and the
+    // terminal event must carry the budget_exhausted failure reason.
+    let mut graph = Graph::new("BudgetHalt");
+
+    let mut start = Node::new("start");
+    start.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Mdiamond".to_string()),
+    );
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut burn = Node::new("burn");
+    burn.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("budget_exhausted".to_string()),
+    );
+    graph.nodes.insert("burn".to_string(), burn);
+
+    graph
+        .nodes
+        .insert("recover".to_string(), Node::new("recover"));
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert(
+        "shape".to_string(),
+        AttrValue::String("Msquare".to_string()),
+    );
+    graph.nodes.insert("exit".to_string(), exit);
+
+    graph.edges.push(Edge::new("start", "burn"));
+    graph.edges.push(Edge::new("burn", "exit"));
+    let mut fail_edge = Edge::new("burn", "recover");
+    fail_edge.attrs.insert(
+        "condition".to_string(),
+        AttrValue::String("outcome=failed".to_string()),
+    );
+    graph.edges.push(fail_edge);
+    graph.edges.push(Edge::new("recover", "exit"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("budget_exhausted", Box::new(BudgetExhaustedHandler));
+    registry.register("recover", Box::new(ContextSetterHandler));
+
+    let emitter = Arc::new(Emitter::default());
+    let events = collect_events(&emitter);
+    let engine = WorkflowRunner::new(registry, Arc::clone(&emitter), local_env());
+    let run_options = RunOptions {
+        settings:         WorkflowSettings::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     CancellationToken::new(),
+        run_id:           test_run_id("budget-halt"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
+        display_base_sha: None,
+        pre_run_git:      None,
+        fork_source_ref:  None,
+        git:              None,
+    };
+
+    let error = engine
+        .run(&graph, &run_options)
+        .await
+        .expect_err("budget exhaustion should terminate the run as an error");
+    assert!(
+        matches!(error, fabro_workflow::error::Error::BudgetExhausted(_)),
+        "expected budget exhausted, got {error:?}"
+    );
+
+    let events = events.lock().unwrap();
+    let run_failed_reasons = events
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::RunFailed(props) => Some(props.failure.reason),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        run_failed_reasons,
+        vec![fabro_types::FailureReason::BudgetExhausted],
+        "the terminal event should carry the budget_exhausted reason"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.node_id.as_deref() == Some("recover")),
+        "the fail edge must not be followed after budget exhaustion"
+    );
+}
+
 #[tokio::test]
 async fn goal_gate_routes_to_retry_target_on_failure() {
     // Pipeline:

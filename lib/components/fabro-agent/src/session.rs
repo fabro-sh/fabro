@@ -1097,6 +1097,21 @@ impl Session {
         self.interrupt_reason.clone()
     }
 
+    /// True when the shared run budget is exhausted. On the first
+    /// observation, marks the session interrupted with `BudgetExhausted` and
+    /// cancels its token so in-flight work stops too.
+    fn budget_exceeded(&self) -> bool {
+        let Some(budget) = &self.config.run_budget else {
+            return false;
+        };
+        if budget.exceeded().is_none() {
+            return false;
+        }
+        self.set_interrupt_reason(InterruptReason::BudgetExhausted);
+        self.cancel_token.cancel();
+        true
+    }
+
     fn set_interrupt_reason(&self, reason: InterruptReason) {
         let mut guard = self
             .interrupt_reason
@@ -1487,6 +1502,14 @@ impl Session {
             // Terminal cancellation wins even when a control interrupt has
             // parked the session waiting for steering.
             if self.cancel_token.is_cancelled() {
+                self.shutdown(SessionShutdownReason::Cancelled).await;
+                return Err(self.interrupted_error());
+            }
+
+            // A budget exhausted outside this session (a parallel stage, a
+            // prior input, seeded resume spend) stops it before the next
+            // request.
+            if self.budget_exceeded() {
                 self.shutdown(SessionShutdownReason::Cancelled).await;
                 return Err(self.interrupted_error());
             }
@@ -1889,6 +1912,16 @@ impl Session {
             ));
             *usage_accumulator += usage.clone();
             UsdMicros::accumulate(cost_accumulator, response.cost_usd.map(UsdMicros::from_usd));
+            if let Some(budget) = &self.config.run_budget {
+                let response_cost = response.cost_usd.map(UsdMicros::from_usd);
+                if budget.charge(usage.total_tokens(), response_cost).is_some() {
+                    // Halt like the wall-clock timeout: the cancelled token
+                    // stops tool execution and the next turn, and the reason
+                    // makes `interrupted_error()` report the budget.
+                    self.set_interrupt_reason(InterruptReason::BudgetExhausted);
+                    self.cancel_token.cancel();
+                }
+            }
 
             if let Some(reminder) = pending_task_reminder {
                 self.history.push(reminder);
@@ -2057,6 +2090,7 @@ impl Session {
             estimate,
             &self.event_emitter,
             &self.id,
+            self.config.run_budget.as_deref(),
         )
         .await
         {

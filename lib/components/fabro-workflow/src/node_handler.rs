@@ -89,6 +89,19 @@ pub(crate) async fn execute_single_attempt(
     run_dir: &Path,
     services: &EngineServices,
 ) -> CoreResult<Outcome> {
+    // Between-stage budget gate. LLM stages also charge and check per
+    // response; this stops every stage type (command, human, parallel) from
+    // starting once the run's `[run.limits]` budget is spent.
+    if let Some(exceeded) = services
+        .run
+        .run_budget()
+        .and_then(|budget| budget.exceeded())
+    {
+        return Err(CoreError::BudgetExhausted {
+            message: exceeded.exceeded_message(),
+        });
+    }
+
     let handler = services.registry.resolve(node);
 
     let wf_context = artifact::resolve_context_for_execution(
@@ -149,6 +162,9 @@ pub(crate) async fn execute_single_attempt(
     match timed_result {
         Ok(Ok(wf_outcome)) => Ok(wf_outcome),
         Ok(Err(Error::Cancelled)) => Err(CoreError::Cancelled),
+        // Budget exhaustion terminates the run: it must not become a fail
+        // outcome, which would follow fail edges and keep executing stages.
+        Ok(Err(Error::BudgetExhausted(message))) => Err(CoreError::BudgetExhausted { message }),
         Ok(Err(fabro_err)) => {
             let retryable = handler.should_retry(&fabro_err);
             Err(CoreError::handler(HandlerErrorDetail {

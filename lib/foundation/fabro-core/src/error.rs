@@ -53,6 +53,11 @@ pub enum Error {
     },
     #[error("stall timeout on node \"{node_id}\"")]
     StallTimeout { node_id: String },
+    /// The run's spend budget was exhausted. Terminal: unlike handler
+    /// failures, this does not convert to a fail outcome, so fail edges are
+    /// not followed and the run ends immediately.
+    #[error("run budget exhausted: {message}")]
+    BudgetExhausted { message: String },
     #[error("{detail}")]
     Handler { detail: Box<HandlerErrorDetail> },
     #[error("{message}")]

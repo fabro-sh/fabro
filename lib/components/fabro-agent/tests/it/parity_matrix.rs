@@ -49,8 +49,9 @@ fn summarizer_model_id(provider: &Provider) -> ModelHandle {
 
 fn build_summarizer(provider: &Provider, client: &Client) -> WebFetchSummarizer {
     WebFetchSummarizer {
-        client:   client.clone(),
-        model_id: summarizer_model_id(provider),
+        client:     client.clone(),
+        model_id:   summarizer_model_id(provider),
+        run_budget: None,
     }
 }
 

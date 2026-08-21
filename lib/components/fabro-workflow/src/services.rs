@@ -11,7 +11,7 @@ use fabro_auth::ResolvedCredentials;
 use fabro_github::token_source::InstallationTokenSource;
 use fabro_hooks::{HookContext, HookDecision, HookExecutionContext, HookRunner};
 use fabro_interview::Interviewer;
-use fabro_model::{Catalog, ProviderId};
+use fabro_model::{Catalog, ProviderId, RunBudget};
 use fabro_types::{ManifestPath, RunId};
 use tokio_util::sync::CancellationToken;
 
@@ -110,6 +110,8 @@ pub struct RunServices {
     /// Run-scoped stage execution allocator, shared between the core
     /// lifecycle and direct-dispatch handlers such as parallel branches.
     pub(crate) stage_executions:  StageExecutionTracker,
+    /// Shared `[run.limits]` spend budget; `None` means unlimited.
+    pub(crate) run_budget:        Option<Arc<RunBudget>>,
 }
 
 impl RunServices {
@@ -146,7 +148,14 @@ impl RunServices {
             metadata_writer,
             interview_blocker: Arc::new(RunInterviewBlocker::new()),
             stage_executions,
+            run_budget: None,
         })
+    }
+
+    /// The shared `[run.limits]` spend budget, when one is configured.
+    #[must_use]
+    pub fn run_budget(&self) -> Option<&Arc<RunBudget>> {
+        self.run_budget.as_ref()
     }
 
     /// The run-level cancellation token. Cancel this to terminate the run.
@@ -169,6 +178,17 @@ impl RunServices {
                 self.locations.hook_execution_context(),
             )
             .await
+    }
+
+    #[must_use]
+    pub(crate) fn with_run_budget(
+        self: &Arc<Self>,
+        run_budget: Option<Arc<RunBudget>>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            run_budget,
+            ..self.as_ref().clone()
+        })
     }
 
     #[must_use]

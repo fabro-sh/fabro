@@ -10,12 +10,13 @@ use fabro_auth::{
 use fabro_github::token_source::InstallationTokenSource;
 use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookExecutionContext, HookRunner};
-use fabro_model::Catalog;
+use fabro_model::{Catalog, RunBudget, UsdMicros};
 use fabro_sandbox::{
     GitSetupIntent, SandboxEventCallback, SandboxSpec, reconnect_for_run_with_callback, shell_quote,
 };
 use fabro_static::EnvVars;
 use fabro_types::RunSandboxKind;
+use fabro_types::settings::run::RunLimitsSettings;
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -30,6 +31,7 @@ use crate::handler::{HandlerRegistry, default_registry};
 use crate::model_fallback::ModelFallbackPolicy;
 use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_branch_name};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
+use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{
     EngineServices, FabroRunToolServices, RunLocations, RunServices, WorkflowToolEnvProvider,
@@ -128,6 +130,29 @@ fn build_sandbox_env(
     Ok((env, source))
 }
 
+/// Build the shared run budget from resolved `[run.limits]`, seeded with the
+/// run's prior spend from the billing projection so a resumed run carries its
+/// spend forward. Returns `None` when no limit is configured.
+async fn build_run_budget(
+    limits: &RunLimitsSettings,
+    run_store: &RunStoreHandle,
+    catalog: &Arc<Catalog>,
+) -> Option<Arc<RunBudget>> {
+    if limits.is_unlimited() {
+        return None;
+    }
+    let budget = RunBudget::new(limits.max_cost, limits.max_tokens);
+    if let Ok(projection) = run_store.state().await {
+        let totals = crate::billing_rollup_from_projection(&projection, Some(catalog)).totals;
+        if totals.total_tokens != 0 || totals.total_usd_micros.is_some() {
+            // The seed charge queues an 80% warning and arms the exceeded
+            // state; `execute` drains and enforces them at run start.
+            let _ = budget.charge(totals.total_tokens, totals.total_usd_micros.map(UsdMicros));
+        }
+    }
+    Some(Arc::new(budget))
+}
+
 async fn build_registry(
     spec: &LlmSpec,
     interviewer: Arc<dyn fabro_interview::Interviewer>,
@@ -139,6 +164,7 @@ async fn build_registry(
     catalog: Arc<Catalog>,
     tool_secrets: ToolSecrets,
     fabro_run_tools: Option<FabroRunToolServices>,
+    run_budget: Option<Arc<RunBudget>>,
 ) -> Result<(Arc<HandlerRegistry>, bool), Error> {
     let no_backend_interviewer = Arc::clone(&interviewer);
     let build_no_backend = move || {
@@ -173,6 +199,7 @@ async fn build_registry(
         let steering_hub_for_api = Arc::clone(&steering_hub);
         let tool_env_provider_for_backend = Arc::clone(&tool_env_provider);
         let fabro_run_tools_for_api = fabro_run_tools.clone();
+        let run_budget_for_api = run_budget.clone();
         Arc::new(default_registry(interviewer, move || {
             let tool_env_provider = Arc::clone(&tool_env_provider_for_backend);
             let mut api = AgentApiBackend::new_with_catalog(
@@ -186,7 +213,8 @@ async fn build_registry(
             .with_run_model_controls(model_controls.clone())
             .with_tool_env_provider(tool_env_provider.clone())
             .with_tool_secrets(tool_secrets_for_api.clone())
-            .with_mcp_servers(mcp_servers.clone());
+            .with_mcp_servers(mcp_servers.clone())
+            .with_run_budget(run_budget_for_api.clone());
             if let Some(services) = fabro_run_tools_for_api.clone() {
                 api = api.with_fabro_run_tools(services);
             }
@@ -287,14 +315,24 @@ pub async fn initialize(
     let sandbox_git = Arc::new(SandboxGitRuntime::new());
     let metadata_runtime = Arc::new(RunMetadataRuntime::new());
 
+    let run_budget = build_run_budget(
+        &options.run_options.settings.run.limits,
+        &options.run_store,
+        &catalog,
+    )
+    .await;
+
     let hook_runner = if options.hooks.hooks.is_empty() {
         None
     } else {
-        Some(Arc::new(HookRunner::new(
-            options.hooks.clone(),
-            Arc::clone(&llm_source),
-            Arc::clone(&catalog),
-        )))
+        Some(Arc::new(
+            HookRunner::new(
+                options.hooks.clone(),
+                Arc::clone(&llm_source),
+                Arc::clone(&catalog),
+            )
+            .with_run_budget(run_budget.clone()),
+        ))
     };
 
     let is_resume = checkpoint.is_some();
@@ -469,6 +507,7 @@ pub async fn initialize(
             Arc::clone(&catalog),
             tool_secrets.clone(),
             options.fabro_run_tools.clone(),
+            run_budget.clone(),
         )
         .await?
     };
@@ -626,7 +665,8 @@ pub async fn initialize(
         metadata_runtime,
         metadata_writer,
         StageExecutionTracker::seeded(stage_executions),
-    );
+    )
+    .with_run_budget(run_budget);
     let engine = Arc::new(EngineServices {
         run: Arc::clone(&run_services),
         registry,
@@ -1142,6 +1182,7 @@ mod tests {
             Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
             test_catalog(),
             ToolSecrets::default(),
+            None,
             None,
         )
         .await

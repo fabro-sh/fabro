@@ -346,3 +346,25 @@ bucket = "higher-bucket"
     assert_eq!(s3.bucket, Some("higher-bucket".to_string()));
     assert_eq!(s3.region, None);
 }
+
+#[test]
+fn run_limits_fields_merge_independently() {
+    let lower = parse(
+        r"
+[run.limits]
+max_cost = 100.0
+max_tokens = 9000000
+",
+    );
+    let higher = parse(
+        r"
+[run.limits]
+max_cost = 25.0
+",
+    );
+
+    let merged = higher.combine(lower);
+    let limits = merged.run.unwrap().limits.unwrap();
+    assert_eq!(limits.max_cost, Some(25.0));
+    assert_eq!(limits.max_tokens, Some(9_000_000));
+}

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, ToolDefinition};
-use fabro_model::ModelHandle;
+use fabro_model::{ModelHandle, RunBudget, UsdMicros};
 #[cfg(test)]
 use fabro_static::EnvVars;
 use futures::{StreamExt, stream};
@@ -22,8 +22,11 @@ pub(crate) const DEFAULT_READ_LINES: usize = 2000;
 /// Configuration for the optional LLM-based summarizer used by `web_fetch`.
 #[derive(Clone)]
 pub struct WebFetchSummarizer {
-    pub client:   Client,
-    pub model_id: ModelHandle,
+    pub client:     Client,
+    pub model_id:   ModelHandle,
+    /// Shared run budget charged for summarization spend; `None` outside
+    /// budgeted workflow runs.
+    pub run_budget: Option<Arc<RunBudget>>,
 }
 
 /// Returns true if the input looks like it contains HTML markup.
@@ -794,6 +797,14 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                         let response = s.client.complete(&request).await.map_err(|e| {
                             format!("web_fetch summarization (model={}) failed: {e}", s.model_id.model_id())
                         })?;
+                        // Summarization spend counts against the run budget;
+                        // the session's next per-turn check acts on a trip.
+                        if let Some(budget) = &s.run_budget {
+                            let _ = budget.charge(
+                                response.usage.total_tokens(),
+                                response.cost_usd.map(UsdMicros::from_usd),
+                            );
+                        }
                         Ok(response.text())
                     }
                     (Some(_), None) => {
@@ -2079,6 +2090,7 @@ mod tests {
                 provider: ProviderId::anthropic(),
                 model:    "mock-model".to_string(),
             },
+            run_budget: None,
         };
 
         let tool = make_web_fetch_tool(Some(summarizer));
@@ -2188,6 +2200,7 @@ mod tests {
                 provider: ProviderId::anthropic(),
                 model:    "target-model".to_string(),
             },
+            run_budget: None,
         };
 
         let tool = make_web_fetch_tool(Some(summarizer));

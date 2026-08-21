@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod billing;
 pub mod bootstrap_catalog;
+pub mod budget;
 pub mod catalog;
 pub mod codec;
 pub mod ids;
@@ -17,6 +18,7 @@ pub use billing::{
     ModelBillingFacts, ModelBillingInput, ModelPricing, ModelPricingPolicy, ModelRef, ModelUsage,
     OpenAiBillingFacts, OpenAiModelPricing, PricePerMTok, Speed, TokenCounts, UsdMicros,
 };
+pub use budget::{BudgetUsage, RunBudget};
 pub use catalog::{
     ApiKeyHeaderPolicy, BillingPolicy, Catalog, CredentialRef, CredentialRefParseError,
     FallbackTarget, ModelSelectionError, ProviderAuthConfig, SelectedModel,

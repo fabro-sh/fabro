@@ -21,7 +21,8 @@ use fabro_mcp::config::McpServerSettings;
 #[cfg(test)]
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{
-    AgentProfileKind, Catalog, FallbackTarget, ModelHandle, ModelRef, ProviderId, UsdMicros,
+    AgentProfileKind, Catalog, FallbackTarget, ModelHandle, ModelRef, ProviderId, RunBudget,
+    UsdMicros,
 };
 use fabro_types::settings::run::RunModelControls;
 use fabro_types::{FailoverProps, PermissionLevel, RunId, SessionCapability, StageId, StageTiming};
@@ -41,7 +42,7 @@ use super::routing::ProviderContext;
 use crate::context::WorkflowContext;
 use crate::context::keys::Fidelity;
 use crate::error::Error;
-use crate::event::{Emitter, Event, StageScope};
+use crate::event::{Emitter, Event, RunNoticeCode, RunNoticeLevel, StageScope};
 use crate::model_fallback::{ModelFallbackNotice, ModelFallbackPolicy};
 use crate::outcome::billed_model_usage_from_llm;
 use crate::services::FabroRunToolServices;
@@ -123,7 +124,11 @@ pub struct EffectiveRequestControls {
     pub(crate) speed:            Option<Speed>,
 }
 
-fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentApiErrorDisposition {
+fn classify_agent_error(
+    err: fabro_agent::Error,
+    allow_failover: bool,
+    budget: Option<&RunBudget>,
+) -> AgentApiErrorDisposition {
     match err {
         fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::Cancelled) => {
             AgentApiErrorDisposition::Cancelled
@@ -132,6 +137,13 @@ fn classify_agent_error(err: fabro_agent::Error, allow_failover: bool) -> AgentA
             AgentApiErrorDisposition::Terminal(Error::Precondition(
                 "Agent session hit its wall-clock timeout".to_string(),
             ))
+        }
+        fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::BudgetExhausted) => {
+            let message = budget.and_then(RunBudget::exceeded).map_or_else(
+                || "run budget exhausted".to_string(),
+                |usage| usage.exceeded_message(),
+            );
+            AgentApiErrorDisposition::Terminal(Error::BudgetExhausted(message))
         }
         fabro_agent::Error::Llm(err) if allow_failover && err.failover_eligible() => {
             AgentApiErrorDisposition::FailoverEligible(err)
@@ -565,6 +577,7 @@ fn spawn_event_forwarder(
     scope: StageScope,
     emitter: Arc<Emitter>,
     file_tracking: Arc<Mutex<FileTracking>>,
+    run_budget: Option<Arc<RunBudget>>,
 ) -> EventForwarder {
     let mut rx = session.subscribe();
     let root_session_id = session.id().to_string();
@@ -581,6 +594,22 @@ fn spawn_event_forwarder(
 
             // Reset watchdog on every event, including streaming deltas
             emitter.touch();
+
+            // The session charges the budget as each response's usage
+            // arrives; this task is the closest site with a run emitter, so
+            // it drains the one-shot warning notices.
+            if matches!(&event.event, AgentEvent::AssistantMessage { .. }) {
+                if let Some(budget) = &run_budget {
+                    for warning in budget.take_pending_warnings() {
+                        emitter.notice_scoped(
+                            RunNoticeLevel::Warn,
+                            RunNoticeCode::BudgetNearlyExhausted,
+                            warning.warning_message(),
+                            &scope,
+                        );
+                    }
+                }
+            }
 
             // Track file changes from tool calls (including sub-agent events)
             track_file_event(
@@ -639,6 +668,9 @@ pub struct AgentApiBackend {
     /// Messages of fallback-plan notices already emitted for this run, so the
     /// same configuration warning is not repeated on every LLM call.
     emitted_plan_notices: Mutex<HashSet<String>>,
+    /// Shared run budget: charged by agent sessions and the one-shot prompt
+    /// path; `None` means unlimited.
+    run_budget:           Option<Arc<RunBudget>>,
     tool_env:             Option<Arc<dyn ToolEnvProvider>>,
     mcp_servers:          Vec<McpServerSettings>,
     tool_secrets:         ToolSecrets,
@@ -730,6 +762,7 @@ struct LiveAgentInvocation {
     lease:              Option<Arc<ActivationLease>>,
     event_forwarder:    EventForwarder,
     file_tracking:      Arc<Mutex<FileTracking>>,
+    run_budget:         Option<Arc<RunBudget>>,
     total_usage:        TokenCounts,
     total_cost:         Option<UsdMicros>,
     inference_duration: Duration,
@@ -761,7 +794,7 @@ impl LiveAgentInvocation {
         allow_failover: bool,
         emitter: &Arc<Emitter>,
     ) -> Result<fabro_llm::Error, Error> {
-        let disposition = classify_agent_error(error, allow_failover);
+        let disposition = classify_agent_error(error, allow_failover, self.run_budget.as_deref());
         self.abort_and_discard(emitter).await;
         match disposition {
             AgentApiErrorDisposition::Cancelled => Err(Error::Cancelled),
@@ -818,6 +851,7 @@ impl AgentApiBackend {
             fallbacks,
             sessions: Mutex::new(HashMap::new()),
             emitted_plan_notices: Mutex::new(HashSet::new()),
+            run_budget: None,
             tool_env: None,
             mcp_servers: Vec::new(),
             tool_secrets: ToolSecrets::default(),
@@ -862,6 +896,12 @@ impl AgentApiBackend {
     #[must_use]
     pub fn with_fabro_run_tools(mut self, services: FabroRunToolServices) -> Self {
         self.fabro_run_tools = Some(services);
+        self
+    }
+
+    #[must_use]
+    pub fn with_run_budget(mut self, budget: Option<Arc<RunBudget>>) -> Self {
+        self.run_budget = budget;
         self
     }
 
@@ -1028,6 +1068,7 @@ impl AgentApiBackend {
             self.mcp_servers.clone(),
             self.tool_secrets.clone(),
             self.fabro_run_tools.clone(),
+            self.run_budget.clone(),
         )
         .await?;
         Ok((
@@ -1052,6 +1093,7 @@ impl AgentApiBackend {
         mcp_servers: Vec<McpServerSettings>,
         tool_secrets: ToolSecrets,
         fabro_run_tools: Option<FabroRunToolServices>,
+        run_budget: Option<Arc<RunBudget>>,
     ) -> Result<Session, Error> {
         let client = Client::from_source(source, Arc::clone(&catalog))
             .await
@@ -1066,11 +1108,12 @@ impl AgentApiBackend {
         .with_tool_secrets(tool_secrets);
         let profile_builder = if provider.profile_kind == AgentProfileKind::Claude5 {
             profile_builder.with_web_fetch_summarizer(Some(WebFetchSummarizer {
-                client:   client.clone(),
-                model_id: ModelHandle::ByName {
+                client:     client.clone(),
+                model_id:   ModelHandle::ByName {
                     provider: provider.provider_id.clone(),
                     model:    model.to_string(),
                 },
+                run_budget: run_budget.clone(),
             }))
         } else {
             profile_builder
@@ -1083,6 +1126,7 @@ impl AgentApiBackend {
             speed: controls.speed,
             tool_hooks,
             mcp_servers,
+            run_budget: run_budget.clone(),
             // Workflow agents run with no `tool_access_policy`, which exposes
             // the entire tool registry (read, write, shell, subagent, MCP) and
             // skips approval gating. Report that truthfully so the UI doesn't
@@ -1106,6 +1150,7 @@ impl AgentApiBackend {
         let factory_fabro_run_tools = fabro_run_tools.clone();
         let factory_permission_level = config.permission_level;
         let factory_tool_hooks = config.tool_hooks.clone();
+        let factory_run_budget = run_budget;
         let factory: SessionFactory = Arc::new(move || {
             let mut child_profile = factory_profile_builder.build();
             if let Some(services) = factory_fabro_run_tools.clone() {
@@ -1121,6 +1166,9 @@ impl AgentApiBackend {
                     speed: controls.speed,
                     tool_hooks: factory_tool_hooks.clone(),
                     permission_level: factory_permission_level,
+                    // Subagents burn real spend: charge them against the
+                    // same run budget as the parent session.
+                    run_budget: factory_run_budget.clone(),
                     ..SessionOptions::default()
                 },
                 None,
@@ -1243,6 +1291,7 @@ impl AgentApiBackend {
                 self.mcp_servers.clone(),
                 self.tool_secrets.clone(),
                 self.fabro_run_tools.clone(),
+                self.run_budget.clone(),
             )
             .await;
             if request.cancel_token.is_cancelled() {
@@ -1263,6 +1312,7 @@ impl AgentApiBackend {
                 stage_scope.clone(),
                 Arc::clone(emitter),
                 Arc::clone(&live.file_tracking),
+                self.run_budget.clone(),
             );
 
             begin_session_lifecycle(&live.session, emitter, None);
@@ -1486,6 +1536,12 @@ impl CodergenBackend for AgentApiBackend {
         let mut inference_duration = Duration::ZERO;
 
         loop {
+            if let Some(budget) = &self.run_budget {
+                if let Some(exceeded) = budget.exceeded() {
+                    return Err(Error::BudgetExhausted(exceeded.exceeded_message()));
+                }
+            }
+
             let request = self.route_request(
                 node,
                 fallback_plan.current(),
@@ -1511,6 +1567,23 @@ impl CodergenBackend for AgentApiBackend {
                 &mut total_cost,
                 completion.response.cost_usd.map(UsdMicros::from_usd),
             );
+            if let Some(budget) = &self.run_budget {
+                let exceeded = budget.charge(
+                    completion.response.usage.total_tokens(),
+                    completion.response.cost_usd.map(UsdMicros::from_usd),
+                );
+                for warning in budget.take_pending_warnings() {
+                    emitter.notice_scoped(
+                        RunNoticeLevel::Warn,
+                        RunNoticeCode::BudgetNearlyExhausted,
+                        warning.warning_message(),
+                        stage_scope,
+                    );
+                }
+                if let Some(exceeded) = exceeded {
+                    return Err(Error::BudgetExhausted(exceeded.exceeded_message()));
+                }
+            }
             let response_text = completion.response.text();
 
             let validation_error = if let Some(schema) = &output_schema {
@@ -1626,6 +1699,7 @@ impl CodergenBackend for AgentApiBackend {
             stage_scope.clone(),
             Arc::clone(emitter),
             Arc::clone(&file_tracking),
+            self.run_budget.clone(),
         );
 
         // Activate with the steering hub after initialization so HTTP
@@ -1639,6 +1713,7 @@ impl CodergenBackend for AgentApiBackend {
             lease: None,
             event_forwarder,
             file_tracking,
+            run_budget: self.run_budget.clone(),
             total_usage: TokenCounts::default(),
             total_cost: None,
             inference_duration: Duration::ZERO,
@@ -3690,6 +3765,280 @@ enabled = true
         assert_eq!(usage.total_usd_micros, Some(100_000));
     }
 
+    fn token_budget(max_tokens: u64) -> Arc<RunBudget> {
+        Arc::new(RunBudget::new(None, Some(max_tokens)))
+    }
+
+    fn collect_run_events(emitter: &Emitter) -> Arc<Mutex<Vec<fabro_types::RunEvent>>> {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.clone())
+        });
+        seen
+    }
+
+    fn budget_notice_messages(events: &[fabro_types::RunEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match &event.body {
+                fabro_types::EventBody::RunNotice(props)
+                    if props.code == "budget_nearly_exhausted" =>
+                {
+                    Some(props.message.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn one_shot_fails_when_budget_exceeded_by_response() {
+        let server = MockServer::start();
+        let completion = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(chat_completion_response("done", 40, 10));
+        });
+        let backend = mock_api_backend(&server).with_run_budget(Some(token_budget(30)));
+        let node = Node::new("audit");
+        let context = Context::new();
+        let stage_scope = StageScope::for_handler(&context, &node.id);
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let workspace = tempfile::tempdir().unwrap();
+        let sandbox: Arc<dyn fabro_agent::Sandbox> =
+            Arc::new(LocalSandbox::new(workspace.path().to_path_buf()));
+
+        let result = backend
+            .one_shot(OneShotRequest {
+                node:          &node,
+                prompt:        "Audit the result",
+                system_prompt: None,
+                emitter:       &emitter,
+                stage_scope:   &stage_scope,
+                sandbox:       &sandbox,
+                cancel_token:  CancellationToken::new(),
+            })
+            .await;
+        let Err(error) = result else {
+            panic!("expected the budget to fail the call")
+        };
+
+        completion.assert_calls(1);
+        assert!(
+            matches!(error, Error::BudgetExhausted(_)),
+            "expected budget exhausted, got {error:?}"
+        );
+        assert!(
+            error.to_string().contains("run.limits.max_tokens"),
+            "message should name the limit: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_shot_skips_the_request_when_budget_is_already_exhausted() {
+        let server = MockServer::start();
+        let completion = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(chat_completion_response("done", 1, 1));
+        });
+        let budget = token_budget(10);
+        assert!(budget.charge(50, None).is_some());
+        let backend = mock_api_backend(&server).with_run_budget(Some(Arc::clone(&budget)));
+        let node = Node::new("audit");
+        let context = Context::new();
+        let stage_scope = StageScope::for_handler(&context, &node.id);
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let workspace = tempfile::tempdir().unwrap();
+        let sandbox: Arc<dyn fabro_agent::Sandbox> =
+            Arc::new(LocalSandbox::new(workspace.path().to_path_buf()));
+
+        let result = backend
+            .one_shot(OneShotRequest {
+                node:          &node,
+                prompt:        "Audit the result",
+                system_prompt: None,
+                emitter:       &emitter,
+                stage_scope:   &stage_scope,
+                sandbox:       &sandbox,
+                cancel_token:  CancellationToken::new(),
+            })
+            .await;
+        let Err(error) = result else {
+            panic!("expected the budget to fail the call")
+        };
+
+        completion.assert_calls(0);
+        assert!(
+            matches!(error, Error::BudgetExhausted(_)),
+            "expected budget exhausted, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_shot_emits_the_eighty_percent_budget_notice_once() {
+        let server = MockServer::start();
+        let completion = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(chat_completion_response("done", 75, 10));
+        });
+        // 85 of 100 tokens: past the 80% warning threshold, under the limit.
+        let backend = mock_api_backend(&server).with_run_budget(Some(token_budget(100)));
+        let node = Node::new("audit");
+        let context = Context::new();
+        let stage_scope = StageScope::for_handler(&context, &node.id);
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let events = collect_run_events(&emitter);
+        let workspace = tempfile::tempdir().unwrap();
+        let sandbox: Arc<dyn fabro_agent::Sandbox> =
+            Arc::new(LocalSandbox::new(workspace.path().to_path_buf()));
+
+        backend
+            .one_shot(OneShotRequest {
+                node:          &node,
+                prompt:        "Audit the result",
+                system_prompt: None,
+                emitter:       &emitter,
+                stage_scope:   &stage_scope,
+                sandbox:       &sandbox,
+                cancel_token:  CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+
+        completion.assert_calls(1);
+        let notices = budget_notice_messages(&events.lock().unwrap());
+        assert_eq!(notices.len(), 1, "exactly one warning notice: {notices:?}");
+        assert!(
+            notices[0].contains("80% of run.limits.max_tokens"),
+            "got {notices:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_run_fails_fast_when_budget_is_already_exhausted() {
+        let server = MockServer::start();
+        let completion = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(chat_completion_stream("done", 1, 1));
+        });
+        let budget = token_budget(10);
+        assert!(budget.charge(50, None).is_some());
+        let backend = mock_api_backend(&server).with_run_budget(Some(budget));
+        let node = Node::new("code");
+        let context = Context::new();
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let workspace = tempfile::tempdir().unwrap();
+        let sandbox: Arc<dyn fabro_agent::Sandbox> =
+            Arc::new(LocalSandbox::new(workspace.path().to_path_buf()));
+
+        let result = backend
+            .run(CodergenRunRequest {
+                node:               &node,
+                prompt:             "Implement the feature",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
+            })
+            .await;
+        let Err(error) = result else {
+            panic!("expected the budget to fail the call")
+        };
+
+        completion.assert_calls(0);
+        assert!(
+            matches!(error, Error::BudgetExhausted(_)),
+            "expected budget exhausted, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_run_halts_mid_session_when_a_response_trips_the_budget() {
+        let server = MockServer::start();
+        // First turn: a tool call whose usage blows the budget. The session
+        // must interrupt without sending the follow-up turn.
+        let usage_chunk = serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "model": "mock-model",
+            "choices": [],
+            "usage": { "prompt_tokens": 90, "completion_tokens": 20 }
+        });
+        let first_body = chat_completion_tool_call_stream(
+            "read_file",
+            "call_budget",
+            r#"{"file_path":"data.txt"}"#,
+        )
+        .replace(
+            "data: [DONE]",
+            &format!("data: {usage_chunk}\n\ndata: [DONE]"),
+        );
+        let first = server.mock(|when, then| {
+            when.method(POST)
+                .path("/chat/completions")
+                .body_excludes(r#""role":"tool""#);
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(first_body);
+        });
+        let followup = server.mock(|when, then| {
+            when.method(POST)
+                .path("/chat/completions")
+                .body_includes(r#""role":"tool""#);
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(chat_completion_stream("done", 1, 1));
+        });
+        let backend = mock_api_backend(&server).with_run_budget(Some(token_budget(100)));
+        let node = Node::new("code");
+        let context = Context::new();
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let workspace = tempfile::tempdir().unwrap();
+        tokio::fs::write(workspace.path().join("data.txt"), "hello\n")
+            .await
+            .unwrap();
+        let sandbox: Arc<dyn fabro_agent::Sandbox> =
+            Arc::new(LocalSandbox::new(workspace.path().to_path_buf()));
+
+        let result = backend
+            .run(CodergenRunRequest {
+                node:               &node,
+                prompt:             "Implement the feature",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
+            })
+            .await;
+        let Err(error) = result else {
+            panic!("expected the budget to fail the call")
+        };
+
+        first.assert_calls(1);
+        followup.assert_calls(0);
+        assert!(
+            matches!(error, Error::BudgetExhausted(_)),
+            "expected budget exhausted, got {error:?}"
+        );
+        assert!(
+            error.to_string().contains("run.limits.max_tokens"),
+            "message should name the limit: {error}"
+        );
+    }
+
     #[tokio::test]
     async fn agent_run_repairs_custom_output_schema_in_same_session() {
         let server = MockServer::start();
@@ -4075,6 +4424,7 @@ enabled = true
             scope,
             Arc::clone(&emitter),
             file_tracking,
+            None,
         );
 
         session.sub_agent_event_callback()(
@@ -4277,7 +4627,7 @@ enabled = true
     fn classify_interrupted_cancelled_is_cancelled() {
         let err = fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::Cancelled);
         assert!(matches!(
-            classify_agent_error(err, true),
+            classify_agent_error(err, true, None),
             AgentApiErrorDisposition::Cancelled
         ));
     }
@@ -4285,7 +4635,7 @@ enabled = true
     #[test]
     fn classify_interrupted_wall_clock_is_terminal_precondition() {
         let err = fabro_agent::Error::Interrupted(fabro_agent::InterruptReason::WallClockTimeout);
-        match classify_agent_error(err, true) {
+        match classify_agent_error(err, true, None) {
             AgentApiErrorDisposition::Terminal(Error::Precondition(msg)) => {
                 assert!(msg.contains("wall-clock"));
             }
@@ -4297,7 +4647,7 @@ enabled = true
     fn classify_failover_eligible_llm_returns_failover_when_allowed() {
         let err = fabro_agent::Error::Llm(failover_eligible_llm_error());
         assert!(matches!(
-            classify_agent_error(err, true),
+            classify_agent_error(err, true, None),
             AgentApiErrorDisposition::FailoverEligible(_)
         ));
     }
@@ -4305,7 +4655,7 @@ enabled = true
     #[test]
     fn classify_failover_eligible_llm_returns_terminal_when_not_allowed() {
         let err = fabro_agent::Error::Llm(failover_eligible_llm_error());
-        match classify_agent_error(err, false) {
+        match classify_agent_error(err, false, None) {
             AgentApiErrorDisposition::Terminal(Error::Llm(_)) => {}
             _ => panic!("expected Terminal(Error::Llm) when failover disallowed"),
         }
@@ -4314,7 +4664,7 @@ enabled = true
     #[test]
     fn classify_non_failover_eligible_llm_is_terminal_llm() {
         let err = fabro_agent::Error::Llm(non_failover_llm_error());
-        match classify_agent_error(err, true) {
+        match classify_agent_error(err, true, None) {
             AgentApiErrorDisposition::Terminal(Error::Llm(_)) => {}
             _ => panic!("expected Terminal(Error::Llm) for non-failover-eligible LLM error"),
         }
@@ -4324,7 +4674,7 @@ enabled = true
     fn classify_refusal_llm_returns_failover_when_allowed() {
         let err = fabro_agent::Error::Llm(refusal_llm_error());
         assert!(matches!(
-            classify_agent_error(err, true),
+            classify_agent_error(err, true, None),
             AgentApiErrorDisposition::FailoverEligible(_)
         ));
     }
@@ -4332,7 +4682,7 @@ enabled = true
     #[test]
     fn classify_refusal_llm_returns_terminal_when_not_allowed() {
         let err = fabro_agent::Error::Llm(refusal_llm_error());
-        match classify_agent_error(err, false) {
+        match classify_agent_error(err, false, None) {
             AgentApiErrorDisposition::Terminal(Error::Llm(llm_err)) => {
                 assert!(llm_err.to_string().contains("claude-fable-5 refused"));
             }
@@ -4343,7 +4693,7 @@ enabled = true
     #[test]
     fn classify_session_closed_is_terminal_precondition() {
         let err = fabro_agent::Error::SessionClosed;
-        match classify_agent_error(err, true) {
+        match classify_agent_error(err, true, None) {
             AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
                 assert!(message.contains("Agent session failed"));
             }
@@ -4354,7 +4704,7 @@ enabled = true
     #[test]
     fn classify_invalid_state_is_terminal_precondition() {
         let err = fabro_agent::Error::InvalidState("oops".into());
-        match classify_agent_error(err, true) {
+        match classify_agent_error(err, true, None) {
             AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
                 assert!(message.contains("Agent session failed"));
             }
@@ -4365,7 +4715,7 @@ enabled = true
     #[test]
     fn classify_tool_execution_is_terminal_precondition() {
         let err = fabro_agent::Error::ToolExecution("tool blew up".into());
-        match classify_agent_error(err, true) {
+        match classify_agent_error(err, true, None) {
             AgentApiErrorDisposition::Terminal(Error::Precondition(message)) => {
                 assert!(message.contains("Agent session failed"));
             }

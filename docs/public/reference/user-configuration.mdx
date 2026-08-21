@@ -434,6 +434,21 @@ enabled = true
 | `enabled` | boolean | false | Automatically create a PR after successful runs. |
 | `merge_strategy` | "merge" \| "squash" \| "rebase" | "squash" | Merge method to configure for the pull request. |
 
+## `[run.limits]`
+
+`[run.limits]` — run-scoped LLM spend budgets. Absent means unlimited
+
+```toml title="settings.toml"
+[run.limits]
+max_cost = 25.00
+max_tokens = 5000000
+```
+
+| Key | Type / values | Default | Description |
+|---|---|---|---|
+| `max_cost` | float | None | Maximum total LLM cost for the run, in USD. When accumulated cost<br />exceeds this value, the run halts and fails. |
+| `max_tokens` | integer | None | Maximum total LLM tokens for the run, counting all token buckets<br />(input, output, reasoning, cache reads, cache writes). When<br />accumulated tokens exceed this value, the run halts and fails. |
+
 ## `[run.agent]`
 
 `[run.agent]` — agent knobs only (Fabro tools and MCPs)

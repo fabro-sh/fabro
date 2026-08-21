@@ -14358,6 +14358,7 @@ components:
         - git
         - prepare
         - execution
+        - limits
         - checkpoint
         - clone
         - run_branch
@@ -14394,6 +14395,8 @@ components:
           $ref: "#/components/schemas/RunPrepareSettings"
         execution:
           $ref: "#/components/schemas/RunExecutionSettings"
+        limits:
+          $ref: "#/components/schemas/RunLimitsSettings"
         checkpoint:
           $ref: "#/components/schemas/RunCheckpointSettings"
         clone:
@@ -14605,6 +14608,26 @@ components:
     ApprovalMode:
       type: string
       enum: [prompt, auto]
+
+    RunLimitsSettings:
+      description: |
+        Resolved `[run.limits]` spend budget for the run. An absent field
+        means that limit is not configured. When accumulated LLM spend
+        exceeds either limit, the run halts and fails with the
+        `budget_exhausted` failure reason.
+      type: object
+      properties:
+        max_cost_usd_micros:
+          type: integer
+          format: int64
+          description: Maximum total LLM cost for the run, in USD micros.
+        max_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Maximum total LLM tokens for the run, counting all token
+            buckets (input, output, reasoning, cache reads, cache writes).
 
     RunCheckpointSettings:
       type: object

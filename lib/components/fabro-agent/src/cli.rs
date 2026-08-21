@@ -218,8 +218,9 @@ fn build_summarizer(
     llm_client: Client,
 ) -> WebFetchSummarizer {
     WebFetchSummarizer {
-        client:   llm_client,
-        model_id: summarizer_model_id(provider_id, catalog, model),
+        client:     llm_client,
+        model_id:   summarizer_model_id(provider_id, catalog, model),
+        run_budget: None,
     }
 }
 

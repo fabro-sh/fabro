@@ -146,6 +146,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
                 "mode": "normal",
                 "approval": "prompt"
               },
+              "limits": {},
               "checkpoint": {
                 "exclude_globs": [],
                 "skip_git_hooks": false,

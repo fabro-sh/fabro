@@ -36,6 +36,8 @@ pub struct RunLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution:     Option<RunExecutionLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits:        Option<RunLimitsLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint:    Option<RunCheckpointLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clone:         Option<RunCloneLayer>,
@@ -282,6 +284,32 @@ pub struct RunExecutionLayer {
     pub mode:     Option<RunMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<ApprovalMode>,
+}
+
+/// `[run.limits]` — run-scoped LLM spend budgets. Absent means unlimited.
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    fabro_macros::Combine,
+    fabro_macros::OptionsMetadata,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunLimitsLayer {
+    /// Maximum total LLM cost for the run, in USD. When accumulated cost
+    /// exceeds this value, the run halts and fails.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(value_type = "float")]
+    pub max_cost:   Option<f64>,
+    /// Maximum total LLM tokens for the run, counting all token buckets
+    /// (input, output, reasoning, cache reads, cache writes). When
+    /// accumulated tokens exceed this value, the run halts and fails.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[option(value_type = "integer")]
+    pub max_tokens: Option<u64>,
 }
 
 /// `[run.checkpoint]` — checkpoint policy.

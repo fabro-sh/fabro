@@ -10,7 +10,7 @@ use fabro_auth::CredentialSource;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::types::{Message, Request, ToolResult};
-use fabro_model::Catalog;
+use fabro_model::{Catalog, RunBudget, UsdMicros};
 use fabro_redact::redacted_url_for_log;
 use fabro_types::settings::{InterpString, ResolveCtx, ResolveError};
 use tokio::process::Command as TokioCommand;
@@ -83,9 +83,20 @@ fn safe_url_source_for_log(url: &InterpString) -> String {
 }
 
 /// Executes hooks via shell commands or HTTP POST.
-pub struct HookExecutorImpl;
+#[derive(Default)]
+pub struct HookExecutorImpl {
+    /// Shared `[run.limits]` spend budget. Prompt/agent hook LLM calls are
+    /// charged against it, and hooks stop firing once it is exhausted.
+    /// `None` outside budgeted runs.
+    run_budget: Option<Arc<RunBudget>>,
+}
 
 impl HookExecutorImpl {
+    #[must_use]
+    pub fn with_run_budget(run_budget: Option<Arc<RunBudget>>) -> Self {
+        Self { run_budget }
+    }
+
     /// Parse a hook decision from JSON stdout and exit code.
     fn parse_decision(exit_code: i32, stdout: &str) -> HookDecision {
         if exit_code == 0 {
@@ -284,7 +295,13 @@ impl HookExecutorImpl {
         context: &HookContext,
         llm_source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
+        run_budget: Option<&RunBudget>,
     ) -> HookDecision {
+        if run_budget.is_some_and(|budget| budget.exceeded().is_some()) {
+            tracing::warn!("prompt hook skipped: run budget exhausted");
+            return HookDecision::Proceed;
+        }
+
         let (prompt, model) = match Self::resolve_prompt_and_model(prompt, model) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -313,19 +330,29 @@ impl HookExecutorImpl {
                 .max_tokens(1024);
 
             match generate_object(params, HOOK_RESPONSE_SCHEMA.clone()).await {
-                Ok(result) => if let Some(obj) = result.output { match serde_json::from_value::<PromptHookResponse>(obj) {
-                    Ok(resp) if resp.ok => HookDecision::Proceed,
-                    Ok(resp) => HookDecision::Block {
-                        reason: resp.reason,
-                    },
-                    Err(e) => {
-                        tracing::warn!(error = %e, "prompt hook response deserialize failed, proceeding");
+                Ok(result) => {
+                    // Hook spend counts against the run budget; a trip here
+                    // stops later hooks and stages, not this decision.
+                    if let Some(budget) = run_budget {
+                        let _ = budget.charge(
+                            result.total_usage.total_tokens(),
+                            result.response.cost_usd.map(UsdMicros::from_usd),
+                        );
+                    }
+                    if let Some(obj) = result.output { match serde_json::from_value::<PromptHookResponse>(obj) {
+                        Ok(resp) if resp.ok => HookDecision::Proceed,
+                        Ok(resp) => HookDecision::Block {
+                            reason: resp.reason,
+                        },
+                        Err(e) => {
+                            tracing::warn!(error = %e, "prompt hook response deserialize failed, proceeding");
+                            HookDecision::Proceed
+                        }
+                    } } else {
+                        tracing::warn!("prompt hook returned no structured output, proceeding");
                         HookDecision::Proceed
                     }
-                } } else {
-                    tracing::warn!("prompt hook returned no structured output, proceeding");
-                    HookDecision::Proceed
-                },
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "prompt hook LLM call failed, proceeding");
                     HookDecision::Proceed
@@ -349,7 +376,13 @@ impl HookExecutorImpl {
         sandbox: Arc<dyn Sandbox>,
         llm_source: &dyn CredentialSource,
         catalog: Arc<Catalog>,
+        run_budget: Option<&RunBudget>,
     ) -> HookDecision {
+        if run_budget.is_some_and(|budget| budget.exceeded().is_some()) {
+            tracing::warn!("agent hook skipped: run budget exhausted");
+            return HookDecision::Proceed;
+        }
+
         let (prompt, model) = match Self::resolve_prompt_and_model(prompt, model) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -386,6 +419,13 @@ impl HookExecutorImpl {
             let cancel = CancellationToken::new();
 
             for _ in 0..rounds {
+                // The budget can be exhausted before this hook fired or by
+                // another concurrent charge; stop before the next request.
+                if run_budget.is_some_and(|budget| budget.exceeded().is_some()) {
+                    tracing::warn!("agent hook stopped: run budget exhausted");
+                    return HookDecision::Proceed;
+                }
+
                 let request = Request {
                     model:            resolved_model.clone(),
                     messages:         messages.clone(),
@@ -411,9 +451,24 @@ impl HookExecutorImpl {
                     }
                 };
 
+                let budget_tripped = run_budget.is_some_and(|budget| {
+                    budget
+                        .charge(
+                            response.usage.total_tokens(),
+                            response.cost_usd.map(UsdMicros::from_usd),
+                        )
+                        .is_some()
+                });
+
                 let tool_calls = response.tool_calls();
                 if tool_calls.is_empty() {
+                    // The hook finished its work; parse the decision even if
+                    // this response tripped the budget.
                     return Self::parse_prompt_response(&response.text());
+                }
+                if budget_tripped {
+                    tracing::warn!("agent hook stopped mid-loop: run budget exhausted");
+                    return HookDecision::Proceed;
                 }
 
                 messages.push(response.message.clone());
@@ -685,6 +740,7 @@ impl HookExecutor for HookExecutorImpl {
                     context,
                     llm_source,
                     Arc::clone(&catalog),
+                    self.run_budget.as_deref(),
                 )
                 .await
             }
@@ -709,6 +765,7 @@ impl HookExecutor for HookExecutorImpl {
                     sandbox,
                     llm_source,
                     Arc::clone(&catalog),
+                    self.run_budget.as_deref(),
                 )
                 .await
             }
@@ -830,7 +887,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_host_success() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::default();
         let def = make_definition("exit 0");
         let ctx = make_context();
         let sandbox = make_sandbox();
@@ -851,7 +908,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_host_failure() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::default();
         let def = make_definition("exit 1");
         let ctx = make_context();
         let sandbox = make_sandbox();
@@ -871,7 +928,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_host_skip_via_exit_2() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::default();
         let def = make_definition("exit 2");
         let ctx = make_context();
         let sandbox = make_sandbox();
@@ -891,7 +948,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_host_json_decision() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::default();
         let def = make_definition(r#"echo '{"decision": "skip", "reason": "test skip"}'"#);
         let ctx = make_context();
         let sandbox = make_sandbox();
@@ -913,7 +970,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_env_vars_set() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::default();
         // Print env vars to stdout for verification
         let def = make_definition("echo $ARC_EVENT:$ARC_RUN_ID:$ARC_WORKFLOW");
         let mut ctx = make_context();
@@ -935,7 +992,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_hook_type_blocks() {
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::default();
         let def = HookDefinition {
             name:       None,
             event:      HookEvent::StageStart,
@@ -1417,7 +1474,7 @@ mod tests {
             })
             .await;
 
-        let executor = HookExecutorImpl;
+        let executor = HookExecutorImpl::default();
         let def = HookDefinition {
             name:       Some("http-test".into()),
             event:      HookEvent::StageStart,
@@ -1477,6 +1534,7 @@ mod tests {
             &make_context(),
             test_llm_source().as_ref(),
             test_catalog(),
+            None,
         )
         .await;
 
@@ -1493,6 +1551,50 @@ mod tests {
         }
     }
 
+    // A spent run budget short-circuits the hook before interpolation or any
+    // LLM call: the same prompt that Blocks above now skips with Proceed.
+    #[tokio::test]
+    async fn prompt_hook_skips_when_run_budget_exhausted() {
+        let budget = RunBudget::new(None, Some(10));
+        assert!(budget.charge(50, None).is_some());
+
+        let decision = HookExecutorImpl::execute_prompt(
+            &make_definition("unused"),
+            &interp("{{ env.MISSING_HOOK_VALUE }}"),
+            None,
+            &make_context(),
+            test_llm_source().as_ref(),
+            test_catalog(),
+            Some(&budget),
+        )
+        .await;
+
+        assert!(matches!(decision, HookDecision::Proceed));
+    }
+
+    #[tokio::test]
+    async fn agent_hook_stops_when_run_budget_exhausted() {
+        let budget = RunBudget::new(None, Some(10));
+        assert!(budget.charge(50, None).is_some());
+
+        let decision = HookExecutorImpl::execute_agent(
+            &make_definition("unused"),
+            &interp("{{ env.MISSING_HOOK_VALUE }}"),
+            None,
+            Some(1),
+            &make_context(),
+            make_sandbox(),
+            test_llm_source().as_ref(),
+            test_catalog(),
+            Some(&budget),
+        )
+        .await;
+
+        // The budget check fires before interpolation, so the prompt that
+        // would otherwise Block skips with Proceed instead.
+        assert!(matches!(decision, HookDecision::Proceed));
+    }
+
     // Fail-closed: an agent hook with a missing token blocks instead of firing.
     #[tokio::test]
     async fn agent_hook_missing_env_blocks() {
@@ -1505,6 +1607,7 @@ mod tests {
             make_sandbox(),
             test_llm_source().as_ref(),
             test_catalog(),
+            None,
         )
         .await;
 

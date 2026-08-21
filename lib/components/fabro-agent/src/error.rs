@@ -6,6 +6,8 @@ use fabro_llm::Error as LlmError;
 pub enum InterruptReason {
     WallClockTimeout,
     Cancelled,
+    /// The run's token/cost budget was exhausted (`[run.limits]`).
+    BudgetExhausted,
 }
 
 impl std::fmt::Display for InterruptReason {
@@ -13,6 +15,7 @@ impl std::fmt::Display for InterruptReason {
         match self {
             Self::WallClockTimeout => write!(f, "wall clock timeout"),
             Self::Cancelled => write!(f, "cancelled"),
+            Self::BudgetExhausted => write!(f, "run budget exhausted"),
         }
     }
 }

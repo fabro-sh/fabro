@@ -5,7 +5,7 @@ use fabro_agent::Sandbox;
 use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::test_support;
-use fabro_model::Catalog;
+use fabro_model::{Catalog, RunBudget};
 
 use crate::config::{HookDefinition, HookSettings};
 use crate::executor::{HookExecutor, HookExecutorImpl};
@@ -32,11 +32,19 @@ impl HookRunner {
         let compiled_matchers = Self::compile_matchers(&config);
         Self {
             config,
-            executor: Arc::new(HookExecutorImpl),
+            executor: Arc::new(HookExecutorImpl::default()),
             llm_source,
             catalog,
             compiled_matchers,
         }
+    }
+
+    /// Attach the shared `[run.limits]` spend budget. Prompt/agent hook LLM
+    /// calls charge it, and those hooks stop firing once it is exhausted.
+    #[must_use]
+    pub fn with_run_budget(mut self, run_budget: Option<Arc<RunBudget>>) -> Self {
+        self.executor = Arc::new(HookExecutorImpl::with_run_budget(run_budget));
+        self
     }
 
     /// Create a HookRunner with a custom executor (for testing).
