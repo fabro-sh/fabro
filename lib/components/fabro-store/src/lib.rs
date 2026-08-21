@@ -36,8 +36,8 @@ pub use run_summary_store::{
 };
 pub use serializable_projection::SerializableProjection;
 pub use slate::{
-    AuthCode, AuthCodeStore, CachedRunProjection, ConsumeOutcome, Database, RefreshToken,
-    RefreshTokenStore, RunCatalogIndex, RunDatabase, Runs, UnreadableRun,
+    AuthCode, AuthCodeStore, CachedRunProjection, ConsumeOutcome, Database, MainEventStore,
+    RefreshToken, RefreshTokenStore, RunCatalogIndex, RunDatabase, Runs, UnreadableRun,
 };
 pub use types::EventPayload;
 
