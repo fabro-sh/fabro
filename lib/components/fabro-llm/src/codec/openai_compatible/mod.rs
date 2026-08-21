@@ -2,10 +2,11 @@
 //!
 //! Serves every "OpenAI-compatible" route (moonshot, zai, minimax, venice,
 //! inception, ollama, litellm, …). Pure translation: no HTTP, auth, or base
-//! URL — the adapter shell owns those. Count-tokens and error mapping use the
-//! `Codec` trait defaults (this dialect has no count route and uses the shared
-//! HTTP-status error mapping).
+//! URL — the adapter shell owns those. This dialect has no count route. Error
+//! mapping also understands the typed provider errors and routing-attempt
+//! metadata returned by OpenRouter.
 
+mod error;
 mod request;
 mod response;
 mod stream;
@@ -39,5 +40,15 @@ impl Codec for OpenAiCompatible {
         rate_limit: Option<RateLimitInfo>,
     ) -> Box<dyn StreamDecoder> {
         Box::new(stream::StreamState::new(ctx, rate_limit))
+    }
+
+    fn decode_error(
+        &self,
+        status: u16,
+        body: &str,
+        ctx: &CodecCtx<'_>,
+        retry_after: Option<f64>,
+    ) -> Error {
+        error::decode_http(status, body, ctx.provider_name, retry_after)
     }
 }

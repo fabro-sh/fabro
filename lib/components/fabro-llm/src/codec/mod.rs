@@ -194,9 +194,9 @@ pub(crate) trait Codec: Send + Sync {
     /// Map a non-2xx response to an `Error`. `retry_after` is the
     /// transport-parsed `retry-after` header value in seconds (header parsing
     /// is the transport's job, like `rate_limit` on the decode methods).
-    /// Default = shared HTTP-status mapping, which openai_compatible and
-    /// anthropic use as-is; a codec overrides when its dialect's error bodies
-    /// need more (e.g. gemini's gRPC status).
+    /// Default = shared HTTP-status mapping, which anthropic uses as-is. A
+    /// codec overrides when its dialect's error bodies need more (for example,
+    /// OpenRouter's typed metadata or Gemini's gRPC status).
     fn decode_error(
         &self,
         status: u16,

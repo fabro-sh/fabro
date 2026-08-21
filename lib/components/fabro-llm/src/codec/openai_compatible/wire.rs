@@ -377,6 +377,9 @@ pub(super) struct StreamChunk {
     pub model:   Option<String>,
     pub choices: Option<Vec<StreamChoice>>,
     pub usage:   Option<ApiUsage>,
+    /// Top-level in-band provider error. OpenRouter includes this after the
+    /// HTTP 200 response has already committed.
+    pub error:   Option<serde_json::Value>,
 }
 
 #[derive(serde::Deserialize)]

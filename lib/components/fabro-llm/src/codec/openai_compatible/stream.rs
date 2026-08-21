@@ -3,6 +3,7 @@
 //! Byte reading and `data:` framing live in the transport; this decoder is fed
 //! already-stripped payloads (including the `[DONE]` sentinel) via `on_event`.
 
+use super::error;
 use super::translate::{map_finish_reason, parse_tool_arguments};
 use super::wire::{AccumulatedToolCall, ReasoningDetails, StreamChunk};
 use crate::codec::{CodecCtx, RawEvent, StreamDecoder};
@@ -258,6 +259,12 @@ impl StreamDecoder for StreamState {
         let chunk: StreamChunk = serde_json::from_str(ev.data)
             .map_err(|e| Error::stream_error(format!("failed to parse SSE chunk: {e}"), e))?;
 
+        if chunk.error.is_some() {
+            let raw = serde_json::from_str(ev.data)
+                .map_err(|e| Error::stream_error(format!("failed to parse SSE error: {e}"), e))?;
+            return Err(error::decode_stream(raw, &self.provider_name));
+        }
+
         Ok(self.process_chunk(chunk).unwrap_or_default())
     }
 
@@ -277,6 +284,7 @@ impl StreamDecoder for StreamState {
 mod tests {
     use super::*;
     use crate::codec::CodecParams;
+    use crate::error::ProviderErrorKind;
     use crate::types::Request;
 
     /// Build a decoder through `StreamState::new` (with a minimal request) for
@@ -360,6 +368,43 @@ mod tests {
         let chunk: StreamChunk = serde_json::from_str(json).unwrap();
         let choices = chunk.choices.unwrap();
         assert_eq!(choices[0].finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn in_band_openrouter_error_uses_provider_error_classifier() {
+        let mut state = test_state("openrouter", "openai/gpt-4o");
+        let data = r#"{
+            "id": "gen-test",
+            "object": "chat.completion.chunk",
+            "model": "openai/gpt-4o",
+            "provider": "OpenAI",
+            "error": {
+                "code": 502,
+                "message": "Provider disconnected mid-stream",
+                "metadata": {"error_type": "provider_unavailable"}
+            },
+            "choices": [{
+                "index": 0,
+                "delta": {"content": ""},
+                "finish_reason": "error"
+            }]
+        }"#;
+
+        let error = state
+            .on_event(RawEvent { event: None, data })
+            .expect_err("an in-band provider error should fail the stream");
+
+        assert!(error.retryable());
+        match error {
+            Error::Provider { kind, detail } => {
+                assert_eq!(kind, ProviderErrorKind::Server);
+                assert_eq!(detail.provider, "openrouter");
+                assert_eq!(detail.status_code, Some(502));
+                assert_eq!(detail.error_code.as_deref(), Some("provider_unavailable"));
+                assert_eq!(detail.raw, serde_json::from_str(data).ok());
+            }
+            other => panic!("expected provider error, got {other:?}"),
+        }
     }
 
     #[test]
