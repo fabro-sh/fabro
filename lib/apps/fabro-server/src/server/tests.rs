@@ -27,8 +27,8 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, BlobHash, CommandTermination, FailureCategory,
-    FailureDetail, Graph, InterviewQuestionRecord, Node, Outcome, ParallelBranchId, QuestionType,
-    RunId, RunSpec, SandboxProviderKind, StageContextWindowBreakdownItem,
+    FailureDetail, Graph, InterviewQuestionRecord, MainEventBody, Node, Outcome, ParallelBranchId,
+    QuestionType, RunId, RunSpec, SandboxProviderKind, StageContextWindowBreakdownItem,
     StageContextWindowCategory, StageContextWindowCountMethod, StageContextWindowProjection,
     StageContextWindowStaleness, StageContextWindowWarning, StageModelUsage, StageTiming,
     SuccessReason, SystemActorKind, WorkflowSettings, fixtures, test_support,
@@ -229,6 +229,211 @@ fn run_json_pending_control(run: &serde_json::Value) -> &serde_json::Value {
 
 fn run_json_archived(run: &serde_json::Value) -> bool {
     run["lifecycle"]["archived"].as_bool().unwrap_or(false)
+}
+
+async fn wait_for_main_events(
+    main_events: StdArc<fabro_store::MainEventStore>,
+    expected_len: usize,
+) -> Vec<fabro_types::MainEventEnvelope> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let listed = main_events.list_from_with_limit(1, 100).await.unwrap();
+        if listed.len() == expected_len {
+            return listed;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for {expected_len} main events, saw {}",
+            listed.len()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+fn run_event_value(
+    run_id: RunId,
+    event_name: &str,
+    properties: &serde_json::Value,
+) -> serde_json::Value {
+    json!({
+        "id": format!("evt-{event_name}"),
+        "ts": "2026-06-21T12:00:00Z",
+        "run_id": run_id,
+        "event": event_name,
+        "properties": properties.clone()
+    })
+}
+
+async fn append_run_event(
+    run_store: &fabro_store::RunDatabase,
+    run_id: RunId,
+    event_name: &str,
+    properties: &serde_json::Value,
+) {
+    let payload =
+        fabro_store::EventPayload::new(run_event_value(run_id, event_name, properties), &run_id)
+            .unwrap();
+    run_store.append_event(&payload).await.unwrap();
+}
+
+#[tokio::test]
+async fn persisted_run_created_mirrors_to_main_stream_without_forwarder() {
+    let state = test_app_state();
+    let run_id = fixtures::RUN_1;
+    let run_store = state.stores.runs.create_run(&run_id).await.unwrap();
+
+    append_run_event(
+        &run_store,
+        run_id,
+        "run.created",
+        &json!({
+            "title": "Triage bug",
+            "settings": WorkflowSettings::default(),
+            "graph": Graph::new("test"),
+            "run_dir": "/tmp/test",
+            "workflow_slug": "triage",
+            "provenance": test_support::test_run_provenance()
+        }),
+    )
+    .await;
+
+    mirror_persisted_run_created_to_main(state.as_ref(), run_id)
+        .await
+        .unwrap();
+
+    let main_events = state.stores.runs.main_events().await.unwrap();
+    let listed = wait_for_main_events(StdArc::clone(&main_events), 1).await;
+
+    match &listed[0].event.body {
+        MainEventBody::RunCreated(props) => {
+            assert_eq!(props.source.run_id, run_id);
+            assert_eq!(props.title.as_deref(), Some("Triage bug"));
+            assert_eq!(props.workflow_slug.as_deref(), Some("triage"));
+        }
+        other => panic!("expected created, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn forward_run_events_mirrors_live_lifecycle_events_to_main_stream() {
+    let state = test_app_state();
+    let run_id = fixtures::RUN_1;
+    let run_store = state.stores.runs.create_run(&run_id).await.unwrap();
+    append_run_event(
+        &run_store,
+        run_id,
+        "run.created",
+        &json!({
+            "settings": WorkflowSettings::default(),
+            "graph": Graph::new("test"),
+            "run_dir": "/tmp/test",
+            "provenance": test_support::test_run_provenance()
+        }),
+    )
+    .await;
+    let forwarder = tokio::spawn(forward_run_events_to_global(
+        StdArc::clone(&state),
+        run_id,
+        run_store.subscribe(),
+    ));
+
+    append_run_event(
+        &run_store,
+        run_id,
+        "run.started",
+        &json!({
+            "name": "triage",
+            "base_branch": "main",
+            "run_branch": "fabro/run-1",
+            "goal": "Triage bug"
+        }),
+    )
+    .await;
+    append_run_event(
+        &run_store,
+        run_id,
+        "run.runnable",
+        &json!({ "source": "start_requested" }),
+    )
+    .await;
+    append_run_event(&run_store, run_id, "run.starting", &json!({})).await;
+    append_run_event(&run_store, run_id, "run.running", &json!({})).await;
+
+    let main_events = state.stores.runs.main_events().await.unwrap();
+    let listed = wait_for_main_events(StdArc::clone(&main_events), 2).await;
+
+    assert!(matches!(listed[0].event.body, MainEventBody::RunStarted(_)));
+    assert!(matches!(listed[1].event.body, MainEventBody::RunRunning(_)));
+
+    drop(run_store);
+    forwarder.abort();
+}
+
+#[tokio::test]
+async fn forward_run_events_ignores_non_v1_and_maps_cancelled() {
+    let state = test_app_state();
+    let run_id = fixtures::RUN_1;
+    let run_store = state.stores.runs.create_run(&run_id).await.unwrap();
+    append_run_event(
+        &run_store,
+        run_id,
+        "run.created",
+        &json!({
+            "settings": WorkflowSettings::default(),
+            "graph": Graph::new("test"),
+            "run_dir": "/tmp/test",
+            "provenance": test_support::test_run_provenance()
+        }),
+    )
+    .await;
+    let forwarder = tokio::spawn(forward_run_events_to_global(
+        StdArc::clone(&state),
+        run_id,
+        run_store.subscribe(),
+    ));
+
+    append_run_event(
+        &run_store,
+        run_id,
+        "stage.started",
+        &json!({
+            "index": 0,
+            "handler_type": "command",
+            "attempt": 1,
+            "max_attempts": 1
+        }),
+    )
+    .await;
+    append_run_event(
+        &run_store,
+        run_id,
+        "run.failed",
+        &json!({
+            "failure": {
+                "reason": "cancelled",
+                "detail": {
+                    "message": "cancelled",
+                    "category": "canceled"
+                }
+            },
+            "timing": {"wall_time_ms": 1, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0}
+        }),
+    )
+    .await;
+
+    let main_events = state.stores.runs.main_events().await.unwrap();
+    let listed = wait_for_main_events(StdArc::clone(&main_events), 1).await;
+
+    assert_eq!(
+        listed
+            .iter()
+            .map(|event| event.event.event_name())
+            .collect::<Vec<_>>(),
+        vec!["fabro.run.cancelled"]
+    );
+
+    drop(run_store);
+    forwarder.abort();
 }
 
 async fn mock_daytona_auth_probe(server: &MockServer) -> httpmock::Mock<'_> {

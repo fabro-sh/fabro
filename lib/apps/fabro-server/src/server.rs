@@ -173,6 +173,7 @@ use crate::{
 
 mod automation_scheduler;
 mod handler;
+mod main_event_mirror;
 mod pull_request_supervisor;
 mod resource_sampler;
 mod session_runtime;
@@ -3317,16 +3318,71 @@ async fn forward_run_events_to_global(
     loop {
         match run_events.recv().await {
             Ok(event) => {
-                let mut runs = state.runs.lock().expect("runs lock poisoned");
-                if let Some(managed_run) = runs.get_mut(&run_id) {
-                    reconcile_live_interview_state_for_event(managed_run, &event.event);
+                {
+                    let mut runs = state.runs.lock().expect("runs lock poisoned");
+                    if let Some(managed_run) = runs.get_mut(&run_id) {
+                        reconcile_live_interview_state_for_event(managed_run, &event.event);
+                    }
                 }
+
+                if let Err(err) =
+                    append_main_event_for_run_event(state.as_ref(), &event.event).await
+                {
+                    tracing::warn!(
+                        run_id = %event.event.run_id,
+                        source_event_id = %event.event.id,
+                        source_event_name = event.event.event_name(),
+                        error = %err,
+                        "Failed to mirror live run event to main event stream"
+                    );
+                }
+
                 let _ = state.global_event_tx.send(event);
             }
-            Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Lagged(skipped)) => {
+                tracing::warn!(
+                    run_id = %run_id,
+                    skipped,
+                    "Run event forwarder lagged; skipped live run events cannot be mirrored to the main stream"
+                );
+            }
             Err(RecvError::Closed) => break,
         }
     }
+}
+
+pub(super) async fn append_main_event_for_run_event(
+    state: &AppState,
+    event: &RunEvent,
+) -> anyhow::Result<()> {
+    if let Some(body) = main_event_mirror::main_event_body_from_run_event(event) {
+        let main_events = state
+            .stores
+            .runs
+            .main_events()
+            .await
+            .context("open main event store for mirroring")?;
+        main_events
+            .append(body)
+            .await
+            .context("append mirrored main event")?;
+    }
+    Ok(())
+}
+
+pub(super) async fn mirror_persisted_run_created_to_main(
+    state: &AppState,
+    run_id: RunId,
+) -> anyhow::Result<()> {
+    let run_store = state.stores.runs.open_run(&run_id).await?;
+    let events = run_store.list_events_from_with_limit(1, 1).await?;
+    let Some(created) = events
+        .into_iter()
+        .find(|event| matches!(event.event.body, EventBody::RunCreated(_)))
+    else {
+        anyhow::bail!("run {run_id} has no run.created event to mirror");
+    };
+    append_main_event_for_run_event(state, &created.event).await
 }
 
 fn managed_run(
