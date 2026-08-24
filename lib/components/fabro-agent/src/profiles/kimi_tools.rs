@@ -380,6 +380,7 @@ mod tests {
 
     fn ctx(env: Arc<dyn Sandbox>) -> ToolContext {
         ToolContext {
+            write_locks: None,
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,

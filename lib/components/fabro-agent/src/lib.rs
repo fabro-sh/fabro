@@ -87,6 +87,8 @@ pub use types::{
     SkillActivationSource, SkillSummary,
 };
 
+pub mod write_locks;
+
 #[cfg(test)]
 #[allow(
     unreachable_pub,

@@ -13,6 +13,7 @@ use crate::session::ToolEnvProvider;
 use crate::tool_registry::{AgentEventEmitter, RegisteredTool, ToolContext, ToolRegistry};
 use crate::truncation::truncate_tool_output;
 use crate::types::AgentEvent;
+use crate::write_locks::{BatchWriteLocks, new_batch_write_locks};
 
 /// Execute tool calls, choosing parallel or sequential based on `parallel`
 /// flag.
@@ -120,6 +121,7 @@ async fn execute_tool_calls_sequential(
             root_session_id,
             tool_env_provider,
             agent_tool_runtime,
+            None,
         )
         .await;
         results.push(result);
@@ -146,6 +148,7 @@ async fn execute_tool_calls_parallel(
 ) -> Vec<ToolResult> {
     let tool_env_provider = tool_env_provider.cloned();
     let agent_tool_runtime = agent_tool_runtime.clone();
+    let write_locks = new_batch_write_locks();
     let futures: Vec<_> = tool_calls
         .iter()
         .map(|tc| {
@@ -159,6 +162,7 @@ async fn execute_tool_calls_parallel(
             let tool_hooks = tool_hooks.cloned();
             let tool_env_provider = tool_env_provider.clone();
             let agent_tool_runtime = agent_tool_runtime.clone();
+            let write_locks = Some(write_locks.clone());
             let access_denial = config.tool_access_denial_reason(&tc.name);
             // Look up the tool before spawning since ToolRegistry is not Send.
             let registered_tool = if access_denial.is_none() {
@@ -180,6 +184,7 @@ async fn execute_tool_calls_parallel(
                     &root_session_id,
                     tool_env_provider.as_ref(),
                     &agent_tool_runtime,
+                    write_locks,
                 )
                 .await
             }
@@ -232,6 +237,7 @@ async fn execute_question_tool_round(
                     root_session_id,
                     tool_env_provider,
                     agent_tool_runtime,
+                    None,
                 )
                 .await,
             );
@@ -319,6 +325,7 @@ pub async fn execute_and_emit_one_tool(
         root_session_id,
         tool_env_provider,
         &AgentToolRuntime::default(),
+        None,
     )
     .await
 }
@@ -339,6 +346,7 @@ async fn execute_and_emit_one_tool_with_runtime(
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
     agent_tool_runtime: &AgentToolRuntime,
+    write_locks: Option<BatchWriteLocks>,
 ) -> ToolResult {
     let access_denial = config.tool_access_denial_reason(&tc.name);
     let registered_tool = if access_denial.is_none() {
@@ -359,6 +367,7 @@ async fn execute_and_emit_one_tool_with_runtime(
         root_session_id,
         tool_env_provider,
         agent_tool_runtime,
+        write_locks,
     )
     .await
 }
@@ -382,6 +391,7 @@ async fn execute_and_emit_one_tool_with_lookup(
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
     agent_tool_runtime: &AgentToolRuntime,
+    write_locks: Option<BatchWriteLocks>,
 ) -> ToolResult {
     emit_tool_call_started(emitter, session_id, tc);
 
@@ -416,6 +426,7 @@ async fn execute_and_emit_one_tool_with_lookup(
         root_session_id,
         tool_env_provider,
         agent_tool_runtime,
+        write_locks,
     )
     .await;
 
@@ -461,6 +472,7 @@ async fn execute_one_tool(
     root_session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
     agent_tool_runtime: &AgentToolRuntime,
+    write_locks: Option<BatchWriteLocks>,
 ) -> ToolResult {
     match registered_tool {
         Some(tool) => {
@@ -482,6 +494,7 @@ async fn execute_one_tool(
                 env,
                 cancel: cancel_token,
                 tool_env_provider: tool_env_provider.cloned(),
+                write_locks,
                 session_id: Some(session_id.to_owned()),
                 root_session_id: Some(root_session_id.to_owned()),
                 tool_call_id: Some(tc.id.clone()),

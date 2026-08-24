@@ -44,6 +44,7 @@ async fn shell_reports_real_docker_process_outcome() {
     let result = (tool.executor)(
         serde_json::json!({"command": "printf 'out'; printf 'err' >&2; exit 7"}),
         ToolContext {
+            write_locks:         None,
             env:                 sandbox.clone() as Arc<dyn Sandbox>,
             cancel:              CancellationToken::new(),
             tool_env_provider:   None,

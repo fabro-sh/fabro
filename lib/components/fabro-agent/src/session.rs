@@ -2275,6 +2275,7 @@ mod tests {
     use super::*;
     use crate::config::{ToolAccess, ToolAccessPolicy, ToolApprovalAdapter, ToolExposureMode};
     use crate::error::CompactionError;
+    use crate::make_edit_file_tool;
     use crate::skills::{Skill, make_use_skill_tool};
     use crate::subagent::{SubAgentStatus, make_wait_tool};
     use crate::test_support::*;
@@ -3735,6 +3736,60 @@ mod tests {
         }
         assert_eq!(start_count, 3);
         assert_eq!(end_count, 3);
+    }
+
+    #[tokio::test]
+    async fn parallel_edit_file_same_file_both_edits_applied_via_session() {
+        // Session-level contract for the same-file write lock: one assistant
+        // response fanning out two edit_file calls to the same file must land
+        // both edits (observed clobber in run 01M0NJZGX7BMJAJC3CZJZ0RNT0).
+        // Slow writes force the interleaving that instant mocks would hide.
+        let mut registry = ToolRegistry::new();
+        registry.register(make_edit_file_tool());
+
+        let responses = vec![
+            multi_tool_call_response(vec![
+                (
+                    "edit_file",
+                    "edit_1",
+                    serde_json::json!({
+                        "file_path": "/main.go",
+                        "old_string": "alpha",
+                        "new_string": "ALPHA"
+                    }),
+                ),
+                (
+                    "edit_file",
+                    "edit_2",
+                    serde_json::json!({
+                        "file_path": "/main.go",
+                        "old_string": "beta",
+                        "new_string": "BETA"
+                    }),
+                ),
+            ]),
+            text_response("All done!"),
+        ];
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(SlowWriteMockSandbox::new(
+            HashMap::from([("/main.go".to_string(), "alpha beta".to_string())]),
+            25,
+        ));
+        let mut session = Session::new(
+            client,
+            profile,
+            env.clone(),
+            SessionOptions::default(),
+            None,
+        );
+
+        session.process_input("Edit both markers").await.unwrap();
+
+        let content = env.inner.read_file_text("/main.go").await.unwrap();
+        assert_eq!(content, "ALPHA BETA");
     }
 
     #[tokio::test]
@@ -6106,6 +6161,7 @@ mod tests {
         let mut rx = session.subscribe();
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let ctx = ToolContext {
+            write_locks: None,
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,

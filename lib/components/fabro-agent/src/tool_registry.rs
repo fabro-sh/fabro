@@ -13,6 +13,7 @@ use crate::sandbox::Sandbox;
 use crate::session::ToolEnvProvider;
 use crate::tool_permissions;
 use crate::types::AgentEvent;
+use crate::write_locks::BatchWriteLocks;
 
 /// Narrow handle a tool uses to publish typed agent events (e.g. todo
 /// mutations) onto the active session's event stream. The implementation
@@ -26,6 +27,10 @@ pub struct ToolContext {
     pub env:                 Arc<dyn Sandbox>,
     pub cancel:              CancellationToken,
     pub tool_env_provider:   Option<Arc<dyn ToolEnvProvider>>,
+    /// Per-batch write locks for parallel tool calls. `None` outside parallel
+    /// dispatch (sequential rounds and direct executor tests have no
+    /// same-batch contention). See `crate::write_locks`.
+    pub write_locks:         Option<BatchWriteLocks>,
     /// Emitting session's ID. `None` when a tool is invoked outside of a
     /// session (e.g. ad-hoc unit tests).
     pub session_id:          Option<String>,
@@ -498,6 +503,7 @@ mod tests {
 
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let ctx = ToolContext {
+            write_locks: None,
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,

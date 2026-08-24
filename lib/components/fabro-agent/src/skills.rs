@@ -652,6 +652,7 @@ name: trimmed
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let args = serde_json::json!({"skill_name": "commit"});
         let ctx = ToolContext {
+            write_locks: None,
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
@@ -675,6 +676,7 @@ name: trimmed
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let args = serde_json::json!({"skill_name": "nonexistent"});
         let ctx = ToolContext {
+            write_locks: None,
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
@@ -696,6 +698,7 @@ name: trimmed
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let args = serde_json::json!({});
         let ctx = ToolContext {
+            write_locks: None,
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
@@ -715,6 +718,7 @@ name: trimmed
         let tool = make_use_skill_tool_for_vocabulary(skills, ToolVocabulary::KimiCode);
         let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
         let ctx = ToolContext {
+            write_locks: None,
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
@@ -756,6 +760,7 @@ name: trimmed
         let result = (tool.executor)(
             serde_json::json!({"skill": "commit", "args": "only staged files"}),
             ToolContext {
+                write_locks:         None,
                 env:                 Arc::new(MockSandbox::default()),
                 cancel:              CancellationToken::new(),
                 tool_env_provider:   None,

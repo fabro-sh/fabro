@@ -424,6 +424,7 @@ impl HookExecutorImpl {
                         env:                 sandbox.clone(),
                         cancel:              cancel.child_token(),
                         tool_env_provider:   None,
+                        write_locks:         None,
                         session_id:          None,
                         root_session_id:     None,
                         tool_call_id:        Some(tc.id.clone()),

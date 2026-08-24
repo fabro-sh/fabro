@@ -11,7 +11,10 @@ use fabro_llm::types::{
 };
 use fabro_model::{AgentProfileKind, ProviderId};
 pub use fabro_sandbox::test_support::{MockSandbox, MutableMockSandbox};
+use fabro_sandbox::{GrepOptions, Result as SandboxResult};
 use futures::stream;
+use tokio::time::{Duration, sleep};
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_profile::AgentProfile;
 use crate::config::SessionOptions;
@@ -404,5 +407,114 @@ pub fn multi_tool_call_response(calls: Vec<(&str, &str, serde_json::Value)>) -> 
         rate_limit:    None,
         cost_usd:      None,
         cost_source:   None,
+    }
+}
+
+/// A [`MutableMockSandbox`] whose writes are delayed by `write_delay_ms`.
+///
+/// Tests for parallel tool execution use this to force the read-modify-write
+/// interleaving that instant mock writes would hide: without a delay, the
+/// first edit future can finish its write before the second one is polled.
+pub struct SlowWriteMockSandbox {
+    pub inner:          MutableMockSandbox,
+    pub write_delay_ms: u64,
+}
+
+impl SlowWriteMockSandbox {
+    pub fn new(files: HashMap<String, String>, write_delay_ms: u64) -> Self {
+        Self {
+            inner: MutableMockSandbox::new(files),
+            write_delay_ms,
+        }
+    }
+}
+
+#[async_trait]
+impl Sandbox for SlowWriteMockSandbox {
+    async fn read_file_bytes(&self, path: &str) -> SandboxResult<Vec<u8>> {
+        self.inner.read_file_bytes(path).await
+    }
+
+    async fn write_file(&self, path: &str, content: &str) -> SandboxResult<()> {
+        sleep(Duration::from_millis(self.write_delay_ms)).await;
+        self.inner.write_file(path, content).await
+    }
+
+    async fn delete_file(&self, path: &str) -> SandboxResult<()> {
+        self.inner.delete_file(path).await
+    }
+
+    async fn file_exists(&self, path: &str) -> SandboxResult<bool> {
+        self.inner.file_exists(path).await
+    }
+
+    async fn list_directory(
+        &self,
+        path: &str,
+        depth: Option<usize>,
+    ) -> SandboxResult<Vec<fabro_sandbox::DirEntry>> {
+        self.inner.list_directory(path, depth).await
+    }
+
+    async fn exec_command(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        working_dir: Option<&str>,
+        env_vars: Option<&std::collections::HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+    ) -> SandboxResult<fabro_sandbox::ExecResult> {
+        self.inner
+            .exec_command(command, timeout_ms, working_dir, env_vars, cancel_token)
+            .await
+    }
+
+    async fn grep(
+        &self,
+        pattern: &str,
+        path: &str,
+        options: &GrepOptions,
+    ) -> SandboxResult<Vec<String>> {
+        self.inner.grep(pattern, path, options).await
+    }
+
+    async fn glob(&self, pattern: &str, path: Option<&str>) -> SandboxResult<Vec<String>> {
+        self.inner.glob(pattern, path).await
+    }
+
+    async fn download_file_to_local(
+        &self,
+        path: &str,
+        local: &std::path::Path,
+    ) -> SandboxResult<()> {
+        self.inner.download_file_to_local(path, local).await
+    }
+
+    async fn upload_file_from_local(
+        &self,
+        local: &std::path::Path,
+        path: &str,
+    ) -> SandboxResult<()> {
+        self.inner.upload_file_from_local(local, path).await
+    }
+
+    async fn initialize(&self) -> SandboxResult<()> {
+        self.inner.initialize().await
+    }
+
+    async fn cleanup(&self) -> SandboxResult<()> {
+        self.inner.cleanup().await
+    }
+
+    fn working_directory(&self) -> &str {
+        self.inner.working_directory()
+    }
+
+    fn platform(&self) -> &str {
+        self.inner.platform()
+    }
+
+    fn os_version(&self) -> String {
+        self.inner.os_version()
     }
 }

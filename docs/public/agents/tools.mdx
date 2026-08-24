@@ -208,6 +208,8 @@ When an Anthropic session has not used `TaskCreate` or `TaskUpdate` for ten assi
 
 When an LLM returns multiple tool calls in a single response, Fabro can execute them in parallel. Independent tool calls run concurrently, while the results are collected in order. If the agent session is cancelled, pending tool calls return a "Cancelled" error.
 
+Write tools that target the same file are serialized: when multiple `edit_file` or `write_file` calls in one batch point at the same path, Fabro acquires a per-path write lock around the whole read-modify-write span, so every edit lands instead of the fastest write silently discarding the others. Calls targeting different files stay fully concurrent. A contention warning is logged when same-path writes are serialized.
+
 ### Argument validation
 
 Before executing a tool, Fabro validates the arguments against the tool's JSON Schema. Invalid arguments are rejected with a descriptive error before the tool executor runs.

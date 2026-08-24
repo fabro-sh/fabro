@@ -1752,6 +1752,7 @@ mod tests {
         let tool = make_wait_tool(manager.clone());
         let tool_cancel = CancellationToken::new();
         let ctx = ToolContext {
+            write_locks:         None,
             env:                 Arc::new(MockSandbox::default()),
             cancel:              tool_cancel.clone(),
             tool_env_provider:   None,

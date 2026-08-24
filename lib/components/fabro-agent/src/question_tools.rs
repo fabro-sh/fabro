@@ -961,6 +961,7 @@ mod tests {
                 }]
             }),
             ToolContext {
+                write_locks:         None,
                 env:                 Arc::new(MockSandbox::default()),
                 cancel:              CancellationToken::new(),
                 tool_env_provider:   None,

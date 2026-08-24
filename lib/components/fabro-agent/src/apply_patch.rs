@@ -959,6 +959,7 @@ mod tests {
 *** End Patch
 ";
         let ctx = ToolContext {
+            write_locks: None,
             env,
             cancel: CancellationToken::new(),
             tool_env_provider: None,
