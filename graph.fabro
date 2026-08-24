@@ -1,0 +1,15 @@
+digraph AdditionalRepositoriesSmoke {
+    graph [goal="Verify one managed GitHub App token can access the origin and one additional repository"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    verify [
+        label="Verify repository access",
+        shape=parallelogram,
+        script="set -eu; test -n \"${GITHUB_TOKEN:-}\"; test -z \"${GH_TOKEN:-}\"; repositories=$(gh api --paginate /installation/repositories --jq '.repositories[].full_name' | sort); printf '%s\\n' \"$repositories\"; printf '%s\\n' \"$repositories\" | grep -Fx 'fabro-sh/fabro'; printf '%s\\n' \"$repositories\" | grep -Fx 'fabro-sh/keystone'; git ls-remote --exit-code https://github.com/fabro-sh/fabro.git HEAD >/dev/null; git ls-remote --exit-code https://github.com/fabro-sh/keystone.git HEAD >/dev/null; printf 'SMOKE_OK: GITHUB_TOKEN accessed origin and additional repository\\n'"
+    ]
+
+    start -> verify -> exit
+}
