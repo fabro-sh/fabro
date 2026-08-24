@@ -242,7 +242,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-08-24T12:15:54.652441529Z",
-  "last_event_at": "2026-08-24T12:15:58.786770931Z",
+  "last_event_at": "2026-08-24T12:16:02.527785112Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -282,9 +282,9 @@
       "diff": {}
     },
     {
-      "seq": 0,
+      "seq": 29,
       "checkpoint": {
-        "timestamp": "2026-08-24T12:15:58.800904056Z",
+        "timestamp": "2026-08-24T12:16:02.527631632Z",
         "current_node": "verify",
         "completed_nodes": [
           "start",
@@ -292,27 +292,23 @@
         ],
         "node_retries": {},
         "context_values": {
-          "outcome": "succeeded",
-          "thread.start.current_node": "verify",
-          "internal.retry_count.verify": 0,
-          "internal.work_dir": "/home/daytona/workspace/fabro",
           "failure_class": "",
-          "internal.run_id": "01M0STV82956V7BP9AKNY3388D",
-          "internal.retry_count.start": 0,
-          "command.output": "blob://sha256/30781a94e143c56f279a447a9f113d5358aac4ae4a4028a32d1722c42daf506a",
-          "internal.fidelity": "compact",
           "graph.goal": "Verify one managed GitHub App token can access the origin and one additional repository",
           "graph.rankdir": "LR",
-          "current_node": "verify",
+          "internal.run_id": "01M0STV82956V7BP9AKNY3388D",
           "internal.node_visit_count": 1,
+          "thread.start.current_node": "verify",
+          "command.output": "blob://sha256/30781a94e143c56f279a447a9f113d5358aac4ae4a4028a32d1722c42daf506a",
           "internal.thread_id": "start",
-          "failure_signature": ""
+          "internal.fidelity": "compact",
+          "current_node": "verify",
+          "failure_signature": "",
+          "outcome": "succeeded",
+          "internal.retry_count.verify": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.retry_count.start": 0
         },
         "node_outcomes": {
-          "start": {
-            "status": "succeeded",
-            "usage": null
-          },
           "verify": {
             "status": "succeeded",
             "context_updates": {
@@ -326,18 +322,71 @@
               "tool_time_ms": 2019,
               "active_time_ms": 2019
             }
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
           }
         },
         "next_node_id": "exit",
+        "git_commit_sha": "405ab56edd783df3fdb9f608cfc57856bd15d221",
         "node_visits": {
-          "start": 1,
-          "verify": 1
+          "verify": 1,
+          "start": 1
         }
       },
-      "diff": {}
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
     }
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-08-24T12:16:02.541247921Z",
+    "status": "succeeded",
+    "timing": {
+      "wall_time_ms": 7875,
+      "inference_time_ms": 0,
+      "tool_time_ms": 2019,
+      "active_time_ms": 2019
+    },
+    "final_git_commit_sha": "405ab56edd783df3fdb9f608cfc57856bd15d221",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "verify",
+        "stage_label": "verify",
+        "timing": {
+          "wall_time_ms": 2023,
+          "inference_time_ms": 0,
+          "tool_time_ms": 2019,
+          "active_time_ms": 2019
+        },
+        "retries": 0
+      }
+    ],
+    "total_retries": 0,
+    "diff": {
+      "summary": {
+        "files_changed": 0,
+        "additions": 0,
+        "deletions": 0
+      }
+    }
+  },
   "sandbox": {
     "kind": "ready",
     "plan": {
@@ -403,7 +452,12 @@
       "first_event_seq": 22,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: set -eu; test -n \"${GITHUB_TOKEN:-}\"; test -z \"${GH_TOKEN:-}\"; repositories=$(gh api --paginate /installation/repositories --jq '.repositories[].full_name' | sort); printf '%s\\n' \"$repositories\"; printf '%s\\n' \"$repositories\" | grep -Fx 'fabro-sh/fabro'; printf '%s\\n' \"$repositories\" | grep -Fx 'fabro-sh/keystone'; git ls-remote --exit-code https://github.com/fabro-sh/fabro.git HEAD >/dev/null; git ls-remote --exit-code https://github.com/fabro-sh/keystone.git HEAD >/dev/null; printf 'SMOKE_OK: GITHUB_TOKEN accessed origin and additional repository\\n'",
+        "failure_reason": null,
+        "timestamp": "2026-08-24T12:15:58.800188455Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -427,6 +481,12 @@
       "started_at": "2026-08-24T12:15:56.763733063Z",
       "handler": "command",
       "graph_visit": 1,
+      "timing": {
+        "wall_time_ms": 2023,
+        "inference_time_ms": 0,
+        "tool_time_ms": 2019,
+        "active_time_ms": 2019
+      },
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -436,7 +496,43 @@
         "cache_write_tokens": 0
       },
       "agent_control": "running",
-      "state": "running"
+      "state": "succeeded"
+    },
+    "exit@1": {
+      "first_event_seq": 32,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-08-24T12:16:02.527785112Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-08-24T12:16:02.527754667Z",
+      "handler": "exit",
+      "graph_visit": 1,
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "agent_control": "running",
+      "state": "succeeded"
     }
   }
 }
