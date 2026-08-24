@@ -42,8 +42,9 @@ use tracing::info;
 use super::super::{
     AppState, DeleteRunOutcome, ListResponse, RunExecutionMode, VariableError, answer_from_request,
     api_question_from_pending_interview, clamp_page_limit, clamp_page_offset, default_page_limit,
-    delete_run_internal, load_pending_interview, managed_run, parse_run_id_path,
-    parse_stage_id_path, reject_if_archived, submit_pending_interview_answer, workflow_event,
+    delete_run_internal, load_pending_interview, managed_run, mirror_persisted_run_created_to_main,
+    parse_run_id_path, parse_stage_id_path, reject_if_archived, submit_pending_interview_answer,
+    workflow_event,
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
@@ -821,6 +822,18 @@ pub(crate) async fn create_run_from_manifest(
             .into_response();
         }
     };
+    if let Err(err) = mirror_persisted_run_created_to_main(state.as_ref(), created.run_id).await {
+        tracing::error!(
+            run_id = %created.run_id,
+            error = %err,
+            "Failed to mirror persisted run creation to main event stream"
+        );
+        return ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record run creation.",
+        )
+        .into_response();
+    }
     let created_at = created.run_id.created_at();
     let summary = match state
         .stores

@@ -1,5 +1,6 @@
 mod auth_codes;
 mod auth_tokens;
+mod main_event_store;
 mod projection_cache;
 mod run_catalog_index;
 mod run_store;
@@ -13,6 +14,7 @@ pub use auth_codes::{AuthCode, AuthCodeStore};
 pub use auth_tokens::{ConsumeOutcome, RefreshToken, RefreshTokenStore};
 use chrono::{DateTime, Utc};
 use fabro_types::{Run, RunId, SessionId};
+pub use main_event_store::MainEventStore;
 use object_store::ObjectStore;
 pub use projection_cache::CachedRunProjection;
 use projection_cache::RunProjectionCache;
@@ -47,6 +49,7 @@ pub struct Database {
     active_runs: Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
     blobs: Arc<OnceCell<Arc<BlobStore>>>,
     catalog_index: Arc<OnceCell<Arc<RunCatalogIndex>>>,
+    main_events: Arc<OnceCell<Arc<MainEventStore>>>,
     auth_codes: Arc<OnceCell<Arc<AuthCodeStore>>>,
     refresh_tokens: Arc<OnceCell<Arc<RefreshTokenStore>>>,
     projection_cache: Arc<RunProjectionCache>,
@@ -80,6 +83,7 @@ impl Database {
             active_runs: Arc::new(Mutex::new(HashMap::new())),
             blobs: Arc::new(OnceCell::new()),
             catalog_index: Arc::new(OnceCell::new()),
+            main_events: Arc::new(OnceCell::new()),
             auth_codes: Arc::new(OnceCell::new()),
             refresh_tokens: Arc::new(OnceCell::new()),
             projection_cache: Arc::new(RunProjectionCache::default()),
@@ -453,6 +457,15 @@ impl Database {
         Ok(Arc::clone(store))
     }
 
+    pub async fn main_events(&self) -> Result<Arc<MainEventStore>> {
+        let db = self.open_db().await?;
+        let store = self
+            .main_events
+            .get_or_try_init(|| async { Ok::<_, Error>(Arc::new(MainEventStore::open(db).await?)) })
+            .await?;
+        Ok(Arc::clone(store))
+    }
+
     pub async fn refresh_tokens(&self) -> Result<Arc<RefreshTokenStore>> {
         let store = self
             .refresh_tokens
@@ -514,8 +527,9 @@ fn active_run_from(
 mod tests {
     use chrono::{DateTime, Utc};
     use fabro_types::{
-        AttrValue, FailureReason, Graph, RunControlAction, RunSpec, RunStatus, StageId,
-        SuccessReason, WorkflowSettings, test_support,
+        AttrValue, FailureReason, Graph, MainEventBody, MainEventLifecycleProps, MainEventSource,
+        MainEventStartedProps, RunControlAction, RunSpec, RunStatus, StageId, SuccessReason,
+        WorkflowSettings, test_support,
     };
     use futures::TryStreamExt;
     use object_store::memory::InMemory;
@@ -654,6 +668,30 @@ mod tests {
         ))
         .await
         .unwrap();
+    }
+
+    fn main_event_body(run_id: RunId, source_event_name: &str) -> MainEventBody {
+        let source = MainEventSource {
+            run_id,
+            source_event_id: format!("evt-{source_event_name}"),
+            source_event_ts: dt("2026-06-21T12:00:00Z"),
+            source_event_name: source_event_name.to_string(),
+            actor: None,
+        };
+        match source_event_name {
+            "run.started" => MainEventBody::RunStarted(MainEventStartedProps {
+                source,
+                name: "test".to_string(),
+                base_branch: None,
+                base_sha: None,
+                run_branch: None,
+                worktree_dir: None,
+                goal: None,
+            }),
+            "run.running" => MainEventBody::RunRunning(MainEventLifecycleProps { source }),
+            "run.paused" => MainEventBody::RunPaused(MainEventLifecycleProps { source }),
+            other => panic!("unsupported test main event source {other}"),
+        }
     }
 
     async fn append_created_with_parent(
@@ -825,6 +863,95 @@ mod tests {
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, test_run_id("run-2"));
         assert!(!list_paths(object_store, "runs/").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn main_events_append_list_and_subscribe_in_order() {
+        let (_object_store, store) = make_store();
+        let main_events = store.main_events().await.unwrap();
+        let run_id = test_run_id("run-1");
+        let mut rx = main_events.subscribe();
+
+        let first = main_events
+            .append(main_event_body(run_id, "run.started"))
+            .await
+            .unwrap();
+        let second = main_events
+            .append(main_event_body(run_id, "run.running"))
+            .await
+            .unwrap();
+
+        assert_eq!(first.seq, 1);
+        assert_eq!(second.seq, 2);
+        assert_eq!(first.event.event_name(), "fabro.run.started");
+
+        assert_eq!(rx.recv().await.unwrap().seq, 1);
+        assert_eq!(rx.recv().await.unwrap().seq, 2);
+
+        let listed = main_events.list_from_with_limit(1, 10).await.unwrap();
+        assert_eq!(
+            listed.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn main_events_list_returns_limit_plus_one_from_start_seq() {
+        let (_object_store, store) = make_store();
+        let main_events = store.main_events().await.unwrap();
+        let run_id = test_run_id("run-1");
+
+        for source in ["run.started", "run.running", "run.paused"] {
+            main_events
+                .append(main_event_body(run_id, source))
+                .await
+                .unwrap();
+        }
+
+        let listed = main_events.list_from_with_limit(2, 1).await.unwrap();
+        assert_eq!(
+            listed.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn main_events_recover_next_sequence_after_reopen() {
+        let (object_store, store) = make_store();
+        let run_id = test_run_id("run-1");
+        let main_events = store.main_events().await.unwrap();
+        main_events
+            .append(main_event_body(run_id, "run.started"))
+            .await
+            .unwrap();
+
+        let reopened = Database::new(object_store, "runs", Duration::from_millis(1), None);
+        let reopened_main_events = reopened.main_events().await.unwrap();
+        let appended = reopened_main_events
+            .append(main_event_body(run_id, "run.running"))
+            .await
+            .unwrap();
+
+        assert_eq!(appended.seq, 2);
+    }
+
+    #[tokio::test]
+    async fn delete_run_keeps_main_events() {
+        let (_object_store, store) = make_store();
+        let run = store.create_run(&test_run_id("run-1")).await.unwrap();
+        append_created(&run, "run-1", dt("2026-03-27T12:00:00Z")).await;
+
+        let main_events = store.main_events().await.unwrap();
+        main_events
+            .append(main_event_body(test_run_id("run-1"), "run.started"))
+            .await
+            .unwrap();
+
+        store.delete_run(&test_run_id("run-1")).await.unwrap();
+
+        let listed = main_events.list_from_with_limit(1, 10).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].event.event_name(), "fabro.run.started");
     }
 
     #[tokio::test]

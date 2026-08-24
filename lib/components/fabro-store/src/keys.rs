@@ -91,6 +91,16 @@ pub(crate) fn run_events_range(run_id: &RunId, start_seq: u32) -> Range<SlateKey
     run_event_seq_prefix(run_id, start_seq)..end
 }
 
+pub(crate) fn main_events_prefix() -> SlateKey {
+    SlateKey::new("events").with("main").into_prefix()
+}
+
+pub(crate) fn main_event_key(seq: u32, epoch_ms: i64) -> SlateKey {
+    SlateKey::new("events")
+        .with("main")
+        .with(format!("{seq:06}-{epoch_ms}"))
+}
+
 pub(crate) fn sessions_by_id_prefix() -> SlateKey {
     SlateKey::new("sessions").with("by-id").into_prefix()
 }
@@ -111,6 +121,16 @@ pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
     segments.next()?.split_once('-')?.0.parse().ok()
 }
 
+pub(crate) fn parse_main_event_seq(key: &str) -> Option<u32> {
+    let mut segments = SlateKey::segments(key);
+    if segments.next()? != "events" {
+        return None;
+    }
+    if segments.next()? != "main" {
+        return None;
+    }
+    segments.next()?.split_once('-')?.0.parse().ok()
+}
 #[cfg(test)]
 mod tests {
     use fabro_types::RunId;
@@ -140,6 +160,13 @@ mod tests {
             "events",
             "000007-123"
         ]);
+    }
+
+    #[test]
+    fn main_event_key_segments() {
+        let key = main_event_key(7, 123);
+        let segments: Vec<&str> = SlateKey::segments(key.as_str()).collect();
+        assert_eq!(segments, ["events", "main", "000007-123"]);
     }
 
     #[test]
@@ -174,6 +201,23 @@ mod tests {
         assert_eq!(
             parse_event_seq(run_event_key(&run_id, 7, 123).as_str()),
             Some(7)
+        );
+    }
+
+    #[test]
+    fn parse_main_event_seq_roundtrip() {
+        assert_eq!(
+            parse_main_event_seq(main_event_key(7, 123).as_str()),
+            Some(7)
+        );
+        assert_eq!(
+            parse_main_event_seq(
+                SlateKey::new("events")
+                    .with("other")
+                    .with("000007-123")
+                    .as_str()
+            ),
+            None
         );
     }
 
