@@ -4,7 +4,7 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
-use fabro_sandbox::{TerminalSize, open_terminal_for_run};
+use fabro_sandbox::{SandboxActivation, TerminalSize, open_terminal_for_run};
 use fabro_types::{
     RunSandboxInstance, SandboxProviderKind, SandboxServiceDiscoverySource, SandboxServiceListMeta,
 };
@@ -20,6 +20,7 @@ use super::super::{
     parse_run_id_path, post, reconnect_for_run, reject_if_archived, render_with_causes,
     sandbox_details,
 };
+use crate::run_files::InspectionSandbox;
 
 const MAX_TERMINAL_CONTROL_BYTES: usize = 4096;
 const DEFAULT_VNC_NO_VNC_PORT: u16 = 6080;
@@ -433,10 +434,11 @@ async fn create_ssh_access(
             }
         }
         SandboxProviderKind::Docker => {
-            let sandbox = match reconnect_run_sandbox_instance(&state, &id, &record).await {
-                Ok(sandbox) => sandbox,
-                Err(response) => return response,
-            };
+            let (sandbox, _activation) =
+                match reconnect_run_sandbox_instance(&state, &id, &record).await {
+                    Ok(pair) => pair,
+                    Err(response) => return response,
+                };
             match sandbox.ssh_access_command().await {
                 Ok(Some(command)) => {
                     (StatusCode::CREATED, Json(SshAccessResponse { command })).into_response()
@@ -543,11 +545,16 @@ async fn list_sandbox_files(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let sandbox = match reconnect_run_sandbox(&state, &id).await {
-        Ok(sandbox) => sandbox,
+    let inspection = match reconnect_run_sandbox_for_inspection(&state, &id).await {
+        Ok(inspection) => inspection,
         Err(response) => return response,
     };
-    match sandbox.list_directory(&params.path, params.depth).await {
+    let listing = inspection
+        .sandbox()
+        .list_directory(&params.path, params.depth)
+        .await;
+    inspection.finish().await;
+    match listing {
         Ok(entries) => Json(SandboxFileListResponse {
             data: entries
                 .into_iter()
@@ -577,11 +584,12 @@ async fn list_sandbox_services(
         Err(response) => return response,
     };
     let provider = record.provider;
-    let sandbox = match reconnect_run_sandbox_instance(&state, &id, &record).await {
-        Ok(sandbox) => sandbox,
+    let inspection = match reconnect_run_sandbox_for_inspection(&state, &id).await {
+        Ok(inspection) => inspection,
         Err(response) => return response,
     };
-    let result = match sandbox
+    let exec = inspection
+        .sandbox()
         .exec_command(
             LIST_SANDBOX_SERVICES_COMMAND,
             LIST_SANDBOX_SERVICES_TIMEOUT_MS,
@@ -589,8 +597,9 @@ async fn list_sandbox_services(
             None,
             None,
         )
-        .await
-    {
+        .await;
+    inspection.finish().await;
+    let result = match exec {
         Ok(result) => result,
         Err(err) => {
             return ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response();
@@ -798,8 +807,8 @@ async fn get_sandbox_file(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let sandbox = match reconnect_run_sandbox(&state, &id).await {
-        Ok(sandbox) => sandbox,
+    let inspection = match reconnect_run_sandbox_for_inspection(&state, &id).await {
+        Ok(inspection) => inspection,
         Err(response) => return response,
     };
     let temp = match NamedTempFile::new() {
@@ -809,10 +818,12 @@ async fn get_sandbox_file(
                 .into_response();
         }
     };
-    if let Err(err) = sandbox
+    let download = inspection
+        .sandbox()
         .download_file_to_local(&params.path, temp.path())
-        .await
-    {
+        .await;
+    inspection.finish().await;
+    if let Err(err) = download {
         return ApiError::new(StatusCode::NOT_FOUND, err.display_with_causes()).into_response();
     }
     match fs::read(temp.path()).await {
@@ -837,8 +848,8 @@ async fn put_sandbox_file(
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
-    let sandbox = match reconnect_run_sandbox(&state, &id).await {
-        Ok(sandbox) => sandbox,
+    let (sandbox, _activation) = match reconnect_run_sandbox(&state, &id).await {
+        Ok(pair) => pair,
         Err(response) => return response,
     };
     let temp = match NamedTempFile::new() {
@@ -864,7 +875,7 @@ async fn put_sandbox_file(
 async fn reconnect_run_sandbox(
     state: &Arc<AppState>,
     run_id: &RunId,
-) -> Result<Box<dyn Sandbox>, Response> {
+) -> Result<(Box<dyn Sandbox>, SandboxActivation), Response> {
     let record = load_run_sandbox_instance(state, run_id).await?;
     reconnect_run_sandbox_instance(state, run_id, &record).await
 }
@@ -873,7 +884,7 @@ async fn reconnect_run_sandbox_instance(
     state: &Arc<AppState>,
     run_id: &RunId,
     record: &RunSandboxInstance,
-) -> Result<Box<dyn Sandbox>, Response> {
+) -> Result<(Box<dyn Sandbox>, SandboxActivation), Response> {
     let daytona_api_key = load_daytona_api_key(state).await?;
     let sandbox = reconnect_for_run(record, daytona_api_key, Some(*run_id))
         .await
@@ -881,10 +892,28 @@ async fn reconnect_run_sandbox_instance(
             let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
             ApiError::new(StatusCode::CONFLICT, detail).into_response()
         })?;
-    sandbox.activate().await.map_err(|err| {
+    let activation = sandbox.activate().await.map_err(|err| {
         ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response()
     })?;
-    Ok(sandbox)
+    Ok((sandbox, activation))
+}
+
+/// Reconnect a run sandbox for a read-only inspection and wrap it in an
+/// [`InspectionSandbox`] guard that restores the stopped state when the
+/// inspection itself started a sandbox of an already-terminated run.
+async fn reconnect_run_sandbox_for_inspection(
+    state: &Arc<AppState>,
+    run_id: &RunId,
+) -> Result<InspectionSandbox, Response> {
+    let status = state
+        .cached_run(run_id)
+        .await
+        .map_err(IntoResponse::into_response)?
+        .projection
+        .status;
+    let record = load_run_sandbox_instance(state, run_id).await?;
+    let (sandbox, activation) = reconnect_run_sandbox_instance(state, run_id, &record).await?;
+    Ok(InspectionSandbox::new(sandbox, *run_id, activation, status))
 }
 
 async fn reconnect_daytona_sandbox(

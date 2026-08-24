@@ -61,8 +61,8 @@ pub use sandbox::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
     ExecStreamingRequest, ExecStreamingResult, GitRunInfo, GitSetupIntent, GrepOptions,
     PushAttempt, PushError, PushReport, RefreshOutcome, RemoteCredentialAction, Sandbox,
-    SandboxEvent, SandboxEventCallback, SandboxFile, StderrCollector, StdioProcess,
-    StdioProcessHandle, StdioProcessTermination, WalkOptions, format_lines_numbered,
+    SandboxActivation, SandboxEvent, SandboxEventCallback, SandboxFile, StderrCollector,
+    StdioProcess, StdioProcessHandle, StdioProcessTermination, WalkOptions, format_lines_numbered,
     redacted_output_tail, setup_git_via_exec, shell_quote,
 };
 pub use sandbox_spec::SandboxSpec;

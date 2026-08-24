@@ -18,9 +18,9 @@ use crate::sandbox::{
 };
 use crate::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
-    ExecStreamingRequest, ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent,
-    SandboxEventCallback, SandboxFile, StderrCollector, StdioProcess, StdioProcessHandle,
-    StdioProcessTermination, WalkOptions,
+    ExecStreamingRequest, ExecStreamingResult, GrepOptions, Sandbox, SandboxActivation,
+    SandboxEvent, SandboxEventCallback, SandboxFile, StderrCollector, StdioProcess,
+    StdioProcessHandle, StdioProcessTermination, WalkOptions,
 };
 
 /// Remediation shown when the worker has no usable Bash.
@@ -871,11 +871,11 @@ impl Sandbox for LocalSandbox {
         result
     }
 
-    async fn activate(&self) -> crate::Result<()> {
+    async fn activate(&self) -> crate::Result<SandboxActivation> {
         // Local sandboxes have no provider resource that can stop or pause.
         // Resume paths still call `start()` to recreate the directory and
         // verify Bash.
-        Ok(())
+        Ok(SandboxActivation::AlreadyActive)
     }
 
     async fn git_push_ref(

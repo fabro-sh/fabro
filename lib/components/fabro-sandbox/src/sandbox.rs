@@ -241,7 +241,7 @@ macro_rules! delegate_sandbox {
                 self.$field.initialize().await
             }
 
-            async fn activate(&self) -> $crate::Result<()> {
+            async fn activate(&self) -> $crate::Result<$crate::SandboxActivation> {
                 self.$field.activate().await
             }
 
@@ -1076,6 +1076,19 @@ impl RefreshOutcome {
     }
 }
 
+/// Outcome of [`Sandbox::activate`], telling callers whether the call
+/// changed the sandbox lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxActivation {
+    /// The sandbox was already running (or only needed unpausing); the caller
+    /// is not responsible for stopping it afterwards.
+    AlreadyActive,
+    /// The sandbox transitioned from stopped to running because of this call.
+    /// Read-only inspections that borrow the sandbox transiently should stop
+    /// it again when they are finished, or it stays running forever.
+    Started,
+}
+
 #[async_trait]
 pub trait Sandbox: Send + Sync {
     async fn read_file_bytes(&self, path: &str) -> crate::Result<Vec<u8>>;
@@ -1262,9 +1275,11 @@ pub trait Sandbox: Send + Sync {
     /// This access-time operation must be idempotent. Providers that can stop
     /// independently should avoid restarting an already-active sandbox. This
     /// lightweight check does not require the full health verification done by
-    /// [`Sandbox::start`], and it does not keep a sandbox active between calls.
-    async fn activate(&self) -> crate::Result<()> {
-        self.start().await
+    /// [`Sandbox::start`], and it does not keep a sandbox active between calls:
+    /// when the call reports [`SandboxActivation::Started`], transient
+    /// read-only callers must stop the sandbox again when they are done.
+    async fn activate(&self) -> crate::Result<SandboxActivation> {
+        self.start().await.map(|()| SandboxActivation::Started)
     }
     async fn start(&self) -> crate::Result<()> {
         Ok(())

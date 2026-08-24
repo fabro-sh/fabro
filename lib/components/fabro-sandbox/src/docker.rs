@@ -39,9 +39,9 @@ use crate::sandbox::{
 };
 use crate::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
-    ExecStreamingRequest, ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent,
-    SandboxEventCallback, SandboxFile, StderrCollector, StdioProcess, StdioProcessHandle,
-    StdioProcessTermination, WalkOptions, format_lines_numbered, shell_quote,
+    ExecStreamingRequest, ExecStreamingResult, GrepOptions, Sandbox, SandboxActivation,
+    SandboxEvent, SandboxEventCallback, SandboxFile, StderrCollector, StdioProcess,
+    StdioProcessHandle, StdioProcessTermination, WalkOptions, format_lines_numbered, shell_quote,
 };
 
 const DOCKER_BASH_REQUIREMENT: &str = "Docker sandboxes require /bin/bash for every command, with no `sh` fallback; use an \
@@ -1843,23 +1843,27 @@ impl Sandbox for DockerSandbox {
             .await
     }
 
-    async fn activate(&self) -> crate::Result<()> {
+    async fn activate(&self) -> crate::Result<SandboxActivation> {
         let container_id = self.container_id()?.to_string();
         let inspect = self.inspect_container(&container_id).await?;
         let labels = container_labels(&inspect);
         verify_managed_labels(&container_id, &labels, self.run_id.as_ref())?;
         let Some(action) = activation_action(&inspect) else {
-            return Ok(());
+            return Ok(SandboxActivation::AlreadyActive);
         };
         match action {
+            // Unpausing leaves an already-running container running; the
+            // caller did not borrow a stopped lifecycle and must not stop it.
             ContainerStartAction::Unpause => {
                 self.set_container_running(&container_id, &labels, action)
-                    .await
+                    .await?;
+                Ok(SandboxActivation::AlreadyActive)
             }
             ContainerStartAction::Start => {
                 let started = self.begin_start();
                 self.complete_start(started, &container_id, &labels, action)
-                    .await
+                    .await?;
+                Ok(SandboxActivation::Started)
             }
         }
     }
@@ -2554,13 +2558,63 @@ mod tests {
             .expect("mock Docker client should connect");
         let sandbox = test_docker_sandbox(docker, "test-container");
 
-        sandbox
+        let activation = sandbox
             .activate()
             .await
             .expect("a paused running container should be unpaused");
 
+        assert_eq!(activation, SandboxActivation::AlreadyActive);
         inspect.assert_calls_async(1).await;
         unpause.assert_calls_async(1).await;
+        start.assert_calls_async(0).await;
+    }
+
+    #[tokio::test]
+    async fn activate_reports_already_active_for_running_container() {
+        let server = MockServer::start_async().await;
+        let inspect = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path_suffix("/containers/test-container/json");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(serde_json::json!({
+                        "Config": {
+                            "Labels": managed_labels::for_run(None)
+                        },
+                        "State": {
+                            "Running": true,
+                            "Paused": false
+                        }
+                    }));
+            })
+            .await;
+        let unpause = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path_suffix("/containers/test-container/unpause");
+                then.status(204);
+            })
+            .await;
+        let start = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path_suffix("/containers/test-container/start");
+                then.status(204);
+            })
+            .await;
+        let docker = Docker::connect_with_http(&server.base_url(), 5, API_DEFAULT_VERSION)
+            .expect("mock Docker client should connect");
+        let sandbox = test_docker_sandbox(docker, "test-container");
+
+        let activation = sandbox
+            .activate()
+            .await
+            .expect("a running container needs no lifecycle change");
+
+        assert_eq!(activation, SandboxActivation::AlreadyActive);
+        inspect.assert_calls_async(1).await;
+        unpause.assert_calls_async(0).await;
         start.assert_calls_async(0).await;
     }
 

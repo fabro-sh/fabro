@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 use crate::sandbox::{self, StdioProcessControl};
 use crate::{
     DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult, ExecStreamingRequest, GrepOptions,
-    Sandbox, SandboxEvent, SandboxEventCallback, SandboxFile, StderrCollector, StdioProcess,
-    StdioProcessHandle, StdioProcessTermination, WalkOptions,
+    Sandbox, SandboxActivation, SandboxEvent, SandboxEventCallback, SandboxFile, StderrCollector,
+    StdioProcess, StdioProcessHandle, StdioProcessTermination, WalkOptions,
 };
 
 // --- MockSandbox ---
@@ -505,7 +505,7 @@ impl Sandbox for MockSandbox {
         Ok(())
     }
 
-    async fn activate(&self) -> crate::Result<()> {
+    async fn activate(&self) -> crate::Result<SandboxActivation> {
         *self
             .activate_calls
             .lock()
@@ -516,7 +516,7 @@ impl Sandbox for MockSandbox {
                 std::io::Error::other(error.clone()),
             ));
         }
-        self.start().await
+        self.start().await.map(|()| SandboxActivation::Started)
     }
 
     async fn start(&self) -> crate::Result<()> {

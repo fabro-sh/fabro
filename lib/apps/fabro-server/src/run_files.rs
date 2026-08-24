@@ -36,9 +36,9 @@ use fabro_api::types::{
     RunFilesMetaToSha,
 };
 use fabro_sandbox::reconnect::reconnect_for_run;
-use fabro_sandbox::shell_quote;
+use fabro_sandbox::{SandboxActivation, shell_quote};
 use fabro_static::EnvVars;
-use fabro_types::RunId;
+use fabro_types::{RunId, RunStatus};
 use fabro_workflow::sandbox_git::{
     DiffError, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange, list_changed_files_raw,
     list_diff_numstat, stream_blob_metadata, stream_blobs,
@@ -306,20 +306,25 @@ async fn materialize_sandbox_range_path(
 ) -> ListRunFilesResult {
     let start = Instant::now();
     let projection = load_projection(state, run_id).await?;
-    let sandbox = reconnect_run_sandbox(state, run_id, &projection).await?;
-    let (resolved_to_sha, to_sha_committed_at) =
-        resolve_ref_sha_and_time(sandbox.as_ref(), to_sha).await?;
-    materialize_committed_range_sandbox_path(
-        sandbox.as_ref(),
-        None,
-        from_sha,
-        &resolved_to_sha,
-        to_sha_committed_at,
-        RunFilesMetaScope::Range,
-        run_id,
-        start,
-    )
-    .await
+    let inspection = reconnect_run_sandbox(state, run_id, &projection).await?;
+    let outcome = async {
+        let (resolved_to_sha, to_sha_committed_at) =
+            resolve_ref_sha_and_time(inspection.sandbox(), to_sha).await?;
+        materialize_committed_range_sandbox_path(
+            inspection.sandbox(),
+            None,
+            from_sha,
+            &resolved_to_sha,
+            to_sha_committed_at,
+            RunFilesMetaScope::Range,
+            run_id,
+            start,
+        )
+        .await
+    }
+    .await;
+    inspection.finish().await;
+    outcome
 }
 
 async fn materialize_run_commits(
@@ -333,25 +338,30 @@ async fn materialize_run_commits(
         .as_ref()
         .and_then(|s| s.base_sha.clone())
         .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "Run has no base SHA."))?;
-    let sandbox = reconnect_run_sandbox(state, run_id, &projection).await?;
-    let (head_sha, _) = resolve_ref_sha_and_time(sandbox.as_ref(), "HEAD").await?;
-    let output = git_log_commits(sandbox.as_ref(), &base_sha, &head_sha, limit + 1).await?;
-    let mut commits = parse_git_log_commits(&output)?;
-    let truncated = commits.len() > usize::try_from(limit).unwrap_or(usize::MAX);
-    commits.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
-    let total_returned = u64::try_from(commits.len()).unwrap_or(u64::MAX);
+    let inspection = reconnect_run_sandbox(state, run_id, &projection).await?;
+    let outcome = async {
+        let (head_sha, _) = resolve_ref_sha_and_time(inspection.sandbox(), "HEAD").await?;
+        let output = git_log_commits(inspection.sandbox(), &base_sha, &head_sha, limit + 1).await?;
+        let mut commits = parse_git_log_commits(&output)?;
+        let truncated = commits.len() > usize::try_from(limit).unwrap_or(usize::MAX);
+        commits.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+        let total_returned = u64::try_from(commits.len()).unwrap_or(u64::MAX);
 
-    Ok(PaginatedRunCommitList {
-        data: commits,
-        meta: RunCommitsMeta {
-            source: RunCommitsMetaSource::Sandbox,
-            base_sha: sha_newtype::<RunCommitsMetaBaseSha>(&base_sha)?,
-            head_sha: sha_newtype::<RunCommitsMetaHeadSha>(&head_sha)?,
-            limit: NonZeroU64::new(limit).expect("commit limit is non-zero"),
-            total_returned,
-            truncated,
-        },
-    })
+        Ok(PaginatedRunCommitList {
+            data: commits,
+            meta: RunCommitsMeta {
+                source: RunCommitsMetaSource::Sandbox,
+                base_sha: sha_newtype::<RunCommitsMetaBaseSha>(&base_sha)?,
+                head_sha: sha_newtype::<RunCommitsMetaHeadSha>(&head_sha)?,
+                limit: NonZeroU64::new(limit).expect("commit limit is non-zero"),
+                total_returned,
+                truncated,
+            },
+        })
+    }
+    .await;
+    inspection.finish().await;
+    outcome
 }
 
 async fn git_log_commits(
@@ -524,8 +534,8 @@ async fn materialize_sandbox_path(
         ));
     };
 
-    let sandbox = match reconnect_run_sandbox(state, run_id, &projection).await {
-        Ok(sandbox) => sandbox,
+    let inspection = match reconnect_run_sandbox(state, run_id, &projection).await {
+        Ok(inspection) => inspection,
         Err(err) if sandbox_read_error_should_fallback(&err) => {
             return Ok(build_fallback_response(
                 &projection,
@@ -540,7 +550,7 @@ async fn materialize_sandbox_path(
     let materialized = match scope {
         ListRunFilesScope::Committed => {
             materialize_committed_sandbox_path(
-                sandbox.as_ref(),
+                inspection.sandbox(),
                 &projection,
                 &base_sha,
                 run_id,
@@ -550,7 +560,7 @@ async fn materialize_sandbox_path(
         }
         ListRunFilesScope::Uncommitted => {
             materialize_working_tree_sandbox_path(
-                sandbox.as_ref(),
+                inspection.sandbox(),
                 "HEAD",
                 RunFilesMetaScope::Uncommitted,
                 run_id,
@@ -560,7 +570,7 @@ async fn materialize_sandbox_path(
         }
         ListRunFilesScope::All => {
             materialize_working_tree_sandbox_path(
-                sandbox.as_ref(),
+                inspection.sandbox(),
                 &base_sha,
                 RunFilesMetaScope::All,
                 run_id,
@@ -570,7 +580,7 @@ async fn materialize_sandbox_path(
         }
     };
 
-    match materialized {
+    let outcome = match materialized {
         Ok(body) => Ok(body),
         Err(err) if sandbox_read_error_should_fallback(&err) => Ok(build_fallback_response(
             &projection,
@@ -579,7 +589,9 @@ async fn materialize_sandbox_path(
             start,
         )),
         Err(err) => Err(err),
-    }
+    };
+    inspection.finish().await;
+    outcome
 }
 
 fn sandbox_read_error_should_fallback(err: &ApiError) -> bool {
@@ -1198,11 +1210,71 @@ async fn load_projection(
     Ok(state.cached_run(run_id).await?.projection)
 }
 
+/// A run sandbox borrowed by a read-only inspection.
+///
+/// Inspection endpoints reconnect to the run's sandbox and activate it. When
+/// the run already reached a terminal state, activation may start a sandbox
+/// the run lifecycle previously stopped — and nothing else would ever stop it
+/// again, leaking a running sandbox forever. The guard records whether this
+/// inspection is responsible for restoring the stopped state; call
+/// [`InspectionSandbox::finish`] on every exit path.
+pub(crate) struct InspectionSandbox {
+    sandbox:    Box<dyn Sandbox>,
+    run_id:     RunId,
+    stop_after: bool,
+}
+
+impl InspectionSandbox {
+    /// Wrap an activated sandbox for a read-only inspection of a run in
+    /// `status`. The guard stops the sandbox again in [`Self::finish`] only
+    /// when the activation started it and the run already terminated.
+    pub(crate) fn new(
+        sandbox: Box<dyn Sandbox>,
+        run_id: RunId,
+        activation: SandboxActivation,
+        status: RunStatus,
+    ) -> Self {
+        Self {
+            sandbox,
+            run_id,
+            stop_after: inspection_should_stop(activation, status),
+        }
+    }
+
+    pub(crate) fn sandbox(&self) -> &dyn Sandbox {
+        self.sandbox.as_ref()
+    }
+
+    /// Restore the lifecycle state the inspection found: stop the sandbox
+    /// again when this inspection started it. Best-effort — cleanup failures
+    /// are logged, never surfaced over the inspection result.
+    pub(crate) async fn finish(self) {
+        if !self.stop_after {
+            return;
+        }
+        if let Err(err) = self.sandbox.stop().await {
+            tracing::warn!(
+                run_id = %self.run_id,
+                error = %err,
+                "Failed to stop run sandbox after read-only inspection"
+            );
+        }
+    }
+}
+
+/// Whether a read-only inspection that observed `activation` for a run in
+/// `status` must stop the sandbox again when it is finished. Only a terminal
+/// run's sandbox is safe to stop: any other status may belong to an active
+/// run whose lifecycle owns the sandbox.
+fn inspection_should_stop(activation: SandboxActivation, status: RunStatus) -> bool {
+    activation == SandboxActivation::Started && status.is_terminal()
+}
+
 async fn reconnect_run_sandbox(
     state: &Arc<AppState>,
     run_id: &RunId,
     projection: &fabro_store::RunProjection,
-) -> std::result::Result<Box<dyn Sandbox>, ApiError> {
+) -> std::result::Result<InspectionSandbox, ApiError> {
     let record = projection
         .sandbox
         .as_ref()
@@ -1216,11 +1288,16 @@ async fn reconnect_run_sandbox(
     let sandbox = reconnect_for_run(&record, daytona_api_key, Some(*run_id))
         .await
         .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.to_string()))?;
-    sandbox
+    let activation = sandbox
         .activate()
         .await
         .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.display_with_causes()))?;
-    Ok(sandbox)
+    Ok(InspectionSandbox::new(
+        sandbox,
+        *run_id,
+        activation,
+        projection.status,
+    ))
 }
 
 /// Resolve HEAD's SHA and its commit time in a single sandbox round-trip.
@@ -3136,5 +3213,160 @@ rename to .env.production
             .await
             .expect("small SHA lists skip phase 1 entirely; phase-2 success is the full story");
         assert_eq!(table.get(&sha), Some(&Some("hello".to_string())));
+    }
+
+    struct StopCountingSandbox {
+        stop_calls: std::sync::Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl fabro_agent::Sandbox for StopCountingSandbox {
+        async fn exec_command(
+            &self,
+            _command: &str,
+            _timeout_ms: u64,
+            _working_dir: Option<&str>,
+            _env_vars: Option<&std::collections::HashMap<String, String>>,
+            _cancel_token: Option<tokio_util::sync::CancellationToken>,
+        ) -> fabro_sandbox::Result<fabro_sandbox::ExecResult> {
+            unimplemented!("inspection guard tests never execute commands")
+        }
+        async fn read_file_bytes(&self, _path: &str) -> fabro_sandbox::Result<Vec<u8>> {
+            unimplemented!()
+        }
+        async fn write_file(&self, _: &str, _: &str) -> fabro_sandbox::Result<()> {
+            unimplemented!()
+        }
+        async fn delete_file(&self, _: &str) -> fabro_sandbox::Result<()> {
+            unimplemented!()
+        }
+        async fn file_exists(&self, _: &str) -> fabro_sandbox::Result<bool> {
+            unimplemented!()
+        }
+        async fn list_directory(
+            &self,
+            _path: &str,
+            _depth: Option<usize>,
+        ) -> fabro_sandbox::Result<Vec<fabro_sandbox::DirEntry>> {
+            unimplemented!()
+        }
+        async fn grep(
+            &self,
+            _pattern: &str,
+            _path: &str,
+            _options: &fabro_sandbox::GrepOptions,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            unimplemented!()
+        }
+        async fn glob(
+            &self,
+            _pattern: &str,
+            _path: Option<&str>,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            unimplemented!()
+        }
+        async fn download_file_to_local(
+            &self,
+            _remote: &str,
+            _local: &std::path::Path,
+        ) -> fabro_sandbox::Result<()> {
+            unimplemented!()
+        }
+        async fn upload_file_from_local(
+            &self,
+            _local: &std::path::Path,
+            _remote: &str,
+        ) -> fabro_sandbox::Result<()> {
+            unimplemented!()
+        }
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        async fn stop(&self) -> fabro_sandbox::Result<()> {
+            self.stop_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        fn working_directory(&self) -> &'static str {
+            "/workspace"
+        }
+        fn platform(&self) -> &'static str {
+            "linux"
+        }
+        fn os_version(&self) -> String {
+            "test".to_string()
+        }
+    }
+
+    fn succeeded_status() -> RunStatus {
+        RunStatus::Succeeded {
+            reason: fabro_types::SuccessReason::Completed,
+        }
+    }
+
+    #[test]
+    fn inspection_stop_decision_requires_started_activation_and_terminal_run() {
+        // Only the combination "activation started the sandbox" + "run is
+        // terminal" may stop it: an active run's lifecycle owns its sandbox,
+        // and an already-active sandbox was not resurrected by the caller.
+        assert!(inspection_should_stop(
+            SandboxActivation::Started,
+            succeeded_status()
+        ));
+        assert!(!inspection_should_stop(
+            SandboxActivation::Started,
+            RunStatus::Running
+        ));
+        assert!(!inspection_should_stop(
+            SandboxActivation::AlreadyActive,
+            succeeded_status()
+        ));
+    }
+
+    #[tokio::test]
+    async fn inspection_guard_stops_resurrected_terminal_run_sandbox() {
+        let stop_calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let guard = InspectionSandbox::new(
+            Box::new(StopCountingSandbox {
+                stop_calls: std::sync::Arc::clone(&stop_calls),
+            }),
+            RunId::new(),
+            SandboxActivation::Started,
+            succeeded_status(),
+        );
+        guard.finish().await;
+        assert_eq!(stop_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn inspection_guard_leaves_active_run_sandbox_running() {
+        let stop_calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let guard = InspectionSandbox::new(
+            Box::new(StopCountingSandbox {
+                stop_calls: std::sync::Arc::clone(&stop_calls),
+            }),
+            RunId::new(),
+            SandboxActivation::Started,
+            RunStatus::Running,
+        );
+        guard.finish().await;
+        assert_eq!(stop_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn inspection_guard_leaves_already_active_sandbox_running() {
+        let stop_calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let guard = InspectionSandbox::new(
+            Box::new(StopCountingSandbox {
+                stop_calls: std::sync::Arc::clone(&stop_calls),
+            }),
+            RunId::new(),
+            SandboxActivation::AlreadyActive,
+            succeeded_status(),
+        );
+        guard.finish().await;
+        assert_eq!(stop_calls.load(Ordering::Relaxed), 0);
     }
 }
