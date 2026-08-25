@@ -10348,17 +10348,17 @@ async fn downstream_local_execution_resolves_response_blob_refs_as_text() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // The downstream handler saw the full inline text, so resolution itself
-    // did not swap the value for a file reference. Prompt-preamble demotion
-    // materializes the oversized response for preamble use, confined to the
-    // run's blob directory.
+    // did not swap the value for a file reference. No preamble at the default
+    // compact fidelity renders the response, so prompt demotion materializes
+    // nothing.
     let captured_value = captured.lock().unwrap().first().cloned().unwrap();
     assert_eq!(captured_value, "x".repeat(150 * 1024));
     assert!(
-        RunScratch::new(dir.path())
+        !RunScratch::new(dir.path())
             .runtime_dir()
             .join("blobs")
             .exists(),
-        "prompt demotion materializes the oversized response under runtime/blobs"
+        "no blob file may be materialized for a response no preamble renders"
     );
 }
 
@@ -10428,21 +10428,15 @@ async fn downstream_remote_execution_resolves_response_blob_refs_as_text() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // The downstream handler saw the full inline text, so resolution itself
-    // did not swap the value for a file reference. Prompt-preamble demotion
-    // may still materialize the oversized response into the sandbox blob
-    // directory, but nowhere else.
+    // did not swap the value for a file reference. No preamble at the default
+    // compact fidelity renders the response, so prompt demotion writes
+    // nothing into the sandbox.
     let captured_value = captured.lock().unwrap().first().cloned().unwrap();
     assert_eq!(captured_value, "x".repeat(150 * 1024));
     let written = remote_env.written.lock().unwrap();
     assert!(
-        !written.is_empty(),
-        "prompt demotion materializes the oversized response into the sandbox"
-    );
-    assert!(
-        written
-            .iter()
-            .all(|(path, _)| path.contains("/.fabro/blobs/")),
-        "nothing is written outside the sandbox blob directory"
+        written.is_empty(),
+        "no sandbox file may be written for a response no preamble renders"
     );
 }
 

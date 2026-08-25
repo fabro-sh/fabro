@@ -3,12 +3,14 @@ use std::fmt::Write;
 
 use fabro_graphviz::graph::{Graph, Node, is_llm_handler_type};
 
-use crate::artifact::{self, PromptLargeValue};
+use crate::artifact::{self, PromptLargeValue, PromptValueSelection};
 use crate::context::{Context, WorkflowContext, keys};
 use crate::outcome::{Outcome, OutcomeExt};
 
 const COMPACT_OUTPUT_MAX_LINES: usize = 25;
 const SUMMARY_HIGH_OUTPUT_MAX_LINES: usize = 50;
+const SUMMARY_MEDIUM_RECENT_STAGES: usize = 5;
+const SUMMARY_LOW_RECENT_STAGES: usize = 2;
 
 /// Build a fidelity-appropriate preamble string for non-full context modes.
 ///
@@ -80,9 +82,84 @@ pub fn build_preamble(
     }
 }
 
+/// The context and outcome values [`build_preamble`] will render at
+/// `fidelity`, keyed the way the prompt demotion pass looks them up.
+///
+/// This mirrors the builders in this module and must stay in lockstep with
+/// them: demotion materializes exactly the values named here, so a value the
+/// builders render but this selection omits would reach the prompt inline at
+/// full size, and a value named here but never rendered would create an
+/// unreferenced materialization.
+#[must_use]
+pub(crate) fn rendered_value_selection(
+    fidelity: keys::Fidelity,
+    context_values: &HashMap<String, serde_json::Value>,
+    graph: &Graph,
+    completed_nodes: &[String],
+    node_outcomes: &HashMap<String, Outcome>,
+) -> PromptValueSelection {
+    use keys::Fidelity;
+
+    let mut selection = PromptValueSelection::default();
+    // Full renders no preamble, Truncate renders only goal and run ID, and
+    // SummaryLow renders stage statuses without any context or output values.
+    let stage_window: &[String] = match fidelity {
+        Fidelity::Full | Fidelity::Truncate | Fidelity::SummaryLow => return selection,
+        Fidelity::Compact | Fidelity::SummaryHigh => completed_nodes,
+        Fidelity::SummaryMedium => {
+            recent_stage_window(completed_nodes, SUMMARY_MEDIUM_RECENT_STAGES)
+        }
+    };
+
+    let mut all_rendered_keys = HashSet::new();
+    for node_id in stage_window {
+        if is_meta_handler(graph, node_id) {
+            continue;
+        }
+        let Some(outcome) = node_outcomes.get(node_id) else {
+            continue;
+        };
+        let node = graph.nodes.get(node_id);
+        let handler = node.and_then(|n| n.handler_type());
+        match handler {
+            Some("command") if outcome.context_updates.contains_key(keys::COMMAND_OUTPUT) => {
+                selection.select_outcome_value(node_id, keys::COMMAND_OUTPUT);
+            }
+            // Only summary:high stage sections include the model response.
+            h if is_llm_handler_type(h) && matches!(fidelity, Fidelity::SummaryHigh) => {
+                let response_key = keys::response_key(node_id);
+                if outcome.context_updates.contains_key(&response_key) {
+                    selection.select_outcome_value(node_id, &response_key);
+                }
+            }
+            _ => {}
+        }
+        all_rendered_keys.extend(stage_rendered_keys(node_id, outcome));
+    }
+
+    for (key, value) in context_values {
+        if keys::is_preamble_hidden_key(key)
+            || all_rendered_keys.contains(key)
+            || is_blank_value(Some(value))
+        {
+            continue;
+        }
+        selection.select_context_value(key);
+    }
+
+    selection
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// The trailing slice of completed nodes a recency-limited summary shows.
+/// Meta stages are filtered later, so they still consume window slots.
+fn recent_stage_window(completed_nodes: &[String], recent_count: usize) -> &[String] {
+    let skipped = completed_nodes.len().saturating_sub(recent_count);
+    &completed_nodes[skipped..]
+}
 
 fn is_meta_handler(graph: &Graph, node_id: &str) -> bool {
     graph
@@ -479,18 +556,15 @@ fn build_summary_preamble(
             let stage_count = completed_nodes.len();
             parts.push(format!("Completed {stage_count} stage(s) so far."));
 
-            let recent_count = 5;
-            let stages_to_show: Vec<&String> = if stage_count > recent_count {
-                let skipped = stage_count - recent_count;
+            let stages_to_show = recent_stage_window(completed_nodes, SUMMARY_MEDIUM_RECENT_STAGES);
+            let skipped = stage_count - stages_to_show.len();
+            if skipped > 0 {
                 parts.push(format!("\n({skipped} earlier stage(s) omitted)"));
-                completed_nodes.iter().skip(skipped).collect()
-            } else {
-                completed_nodes.iter().collect()
-            };
+            }
 
             {
                 let mut header_emitted = false;
-                for node_id in &stages_to_show {
+                for node_id in stages_to_show {
                     if is_meta_handler(graph, node_id) {
                         continue;
                     }
@@ -498,7 +572,7 @@ fn build_summary_preamble(
                         parts.push(String::from("\nRecent stages:"));
                         header_emitted = true;
                     }
-                    if let Some(outcome) = node_outcomes.get(*node_id) {
+                    if let Some(outcome) = node_outcomes.get(node_id) {
                         let status = outcome.status.to_string();
                         let mut line = format!("- {node_id}: {status}");
                         if let Some(notes) = outcome.notes.as_deref() {
@@ -509,7 +583,7 @@ fn build_summary_preamble(
                         }
                         parts.push(line);
 
-                        let node = graph.nodes.get(*node_id);
+                        let node = graph.nodes.get(node_id);
                         let details = render_compact_stage_details(node_id, node, outcome);
                         parts.extend(details);
 
@@ -526,18 +600,15 @@ fn build_summary_preamble(
             let stage_count = completed_nodes.len();
             parts.push(format!("Completed {stage_count} stage(s) so far."));
 
-            let recent_count = 2;
-            let stages_to_show: Vec<&String> = if stage_count > recent_count {
-                let skipped = stage_count - recent_count;
+            let stages_to_show = recent_stage_window(completed_nodes, SUMMARY_LOW_RECENT_STAGES);
+            let skipped = stage_count - stages_to_show.len();
+            if skipped > 0 {
                 parts.push(format!("\n({skipped} earlier stage(s) omitted)"));
-                completed_nodes.iter().skip(skipped).collect()
-            } else {
-                completed_nodes.iter().collect()
-            };
+            }
 
             {
                 let mut header_emitted = false;
-                for node_id in &stages_to_show {
+                for node_id in stages_to_show {
                     if is_meta_handler(graph, node_id) {
                         continue;
                     }
@@ -545,7 +616,7 @@ fn build_summary_preamble(
                         parts.push(String::from("\nRecent stages:"));
                         header_emitted = true;
                     }
-                    if let Some(outcome) = node_outcomes.get(*node_id) {
+                    if let Some(outcome) = node_outcomes.get(node_id) {
                         let status = outcome.status.to_string();
                         let mut line = format!("- {node_id}: {status}");
                         if let Some(notes) = outcome.notes.as_deref() {
@@ -556,7 +627,7 @@ fn build_summary_preamble(
                         }
                         parts.push(line);
 
-                        let node = graph.nodes.get(*node_id);
+                        let node = graph.nodes.get(node_id);
                         let handler = node.and_then(|n| n.handler_type());
                         if let Some(h) = handler {
                             parts.push(format!("  - Handler: {h}"));
@@ -2361,5 +2432,223 @@ mod tests {
             !preamble.contains("Parent workflow context"),
             "should not contain parent section when no parent preamble"
         );
+    }
+
+    // --- rendered_value_selection ---
+
+    /// Distinctive fill patterns so a leaked raw value is detectable in a
+    /// rendered preamble.
+    const RAW_RESPONSE_FILL: &str = "RRRR";
+    const STRUCTURED_OUTPUT_FILL: &str = "OOOO";
+    const COMMAND_OUTPUT_FILL: &str = "DDDD";
+    const EXTRA_CONTEXT_FILL: &str = "NNNN";
+
+    /// A completed agent stage (`plan`) with a raw response and a structured
+    /// output, followed by a completed command stage (`run_cmd`), with all
+    /// values present both in the outcomes and in the context snapshot the
+    /// way `ExecutionState::record` applies them.
+    fn selection_fixture() -> (
+        Graph,
+        Vec<String>,
+        HashMap<String, Outcome>,
+        HashMap<String, serde_json::Value>,
+    ) {
+        let mut graph = Graph::new("selection");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Ship the fix".to_string()),
+        );
+        let mut plan = Node::new("plan");
+        plan.attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
+        let mut run_cmd = Node::new("run_cmd");
+        run_cmd.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("parallelogram".to_string()),
+        );
+        run_cmd.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("make test".to_string()),
+        );
+        graph.nodes.insert("plan".to_string(), plan);
+        graph.nodes.insert("run_cmd".to_string(), run_cmd);
+
+        let raw_response = RAW_RESPONSE_FILL.repeat(200);
+        let structured_output = serde_json::json!({"rows": STRUCTURED_OUTPUT_FILL.repeat(200)});
+        let command_output = COMMAND_OUTPUT_FILL.repeat(200);
+
+        let mut plan_outcome = Outcome::success();
+        plan_outcome.context_updates.insert(
+            "response.plan".to_string(),
+            serde_json::json!(raw_response.clone()),
+        );
+        plan_outcome
+            .context_updates
+            .insert("output.plan".to_string(), structured_output.clone());
+        let mut cmd_outcome = Outcome::success();
+        cmd_outcome.context_updates.insert(
+            keys::COMMAND_OUTPUT.to_string(),
+            serde_json::json!(command_output.clone()),
+        );
+
+        let completed = vec!["plan".to_string(), "run_cmd".to_string()];
+        let outcomes = HashMap::from([
+            ("plan".to_string(), plan_outcome),
+            ("run_cmd".to_string(), cmd_outcome),
+        ]);
+        let context_values = HashMap::from([
+            ("response.plan".to_string(), serde_json::json!(raw_response)),
+            ("output.plan".to_string(), structured_output),
+            (
+                keys::COMMAND_OUTPUT.to_string(),
+                serde_json::json!(command_output),
+            ),
+            (
+                "notes.data".to_string(),
+                serde_json::json!(EXTRA_CONTEXT_FILL.repeat(200)),
+            ),
+            (
+                keys::INTERNAL_RUN_ID.to_string(),
+                serde_json::json!("run-1"),
+            ),
+        ]);
+        (graph, completed, outcomes, context_values)
+    }
+
+    #[test]
+    fn rendered_selection_is_empty_for_full_truncate_and_summary_low() {
+        let (graph, completed, outcomes, context_values) = selection_fixture();
+
+        for fidelity in [
+            keys::Fidelity::Full,
+            keys::Fidelity::Truncate,
+            keys::Fidelity::SummaryLow,
+        ] {
+            let selection =
+                rendered_value_selection(fidelity, &context_values, &graph, &completed, &outcomes);
+            assert!(
+                selection.is_empty(),
+                "{fidelity} renders no values, so nothing may be selected"
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_selection_compact_omits_llm_response() {
+        let (graph, completed, outcomes, context_values) = selection_fixture();
+
+        let selection = rendered_value_selection(
+            keys::Fidelity::Compact,
+            &context_values,
+            &graph,
+            &completed,
+            &outcomes,
+        );
+
+        let mut expected = PromptValueSelection::default();
+        expected.select_outcome_value("run_cmd", keys::COMMAND_OUTPUT);
+        expected.select_context_value("output.plan");
+        expected.select_context_value("notes.data");
+        assert_eq!(selection, expected);
+    }
+
+    #[test]
+    fn rendered_selection_summary_high_includes_llm_response() {
+        let (graph, completed, outcomes, context_values) = selection_fixture();
+
+        let selection = rendered_value_selection(
+            keys::Fidelity::SummaryHigh,
+            &context_values,
+            &graph,
+            &completed,
+            &outcomes,
+        );
+
+        let mut expected = PromptValueSelection::default();
+        expected.select_outcome_value("plan", &keys::response_key("plan"));
+        expected.select_outcome_value("run_cmd", keys::COMMAND_OUTPUT);
+        expected.select_context_value("output.plan");
+        expected.select_context_value("notes.data");
+        assert_eq!(selection, expected);
+    }
+
+    #[test]
+    fn rendered_selection_medium_ignores_stages_outside_recent_window() {
+        let (graph, _, outcomes, context_values) = selection_fixture();
+        // run_cmd falls outside the medium window of recent stages, so its
+        // outcome output is not rendered — but the context copy of
+        // command.output then is, because no shown stage supersedes it.
+        let mut completed = vec!["run_cmd".to_string()];
+        completed.extend((0..SUMMARY_MEDIUM_RECENT_STAGES).map(|i| format!("later_{i}")));
+
+        let selection = rendered_value_selection(
+            keys::Fidelity::SummaryMedium,
+            &context_values,
+            &graph,
+            &completed,
+            &outcomes,
+        );
+
+        assert!(!selection.renders_outcome_value("run_cmd", keys::COMMAND_OUTPUT));
+        assert!(selection.renders_context_value(keys::COMMAND_OUTPUT));
+        assert!(selection.renders_context_value("output.plan"));
+    }
+
+    /// Drift guard between [`rendered_value_selection`] and the builders: at
+    /// every fidelity, demoting exactly the selected values yields a preamble
+    /// that references every demoted path and inlines no unselected fill.
+    #[test]
+    fn rendered_selection_matches_builders_at_every_fidelity() {
+        let (graph, completed, outcomes, context_values) = selection_fixture();
+
+        for &fidelity in keys::Fidelity::variants() {
+            let selection =
+                rendered_value_selection(fidelity, &context_values, &graph, &completed, &outcomes);
+
+            let mut demoted_values = context_values.clone();
+            let mut demoted_outcomes = outcomes.clone();
+            let mut expected_paths = Vec::new();
+            for (key, value) in &mut demoted_values {
+                if selection.renders_context_value(key) {
+                    let path = format!("/blobs/context-{key}.json");
+                    *value = large_prompt_value(9_000, &path, "preview");
+                    expected_paths.push(path);
+                }
+            }
+            for (node_id, outcome) in &mut demoted_outcomes {
+                for (key, value) in &mut outcome.context_updates {
+                    if selection.renders_outcome_value(node_id, key) {
+                        let path = format!("/blobs/{node_id}-{key}.json");
+                        *value = large_prompt_value(9_000, &path, "preview");
+                        expected_paths.push(path);
+                    }
+                }
+            }
+
+            let context = Context::new();
+            for (key, value) in demoted_values {
+                context.set(key, value);
+            }
+            let preamble =
+                build_preamble(fidelity, &context, &graph, &completed, &demoted_outcomes);
+
+            for path in &expected_paths {
+                assert!(
+                    preamble.contains(path),
+                    "{fidelity}: selected value was not referenced: {path}\n{preamble}"
+                );
+            }
+            for fill in [
+                RAW_RESPONSE_FILL,
+                STRUCTURED_OUTPUT_FILL,
+                COMMAND_OUTPUT_FILL,
+                EXTRA_CONTEXT_FILL,
+            ] {
+                assert!(
+                    !preamble.contains(fill),
+                    "{fidelity}: unselected large value leaked inline ({fill})\n{preamble}"
+                );
+            }
+        }
     }
 }

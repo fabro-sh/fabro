@@ -13,7 +13,7 @@ use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvN
 use crate::artifact;
 use crate::context::{Context, ParallelBranchPreamble, keys};
 use crate::graph::{WorkflowGraph, WorkflowNode};
-use crate::handler::llm::preamble::build_preamble;
+use crate::handler::llm::preamble;
 use crate::outcome::{BilledModelUsage, Outcome};
 use crate::runtime_store::RunStoreHandle;
 
@@ -104,7 +104,7 @@ impl FidelityLifecycle {
 
             let entry = ParallelBranchPreamble {
                 fidelity: branch_fidelity,
-                preamble: build_preamble(
+                preamble: preamble::build_preamble(
                     branch_fidelity,
                     resolved_context,
                     &self.graph,
@@ -120,6 +120,29 @@ impl FidelityLifecycle {
         }
 
         preambles
+    }
+
+    /// Distinct effective fidelities of a parallel node's branch preamble
+    /// entries, in outgoing-edge order. Branches that inherit the fork's
+    /// preamble contribute nothing beyond the fork's own fidelity.
+    fn parallel_branch_effective_fidelities(
+        &self,
+        node_id: &str,
+        fork_fidelity: keys::Fidelity,
+    ) -> Vec<keys::Fidelity> {
+        let mut fidelities = Vec::new();
+        for edge in self.graph.outgoing_edges(node_id) {
+            let Some(target_node) = self.graph.nodes.get(&edge.to) else {
+                continue;
+            };
+            let resolution = resolve_parallel_branch_fidelity(edge, target_node, fork_fidelity);
+            if let Some(fidelity) = resolution.effective {
+                if !fidelities.contains(&fidelity) {
+                    fidelities.push(fidelity);
+                }
+            }
+        }
+        fidelities
     }
 }
 
@@ -194,16 +217,33 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
 
         // The resolved copies exist only to render prompt preambles, so bound
         // what any one value may contribute before the builders see them.
-        // Full renders no preamble and Truncate renders no context values, so
-        // there is nothing to bound — except for a parallel node, whose branch
-        // stash may render at a richer fidelity.
-        let preamble_renders_values =
-            !matches!(fidelity, keys::Fidelity::Full | keys::Fidelity::Truncate)
-                || gv_node.handler_type() == Some("parallel");
-        if preamble_renders_values {
+        // Demote exactly the values the selected fidelity renders — plus, for
+        // a parallel node, whatever its branch stash renders at other
+        // fidelities — so no blob or sandbox file is materialized for a value
+        // absent from every generated preamble.
+        let mut selection = preamble::rendered_value_selection(
+            fidelity,
+            &resolved_values,
+            &self.graph,
+            &state.completed_nodes,
+            &resolved_outcomes,
+        );
+        if gv_node.handler_type() == Some("parallel") {
+            for branch_fidelity in self.parallel_branch_effective_fidelities(node.id(), fidelity) {
+                selection.merge(preamble::rendered_value_selection(
+                    branch_fidelity,
+                    &resolved_values,
+                    &self.graph,
+                    &state.completed_nodes,
+                    &resolved_outcomes,
+                ));
+            }
+        }
+        if !selection.is_empty() {
             artifact::demote_large_values_for_prompt(
                 &mut resolved_values,
                 &mut resolved_outcomes,
+                &selection,
                 &self.run_store,
                 &*self.sandbox,
                 &self.run_dir,
@@ -212,7 +252,7 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         }
         let resolved_context = Context::from_values(resolved_values);
 
-        let preamble = build_preamble(
+        let preamble = preamble::build_preamble(
             fidelity,
             &resolved_context,
             &self.graph,
@@ -405,6 +445,10 @@ fn resolve_thread_id(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests inspect materialized blob files on disk"
+)]
 mod tests {
     use std::path::Path;
     use std::time::Duration;
@@ -476,6 +520,274 @@ mod tests {
             RunStoreHandle::local(run_store),
             run_dir.to_path_buf(),
         )
+    }
+
+    /// Over the 8 KiB prompt inline budget, under the 100 KiB durable
+    /// offload threshold, so values stay inline in context until demotion.
+    const OVERSIZED_LEN: usize = 20_000;
+
+    fn oversized_response() -> String {
+        "R".repeat(OVERSIZED_LEN)
+    }
+
+    fn oversized_output() -> serde_json::Value {
+        serde_json::json!({"rows": "O".repeat(OVERSIZED_LEN)})
+    }
+
+    fn linear_workflow_graph(work_fidelity: Option<&str>) -> WorkflowGraph {
+        let mut graph = Graph::new("linear-fidelity");
+        let mut start = Node::new("start");
+        start
+            .attrs
+            .insert("shape".to_string(), str_attr("Mdiamond"));
+        let mut consolidate = Node::new("consolidate");
+        consolidate
+            .attrs
+            .insert("shape".to_string(), str_attr("box"));
+        let mut work = Node::new("work");
+        work.attrs.insert("shape".to_string(), str_attr("box"));
+        if let Some(fidelity) = work_fidelity {
+            work.attrs
+                .insert("fidelity".to_string(), str_attr(fidelity));
+        }
+
+        graph.nodes.insert(start.id.clone(), start);
+        graph.nodes.insert(consolidate.id.clone(), consolidate);
+        graph.nodes.insert(work.id.clone(), work);
+        graph.edges.push(Edge::new("start", "consolidate"));
+        graph.edges.push(Edge::new("consolidate", "work"));
+
+        WorkflowGraph(Arc::new(graph))
+    }
+
+    /// A state where the agent stage `node_id` completed with an oversized
+    /// raw response and an oversized structured output, applied to context
+    /// the way `ExecutionState::record` does.
+    fn state_with_completed_llm_stage(graph: &WorkflowGraph, node_id: &str) -> WfRunState {
+        let mut state: WfRunState = ExecutionState::new(graph).unwrap();
+        let mut outcome = Outcome::success();
+        outcome.context_updates.insert(
+            keys::response_key(node_id),
+            serde_json::json!(oversized_response()),
+        );
+        outcome
+            .context_updates
+            .insert(format!("output.{node_id}"), oversized_output());
+        state.context.apply_updates(&outcome.context_updates);
+        state.completed_nodes.push(node_id.to_string());
+        state.node_outcomes.insert(node_id.to_string(), outcome);
+        state
+    }
+
+    fn materialized_blob_files(run_dir: &Path) -> Vec<PathBuf> {
+        let blobs_dir = fabro_config::RunScratch::new(run_dir)
+            .runtime_dir()
+            .join("blobs");
+        if !blobs_dir.exists() {
+            return Vec::new();
+        }
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&blobs_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        files.sort();
+        files
+    }
+
+    fn assert_durable_state_unchanged(state: &WfRunState, node_id: &str) {
+        assert_eq!(
+            state.context.get(&keys::response_key(node_id)),
+            Some(serde_json::json!(oversized_response())),
+            "durable context must keep the raw response"
+        );
+        assert_eq!(
+            state.context.get(&format!("output.{node_id}")),
+            Some(oversized_output()),
+            "durable context must keep the structured output"
+        );
+        let outcome = &state.node_outcomes[node_id];
+        assert_eq!(
+            outcome.context_updates[&keys::response_key(node_id)],
+            serde_json::json!(oversized_response()),
+            "node outcome must keep the raw response"
+        );
+        assert_eq!(
+            outcome.context_updates[&format!("output.{node_id}")],
+            oversized_output(),
+            "node outcome must keep the structured output"
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_materializes_only_values_its_preamble_renders() {
+        let graph = linear_workflow_graph(None);
+        let run_dir = tempfile::tempdir().unwrap();
+        let lifecycle = test_lifecycle(&graph, run_dir.path()).await;
+        let state = state_with_completed_llm_stage(&graph, "consolidate");
+        let work = graph.get_node("work").unwrap();
+
+        lifecycle.before_node(&work, &state).await.unwrap();
+
+        let files = materialized_blob_files(run_dir.path());
+        assert_eq!(
+            files.len(),
+            1,
+            "compact must not materialize the unrendered LLM response"
+        );
+        let stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).unwrap();
+        assert_eq!(stored, oversized_output());
+
+        let preamble = state.context.preamble();
+        assert!(
+            preamble.contains(files[0].to_str().unwrap()),
+            "the materialized output must be referenced by the preamble"
+        );
+        assert!(
+            !preamble.contains("RRRR"),
+            "the raw response must not appear in a compact preamble"
+        );
+        assert!(
+            !preamble.contains(&"O".repeat(1000)),
+            "no oversized value may be inlined"
+        );
+        assert_durable_state_unchanged(&state, "consolidate");
+    }
+
+    #[tokio::test]
+    async fn summary_high_materializes_and_references_the_llm_response() {
+        let graph = linear_workflow_graph(Some("summary:high"));
+        let run_dir = tempfile::tempdir().unwrap();
+        let lifecycle = test_lifecycle(&graph, run_dir.path()).await;
+        let state = state_with_completed_llm_stage(&graph, "consolidate");
+        let work = graph.get_node("work").unwrap();
+
+        lifecycle.before_node(&work, &state).await.unwrap();
+
+        let files = materialized_blob_files(run_dir.path());
+        assert_eq!(
+            files.len(),
+            2,
+            "summary:high renders both the response and the output"
+        );
+        let preamble = state.context.preamble();
+        for file in &files {
+            assert!(
+                preamble.contains(file.to_str().unwrap()),
+                "every materialized blob must be referenced by the preamble: {}",
+                file.display()
+            );
+        }
+        assert!(
+            !preamble.contains(&"R".repeat(1000)),
+            "no oversized value may be inlined"
+        );
+        assert!(
+            !preamble.contains(&"O".repeat(1000)),
+            "no oversized value may be inlined"
+        );
+        assert_durable_state_unchanged(&state, "consolidate");
+    }
+
+    #[tokio::test]
+    async fn value_free_fidelities_materialize_nothing() {
+        for fidelity in ["full", "truncate", "summary:low"] {
+            let graph = linear_workflow_graph(Some(fidelity));
+            let run_dir = tempfile::tempdir().unwrap();
+            let lifecycle = test_lifecycle(&graph, run_dir.path()).await;
+            let state = state_with_completed_llm_stage(&graph, "consolidate");
+            let work = graph.get_node("work").unwrap();
+
+            lifecycle.before_node(&work, &state).await.unwrap();
+
+            assert!(
+                materialized_blob_files(run_dir.path()).is_empty(),
+                "{fidelity} renders no values, so nothing may be materialized"
+            );
+            assert_durable_state_unchanged(&state, "consolidate");
+        }
+    }
+
+    #[tokio::test]
+    async fn parallel_branch_materializes_values_only_its_fidelity_renders() {
+        let graph = parallel_workflow_graph(None, Some("summary:high"));
+        let run_dir = tempfile::tempdir().unwrap();
+        let lifecycle = test_lifecycle(&graph, run_dir.path()).await;
+        let state = state_with_completed_llm_stage(&graph, "work");
+        let fork = graph.get_node("fork").unwrap();
+
+        lifecycle.before_node(&fork, &state).await.unwrap();
+
+        // The compact fork renders the output; the summary:high branch also
+        // renders the response.
+        let files = materialized_blob_files(run_dir.path());
+        assert_eq!(files.len(), 2);
+
+        let fork_preamble = state.context.preamble();
+        assert!(
+            !fork_preamble.contains("RRRR"),
+            "the compact fork preamble must not include the response"
+        );
+
+        let stash = state
+            .context
+            .get(keys::INTERNAL_PARALLEL_BRANCH_PREAMBLES)
+            .expect("parallel stash should be set");
+        let branch_preamble = stash[0]["preamble"]
+            .as_str()
+            .expect("branch_a should render its own preamble");
+
+        for file in &files {
+            let path = file.to_str().unwrap();
+            assert!(
+                fork_preamble.contains(path) || branch_preamble.contains(path),
+                "every materialized blob must be referenced by some preamble: {path}"
+            );
+        }
+        assert!(
+            branch_preamble.contains(
+                materialized_blob_files(run_dir.path())
+                    .iter()
+                    .find_map(|file| {
+                        let stored: serde_json::Value =
+                            serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+                        (stored == serde_json::json!(oversized_response()))
+                            .then(|| file.to_str().unwrap().to_string())
+                    })
+                    .expect("the raw response must be materialized")
+                    .as_str()
+            ),
+            "the summary:high branch must reference the materialized response"
+        );
+    }
+
+    #[tokio::test]
+    async fn truncate_fork_materializes_only_branch_rendered_values() {
+        let graph = parallel_workflow_graph(Some("truncate"), Some("compact"));
+        let run_dir = tempfile::tempdir().unwrap();
+        let lifecycle = test_lifecycle(&graph, run_dir.path()).await;
+        let state = state_with_completed_llm_stage(&graph, "work");
+        let fork = graph.get_node("fork").unwrap();
+
+        lifecycle.before_node(&fork, &state).await.unwrap();
+
+        // Only the compact branch renders values, and compact omits the
+        // response — so exactly the structured output is materialized.
+        let files = materialized_blob_files(run_dir.path());
+        assert_eq!(files.len(), 1);
+        let stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).unwrap();
+        assert_eq!(stored, oversized_output());
+
+        let stash = state
+            .context
+            .get(keys::INTERNAL_PARALLEL_BRANCH_PREAMBLES)
+            .expect("parallel stash should be set");
+        let branch_preamble = stash[0]["preamble"].as_str().unwrap();
+        assert!(
+            branch_preamble.contains(files[0].to_str().unwrap()),
+            "the compact branch must reference the materialized output"
+        );
     }
 
     #[test]

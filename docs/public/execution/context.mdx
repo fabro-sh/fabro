@@ -234,6 +234,8 @@ Internal keys (prefixed with `internal.`, `current`, `graph.`, `thread.`, `respo
 
 In fidelity modes that render context or completed-stage output, one value can contribute at most 8 KiB of serialized JSON inline. Fabro stores larger values as content-addressed blobs, materializes them as readable files, and puts the size, file path, and a 300-character preview in the preamble. The agent can read the file when it needs the full value.
 
+Only values the selected fidelity actually renders are materialized this way. For example, compact stage details do not include a prior stage's raw model response, so an oversized `response.<node_id>` creates no blob or sandbox file at compact fidelity, while `summary:high` — which includes the response in its stage section — does materialize and reference it. Parallel branch preambles follow the same rule at each branch's own fidelity.
+
 This prompt limit is separate from durable artifact offloading. If Fabro cannot demote a value, it logs a warning and keeps that value inline so the stage can continue.
 
 ## Artifact offloading

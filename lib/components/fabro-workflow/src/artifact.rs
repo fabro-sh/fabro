@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use fabro_agent::Sandbox;
@@ -155,18 +155,71 @@ fn serialized_if_over(value: &Value, threshold: usize) -> Result<Option<Vec<u8>>
     Ok((bytes.len() > threshold).then_some(bytes))
 }
 
-/// Bound every value the prompt preamble may inline.
+/// The exact set of resolved context and outcome values the preamble builders
+/// will render for the fidelities in play, keyed the way the demotion pass
+/// looks them up.
+///
+/// Built by `preamble::rendered_value_selection` for one fidelity and merged
+/// across a parallel node's branch fidelities, so demotion materializes only
+/// values some generated preamble actually references.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PromptValueSelection {
+    context_keys: HashSet<String>,
+    outcome_keys: HashMap<String, HashSet<String>>,
+}
+
+impl PromptValueSelection {
+    /// Mark a resolved context snapshot key as rendered.
+    pub fn select_context_value(&mut self, key: &str) {
+        self.context_keys.insert(key.to_string());
+    }
+
+    /// Mark one key of a completed node's outcome context updates as rendered.
+    pub fn select_outcome_value(&mut self, node_id: &str, key: &str) {
+        self.outcome_keys
+            .entry(node_id.to_string())
+            .or_default()
+            .insert(key.to_string());
+    }
+
+    /// Union another fidelity's selection into this one.
+    pub fn merge(&mut self, other: Self) {
+        self.context_keys.extend(other.context_keys);
+        for (node_id, keys) in other.outcome_keys {
+            self.outcome_keys.entry(node_id).or_default().extend(keys);
+        }
+    }
+
+    /// True when no preamble in play renders any value, so demotion has
+    /// nothing to bound.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.context_keys.is_empty() && self.outcome_keys.is_empty()
+    }
+
+    pub(crate) fn renders_context_value(&self, key: &str) -> bool {
+        self.context_keys.contains(key)
+    }
+
+    pub(crate) fn renders_outcome_value(&self, node_id: &str, key: &str) -> bool {
+        self.outcome_keys
+            .get(node_id)
+            .is_some_and(|keys| keys.contains(key))
+    }
+}
+
+/// Bound every value the prompt preamble will inline.
 ///
 /// The resolved context snapshot and outcomes passed here exist only to
-/// render prompt text, so any value whose serialized JSON exceeds
+/// render prompt text, so any selected value whose serialized JSON exceeds
 /// [`PROMPT_INLINE_VALUE_MAX`] is replaced with a small marker object holding
 /// a preview and the sandbox path of the full value. The agent reads the file
 /// when it needs the data; the preamble stays within its budget no matter how
 /// much state the run has accumulated.
 ///
-/// Context keys the preamble never renders are skipped. Outcome updates are
-/// demoted wholesale: the set is small, and over-demoting a prompt-only copy
-/// is harmless.
+/// Only values named by `selection` are demoted: those are exactly the values
+/// the selected fidelity's preamble path renders, so no blob or sandbox file
+/// is created for a value the generated prompt omits.
 ///
 /// Demotion is an optimization of prompt size, not a correctness gate: a
 /// value that fails to demote is left inline and logged rather than failing
@@ -174,13 +227,14 @@ fn serialized_if_over(value: &Value, threshold: usize) -> Result<Option<Vec<u8>>
 pub async fn demote_large_values_for_prompt(
     values: &mut HashMap<String, Value>,
     node_outcomes: &mut HashMap<String, Outcome>,
+    selection: &PromptValueSelection,
     run_store: &RunStoreHandle,
     env: &dyn Sandbox,
     run_dir: &Path,
 ) {
     let mut locality = SandboxLocality::default();
     for (key, value) in &mut *values {
-        if context::keys::is_preamble_hidden_key(key) {
+        if !selection.renders_context_value(key) {
             continue;
         }
         if let Err(err) = demote_value_for_prompt(
@@ -198,6 +252,9 @@ pub async fn demote_large_values_for_prompt(
     }
     for (node_id, outcome) in &mut *node_outcomes {
         for (key, value) in &mut outcome.context_updates {
+            if !selection.renders_outcome_value(node_id, key) {
+                continue;
+            }
             if let Err(err) = demote_value_for_prompt(
                 value,
                 PROMPT_INLINE_VALUE_MAX,
@@ -1464,9 +1521,20 @@ mod tests {
             )]),
             ..Outcome::success()
         })]);
+        let mut selection = PromptValueSelection::default();
+        selection.select_context_value("dataset");
+        selection.select_context_value("small");
+        selection.select_outcome_value("work", context::keys::COMMAND_OUTPUT);
 
-        demote_large_values_for_prompt(&mut values, &mut outcomes, &run_store, &sandbox, &run_dir)
-            .await;
+        demote_large_values_for_prompt(
+            &mut values,
+            &mut outcomes,
+            &selection,
+            &run_store,
+            &sandbox,
+            &run_dir,
+        )
+        .await;
 
         let details = values["dataset"]
             .get("fabroLargeValue")
@@ -1500,22 +1568,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn demote_skips_keys_the_preamble_never_renders() {
-        let run_store: RunStoreHandle = make_run_store("prompt-demote-hidden").await.into();
+    async fn demote_skips_values_the_selection_omits() {
+        let run_store: RunStoreHandle = make_run_store("prompt-demote-unselected").await.into();
         let tmp = tempfile::tempdir().unwrap();
         let run_dir = tmp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
         let sandbox = fabro_agent::LocalSandbox::new(tmp.path().to_path_buf());
 
-        let inherited_preamble = "p".repeat(PROMPT_INLINE_VALUE_MAX + 1);
+        let unrendered_context = "p".repeat(PROMPT_INLINE_VALUE_MAX + 1);
+        let unrendered_response = "r".repeat(PROMPT_INLINE_VALUE_MAX + 1);
         let mut values = HashMap::from([(
             context::keys::CURRENT_PREAMBLE.to_string(),
-            serde_json::json!(inherited_preamble.clone()),
+            serde_json::json!(unrendered_context.clone()),
         )]);
+        let mut outcomes = HashMap::from([("work".to_string(), Outcome {
+            context_updates: HashMap::from([(
+                "response.work".to_string(),
+                serde_json::json!(unrendered_response.clone()),
+            )]),
+            ..Outcome::success()
+        })]);
 
         demote_large_values_for_prompt(
             &mut values,
-            &mut HashMap::new(),
+            &mut outcomes,
+            &PromptValueSelection::default(),
             &run_store,
             &sandbox,
             &run_dir,
@@ -1524,7 +1601,33 @@ mod tests {
 
         assert_eq!(
             values[context::keys::CURRENT_PREAMBLE],
-            serde_json::json!(inherited_preamble)
+            serde_json::json!(unrendered_context)
         );
+        assert_eq!(
+            outcomes["work"].context_updates["response.work"],
+            serde_json::json!(unrendered_response)
+        );
+        let blobs_dir = RunScratch::new(&run_dir).runtime_dir().join("blobs");
+        assert!(
+            !blobs_dir.exists(),
+            "no blob file may be materialized for an unselected value"
+        );
+    }
+
+    #[test]
+    fn prompt_value_selection_merges_and_reports_emptiness() {
+        let mut selection = PromptValueSelection::default();
+        assert!(selection.is_empty());
+
+        let mut other = PromptValueSelection::default();
+        other.select_context_value("output.plan");
+        other.select_outcome_value("run_cmd", context::keys::COMMAND_OUTPUT);
+        selection.merge(other);
+
+        assert!(!selection.is_empty());
+        assert!(selection.renders_context_value("output.plan"));
+        assert!(!selection.renders_context_value("response.plan"));
+        assert!(selection.renders_outcome_value("run_cmd", context::keys::COMMAND_OUTPUT));
+        assert!(!selection.renders_outcome_value("other", context::keys::COMMAND_OUTPUT));
     }
 }
