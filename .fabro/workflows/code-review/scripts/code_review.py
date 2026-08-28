@@ -109,9 +109,17 @@ CONFIDENCE_RANK = SEVERITY_RANK
 SAFE_REV_RE = re.compile(r"^[A-Za-z0-9@][A-Za-z0-9._/@{}^~:+-]{0,399}$")
 REVIEW_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 CANDIDATE_ID_RE = re.compile(r"^[FS][1-9][0-9]*$")
+# A historical sibling: a finding already posted on the reviewed PR by an
+# earlier run, addressed by its comment ID (P3 item 5). The grammar is
+# disjoint from same-run candidate IDs so a verdict's duplicate_of target
+# is never ambiguous.
+HISTORICAL_ID_RE = re.compile(r"^H[1-9][0-9]*$")
 # Other candidates in the same file a verifier is shown, nearest first, so it
 # can mark its claim a duplicate of one that describes the same defect.
 SIBLING_CAP = 6
+# Historical siblings append under their own bound so they can never
+# displace same-run siblings and starve the in-run fold.
+HISTORICAL_SIBLING_CAP = 4
 
 # Lines of context kept on each side of a finding's anchor line.
 CODE_FRAME_CONTEXT = 4
@@ -1084,6 +1092,135 @@ def import_rule_loader() -> Any:
     return rule_loader
 
 
+def import_publisher() -> Any:
+    """The publisher module (stdlib-only), for its shared P3 contracts."""
+    import publish_pr
+
+    return publish_pr
+
+
+# --- Incremental re-review (P3) ----------------------------------------------
+
+
+HISTORY_FILE_NAME = "pr-history.json"
+
+
+def parse_incremental_input(raw: str) -> bool:
+    text = (raw or "").strip().lower()
+    if text in ("", "false", "0", "no", "off"):
+        return False
+    if text in ("true", "1", "yes", "on"):
+        return True
+    raise WorkflowDataError(
+        f"incremental must be true or false (or empty), got {raw!r}"
+    )
+
+
+def prepare_incremental(args: argparse.Namespace, mode: str) -> Dict[str, Any]:
+    """Fetch per-PR history and resolve the incremental posture (items 1-2).
+
+    Runs before range resolution: the delta needs the last reviewed head.
+    The fetch itself is `publish_pr.py history` -- pinned code holding the
+    token, the P3 sibling of apply. A fetch failure degrades open (full
+    review, no suppression, declared downstream; decided Q2), but a
+    snapshot that disagrees with the local HEAD fails the run: it was
+    taken around a racing push and every decision built on it would be
+    wrong from the outset.
+    """
+    publisher = import_publisher()
+    state: Dict[str, Any] = {
+        "requested": True,
+        "enabled": False,
+        "from": None,
+        "commits": None,
+        "history_unavailable": None,
+        "history_comments": [],
+        "range": None,
+    }
+    if mode != "changes":
+        raise WorkflowDataError(
+            "incremental review requires mode=changes (a PR review)"
+        )
+    if not inside_git_worktree():
+        raise WorkflowDataError("incremental review requires a Git worktree")
+    repo = args.pr_repo.strip()
+    pr = args.pr_number.strip()
+    if not repo or not pr:
+        raise WorkflowDataError(
+            "incremental is enabled but pr_repo/pr_number do not name the "
+            "pull request whose history to read"
+        )
+    try:
+        publisher.parse_overlap_threshold(args.incremental_overlap_threshold)
+    except publisher.PublishError as error:
+        raise WorkflowDataError(str(error)) from error
+
+    publisher_path = resolve_workflow_script(PUBLISHER_PATH, "PR publisher")
+    history_path = CONTROL_DIR / HISTORY_FILE_NAME
+    fetched = subprocess.run(
+        [
+            sys.executable, str(publisher_path), "history",
+            "--repo", repo,
+            "--pr", pr,
+            "--api-base", args.api_base,
+            "--bot-login", args.bot_login,
+            "--output", str(history_path),
+        ],
+        cwd=root(),
+        capture_output=True,
+    )
+    if fetched.returncode != 0:
+        reason = one_line(
+            fetched.stderr.decode("utf-8", "replace").strip()
+            or "the history fetch failed",
+            500,
+        )
+        state["history_unavailable"] = reason
+        print(f"Incremental history unavailable, degrading open: {reason}")
+        return state
+    stdout_text = fetched.stdout.decode("utf-8", "replace").strip()
+    if stdout_text:
+        print(stdout_text)
+
+    try:
+        history = publisher.validate_history_document(
+            read_json(history_path)
+        )
+    except publisher.PublishError as error:
+        raise WorkflowDataError(f"the fetched history is invalid: {error}")
+    live_head = history["live_head"]
+    local_head = resolve_commit("HEAD", "HEAD")
+    if live_head != local_head:
+        raise WorkflowDataError(
+            f"the PR head moved during preparation: the history snapshot "
+            f"describes {live_head[:12]} but the checkout is at "
+            f"{local_head[:12]}; re-run the review"
+        )
+    state["enabled"] = True
+    state["history_comments"] = list(history.get("comments") or [])
+
+    last_head = (history.get("summary") or {}).get("head")
+    if isinstance(last_head, str):
+        ancestry = git("merge-base", "--is-ancestor", last_head, "HEAD")
+        if ancestry.returncode == 0:
+            # Delta review (item 2): two-dot, literal base. A same-head
+            # re-run resolves to an empty range and exits quietly (Q3).
+            state["from"] = last_head
+            state["range"] = f"{last_head}..HEAD"
+            commits = git_text("rev-list", "--count", f"{last_head}..HEAD")
+            state["commits"] = (
+                int(commits) if commits and commits.isdigit() else None
+            )
+        else:
+            # A force-push or rebase: cold start for the range, but the
+            # history still suppresses where mapping succeeded (item 1).
+            print(
+                f"Last reviewed head {last_head[:12]} is not an ancestor "
+                "of HEAD (force-push?); reviewing the full range"
+            )
+    return state
+
+
 def repo_rule_revision(state: Mapping[str, Any]) -> Optional[str]:
     """The revision repository rules are read from.
 
@@ -1528,6 +1665,17 @@ def prepare(args: argparse.Namespace) -> None:
     base_input = args.base.strip()
     commit_input = args.commit.strip()
     range_input = args.range.strip()
+    incremental_requested = parse_incremental_input(args.incremental)
+    incremental_state: Dict[str, Any] = {"requested": False}
+    if incremental_requested:
+        if base_input or range_input or commit_input:
+            raise WorkflowDataError(
+                "incremental review resolves its own range; leave base, "
+                "commit, and range empty"
+            )
+        incremental_state = prepare_incremental(args, mode)
+        if incremental_state.get("range"):
+            range_input = str(incremental_state["range"])
     model = one_line(args.model, 120)
     # Guidance reaches the finder and sweep prompts through their MiniJinja
     # templates; the engine only records it so the report says what steering
@@ -1668,6 +1816,14 @@ def prepare(args: argparse.Namespace) -> None:
         "scope_files": scope_file_count,
         "empty_diff": empty_diff,
         "empty_scope": empty_scope,
+        "incremental": {
+            key: value
+            for key, value in incremental_state.items()
+            if key != "history_comments"
+        },
+        "history_comments": list(
+            incremental_state.get("history_comments") or []
+        ),
         "use_verify": bool(cell["verify"]),
         "verify_bias": cell["bias"],
         "use_sweep": bool(cell["sweep"]),
@@ -1703,6 +1859,16 @@ def prepare(args: argparse.Namespace) -> None:
     evidence_dir.mkdir()
     metadata_dir.mkdir()
     (products_dir / ".gitignore").write_text("*\n", encoding="utf-8")
+    if incremental_state.get("enabled"):
+        # Ship the history snapshot as a run artifact: every skip stays
+        # replayable from the products directory.
+        history_source = CONTROL_DIR / HISTORY_FILE_NAME
+        (products_dir / HISTORY_FILE_NAME).write_bytes(
+            history_source.read_bytes()
+        )
+        state["incremental"]["history_rel"] = (
+            f"{products_rel}/{HISTORY_FILE_NAME}"
+        )
     state["products_dir"] = products_dir.as_posix()
     state["products_rel"] = products_rel
     state["evidence_dir"] = evidence_dir.as_posix()
@@ -2087,10 +2253,14 @@ def normalize_verdict(value: Any) -> Optional[Dict[str, Any]]:
         "reasoning": clean_text(value.get("reasoning"), 4000),
     }
     duplicate_of = value.get("duplicate_of")
-    if isinstance(duplicate_of, str) and CANDIDATE_ID_RE.fullmatch(
-        duplicate_of.strip()
-    ):
-        result["duplicate_of"] = duplicate_of.strip()
+    if isinstance(duplicate_of, str):
+        token = duplicate_of.strip()
+        # Same-run candidates (F/S) and historical siblings (H, P3 item
+        # 5) are both addressable; anything else is silently dropped.
+        if CANDIDATE_ID_RE.fullmatch(token) or HISTORICAL_ID_RE.fullmatch(
+            token
+        ):
+            result["duplicate_of"] = token
     suggestion_valid = value.get("suggestion_valid")
     if isinstance(suggestion_valid, bool):
         result["suggestion_valid"] = suggestion_valid
@@ -2433,6 +2603,46 @@ def sibling_claims(
     ]
 
 
+def historical_sibling_claims(
+    candidate: Mapping[str, Any],
+    state: Optional[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Previously posted findings on this PR, as extra verifier siblings.
+
+    Same-file only, nearest by live-mapped line first, under their own
+    bound (HISTORICAL_SIBLING_CAP) so they never displace same-run
+    siblings. A comment without a mapped span or a parseable meta tag
+    (a pre-P3 comment) is skipped.
+    """
+    comments = (state or {}).get("history_comments") or []
+    line = int(candidate.get("line") or 0)
+    entries: List[Dict[str, Any]] = []
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        span = comment.get("mapped_span")
+        meta = comment.get("meta")
+        if not isinstance(span, dict) or not isinstance(meta, dict):
+            continue
+        if span.get("path") != candidate.get("file"):
+            continue
+        entries.append(
+            {
+                "id": f"H{comment.get('id')}",
+                "line": span.get("end_line"),
+                "category": meta.get("category"),
+                "short_summary": one_line(meta.get("short_summary"), 200),
+            }
+        )
+    entries.sort(
+        key=lambda entry: (
+            abs(int(entry.get("line") or 0) - line),
+            str(entry.get("id")),
+        )
+    )
+    return entries[:HISTORICAL_SIBLING_CAP]
+
+
 def verification_claim(
     candidate: Mapping[str, Any],
     state: Optional[Mapping[str, Any]] = None,
@@ -2462,7 +2672,8 @@ def verification_claim(
         "summary": candidate.get("summary"),
         "failure_scenario": candidate.get("failure_scenario"),
         "reports": int(candidate.get("reports") or 1),
-        "siblings": sibling_claims(candidate, pool or []),
+        "siblings": sibling_claims(candidate, pool or [])
+        + historical_sibling_claims(candidate, state),
     }
     suggestion_code = str(candidate.get("suggestion_code") or "")
     if suggestion_code and location["existing_code"]:
@@ -2999,6 +3210,8 @@ def reportable_finding(
             candidate["file"], start_line, end_line, state
         ),
     }
+    if isinstance(candidate.get("duplicate_of_posted"), dict):
+        finding["duplicate_of_posted"] = dict(candidate["duplicate_of_posted"])
     suggestion_code = str(candidate.get("suggestion_code") or "")
     if (
         suggestion_code
@@ -3228,12 +3441,35 @@ def fold_duplicates(
             candidate_id = folded[candidate_id]
         return candidate_id
 
+    history_by_hid = {
+        f"H{comment.get('id')}": comment
+        for comment in state.get("history_comments") or []
+        if isinstance(comment, dict)
+    }
+
     for record in ordered:
         candidate_id = str(record["candidate"].get("id"))
         target = (record.get("verdict") or {}).get("duplicate_of")
+        if not target:
+            continue
+        if HISTORICAL_ID_RE.fullmatch(str(target)):
+            # A historical target (P3 item 5): the posted finding is not
+            # in kept_records, so the shown-sibling check stays but the
+            # survivor check does not apply. The candidate is not folded
+            # away -- it is marked, kept in the bundle, and the publisher
+            # places it as skipped (reason duplicate-of-posted).
+            comment = history_by_hid.get(str(target))
+            if (
+                target in allowed.get(candidate_id, set())
+                and comment is not None
+            ):
+                record["candidate"]["duplicate_of_posted"] = {
+                    "comment_id": int(comment["id"]),
+                    "html_url": str(comment.get("html_url") or ""),
+                }
+            continue
         if (
-            not target
-            or target == candidate_id
+            target == candidate_id
             or target not in allowed.get(candidate_id, set())
             or target not in by_id
             or rank_index[target] > rank_index[candidate_id]
@@ -3350,6 +3586,10 @@ def final_tally() -> None:
             entry["verdict"] = verdict["verdict"]
         if disposition == "duplicate":
             entry["duplicate_of"] = folded.get(str(candidate.get("id")))
+        if isinstance(candidate.get("duplicate_of_posted"), dict):
+            entry["duplicate_of_posted"] = dict(
+                candidate["duplicate_of_posted"]
+            )
         if candidate.get("anchors"):
             entry["anchors"] = list(candidate["anchors"])
         return entry
@@ -3363,6 +3603,8 @@ def final_tally() -> None:
         if str(candidate.get("id")) in folded:
             return "duplicate"
         if candidate_key(candidate) in reported_keys and record["kept"]:
+            if isinstance(candidate.get("duplicate_of_posted"), dict):
+                return "duplicate-of-posted"
             return "reportable"
         if record["kept"]:
             return "deferred-by-cap"
@@ -3532,6 +3774,21 @@ def final_tally() -> None:
         "verification": {"status": verification_status},
         "canonical_files": list(CANONICAL_FILES),
     }
+    incremental_state = (
+        state.get("incremental")
+        if isinstance(state.get("incremental"), dict)
+        else {}
+    )
+    if incremental_state.get("requested"):
+        manifest["incremental"] = {
+            "requested": True,
+            "enabled": bool(incremental_state.get("enabled")),
+            "from": incremental_state.get("from"),
+            "commits": incremental_state.get("commits"),
+            "history_unavailable": incremental_state.get(
+                "history_unavailable"
+            ),
+        }
     if rule_mapped:
         rules_state = (
             state.get("rules") if isinstance(state.get("rules"), dict) else {}
@@ -3707,19 +3964,33 @@ def publish_pr_command(args: argparse.Namespace) -> None:
         if key in ("PATH", "HOME", "TZ", "USER", "LOGNAME", "SHELL")
         or key.startswith(("LANG", "LC_", "PYTHON", "TMP", "TEMP"))
     }
-    result = run_publisher(
-        [
-            "plan",
-            "--evidence-dir", evidence_rel,
-            "--repo", repo,
-            "--pr", pr_text,
-            "--route-severity-below", args.route_severity_below,
-            "--route-categories", args.route_categories,
-            "--run-url", one_line(args.run_url, 2000),
-            "--output", plan_rel,
-        ],
-        plan_environment,
+    plan_arguments = [
+        "plan",
+        "--evidence-dir", evidence_rel,
+        "--repo", repo,
+        "--pr", pr_text,
+        "--route-severity-below", args.route_severity_below,
+        "--route-categories", args.route_categories,
+        "--run-url", one_line(args.run_url, 2000),
+        "--output", plan_rel,
+    ]
+    incremental_state = (
+        state.get("incremental")
+        if isinstance(state.get("incremental"), dict)
+        else {}
     )
+    if incremental_state.get("requested"):
+        plan_arguments.extend(
+            [
+                "--incremental", "true",
+                "--incremental-overlap-threshold",
+                args.incremental_overlap_threshold,
+            ]
+        )
+        history_rel = incremental_state.get("history_rel")
+        if incremental_state.get("enabled") and isinstance(history_rel, str):
+            plan_arguments.extend(["--history", history_rel])
+    result = run_publisher(plan_arguments, plan_environment)
     if result.returncode != 0:
         raise publisher_error("the publication plan failed: ", result)
     print(result.stdout.decode("utf-8", "replace").strip())
@@ -3731,6 +4002,7 @@ def publish_pr_command(args: argparse.Namespace) -> None:
             "--repo", repo,
             "--pr", pr_text,
             "--api-base", args.api_base,
+            "--bot-login", args.bot_login,
             "--outcome", outcome_rel,
         ]
     )
@@ -3902,6 +4174,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--range", default="")
     prepare_parser.add_argument("--model", default="")
     prepare_parser.add_argument("--guidance", default="")
+    prepare_parser.add_argument("--incremental", default="")
+    prepare_parser.add_argument("--incremental-overlap-threshold", default="")
+    prepare_parser.add_argument("--pr-repo", default="")
+    prepare_parser.add_argument("--pr-number", default="")
+    prepare_parser.add_argument("--bot-login", default="")
+    prepare_parser.add_argument("--api-base", default="https://api.github.com")
     prepare_parser.add_argument("--review-id-stdin", action="store_true")
 
     merge_parser = subparsers.add_parser("merge")
@@ -3917,6 +4195,9 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--route-severity-below", default="")
     publish_parser.add_argument("--route-categories", default="")
     publish_parser.add_argument("--run-url", default="")
+    publish_parser.add_argument("--incremental", default="")
+    publish_parser.add_argument("--incremental-overlap-threshold", default="")
+    publish_parser.add_argument("--bot-login", default="")
     publish_parser.add_argument("--api-base", default="https://api.github.com")
 
     expectations_parser = subparsers.add_parser("verify-expectations")
