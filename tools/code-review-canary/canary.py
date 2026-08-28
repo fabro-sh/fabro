@@ -25,3 +25,9 @@ def moving_average(values, window):
         chunk = values[start:start + window]
         averages.append(sum(chunk) / window)
     return averages
+
+
+def collect_values(values, collected=[]):
+    """Collect values for one independent operation."""
+    collected.extend(values)
+    return collected
