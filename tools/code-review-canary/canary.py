@@ -10,12 +10,14 @@ guaranteed inline-postable findings:
 This file exists only on the calibration draft PR and is never merged.
 """
 
+# Calibration cycle 3: these two lines shift every function down.
+# They exist to outdate and re-anchor the earlier review comments.
 
 def percentile(values, fraction):
     """Return the value at the given fraction of the sorted input."""
     ordered = sorted(values)
     index = int(len(ordered) * fraction)
-    return ordered[index]
+    return ordered[index]  # still off the end at fraction == 1.0
 
 
 def moving_average(values, window):
