@@ -1105,14 +1105,16 @@ def import_publisher() -> Any:
 HISTORY_FILE_NAME = "pr-history.json"
 
 
-def parse_incremental_input(raw: str) -> bool:
-    text = (raw or "").strip().lower()
-    if text in ("", "false", "0", "no", "off"):
-        return False
-    if text in ("true", "1", "yes", "on"):
-        return True
-    raise WorkflowDataError(
-        f"incremental must be true or false (or empty), got {raw!r}"
+def run_publisher(
+    publisher_path: Path,
+    arguments: List[str],
+    environment: Optional[Dict[str, str]] = None,
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(publisher_path), *arguments],
+        cwd=root(),
+        env=environment,
+        capture_output=True,
     )
 
 
@@ -1135,7 +1137,6 @@ def prepare_incremental(args: argparse.Namespace, mode: str) -> Dict[str, Any]:
         "commits": None,
         "history_unavailable": None,
         "history_comments": [],
-        "range": None,
     }
     if mode != "changes":
         raise WorkflowDataError(
@@ -1151,23 +1152,26 @@ def prepare_incremental(args: argparse.Namespace, mode: str) -> Dict[str, Any]:
             "pull request whose history to read"
         )
     try:
-        publisher.parse_overlap_threshold(args.incremental_overlap_threshold)
+        # The parsed value rides in the state record so the publish node
+        # reuses this validated decision instead of re-reading the input.
+        state["overlap_threshold"] = publisher.parse_overlap_threshold(
+            args.incremental_overlap_threshold
+        )
     except publisher.PublishError as error:
         raise WorkflowDataError(str(error)) from error
 
     publisher_path = resolve_workflow_script(PUBLISHER_PATH, "PR publisher")
     history_path = CONTROL_DIR / HISTORY_FILE_NAME
-    fetched = subprocess.run(
+    fetched = run_publisher(
+        publisher_path,
         [
-            sys.executable, str(publisher_path), "history",
+            "history",
             "--repo", repo,
             "--pr", pr,
             "--api-base", args.api_base,
             "--bot-login", args.bot_login,
             "--output", str(history_path),
         ],
-        cwd=root(),
-        capture_output=True,
     )
     if fetched.returncode != 0:
         reason = one_line(
@@ -1206,7 +1210,6 @@ def prepare_incremental(args: argparse.Namespace, mode: str) -> Dict[str, Any]:
             # Delta review (item 2): two-dot, literal base. A same-head
             # re-run resolves to an empty range and exits quietly (Q3).
             state["from"] = last_head
-            state["range"] = f"{last_head}..HEAD"
             commits = git_text("rev-list", "--count", f"{last_head}..HEAD")
             state["commits"] = (
                 int(commits) if commits and commits.isdigit() else None
@@ -1665,17 +1668,29 @@ def prepare(args: argparse.Namespace) -> None:
     base_input = args.base.strip()
     commit_input = args.commit.strip()
     range_input = args.range.strip()
-    incremental_requested = parse_incremental_input(args.incremental)
+    publisher = import_publisher()
+    try:
+        incremental_requested = publisher.parse_incremental_flag(
+            args.incremental
+        )
+    except publisher.PublishError as error:
+        raise WorkflowDataError(str(error)) from error
     incremental_state: Dict[str, Any] = {"requested": False}
     if incremental_requested:
-        if base_input or range_input or commit_input:
+        if range_input or commit_input:
             raise WorkflowDataError(
-                "incremental review resolves its own range; leave base, "
-                "commit, and range empty"
+                "incremental review resolves its own range; leave commit "
+                "and range empty (base is allowed as the cold-start "
+                "fallback)"
             )
         incremental_state = prepare_incremental(args, mode)
-        if incremental_state.get("range"):
-            range_input = str(incremental_state["range"])
+        if incremental_state.get("from"):
+            # The delta wins; base is only the cold-start fallback. A
+            # sandbox clone's default base resolves to the PR branch's
+            # own upstream (an empty range), so PR runs pass the base
+            # branch explicitly for the first, untagged review.
+            range_input = f"{incremental_state['from']}..HEAD"
+            base_input = ""
     model = one_line(args.model, 120)
     # Guidance reaches the finder and sweep prompts through their MiniJinja
     # templates; the engine only records it so the report says what steering
@@ -3937,17 +3952,6 @@ def publish_pr_command(args: argparse.Namespace) -> None:
     plan_rel = f"{products_rel}/pr-publish-plan.json"
     outcome_rel = f"{products_rel}/pr-publish-outcome.json"
 
-    def run_publisher(
-        arguments: List[str],
-        environment: Optional[Dict[str, str]] = None,
-    ) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [sys.executable, str(publisher), *arguments],
-            cwd=root(),
-            env=environment,
-            capture_output=True,
-        )
-
     def publisher_error(
         prefix: str, failed: subprocess.CompletedProcess
     ) -> WorkflowDataError:
@@ -3980,22 +3984,25 @@ def publish_pr_command(args: argparse.Namespace) -> None:
         else {}
     )
     if incremental_state.get("requested"):
+        # Prepare parsed and recorded the threshold; the node reuses that
+        # decision rather than re-reading the raw workflow input.
         plan_arguments.extend(
             [
                 "--incremental", "true",
                 "--incremental-overlap-threshold",
-                args.incremental_overlap_threshold,
+                str(incremental_state.get("overlap_threshold") or ""),
             ]
         )
         history_rel = incremental_state.get("history_rel")
         if incremental_state.get("enabled") and isinstance(history_rel, str):
             plan_arguments.extend(["--history", history_rel])
-    result = run_publisher(plan_arguments, plan_environment)
+    result = run_publisher(publisher, plan_arguments, plan_environment)
     if result.returncode != 0:
         raise publisher_error("the publication plan failed: ", result)
     print(result.stdout.decode("utf-8", "replace").strip())
 
     result = run_publisher(
+        publisher,
         [
             "apply",
             "--plan", plan_rel,
@@ -4004,7 +4011,7 @@ def publish_pr_command(args: argparse.Namespace) -> None:
             "--api-base", args.api_base,
             "--bot-login", args.bot_login,
             "--outcome", outcome_rel,
-        ]
+        ],
     )
     value = read_json(root() / outcome_rel, required=False)
     outcome: Dict[str, Any] = value if isinstance(value, dict) else {}
@@ -4195,8 +4202,6 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--route-severity-below", default="")
     publish_parser.add_argument("--route-categories", default="")
     publish_parser.add_argument("--run-url", default="")
-    publish_parser.add_argument("--incremental", default="")
-    publish_parser.add_argument("--incremental-overlap-threshold", default="")
     publish_parser.add_argument("--bot-login", default="")
     publish_parser.add_argument("--api-base", default="https://api.github.com")
 

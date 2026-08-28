@@ -139,11 +139,17 @@ def base_tag_for(base: str) -> str:
     return f"<!-- {BASE_TAG_PREFIX}:{base} -->"
 
 
-def tagged_sha(body: str, prefix: str) -> Optional[str]:
+def tag_value(
+    body: str, prefix: str, pattern: str = r"[^>]+"
+) -> Optional[str]:
     match = re.search(
-        r"<!-- " + re.escape(prefix) + r":([0-9a-f]{40}) -->", body
+        r"<!-- " + re.escape(prefix) + r":(" + pattern + r") -->", body
     )
-    return match.group(1) if match else None
+    return match.group(1).strip() if match else None
+
+
+def tagged_sha(body: str, prefix: str) -> Optional[str]:
+    return tag_value(body, prefix, r"[0-9a-f]{40}")
 
 
 def meta_tag_for(finding: Mapping[str, Any]) -> str:
@@ -242,6 +248,13 @@ def resolve_commit(token: str, field: str) -> str:
             "repository; plan must run inside the reviewed checkout"
         )
     return resolved
+
+
+@functools.lru_cache(maxsize=None)
+def commit_exists(sha: str) -> bool:
+    """True when the SHA resolves to a commit in the local repository."""
+    result = run_git("rev-parse", "--verify", "--quiet", sha + "^{commit}")
+    return result.returncode == 0
 
 
 def resolve_diff_base(token: str) -> str:
@@ -782,7 +795,7 @@ def counts_line(
     no_position: int,
     routed: int,
     failed: int,
-    skipped: int = 0,
+    skipped: int,
 ) -> str:
     if total == 0:
         return (
@@ -1836,15 +1849,16 @@ def extract_posted_ids(
 # --- history (P3 item 1: the token-holding sibling of apply) -----------------
 
 
-def resolve_history_login(
+def resolve_token_login(
     client: GitHubClient, bot_login: str
 ) -> Optional[str]:
-    """The login whose comments count as ours, for this read-only fetch.
+    """The login whose comments count as ours.
 
     The bot_login input wins when set; otherwise GET /user works on
-    PAT-mode servers. Apply's write-probe cannot be reused here -- the
-    probe is a write -- so on App-mode servers (where /user returns 403)
-    bot_login is effectively required for incremental to work at all.
+    PAT-mode servers. On App-mode servers (where /user returns 403) this
+    returns None: history then degrades to no history -- its write-probe
+    cannot be reused because the probe is a write -- while apply learns
+    the login from its own first write (the anchor response).
     """
     login = (bot_login or "").strip()
     if login:
@@ -1893,10 +1907,7 @@ def history_mapped_span(
         SHA_RE.fullmatch(original_commit)
     ):
         return None
-    result = run_git(
-        "rev-parse", "--verify", "--quiet", original_commit + "^{commit}"
-    )
-    if result.returncode != 0:
+    if not commit_exists(original_commit):
         return None
     original_start = (
         comment_line_field(comment, "original_start_line") or original_line
@@ -1930,7 +1941,7 @@ def command_history(args: argparse.Namespace) -> int:
     if not isinstance(live_head, str) or not SHA_RE.fullmatch(live_head):
         fail("the PR head is not a commit SHA")
 
-    login = resolve_history_login(client, args.bot_login)
+    login = resolve_token_login(client, args.bot_login)
     if login is None:
         # History drives range selection and suppression, so ownership
         # must be attributable; without an identity the run degrades to
@@ -1992,12 +2003,9 @@ def command_history(args: argparse.Namespace) -> int:
     if owned_summaries:
         newest = max(owned_summaries, key=lambda comment: comment["id"])
         body = str(newest.get("body") or "")
-        run_match = re.search(
-            r"<!-- " + re.escape(RUN_TAG_PREFIX) + r":([^>]+) -->", body
-        )
         summary_record = {
             "comment_id": newest["id"],
-            "review_id": run_match.group(1).strip() if run_match else None,
+            "review_id": tag_value(body, RUN_TAG_PREFIX),
             "completed_at": completed_stamp(body),
             "head": tagged_sha(body, HEAD_TAG_PREFIX),
             "base": tagged_sha(body, BASE_TAG_PREFIX),
@@ -2033,10 +2041,7 @@ def command_history(args: argparse.Namespace) -> int:
 
 
 def completed_stamp(body: str) -> Optional[str]:
-    match = re.search(
-        r"<!-- " + re.escape(COMPLETED_TAG_PREFIX) + r":([^>]+) -->", body
-    )
-    return match.group(1).strip() if match else None
+    return tag_value(body, COMPLETED_TAG_PREFIX)
 
 
 def is_newer_stamp(existing: Optional[str], ours: str) -> bool:
@@ -2073,12 +2078,12 @@ class BatchPoster:
         pr: int,
         plan: Mapping[str, Any],
         already_posted: Set[str],
-        commit_id: Optional[str] = None,
+        commit_id: str,
     ) -> None:
         self.client = client
         self.repo = repo
         self.pr = pr
-        self.head = commit_id or plan["head"]
+        self.head = commit_id
         self.by_id = {
             entry["finding_id"]: entry
             for entry in plan["placements"]
@@ -2143,8 +2148,11 @@ class BatchPoster:
     )
 
     def mark_failed(self, finding_ids: Sequence[str], detail: str) -> None:
+        # A finding that already landed is never also failed: posted and
+        # failed staying disjoint is what keeps the outcome counts honest.
         for finding_id in finding_ids:
-            self.failed[finding_id] = detail
+            if finding_id not in self.posted:
+                self.failed[finding_id] = detail
 
     def reconcile(self, finding_ids: Sequence[str]) -> List[str]:
         """After a possibly-landed failure: absorb what landed, return what
@@ -2234,16 +2242,15 @@ class BatchPoster:
 
 def ensure_commit_local(sha: str) -> bool:
     """True when the commit is available locally, fetching if needed."""
-    check = run_git("rev-parse", "--verify", "--quiet", sha + "^{commit}")
-    if check.returncode == 0:
+    if commit_exists(sha):
         return True
     # The sandbox clone's HTTPS credentials are ambient; a fetch failure
     # falls back to the R20 refusal.
     fetched = run_git("fetch", "origin", sha)
     if fetched.returncode != 0:
         return False
-    check = run_git("rev-parse", "--verify", "--quiet", sha + "^{commit}")
-    return check.returncode == 0
+    commit_exists.cache_clear()
+    return commit_exists(sha)
 
 
 def forward_map_placements(
@@ -2337,17 +2344,10 @@ def command_apply(args: argparse.Namespace) -> int:
             fail(f"{refusal} ({error})")
         posting_head = live_head
 
-    # Token identity (R7). The bot_login input names it directly when
-    # set; otherwise a PAT answers /user, while a GitHub App installation
-    # token gets 403 there and its login is learned from apply's own
-    # first write (the anchor response) below.
-    login: Optional[str] = (args.bot_login or "").strip() or None
-    if login is None:
-        status, user = client.request("GET", "/user")
-        if status == 200 and isinstance(user, dict) and user.get("login"):
-            login = str(user["login"])
-        elif status == 401:
-            fail("GitHub rejected the token (HTTP 401)")
+    # Token identity (R7). A GitHub App installation token resolves to
+    # None here and its login is learned from apply's own first write
+    # (the anchor response) below.
+    login: Optional[str] = resolve_token_login(client, args.bot_login)
 
     # Reconcile against comments already carrying this review's tags (R14).
     already_posted = extract_posted_ids(
@@ -2441,8 +2441,7 @@ def command_apply(args: argparse.Namespace) -> int:
     # A drift-unmapped span is failed before any write: it never enters a
     # posted batch and lands in the summary with its reason (R15).
     for finding_id, detail in drift_failures.items():
-        if finding_id not in poster.posted:
-            poster.failed[finding_id] = detail
+        poster.mark_failed([finding_id], detail)
     for batch in plan["batches"]:
         poster.post_batch(batch)
 
