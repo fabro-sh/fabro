@@ -47,7 +47,7 @@ fabro mcp init claude --name fabro-testing --server https://fabro-testing.exampl
 | `fabro_run_pair` | Inspect, start, message, end, or read transcript for a live run pairing session. |
 | `fabro_run_events` | List, inspect, or search stored events for a run. |
 
-For a simple create call, `fabro_run_create` accepts a workflow selector string:
+For a simple create call, `fabro_run_create` accepts a workflow selector string. Selectors are compatible only when the MCP process and Fabro operation share the native filesystem:
 
 ```json
 { "runs": ["sleeper"] }
@@ -70,7 +70,51 @@ Use the object form when you need create options:
 }
 ```
 
-Use `goal` for inline goal text or `goal_file` to read the run goal from a file. They are mutually exclusive. Relative `goal_file` paths resolve from the run's `cwd`, or from the MCP server working directory when `cwd` is omitted.
+For agent-authored content or callers without a shared filesystem, send an inline package by value. `entrypoint` and every `files` key are portable paths inside that package:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": {
+        "kind": "inline",
+        "entrypoint": "workflows/review/workflow.fabro",
+        "files": {
+          "workflows/review/workflow.fabro": "digraph Review { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+        }
+      },
+      "target": {
+        "kind": "git",
+        "repo": "acme/widgets",
+        "branch": "feature/checkout"
+      }
+    }
+  ]
+}
+```
+
+You can also reuse an exact immutable workflow version without uploading content again:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": {
+        "kind": "stored",
+        "workflow_version_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "target": { "kind": "none" },
+      "start": false
+    }
+  ]
+}
+```
+
+Workflow source and run target are independent. Object-form calls can provide an explicit Git, `none`, or folder target. A workflow agent inherits its parent run's canonical target when `target` is omitted; standalone MCP instead derives an attached GitHub checkout when it can do so truthfully and otherwise requires an explicit target. Docker and Daytona agents must send inline files or a stored version ID—never send a sandbox path as a selector, because the run worker cannot use that path to read the sandbox's files.
+
+Use `goal` for inline goal text or `goal_file` to read the run goal from a file. They are mutually exclusive. Relative `goal_file` paths resolve from the run's `cwd`, or from the MCP server working directory when `cwd` is omitted. Like selectors, `goal_file` requires a native/shared filesystem; Docker and Daytona agents must send `goal` text by value.
+
+Creation and execution remain separate operations. `fabro_run_create` first creates a durable run, then requests one start by default. Set `start: false` to leave the new run submitted without requesting execution.
 
 Run summaries returned by the MCP server include parent metadata. Use `parent_id` on `fabro_run_create` to create a child run, `parent_id` on `fabro_run_search` to list direct children, and the `link_parent` or `unlink_parent` actions on `fabro_run_interact` to change an existing run's parent. See [Child Runs](/execution/child-runs) for the orchestration model.
 

@@ -1,6 +1,5 @@
 mod config;
 mod executable_monitor;
-mod manifest_builder;
 mod server;
 
 use std::future::Future;

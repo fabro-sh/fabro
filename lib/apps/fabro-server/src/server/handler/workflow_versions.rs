@@ -10,8 +10,9 @@ use fabro_workflow_version::{
 };
 
 use super::super::{
-    ApiError, AppState, IntoResponse, Json, RequiredUser, Response, Router, State, StatusCode, post,
+    ApiError, AppState, IntoResponse, Json, Response, Router, State, StatusCode, post,
 };
+use crate::principal_middleware::RequiredRunManagementActor;
 
 const INVALID_JSON_CODE: &str = "invalid_json";
 const INVALID_VERSION_CODE: &str = "workflow_version_invalid";
@@ -26,7 +27,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
 }
 
 async fn create_workflow_version(
-    _auth: RequiredUser,
+    _auth: RequiredRunManagementActor,
     State(state): State<Arc<AppState>>,
     payload: Result<Json<WorkflowVersion>, JsonRejection>,
 ) -> Result<Response, ApiError> {
@@ -119,6 +120,7 @@ mod tests {
     };
     use crate::server;
     use crate::test_support::{self, TestAppStateBuilder};
+    use crate::worker_token::{WorkerScopeSet, issue_worker_token, issue_worker_token_with_scopes};
 
     const GRAPH: &str = "digraph W { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }";
 
@@ -158,6 +160,79 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn workflow_version_registration_authorization_is_narrow() {
+        let state = TestAppStateBuilder::new().build();
+        let app = server::build_router(Arc::clone(&state), test_support::test_auth_mode());
+        let run_id = fabro_types::RunId::new();
+        let scoped = issue_worker_token_with_scopes(
+            state.worker_token_keys(),
+            &run_id,
+            WorkerScopeSet::run_worker_with_agent_run_tools(),
+        )
+        .unwrap();
+        let ordinary = issue_worker_token(state.worker_token_keys(), &run_id).unwrap();
+
+        let authorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/workflow-versions")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {scoped}"))
+                    .body(Body::from(serde_json::to_vec(&version(GRAPH)).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        fabro_test::expect_axum_status(
+            authorized,
+            StatusCode::CREATED,
+            "scoped worker POST /api/v1/workflow-versions",
+        )
+        .await;
+
+        let forbidden = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/workflow-versions")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {ordinary}"))
+                    .body(Body::from(serde_json::to_vec(&version(GRAPH)).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        fabro_test::expect_axum_status(
+            forbidden,
+            StatusCode::FORBIDDEN,
+            "ordinary worker POST /api/v1/workflow-versions",
+        )
+        .await;
+
+        let malformed = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/workflow-versions")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer not-a-worker-token")
+                    .body(Body::from(serde_json::to_vec(&version(GRAPH)).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        fabro_test::expect_axum_status(
+            malformed,
+            StatusCode::UNAUTHORIZED,
+            "malformed worker POST /api/v1/workflow-versions",
+        )
+        .await;
     }
 
     #[tokio::test]

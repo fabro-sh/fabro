@@ -96,6 +96,48 @@ The parent can create several children in one call:
 }
 ```
 
+Selector strings and selector paths are available only when the parent agent runs in a genuinely shared Local filesystem context. Docker and Daytona agents must send the workflow bytes inline or reuse an exact stored workflow version; a path inside their sandbox is not a usable selector on the worker host.
+
+Send agent-authored workflow content with a strict inline source:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": {
+        "kind": "inline",
+        "entrypoint": "child/workflow.fabro",
+        "files": {
+          "child/workflow.fabro": "digraph Child { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+        }
+      },
+      "goal": "Run the workflow content supplied by this parent."
+    }
+  ]
+}
+```
+
+Reuse content already registered with Fabro by supplying its exact immutable ID:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": {
+        "kind": "stored",
+        "workflow_version_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "target": { "kind": "none" },
+      "start": false
+    }
+  ]
+}
+```
+
+Workflow content and workspace target are separate choices. If `target` is omitted, a child inherits the parent's full canonical Git, `none`, or folder target. An explicit Git, `none`, or folder target overrides that inheritance while the current run remains the forced parent.
+
+`goal_file` is also a shared-filesystem feature. Local agents can read it relative to the operation `cwd`; Docker and Daytona agents must send the resolved `goal` text by value.
+
 By default, `fabro_run_create` requests start for each created run. Set `"start": false` when the parent should create the child now and start it later.
 
 ## Start and approval

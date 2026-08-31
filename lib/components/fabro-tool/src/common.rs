@@ -7,7 +7,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use fabro_api::types;
 use fabro_types::{
     PairId, PairMessageRecord, PairMessageRequest, PairRecord, PairTranscriptResponse, Run, RunId,
-    RunPairStatusResponse, StageId,
+    RunPairStatusResponse, RunTarget, StageId, WorkflowVersionId,
 };
 use fabro_util::exit::{self, ExitClass};
 use schemars::JsonSchema;
@@ -46,15 +46,43 @@ impl std::error::Error for ToolError {}
 
 pub type ToolResult<T> = Result<T, ToolError>;
 
+#[derive(Debug)]
+pub struct PreparedRunCreate {
+    pub workflow_version_id: WorkflowVersionId,
+    pub target:              RunTarget,
+    pub goal:                Option<String>,
+    pub warnings:            Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct CreateRunSubmission {
+    pub run_id:   RunId,
+    pub warnings: Vec<String>,
+}
+
+/// Trusted producer-local preparation for one tool-created run.
+///
+/// Implementations acquire permitted workflow bytes and goal files, validate
+/// local content, resolve the independent target, and register immutable
+/// workflow versions before returning intent-ready fields.
+#[async_trait]
+pub trait RunCreateAdapter: Send + Sync {
+    async fn prepare(
+        &self,
+        client: &fabro_client::Client,
+        spec: &crate::ValidatedCreateRunSpec,
+        cwd: &Path,
+    ) -> anyhow::Result<PreparedRunCreate>;
+}
+
 #[async_trait]
 pub trait FabroToolBackend: Send + Sync {
     async fn create_run_from_spec(
         &self,
         spec: &crate::ValidatedCreateRunSpec,
         cwd: &Path,
-        user_settings_path: &Path,
         parent_id: Option<RunId>,
-    ) -> anyhow::Result<RunId>;
+    ) -> anyhow::Result<CreateRunSubmission>;
 
     async fn resolve_run(&self, selector: &str) -> anyhow::Result<Run>;
     async fn retrieve_run(&self, run_id: &RunId) -> anyhow::Result<Run>;
@@ -135,15 +163,6 @@ fn pair_tool_unavailable_error() -> anyhow::Error {
     ToolError::message(format!("{FABRO_RUN_PAIR_TOOL_NAME} is not available")).into()
 }
 
-pub trait RunManifestBuilder: Send + Sync {
-    fn build_run_manifest(
-        &self,
-        spec: &crate::ValidatedCreateRunSpec,
-        cwd: &Path,
-        user_settings_path: &Path,
-    ) -> ToolResult<types::RunManifest>;
-}
-
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RunSummaryResult {
     pub run_id:              String,
@@ -182,7 +201,7 @@ static TOOL_DEFINITIONS: LazyLock<Vec<ToolDefinition>> = LazyLock::new(|| {
     vec![
         tool_definition::<crate::FabroRunCreateParams>(
             FABRO_RUN_CREATE_TOOL_NAME,
-            "Create one or more Fabro workflow runs, optionally under a parent run, starting them by default.",
+            "Create one or more Fabro workflow runs from a native selector, inline files, or an exact stored workflow version, optionally under a parent run and starting them by default.",
         ),
         tool_definition::<crate::FabroRunSearchParams>(
             FABRO_RUN_SEARCH_TOOL_NAME,
@@ -310,6 +329,7 @@ mod tests {
     use fabro_types::{
         RunLifecycle, RunLinks, RunOrigin, RunStatus, RunTimestamps, WorkflowRef, test_support,
     };
+    use serde_json::Value;
 
     use super::*;
 
@@ -331,6 +351,44 @@ mod tests {
             FABRO_RUN_PAIR_TOOL_NAME,
             FABRO_RUN_EVENTS_TOOL_NAME,
         ]);
+    }
+
+    #[test]
+    fn create_tool_definition_advertises_complete_workflow_source_and_target_grammar() {
+        let definition = tool_definitions()
+            .iter()
+            .find(|definition| definition.name == FABRO_RUN_CREATE_TOOL_NAME)
+            .expect("create tool should be in the shared catalog");
+        let variants = definition
+            .parameters
+            .pointer("/properties/runs/items/anyOf")
+            .and_then(Value::as_array)
+            .expect("run item union should be present");
+        assert!(variants.iter().any(|variant| variant["type"] == "string"));
+        let object = variants
+            .iter()
+            .find(|variant| variant["type"] == "object")
+            .expect("object create specification should be present");
+        assert_eq!(object["additionalProperties"], false);
+        let workflow = object
+            .pointer("/properties/workflow/anyOf")
+            .and_then(Value::as_array)
+            .expect("workflow source union should be present");
+        assert!(workflow.iter().any(|variant| variant["type"] == "string"));
+        for kind in ["inline", "stored"] {
+            assert!(workflow.iter().any(|variant| {
+                variant.pointer("/properties/kind/const") == Some(&Value::from(kind))
+            }));
+        }
+        let target = object
+            .pointer("/properties/target/anyOf")
+            .and_then(Value::as_array)
+            .expect("target union should be present");
+        for kind in ["git", "none", "folder"] {
+            assert!(target.iter().any(|variant| {
+                variant.pointer("/properties/kind/const") == Some(&Value::from(kind))
+            }));
+        }
     }
 
     #[test]

@@ -1,15 +1,19 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fabro_types::RunId;
+use fabro_types::{RunId, RunTarget, WorkflowPath, WorkflowVersionId};
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::Value;
 
 use super::common::{self, FabroToolBackend, ToolError, ToolResult};
 use super::manifest;
+
+const MAX_INLINE_WORKFLOW_FILES: usize = fabro_types::MAX_WORKFLOW_VERSION_FILES;
+const MAX_INLINE_WORKFLOW_FILE_BYTES: usize = fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES;
+const MAX_INLINE_WORKFLOW_TOTAL_BYTES: usize = fabro_types::MAX_WORKFLOW_VERSION_BYTES;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FabroRunCreateParams {
@@ -80,10 +84,38 @@ impl JsonSchema for CreateRunSpecInput {
                     "type": "object",
                     "description": "Full create-run specification.",
                     "required": ["workflow"],
+                    "additionalProperties": false,
                     "properties": {
                         "workflow": {
-                            "type": "string",
-                            "description": "Workflow selector, such as a workflow name or workflow file path."
+                            "description": "Workflow content source. Selector strings require a proven shared filesystem; inline files and exact stored IDs are portable.",
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                    "description": "Workflow selector, such as a workflow name or workflow file path."
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["kind", "entrypoint", "files"],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "kind": { "const": "inline" },
+                                        "entrypoint": { "type": "string" },
+                                        "files": {
+                                            "type": "object",
+                                            "additionalProperties": { "type": "string" }
+                                        }
+                                    }
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["kind", "workflow_version_id"],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "kind": { "const": "stored" },
+                                        "workflow_version_id": { "type": "string" }
+                                    }
+                                }
+                            ]
                         },
                         "cwd": {
                             "anyOf": [
@@ -98,6 +130,51 @@ impl JsonSchema for CreateRunSpecInput {
                                 { "type": "null" }
                             ],
                             "description": "Optional parent run id or selector."
+                        },
+                        "target": {
+                            "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted; standalone calls require an observable Git checkout when omitted.",
+                            "anyOf": [
+                                { "type": "null" },
+                                {
+                                    "type": "object",
+                                    "required": ["kind", "repo", "branch"],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "kind": { "const": "git" },
+                                        "repo": { "type": "string" },
+                                        "branch": { "type": "string" },
+                                        "tag": {
+                                            "anyOf": [
+                                                { "type": "string" },
+                                                { "type": "null" }
+                                            ]
+                                        },
+                                        "sha": {
+                                            "anyOf": [
+                                                { "type": "string" },
+                                                { "type": "null" }
+                                            ]
+                                        }
+                                    }
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["kind"],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "kind": { "const": "none" }
+                                    }
+                                },
+                                {
+                                    "type": "object",
+                                    "required": ["kind", "path"],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "kind": { "const": "folder" },
+                                        "path": { "type": "string" }
+                                    }
+                                }
+                            ]
                         },
                         "goal": {
                             "anyOf": [
@@ -187,11 +264,67 @@ impl JsonSchema for CreateRunSpecInput {
     }
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone)]
+pub enum CreateRunWorkflowSource {
+    Selector(String),
+    Inline(InlineWorkflowSource),
+    Stored {
+        workflow_version_id: WorkflowVersionId,
+    },
+}
+
+impl<'de> Deserialize<'de> for CreateRunWorkflowSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum TaggedSource {
+            Inline {
+                entrypoint: WorkflowPath,
+                files:      BTreeMap<WorkflowPath, String>,
+            },
+            Stored {
+                workflow_version_id: WorkflowVersionId,
+            },
+        }
+
+        match Value::deserialize(deserializer)? {
+            Value::String(selector) => Ok(Self::Selector(selector)),
+            value @ Value::Object(_) => {
+                match serde_json::from_value::<TaggedSource>(value).map_err(de::Error::custom)? {
+                    TaggedSource::Inline { entrypoint, files } => {
+                        Ok(Self::Inline(InlineWorkflowSource { entrypoint, files }))
+                    }
+                    TaggedSource::Stored {
+                        workflow_version_id,
+                    } => Ok(Self::Stored {
+                        workflow_version_id,
+                    }),
+                }
+            }
+            other => Err(de::Error::custom(format!(
+                "expected workflow selector string or tagged source object, got {}",
+                json_value_kind(&other)
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InlineWorkflowSource {
+    pub entrypoint: WorkflowPath,
+    pub files:      BTreeMap<WorkflowPath, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateRunSpec {
-    pub workflow:         String,
+    pub workflow:         CreateRunWorkflowSource,
     pub cwd:              Option<PathBuf>,
     pub parent_id:        Option<String>,
+    pub target:           Option<RunTarget>,
     pub goal:             Option<String>,
     pub goal_file:        Option<PathBuf>,
     #[serde(default)]
@@ -252,12 +385,13 @@ pub struct ValidatedCreateRuns {
 
 #[derive(Debug)]
 pub struct ValidatedCreateRunSpec {
-    pub workflow:         String,
+    pub workflow:         ValidatedCreateRunWorkflowSource,
     pub cwd:              Option<PathBuf>,
     pub parent_id:        Option<String>,
+    pub target:           Option<RunTarget>,
     pub goal:             Option<String>,
     pub goal_file:        Option<PathBuf>,
-    pub inputs:           HashMap<String, toml::Value>,
+    pub inputs:           HashMap<String, ValidatedRunInputValue>,
     pub labels:           HashMap<String, String>,
     pub dry_run:          Option<bool>,
     pub auto_approve:     Option<bool>,
@@ -266,6 +400,46 @@ pub struct ValidatedCreateRunSpec {
     pub environment:      Option<String>,
     pub preserve_sandbox: Option<bool>,
     pub start:            Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ValidatedCreateRunWorkflowSource {
+    Selector(String),
+    Inline(InlineWorkflowSource),
+    Stored {
+        workflow_version_id: WorkflowVersionId,
+    },
+}
+
+impl ValidatedCreateRunWorkflowSource {
+    #[must_use]
+    pub fn display(&self) -> String {
+        match self {
+            Self::Selector(selector) => selector.clone(),
+            Self::Inline(source) => source.entrypoint.to_string(),
+            Self::Stored {
+                workflow_version_id,
+            } => workflow_version_id.to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ValidatedRunInputValue {
+    json: Value,
+    toml: toml::Value,
+}
+
+impl ValidatedRunInputValue {
+    #[must_use]
+    pub fn json(&self) -> &Value {
+        &self.json
+    }
+
+    #[must_use]
+    pub fn toml(&self) -> &toml::Value {
+        &self.toml
+    }
 }
 
 impl TryFrom<FabroRunCreateParams> for ValidatedCreateRuns {
@@ -287,28 +461,23 @@ impl TryFrom<CreateRunSpecInput> for ValidatedCreateRunSpec {
 
     fn try_from(spec: CreateRunSpecInput) -> Result<Self, Self::Error> {
         match spec {
-            CreateRunSpecInput::Workflow(workflow) => {
-                let workflow = workflow.trim();
-                if workflow.is_empty() {
-                    return Err(ToolError::message("workflow must not be blank"));
-                }
-                Self::try_from(CreateRunSpec {
-                    workflow:         workflow.to_string(),
-                    cwd:              None,
-                    parent_id:        None,
-                    goal:             None,
-                    goal_file:        None,
-                    inputs:           HashMap::new(),
-                    labels:           HashMap::new(),
-                    dry_run:          None,
-                    auto_approve:     None,
-                    model:            None,
-                    provider:         None,
-                    environment:      None,
-                    preserve_sandbox: None,
-                    start:            None,
-                })
-            }
+            CreateRunSpecInput::Workflow(workflow) => Self::try_from(CreateRunSpec {
+                workflow:         CreateRunWorkflowSource::Selector(workflow),
+                cwd:              None,
+                parent_id:        None,
+                target:           None,
+                goal:             None,
+                goal_file:        None,
+                inputs:           HashMap::new(),
+                labels:           HashMap::new(),
+                dry_run:          None,
+                auto_approve:     None,
+                model:            None,
+                provider:         None,
+                environment:      None,
+                preserve_sandbox: None,
+                start:            None,
+            }),
             CreateRunSpecInput::Spec(spec) => Self::try_from(*spec),
         }
     }
@@ -318,6 +487,7 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
     type Error = ToolError;
 
     fn try_from(spec: CreateRunSpec) -> Result<Self, Self::Error> {
+        let workflow = validate_workflow_source(spec.workflow)?;
         let parent_id = spec
             .parent_id
             .as_deref()
@@ -343,14 +513,25 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
             .inputs
             .into_iter()
             .map(|(key, value)| {
-                let value = value.into_inner();
-                manifest::json_to_toml_value(&key, &value).map(|value| (key, value))
+                let json = value.into_inner();
+                manifest::json_to_toml_value(&key, &json)
+                    .map(|toml| (key, ValidatedRunInputValue { json, toml }))
             })
             .collect::<ToolResult<HashMap<_, _>>>()?;
+        let target = spec
+            .target
+            .map(|target| {
+                target
+                    .validate()
+                    .map(|validated| validated.target)
+                    .map_err(|err| ToolError::message(format!("invalid run target: {err}")))
+            })
+            .transpose()?;
         Ok(Self {
-            workflow: spec.workflow,
+            workflow,
             cwd: spec.cwd,
             parent_id,
+            target,
             goal: spec.goal,
             goal_file: spec.goal_file,
             inputs,
@@ -363,6 +544,58 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
             preserve_sandbox: spec.preserve_sandbox,
             start: spec.start,
         })
+    }
+}
+
+fn validate_workflow_source(
+    source: CreateRunWorkflowSource,
+) -> ToolResult<ValidatedCreateRunWorkflowSource> {
+    match source {
+        CreateRunWorkflowSource::Selector(selector) => {
+            let selector = selector.trim();
+            if selector.is_empty() {
+                return Err(ToolError::message("workflow selector must not be blank"));
+            }
+            Ok(ValidatedCreateRunWorkflowSource::Selector(
+                selector.to_string(),
+            ))
+        }
+        CreateRunWorkflowSource::Inline(source) => {
+            if source.files.len() > MAX_INLINE_WORKFLOW_FILES {
+                return Err(ToolError::message(format!(
+                    "inline workflow contains more than {MAX_INLINE_WORKFLOW_FILES} files"
+                )));
+            }
+            if !source.files.contains_key(&source.entrypoint) {
+                return Err(ToolError::message(format!(
+                    "inline workflow entrypoint `{}` is missing from files",
+                    source.entrypoint
+                )));
+            }
+            let mut total_bytes = 0usize;
+            for (path, content) in &source.files {
+                let bytes = content.len();
+                if bytes > MAX_INLINE_WORKFLOW_FILE_BYTES {
+                    return Err(ToolError::message(format!(
+                        "inline workflow file `{path}` exceeds 512 KiB"
+                    )));
+                }
+                total_bytes = total_bytes
+                    .checked_add(bytes)
+                    .ok_or_else(|| ToolError::message("inline workflow content size overflowed"))?;
+                if total_bytes > MAX_INLINE_WORKFLOW_TOTAL_BYTES {
+                    return Err(ToolError::message(
+                        "inline workflow content exceeds 2 MiB in aggregate",
+                    ));
+                }
+            }
+            Ok(ValidatedCreateRunWorkflowSource::Inline(source))
+        }
+        CreateRunWorkflowSource::Stored {
+            workflow_version_id,
+        } => Ok(ValidatedCreateRunWorkflowSource::Stored {
+            workflow_version_id,
+        }),
     }
 }
 
@@ -379,6 +612,9 @@ pub struct CreatedRunResult {
     pub workflow:        String,
     pub start_requested: bool,
     pub status:          String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings:        Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -389,29 +625,21 @@ pub struct CreateRunOptions {
 pub async fn create_runs(
     backend: Arc<dyn FabroToolBackend>,
     base_cwd: &Path,
-    user_settings_path: &Path,
     params: ValidatedCreateRuns,
 ) -> ToolResult<CreateRunsResult> {
-    create_runs_with_options(
-        backend,
-        base_cwd,
-        user_settings_path,
-        params,
-        CreateRunOptions::default(),
-    )
-    .await
+    create_runs_with_options(backend, base_cwd, params, CreateRunOptions::default()).await
 }
 
 pub async fn create_runs_with_options(
     backend: Arc<dyn FabroToolBackend>,
     base_cwd: &Path,
-    user_settings_path: &Path,
     params: ValidatedCreateRuns,
     options: CreateRunOptions,
 ) -> ToolResult<CreateRunsResult> {
     let mut created = Vec::with_capacity(params.runs.len());
     let mut parent_id_cache = HashMap::<String, RunId>::new();
     for spec in params.runs {
+        let workflow = spec.workflow.display();
         let cwd = spec.cwd.clone().unwrap_or_else(|| base_cwd.to_path_buf());
         let parent_id = if let Some(forced_parent_id) = options.forced_parent_id {
             Some(forced_parent_id)
@@ -423,10 +651,11 @@ pub async fn create_runs_with_options(
         } else {
             None
         };
-        let run_id = backend
-            .create_run_from_spec(&spec, &cwd, user_settings_path, parent_id)
+        let submission = backend
+            .create_run_from_spec(&spec, &cwd, parent_id)
             .await
             .map_err(|err| ToolError::from_anyhow(&err))?;
+        let run_id = submission.run_id;
         let start_requested = spec.start.unwrap_or(true);
         let summary = if start_requested {
             backend
@@ -443,9 +672,10 @@ pub async fn create_runs_with_options(
             run_id: summary.id.to_string(),
             parent_id: summary.parent_id.map(|parent_id| parent_id.to_string()),
             children_count: summary.children_count,
-            workflow: spec.workflow,
+            workflow,
             start_requested,
             status: summary.lifecycle.status.kind().to_string(),
+            warnings: submission.warnings,
         });
     }
     Ok(CreateRunsResult { runs: created })
@@ -474,10 +704,15 @@ async fn resolve_parent_run_id(
 
 pub fn create_runs_text(result: &CreateRunsResult) -> String {
     let start_requested = result.runs.iter().filter(|run| run.start_requested).count();
-    format!(
+    let mut text = format!(
         "created {} Fabro run(s), start requested for {start_requested}",
         result.runs.len()
-    )
+    );
+    for warning in result.runs.iter().flat_map(|run| &run.warnings) {
+        text.push_str("\nwarning: ");
+        text.push_str(warning);
+    }
+    text
 }
 
 #[cfg(test)]
@@ -514,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn create_spec_schema_omits_run_id() {
+    fn create_spec_schema_advertises_the_accepted_workflow_and_target_grammar() {
         let mut generator = SchemaGenerator::default();
         let schema = CreateRunSpecInput::json_schema(&mut generator);
         let schema = serde_json::to_value(schema).expect("schema should serialize");
@@ -523,14 +758,37 @@ mod tests {
             .expect("object form should have properties");
 
         assert!(!properties.contains_key("run_id"));
+        assert_eq!(schema["anyOf"][1]["additionalProperties"], false);
+        let workflow_variants = properties["workflow"]["anyOf"]
+            .as_array()
+            .expect("workflow should advertise all source variants");
+        assert!(
+            workflow_variants
+                .iter()
+                .any(|variant| variant["type"] == "string")
+        );
+        for kind in ["inline", "stored"] {
+            assert!(workflow_variants.iter().any(|variant| {
+                variant.pointer("/properties/kind/const") == Some(&json!(kind))
+            }));
+        }
+        let target_variants = properties["target"]["anyOf"]
+            .as_array()
+            .expect("target should advertise the canonical target variants");
+        for kind in ["git", "none", "folder"] {
+            assert!(target_variants.iter().any(|variant| {
+                variant.pointer("/properties/kind/const") == Some(&json!(kind))
+            }));
+        }
     }
 
     #[test]
     fn create_spec_accepts_parent_selector() {
         let spec = ValidatedCreateRunSpec::try_from(CreateRunSpec {
-            workflow:         "simple.fabro".to_string(),
+            workflow:         selector("simple.fabro"),
             cwd:              None,
             parent_id:        Some(" nightly-parent ".to_string()),
+            target:           None,
             goal:             None,
             goal_file:        None,
             inputs:           HashMap::new(),
@@ -558,12 +816,154 @@ mod tests {
         let params = ValidatedCreateRuns::try_from(params)
             .expect("string shorthand should validate as workflow selector");
         let spec = &params.runs[0];
-        assert_eq!(spec.workflow, "simple.fabro");
+        assert_eq!(spec.workflow.display(), "simple.fabro");
         assert_eq!(spec.cwd, None);
         assert_eq!(spec.parent_id, None);
         assert!(spec.inputs.is_empty());
         assert!(spec.labels.is_empty());
         assert_eq!(spec.start, None);
+    }
+
+    #[test]
+    fn create_params_accept_inline_and_stored_workflow_sources() {
+        let stored_id = fabro_types::BlobHash::new(b"stored workflow").to_string();
+        let inline: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": {
+                    "kind": "inline",
+                    "entrypoint": "flows/main.fabro",
+                    "files": {
+                        "flows/main.fabro": "digraph Main {}",
+                        "prompts/goal.md": "Ship it"
+                    }
+                },
+                "target": { "kind": "none" },
+                "start": false
+            }]
+        }))
+        .expect("inline workflow source should deserialize");
+        let inline =
+            ValidatedCreateRuns::try_from(inline).expect("inline workflow source should validate");
+        assert_eq!(inline.runs[0].workflow.display(), "flows/main.fabro");
+
+        let stored: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": {
+                    "kind": "stored",
+                    "workflow_version_id": stored_id
+                },
+                "target": { "kind": "git", "repo": "fabro-sh/fabro", "branch": "main" }
+            }]
+        }))
+        .expect("stored workflow source should deserialize");
+        let stored =
+            ValidatedCreateRuns::try_from(stored).expect("stored workflow source should validate");
+        assert_eq!(stored.runs[0].workflow.display(), stored_id);
+    }
+
+    #[test]
+    fn create_params_reject_invalid_workflow_sources_and_inputs_before_backend_work() {
+        for workflow in [
+            json!({
+                "kind": "inline",
+                "entrypoint": "../escape.fabro",
+                "files": { "../escape.fabro": "digraph W {}" }
+            }),
+            json!({
+                "kind": "stored",
+                "workflow_version_id": "not-an-id"
+            }),
+            json!({
+                "kind": "stored",
+                "workflow_version_id": fabro_types::BlobHash::new(b"stored").to_string(),
+                "extra": true
+            }),
+        ] {
+            serde_json::from_value::<FabroRunCreateParams>(json!({
+                "runs": [{ "workflow": workflow }]
+            }))
+            .expect_err("invalid workflow source should fail deserialization");
+        }
+
+        let missing_entrypoint: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": {
+                    "kind": "inline",
+                    "entrypoint": "main.fabro",
+                    "files": { "other.fabro": "digraph Other {}" }
+                }
+            }]
+        }))
+        .unwrap();
+        assert!(
+            ValidatedCreateRuns::try_from(missing_entrypoint)
+                .unwrap_err()
+                .to_string()
+                .contains("entrypoint")
+        );
+
+        let too_many = (0..=MAX_INLINE_WORKFLOW_FILES)
+            .map(|index| (format!("files/{index}.md"), json!("x")))
+            .collect::<serde_json::Map<_, _>>();
+        let too_many: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": {
+                    "kind": "inline",
+                    "entrypoint": "files/0.md",
+                    "files": too_many
+                }
+            }]
+        }))
+        .unwrap();
+        assert!(ValidatedCreateRuns::try_from(too_many).is_err());
+
+        let oversized: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": {
+                    "kind": "inline",
+                    "entrypoint": "main.fabro",
+                    "files": { "main.fabro": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES + 1) }
+                }
+            }]
+        }))
+        .unwrap();
+        assert!(ValidatedCreateRuns::try_from(oversized).is_err());
+
+        let aggregate: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": {
+                    "kind": "inline",
+                    "entrypoint": "0.fabro",
+                    "files": {
+                        "0.fabro": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES),
+                        "1.md": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES),
+                        "2.md": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES),
+                        "3.md": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES),
+                        "4.md": "x"
+                    }
+                }
+            }]
+        }))
+        .unwrap();
+        assert!(ValidatedCreateRuns::try_from(aggregate).is_err());
+
+        let invalid_target: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": "main.fabro",
+                "target": { "kind": "git", "repo": "not-a-slug", "branch": "HEAD" }
+            }]
+        }))
+        .unwrap();
+        assert!(ValidatedCreateRuns::try_from(invalid_target).is_err());
+
+        let nonscalar: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": [{
+                "workflow": "main.fabro",
+                "inputs": { "nested": { "no": "objects" } }
+            }]
+        }))
+        .unwrap();
+        assert!(ValidatedCreateRuns::try_from(nonscalar).is_err());
     }
 
     #[test]
@@ -582,7 +982,7 @@ mod tests {
         let params =
             ValidatedCreateRuns::try_from(params).expect("object form should still validate");
         let spec = &params.runs[0];
-        assert_eq!(spec.workflow, "simple.fabro");
+        assert_eq!(spec.workflow.display(), "simple.fabro");
         assert_eq!(spec.dry_run, Some(true));
         assert_eq!(spec.auto_approve, Some(true));
         assert_eq!(
@@ -593,20 +993,17 @@ mod tests {
     }
 
     #[test]
-    fn create_params_ignore_removed_run_id() {
-        let params: FabroRunCreateParams = serde_json::from_value(json!({
+    fn create_params_reject_unknown_object_fields() {
+        let err = serde_json::from_value::<FabroRunCreateParams>(json!({
             "runs": [{
                 "workflow": "simple.fabro",
                 "run_id": "not-a-valid-run-id",
                 "start": false
             }]
         }))
-        .expect("old object form should deserialize with run_id ignored");
+        .expect_err("unknown create fields should be rejected");
 
-        let params =
-            ValidatedCreateRuns::try_from(params).expect("remaining create fields should validate");
-        assert_eq!(params.runs[0].workflow, "simple.fabro");
-        assert_eq!(params.runs[0].start, Some(false));
+        assert!(err.to_string().contains("unknown field `run_id`"), "{err}");
     }
 
     #[test]
@@ -676,7 +1073,6 @@ mod tests {
     #[tokio::test]
     async fn create_runs_resolves_parent_selector_and_sends_parent_id_to_backend() {
         let temp = tempfile::tempdir().expect("tempdir should be created");
-        let settings = temp.path().join("settings.toml");
         let child_id = run_id("01KRBZW5C00000000000000001");
         let parent_id = run_id("01KRBZW4DW0000000000000002");
         let backend = Arc::new(MockCreateBackend {
@@ -685,13 +1081,16 @@ mod tests {
             created_parent_ids: Mutex::new(Vec::new()),
             resolved_selectors: Mutex::new(Vec::new()),
             started_run_ids: Mutex::new(Vec::new()),
+            warnings: Vec::new(),
+            create_error: false,
         });
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
             runs: vec![
                 CreateRunSpec {
-                    workflow:         "simple.fabro".to_string(),
+                    workflow:         selector("simple.fabro"),
                     cwd:              None,
                     parent_id:        Some("nightly-parent".to_string()),
+                    target:           None,
                     goal:             None,
                     goal_file:        None,
                     inputs:           HashMap::new(),
@@ -709,7 +1108,7 @@ mod tests {
         })
         .expect("create params should validate");
 
-        let result = create_runs(backend.clone(), temp.path(), &settings, params)
+        let result = create_runs(backend.clone(), temp.path(), params)
             .await
             .expect("run should be created");
 
@@ -726,7 +1125,6 @@ mod tests {
     #[tokio::test]
     async fn create_runs_reuses_parent_selector_resolution_within_batch() {
         let temp = tempfile::tempdir().expect("tempdir should be created");
-        let settings = temp.path().join("settings.toml");
         let child_id = run_id("01KRBZW5C00000000000000001");
         let parent_id = run_id("01KRBZW4DW0000000000000002");
         let backend = Arc::new(MockCreateBackend {
@@ -735,13 +1133,16 @@ mod tests {
             created_parent_ids: Mutex::new(Vec::new()),
             resolved_selectors: Mutex::new(Vec::new()),
             started_run_ids: Mutex::new(Vec::new()),
+            warnings: Vec::new(),
+            create_error: false,
         });
         let runs: Vec<CreateRunSpecInput> = (0..2)
             .map(|_| {
                 CreateRunSpecInput::from(CreateRunSpec {
-                    workflow:         "simple.fabro".to_string(),
+                    workflow:         selector("simple.fabro"),
                     cwd:              None,
                     parent_id:        Some("nightly-parent".to_string()),
+                    target:           None,
                     goal:             None,
                     goal_file:        None,
                     inputs:           HashMap::new(),
@@ -759,7 +1160,7 @@ mod tests {
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams { runs })
             .expect("create params should validate");
 
-        create_runs(backend.clone(), temp.path(), &settings, params)
+        create_runs(backend.clone(), temp.path(), params)
             .await
             .expect("runs should be created");
 
@@ -775,7 +1176,6 @@ mod tests {
     #[tokio::test]
     async fn create_runs_forced_parent_id_skips_selector_resolution() {
         let temp = tempfile::tempdir().expect("tempdir should be created");
-        let settings = temp.path().join("settings.toml");
         let child_id = run_id("01KRBZW5C00000000000000001");
         let parent_id = run_id("01KRBZW4DW0000000000000002");
         let backend = Arc::new(MockCreateBackend {
@@ -784,13 +1184,16 @@ mod tests {
             created_parent_ids: Mutex::new(Vec::new()),
             resolved_selectors: Mutex::new(Vec::new()),
             started_run_ids: Mutex::new(Vec::new()),
+            warnings: Vec::new(),
+            create_error: false,
         });
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
             runs: vec![
                 CreateRunSpec {
-                    workflow:         "simple.fabro".to_string(),
+                    workflow:         selector("simple.fabro"),
                     cwd:              None,
                     parent_id:        Some(parent_id.to_string()),
+                    target:           None,
                     goal:             None,
                     goal_file:        None,
                     inputs:           HashMap::new(),
@@ -808,15 +1211,9 @@ mod tests {
         })
         .expect("create params should validate");
 
-        create_runs_with_options(
-            backend.clone(),
-            temp.path(),
-            &settings,
-            params,
-            CreateRunOptions {
-                forced_parent_id: Some(parent_id),
-            },
-        )
+        create_runs_with_options(backend.clone(), temp.path(), params, CreateRunOptions {
+            forced_parent_id: Some(parent_id),
+        })
         .await
         .expect("run should be created");
 
@@ -829,7 +1226,6 @@ mod tests {
     #[tokio::test]
     async fn create_runs_defaults_to_start_request_and_reports_pending_child_status() {
         let temp = tempfile::tempdir().expect("tempdir should be created");
-        let settings = temp.path().join("settings.toml");
         let child_id = run_id("01KRBZW5C00000000000000001");
         let parent_id = run_id("01KRBZW4DW0000000000000002");
         let backend = Arc::new(MockCreateBackend {
@@ -838,13 +1234,16 @@ mod tests {
             created_parent_ids: Mutex::new(Vec::new()),
             resolved_selectors: Mutex::new(Vec::new()),
             started_run_ids: Mutex::new(Vec::new()),
+            warnings: vec!["uncommitted changes are excluded".to_string()],
+            create_error: false,
         });
         let params = ValidatedCreateRuns::try_from(FabroRunCreateParams {
             runs: vec![
                 CreateRunSpec {
-                    workflow:         "simple.fabro".to_string(),
+                    workflow:         selector("simple.fabro"),
                     cwd:              None,
                     parent_id:        Some(parent_id.to_string()),
+                    target:           None,
                     goal:             None,
                     goal_file:        None,
                     inputs:           HashMap::new(),
@@ -862,7 +1261,7 @@ mod tests {
         })
         .expect("create params should validate");
 
-        let result = create_runs(backend.clone(), temp.path(), &settings, params)
+        let result = create_runs(backend.clone(), temp.path(), params)
             .await
             .expect("run should be created and start requested");
 
@@ -873,12 +1272,75 @@ mod tests {
         ]);
         assert_eq!(
             create_runs_text(&result),
-            "created 1 Fabro run(s), start requested for 1"
+            "created 1 Fabro run(s), start requested for 1\nwarning: uncommitted changes are excluded"
+        );
+        assert_eq!(result.runs[0].warnings, [
+            "uncommitted changes are excluded"
+        ]);
+        let wire = serde_json::to_value(&result).unwrap();
+        assert_eq!(
+            wire["runs"][0]["warnings"],
+            json!(["uncommitted changes are excluded"])
+        );
+    }
+
+    #[tokio::test]
+    async fn create_runs_create_failure_does_not_request_start() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let child_id = run_id("01KRBZW5C00000000000000001");
+        let parent_id = run_id("01KRBZW4DW0000000000000002");
+        let backend = Arc::new(MockCreateBackend {
+            child_id,
+            parent_id,
+            created_parent_ids: Mutex::new(Vec::new()),
+            resolved_selectors: Mutex::new(Vec::new()),
+            started_run_ids: Mutex::new(Vec::new()),
+            warnings: Vec::new(),
+            create_error: true,
+        });
+        let params: FabroRunCreateParams = serde_json::from_value(json!({
+            "runs": ["simple.fabro"]
+        }))
+        .unwrap();
+
+        create_runs(
+            backend.clone(),
+            temp.path(),
+            ValidatedCreateRuns::try_from(params).unwrap(),
+        )
+        .await
+        .expect_err("create failure should be returned");
+
+        assert!(backend.started_run_ids.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn create_run_result_omits_empty_warnings() {
+        let result = CreateRunsResult {
+            runs: vec![CreatedRunResult {
+                run_id:          RunId::new().to_string(),
+                parent_id:       None,
+                children_count:  0,
+                workflow:        "simple".to_string(),
+                start_requested: false,
+                status:          "submitted".to_string(),
+                warnings:        Vec::new(),
+            }],
+        };
+
+        assert!(
+            serde_json::to_value(result).unwrap()["runs"][0]
+                .get("warnings")
+                .is_none()
         );
     }
 
     fn run_id(raw: &str) -> RunId {
         raw.parse().expect("test run id should parse")
+    }
+
+    fn selector(value: &str) -> CreateRunWorkflowSource {
+        CreateRunWorkflowSource::Selector(value.to_string())
     }
 
     fn run(run_id: RunId, parent_id: Option<RunId>, children_count: u64) -> Run {
@@ -946,6 +1408,8 @@ mod tests {
         created_parent_ids: Mutex<Vec<Option<RunId>>>,
         resolved_selectors: Mutex<Vec<String>>,
         started_run_ids:    Mutex<Vec<RunId>>,
+        warnings:           Vec<String>,
+        create_error:       bool,
     }
 
     #[async_trait]
@@ -954,11 +1418,16 @@ mod tests {
             &self,
             _spec: &ValidatedCreateRunSpec,
             _cwd: &Path,
-            _user_settings_path: &Path,
             parent_id: Option<RunId>,
-        ) -> anyhow::Result<RunId> {
+        ) -> anyhow::Result<crate::CreateRunSubmission> {
             self.created_parent_ids.lock().unwrap().push(parent_id);
-            Ok(self.child_id)
+            if self.create_error {
+                anyhow::bail!("create failed");
+            }
+            Ok(crate::CreateRunSubmission {
+                run_id:   self.child_id,
+                warnings: self.warnings.clone(),
+            })
         }
 
         async fn resolve_run(&self, selector: &str) -> anyhow::Result<Run> {

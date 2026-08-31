@@ -244,7 +244,6 @@ async fn execute_fabro_run_tool(
             let result = fabro_tool::create_runs_with_options(
                 Arc::clone(&services.backend),
                 &services.base_cwd,
-                &services.user_settings_path,
                 validated,
                 fabro_tool::CreateRunOptions {
                     forced_parent_id: Some(services.current_run_id),
@@ -2555,10 +2554,9 @@ reasoning = false
             pair_status_run_ids: Mutex::new(Vec::new()),
         });
         let services = FabroRunToolServices {
-            backend:            backend.clone(),
-            current_run_id:     current_run_id(),
-            base_cwd:           PathBuf::from("/tmp/fabro-test"),
-            user_settings_path: PathBuf::from("/tmp/fabro-test/settings.toml"),
+            backend:        backend.clone(),
+            current_run_id: current_run_id(),
+            base_cwd:       PathBuf::from("/tmp/fabro-test"),
         };
         (services, backend)
     }
@@ -2663,11 +2661,13 @@ reasoning = false
             &self,
             _spec: &fabro_tool::ValidatedCreateRunSpec,
             _cwd: &Path,
-            _user_settings_path: &Path,
             parent_id: Option<RunId>,
-        ) -> anyhow::Result<RunId> {
+        ) -> anyhow::Result<fabro_tool::CreateRunSubmission> {
             self.created_parent_ids.lock().unwrap().push(parent_id);
-            Ok(self.child_id)
+            Ok(fabro_tool::CreateRunSubmission {
+                run_id:   self.child_id,
+                warnings: Vec::new(),
+            })
         }
 
         async fn resolve_run(&self, selector: &str) -> anyhow::Result<Run> {

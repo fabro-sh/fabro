@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use fabro_api::types::RunManifest;
 use fabro_client::ServerTarget;
 use fabro_config::user::active_settings_path;
 use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
@@ -16,7 +15,7 @@ use fabro_interview::{
     WorkerControlMessage,
 };
 use fabro_model::Catalog;
-use fabro_server::run_tool_manifest;
+use fabro_server::run_tool_create::ServerRunCreateAdapter;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_tool::fabro_client::ClientBackend;
 use fabro_types::settings::run::{RunMode, RunNamespace};
@@ -108,6 +107,8 @@ pub(crate) async fn execute(
             worker_token,
             client.clone_for_reuse(),
             run_id,
+            run_spec.settings.run.environment.provider,
+            run_spec.target.clone(),
             run_spec.source_directory.as_deref(),
             &run_dir,
         )
@@ -232,33 +233,34 @@ fn build_fabro_run_tool_services(
     worker_token: &str,
     client: fabro_client::Client,
     current_run_id: RunId,
+    provider: fabro_types::settings::run::EnvironmentProvider,
+    inherited_target: Option<fabro_types::RunTarget>,
     source_directory: Option<&str>,
     run_dir: &Path,
 ) -> Option<FabroRunToolServices> {
     if worker_token.trim().is_empty() {
         return None;
     }
-    let backend = ClientBackend::new(Arc::new(client))
-        .with_manifest_builder(Arc::new(WorkerRunManifestBuilder));
+    let settings_path = active_settings_path(None);
+    let user_workflows_root = settings_path
+        .parent()
+        .map(|parent| parent.join("workflows"));
+    let backend = ClientBackend::new(Arc::new(client)).with_run_create_adapter(Arc::new(
+        worker_run_create_adapter(provider, inherited_target, user_workflows_root),
+    ));
     Some(FabroRunToolServices {
         backend: Arc::new(backend),
         current_run_id,
         base_cwd: source_directory.map_or_else(|| run_dir.to_path_buf(), PathBuf::from),
-        user_settings_path: active_settings_path(None),
     })
 }
 
-struct WorkerRunManifestBuilder;
-
-impl fabro_tool::RunManifestBuilder for WorkerRunManifestBuilder {
-    fn build_run_manifest(
-        &self,
-        spec: &fabro_tool::ValidatedCreateRunSpec,
-        cwd: &Path,
-        user_settings_path: &Path,
-    ) -> fabro_tool::ToolResult<RunManifest> {
-        run_tool_manifest::build_run_tool_manifest(spec, cwd, user_settings_path)
-    }
+fn worker_run_create_adapter(
+    provider: fabro_types::settings::run::EnvironmentProvider,
+    inherited_target: Option<fabro_types::RunTarget>,
+    user_workflows_root: Option<PathBuf>,
+) -> ServerRunCreateAdapter {
+    ServerRunCreateAdapter::worker(provider, inherited_target, user_workflows_root)
 }
 
 /// Load the worker's secret vault from the run's storage root.
@@ -1189,6 +1191,7 @@ fn install_signal_handlers(
     reason = "This test module prefers explicit type paths over extra imports."
 )]
 mod tests {
+    use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -1204,7 +1207,7 @@ mod tests {
     };
     use fabro_types::{
         AuthMethod, EventBody, FailureCategory, FailureDetail, FailureReason, IdpIdentity,
-        Principal, QuestionType, RunFailure, SuccessReason, fixtures,
+        Principal, QuestionType, RunFailure, RunTarget, SuccessReason, WorkflowVersionId, fixtures,
     };
     use fabro_vault::{SecretType, Vault};
     use fabro_workflow::event::RunEventSink;
@@ -1260,6 +1263,44 @@ mod tests {
                 &serde_json::json!({ "scope": "run:worker agent:run_tools" }),
             ),
         ));
+    }
+
+    #[tokio::test]
+    async fn fabro_run_create_worker_adapter_uses_runtime_provider_and_canonical_target() {
+        use fabro_tool::{FabroRunCreateParams, RunCreateAdapter, ValidatedCreateRuns};
+        use fabro_types::settings::run::EnvironmentProvider;
+
+        let temp = tempfile::tempdir().unwrap();
+        let workflow_version_id: WorkflowVersionId =
+            fabro_types::BlobHash::new(b"stored workflow").into();
+        let inherited = RunTarget::None {};
+        let params: FabroRunCreateParams = serde_json::from_value(serde_json::json!({
+            "runs": [{
+                "workflow": {
+                    "kind": "stored",
+                    "workflow_version_id": workflow_version_id
+                }
+            }]
+        }))
+        .unwrap();
+        let spec = ValidatedCreateRuns::try_from(params)
+            .unwrap()
+            .runs
+            .remove(0);
+        let adapter = super::worker_run_create_adapter(
+            EnvironmentProvider::Docker,
+            Some(inherited.clone()),
+            Some(temp.path().join("workflows")),
+        );
+        let client = fabro_client::Client::new_no_proxy("http://127.0.0.1:9").unwrap();
+
+        let prepared = adapter
+            .prepare(&client, &spec, Path::new("/host/that-must-not-be-read"))
+            .await
+            .unwrap();
+
+        assert_eq!(prepared.workflow_version_id, workflow_version_id);
+        assert_eq!(prepared.target, inherited);
     }
 
     fn worker_token_with_claims(claims: &serde_json::Value) -> String {
