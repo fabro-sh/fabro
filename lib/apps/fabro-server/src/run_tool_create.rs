@@ -9,12 +9,12 @@ use fabro_manifest::{
     collect_workflow_versions, observe_git_run_target, resolve_local_workflow_package,
 };
 use fabro_tool::{
-    PreparedRunCreate, RunCreateAdapter, ValidatedCreateRunSpec, ValidatedCreateRunWorkflowSource,
+    CreateRunWorkflowSource, PreparedRunCreate, RunCreateAdapter, ValidatedCreateRunSpec,
 };
 use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{DirtyStatus, RunTarget};
-use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::{fs, task};
 
 use crate::manifest_validation;
 
@@ -102,7 +102,11 @@ impl ServerRunCreateAdapter {
             .map(Some)
     }
 
-    fn resolve_target(&self, spec: &ValidatedCreateRunSpec, cwd: &Path) -> Result<ResolvedTarget> {
+    async fn resolve_target(
+        &self,
+        spec: &ValidatedCreateRunSpec,
+        cwd: &Path,
+    ) -> Result<ResolvedTarget> {
         if let Some(target) = &spec.target {
             return Ok(ResolvedTarget {
                 target:   target.clone(),
@@ -125,7 +129,13 @@ impl ServerRunCreateAdapter {
                 "the parent run has no canonical target; send an explicit target for this child run"
             ),
             RunCreateMode::Standalone { .. } => {
-                let observation = observe_git_run_target(cwd, None).ok_or_else(|| {
+                let observation_cwd = cwd.to_path_buf();
+                let observation = task::spawn_blocking(move || {
+                    observe_git_run_target(&observation_cwd, None)
+                })
+                .await
+                .context("git target observation task failed")?
+                .ok_or_else(|| {
                     anyhow::anyhow!(
                         "target is required outside an attached local GitHub checkout with a branch"
                     )
@@ -162,15 +172,26 @@ impl ServerRunCreateAdapter {
         }
     }
 
-    fn collect_selector(&self, selector: &str, cwd: &Path) -> Result<LocalWorkflowSource> {
+    async fn collect_selector(
+        &self,
+        selector: &str,
+        cwd: &Path,
+    ) -> Result<CollectedWorkflowClosure> {
         if !self.has_shared_filesystem() {
             bail!(
                 "workflow selectors require a shared Local filesystem; send inline files or an exact stored workflow version ID from Docker or Daytona"
             );
         }
-        resolve_local_workflow_package(Path::new(selector), cwd, self.user_workflows_root())
-            .map(LocalWorkflowSource::Selector)
-            .map_err(anyhow::Error::new)
+        let selector = PathBuf::from(selector);
+        let cwd = cwd.to_path_buf();
+        let user_workflows_root = self.user_workflows_root().map(Path::to_path_buf);
+        task::spawn_blocking(move || {
+            resolve_local_workflow_package(&selector, &cwd, user_workflows_root.as_deref())
+                .map(ResolvedLocalWorkflowPackage::into_closure)
+                .map_err(anyhow::Error::new)
+        })
+        .await
+        .context("workflow package collection task failed")?
     }
 }
 
@@ -182,45 +203,26 @@ impl RunCreateAdapter for ServerRunCreateAdapter {
         spec: &ValidatedCreateRunSpec,
         cwd: &Path,
     ) -> Result<PreparedRunCreate> {
-        if !self.has_shared_filesystem()
-            && matches!(spec.workflow, ValidatedCreateRunWorkflowSource::Selector(_))
-        {
-            bail!(
-                "workflow selectors require a shared Local filesystem; send inline files or an exact stored workflow version ID from Docker or Daytona"
-            );
-        }
-        if !self.has_shared_filesystem() && spec.goal_file.is_some() {
-            bail!(
-                "goal_file requires a shared Local filesystem; Docker and Daytona callers must send goal text by value"
-            );
-        }
-
         let goal = self.resolve_goal(spec, cwd).await?;
-        if let ValidatedCreateRunWorkflowSource::Stored {
-            workflow_version_id,
-        } = spec.workflow
-        {
-            let resolved_target = self.resolve_target(spec, cwd)?;
-            return Ok(PreparedRunCreate {
+        let closure = match &spec.workflow {
+            CreateRunWorkflowSource::Stored {
                 workflow_version_id,
-                target: resolved_target.target,
-                goal,
-                warnings: resolved_target.warnings,
-            });
-        }
-
-        let local_source = match &spec.workflow {
-            ValidatedCreateRunWorkflowSource::Selector(selector) => {
-                self.collect_selector(selector, cwd)?
+            } => {
+                let resolved_target = self.resolve_target(spec, cwd).await?;
+                return Ok(PreparedRunCreate {
+                    workflow_version_id: *workflow_version_id,
+                    target: resolved_target.target,
+                    goal,
+                    warnings: resolved_target.warnings,
+                });
             }
-            ValidatedCreateRunWorkflowSource::Inline(source) => {
-                LocalWorkflowSource::inline(source).await?
+            CreateRunWorkflowSource::Selector(selector) => {
+                self.collect_selector(selector, cwd).await?
             }
-            ValidatedCreateRunWorkflowSource::Stored { .. } => unreachable!(),
+            CreateRunWorkflowSource::Inline(source) => collect_inline_workflow(source).await?,
         };
-        validate_local_source(local_source.closure(), spec, goal.as_deref())?;
-        let resolved_target = self.resolve_target(spec, cwd)?;
-        let closure = local_source.closure();
+        validate_local_source(&closure, spec, goal.as_deref())?;
+        let resolved_target = self.resolve_target(spec, cwd).await?;
         let versions = closure
             .versions()
             .map(|(_, version)| version.version())
@@ -241,59 +243,51 @@ struct ResolvedTarget {
     warnings: Vec<String>,
 }
 
-enum LocalWorkflowSource {
-    Selector(ResolvedLocalWorkflowPackage),
-    Inline {
-        closure: CollectedWorkflowClosure,
-        _root:   tempfile::TempDir,
-    },
-}
-
-impl LocalWorkflowSource {
-    async fn inline(source: &fabro_tool::InlineWorkflowSource) -> Result<Self> {
-        let root = tempfile::tempdir().context("failed to create private inline workflow root")?;
-        for (path, content) in &source.files {
-            let destination = root.path().join(path.as_str());
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent).await.with_context(|| {
-                    format!(
-                        "failed to create inline workflow directory {}",
-                        parent.display()
-                    )
-                })?;
-            }
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&destination)
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to create inline workflow file {}",
-                        destination.display()
-                    )
-                })?;
-            file.write_all(content.as_bytes()).await.with_context(|| {
+/// Collect an inline workflow by staging its bytes in a private temporary
+/// root; the collected closure owns every file, so the root is discarded on
+/// return.
+async fn collect_inline_workflow(
+    source: &fabro_tool::InlineWorkflowSource,
+) -> Result<CollectedWorkflowClosure> {
+    let root = tempfile::tempdir().context("failed to create private inline workflow root")?;
+    for (path, content) in &source.files {
+        let destination = root.path().join(path.as_str());
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).await.with_context(|| {
                 format!(
-                    "failed to write inline workflow file {}",
-                    destination.display()
+                    "failed to create inline workflow directory {}",
+                    parent.display()
                 )
             })?;
         }
-        let closure = collect_workflow_versions(Path::new(source.entrypoint.as_str()), root.path())
-            .map_err(anyhow::Error::new)?;
-        Ok(Self::Inline {
-            closure,
-            _root: root,
-        })
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to create inline workflow file {}",
+                    destination.display()
+                )
+            })?;
+        file.write_all(content.as_bytes()).await.with_context(|| {
+            format!(
+                "failed to write inline workflow file {}",
+                destination.display()
+            )
+        })?;
+        // Dropping a tokio File does not wait for queued writes; the
+        // collector below reads these files synchronously, so flush first.
+        file.flush().await.with_context(|| {
+            format!(
+                "failed to flush inline workflow file {}",
+                destination.display()
+            )
+        })?;
     }
-
-    fn closure(&self) -> &CollectedWorkflowClosure {
-        match self {
-            Self::Selector(package) => package.closure(),
-            Self::Inline { closure, .. } => closure,
-        }
-    }
+    collect_workflow_versions(Path::new(source.entrypoint.as_str()), root.path())
+        .map_err(anyhow::Error::new)
 }
 
 fn validate_local_source(

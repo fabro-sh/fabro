@@ -30,4 +30,5 @@ toml.workspace = true
 
 [dev-dependencies]
 fabro-types = { path = "../../foundation/fabro-types", features = ["test-support"] }
+jsonschema.workspace = true
 tempfile = "3"

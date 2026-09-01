@@ -11,10 +11,6 @@ use serde_json::Value;
 use super::common::{self, FabroToolBackend, ToolError, ToolResult};
 use super::manifest;
 
-const MAX_INLINE_WORKFLOW_FILES: usize = fabro_types::MAX_WORKFLOW_VERSION_FILES;
-const MAX_INLINE_WORKFLOW_FILE_BYTES: usize = fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES;
-const MAX_INLINE_WORKFLOW_TOTAL_BYTES: usize = fabro_types::MAX_WORKFLOW_VERSION_BYTES;
-
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FabroRunCreateParams {
     pub runs: Vec<CreateRunSpecInput>,
@@ -273,6 +269,19 @@ pub enum CreateRunWorkflowSource {
     },
 }
 
+impl CreateRunWorkflowSource {
+    #[must_use]
+    pub fn display(&self) -> String {
+        match self {
+            Self::Selector(selector) => selector.clone(),
+            Self::Inline(source) => source.entrypoint.to_string(),
+            Self::Stored {
+                workflow_version_id,
+            } => workflow_version_id.to_string(),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for CreateRunWorkflowSource {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -385,7 +394,7 @@ pub struct ValidatedCreateRuns {
 
 #[derive(Debug)]
 pub struct ValidatedCreateRunSpec {
-    pub workflow:         ValidatedCreateRunWorkflowSource,
+    pub workflow:         CreateRunWorkflowSource,
     pub cwd:              Option<PathBuf>,
     pub parent_id:        Option<String>,
     pub target:           Option<RunTarget>,
@@ -400,28 +409,6 @@ pub struct ValidatedCreateRunSpec {
     pub environment:      Option<String>,
     pub preserve_sandbox: Option<bool>,
     pub start:            Option<bool>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ValidatedCreateRunWorkflowSource {
-    Selector(String),
-    Inline(InlineWorkflowSource),
-    Stored {
-        workflow_version_id: WorkflowVersionId,
-    },
-}
-
-impl ValidatedCreateRunWorkflowSource {
-    #[must_use]
-    pub fn display(&self) -> String {
-        match self {
-            Self::Selector(selector) => selector.clone(),
-            Self::Inline(source) => source.entrypoint.to_string(),
-            Self::Stored {
-                workflow_version_id,
-            } => workflow_version_id.to_string(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -549,21 +536,20 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
 
 fn validate_workflow_source(
     source: CreateRunWorkflowSource,
-) -> ToolResult<ValidatedCreateRunWorkflowSource> {
+) -> ToolResult<CreateRunWorkflowSource> {
     match source {
         CreateRunWorkflowSource::Selector(selector) => {
             let selector = selector.trim();
             if selector.is_empty() {
                 return Err(ToolError::message("workflow selector must not be blank"));
             }
-            Ok(ValidatedCreateRunWorkflowSource::Selector(
-                selector.to_string(),
-            ))
+            Ok(CreateRunWorkflowSource::Selector(selector.to_string()))
         }
         CreateRunWorkflowSource::Inline(source) => {
-            if source.files.len() > MAX_INLINE_WORKFLOW_FILES {
+            if source.files.len() > fabro_types::MAX_WORKFLOW_VERSION_FILES {
                 return Err(ToolError::message(format!(
-                    "inline workflow contains more than {MAX_INLINE_WORKFLOW_FILES} files"
+                    "inline workflow contains more than {} files",
+                    fabro_types::MAX_WORKFLOW_VERSION_FILES
                 )));
             }
             if !source.files.contains_key(&source.entrypoint) {
@@ -575,27 +561,25 @@ fn validate_workflow_source(
             let mut total_bytes = 0usize;
             for (path, content) in &source.files {
                 let bytes = content.len();
-                if bytes > MAX_INLINE_WORKFLOW_FILE_BYTES {
+                if bytes > fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES {
                     return Err(ToolError::message(format!(
-                        "inline workflow file `{path}` exceeds 512 KiB"
+                        "inline workflow file `{path}` exceeds {} KiB",
+                        fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES / 1024
                     )));
                 }
                 total_bytes = total_bytes
                     .checked_add(bytes)
                     .ok_or_else(|| ToolError::message("inline workflow content size overflowed"))?;
-                if total_bytes > MAX_INLINE_WORKFLOW_TOTAL_BYTES {
-                    return Err(ToolError::message(
-                        "inline workflow content exceeds 2 MiB in aggregate",
-                    ));
+                if total_bytes > fabro_types::MAX_WORKFLOW_VERSION_BYTES {
+                    return Err(ToolError::message(format!(
+                        "inline workflow content exceeds {} MiB in aggregate",
+                        fabro_types::MAX_WORKFLOW_VERSION_BYTES / (1024 * 1024)
+                    )));
                 }
             }
-            Ok(ValidatedCreateRunWorkflowSource::Inline(source))
+            Ok(CreateRunWorkflowSource::Inline(source))
         }
-        CreateRunWorkflowSource::Stored {
-            workflow_version_id,
-        } => Ok(ValidatedCreateRunWorkflowSource::Stored {
-            workflow_version_id,
-        }),
+        stored @ CreateRunWorkflowSource::Stored { .. } => Ok(stored),
     }
 }
 
@@ -783,6 +767,51 @@ mod tests {
     }
 
     #[test]
+    fn create_spec_schema_stays_in_parity_with_run_target_serde() {
+        let mut generator = SchemaGenerator::default();
+        let schema = CreateRunSpecInput::json_schema(&mut generator);
+        let schema = serde_json::to_value(schema).expect("schema should serialize");
+        let validator = jsonschema::validator_for(&schema).expect("advertised schema must compile");
+
+        // Every serde-produced target shape must satisfy the hand-written
+        // schema literal; a field added to a target variant without updating
+        // the literal fails here because the schema denies unknown fields.
+        let targets = [
+            RunTarget::Git(fabro_types::GitRunTarget {
+                repo:   "fabro-sh/fabro".to_string(),
+                branch: "main".to_string(),
+                tag:    Some("v1.0.0".to_string()),
+                sha:    Some("0123456789abcdef0123456789abcdef01234567".to_string()),
+            }),
+            RunTarget::None {},
+            RunTarget::Folder {
+                path: "/srv/workspace".to_string(),
+            },
+        ];
+        for target in targets {
+            let target = serde_json::to_value(&target).expect("target should serialize");
+            let spec = json!({ "workflow": "demo", "target": target });
+            assert!(
+                validator.is_valid(&spec),
+                "advertised schema rejects serde-produced target {target}"
+            );
+        }
+
+        // The schema must actually enforce the field lists, so the parity
+        // assertions above have teeth.
+        let unknown_field = json!({
+            "workflow": "demo",
+            "target": {
+                "kind": "git",
+                "repo": "fabro-sh/fabro",
+                "branch": "main",
+                "unknown_field": true
+            }
+        });
+        assert!(!validator.is_valid(&unknown_field));
+    }
+
+    #[test]
     fn create_spec_accepts_parent_selector() {
         let spec = ValidatedCreateRunSpec::try_from(CreateRunSpec {
             workflow:         selector("simple.fabro"),
@@ -902,7 +931,7 @@ mod tests {
                 .contains("entrypoint")
         );
 
-        let too_many = (0..=MAX_INLINE_WORKFLOW_FILES)
+        let too_many = (0..=fabro_types::MAX_WORKFLOW_VERSION_FILES)
             .map(|index| (format!("files/{index}.md"), json!("x")))
             .collect::<serde_json::Map<_, _>>();
         let too_many: FabroRunCreateParams = serde_json::from_value(json!({
@@ -922,7 +951,7 @@ mod tests {
                 "workflow": {
                     "kind": "inline",
                     "entrypoint": "main.fabro",
-                    "files": { "main.fabro": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES + 1) }
+                    "files": { "main.fabro": "x".repeat(fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES + 1) }
                 }
             }]
         }))
@@ -935,10 +964,10 @@ mod tests {
                     "kind": "inline",
                     "entrypoint": "0.fabro",
                     "files": {
-                        "0.fabro": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES),
-                        "1.md": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES),
-                        "2.md": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES),
-                        "3.md": "x".repeat(MAX_INLINE_WORKFLOW_FILE_BYTES),
+                        "0.fabro": "x".repeat(fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES),
+                        "1.md": "x".repeat(fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES),
+                        "2.md": "x".repeat(fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES),
+                        "3.md": "x".repeat(fabro_types::MAX_WORKFLOW_VERSION_FILE_BYTES),
                         "4.md": "x"
                     }
                 }

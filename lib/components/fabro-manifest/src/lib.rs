@@ -333,11 +333,8 @@ pub fn observe_git_run_target(
 ) -> Option<GitRunTargetObservation> {
     let local = inspect_local_git(repo_path, configured_repo_origin_url)?;
     let legacy_git_context = local.legacy_git_context;
-    let mut run_target = github_run_target(
-        &legacy_git_context.origin_url,
-        &legacy_git_context.branch,
-        None,
-    );
+    let mut run_target =
+        github_run_target(&legacy_git_context.origin_url, &legacy_git_context.branch);
     if let Some(target) = run_target.as_mut() {
         let publish_status = publish_manifest_branch_best_effort(
             repo_path,
@@ -414,14 +411,14 @@ fn build_legacy_git_context(
     Some(local.legacy_git_context)
 }
 
-fn github_run_target(origin_url: &str, branch: &str, sha: Option<String>) -> Option<GitRunTarget> {
+fn github_run_target(origin_url: &str, branch: &str) -> Option<GitRunTarget> {
     let (owner, repository) = fabro_github::parse_github_owner_repo(origin_url).ok()?;
     let slug = GitHubRepositorySlug::try_new(&format!("{owner}/{repository}"))?;
     let validated = RunTarget::Git(GitRunTarget {
-        repo: slug.to_string(),
+        repo:   slug.to_string(),
         branch: branch.to_owned(),
-        tag: None,
-        sha,
+        tag:    None,
+        sha:    None,
     })
     .validate()
     .ok()?;

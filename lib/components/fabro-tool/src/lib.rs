@@ -24,8 +24,8 @@ pub use common::{
 pub use create::{
     CreateRunOptions, CreateRunSpec, CreateRunSpecInput, CreateRunWorkflowSource, CreateRunsResult,
     CreatedRunResult, FabroRunCreateParams, InlineWorkflowSource, RunInputValue,
-    ValidatedCreateRunSpec, ValidatedCreateRunWorkflowSource, ValidatedCreateRuns,
-    ValidatedRunInputValue, create_runs, create_runs_text, create_runs_with_options,
+    ValidatedCreateRunSpec, ValidatedCreateRuns, ValidatedRunInputValue, create_runs,
+    create_runs_text, create_runs_with_options,
 };
 pub use events::{
     FabroRunEventsParams, RunEventResult, RunEventsAction, RunEventsResult, ValidatedRunEvents,
