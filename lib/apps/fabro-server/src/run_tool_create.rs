@@ -13,6 +13,7 @@ use fabro_tool::{
 };
 use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{DirtyStatus, RunTarget};
+use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 use crate::manifest_validation;
@@ -95,7 +96,7 @@ impl ServerRunCreateAdapter {
             );
         }
         let path = cwd.join(goal_file);
-        tokio::fs::read_to_string(&path)
+        fs::read_to_string(&path)
             .await
             .with_context(|| format!("failed to read goal file {}", path.display()))
             .map(Some)
@@ -254,14 +255,14 @@ impl LocalWorkflowSource {
         for (path, content) in &source.files {
             let destination = root.path().join(path.as_str());
             if let Some(parent) = destination.parent() {
-                tokio::fs::create_dir_all(parent).await.with_context(|| {
+                fs::create_dir_all(parent).await.with_context(|| {
                     format!(
                         "failed to create inline workflow directory {}",
                         parent.display()
                     )
                 })?;
             }
-            let mut file = tokio::fs::OpenOptions::new()
+            let mut file = fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&destination)
@@ -341,7 +342,7 @@ mod tests {
 
     use super::*;
 
-    fn validated_spec(value: serde_json::Value) -> ValidatedCreateRunSpec {
+    fn validated_spec(value: &serde_json::Value) -> ValidatedCreateRunSpec {
         let params: FabroRunCreateParams = serde_json::from_value(json!({ "runs": [value] }))
             .expect("create input should deserialize");
         ValidatedCreateRuns::try_from(params)
@@ -354,6 +355,10 @@ mod tests {
         fabro_client::Client::new_no_proxy(base_url).expect("test client should build")
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test fixture setup uses the Git CLI against an isolated temporary repository"
+    )]
     fn run_git(cwd: &Path, args: &[&str]) {
         let output = Command::new("git")
             .args(args)
@@ -367,10 +372,10 @@ mod tests {
         );
     }
 
-    async fn dynamic_version_registration_mock<'a>(
-        server: &'a MockServer,
+    async fn dynamic_version_registration_mock(
+        server: &MockServer,
         registered: Arc<Mutex<Vec<WorkflowVersion>>>,
-    ) -> httpmock::Mock<'a> {
+    ) -> httpmock::Mock<'_> {
         server
             .mock_async(move |when, then| {
                 when.method(POST).path("/api/v1/workflow-versions");
@@ -396,7 +401,7 @@ mod tests {
         let registration =
             dynamic_version_registration_mock(&server, Arc::clone(&registered)).await;
         let client = no_proxy_client(&server.url(""));
-        let spec = validated_spec(json!({
+        let spec = validated_spec(&json!({
             "workflow": {
                 "kind": "inline",
                 "entrypoint": "root/workflow.fabro",
@@ -468,7 +473,7 @@ mod tests {
             tag:    Some("v1.0.0".to_string()),
             sha:    Some("0123456789abcdef0123456789abcdef01234567".to_string()),
         });
-        let spec = validated_spec(json!({
+        let spec = validated_spec(&json!({
             "workflow": {
                 "kind": "stored",
                 "workflow_version_id": workflow_version_id
@@ -494,25 +499,29 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let operation_cwd = temp.path().join("nested/operation");
         let workflow_dir = temp.path().join(".fabro/workflows/demo");
-        std::fs::create_dir_all(&operation_cwd).unwrap();
-        std::fs::create_dir_all(&workflow_dir).unwrap();
-        std::fs::write(temp.path().join(".fabro/project.toml"), "_version = 1\n").unwrap();
-        std::fs::write(
+        fs::create_dir_all(&operation_cwd).await.unwrap();
+        fs::create_dir_all(&workflow_dir).await.unwrap();
+        fs::write(temp.path().join(".fabro/project.toml"), "_version = 1\n")
+            .await
+            .unwrap();
+        fs::write(
             workflow_dir.join("workflow.toml"),
             "_version = 1\n[workflow]\ngraph = \"workflow.fabro\"\n",
         )
+        .await
         .unwrap();
-        std::fs::write(
+        fs::write(
             workflow_dir.join("workflow.fabro"),
             "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
         )
+        .await
         .unwrap();
         let server = MockServer::start_async().await;
         let registered = Arc::new(Mutex::new(Vec::new()));
         let registration =
             dynamic_version_registration_mock(&server, Arc::clone(&registered)).await;
         let client = no_proxy_client(&server.url(""));
-        let spec = validated_spec(json!({
+        let spec = validated_spec(&json!({
             "workflow": "demo",
             "target": { "kind": "none" }
         }));
@@ -536,20 +545,22 @@ mod tests {
     async fn workflow_version_worker_capabilities_gate_selector_and_goal_file_before_reads() {
         let temp = tempfile::tempdir().unwrap();
         let workflow = temp.path().join("same-name.fabro");
-        std::fs::write(
+        fs::write(
             &workflow,
             "digraph HostCopy { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
         )
+        .await
         .unwrap();
-        std::fs::write(
+        fs::write(
             temp.path().join("goal.md"),
             "host goal that must not be read",
         )
+        .await
         .unwrap();
         let client = no_proxy_client("http://127.0.0.1:9");
         let adapter = ServerRunCreateAdapter::worker(EnvironmentProvider::Daytona, None, None);
 
-        let selector = validated_spec(json!({
+        let selector = validated_spec(&json!({
             "workflow": "same-name.fabro",
             "target": { "kind": "none" }
         }));
@@ -564,7 +575,7 @@ mod tests {
         );
 
         let workflow_version_id: WorkflowVersionId = fabro_types::BlobHash::new(b"stored").into();
-        let goal_file = validated_spec(json!({
+        let goal_file = validated_spec(&json!({
             "workflow": {
                 "kind": "stored",
                 "workflow_version_id": workflow_version_id
@@ -584,7 +595,7 @@ mod tests {
         let client = no_proxy_client("http://127.0.0.1:9");
         let adapter = ServerRunCreateAdapter::worker(EnvironmentProvider::Docker, None, None);
 
-        let invalid_graph = validated_spec(json!({
+        let invalid_graph = validated_spec(&json!({
             "workflow": {
                 "kind": "inline",
                 "entrypoint": "workflow.fabro",
@@ -597,7 +608,7 @@ mod tests {
             .await
             .expect_err("invalid graph should fail before registration");
 
-        let undefined_input = validated_spec(json!({
+        let undefined_input = validated_spec(&json!({
             "workflow": {
                 "kind": "inline",
                 "entrypoint": "workflow.fabro",
@@ -624,7 +635,7 @@ mod tests {
     async fn workflow_version_target_failure_precedes_registration() {
         let client = no_proxy_client("http://127.0.0.1:9");
         let adapter = ServerRunCreateAdapter::worker(EnvironmentProvider::Docker, None, None);
-        let spec = validated_spec(json!({
+        let spec = validated_spec(&json!({
             "workflow": {
                 "kind": "inline",
                 "entrypoint": "workflow.fabro",
@@ -642,17 +653,20 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("parent run has no canonical target")
+                .contains("parent run has no canonical target"),
+            "unexpected error: {error:#}"
         );
     }
 
     #[tokio::test]
     async fn workflow_version_shared_goal_file_and_explicit_target_are_preserved() {
         let temp = tempfile::tempdir().unwrap();
-        std::fs::write(temp.path().join("goal.md"), "goal from shared filesystem").unwrap();
+        fs::write(temp.path().join("goal.md"), "goal from shared filesystem")
+            .await
+            .unwrap();
         let client = no_proxy_client("http://127.0.0.1:9");
         let workflow_version_id: WorkflowVersionId = fabro_types::BlobHash::new(b"stored").into();
-        let spec = validated_spec(json!({
+        let spec = validated_spec(&json!({
             "workflow": {
                 "kind": "stored",
                 "workflow_version_id": workflow_version_id
@@ -679,7 +693,7 @@ mod tests {
     async fn workflow_version_standalone_git_fallback_reports_excluded_local_bytes() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = temp.path().join("workspace");
-        std::fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&workspace).await.unwrap();
         run_git(&workspace, &[
             "init",
             "--quiet",
@@ -688,7 +702,9 @@ mod tests {
         ]);
         run_git(&workspace, &["config", "user.name", "Fabro Test"]);
         run_git(&workspace, &["config", "user.email", "fabro@example.com"]);
-        std::fs::write(workspace.join("tracked.txt"), "committed").unwrap();
+        fs::write(workspace.join("tracked.txt"), "committed")
+            .await
+            .unwrap();
         run_git(&workspace, &["add", "tracked.txt"]);
         run_git(&workspace, &["commit", "--quiet", "-m", "initial"]);
         run_git(&workspace, &[
@@ -701,10 +717,12 @@ mod tests {
         run_git(&workspace, &[
             "remote", "set-url", "--push", "origin", &missing,
         ]);
-        std::fs::write(workspace.join("dirty.txt"), "uncommitted").unwrap();
+        fs::write(workspace.join("dirty.txt"), "uncommitted")
+            .await
+            .unwrap();
 
         let workflow_version_id: WorkflowVersionId = fabro_types::BlobHash::new(b"stored").into();
-        let spec = validated_spec(json!({
+        let spec = validated_spec(&json!({
             "workflow": {
                 "kind": "stored",
                 "workflow_version_id": workflow_version_id

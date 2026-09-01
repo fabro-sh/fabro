@@ -742,6 +742,7 @@ async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
         serde_json::json!({
             "runs": [{
                 "workflow": workflow,
+                "target": { "kind": "none" },
                 "dry_run": true,
                 "auto_approve": true,
                 "labels": { "source": "mcp-test" }
@@ -780,7 +781,7 @@ async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
           "labels": {
             "source": "mcp-test"
           },
-          "source_directory": "[SOURCE_DIRECTORY]",
+          "source_directory": null,
           "repo_origin_url": null,
           "goal_preview": "Run tests and report results",
           "goal_truncated": false
@@ -809,6 +810,7 @@ async fn mcp_run_tools_use_default_local_server_without_server_flag() {
         serde_json::json!({
             "runs": [{
                 "workflow": workflow,
+                "target": { "kind": "none" },
                 "dry_run": true,
                 "auto_approve": true,
                 "labels": { "source": "mcp-default-server-test" },
@@ -1387,7 +1389,7 @@ async fn mcp_lifecycle_tools_manage_real_run() {
             "labels": {
               "source": "mcp-test"
             },
-            "source_directory": "[SOURCE_DIRECTORY]",
+            "source_directory": null,
             "repo_origin_url": null,
             "goal": "Run tests and report results"
           }
@@ -1912,6 +1914,29 @@ async fn mcp_create_string_shorthand_deserializes_before_auth() {
         RealAuthHarness::start_with_dev_token(fabro_test::GitHubAppState::default()).await;
     let target_url = harness.api_target();
     let workflow = context.install_fixture("simple.fabro");
+    context.git_init();
+    run_git(&context.temp_dir, &["config", "user.name", "Fabro Test"]);
+    run_git(&context.temp_dir, &[
+        "config",
+        "user.email",
+        "fabro@example.com",
+    ]);
+    run_git(&context.temp_dir, &["add", "simple.fabro"]);
+    run_git(&context.temp_dir, &["commit", "--quiet", "-m", "fixture"]);
+    run_git(&context.temp_dir, &[
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/fabro-sh/fabro.git",
+    ]);
+    let missing_push = format!("file://{}/missing.git", context.temp_dir.display());
+    run_git(&context.temp_dir, &[
+        "remote",
+        "set-url",
+        "--push",
+        "origin",
+        &missing_push,
+    ]);
     let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
 
     let result = client
@@ -2806,6 +2831,7 @@ async fn create_mcp_run(client: &McpClient, workflow: PathBuf, start: bool) -> S
         serde_json::json!({
             "runs": [{
                 "workflow": workflow,
+                "target": { "kind": "none" },
                 "dry_run": true,
                 "auto_approve": true,
                 "labels": { "source": "mcp-test" },
@@ -2818,6 +2844,19 @@ async fn create_mcp_run(client: &McpClient, workflow: PathBuf, start: bool) -> S
         .as_str()
         .expect("create result should include run id")
         .to_string()
+}
+
+fn run_git(cwd: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("git command should run");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn seed_oauth_auth(

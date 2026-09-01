@@ -18,9 +18,9 @@ use fabro_model::Catalog;
 use fabro_server::run_tool_create::ServerRunCreateAdapter;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_tool::fabro_client::ClientBackend;
-use fabro_types::settings::run::{RunMode, RunNamespace};
+use fabro_types::settings::run::{EnvironmentProvider, RunMode, RunNamespace};
 use fabro_types::{
-    ArtifactUpload, BlobHash, EventBody, FailureReason, Principal, RunEvent, RunId,
+    ArtifactUpload, BlobHash, EventBody, FailureReason, Principal, RunEvent, RunId, RunTarget,
     WorkflowSettings,
 };
 use fabro_vault::{SecretStore, Vault};
@@ -233,8 +233,8 @@ fn build_fabro_run_tool_services(
     worker_token: &str,
     client: fabro_client::Client,
     current_run_id: RunId,
-    provider: fabro_types::settings::run::EnvironmentProvider,
-    inherited_target: Option<fabro_types::RunTarget>,
+    provider: EnvironmentProvider,
+    inherited_target: Option<RunTarget>,
     source_directory: Option<&str>,
     run_dir: &Path,
 ) -> Option<FabroRunToolServices> {
@@ -256,8 +256,8 @@ fn build_fabro_run_tool_services(
 }
 
 fn worker_run_create_adapter(
-    provider: fabro_types::settings::run::EnvironmentProvider,
-    inherited_target: Option<fabro_types::RunTarget>,
+    provider: EnvironmentProvider,
+    inherited_target: Option<RunTarget>,
     user_workflows_root: Option<PathBuf>,
 ) -> ServerRunCreateAdapter {
     ServerRunCreateAdapter::worker(provider, inherited_target, user_workflows_root)

@@ -300,7 +300,7 @@ mod tests {
     use super::*;
     use crate::{FabroRunCreateParams, ValidatedCreateRuns};
 
-    fn validated_spec(value: serde_json::Value) -> ValidatedCreateRunSpec {
+    fn validated_spec(value: &serde_json::Value) -> ValidatedCreateRunSpec {
         let params: FabroRunCreateParams = serde_json::from_value(json!({ "runs": [value] }))
             .expect("create input should deserialize");
         ValidatedCreateRuns::try_from(params)
@@ -319,7 +319,7 @@ mod tests {
             tag:    Some("v1.2.3".to_string()),
             sha:    Some("0123456789ABCDEF0123456789ABCDEF01234567".to_string()),
         });
-        let spec = validated_spec(json!({
+        let spec = validated_spec(&json!({
             "workflow": {
                 "kind": "stored",
                 "workflow_version_id": workflow_version_id
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn create_run_intent_mapping_preserves_omitted_boolean_overrides() {
         let workflow_version_id = fabro_types::BlobHash::new(b"stored").into();
-        let spec = validated_spec(json!({
+        let spec = validated_spec(&json!({
             "workflow": {
                 "kind": "stored",
                 "workflow_version_id": workflow_version_id

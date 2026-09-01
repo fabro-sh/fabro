@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use fabro_server::run_tool_create::ServerRunCreateAdapter;
 use fabro_tool::fabro_client::ClientBackend;
 use fabro_tool::{self as run_tools, FabroToolBackend};
 use fabro_util::version::FABRO_VERSION;
@@ -256,9 +257,7 @@ impl FabroMcpServer {
                             .map(|parent| parent.join("workflows"));
                         Arc::new(
                             ClientBackend::new(Arc::new(client)).with_run_create_adapter(Arc::new(
-                                fabro_server::run_tool_create::ServerRunCreateAdapter::standalone(
-                                    user_workflows_root,
-                                ),
+                                ServerRunCreateAdapter::standalone(user_workflows_root),
                             )),
                         ) as Arc<dyn FabroToolBackend>
                     })
