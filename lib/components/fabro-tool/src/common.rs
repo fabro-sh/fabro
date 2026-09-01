@@ -62,9 +62,11 @@ pub struct CreateRunSubmission {
 
 /// Trusted producer-local preparation for one tool-created run.
 ///
-/// Implementations acquire permitted workflow bytes and goal files, validate
-/// local content, resolve the independent target, and register immutable
-/// workflow versions before returning intent-ready fields.
+/// Implementations acquire permitted workflow bytes and goal files, enforce
+/// producer capabilities and package structure, resolve the independent
+/// target, and register immutable workflow versions before returning
+/// intent-ready fields. The server remains authoritative for semantic run
+/// admission.
 #[async_trait]
 pub trait RunCreateAdapter: Send + Sync {
     async fn prepare(

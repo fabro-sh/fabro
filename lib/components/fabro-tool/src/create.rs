@@ -128,7 +128,7 @@ impl JsonSchema for CreateRunSpecInput {
                             "description": "Optional parent run id or selector."
                         },
                         "target": {
-                            "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted; standalone calls require an observable Git checkout when omitted.",
+                            "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted; standalone calls require an attached GitHub checkout whose exact local HEAD is available from the canonical origin.",
                             "anyOf": [
                                 { "type": "null" },
                                 {
@@ -414,18 +414,12 @@ pub struct ValidatedCreateRunSpec {
 #[derive(Debug)]
 pub struct ValidatedRunInputValue {
     json: Value,
-    toml: toml::Value,
 }
 
 impl ValidatedRunInputValue {
     #[must_use]
     pub fn json(&self) -> &Value {
         &self.json
-    }
-
-    #[must_use]
-    pub fn toml(&self) -> &toml::Value {
-        &self.toml
     }
 }
 
@@ -501,8 +495,8 @@ impl TryFrom<CreateRunSpec> for ValidatedCreateRunSpec {
             .into_iter()
             .map(|(key, value)| {
                 let json = value.into_inner();
-                manifest::json_to_toml_value(&key, &json)
-                    .map(|toml| (key, ValidatedRunInputValue { json, toml }))
+                manifest::json_to_toml_value(&key, &json)?;
+                Ok((key, ValidatedRunInputValue { json }))
             })
             .collect::<ToolResult<HashMap<_, _>>>()?;
         let target = spec

@@ -110,7 +110,7 @@ You can also reuse an exact immutable workflow version without uploading content
 }
 ```
 
-Workflow source and run target are independent. Object-form calls can provide an explicit Git, `none`, or folder target. A workflow agent inherits its parent run's canonical target when `target` is omitted; standalone MCP instead derives an attached GitHub checkout when it can do so truthfully and otherwise requires an explicit target. Docker and Daytona agents must send inline files or a stored version ID—never send a sandbox path as a selector, because the run worker cannot use that path to read the sandbox's files.
+Workflow source and run target are independent. Object-form calls can provide an explicit Git, `none`, or folder target. A workflow agent inherits its parent run's canonical target when `target` is omitted. Standalone MCP derives an attached GitHub checkout only when it can prove that the exact local HEAD is available from the canonical origin; otherwise, push the commit or provide an explicit target. Docker and Daytona agents must send inline files or a stored version ID—never send a sandbox path as a selector, because the run worker cannot use that path to read the sandbox's files.
 
 Use `goal` for inline goal text or `goal_file` to read the run goal from a file. They are mutually exclusive. Relative `goal_file` paths resolve from the run's `cwd`, or from the MCP server working directory when `cwd` is omitted. Like selectors, `goal_file` requires a native/shared filesystem; Docker and Daytona agents must send `goal` text by value.
 

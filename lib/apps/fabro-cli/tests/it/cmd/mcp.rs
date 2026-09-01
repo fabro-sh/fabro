@@ -1929,14 +1929,23 @@ async fn mcp_create_string_shorthand_deserializes_before_auth() {
         "origin",
         "https://github.com/fabro-sh/fabro.git",
     ]);
-    let missing_push = format!("file://{}/missing.git", context.temp_dir.display());
+    let test_origin = context.temp_dir.join("origin.git");
     run_git(&context.temp_dir, &[
-        "remote",
-        "set-url",
-        "--push",
-        "origin",
-        &missing_push,
+        "init",
+        "--bare",
+        "--quiet",
+        test_origin
+            .to_str()
+            .expect("test origin path should be UTF-8"),
     ]);
+    let push_url = format!("file://{}", test_origin.display());
+    run_git(&context.temp_dir, &[
+        "remote", "set-url", "--push", "origin", &push_url,
+    ]);
+    let workflow_version_id =
+        fabro_manifest::collect_workflow_versions(&workflow, &context.temp_dir)
+            .expect("workflow fixture should package")
+            .root_id();
     let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
 
     let result = client
@@ -1958,6 +1967,20 @@ async fn mcp_create_string_shorthand_deserializes_before_auth() {
     assert!(
         error.contains("Run `fabro auth login` to authenticate."),
         "{error}"
+    );
+    assert!(
+        harness
+            .api_requests
+            .contains("POST /api/v1/workflow-versions"),
+        "the shorthand request should reach workflow-version authentication"
+    );
+    assert!(
+        !harness.workflow_version_exists(workflow_version_id).await,
+        "an unauthenticated shorthand request must not register a workflow version"
+    );
+    assert!(
+        !harness.api_requests.contains("POST /api/v1/runs"),
+        "an unauthenticated shorthand request must not reach run creation"
     );
     assert_mcp_run_tool_count(&client).await;
 

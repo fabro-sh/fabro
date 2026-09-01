@@ -1,12 +1,10 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use fabro_config::RunLayer;
 use fabro_manifest::{
-    CollectedWorkflowClosure, ResolvedLocalWorkflowPackage, RunOverrideInput,
-    collect_workflow_versions, observe_git_run_target, resolve_local_workflow_package,
+    CollectedWorkflowClosure, ResolvedLocalWorkflowPackage, collect_workflow_versions,
+    observe_git_run_target, resolve_local_workflow_package,
 };
 use fabro_tool::{
     CreateRunWorkflowSource, PreparedRunCreate, RunCreateAdapter, ValidatedCreateRunSpec,
@@ -15,8 +13,6 @@ use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{DirtyStatus, RunTarget};
 use tokio::io::AsyncWriteExt;
 use tokio::{fs, task};
-
-use crate::manifest_validation;
 
 #[derive(Clone, Debug)]
 pub struct ServerRunCreateAdapter {
@@ -145,13 +141,6 @@ impl ServerRunCreateAdapter {
                         "target is required because the local checkout cannot be represented as a GitHub run target"
                     )
                 })?;
-                let mut warnings = Vec::new();
-                if observation.legacy_git_context.dirty == DirtyStatus::Dirty {
-                    warnings.push(
-                        "the local checkout has uncommitted changes; those changes are excluded from the run target"
-                            .to_string(),
-                    );
-                }
                 if observation
                     .legacy_git_context
                     .sha
@@ -159,8 +148,14 @@ impl ServerRunCreateAdapter {
                     .is_some_and(|sha| !sha.is_empty())
                     && target.sha.is_none()
                 {
+                    bail!(
+                        "the exact local Git commit could not be made available from the canonical GitHub origin; push the commit and try again"
+                    );
+                }
+                let mut warnings = Vec::new();
+                if observation.legacy_git_context.dirty == DirtyStatus::Dirty {
                     warnings.push(
-                        "the local HEAD commit is not fetchable and is not pinned; the remote branch will be selected"
+                        "the local checkout has uncommitted changes; those changes are excluded from the run target"
                             .to_string(),
                     );
                 }
@@ -221,7 +216,6 @@ impl RunCreateAdapter for ServerRunCreateAdapter {
             }
             CreateRunWorkflowSource::Inline(source) => collect_inline_workflow(source).await?,
         };
-        validate_local_source(&closure, spec, goal.as_deref())?;
         let resolved_target = self.resolve_target(spec, cwd).await?;
         let versions = closure
             .versions()
@@ -286,40 +280,13 @@ async fn collect_inline_workflow(
             )
         })?;
     }
-    collect_workflow_versions(Path::new(source.entrypoint.as_str()), root.path())
-        .map_err(anyhow::Error::new)
-}
-
-fn validate_local_source(
-    closure: &CollectedWorkflowClosure,
-    spec: &ValidatedCreateRunSpec,
-    goal: Option<&str>,
-) -> Result<()> {
-    let run_overrides = run_tool_run_overrides(spec, goal);
-    let inputs = spec
-        .inputs
-        .iter()
-        .map(|(key, value)| (key.clone(), value.toml().clone()))
-        .collect::<HashMap<_, _>>();
-    let response =
-        manifest_validation::validate_collected_workflow(closure, run_overrides.as_ref(), &inputs)?;
-    if !response.ok {
-        bail!("workflow validation failed");
-    }
-    Ok(())
-}
-
-fn run_tool_run_overrides(spec: &ValidatedCreateRunSpec, goal: Option<&str>) -> Option<RunLayer> {
-    fabro_manifest::build_sparse_run_overrides(RunOverrideInput {
-        goal,
-        model: spec.model.as_deref(),
-        provider: spec.provider.as_deref(),
-        environment: spec.environment.as_deref(),
-        preserve_sandbox: spec.preserve_sandbox,
-        dry_run: spec.dry_run,
-        auto_approve: spec.auto_approve,
-        labels: spec.labels.clone(),
+    let entrypoint = source.entrypoint.clone();
+    task::spawn_blocking(move || {
+        collect_workflow_versions(Path::new(entrypoint.as_str()), root.path())
+            .map_err(anyhow::Error::new)
     })
+    .await
+    .context("inline workflow package collection task failed")?
 }
 
 #[cfg(test)]
@@ -328,7 +295,8 @@ mod tests {
     use std::process::Command;
     use std::sync::{Arc, Mutex};
 
-    use fabro_tool::{FabroRunCreateParams, ValidatedCreateRuns};
+    use fabro_tool::fabro_client::ClientBackend;
+    use fabro_tool::{FabroRunCreateParams, FabroToolBackend as _, ValidatedCreateRuns};
     use fabro_types::{GitRunTarget, WorkflowVersion, WorkflowVersionId};
     use httpmock::Method::POST;
     use httpmock::{HttpMockRequest, HttpMockResponse, MockServer};
@@ -585,24 +553,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn workflow_version_local_content_is_validated_before_registration() {
-        let client = no_proxy_client("http://127.0.0.1:9");
+    async fn workflow_version_is_registered_before_server_admission_rejection() {
+        let server = MockServer::start_async().await;
+        let registered = Arc::new(Mutex::new(Vec::new()));
+        let registration =
+            dynamic_version_registration_mock(&server, Arc::clone(&registered)).await;
+        let admission = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/api/v1/runs");
+                then.status(422)
+                    .header("content-type", "text/plain")
+                    .body("server-authoritative workflow rejection");
+            })
+            .await;
+        let client = Arc::new(no_proxy_client(&server.url("")));
         let adapter = ServerRunCreateAdapter::worker(EnvironmentProvider::Docker, None, None);
-
-        let invalid_graph = validated_spec(&json!({
-            "workflow": {
-                "kind": "inline",
-                "entrypoint": "workflow.fabro",
-                "files": { "workflow.fabro": "this is not a graph" }
-            },
-            "target": { "kind": "none" }
-        }));
-        adapter
-            .prepare(&client, &invalid_graph, Path::new("/ignored"))
-            .await
-            .expect_err("invalid graph should fail before registration");
-
-        let undefined_input = validated_spec(&json!({
+        let backend =
+            ClientBackend::new(Arc::clone(&client)).with_run_create_adapter(Arc::new(adapter));
+        let spec = validated_spec(&json!({
             "workflow": {
                 "kind": "inline",
                 "entrypoint": "workflow.fabro",
@@ -618,11 +586,20 @@ mod tests {
             },
             "target": { "kind": "none" }
         }));
-        let error = adapter
-            .prepare(&client, &undefined_input, Path::new("/ignored"))
+        let error = backend
+            .create_run_from_spec(&spec, Path::new("/ignored"), None)
             .await
-            .expect_err("undefined input should fail before registration");
-        assert!(error.to_string().contains("workflow validation failed"));
+            .expect_err("the server should reject the semantically invalid workflow");
+
+        registration.assert_calls_async(1).await;
+        admission.assert_calls_async(1).await;
+        assert_eq!(registered.lock().unwrap().len(), 1);
+        assert!(
+            error
+                .to_string()
+                .contains("server-authoritative workflow rejection"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[tokio::test]
@@ -684,7 +661,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn workflow_version_standalone_git_fallback_reports_excluded_local_bytes() {
+    async fn workflow_version_standalone_rejects_unavailable_head_before_registration_or_create() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         fs::create_dir(&workspace).await.unwrap();
@@ -711,6 +688,81 @@ mod tests {
         run_git(&workspace, &[
             "remote", "set-url", "--push", "origin", &missing,
         ]);
+        let spec = validated_spec(&json!({
+            "workflow": {
+                "kind": "inline",
+                "entrypoint": "workflow.fabro",
+                "files": {
+                    "workflow.fabro": "digraph W { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+                }
+            }
+        }));
+        let server = MockServer::start_async().await;
+        let registered = Arc::new(Mutex::new(Vec::new()));
+        let registration =
+            dynamic_version_registration_mock(&server, Arc::clone(&registered)).await;
+        let create = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/api/v1/runs");
+                then.status(500);
+            })
+            .await;
+        let client = Arc::new(no_proxy_client(&server.url("")));
+        let adapter = ServerRunCreateAdapter::standalone(None);
+        let backend =
+            ClientBackend::new(Arc::clone(&client)).with_run_create_adapter(Arc::new(adapter));
+
+        let error = backend
+            .create_run_from_spec(&spec, &workspace, None)
+            .await
+            .expect_err("an unavailable local HEAD must not degrade to a branch-only target");
+
+        registration.assert_calls_async(0).await;
+        create.assert_calls_async(0).await;
+        assert!(registered.lock().unwrap().is_empty());
+        assert!(
+            error
+                .to_string()
+                .contains("exact local Git commit could not be made available"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn workflow_version_standalone_preserves_dirty_warning_for_exact_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let origin = temp.path().join("origin.git");
+        fs::create_dir(&workspace).await.unwrap();
+        run_git(temp.path(), &[
+            "init",
+            "--bare",
+            "--quiet",
+            origin.to_str().unwrap(),
+        ]);
+        run_git(&workspace, &[
+            "init",
+            "--quiet",
+            "--initial-branch",
+            "feature",
+        ]);
+        run_git(&workspace, &["config", "user.name", "Fabro Test"]);
+        run_git(&workspace, &["config", "user.email", "fabro@example.com"]);
+        fs::write(workspace.join("tracked.txt"), "committed")
+            .await
+            .unwrap();
+        run_git(&workspace, &["add", "tracked.txt"]);
+        run_git(&workspace, &["commit", "--quiet", "-m", "initial"]);
+        run_git(&workspace, &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/widgets.git",
+        ]);
+        let push_url = format!("file://{}", origin.display());
+        run_git(&workspace, &[
+            "remote", "set-url", "--push", "origin", &push_url,
+        ]);
         fs::write(workspace.join("dirty.txt"), "uncommitted")
             .await
             .unwrap();
@@ -732,18 +784,12 @@ mod tests {
         };
         assert_eq!(target.repo, "acme/widgets");
         assert_eq!(target.branch, "feature");
-        assert_eq!(target.sha, None);
+        assert!(target.sha.is_some());
         assert!(
             prepared
                 .warnings
                 .iter()
                 .any(|warning| warning.contains("uncommitted changes"))
-        );
-        assert!(
-            prepared
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("not fetchable") && warning.contains("not pinned"))
         );
     }
 }
