@@ -282,10 +282,12 @@ push = true
 
 Runs select a reusable server-managed environment by slug. For `fabro run` and
 `fabro create`, use `--environment <slug>` to select it; omitting the flag
-selects `default`. Configure the catalog on the server rather than relying on
-the CLI machine's `settings.toml` or the source checkout's
-`.fabro/project.toml`, because those `environments` tables are not transmitted
-during intent creation.
+selects an environment named `default`. If `default` does not exist, Fabro uses
+the sole Docker or Daytona environment in the server catalog. If there are zero
+or multiple compatible environments, specify `--environment` explicitly.
+Configure the catalog on the server rather than relying on the CLI machine's
+`settings.toml` or the source checkout's `.fabro/project.toml`, because those
+`environments` tables are not transmitted during intent creation.
 
 ```toml title="server settings.toml"
 [environments.ci]

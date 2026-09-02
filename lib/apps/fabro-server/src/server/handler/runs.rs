@@ -19,7 +19,7 @@ use fabro_api::types::{
     UpdateRunParentRequest, UpdateRunRequest,
 };
 use fabro_config::{CliLayer, RunLayer, Storage, project};
-use fabro_environment::{DEFAULT_ENVIRONMENT_ID, EnvironmentId};
+use fabro_environment::{EnvironmentId, select_implicit_run_environment};
 use fabro_interview::AnswerSubmission;
 use fabro_llm::client::Client as LlmClient;
 use fabro_manifest::RunOverrideInput;
@@ -630,16 +630,11 @@ pub(crate) async fn create_run_from_intent(
         Ok(validated) => validated,
         Err(error) => return run_intent_admission_error(error.into()),
     };
-    let environment_id = match select_intent_environment_id(
-        &state,
-        intent
-            .environment_id
-            .as_deref()
-            .unwrap_or(DEFAULT_ENVIRONMENT_ID),
-    ) {
-        Ok(id) => id,
-        Err(error) => return run_intent_admission_error(error.into()),
-    };
+    let environment_id =
+        match select_intent_environment_id(&state, intent.environment_id.as_deref()) {
+            Ok(id) => id,
+            Err(error) => return run_intent_admission_error(error.into()),
+        };
     let blobs = state.store_ref().blobs();
     let version_store = fabro_workflow_version::WorkflowVersionStore::new(blobs);
     let closure = match version_store.get_closure(&intent.workflow_version_id).await {
@@ -1026,6 +1021,11 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
             "target_invalid",
         ),
         RunIntentAdmissionError::Environment(error) => match error {
+            EnvironmentSelectionError::Implicit(_) => intent_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                error.to_string(),
+                "environment_selection_required",
+            ),
             EnvironmentSelectionError::InvalidId { source, .. } => intent_error(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 source.to_string(),
@@ -1074,8 +1074,14 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
 
 fn select_intent_environment_id(
     state: &AppState,
-    value: &str,
+    value: Option<&str>,
 ) -> Result<EnvironmentId, EnvironmentSelectionError> {
+    let Some(value) = value else {
+        let environments = state.environment_store().list();
+        return select_implicit_run_environment(&environments)
+            .map(|environment| environment.id.clone())
+            .map_err(EnvironmentSelectionError::from);
+    };
     let id =
         value
             .parse::<EnvironmentId>()

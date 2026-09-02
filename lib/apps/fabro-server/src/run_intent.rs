@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use fabro_config::parse::SettingsSource;
 use fabro_config::{EnvironmentLayer, RunEnvironmentLayer, RunGoalLayer, SettingsLayer};
-use fabro_environment::{EnvironmentId, EnvironmentValidationError};
+use fabro_environment::{EnvironmentId, EnvironmentValidationError, ImplicitRunEnvironmentError};
 use fabro_manifest::CollectedWorkflowClosure;
 use fabro_types::settings::InterpString;
 use fabro_types::{
@@ -123,6 +123,8 @@ fn canonical_folder_text(path: &Path) -> Result<String, FolderTargetValidationEr
 
 #[derive(Debug, Error)]
 pub(crate) enum EnvironmentSelectionError {
+    #[error(transparent)]
+    Implicit(#[from] ImplicitRunEnvironmentError),
     #[error("invalid environment ID `{value}`")]
     InvalidId {
         value:  String,

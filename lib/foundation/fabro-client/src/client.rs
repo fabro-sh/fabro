@@ -712,6 +712,14 @@ impl Client {
         Ok(response.into_inner())
     }
 
+    /// Lists the canonical server-managed environment catalog.
+    pub async fn list_environments(&self) -> Result<Vec<types::Environment>> {
+        let response = self
+            .send_api(|client| async move { client.list_environments().send().await })
+            .await?;
+        Ok(response.into_inner().data)
+    }
+
     /// Registers one workflow version and verifies the server assigned the
     /// content-derived id, so a mismatched response fails loudly here rather
     /// than being trusted downstream.
@@ -2458,6 +2466,33 @@ mod tests {
         mock.assert_async().await;
         assert_eq!(environment.id.as_str(), "local");
         assert_eq!(environment.settings.provider, EnvironmentProvider::Local);
+    }
+
+    #[tokio::test]
+    async fn list_environments_returns_the_canonical_catalog() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/api/v1/environments");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "data": [environment_json("production", "daytona")],
+                        "meta": { "total": 1 }
+                    }));
+            })
+            .await;
+        let client = Client::new_no_proxy(&server.url("")).unwrap();
+
+        let environments = client.list_environments().await.unwrap();
+
+        mock.assert_async().await;
+        assert_eq!(environments.len(), 1);
+        assert_eq!(environments[0].id.as_str(), "production");
+        assert_eq!(
+            environments[0].settings.provider,
+            EnvironmentProvider::Daytona
+        );
     }
 
     #[tokio::test]

@@ -30,6 +30,48 @@ use crate::{
 /// reserved, in-memory environment.
 pub const DEFAULT_ENVIRONMENT_ID: &str = "default";
 
+/// Error returned when an omitted run environment cannot be resolved without
+/// making an arbitrary choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "no environment was specified and no environment named `default` exists; expected exactly one Docker or Daytona environment, found {compatible_count}"
+)]
+pub struct ImplicitRunEnvironmentError {
+    pub compatible_count: usize,
+}
+
+/// Selects the environment used when run creation omits an environment ID.
+///
+/// A catalog entry named `default` preserves the established behavior. If it
+/// is absent, the sole clone-based (Docker or Daytona) environment is selected.
+/// Zero or multiple compatible environments are intentionally ambiguous.
+pub fn select_implicit_run_environment(
+    environments: &[Environment],
+) -> Result<&Environment, ImplicitRunEnvironmentError> {
+    if let Some(environment) = environments
+        .iter()
+        .find(|environment| environment.id.as_str() == DEFAULT_ENVIRONMENT_ID)
+    {
+        return Ok(environment);
+    }
+
+    let mut compatible = environments
+        .iter()
+        .filter(|environment| environment.settings.provider.is_clone_based());
+    let Some(environment) = compatible.next() else {
+        return Err(ImplicitRunEnvironmentError {
+            compatible_count: 0,
+        });
+    };
+    let Some(_second) = compatible.next() else {
+        return Ok(environment);
+    };
+
+    Err(ImplicitRunEnvironmentError {
+        compatible_count: 2 + compatible.count(),
+    })
+}
+
 /// `local` is a reserved environment: it is synthesized in memory only when the
 /// local sandbox provider is enabled, is never persisted, and cannot be
 /// created, replaced, or deleted through the store.

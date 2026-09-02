@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use fabro_environment::{
     EnvironmentDraft, EnvironmentId, EnvironmentStore, EnvironmentStoreError,
     import_legacy_directory_once, seed_default_environment, seed_environments,
+    select_implicit_run_environment,
 };
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
@@ -152,6 +153,58 @@ async fn default_is_deletable() -> anyhow::Result<()> {
 
     assert!(store.get(&default.id).is_none());
     assert_eq!(sql_environment_count(&test.pool).await?, 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn implicit_run_environment_prefers_default() -> anyhow::Result<()> {
+    let test = test_store(false).await?;
+    test.store
+        .create(draft("production", EnvironmentProvider::Daytona))
+        .await?;
+    test.store
+        .create(draft("default", EnvironmentProvider::Docker))
+        .await?;
+
+    let environments = test.store.list();
+    let selected = select_implicit_run_environment(&environments)?;
+
+    assert_eq!(selected.id.as_str(), "default");
+    Ok(())
+}
+
+#[tokio::test]
+async fn implicit_run_environment_selects_the_sole_clone_based_environment() -> anyhow::Result<()> {
+    let test = test_store(true).await?;
+    test.store
+        .create(draft("production", EnvironmentProvider::Daytona))
+        .await?;
+
+    let environments = test.store.list();
+    let selected = select_implicit_run_environment(&environments)?;
+
+    assert_eq!(selected.id.as_str(), "production");
+    Ok(())
+}
+
+#[tokio::test]
+async fn implicit_run_environment_rejects_zero_or_multiple_clone_based_environments()
+-> anyhow::Result<()> {
+    let test = test_store(true).await?;
+    let environments = test.store.list();
+    let error = select_implicit_run_environment(&environments).unwrap_err();
+    assert_eq!(error.compatible_count, 0);
+
+    test.store
+        .create(draft("development", EnvironmentProvider::Docker))
+        .await?;
+    test.store
+        .create(draft("production", EnvironmentProvider::Daytona))
+        .await?;
+    let environments = test.store.list();
+    let error = select_implicit_run_environment(&environments).unwrap_err();
+    assert_eq!(error.compatible_count, 2);
 
     Ok(())
 }

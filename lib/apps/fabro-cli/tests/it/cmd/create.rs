@@ -156,6 +156,61 @@ fn create_uses_explicit_server_target_and_prints_remote_run_id() {
 }
 
 #[test]
+fn create_uses_the_sole_clone_based_environment_when_default_is_missing() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let default_mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/environments/default");
+        then.status(404)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "errors": [{
+                    "status": "404",
+                    "title": "Not Found",
+                    "detail": "environment `default` not found",
+                    "code": "environment_not_found"
+                }]
+            }));
+    });
+    let list_mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/environments");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "data": [environment_json("production", "docker")],
+                "meta": { "total": 1 }
+            }));
+    });
+    let version_mock = mock_workflow_version_registrations(&server);
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let create_mock = mock_intent_create(&server, &run_id, Arc::clone(&requests));
+
+    let output = context
+        .create_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "--dry-run",
+            fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    default_mock.assert();
+    list_mock.assert();
+    version_mock.assert();
+    create_mock.assert();
+    assert_eq!(requests.lock().unwrap()[0]["environment_id"], "production");
+}
+
+#[test]
 fn create_defers_provider_validation_to_the_server() {
     let context = test_context!();
     let server = MockServer::start();

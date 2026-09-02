@@ -31,7 +31,7 @@ export interface RunIntent {
     'target': RunTarget;
     'args': RunIntentArgs;
     /**
-     * Server environment catalog ID. Omission selects `default`.
+     * Server environment catalog ID. When omitted, the server selects an environment named `default`, or the sole Docker or Daytona environment when `default` does not exist. Omission is rejected if that fallback is absent or ambiguous.
      */
     'environment_id'?: string;
     /**

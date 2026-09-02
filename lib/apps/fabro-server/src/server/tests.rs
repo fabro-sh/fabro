@@ -24,7 +24,7 @@ use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest, TokenCounts
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ModelRef, ProviderId, ReasoningEffort, Speed};
 use fabro_types::settings::ServerAuthMethod;
-use fabro_types::settings::run::{ApprovalMode, EnvironmentProvider};
+use fabro_types::settings::run::{ApprovalMode, EnvironmentProvider, EnvironmentSettings};
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, BlobHash, CommandTermination, FailureCategory,
     FailureDetail, GitRunTarget, Graph, InterviewQuestionRecord, Node, Outcome, ParallelBranchId,
@@ -3567,6 +3567,21 @@ async fn store_workflow_version(
     store_workflow_version_with_entrypoint(state, "workflow.fabro", graph, workflow_toml).await
 }
 
+async fn create_test_environment(state: &AppState, id: &str, provider: EnvironmentProvider) {
+    state
+        .environment_store()
+        .create(fabro_environment::EnvironmentDraft {
+            id:       id.parse().expect("test environment ID should be valid"),
+            settings: EnvironmentSettings {
+                provider,
+                ..EnvironmentSettings::default()
+            },
+        })
+        .await
+        .expect("test environment should be created");
+    state.refresh_manifest_run_settings_from_environment_catalog();
+}
+
 async fn store_workflow_version_with_entrypoint(
     state: &AppState,
     entrypoint: &str,
@@ -3640,6 +3655,65 @@ async fn post_runs_run_intent_derives_workflow_slug_from_immutable_entrypoint() 
             Some(workflow_version_id)
         );
     }
+}
+
+#[tokio::test]
+async fn post_runs_run_intent_uses_sole_clone_based_environment_when_default_is_absent() {
+    let state = TestAppStateBuilder::new()
+        .default_environment_provider(None)
+        .vault_entries([(EnvVars::OPENAI_API_KEY, "test-openai-api-key")])
+        .build();
+    create_test_environment(&state, "production", EnvironmentProvider::Docker).await;
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
+
+    let body = post_run_manifest(
+        &app,
+        json!({
+            "workflow_version_id": workflow_version_id,
+            "target": { "kind": "none" },
+            "args": {}
+        }),
+    )
+    .await;
+
+    let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+    let run_store = state.stores.runs.open_run_reader(&run_id).await.unwrap();
+    let projection = run_store.state().await.unwrap();
+    assert_eq!(
+        projection.spec.settings.run.environment.provider,
+        EnvironmentProvider::Docker
+    );
+}
+
+#[tokio::test]
+async fn post_runs_run_intent_rejects_ambiguous_implicit_environment() {
+    let state = TestAppStateBuilder::new()
+        .default_environment_provider(None)
+        .build();
+    create_test_environment(&state, "development", EnvironmentProvider::Docker).await;
+    create_test_environment(&state, "production", EnvironmentProvider::Daytona).await;
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
+
+    let response = post_run_intent_response(
+        &app,
+        json!({
+            "workflow_version_id": workflow_version_id,
+            "target": { "kind": "none" },
+            "args": {}
+        }),
+    )
+    .await;
+    let body = response_json!(response, StatusCode::UNPROCESSABLE_ENTITY).await;
+
+    assert_eq!(body["errors"][0]["code"], "environment_selection_required");
+    assert!(
+        body["errors"][0]["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("found 2")),
+        "unexpected response: {body}"
+    );
 }
 
 #[tokio::test]
