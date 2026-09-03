@@ -4603,6 +4603,89 @@ enabled = false
 }
 
 #[tokio::test]
+async fn run_tools_worker_cannot_select_server_folder_from_clone_based_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing_target = dir.path().join("missing");
+    let (state, app) = jwt_auth_app();
+    let user_token = issue_test_user_jwt();
+    let parent_run_id = create_run_with_bearer(&app, &user_token).await;
+    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
+    let mut intent = folder_intent(workflow_version_id, missing_target.to_string_lossy());
+    intent["environment_id"] = json!("local");
+    intent["parent_id"] = json!(parent_run_id);
+
+    let response = app
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs",
+            &worker_token,
+            &intent,
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::UNPROCESSABLE_ENTITY).await;
+
+    assert_eq!(body["errors"][0]["code"], "target_environment_unsupported");
+    assert_eq!(
+        body["errors"][0]["detail"],
+        "folder targets created by a worker require a Local parent environment"
+    );
+    assert_eq!(
+        state
+            .stores
+            .run_summaries
+            .list_identities()
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "the rejected child must not be persisted"
+    );
+}
+
+#[tokio::test]
+async fn run_tools_worker_can_select_server_folder_from_local_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let (state, app) = jwt_auth_app();
+    let user_token = issue_test_user_jwt();
+    let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
+    let mut parent_intent = folder_intent(workflow_version_id, dir.path().to_string_lossy());
+    parent_intent["environment_id"] = json!("local");
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs",
+            &user_token,
+            &parent_intent,
+        ))
+        .await
+        .unwrap();
+    let parent = response_json!(response, StatusCode::CREATED).await;
+    let parent_run_id = parent["id"].as_str().unwrap().parse::<RunId>().unwrap();
+    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let mut child_intent = folder_intent(workflow_version_id, dir.path().to_string_lossy());
+    child_intent["environment_id"] = json!("local");
+    child_intent["parent_id"] = json!(parent_run_id);
+
+    let response = app
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs",
+            &worker_token,
+            &child_intent,
+        ))
+        .await
+        .unwrap();
+    let child = response_json!(response, StatusCode::CREATED).await;
+
+    assert_eq!(child["parent_id"], parent_run_id.to_string());
+    assert_eq!(child["lifecycle"]["status"]["kind"], "submitted");
+}
+
+#[tokio::test]
 async fn post_runs_run_intent_accepts_none_target_with_ready_daytona_environment() {
     let state = TestAppStateBuilder::new()
         .default_environment_provider(Some(EnvironmentProvider::Daytona))

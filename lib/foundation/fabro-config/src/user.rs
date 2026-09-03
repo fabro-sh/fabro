@@ -23,6 +23,10 @@ pub fn default_storage_dir() -> PathBuf {
     Home::from_env().root().join("storage")
 }
 
+pub fn default_workflows_dir() -> PathBuf {
+    Home::from_env().workflows_dir()
+}
+
 pub fn default_socket_path() -> PathBuf {
     Home::from_env().root().join("fabro.sock")
 }
@@ -77,8 +81,8 @@ mod tests {
     use temp_env::with_var;
 
     use super::{
-        SETTINGS_CONFIG_FILENAME, active_settings_path_with_lookup, default_settings_path,
-        default_socket_path, default_storage_dir,
+        SETTINGS_CONFIG_FILENAME, active_settings_path, active_settings_path_with_lookup,
+        default_settings_path, default_socket_path, default_storage_dir, default_workflows_dir,
     };
 
     #[test]
@@ -91,7 +95,26 @@ mod tests {
                 home.join(".fabro").join(SETTINGS_CONFIG_FILENAME)
             );
             assert_eq!(default_storage_dir(), home.join(".fabro/storage"));
+            assert_eq!(default_workflows_dir(), home.join(".fabro/workflows"));
             assert_eq!(default_socket_path(), home.join(".fabro/fabro.sock"));
+        });
+    }
+
+    #[test]
+    fn workflows_path_uses_fabro_home_when_config_is_elsewhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let fabro_home = dir.path().join("fabro-home");
+        let custom_config = dir.path().join("config/settings.toml");
+
+        with_var(EnvVars::FABRO_HOME, Some(fabro_home.as_os_str()), || {
+            with_var(
+                EnvVars::FABRO_CONFIG,
+                Some(custom_config.as_os_str()),
+                || {
+                    assert_eq!(active_settings_path(None), custom_config);
+                    assert_eq!(default_workflows_dir(), fabro_home.join("workflows"));
+                },
+            );
         });
     }
 

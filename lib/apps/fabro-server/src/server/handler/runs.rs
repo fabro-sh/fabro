@@ -630,6 +630,9 @@ pub(crate) async fn create_run_from_intent(
         Ok(validated) => validated,
         Err(error) => return run_intent_admission_error(error.into()),
     };
+    if let Err(error) = validate_intent_actor_target(&state, &actor, &target).await {
+        return run_intent_admission_error(error);
+    }
     let environment_id = match select_intent_environment_id(
         &state,
         intent
@@ -983,6 +986,7 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
     match &error {
         RunIntentAdmissionError::VersionStore { .. }
         | RunIntentAdmissionError::VariableSnapshot { .. }
+        | RunIntentAdmissionError::WorkerRun { .. }
         | RunIntentAdmissionError::Environment(EnvironmentSelectionError::CredentialStore {
             ..
         }) => {
@@ -1074,7 +1078,46 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
             "failed to load run variables",
             "variable_store_error",
         ),
+        RunIntentAdmissionError::WorkerRun { .. } => intent_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to inspect originating worker run",
+            "worker_run_store_error",
+        ),
     }
+}
+
+async fn validate_intent_actor_target(
+    state: &AppState,
+    actor: &Principal,
+    target: &RunTarget,
+) -> Result<(), RunIntentAdmissionError> {
+    let (Principal::Worker { run_id }, RunTarget::Folder { .. }) = (actor, target) else {
+        return Ok(());
+    };
+    let run_store = state
+        .stores
+        .runs
+        .open_run_reader(run_id)
+        .await
+        .map_err(|source| RunIntentAdmissionError::WorkerRun {
+            run_id: *run_id,
+            source,
+        })?;
+    let projection =
+        run_store
+            .state()
+            .await
+            .map_err(|source| RunIntentAdmissionError::WorkerRun {
+                run_id: *run_id,
+                source,
+            })?;
+    if !projection.spec.settings.run.environment.provider.is_local() {
+        return Err(EnvironmentSelectionError::TargetUnsupported {
+            detail: "folder targets created by a worker require a Local parent environment",
+        }
+        .into());
+    }
+    Ok(())
 }
 
 fn select_intent_environment_id(

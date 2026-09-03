@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use fabro_client::ServerTarget;
-use fabro_config::user::active_settings_path;
+use fabro_config::user::default_workflows_dir;
 use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
 use fabro_interview::{
     AnswerSubmission, ControlInterviewer, WORKER_CONTROL_INVALID_CURSOR_REASON,
@@ -241,12 +241,8 @@ fn build_fabro_run_tool_services(
     if worker_token.trim().is_empty() {
         return None;
     }
-    let settings_path = active_settings_path(None);
-    let user_workflows_root = settings_path
-        .parent()
-        .map(|parent| parent.join("workflows"));
     let backend = ClientBackend::new(Arc::new(client)).with_run_create_adapter(Arc::new(
-        ServerRunCreateAdapter::worker(provider, inherited_target, user_workflows_root),
+        ServerRunCreateAdapter::worker(provider, inherited_target, Some(default_workflows_dir())),
     ));
     Some(FabroRunToolServices {
         backend: Arc::new(backend),

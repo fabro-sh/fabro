@@ -7,8 +7,8 @@ use fabro_environment::{EnvironmentId, EnvironmentValidationError};
 use fabro_manifest::CollectedWorkflowClosure;
 use fabro_types::settings::InterpString;
 use fabro_types::{
-    GitContext, ManifestPath, RunTarget, SandboxProviderKind, TargetValidationError, WorkflowPath,
-    WorkflowVersion, WorkflowVersionId,
+    GitContext, ManifestPath, RunId, RunTarget, SandboxProviderKind, TargetValidationError,
+    WorkflowPath, WorkflowVersion, WorkflowVersionId,
 };
 use fabro_workflow::git;
 use fabro_workflow::workflow_bundle::{BundledWorkflow, ParsedWorkflowConfig, WorkflowBundle};
@@ -39,6 +39,12 @@ pub(crate) enum RunIntentAdmissionError {
     VariableSnapshot {
         #[source]
         source: fabro_variable::Error,
+    },
+    #[error("originating worker run `{run_id}` could not be loaded")]
+    WorkerRun {
+        run_id: RunId,
+        #[source]
+        source: fabro_store::Error,
     },
 }
 

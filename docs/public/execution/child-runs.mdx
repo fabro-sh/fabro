@@ -134,7 +134,7 @@ Reuse content already registered with Fabro by supplying its exact immutable ID:
 }
 ```
 
-Workflow content and workspace target are separate choices. If `target` is omitted, a child inherits the parent's full canonical Git, `none`, or folder target. An explicit Git, `none`, or folder target overrides that inheritance while the current run remains the forced parent.
+Workflow content and workspace target are separate choices. If `target` is omitted, a child inherits the parent's full canonical Git, `none`, or folder target. An explicit Git, `none`, or folder target overrides that inheritance while the current run remains the forced parent. Folder targets require a Local parent with a shared host filesystem; Docker and Daytona parents cannot select a server-host folder, even by naming a Local child environment.
 
 `goal_file` is also a shared-filesystem feature. Local agents can read it relative to the operation `cwd`; Docker and Daytona agents must send the resolved `goal` text by value.
 

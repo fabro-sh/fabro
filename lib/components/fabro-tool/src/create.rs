@@ -128,7 +128,7 @@ impl JsonSchema for CreateRunSpecInput {
                             "description": "Optional parent run id or selector."
                         },
                         "target": {
-                            "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted; standalone calls require an attached GitHub checkout whose exact local HEAD is available from the canonical origin.",
+                            "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted; standalone calls require an attached GitHub checkout whose exact local HEAD is available from the canonical origin. Folder targets require a standalone or Local-worker filesystem context.",
                             "anyOf": [
                                 { "type": "null" },
                                 {

@@ -104,6 +104,11 @@ impl ServerRunCreateAdapter {
         cwd: &Path,
     ) -> Result<ResolvedTarget> {
         if let Some(target) = &spec.target {
+            if matches!(target, RunTarget::Folder { .. }) && !self.has_shared_filesystem() {
+                bail!(
+                    "folder targets require a shared Local filesystem; Docker and Daytona parents cannot select server-host folders"
+                );
+            }
             return Ok(ResolvedTarget {
                 target:   target.clone(),
                 warnings: Vec::new(),
@@ -550,6 +555,58 @@ mod tests {
             .await
             .expect_err("Daytona worker must reject host goal files");
         assert!(goal_error.to_string().contains("send goal text by value"));
+    }
+
+    #[tokio::test]
+    async fn workflow_version_clone_based_workers_reject_explicit_folder_targets() {
+        let client = no_proxy_client("http://127.0.0.1:9");
+        let workflow_version_id: WorkflowVersionId = fabro_types::BlobHash::new(b"stored").into();
+        let spec = validated_spec(&json!({
+            "workflow": {
+                "kind": "stored",
+                "workflow_version_id": workflow_version_id
+            },
+            "target": { "kind": "folder", "path": "/srv/server-workspace" }
+        }));
+
+        for provider in [EnvironmentProvider::Docker, EnvironmentProvider::Daytona] {
+            let adapter = ServerRunCreateAdapter::worker(provider, None, None);
+            let error = adapter
+                .prepare(&client, &spec, Path::new("/ignored"))
+                .await
+                .expect_err("clone-based workers must not select server-host folders");
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("cannot select server-host folders"),
+                "unexpected error for {provider:?}: {error:#}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn workflow_version_local_worker_accepts_explicit_folder_target() {
+        let client = no_proxy_client("http://127.0.0.1:9");
+        let workflow_version_id: WorkflowVersionId = fabro_types::BlobHash::new(b"stored").into();
+        let target = RunTarget::Folder {
+            path: "/srv/server-workspace".to_string(),
+        };
+        let spec = validated_spec(&json!({
+            "workflow": {
+                "kind": "stored",
+                "workflow_version_id": workflow_version_id
+            },
+            "target": target
+        }));
+        let adapter = ServerRunCreateAdapter::worker(EnvironmentProvider::Local, None, None);
+
+        let prepared = adapter
+            .prepare(&client, &spec, Path::new("/ignored"))
+            .await
+            .unwrap();
+
+        assert_eq!(prepared.target, target);
     }
 
     #[tokio::test]
