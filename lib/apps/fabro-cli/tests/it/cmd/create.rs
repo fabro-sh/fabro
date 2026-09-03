@@ -12,7 +12,7 @@ use insta::assert_snapshot;
 use serde_json::json;
 
 use super::support::{
-    created_run_id, environment_json, fixture, mock_environment,
+    created_run_id, environment_catalog_json, fixture, mock_environment, mock_environment_catalog,
     mock_workflow_version_registrations, mock_workflow_version_registrations_recording,
     output_stderr, output_stdout, remote_run_summary_json, resolve_run, run_count_for_test_case,
     run_git, run_state,
@@ -123,7 +123,7 @@ fn create_uses_explicit_server_target_and_prints_remote_run_id() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let mock = server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -160,28 +160,7 @@ fn create_uses_the_sole_clone_based_environment_when_default_is_missing() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    let default_mock = server.mock(|when, then| {
-        when.method("GET").path("/api/v1/environments/default");
-        then.status(404)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "errors": [{
-                    "status": "404",
-                    "title": "Not Found",
-                    "detail": "environment `default` not found",
-                    "code": "environment_not_found"
-                }]
-            }));
-    });
-    let list_mock = server.mock(|when, then| {
-        when.method("GET").path("/api/v1/environments");
-        then.status(200)
-            .header("content-type", "application/json")
-            .json_body(json!({
-                "data": [environment_json("production", "docker")],
-                "meta": { "total": 1 }
-            }));
-    });
+    let list_mock = mock_environment_catalog(&server, &[("production", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let requests = Arc::new(Mutex::new(Vec::new()));
     let create_mock = mock_intent_create(&server, &run_id, Arc::clone(&requests));
@@ -203,7 +182,6 @@ fn create_uses_the_sole_clone_based_environment_when_default_is_missing() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    default_mock.assert();
     list_mock.assert();
     version_mock.assert();
     create_mock.assert();
@@ -215,7 +193,7 @@ fn create_defers_provider_validation_to_the_server() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let registered_versions = Arc::new(Mutex::new(Vec::new()));
     let version_mock =
         mock_workflow_version_registrations_recording(&server, Arc::clone(&registered_versions));
@@ -258,7 +236,7 @@ fn create_uses_configured_server_target_without_server_flag() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let mock = server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -293,7 +271,7 @@ fn create_parent_resolves_parent_and_sends_parent_id_in_intent() {
     let run_id = unique_run_id();
     let parent_id = unique_run_id();
     let resolve_mock = super::support::mock_resolved_run(&server, "nightly-parent", &parent_id);
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let create_mock = server.mock(|when, then| {
         when.method("POST")
@@ -363,7 +341,7 @@ fn create_cli_server_target_overrides_configured_server_target() {
     });
     let cli_server = MockServer::start();
     let run_id = unique_run_id();
-    let environment_mock = mock_environment(&cli_server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&cli_server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&cli_server);
     let cli_mock = cli_server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -693,7 +671,7 @@ fn create_clone_targets_require_exact_git_observations() {
     let environment_calls = Arc::new(AtomicUsize::new(0));
     let environment_calls_for_mock = Arc::clone(&environment_calls);
     let environment_mock = server.mock(|when, then| {
-        when.method("GET").path("/api/v1/environments/default");
+        when.method("GET").path("/api/v1/environments");
         then.respond_with(move |_| {
             let provider = match environment_calls_for_mock.fetch_add(1, Ordering::SeqCst) {
                 0 | 2 => "docker",
@@ -703,7 +681,7 @@ fn create_clone_targets_require_exact_git_observations() {
             HttpMockResponse::builder()
                 .status(200)
                 .header("content-type", "application/json")
-                .body(environment_json("default", provider).to_string())
+                .body(environment_catalog_json(&[("default", provider)]).to_string())
                 .build()
         });
     });
@@ -866,7 +844,7 @@ fn create_clone_targets_require_exact_git_observations() {
 fn create_rejects_unusable_git_checkouts_instead_of_sending_an_empty_target() {
     let context = test_context!();
     let server = MockServer::start();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let run_id = unique_run_id();
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -935,7 +913,7 @@ fn create_rejects_unusable_git_checkouts_instead_of_sending_an_empty_target() {
 fn create_rejects_an_unsupported_attached_origin_before_upload() {
     let context = test_context!();
     let server = MockServer::start();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let run_id = unique_run_id();
     let requests = Arc::new(Mutex::new(Vec::new()));

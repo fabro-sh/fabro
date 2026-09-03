@@ -1078,9 +1078,7 @@ fn select_intent_environment_id(
 ) -> Result<EnvironmentId, EnvironmentSelectionError> {
     let Some(value) = value else {
         let environments = state.environment_store().list();
-        return select_implicit_run_environment(&environments)
-            .map(|environment| environment.id.clone())
-            .map_err(EnvironmentSelectionError::from);
+        return Ok(select_implicit_run_environment(&environments)?.id.clone());
     };
     let id =
         value

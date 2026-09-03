@@ -318,7 +318,7 @@ memory = "8GB"
 
 | Field | Description |
 |---|---|
-| `run.environment.id` | Environment slug to select. Defaults to `default`. |
+| `run.environment.id` | Environment slug to select. When omitted, the implicit selection described above applies. |
 | `environments.<slug>.provider` | Required provider: `local`, `docker`, or `daytona`. |
 | `image.docker` | Docker image. Docker runs it directly; Daytona uses it to create or reuse an internally named snapshot. |
 | `image.dockerfile` | Inline Dockerfile or `{ path = "Dockerfile" }`; Daytona uses it to create or reuse an internally named snapshot. Do not set it with `image.docker`. |

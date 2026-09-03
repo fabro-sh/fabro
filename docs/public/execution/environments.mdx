@@ -178,10 +178,10 @@ fabro server start --environment default
 ## Seeded Environments
 
 Install seeds a `default` environment into SQLite. It is a normal persisted
-environment, so you can edit or delete it. When it is absent, run creation that
-does not name an environment uses the sole Docker or Daytona environment in the
-catalog; zero or multiple compatible environments require an explicit
-selection. The standard Docker default is:
+environment, so you can edit or delete it. Runs that do not name an environment
+select it implicitly; see
+[Run Configuration](/execution/run-configuration#runenvironment-and-server-managed-environments)
+for the fallback rule when it is absent. The standard Docker default is:
 
 ```json title="GET /api/v1/environments/default"
 {

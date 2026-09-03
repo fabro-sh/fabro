@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context as _, anyhow, bail};
 use fabro_config::project;
-use fabro_environment::{DEFAULT_ENVIRONMENT_ID, Environment, select_implicit_run_environment};
+use fabro_environment::{Environment, select_implicit_run_environment};
 use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{DirtyStatus, RunId, RunIntent, RunTarget};
 use fabro_util::terminal::Styles;
@@ -109,24 +109,23 @@ pub(crate) async fn create_run(
     })
 }
 
+/// Resolves the run environment the same way the server does for an omitted
+/// `environment_id`, so the CLI can derive the run target from its provider.
 async fn resolve_run_environment(
     client: &fabro_client::Client,
     explicit_id: Option<&str>,
 ) -> anyhow::Result<Environment> {
-    let id = explicit_id.unwrap_or(DEFAULT_ENVIRONMENT_ID);
-    match client.retrieve_environment(id).await {
-        Ok(environment) => Ok(environment),
-        Err(error) if explicit_id.is_none() && fabro_client::is_not_found_error(&error) => {
-            let environments = client
-                .list_environments()
-                .await
-                .context("could not list environments")?;
-            select_implicit_run_environment(&environments)
-                .cloned()
-                .map_err(anyhow::Error::new)
-        }
-        Err(error) => Err(error).with_context(|| format!("could not retrieve environment `{id}`")),
-    }
+    let Some(id) = explicit_id else {
+        let environments = client
+            .list_environments()
+            .await
+            .context("could not list environments")?;
+        return Ok(select_implicit_run_environment(&environments)?.clone());
+    };
+    client
+        .retrieve_environment(id)
+        .await
+        .with_context(|| format!("could not retrieve environment `{id}`"))
 }
 
 fn warn_untransmitted_settings(

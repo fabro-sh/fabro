@@ -10,7 +10,7 @@ use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{
-    created_run_id, mock_environment, mock_workflow_version_registrations, output_stderr,
+    created_run_id, mock_environment_catalog, mock_workflow_version_registrations, output_stderr,
     remote_run_summary_json, run_state, wait_for_event_names,
 };
 use crate::support::{LightweightCli, run_output_filters, run_projection_json, unique_run_id};
@@ -155,7 +155,7 @@ fn detach_uses_explicit_server_target_and_prints_remote_run_id() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let create_mock = server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -209,7 +209,7 @@ fn run_parent_resolves_parent_and_sends_parent_id_in_intent() {
     let run_id = unique_run_id();
     let parent_id = unique_run_id();
     let resolve_mock = super::support::mock_resolved_run(&server, "nightly-parent", &parent_id);
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let create_mock = server.mock(|when, then| {
         when.method("POST")
@@ -265,7 +265,7 @@ fn detach_uses_configured_server_target_without_server_flag() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let create_mock = server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -314,7 +314,7 @@ fn detach_uses_configured_server_target_without_server_flag() {
 fn run_create_failure_shows_action_context_and_response_body() {
     let context = test_context!();
     let server = MockServer::start();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let create_mock = server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -496,7 +496,7 @@ fn detach_cli_server_target_overrides_configured_server_target() {
     });
     let cli_server = MockServer::start();
     let run_id = unique_run_id();
-    let environment_mock = mock_environment(&cli_server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&cli_server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&cli_server);
     let cli_create = cli_server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -550,7 +550,7 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let preflight = server.mock(|when, then| {
         when.method("POST").path("/api/v1/preflight");
@@ -672,7 +672,7 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
 fn run_surfaces_server_rejection_for_unbound_template_inputs() {
     let context = test_context!();
     let server = MockServer::start();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let create = server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");
@@ -714,7 +714,7 @@ fn run_surfaces_server_rejection_for_unbound_template_inputs() {
 fn foreground_run_surfaces_server_rejection_for_invalid_workflow() {
     let context = test_context!();
     let server = MockServer::start();
-    let environment_mock = mock_environment(&server, "default", "docker");
+    let environment_mock = mock_environment_catalog(&server, &[("default", "docker")]);
     let version_mock = mock_workflow_version_registrations(&server);
     let create = server.mock(|when, then| {
         when.method("POST").path("/api/v1/runs");

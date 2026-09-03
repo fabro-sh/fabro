@@ -172,6 +172,32 @@ pub(crate) fn mock_environment<'a>(server: &'a MockServer, id: &str, provider: &
     })
 }
 
+/// Canonical environment catalog body for mock servers, matching the
+/// `GET /api/v1/environments` shape the run-intent create path reads when no
+/// `--environment` is given.
+pub(crate) fn environment_catalog_json(environments: &[(&str, &str)]) -> Value {
+    serde_json::json!({
+        "data": environments
+            .iter()
+            .map(|(id, provider)| environment_json(id, provider))
+            .collect::<Vec<_>>(),
+        "meta": { "total": environments.len() }
+    })
+}
+
+pub(crate) fn mock_environment_catalog<'a>(
+    server: &'a MockServer,
+    environments: &[(&str, &str)],
+) -> Mock<'a> {
+    let body = environment_catalog_json(environments);
+    server.mock(|when, then| {
+        when.method("GET").path("/api/v1/environments");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(body);
+    })
+}
+
 pub(crate) fn mock_workflow_version_registrations(server: &MockServer) -> Mock<'_> {
     mock_workflow_version_registrations_recording(server, Arc::new(Mutex::new(Vec::new())))
 }

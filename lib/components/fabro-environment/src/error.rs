@@ -134,3 +134,13 @@ impl EnvironmentStoreError {
         }
     }
 }
+
+/// Error returned when an omitted run environment cannot be resolved without
+/// making an arbitrary choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "no environment was specified and no environment named `default` exists; expected exactly one Docker or Daytona environment, found {compatible_count}"
+)]
+pub struct ImplicitRunEnvironmentError {
+    pub compatible_count: usize,
+}

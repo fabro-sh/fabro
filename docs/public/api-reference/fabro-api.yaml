@@ -1181,8 +1181,8 @@ paths:
         Failures return the standard error body. The intent lane responds
         `404` (`workflow_version_not_found`, `environment_not_found`), `422`
         (`run_intent_invalid`, `target_invalid`,
-        `target_environment_unsupported`, `workflow_version_unusable`,
-        `run_compile_invalid`), `503` (`integration_unavailable`), or `500`
+        `target_environment_unsupported`, `environment_selection_required`,
+        `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500`
         (`workflow_version_store_error`, `credential_store_error`,
         `variable_store_error`, `run_persistence_failed`).
       requestBody:

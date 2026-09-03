@@ -372,7 +372,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.  Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
+         * Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.  Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `environment_selection_required`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
          * @summary Create Run
          * @param {CreateRunRequest} createRunRequest
          * @param {*} [options] Override http request option.
@@ -1677,7 +1677,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.  Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
+         * Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.  Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `environment_selection_required`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
          * @summary Create Run
          * @param {CreateRunRequest} createRunRequest
          * @param {*} [options] Override http request option.
@@ -2137,7 +2137,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.closeRunPullRequest(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.  Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
+         * Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.  Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `environment_selection_required`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
          * @summary Create Run
          * @param {CreateRunRequest} createRunRequest
          * @param {*} [options] Override http request option.
@@ -2518,7 +2518,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.  Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
+     * Creates a new workflow run in `submitted` status from either a self-contained legacy manifest or an immutable workflow-version intent. Creation does not start or schedule the run.  Failures return the standard error body. The intent lane responds `404` (`workflow_version_not_found`, `environment_not_found`), `422` (`run_intent_invalid`, `target_invalid`, `target_environment_unsupported`, `environment_selection_required`, `workflow_version_unusable`, `run_compile_invalid`), `503` (`integration_unavailable`), or `500` (`workflow_version_store_error`, `credential_store_error`, `variable_store_error`, `run_persistence_failed`).
      * @summary Create Run
      * @param {CreateRunRequest} createRunRequest
      * @param {*} [options] Override http request option.
