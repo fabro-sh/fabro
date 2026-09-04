@@ -1,10 +1,9 @@
 use std::path::Path;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context as _, anyhow};
 use fabro_config::project;
 use fabro_environment::{DEFAULT_ENVIRONMENT_ID, Environment};
-use fabro_types::settings::run::EnvironmentProvider;
-use fabro_types::{DirtyStatus, RunId, RunIntent, RunTarget};
+use fabro_types::{RunId, RunIntent};
 use fabro_util::terminal::Styles;
 
 use super::overrides::prepare_intent_overrides;
@@ -72,8 +71,14 @@ pub(crate) async fn create_run(
         },
         resolve_run_environment(client.as_ref(), args.environment.as_deref()),
     )?;
-    let (target, dirty_worktree) =
-        run_target_for_environment(environment.settings.provider, &canonical_cwd)?;
+    let fabro_manifest::DerivedRunTarget {
+        target,
+        dirty_worktree,
+    } = fabro_manifest::derive_run_target_for_provider(
+        environment.settings.provider,
+        &canonical_cwd,
+        None,
+    )?;
     if dirty_worktree {
         fabro_util::printerr!(
             ctx.printer(),
@@ -163,87 +168,4 @@ fn warn_untransmitted_settings(
         path.display(),
         keys.join(", "),
     );
-}
-
-/// Derives the run target from the caller directory for the environment's
-/// provider. Returns the target plus whether a clone-based observation found a
-/// dirty Git worktree, so the caller can warn about it.
-fn run_target_for_environment(
-    provider: EnvironmentProvider,
-    canonical_cwd: &Path,
-) -> anyhow::Result<(RunTarget, bool)> {
-    if !provider.is_clone_based() {
-        let path = canonical_cwd.to_str().ok_or_else(|| {
-            anyhow!(
-                "caller working directory is not valid UTF-8: {}",
-                canonical_cwd.display()
-            )
-        })?;
-        return Ok((
-            RunTarget::Folder {
-                path: path.to_string(),
-            },
-            false,
-        ));
-    }
-    let Some(observation) = fabro_manifest::observe_git_run_target(canonical_cwd, None) else {
-        return Ok((none_target_for_unversioned_directory(canonical_cwd)?, false));
-    };
-    let dirty = observation.legacy_git_context.dirty == DirtyStatus::Dirty;
-    let target = observation.run_target.ok_or_else(|| {
-        anyhow!("the caller Git checkout cannot be represented as a canonical GitHub run target")
-    })?;
-    if target.sha.is_none() {
-        bail!(
-            "the exact local Git commit could not be made available from the canonical GitHub origin; push the commit and try again"
-        );
-    }
-    Ok((RunTarget::Git(target), dirty))
-}
-
-fn none_target_for_unversioned_directory(canonical_cwd: &Path) -> anyhow::Result<RunTarget> {
-    let repository = match git2::Repository::discover(canonical_cwd) {
-        Ok(repository) => repository,
-        Err(source) if source.code() == git2::ErrorCode::NotFound => return Ok(RunTarget::None {}),
-        Err(source) => {
-            return Err(anyhow::Error::new(source)).with_context(|| {
-                format!(
-                    "failed to inspect caller working directory {} for Git metadata",
-                    canonical_cwd.display()
-                )
-            });
-        }
-    };
-
-    if repository.is_bare() {
-        bail!(
-            "the caller directory resolves to a bare Git repository; clone-based runs require a non-bare checkout with an attached branch"
-        );
-    }
-    match repository.head() {
-        Err(source)
-            if matches!(
-                source.code(),
-                git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
-            ) =>
-        {
-            bail!(
-                "the caller Git checkout has no commits; create a commit before using a clone-based environment"
-            );
-        }
-        Err(source) => {
-            return Err(anyhow::Error::new(source))
-                .context("failed to inspect the caller Git checkout HEAD");
-        }
-        Ok(head) if !head.is_branch() => {
-            bail!(
-                "the caller Git checkout has a detached HEAD; check out a branch before using a clone-based environment"
-            );
-        }
-        Ok(_) => {}
-    }
-
-    bail!(
-        "the caller Git checkout does not have a usable attached branch for a clone-based run target"
-    )
 }

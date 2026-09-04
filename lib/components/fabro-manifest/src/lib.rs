@@ -24,7 +24,9 @@ use fabro_graphviz::parser;
 use fabro_template::validate_static_reference;
 use fabro_types::graph::ReferenceKind;
 use fabro_types::settings::interp::InterpString;
-use fabro_types::settings::run::{ApprovalMode, ResolvedGoalSource, ResolvedRunGoal, RunMode};
+use fabro_types::settings::run::{
+    ApprovalMode, EnvironmentProvider, ResolvedGoalSource, ResolvedRunGoal, RunMode,
+};
 use fabro_types::{
     DirtyStatus, GitContext, GitHubRepositorySlug, GitRunTarget, ManifestPath, RunTarget,
     WorkflowSettings,
@@ -316,7 +318,27 @@ fn resolved_goal_to_manifest(resolved: ResolvedRunGoal) -> types::ManifestGoal {
 #[derive(Clone, Debug)]
 pub struct GitRunTargetObservation {
     pub run_target:         Option<GitRunTarget>,
+    /// Whether the target's exact commit was proven available, and if not, why.
+    pub exact_commit:       ExactCommitStatus,
     pub legacy_git_context: GitContext,
+}
+
+/// Outcome of proving that the local HEAD commit is available from the
+/// canonical origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExactCommitStatus {
+    /// A successful push or a direct remote query proved the commit is
+    /// available; the target carries its SHA.
+    Available,
+    /// The local branch has commits the origin does not, and the best-effort
+    /// push did not publish them.
+    Unpublished,
+    /// The local tracking ref matches HEAD, but the origin could not be
+    /// queried to confirm the commit is there.
+    Unverified,
+    /// The workflow configures a `run.scm` repository that is not the
+    /// checkout's origin, so nothing can be proven about that repository.
+    ConfiguredOriginMismatch,
 }
 
 /// Observe Git facts without choosing an environment or a non-Git target.
@@ -336,6 +358,7 @@ pub fn observe_git_run_target(
     let legacy_git_context = local.legacy_git_context;
     let mut run_target =
         github_run_target(&legacy_git_context.origin_url, &legacy_git_context.branch);
+    let mut exact_commit = ExactCommitStatus::Unpublished;
     if let Some(target) = run_target.as_mut() {
         let publish_status = publish_manifest_branch_best_effort(
             repo_path,
@@ -343,18 +366,182 @@ pub fn observe_git_run_target(
             local.push_origin_url.as_deref(),
             configured_repo_origin_url,
         );
-        target.sha = remotely_available_sha(
+        let (sha, status) = remotely_available_sha(
             repo_path,
             &legacy_git_context.branch,
             legacy_git_context.sha.as_deref(),
             publish_status,
         );
+        target.sha = sha;
+        exact_commit = status;
     }
 
     Some(GitRunTargetObservation {
         run_target,
+        exact_commit,
         legacy_git_context,
     })
+}
+
+/// A canonical run target derived from a caller directory, plus whether a
+/// clone-based observation found uncommitted changes the target excludes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DerivedRunTarget {
+    pub target:         RunTarget,
+    pub dirty_worktree: bool,
+}
+
+/// Why a caller directory could not be turned into a canonical run target.
+#[derive(Debug, thiserror::Error)]
+pub enum RunTargetDerivationError {
+    #[error("caller working directory is not valid UTF-8: {}", path.display())]
+    NonUtf8Path { path: PathBuf },
+    #[error("the caller Git checkout cannot be represented as a canonical GitHub run target")]
+    Unrepresentable,
+    #[error(
+        "the exact local Git commit could not be made available from the canonical GitHub origin; push the commit and try again"
+    )]
+    Unpublished,
+    #[error(
+        "the canonical GitHub origin could not be queried to confirm the exact local Git commit is available; check network access and credentials for the origin and try again"
+    )]
+    Unverified,
+    #[error(
+        "the workflow configures a run.scm repository that is not the local checkout's origin; run from a checkout of the configured repository or pass an explicit target"
+    )]
+    ConfiguredOriginMismatch,
+    #[error("failed to inspect caller working directory {} for Git metadata", path.display())]
+    Inspect {
+        path:   PathBuf,
+        #[source]
+        source: git2::Error,
+    },
+    #[error(
+        "the caller directory resolves to a bare Git repository; clone-based runs require a non-bare checkout with an attached branch"
+    )]
+    BareRepository,
+    #[error(
+        "the caller Git checkout has no commits; create a commit before using a clone-based environment"
+    )]
+    NoCommits,
+    #[error("failed to inspect the caller Git checkout HEAD")]
+    Head {
+        #[source]
+        source: git2::Error,
+    },
+    #[error(
+        "the caller Git checkout has a detached HEAD; check out a branch before using a clone-based environment"
+    )]
+    DetachedHead,
+    #[error(
+        "the caller Git checkout does not have a usable attached branch for a clone-based run target"
+    )]
+    NoAttachedBranch,
+}
+
+/// Derive the canonical run target for `canonical_cwd` under `provider`, the
+/// way `fabro run` and `fabro create` do.
+///
+/// Non-clone providers run against the caller folder. Clone-based providers
+/// need an attached GitHub checkout whose exact HEAD is available from the
+/// origin, or a directory with no Git metadata at all, which becomes a `none`
+/// target. `configured_repo_origin_url` is the workflow's configured `run.scm`
+/// repository, when any, and takes precedence over the checkout's own origin.
+///
+/// # Errors
+///
+/// Returns the reason a clone-based target could not be derived; every
+/// variant's message is written for the caller of the run tool or CLI.
+pub fn derive_run_target_for_provider(
+    provider: EnvironmentProvider,
+    canonical_cwd: &Path,
+    configured_repo_origin_url: Option<&str>,
+) -> std::result::Result<DerivedRunTarget, RunTargetDerivationError> {
+    if !provider.is_clone_based() {
+        let path = canonical_cwd
+            .to_str()
+            .ok_or_else(|| RunTargetDerivationError::NonUtf8Path {
+                path: canonical_cwd.to_path_buf(),
+            })?;
+        return Ok(DerivedRunTarget {
+            target:         RunTarget::Folder {
+                path: path.to_string(),
+            },
+            dirty_worktree: false,
+        });
+    }
+    let Some(observation) = observe_git_run_target(canonical_cwd, configured_repo_origin_url)
+    else {
+        return Ok(DerivedRunTarget {
+            target:         none_target_for_unversioned_directory(canonical_cwd)?,
+            dirty_worktree: false,
+        });
+    };
+    let dirty_worktree = observation.legacy_git_context.dirty == DirtyStatus::Dirty;
+    let target = observation
+        .run_target
+        .ok_or(RunTargetDerivationError::Unrepresentable)?;
+    if target.sha.is_none() {
+        return Err(match observation.exact_commit {
+            ExactCommitStatus::Unverified => RunTargetDerivationError::Unverified,
+            ExactCommitStatus::ConfiguredOriginMismatch => {
+                RunTargetDerivationError::ConfiguredOriginMismatch
+            }
+            ExactCommitStatus::Available | ExactCommitStatus::Unpublished => {
+                RunTargetDerivationError::Unpublished
+            }
+        });
+    }
+    Ok(DerivedRunTarget {
+        target: RunTarget::Git(target),
+        dirty_worktree,
+    })
+}
+
+fn none_target_for_unversioned_directory(
+    canonical_cwd: &Path,
+) -> std::result::Result<RunTarget, RunTargetDerivationError> {
+    let repository = match git2::Repository::discover(canonical_cwd) {
+        Ok(repository) => repository,
+        Err(source) if source.code() == git2::ErrorCode::NotFound => return Ok(RunTarget::None {}),
+        Err(source) => {
+            return Err(RunTargetDerivationError::Inspect {
+                path: canonical_cwd.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    if repository.is_bare() {
+        return Err(RunTargetDerivationError::BareRepository);
+    }
+    let outcome = match repository.head() {
+        Err(source)
+            if matches!(
+                source.code(),
+                git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
+            ) =>
+        {
+            Err(RunTargetDerivationError::NoCommits)
+        }
+        Err(source) => Err(RunTargetDerivationError::Head { source }),
+        Ok(head) if !head.is_branch() => Err(RunTargetDerivationError::DetachedHead),
+        Ok(_) => Err(RunTargetDerivationError::NoAttachedBranch),
+    };
+    outcome
+}
+
+/// The workflow's configured `run.scm` GitHub repository as a normalized
+/// origin URL, read from `workflow.toml` source text. `None` when the config
+/// names no GitHub repository.
+///
+/// # Errors
+///
+/// Returns an error when the source cannot be parsed or resolved.
+pub fn configured_repo_origin_url_from_workflow_toml(source: &str) -> Result<Option<String>> {
+    let settings = WorkflowSettingsBuilder::from_toml(source)
+        .context("failed to resolve workflow settings from workflow.toml")?;
+    Ok(configured_repo_origin_url(&settings))
 }
 
 struct LocalGitObservation {
@@ -495,6 +682,9 @@ enum BranchPublishStatus {
     TrackingRefMatches,
     Pushed,
     Unavailable,
+    /// The configured repository is not the checkout's origin, so the push
+    /// is skipped entirely.
+    OriginMismatch,
 }
 
 /// Best-effort publication of the local branch so clone-based execution can
@@ -517,7 +707,7 @@ fn publish_manifest_branch_best_effort(
     {
         let remote = fabro_github::normalize_repo_origin_url(origin_url);
         if remote != repo_origin_url {
-            return BranchPublishStatus::Unavailable;
+            return BranchPublishStatus::OriginMismatch;
         }
     }
 
@@ -537,18 +727,25 @@ fn remotely_available_sha(
     branch: &str,
     local_sha: Option<&str>,
     publish_status: BranchPublishStatus,
-) -> Option<String> {
-    let local_sha = local_sha?;
+) -> (Option<String>, ExactCommitStatus) {
+    let Some(local_sha) = local_sha else {
+        return (None, ExactCommitStatus::Unpublished);
+    };
     match publish_status {
-        BranchPublishStatus::Pushed => Some(local_sha.to_owned()),
+        BranchPublishStatus::Pushed => (Some(local_sha.to_owned()), ExactCommitStatus::Available),
         BranchPublishStatus::TrackingRefMatches => {
-            git::remote_branch_sha_noninteractive(repo_path, "origin", branch)
-                .ok()
-                .flatten()
-                .filter(|remote_sha| remote_sha == local_sha)
-                .map(|_| local_sha.to_owned())
+            match git::remote_branch_sha_noninteractive(repo_path, "origin", branch) {
+                Ok(Some(remote_sha)) if remote_sha == local_sha => {
+                    (Some(local_sha.to_owned()), ExactCommitStatus::Available)
+                }
+                Ok(_) => (None, ExactCommitStatus::Unpublished),
+                // The failure may carry raw Git stderr, so it is neither
+                // returned nor logged; the status tells callers what to say.
+                Err(_) => (None, ExactCommitStatus::Unverified),
+            }
         }
-        BranchPublishStatus::Unavailable => None,
+        BranchPublishStatus::Unavailable => (None, ExactCommitStatus::Unpublished),
+        BranchPublishStatus::OriginMismatch => (None, ExactCommitStatus::ConfiguredOriginMismatch),
     }
 }
 

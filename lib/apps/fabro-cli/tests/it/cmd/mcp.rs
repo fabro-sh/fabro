@@ -1971,8 +1971,14 @@ async fn mcp_create_string_shorthand_deserializes_before_auth() {
     assert!(
         harness
             .api_requests
+            .contains("GET /api/v1/environments/default"),
+        "the shorthand request should reach environment lookup authentication"
+    );
+    assert!(
+        !harness
+            .api_requests
             .contains("POST /api/v1/workflow-versions"),
-        "the shorthand request should reach workflow-version authentication"
+        "an unauthenticated shorthand request must not attempt registration"
     );
     assert!(
         !harness.workflow_version_exists(workflow_version_id).await,
