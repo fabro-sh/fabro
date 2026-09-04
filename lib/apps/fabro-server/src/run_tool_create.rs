@@ -4,9 +4,9 @@ use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use fabro_environment::DEFAULT_ENVIRONMENT_ID;
 use fabro_manifest::{
-    CollectedWorkflowClosure, DerivedRunTarget, ResolvedLocalWorkflowPackage,
-    collect_inline_workflow_versions, derive_run_target_for_provider,
-    resolve_local_workflow_package,
+    CollectedWorkflowClosure, DerivedRunTarget, collect_inline_workflow_versions,
+    configured_repo_origin_url_for_location, configured_repo_origin_url_from_workflow_toml,
+    derive_run_target_for_provider, resolve_local_workflow_package,
 };
 use fabro_tool::{
     CreateRunWorkflowSource, PreparedRunCreate, RunCreateAdapter, ValidatedCreateRunSpec,
@@ -104,6 +104,7 @@ impl ServerRunCreateAdapter {
         client: &fabro_client::Client,
         spec: &ValidatedCreateRunSpec,
         cwd: &Path,
+        configured_repo_origin_url: Option<&str>,
     ) -> Result<ResolvedTarget> {
         if let Some(target) = &spec.target {
             if matches!(target, RunTarget::Folder { .. }) && !self.has_shared_filesystem() {
@@ -152,11 +153,16 @@ impl ServerRunCreateAdapter {
                 let canonical_cwd = fs::canonicalize(cwd).await.with_context(|| {
                     format!("failed to canonicalize run directory {}", cwd.display())
                 })?;
+                let configured_repo_origin_url = configured_repo_origin_url.map(str::to_owned);
                 let DerivedRunTarget {
                     target,
                     dirty_worktree,
                 } = task::spawn_blocking(move || {
-                    derive_run_target_for_provider(provider, &canonical_cwd, None)
+                    derive_run_target_for_provider(
+                        provider,
+                        &canonical_cwd,
+                        configured_repo_origin_url.as_deref(),
+                    )
                 })
                 .await
                 .context("run target derivation task failed")??;
@@ -172,11 +178,7 @@ impl ServerRunCreateAdapter {
         }
     }
 
-    async fn collect_selector(
-        &self,
-        selector: &str,
-        cwd: &Path,
-    ) -> Result<CollectedWorkflowClosure> {
+    async fn collect_selector(&self, selector: &str, cwd: &Path) -> Result<CollectedWorkflow> {
         if !self.has_shared_filesystem() {
             bail!(
                 "workflow selectors require a shared Local filesystem; send inline files or an exact stored workflow version ID from Docker or Daytona"
@@ -186,13 +188,25 @@ impl ServerRunCreateAdapter {
         let cwd = cwd.to_path_buf();
         let user_workflows_root = self.user_workflows_root().map(Path::to_path_buf);
         task::spawn_blocking(move || {
-            resolve_local_workflow_package(&selector, &cwd, user_workflows_root.as_deref())
-                .map(ResolvedLocalWorkflowPackage::into_closure)
-                .map_err(anyhow::Error::new)
+            let package =
+                resolve_local_workflow_package(&selector, &cwd, user_workflows_root.as_deref())?;
+            let configured_repo_origin_url =
+                configured_repo_origin_url_for_location(package.workflow_location())?;
+            Ok(CollectedWorkflow {
+                closure: package.into_closure(),
+                configured_repo_origin_url,
+            })
         })
         .await
         .context("workflow package collection task failed")?
     }
+}
+
+/// A packaged workflow closure plus the `run.scm` repository its config names,
+/// which standalone target derivation honors over the checkout's own origin.
+struct CollectedWorkflow {
+    closure:                    CollectedWorkflowClosure,
+    configured_repo_origin_url: Option<String>,
 }
 
 #[async_trait]
@@ -204,11 +218,16 @@ impl RunCreateAdapter for ServerRunCreateAdapter {
         cwd: &Path,
     ) -> Result<PreparedRunCreate> {
         let goal = self.resolve_goal(spec, cwd).await?;
-        let closure = match &spec.workflow {
+        let CollectedWorkflow {
+            closure,
+            configured_repo_origin_url,
+        } = match &spec.workflow {
             CreateRunWorkflowSource::Stored {
                 workflow_version_id,
             } => {
-                let resolved_target = self.resolve_target(client, spec, cwd).await?;
+                // A stored version's config is not available locally, so
+                // derivation uses the checkout's own origin.
+                let resolved_target = self.resolve_target(client, spec, cwd, None).await?;
                 return Ok(PreparedRunCreate {
                     workflow_version_id: *workflow_version_id,
                     target: resolved_target.target,
@@ -221,7 +240,9 @@ impl RunCreateAdapter for ServerRunCreateAdapter {
             }
             CreateRunWorkflowSource::Inline(source) => collect_inline_workflow(source).await?,
         };
-        let resolved_target = self.resolve_target(client, spec, cwd).await?;
+        let resolved_target = self
+            .resolve_target(client, spec, cwd, configured_repo_origin_url.as_deref())
+            .await?;
         let versions = closure
             .versions()
             .map(|(_, version)| version.version())
@@ -246,11 +267,30 @@ struct ResolvedTarget {
 /// exact key of the file map, never a checkout selector.
 async fn collect_inline_workflow(
     source: &fabro_tool::InlineWorkflowSource,
-) -> Result<CollectedWorkflowClosure> {
+) -> Result<CollectedWorkflow> {
     let entrypoint = source.entrypoint.clone();
     let files = source.files.clone();
     task::spawn_blocking(move || {
-        collect_inline_workflow_versions(&entrypoint, &files).map_err(anyhow::Error::new)
+        let closure = collect_inline_workflow_versions(&entrypoint, &files)?;
+        // The inline config is either the entrypoint itself or the
+        // `workflow.toml` beside the entrypoint graph.
+        let config_path = if Path::new(entrypoint.as_str())
+            .extension()
+            .is_some_and(|ext| ext == "toml")
+        {
+            Some(entrypoint.clone())
+        } else {
+            entrypoint.resolve_reference("workflow.toml").ok()
+        };
+        let configured_repo_origin_url = config_path
+            .and_then(|path| files.get(&path))
+            .map(|source| configured_repo_origin_url_from_workflow_toml(source))
+            .transpose()?
+            .flatten();
+        Ok(CollectedWorkflow {
+            closure,
+            configured_repo_origin_url,
+        })
     })
     .await
     .context("inline workflow package collection task failed")?
@@ -930,5 +970,78 @@ mod tests {
         let prepared = adapter.prepare(&client, &spec, &workspace).await.unwrap();
 
         assert_eq!(prepared.target, RunTarget::None {});
+    }
+
+    #[tokio::test]
+    async fn workflow_version_standalone_honors_configured_scm_repository_over_checkout_origin() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let origin = temp.path().join("origin.git");
+        fs::create_dir(&workspace).await.unwrap();
+        run_git(temp.path(), &[
+            "init",
+            "--bare",
+            "--quiet",
+            origin.to_str().unwrap(),
+        ]);
+        run_git(&workspace, &[
+            "init",
+            "--quiet",
+            "--initial-branch",
+            "feature",
+        ]);
+        run_git(&workspace, &["config", "user.name", "Fabro Test"]);
+        run_git(&workspace, &["config", "user.email", "fabro@example.com"]);
+        let workflow_dir = workspace.join(".fabro/workflows/demo");
+        fs::create_dir_all(&workflow_dir).await.unwrap();
+        fs::write(workspace.join(".fabro/project.toml"), "_version = 1\n")
+            .await
+            .unwrap();
+        fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n[workflow]\ngraph = \"workflow.fabro\"\n[run.scm]\nowner = \"acme\"\nrepository = \"widgets\"\n",
+        )
+        .await
+        .unwrap();
+        fs::write(
+            workflow_dir.join("workflow.fabro"),
+            "digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .await
+        .unwrap();
+        run_git(&workspace, &["add", "."]);
+        run_git(&workspace, &["commit", "--quiet", "-m", "initial"]);
+        // The checkout is a fork; the workflow names the upstream repository.
+        run_git(&workspace, &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/alice/widgets.git",
+        ]);
+        let push_url = format!("file://{}", origin.display());
+        run_git(&workspace, &[
+            "remote", "set-url", "--push", "origin", &push_url,
+        ]);
+        let server = MockServer::start_async().await;
+        mock_environment(&server, "default", "docker").await;
+        let registered = Arc::new(Mutex::new(Vec::new()));
+        let registration =
+            dynamic_version_registration_mock(&server, Arc::clone(&registered)).await;
+        let client = no_proxy_client(&server.url(""));
+        let spec = validated_spec(&json!({ "workflow": "demo" }));
+        let adapter = ServerRunCreateAdapter::standalone(None);
+
+        let error = adapter
+            .prepare(&client, &spec, &workspace)
+            .await
+            .expect_err("a fork checkout must not silently become the run's repository");
+
+        registration.assert_calls_async(0).await;
+        assert!(
+            error
+                .to_string()
+                .contains("run.scm repository that is not the local checkout's origin"),
+            "unexpected error: {error:#}"
+        );
     }
 }

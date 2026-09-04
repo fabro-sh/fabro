@@ -13,10 +13,13 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use fabro_api::types;
 use fabro_config::project::{self, WorkflowLocation, discover_project_config};
-use fabro_config::run::{resolve_run_goal_from_layer, resolve_run_goal_from_namespace};
+use fabro_config::run::{
+    parse_run_layer_from_settings_toml, resolve_run_goal_from_layer,
+    resolve_run_goal_from_namespace,
+};
 use fabro_config::{
     CliLayer, EnvironmentLayer, EnvironmentLifecycleLayer, MergeMap, ReplaceMap,
-    RunEnvironmentLayer, RunExecutionLayer, RunGoalLayer, RunLayer, RunModelLayer,
+    RunEnvironmentLayer, RunExecutionLayer, RunGoalLayer, RunLayer, RunModelLayer, RunScmLayer,
     WorkflowSettingsBuilder,
 };
 use fabro_graphviz::graph::AttrValue;
@@ -539,9 +542,42 @@ fn none_target_for_unversioned_directory(
 ///
 /// Returns an error when the source cannot be parsed or resolved.
 pub fn configured_repo_origin_url_from_workflow_toml(source: &str) -> Result<Option<String>> {
-    let settings = WorkflowSettingsBuilder::from_toml(source)
-        .context("failed to resolve workflow settings from workflow.toml")?;
-    Ok(configured_repo_origin_url(&settings))
+    let run = parse_run_layer_from_settings_toml(source)
+        .context("failed to parse run settings from workflow.toml")?;
+    Ok(configured_repo_origin_url_from_scm_layer(
+        &run.scm.unwrap_or_default(),
+    ))
+}
+
+/// The configured `run.scm` GitHub repository for a resolved local workflow.
+/// `workflow.toml` values take precedence over the discovered
+/// `.fabro/project.toml`, field by field, matching run settings layering.
+/// `None` when neither names a repository.
+///
+/// # Errors
+///
+/// Returns an error when either config exists but cannot be read or parsed.
+pub fn configured_repo_origin_url_for_location(
+    location: &WorkflowLocation,
+) -> Result<Option<String>> {
+    let workflow = location
+        .toml
+        .as_deref()
+        .map(read_scm_layer)
+        .transpose()?
+        .unwrap_or_default();
+    let project = discover_project_config(&location.dir)?
+        .as_deref()
+        .map(read_scm_layer)
+        .transpose()?
+        .unwrap_or_default();
+    let scm = RunScmLayer {
+        provider:   workflow.provider.or(project.provider),
+        owner:      workflow.owner.or(project.owner),
+        repository: workflow.repository.or(project.repository),
+        github:     workflow.github.or(project.github),
+    };
+    Ok(configured_repo_origin_url_from_scm_layer(&scm))
 }
 
 struct LocalGitObservation {
@@ -618,21 +654,45 @@ fn github_run_target(origin_url: &str, branch: &str) -> Option<GitRunTarget> {
 
 fn configured_repo_origin_url(settings: &WorkflowSettings) -> Option<String> {
     let scm = &settings.run.scm;
-    if !scm
-        .provider
-        .as_deref()
-        .is_none_or(|provider| provider.eq_ignore_ascii_case("github"))
-    {
+    configured_repo_origin_url_from_scm(
+        scm.provider.as_deref(),
+        scm.owner.as_deref(),
+        scm.repository.as_deref(),
+    )
+}
+
+fn configured_repo_origin_url_from_scm(
+    provider: Option<&str>,
+    owner: Option<&str>,
+    repository: Option<&str>,
+) -> Option<String> {
+    if !provider.is_none_or(|provider| provider.eq_ignore_ascii_case("github")) {
         return None;
     }
-    let owner = scm.owner.as_deref()?;
-    let repository = scm.repository.as_deref()?;
+    let owner = owner?;
+    let repository = repository?;
     if owner.trim().is_empty() || repository.trim().is_empty() {
         return None;
     }
     let origin = format!("https://github.com/{owner}/{repository}");
     let normalized = fabro_github::normalize_repo_origin_url(&origin);
     (!normalized.is_empty()).then_some(normalized)
+}
+
+fn configured_repo_origin_url_from_scm_layer(scm: &RunScmLayer) -> Option<String> {
+    configured_repo_origin_url_from_scm(
+        scm.provider.as_deref(),
+        scm.owner.as_deref(),
+        scm.repository.as_deref(),
+    )
+}
+
+fn read_scm_layer(path: &Path) -> Result<RunScmLayer> {
+    let source = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let run = parse_run_layer_from_settings_toml(&source)
+        .with_context(|| format!("failed to parse run settings from {}", path.display()))?;
+    Ok(run.scm.unwrap_or_default())
 }
 
 struct ManifestRepoInfo {
@@ -821,6 +881,28 @@ pub(crate) mod test_fixtures {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn configured_repo_origin_url_reads_run_scm_from_workflow_toml() {
+        let configured = super::configured_repo_origin_url_from_workflow_toml(
+            "_version = 1\n[run.scm]\nowner = \"acme\"\nrepository = \"widgets\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            configured.as_deref(),
+            Some("https://github.com/acme/widgets")
+        );
+
+        let unconfigured =
+            super::configured_repo_origin_url_from_workflow_toml("_version = 1\n").unwrap();
+        assert_eq!(unconfigured, None);
+
+        let other_provider = super::configured_repo_origin_url_from_workflow_toml(
+            "_version = 1\n[run.scm]\nprovider = \"gitlab\"\nowner = \"acme\"\nrepository = \"widgets\"\n",
+        )
+        .unwrap();
+        assert_eq!(other_provider, None);
+    }
+
     use fabro_workflow::git::head_sha;
 
     use super::*;

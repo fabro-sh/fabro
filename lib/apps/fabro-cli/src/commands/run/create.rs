@@ -71,13 +71,15 @@ pub(crate) async fn create_run(
         },
         resolve_run_environment(client.as_ref(), args.environment.as_deref()),
     )?;
+    let configured_repo_origin_url =
+        fabro_manifest::configured_repo_origin_url_for_location(package.workflow_location())?;
     let fabro_manifest::DerivedRunTarget {
         target,
         dirty_worktree,
     } = fabro_manifest::derive_run_target_for_provider(
         environment.settings.provider,
         &canonical_cwd,
-        None,
+        configured_repo_origin_url.as_deref(),
     )?;
     if dirty_worktree {
         fabro_util::printerr!(
