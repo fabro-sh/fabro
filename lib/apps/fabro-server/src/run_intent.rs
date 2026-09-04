@@ -46,6 +46,8 @@ pub(crate) enum RunIntentAdmissionError {
         #[source]
         source: fabro_store::Error,
     },
+    #[error("originating worker run `{run_id}` was not found")]
+    WorkerRunNotFound { run_id: RunId },
 }
 
 #[derive(Debug, Error)]

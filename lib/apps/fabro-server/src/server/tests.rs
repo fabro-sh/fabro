@@ -4645,6 +4645,38 @@ async fn run_tools_worker_cannot_select_server_folder_from_clone_based_parent() 
 }
 
 #[tokio::test]
+async fn run_tools_worker_folder_target_from_missing_parent_run_is_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let (state, app) = jwt_auth_app();
+    let worker_token = issue_test_run_tools_worker_token(&RunId::new());
+    let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
+    let mut intent = folder_intent(workflow_version_id, dir.path().to_string_lossy());
+    intent["environment_id"] = json!("local");
+
+    let response = app
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs",
+            &worker_token,
+            &intent,
+        ))
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::NOT_FOUND).await;
+
+    assert_eq!(body["errors"][0]["code"], "worker_run_not_found");
+    assert!(
+        state
+            .stores
+            .run_summaries
+            .list_identities()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn run_tools_worker_can_select_server_folder_from_local_parent() {
     let dir = tempfile::tempdir().unwrap();
     let (state, app) = jwt_auth_app();
