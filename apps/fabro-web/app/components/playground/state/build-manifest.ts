@@ -23,6 +23,26 @@ import {
 const PLAYGROUND_CWD = "/tmp/fabro-playground";
 
 /**
+ * Server-side cap on `RunManifest.title` (`MAX_RUN_TITLE_CHARS`), counted in
+ * Unicode scalar values. Titles longer than this are rejected at run creation,
+ * so we clamp the goal-derived title here to keep "Save to Runs" working for
+ * long goals.
+ */
+const MAX_TITLE_CHARS = 100;
+
+/**
+ * Clamp a candidate title to the server's character limit, counting by code
+ * point (matching Rust's `chars().count()`) rather than UTF-16 units. When it
+ * overflows, keep the first `MAX_TITLE_CHARS - 1` code points and append an
+ * ellipsis so the result is exactly at the limit.
+ */
+function clampTitle(title: string): string {
+  const codePoints = Array.from(title);
+  if (codePoints.length <= MAX_TITLE_CHARS) return title;
+  return `${codePoints.slice(0, MAX_TITLE_CHARS - 1).join("")}…`;
+}
+
+/**
  * Minimal subset of `RunManifest` the playground needs to send. The
  * generated `RunManifest` type from `@qltysh/fabro-api-client` accepts
  * the same shape; we keep this lightweight so the playground subtree
@@ -64,7 +84,7 @@ export function buildRunManifest(draft: WorkflowDraft): PlaygroundRunManifest {
   return {
     version: 1,
     cwd:     PLAYGROUND_CWD,
-    title:   draft.goal && draft.goal.length > 0 ? draft.goal : `Playground: ${name}`,
+    title:   draft.goal && draft.goal.length > 0 ? clampTitle(draft.goal) : `Playground: ${name}`,
     target:  {
       path: workflowPath,
     },

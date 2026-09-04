@@ -11,6 +11,7 @@ import {
   canArchive,
   canCancel,
   canDelete,
+  canRetryStatus,
   canUnarchive,
   cancellationActionLabel,
   cancellationSuccessMessage,
@@ -44,7 +45,10 @@ export function RowActionsMenu({ run }: { run: RunWithStatus }) {
   const status = run.lifecycleStatus;
   const showApprove = run.pendingApproval === true;
   const showDeny = run.pendingApproval === true;
-  const showRetry = status === "failed" || status === "dead";
+  // Any terminal, non-archived run can be retried (the server re-creates a
+  // fresh run from the stored spec) — including succeeded ones. Row data is the
+  // flattened lifecycle status string, so use the string-form predicate.
+  const showRetry = canRetryStatus(status);
   const showArchive = canArchive(status);
   const showUnarchive = canUnarchive(status);
   const showCancel = canCancel(status);
