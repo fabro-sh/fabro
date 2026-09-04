@@ -552,6 +552,9 @@ fn validate_workflow_source(
                     source.entrypoint
                 )));
             }
+            fabro_types::validate_workflow_path_collisions(source.files.keys())
+                .map_err(|err| ToolError::message(format!("inline workflow {err}")))?;
+            validate_inline_paths_distinct_ignoring_case(&source.files)?;
             let mut total_bytes = 0usize;
             for (path, content) in &source.files {
                 let bytes = content.len();
@@ -575,6 +578,24 @@ fn validate_workflow_source(
         }
         stored @ CreateRunWorkflowSource::Stored { .. } => Ok(stored),
     }
+}
+
+/// Inline files are staged on, and later checked out to, filesystems that may
+/// be case-insensitive, so two paths that differ only by case would silently
+/// overwrite each other there. Reject them up front with a clear message
+/// instead of surfacing a platform-dependent I/O error later.
+fn validate_inline_paths_distinct_ignoring_case(
+    files: &BTreeMap<WorkflowPath, String>,
+) -> ToolResult<()> {
+    let mut seen: HashMap<String, &WorkflowPath> = HashMap::with_capacity(files.len());
+    for path in files.keys() {
+        if let Some(existing) = seen.insert(path.as_str().to_lowercase(), path) {
+            return Err(ToolError::message(format!(
+                "inline workflow files `{existing}` and `{path}` differ only by case; workflow files must stay distinct on case-insensitive filesystems"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -924,6 +945,33 @@ mod tests {
                 .to_string()
                 .contains("entrypoint")
         );
+
+        for (files, expected) in [
+            (json!({ "a": "x", "a/b.md": "y" }), "paths collide"),
+            (
+                json!({ "main.fabro": "digraph W {}", "Prompt.md": "x", "prompt.md": "y" }),
+                "differ only by case",
+            ),
+        ] {
+            let entrypoint = files
+                .as_object()
+                .and_then(|files| files.keys().next().cloned())
+                .unwrap();
+            let colliding: FabroRunCreateParams = serde_json::from_value(json!({
+                "runs": [{
+                    "workflow": {
+                        "kind": "inline",
+                        "entrypoint": entrypoint,
+                        "files": files
+                    }
+                }]
+            }))
+            .unwrap();
+            let error = ValidatedCreateRuns::try_from(colliding)
+                .expect_err("colliding inline paths must fail validation before any staging")
+                .to_string();
+            assert!(error.contains(expected), "unexpected error: {error}");
+        }
 
         let too_many = (0..=fabro_types::MAX_WORKFLOW_VERSION_FILES)
             .map(|index| (format!("files/{index}.md"), json!("x")))
