@@ -68,7 +68,7 @@ impl JsonSchema for CreateRunSpecInput {
         "CreateRunSpecInput".into()
     }
 
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         json_schema!({
             "description": "Fabro run create specification. Use a workflow string shorthand, or an object when setting create options.",
             "anyOf": [
@@ -76,188 +76,105 @@ impl JsonSchema for CreateRunSpecInput {
                     "type": "string",
                     "description": "Workflow selector shorthand. Equivalent to an object with only the workflow field set."
                 },
+                generator.subschema_for::<CreateRunSpec>()
+            ]
+        })
+    }
+}
+
+impl JsonSchema for CreateRunWorkflowSource {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "CreateRunWorkflowSource".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Workflow content source. Selector strings require a proven shared filesystem; inline files and exact stored IDs are portable.",
+            "anyOf": [
+                {
+                    "type": "string",
+                    "description": "Workflow selector, such as a workflow name or workflow file path."
+                },
                 {
                     "type": "object",
-                    "description": "Full create-run specification.",
-                    "required": ["workflow"],
+                    "required": ["kind", "entrypoint", "files"],
                     "additionalProperties": false,
                     "properties": {
-                        "workflow": {
-                            "description": "Workflow content source. Selector strings require a proven shared filesystem; inline files and exact stored IDs are portable.",
-                            "anyOf": [
-                                {
-                                    "type": "string",
-                                    "description": "Workflow selector, such as a workflow name or workflow file path."
-                                },
-                                {
-                                    "type": "object",
-                                    "required": ["kind", "entrypoint", "files"],
-                                    "additionalProperties": false,
-                                    "properties": {
-                                        "kind": { "const": "inline" },
-                                        "entrypoint": { "type": "string" },
-                                        "files": {
-                                            "type": "object",
-                                            "additionalProperties": { "type": "string" }
-                                        }
-                                    }
-                                },
-                                {
-                                    "type": "object",
-                                    "required": ["kind", "workflow_version_id"],
-                                    "additionalProperties": false,
-                                    "properties": {
-                                        "kind": { "const": "stored" },
-                                        "workflow_version_id": { "type": "string" }
-                                    }
-                                }
-                            ]
-                        },
-                        "cwd": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ],
-                            "description": "Working directory used to resolve relative workflow paths."
-                        },
-                        "parent_id": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ],
-                            "description": "Optional parent run id or selector."
-                        },
-                        "target": {
-                            "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted; standalone calls require an attached GitHub checkout whose exact local HEAD is available from the canonical origin. Folder targets require a standalone or Local-worker filesystem context.",
-                            "anyOf": [
-                                { "type": "null" },
-                                {
-                                    "type": "object",
-                                    "required": ["kind", "repo", "branch"],
-                                    "additionalProperties": false,
-                                    "properties": {
-                                        "kind": { "const": "git" },
-                                        "repo": { "type": "string" },
-                                        "branch": { "type": "string" },
-                                        "tag": {
-                                            "anyOf": [
-                                                { "type": "string" },
-                                                { "type": "null" }
-                                            ]
-                                        },
-                                        "sha": {
-                                            "anyOf": [
-                                                { "type": "string" },
-                                                { "type": "null" }
-                                            ]
-                                        }
-                                    }
-                                },
-                                {
-                                    "type": "object",
-                                    "required": ["kind"],
-                                    "additionalProperties": false,
-                                    "properties": {
-                                        "kind": { "const": "none" }
-                                    }
-                                },
-                                {
-                                    "type": "object",
-                                    "required": ["kind", "path"],
-                                    "additionalProperties": false,
-                                    "properties": {
-                                        "kind": { "const": "folder" },
-                                        "path": { "type": "string" }
-                                    }
-                                }
-                            ]
-                        },
-                        "goal": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ],
-                            "description": "Optional goal override for the run."
-                        },
-                        "goal_file": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ],
-                            "description": "Read the run goal from a file. Mutually exclusive with goal. Relative paths are resolved from the run cwd."
-                        },
-                        "inputs": {
+                        "kind": { "const": "inline" },
+                        "entrypoint": { "type": "string" },
+                        "files": {
                             "type": "object",
-                            "description": "Workflow input overrides keyed by input name.",
-                            "additionalProperties": {
-                                "description": "Run input override value. Inputs are TOML-compatible scalar values: string, boolean, integer, or float.",
-                                "anyOf": [
-                                    { "type": "string" },
-                                    { "type": "boolean" },
-                                    { "type": "integer" },
-                                    { "type": "number" }
-                                ]
-                            }
-                        },
-                        "labels": {
-                            "type": "object",
-                            "description": "Labels to attach to the created run.",
                             "additionalProperties": { "type": "string" }
-                        },
-                        "dry_run": {
-                            "anyOf": [
-                                { "type": "boolean" },
-                                { "type": "null" }
-                            ],
-                            "description": "Whether the run should use dry-run mode."
-                        },
-                        "auto_approve": {
-                            "anyOf": [
-                                { "type": "boolean" },
-                                { "type": "null" }
-                            ],
-                            "description": "Whether agent approval prompts should be auto-approved."
-                        },
-                        "model": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ],
-                            "description": "Model override for the run."
-                        },
-                        "provider": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ],
-                            "description": "Provider override for the run."
-                        },
-                        "environment": {
-                            "anyOf": [
-                                { "type": "string" },
-                                { "type": "null" }
-                            ],
-                            "description": "Named environment slug override for the run."
-                        },
-                        "preserve_sandbox": {
-                            "anyOf": [
-                                { "type": "boolean" },
-                                { "type": "null" }
-                            ],
-                            "description": "Whether to preserve the sandbox after the run."
-                        },
-                        "start": {
-                            "anyOf": [
-                                { "type": "boolean" },
-                                { "type": "null" }
-                            ],
-                            "description": "Whether to start the run immediately after creation. Defaults to true."
                         }
+                    }
+                },
+                {
+                    "type": "object",
+                    "required": ["kind", "workflow_version_id"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "kind": { "const": "stored" },
+                        "workflow_version_id": { "type": "string" }
                     }
                 }
             ]
         })
     }
+}
+
+/// Schema for the optional canonical run target. `RunTarget` is an internally
+/// tagged serde enum whose variants deny unknown fields, so the union is
+/// spelled out here and pinned by the serde parity test below.
+fn run_target_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted; standalone calls require an attached GitHub checkout whose exact local HEAD is available from the canonical origin. Folder targets require a standalone or Local-worker filesystem context.",
+        "anyOf": [
+            { "type": "null" },
+            {
+                "type": "object",
+                "required": ["kind", "repo", "branch"],
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "const": "git" },
+                    "repo": { "type": "string" },
+                    "branch": { "type": "string" },
+                    "tag": {
+                        "anyOf": [
+                            { "type": "string" },
+                            { "type": "null" }
+                        ]
+                    },
+                    "sha": {
+                        "anyOf": [
+                            { "type": "string" },
+                            { "type": "null" }
+                        ]
+                    }
+                }
+            },
+            {
+                "type": "object",
+                "required": ["kind"],
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "const": "none" }
+                }
+            },
+            {
+                "type": "object",
+                "required": ["kind", "path"],
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "const": "folder" },
+                    "path": { "type": "string" }
+                }
+            }
+        ]
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -327,25 +244,46 @@ pub struct InlineWorkflowSource {
     pub files:      BTreeMap<WorkflowPath, String>,
 }
 
-#[derive(Debug, Deserialize)]
+/// Full create-run specification.
+///
+/// The advertised MCP schema is derived from this struct, so adding a field
+/// here publishes it to clients automatically; `deny_unknown_fields` and the
+/// derived `additionalProperties: false` stay in lockstep.
+#[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(inline)]
 pub struct CreateRunSpec {
     pub workflow:         CreateRunWorkflowSource,
+    /// Working directory used to resolve relative workflow paths.
     pub cwd:              Option<PathBuf>,
+    /// Optional parent run id or selector.
     pub parent_id:        Option<String>,
+    #[schemars(schema_with = "run_target_schema")]
     pub target:           Option<RunTarget>,
+    /// Optional goal override for the run.
     pub goal:             Option<String>,
+    /// Read the run goal from a file. Mutually exclusive with goal. Relative
+    /// paths are resolved from the run cwd.
     pub goal_file:        Option<PathBuf>,
+    /// Workflow input overrides keyed by input name.
     #[serde(default)]
     pub inputs:           HashMap<String, RunInputValue>,
+    /// Labels to attach to the created run.
     #[serde(default)]
     pub labels:           HashMap<String, String>,
+    /// Whether the run should use dry-run mode.
     pub dry_run:          Option<bool>,
+    /// Whether agent approval prompts should be auto-approved.
     pub auto_approve:     Option<bool>,
+    /// Model override for the run.
     pub model:            Option<String>,
+    /// Provider override for the run.
     pub provider:         Option<String>,
+    /// Named environment slug override for the run.
     pub environment:      Option<String>,
+    /// Whether to preserve the sandbox after the run.
     pub preserve_sandbox: Option<bool>,
+    /// Whether to start the run immediately after creation. Defaults to true.
     pub start:            Option<bool>,
 }
 
@@ -811,6 +749,37 @@ mod tests {
                 "advertised schema rejects serde-produced target {target}"
             );
         }
+
+        // A spec exercising every field must satisfy the derived schema, so a
+        // field that deserializes but is missing from the advertised schema
+        // (or advertised with the wrong shape) fails here.
+        let full_spec = json!({
+            "workflow": {
+                "kind": "stored",
+                "workflow_version_id": fabro_types::BlobHash::new(b"stored").to_string()
+            },
+            "cwd": "/srv/project",
+            "parent_id": "parent",
+            "target": { "kind": "none" },
+            "goal": "goal",
+            "goal_file": null,
+            "inputs": { "count": 1, "name": "x", "flag": true, "ratio": 0.5 },
+            "labels": { "team": "core" },
+            "dry_run": true,
+            "auto_approve": false,
+            "model": "model",
+            "provider": "provider",
+            "environment": "default",
+            "preserve_sandbox": true,
+            "start": false
+        });
+        serde_json::from_value::<CreateRunSpec>(full_spec.clone())
+            .expect("full spec should deserialize");
+        assert!(
+            validator.is_valid(&full_spec),
+            "advertised schema rejects a fully populated spec: {:?}",
+            validator.iter_errors(&full_spec).collect::<Vec<_>>()
+        );
 
         // The schema must actually enforce the field lists, so the parity
         // assertions above have teeth.
