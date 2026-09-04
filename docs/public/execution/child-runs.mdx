@@ -138,6 +138,8 @@ Workflow content and workspace target are separate choices. If `target` is omitt
 
 `goal_file` is also a shared-filesystem feature. Local agents can read it relative to the operation `cwd`; Docker and Daytona agents must send the resolved `goal` text by value.
 
+Like `fabro run`, `fabro_run_create` transmits only what the request names. Run defaults from the caller's `~/.fabro/settings.toml` `[run]` table, and project or machine run settings, are not applied to the created run. Put workflow-owned behavior in the workflow's `workflow.toml`, and pass explicit `auto_approve`, `dry_run`, `model`, `provider`, `environment`, or `preserve_sandbox` values in the spec when a child needs them. See [Run Configuration](/execution/run-configuration) for the settings layering.
+
 By default, `fabro_run_create` requests start for each created run. Set `"start": false` when the parent should create the child now and start it later.
 
 ## Start and approval

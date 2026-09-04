@@ -116,6 +116,8 @@ Use `goal` for inline goal text or `goal_file` to read the run goal from a file.
 
 Creation and execution remain separate operations. `fabro_run_create` first creates a durable run, then requests one start by default. Set `start: false` to leave the new run submitted without requesting execution.
 
+`fabro_run_create` transmits only the values in the request. The MCP server's `~/.fabro/settings.toml` `[run]` defaults, and any project or machine run settings, are not applied to the created run, matching `fabro run`. Keep workflow-owned behavior in `workflow.toml`, and pass explicit `auto_approve`, `dry_run`, `model`, `provider`, `environment`, or `preserve_sandbox` values in the spec when a run needs them.
+
 Run summaries returned by the MCP server include parent metadata. Use `parent_id` on `fabro_run_create` to create a child run, `parent_id` on `fabro_run_search` to list direct children, and the `link_parent` or `unlink_parent` actions on `fabro_run_interact` to change an existing run's parent. See [Child Runs](/execution/child-runs) for the orchestration model.
 
 Pending runs can be approved or denied through `fabro_run_interact`:
