@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use fabro_manifest::{
-    CollectedWorkflowClosure, ResolvedLocalWorkflowPackage, collect_workflow_versions,
+    CollectedWorkflowClosure, ResolvedLocalWorkflowPackage, collect_inline_workflow_versions,
     observe_git_run_target, resolve_local_workflow_package,
 };
 use fabro_tool::{
@@ -11,7 +11,6 @@ use fabro_tool::{
 };
 use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{DirtyStatus, RunTarget};
-use tokio::io::AsyncWriteExt;
 use tokio::{fs, task};
 
 #[derive(Clone, Debug)]
@@ -242,53 +241,15 @@ struct ResolvedTarget {
     warnings: Vec<String>,
 }
 
-/// Collect an inline workflow by staging its bytes in a private temporary
-/// root; the collected closure owns every file, so the root is discarded on
-/// return.
+/// Collect an inline workflow from its supplied bytes. The entrypoint is an
+/// exact key of the file map, never a checkout selector.
 async fn collect_inline_workflow(
     source: &fabro_tool::InlineWorkflowSource,
 ) -> Result<CollectedWorkflowClosure> {
-    let root = tempfile::tempdir().context("failed to create private inline workflow root")?;
-    for (path, content) in &source.files {
-        let destination = root.path().join(path.as_str());
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).await.with_context(|| {
-                format!(
-                    "failed to create inline workflow directory {}",
-                    parent.display()
-                )
-            })?;
-        }
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&destination)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to create inline workflow file {}",
-                    destination.display()
-                )
-            })?;
-        file.write_all(content.as_bytes()).await.with_context(|| {
-            format!(
-                "failed to write inline workflow file {}",
-                destination.display()
-            )
-        })?;
-        // Dropping a tokio File does not wait for queued writes; the
-        // collector below reads these files synchronously, so flush first.
-        file.flush().await.with_context(|| {
-            format!(
-                "failed to flush inline workflow file {}",
-                destination.display()
-            )
-        })?;
-    }
     let entrypoint = source.entrypoint.clone();
+    let files = source.files.clone();
     task::spawn_blocking(move || {
-        collect_workflow_versions(Path::new(entrypoint.as_str()), root.path())
-            .map_err(anyhow::Error::new)
+        collect_inline_workflow_versions(&entrypoint, &files).map_err(anyhow::Error::new)
     })
     .await
     .context("inline workflow package collection task failed")?
@@ -428,6 +389,36 @@ mod tests {
                 .map(String::as_str),
             Some("runtime-authored root bytes")
         );
+    }
+
+    #[tokio::test]
+    async fn workflow_version_inline_entrypoint_is_exact_even_without_an_extension() {
+        let server = MockServer::start_async().await;
+        let registered = Arc::new(Mutex::new(Vec::new()));
+        let registration =
+            dynamic_version_registration_mock(&server, Arc::clone(&registered)).await;
+        let client = no_proxy_client(&server.url(""));
+        let spec = validated_spec(&json!({
+            "workflow": {
+                "kind": "inline",
+                "entrypoint": "review",
+                "files": {
+                    "review": "digraph Review { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+                }
+            },
+            "target": { "kind": "none" }
+        }));
+        let adapter = ServerRunCreateAdapter::worker(EnvironmentProvider::Docker, None, None);
+
+        let prepared = adapter
+            .prepare(&client, &spec, Path::new("/host/that-must-not-be-read"))
+            .await
+            .expect("an extensionless inline entrypoint names a supplied file, not a selector");
+
+        registration.assert_calls_async(1).await;
+        let registered = registered.lock().unwrap();
+        assert_eq!(prepared.workflow_version_id, registered[0].id().unwrap());
+        assert_eq!(registered[0].entrypoint().as_str(), "review");
     }
 
     #[tokio::test]
