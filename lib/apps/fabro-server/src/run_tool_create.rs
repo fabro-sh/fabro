@@ -123,7 +123,7 @@ impl ServerRunCreateAdapter {
                 inherited_target: Some(target),
                 ..
             } => Ok(ResolvedTarget {
-                target:   target.clone(),
+                target:   inherit_parent_target(target),
                 warnings: Vec::new(),
             }),
             RunCreateMode::Worker {
@@ -261,6 +261,25 @@ impl RunCreateAdapter for ServerRunCreateAdapter {
 struct ResolvedTarget {
     target:   RunTarget,
     warnings: Vec<String>,
+}
+
+/// The target a child inherits when it omits its own. A parent's Git target
+/// is pinned to the commit admitted for the parent, and clone-based providers
+/// never fall back to branch HEAD, so carrying that pin forward would hide
+/// every commit the parent has since pushed from a child meant to review or
+/// continue that work. The child follows the parent's branch instead; the
+/// pinned commit and tag stay on the parent only. Folder and none targets are
+/// inherited as-is.
+fn inherit_parent_target(parent: &RunTarget) -> RunTarget {
+    match parent {
+        RunTarget::Git(git) => RunTarget::Git(fabro_types::GitRunTarget {
+            repo:   git.repo.clone(),
+            branch: git.branch.clone(),
+            tag:    None,
+            sha:    None,
+        }),
+        RunTarget::None {} | RunTarget::Folder { .. } => parent.clone(),
+    }
 }
 
 /// Collect an inline workflow from its supplied bytes. The entrypoint is an
@@ -499,7 +518,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn workflow_version_stored_create_skips_registration_and_inherits_exact_worker_target() {
+    async fn workflow_version_stored_create_skips_registration_and_inherits_worker_branch() {
         let client = no_proxy_client("http://127.0.0.1:9");
         let workflow_version_id: WorkflowVersionId = fabro_types::BlobHash::new(b"stored").into();
         let inherited = RunTarget::Git(GitRunTarget {
@@ -526,7 +545,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(prepared.workflow_version_id, workflow_version_id);
-        assert_eq!(prepared.target, inherited);
+        // The child follows the parent's branch so commits the parent pushed
+        // are visible; the parent's pinned commit and tag are not inherited.
+        assert_eq!(
+            prepared.target,
+            RunTarget::Git(GitRunTarget {
+                repo:   "fabro-sh/fabro".to_string(),
+                branch: "main".to_string(),
+                tag:    None,
+                sha:    None,
+            })
+        );
     }
 
     #[tokio::test]

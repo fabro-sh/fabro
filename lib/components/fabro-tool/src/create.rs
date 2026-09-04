@@ -131,7 +131,7 @@ impl JsonSchema for CreateRunWorkflowSource {
 /// spelled out here and pinned by the serde parity test below.
 fn run_target_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted; standalone calls derive it from the selected environment: Local environments target the working directory folder, and clone-based environments require an attached GitHub checkout whose exact local HEAD is available from the canonical origin. Folder targets require a standalone or Local-worker filesystem context.",
+        "description": "Canonical run workspace target. Worker calls inherit the parent target when omitted (a Git parent contributes its repository and branch, not its pinned commit or tag, so the child sees commits the parent has pushed); standalone calls derive it from the selected environment: Local environments target the working directory folder, and clone-based environments require an attached GitHub checkout whose exact local HEAD is available from the canonical origin. Folder targets require a standalone or Local-worker filesystem context.",
         "anyOf": [
             { "type": "null" },
             {
