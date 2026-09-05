@@ -57,9 +57,6 @@ import type { RunIntegrationsSettings } from './run-integrations-settings';
 import type { RunInterviewsSettings } from './run-interviews-settings';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunMetaBranchSettings } from './run-meta-branch-settings';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { RunModelSettings } from './run-model-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -83,7 +80,6 @@ export interface RunNamespace {
     'checkpoint': RunCheckpointSettings;
     'clone': RunCloneSettings;
     'run_branch': RunBranchSettings;
-    'meta_branch': RunMetaBranchSettings;
     'environment': RunEnvironmentSettings;
     'notifications': { [key: string]: NotificationRouteSettings; };
     'interviews': RunInterviewsSettings;

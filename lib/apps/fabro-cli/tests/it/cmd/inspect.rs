@@ -159,10 +159,6 @@ fn inspect_resolves_selector_via_server_endpoint() {
                 "enabled": true,
                 "push": true
               },
-              "meta_branch": {
-                "enabled": true,
-                "push": true
-              },
               "environment": {
                 "id": "default",
                 "provider": "local",

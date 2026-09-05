@@ -14610,7 +14610,6 @@ components:
         - checkpoint
         - clone
         - run_branch
-        - meta_branch
         - environment
         - notifications
         - interviews
@@ -14649,8 +14648,6 @@ components:
           $ref: "#/components/schemas/RunCloneSettings"
         run_branch:
           $ref: "#/components/schemas/RunBranchSettings"
-        meta_branch:
-          $ref: "#/components/schemas/RunMetaBranchSettings"
         environment:
           $ref: "#/components/schemas/RunEnvironmentSettings"
         notifications:
@@ -14896,15 +14893,6 @@ components:
           description: Git history depth. Set to 0 to clone full history.
 
     RunBranchSettings:
-      type: object
-      required: [enabled, push]
-      properties:
-        enabled:
-          type: boolean
-        push:
-          type: boolean
-
-    RunMetaBranchSettings:
       type: object
       required: [enabled, push]
       properties:

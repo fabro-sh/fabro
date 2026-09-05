@@ -11091,9 +11091,8 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         pre_run_git:      None,
         fork_source_ref:  None,
         git:              Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha.clone()),
-            run_branch:  Some(run_branch),
-            meta_branch: None,
+            base_sha:   Some(base_sha.clone()),
+            run_branch: Some(run_branch),
         }),
     };
     // 5. Run pipeline
@@ -11151,11 +11150,9 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         .output();
 }
 
-/// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
-/// but no worker-side GitHub credentials still writes run-branch checkpoint
-/// commits and skips metadata-branch snapshots.
+/// Git checkpointing writes code commits while execution state stays in events.
 #[tokio::test]
-async fn git_checkpoint_host_skips_metadata_branch_without_writer_prereqs() {
+async fn git_checkpoint_retains_run_history_without_metadata_branch() {
     // 1. Create a temporary git repo with an initial commit
     let repo = tempfile::tempdir().unwrap();
     std::process::Command::new("git")
@@ -11179,7 +11176,7 @@ async fn git_checkpoint_host_skips_metadata_branch_without_writer_prereqs() {
         .unwrap();
 
     // 2. Create a branch and worktree
-    let run_id = test_run_id("test-shadow");
+    let run_id = test_run_id("test-code-history");
     let base_sha = {
         let out = std::process::Command::new("git")
             .args(["rev-parse", "HEAD"])
@@ -11202,14 +11199,26 @@ async fn git_checkpoint_host_skips_metadata_branch_without_writer_prereqs() {
         .output()
         .unwrap();
 
+    let historical_branch = "fabro/meta/historical";
+    let historical = std::process::Command::new("git")
+        .args(["branch", historical_branch, &base_sha])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(historical.status.success());
+
     // Write a file in the worktree so there's something to commit
-    std::fs::write(worktree_path.join("shadow_test.txt"), "shadow branch test").unwrap();
+    std::fs::write(
+        worktree_path.join("checkpoint_test.txt"),
+        "code checkpoint test",
+    )
+    .unwrap();
 
     // 3. Build a simple pipeline: start -> work -> exit
-    let mut graph = Graph::new("ShadowBranchTest");
+    let mut graph = Graph::new("CodeHistoryTest");
     graph.attrs.insert(
         "goal".to_string(),
-        AttrValue::String("Test shadow branch".to_string()),
+        AttrValue::String("Test code history".to_string()),
     );
     let mut start = Node::new("start");
     start.attrs.insert(
@@ -11230,11 +11239,10 @@ async fn git_checkpoint_host_skips_metadata_branch_without_writer_prereqs() {
     graph.edges.push(Edge::new("start", "work"));
     graph.edges.push(Edge::new("work", "exit"));
 
-    // 4. Set up engine with meta_branch
+    // 4. Set up the workflow engine
     let run_dir = tempfile::tempdir().unwrap();
-    // Write graph.fabro so init_run can read it
-    std::fs::write(run_dir.path().join("graph.fabro"), "digraph {}").unwrap();
     let emitter = Emitter::default();
+    let events = collect_events(&emitter);
 
     let env: Arc<dyn fabro_agent::Sandbox> =
         Arc::new(fabro_agent::LocalSandbox::new(worktree_path.clone()));
@@ -11243,7 +11251,6 @@ async fn git_checkpoint_host_skips_metadata_branch_without_writer_prereqs() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
-    let meta_branch = format!("fabro/meta/{run_id}");
     let run_options = RunOptions {
         settings: WorkflowSettings::default(),
         run_dir: run_dir.path().to_path_buf(),
@@ -11257,28 +11264,59 @@ async fn git_checkpoint_host_skips_metadata_branch_without_writer_prereqs() {
         pre_run_git: None,
         fork_source_ref: None,
         git: Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha),
-            run_branch:  Some(format!("fabro/run/{run_id}")),
-            meta_branch: Some(meta_branch.clone()),
+            base_sha:   Some(base_sha.clone()),
+            run_branch: Some(format!("fabro/run/{run_id}")),
         }),
     };
     // 5. Run pipeline
-    let outcome = engine
-        .run(&graph, &run_options)
+    let (outcome, state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    // 6. Without pre-run GitHub credentials, metadata snapshots are disabled.
-    let run_json = std::process::Command::new("git")
-        .args(["show", &format!("refs/heads/{meta_branch}:run.json")])
+    // Existing metadata refs stay unchanged; the run creates none.
+    let refs = std::process::Command::new("git")
+        .args([
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/heads/fabro/meta/",
+        ])
         .current_dir(repo.path())
         .output()
-        .expect("git show should run");
-    assert!(
-        !run_json.status.success(),
-        "metadata run.json should not exist without writer prerequisites"
+        .unwrap();
+    assert!(refs.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&refs.stdout).trim(),
+        format!("refs/heads/{historical_branch} {base_sha}")
     );
+
+    // Events retain the code link and context used by resume and history views.
+    let events = events.lock().unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.event_name().starts_with("metadata.snapshot."))
+    );
+    let checkpoint_event = events
+        .iter()
+        .rev()
+        .find(|event| event.event_name() == "checkpoint.completed")
+        .expect("checkpoint event");
+    let properties = checkpoint_event.properties().unwrap();
+    let sha = properties["git_commit_sha"].as_str().unwrap();
+    let head = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&worktree_path)
+        .output()
+        .unwrap();
+    assert!(head.status.success());
+    assert_eq!(sha, String::from_utf8_lossy(&head.stdout).trim());
+    assert_eq!(properties["context_values"]["my_flag"], "set");
+    let checkpoint = state.current_checkpoint().unwrap();
+    assert_eq!(checkpoint.git_commit_sha.as_deref(), Some(sha));
+    assert_eq!(checkpoint.context_values["my_flag"], "set");
+    assert!(!state.conclusion.as_ref().unwrap().stages.is_empty());
 
     // 7. Assert run-branch commit still has the run checkpoint trailers.
     let output = std::process::Command::new("git")
@@ -11297,7 +11335,7 @@ async fn git_checkpoint_host_skips_metadata_branch_without_writer_prereqs() {
     );
     assert!(
         !commit_msg.contains("Fabro-Checkpoint:"),
-        "run-branch commit should not have Fabro-Checkpoint trailer without metadata snapshot, got:\n{commit_msg}"
+        "run-branch commit should not have Fabro-Checkpoint trailer after metadata branch removal, got:\n{commit_msg}"
     );
 
     // Cleanup worktree
@@ -11440,9 +11478,8 @@ async fn parallel_shared_checkout_host_e2e() {
         pre_run_git: None,
         fork_source_ref: None,
         git: Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha.clone()),
-            run_branch:  Some(run_branch.clone()),
-            meta_branch: None,
+            base_sha:   Some(base_sha.clone()),
+            run_branch: Some(run_branch.clone()),
         }),
     };
     // 5. Run pipeline
@@ -11691,9 +11728,8 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         pre_run_git:      None,
         fork_source_ref:  None,
         git:              Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha.clone()),
-            run_branch:  Some(run_branch),
-            meta_branch: None,
+            base_sha:   Some(base_sha.clone()),
+            run_branch: Some(run_branch),
         }),
     };
     let outcome = engine

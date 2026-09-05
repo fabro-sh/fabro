@@ -41,7 +41,8 @@ pub struct RunLayer {
     pub clone:         Option<RunCloneLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_branch:    Option<RunRunBranchLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Legacy input only. Metadata branches are no longer written.
+    #[serde(default, skip_serializing)]
     pub meta_branch:   Option<RunMetaBranchLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment:   Option<RunEnvironmentLayer>,
@@ -327,7 +328,7 @@ pub struct RunRunBranchLayer {
     pub push:    Option<bool>,
 }
 
-/// `[run.meta_branch]` — Fabro-managed checkpoint metadata branch policy.
+/// Legacy `[run.meta_branch]` input, accepted and ignored on config load.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
 #[serde(deny_unknown_fields)]
 pub struct RunMetaBranchLayer {

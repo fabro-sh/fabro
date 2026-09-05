@@ -974,10 +974,6 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 "provider": null,
                 "slack": null
               },
-              "meta_branch": {
-                "enabled": true,
-                "push": true
-              },
               "metadata": {},
               "model": {
                 "controls": {

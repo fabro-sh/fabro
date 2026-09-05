@@ -1,10 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Context as _;
-pub use fabro_checkpoint::META_BRANCH_PREFIX;
 pub use fabro_checkpoint::author::GitAuthor;
-use fabro_checkpoint::git::Store;
 use fabro_redact::DisplaySafeUrl;
 use fabro_types::{DirtyStatus, GitContext, WorkflowSettings};
 use tokio::task::{JoinError, spawn_blocking};
@@ -268,34 +265,6 @@ pub fn remote_branch_sha_noninteractive(
     Ok(None)
 }
 
-/// Push run and metadata branches to origin if a remote tracking branch exists.
-///
-/// Callers supply pre-built refspecs so they control force-push (`+` prefix).
-#[allow(
-    clippy::print_stderr,
-    reason = "Git push status is operator feedback and should stay off stdout."
-)]
-pub fn push_run_branches(
-    store: &Store,
-    probe_branch: &str,
-    run_refspec: Option<&str>,
-    meta_refspec: &str,
-    label: &str,
-) -> anyhow::Result<()> {
-    let repo_path = store.repo_dir();
-    let remote_ref = format!("refs/remotes/origin/{probe_branch}");
-    if store.repo().find_reference(&remote_ref).is_err() {
-        return Ok(());
-    }
-    eprintln!("Pushing {label} branches to origin...");
-    if let Some(refspec) = run_refspec {
-        push_branch(repo_path, "origin", refspec).context("failed to push run branch")?;
-    }
-    push_branch(repo_path, "origin", meta_refspec).context("failed to push metadata branch")?;
-    eprintln!("Remote refs updated.");
-    Ok(())
-}
-
 /// Error from [`blocking_push_with_timeout`].
 pub enum BlockingPushError {
     /// The git push itself failed.
@@ -394,7 +363,6 @@ pub fn sync_status(repo: &Path, remote: &str, branch: Option<&str>) -> GitSyncSt
     }
 }
 
-/// Filenames allowed in per-node directories on the shadow branch.
 #[cfg(test)]
 #[expect(
     clippy::disallowed_methods,
@@ -711,36 +679,6 @@ mod tests {
         init_repo(dir.path());
         let result = push_branch(dir.path(), "nonexistent", "main");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn push_run_branches_preserves_push_error_causes() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-        let repo = git2::Repository::open(dir.path()).unwrap();
-        let head = repo.head().unwrap().target().unwrap();
-        repo.reference("refs/remotes/origin/main", head, true, "test")
-            .unwrap();
-        let store = Store::new(repo);
-
-        let err = push_run_branches(&store, "main", Some("main"), "fabro/meta/test-run", "test")
-            .unwrap_err();
-        let chain = err.chain().map(ToString::to_string).collect::<Vec<_>>();
-
-        assert!(
-            chain
-                .iter()
-                .any(|cause| cause.contains("failed to push run branch")),
-            "expected push context in chain, got {chain:#?}"
-        );
-        assert!(
-            chain.len() >= 2,
-            "expected push source to be preserved, got {chain:#?}"
-        );
-        assert!(
-            chain.iter().any(|cause| cause.contains("git push failed")),
-            "expected git source in chain, got {chain:#?}"
-        );
     }
 
     #[test]

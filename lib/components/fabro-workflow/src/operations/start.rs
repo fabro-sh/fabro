@@ -52,7 +52,6 @@ use crate::pipeline::{
 use crate::records::Checkpoint;
 use crate::run_control::RunControlState;
 use crate::run_materialization::resolve_run_model;
-use crate::run_metadata::metadata_branch_name;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions, SetupCommand};
 use crate::run_status::{FailureReason, RunStatus};
 use crate::runtime_store::RunStoreHandle;
@@ -409,7 +408,7 @@ impl RunSession {
                 Some(RunTarget::Git(_) | RunTarget::None {})
             );
         let git = (!dry_run_clone_target)
-            .then(|| git_checkpoint_options_from_start(settings, &record.run_id, state.start))
+            .then(|| git_checkpoint_options_from_start(settings, state.start))
             .flatten();
         let definition_blob = state.spec.definition_blob;
         let accepted_definition = match definition_blob {
@@ -764,7 +763,6 @@ async fn configured_providers_for_start(
 
 fn git_checkpoint_options_from_start(
     settings: &fabro_types::WorkflowSettings,
-    run_id: &RunId,
     start: Option<fabro_types::StartRecord>,
 ) -> Option<GitCheckpointOptions> {
     if !settings.run.run_branch.enabled {
@@ -773,13 +771,8 @@ fn git_checkpoint_options_from_start(
 
     let start = start?;
     start.run_branch.as_ref().map(|_| GitCheckpointOptions {
-        base_sha:    start.base_sha.clone(),
-        run_branch:  start.run_branch.clone(),
-        meta_branch: settings
-            .run
-            .meta_branch
-            .enabled
-            .then(|| metadata_branch_name(&run_id.to_string())),
+        base_sha:   start.base_sha.clone(),
+        run_branch: start.run_branch.clone(),
     })
 }
 
@@ -2426,27 +2419,7 @@ reasoning = false
             base_sha:   Some("abc123".to_string()),
         };
 
-        assert!(
-            git_checkpoint_options_from_start(&settings, &fixtures::RUN_1, Some(start)).is_none()
-        );
-    }
-
-    #[test]
-    fn start_record_git_options_honor_disabled_meta_branch() {
-        let mut settings = WorkflowSettings::default();
-        settings.run.meta_branch.enabled = false;
-        let start = fabro_types::StartRecord {
-            start_time: Utc::now(),
-            run_branch: Some("fabro/run/test".to_string()),
-            base_sha:   Some("abc123".to_string()),
-        };
-
-        let git = git_checkpoint_options_from_start(&settings, &fixtures::RUN_1, Some(start))
-            .expect("run branch should remain enabled");
-
-        assert_eq!(git.run_branch.as_deref(), Some("fabro/run/test"));
-        assert_eq!(git.base_sha.as_deref(), Some("abc123"));
-        assert_eq!(git.meta_branch, None);
+        assert!(git_checkpoint_options_from_start(&settings, Some(start)).is_none());
     }
 
     async fn persisted_workflow_with_settings(

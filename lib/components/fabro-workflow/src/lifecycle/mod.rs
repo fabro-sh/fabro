@@ -37,7 +37,6 @@ use crate::event::Emitter;
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::outcome::{BilledModelUsage, Outcome};
 use crate::run_control::RunControlState;
-use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::run_options::RunOptions;
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
@@ -93,8 +92,6 @@ impl WorkflowLifecycle {
         locations: &RunLocations,
         run_options: &Arc<RunOptions>,
         sandbox_git: Arc<SandboxGitRuntime>,
-        metadata_runtime: Arc<RunMetadataRuntime>,
-        metadata_writer: Option<RunMetadataWriterHandle>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
         run_control: Option<Arc<RunControlState>>,
@@ -159,11 +156,8 @@ impl WorkflowLifecycle {
             sandbox: Arc::clone(sandbox),
             emitter: Arc::clone(emitter),
             run_id: run_options.run_id,
-            run_store: run_store.clone(),
             run_options: Arc::clone(run_options),
             sandbox_git,
-            metadata_runtime,
-            metadata_writer,
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             last_git_sha,
@@ -419,8 +413,8 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         state: &WfRunState,
     ) -> CoreResult<()> {
         // A StageStart hook can skip before any attempt reserved an execution
-        // scope. Ensure one exists so Git metadata-snapshot events and the
-        // `checkpoint.completed` envelope attach to a concrete execution;
+        // scope. Ensure one exists so the `checkpoint.completed` envelope
+        // attaches to a concrete execution;
         // an existing reservation from the attempt path is reused as-is.
         let execution = self
             .stage_executions

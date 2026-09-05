@@ -754,9 +754,8 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         pre_run_git:      None,
         fork_source_ref:  None,
         git:              Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha),
-            run_branch:  Some(branch_name),
-            meta_branch: None,
+            base_sha:   Some(base_sha),
+            run_branch: Some(branch_name),
         }),
     };
     let outcome = engine
@@ -808,14 +807,13 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 }
 
 // ---------------------------------------------------------------------------
-// Daytona shadow commit E2E with sandbox-native metadata
+// Daytona checkpoint E2E without metadata branches
 // ---------------------------------------------------------------------------
 
-/// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
-/// writes shadow branch in the sandbox repo and includes `Fabro-Checkpoint`
+/// End-to-end test: checkpoint code commits without a metadata branch or
 /// trailer in sandbox commits.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
-async fn daytona_git_checkpoint_with_shadow_branch() {
+async fn daytona_git_checkpoint_without_metadata_branch() {
     let env = create_env().await;
     env.initialize().await.unwrap();
     let env: Arc<dyn Sandbox> = Arc::new(env);
@@ -847,10 +845,10 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     let (run_id, base_sha, branch_name) = setup_daytona_git(&*env).await;
 
     // Pipeline: start -> work -> exit
-    let mut graph = Graph::new("DaytonaShadowBranch");
+    let mut graph = Graph::new("DaytonaCodeCheckpoint");
     graph.attrs.insert(
         "goal".to_string(),
-        AttrValue::String("Test Daytona shadow branch".to_string()),
+        AttrValue::String("Test Daytona code checkpoints".to_string()),
     );
 
     let mut start = Node::new("start");
@@ -883,7 +881,6 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let meta_branch = format!("fabro/meta/{run_id}");
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
         settings: WorkflowSettings::default(),
@@ -898,9 +895,8 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         pre_run_git: None,
         fork_source_ref: None,
         git: Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha),
-            run_branch:  Some(branch_name),
-            meta_branch: Some(meta_branch.clone()),
+            base_sha:   Some(base_sha),
+            run_branch: Some(branch_name),
         }),
     };
     let outcome = engine
@@ -909,34 +905,21 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    // Assert shadow branch in the sandbox has checkpoint data
-    let run_json = env
+    // Metadata refs are never created in the sandbox.
+    let refs = env
         .exec_command(
-            &format!("git show refs/heads/{meta_branch}:run.json"),
+            "git for-each-ref refs/heads/fabro/meta/",
             10_000,
             None,
             None,
             None,
         )
         .await
-        .expect("git show should succeed");
-    assert_eq!(run_json.exit_code, Some(0), "{}", run_json.stderr);
-    let projection: fabro_store::RunProjection =
-        serde_json::from_slice(run_json.stdout.as_bytes()).expect("run.json should parse");
-    let checkpoint = projection
-        .current_checkpoint()
-        .cloned()
-        .expect("shadow branch should contain checkpoint data");
-    assert!(
-        !checkpoint.completed_nodes.is_empty(),
-        "checkpoint should have completed nodes"
-    );
-    assert!(
-        checkpoint.completed_nodes.contains(&"work".to_string()),
-        "checkpoint should contain the 'work' node"
-    );
+        .expect("git ref listing should succeed");
+    assert_eq!(refs.exit_code, Some(0));
+    assert!(refs.stdout.trim().is_empty());
 
-    // Assert sandbox commit has Fabro-Checkpoint trailer
+    // Run identity remains in code commits, without a metadata SHA.
     let log_result = env
         .exec_command("git log --format=%B -1", 10_000, None, None, None)
         .await
@@ -944,8 +927,8 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     assert_eq!(log_result.exit_code, Some(0));
     let commit_msg = log_result.stdout.trim().to_string();
     assert!(
-        commit_msg.contains("Fabro-Checkpoint:"),
-        "sandbox commit should have Fabro-Checkpoint trailer, got:\n{commit_msg}"
+        !commit_msg.contains("Fabro-Checkpoint:"),
+        "sandbox commit should not have Fabro-Checkpoint trailer, got:\n{commit_msg}"
     );
     assert!(
         commit_msg.contains("Fabro-Run:"),
@@ -1324,9 +1307,8 @@ async fn daytona_git_push_run_branch_to_origin() {
         pre_run_git: None,
         fork_source_ref: None,
         git: Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha),
-            run_branch:  Some(branch_name.clone()),
-            meta_branch: None,
+            base_sha:   Some(base_sha),
+            run_branch: Some(branch_name.clone()),
         }),
     };
     let outcome = engine

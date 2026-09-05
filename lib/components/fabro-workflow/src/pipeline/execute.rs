@@ -160,8 +160,6 @@ pub async fn execute(init: Initialized) -> Executed {
         &engine.run.locations,
         &settings_arc,
         Arc::clone(&engine.run.sandbox_git),
-        Arc::clone(&engine.run.metadata_runtime),
-        engine.run.metadata_writer.clone(),
         checkpoint.is_some(),
         on_node,
         run_control,

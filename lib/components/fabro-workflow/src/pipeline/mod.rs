@@ -13,7 +13,7 @@ pub use execute::execute;
 pub(crate) use finalize::build_conclusion_from_store;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use finalize::{billing_from_projection, build_terminal_event};
-pub use finalize::{classify_engine_result, conclude, finalize, write_finalize_commit};
+pub use finalize::{classify_engine_result, conclude, finalize};
 pub use initialize::initialize;
 pub use parse::parse;
 pub(crate) use persist::persist;

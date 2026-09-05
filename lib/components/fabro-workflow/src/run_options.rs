@@ -10,9 +10,8 @@ use crate::git::{GitAuthor, git_author_from_settings};
 /// Git checkpoint options for a workflow run.
 #[derive(Clone)]
 pub struct GitCheckpointOptions {
-    pub base_sha:    Option<String>,
-    pub run_branch:  Option<String>,
-    pub meta_branch: Option<String>,
+    pub base_sha:   Option<String>,
+    pub run_branch: Option<String>,
 }
 
 /// Options for a workflow run.
@@ -30,7 +29,7 @@ pub struct RunOptions {
     pub labels:           HashMap<String, String>,
     /// Workflow directory slug (e.g. "smoke" from `.fabro/workflows/smoke/`).
     pub workflow_slug:    Option<String>,
-    /// GitHub credentials for pushing metadata branches to origin.
+    /// GitHub credentials for sandbox repository access.
     pub github_app:       Option<fabro_github::GitHubCredentials>,
     /// Submitter-side git context captured before the run was created.
     pub pre_run_git:      Option<GitContext>,

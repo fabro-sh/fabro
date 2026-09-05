@@ -4369,6 +4369,76 @@ mod tests {
     }
 
     #[test]
+    fn historical_metadata_events_and_settings_remain_replayable() {
+        let mut settings = serde_json::to_value(WorkflowSettings::default()).unwrap();
+        settings["run"]["meta_branch"] = json!({"enabled": true, "push": true});
+        let mut events = vec![test_raw_event(
+            1,
+            "run.created",
+            &json!({
+                "title": "Historical run",
+                "settings": settings,
+                "graph": { "name": "test", "nodes": {}, "edges": [], "attrs": {} },
+                "labels": {},
+                "provenance": test_support::test_run_provenance()
+            }),
+            None,
+        )];
+        for (name, properties) in [
+            (
+                "metadata.snapshot.started",
+                json!({
+                    "phase": "init", "branch": "fabro/meta/historical"
+                }),
+            ),
+            (
+                "metadata.snapshot.completed",
+                json!({
+                    "phase": "init", "branch": "fabro/meta/historical",
+                    "duration_ms": 10, "entry_count": 2, "bytes": 42, "commit_sha": "abc123"
+                }),
+            ),
+            (
+                "metadata.snapshot.failed",
+                json!({
+                    "phase": "checkpoint", "branch": "fabro/meta/historical",
+                    "duration_ms": 20, "failure_kind": "push", "error": "remote unavailable"
+                }),
+            ),
+        ] {
+            let event = test_raw_event(
+                u32::try_from(events.len()).unwrap() + 1,
+                name,
+                &properties,
+                None,
+            );
+            assert!(matches!(
+                event.event.body,
+                EventBody::MetadataSnapshotStarted(_)
+                    | EventBody::MetadataSnapshotCompleted(_)
+                    | EventBody::MetadataSnapshotFailed(_)
+            ));
+            assert_eq!(event.event.event_name(), name);
+            assert_eq!(event.event.properties().unwrap(), properties);
+            events.push(event);
+        }
+        events.push(test_raw_event(
+            5,
+            "run.title.updated",
+            &json!({ "title": "Replayed historical run" }),
+            None,
+        ));
+
+        let state = RunProjection::apply_events(&events).unwrap();
+        assert_eq!(state.title, "Replayed historical run");
+        assert!(
+            serde_json::to_value(&state.spec.settings).unwrap()["run"]
+                .get("meta_branch")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn projection_serialization_includes_manifest_and_definition_blob_refs() {
         let manifest_blob = BlobHash::new(br#"{"version":1}"#).to_string();
         let definition_blob =
@@ -4428,8 +4498,7 @@ mod tests {
     #[test]
     fn terminal_conclusion_replays_stage_summaries_without_metadata() {
         for terminal_name in ["run.completed", "run.failed"] {
-            let mut settings = WorkflowSettings::default();
-            settings.run.meta_branch.enabled = false;
+            let settings = WorkflowSettings::default();
             let mut events = vec![
                 test_raw_event(
                     1,

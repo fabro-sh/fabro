@@ -3,18 +3,19 @@ title: "Checkpoints"
 description: "How Fabro uses Git to checkpoint and resume workflow runs"
 ---
 
-Fabro checkpoints every workflow run using Git plus the durable run store. After each node completes, Fabro commits the file changes and execution state so that interrupted runs can be resumed exactly where they left off. This happens automatically — no configuration required beyond running inside a Git repository.
+Fabro checkpoints every workflow run using Git plus the durable run store. After each node completes, Fabro commits file changes to the run branch and records execution state in the durable event stream so that interrupted runs can be resumed exactly where they left off. This happens automatically — no configuration required beyond running inside a Git repository.
 
-## Two branches, two purposes
+## Code and execution history
 
-Each run creates two Git branches that work in tandem:
+Fabro stores code and execution state separately:
 
-| Branch | Ref format | Contains |
-|---|---|---|
-| **Run branch** | `fabro/run/{run_id}` | File changes made by agents and commands — the actual work product |
-| **Metadata branch** | `fabro/meta/{run_id}` | Checkpoint JSON, the workflow graph, run and start records, and offloaded artifacts |
+| Storage | Contains |
+|---|---|
+| **Run branch** (`fabro/run/{run_id}`) | File changes made by agents and commands |
+| **Durable run store** | Events and event-derived projections for checkpoints, stages, configuration, and conclusions |
+| **Content-addressed store (CAS)** | Artifact and offloaded context payloads referenced by events and checkpoints |
 
-The run branch is a regular Git branch that grows one commit per completed node. The metadata branch is an orphan branch (no shared history with your code) that stores structured data using Git's object database directly — no working tree needed.
+The run branch is a regular Git branch. Checkpoint events record its commit SHAs, which link execution state to the corresponding code.
 
 ### Run branch commits
 
@@ -25,7 +26,6 @@ fabro(01JKXYZ...): plan (succeeded)
 
 Fabro-Run: 01JKXYZ...
 Fabro-Completed: 2
-Fabro-Checkpoint: a1b2c3d4...
 ```
 
 The commit message follows a structured format:
@@ -35,27 +35,24 @@ The commit message follows a structured format:
 | Subject line | `fabro({run_id}): {node_id} ({status})` |
 | `Fabro-Run` trailer | The run ID |
 | `Fabro-Completed` trailer | Number of completed nodes so far |
-| `Fabro-Checkpoint` trailer | SHA of the corresponding commit on the metadata branch |
 
-The `Fabro-Checkpoint` trailer links each run branch commit to its metadata branch commit, so you can navigate from file changes to the full execution state and back.
+The `git_commit_sha` in a `checkpoint.completed` event identifies the run branch commit. New commits do not include a `Fabro-Checkpoint` trailer.
 
 Fabro disables Git commit and tag signing for checkpoint commits created inside a sandbox. Your personal or repository-level signing settings can stay enabled, but sandbox bookkeeping does not need access to your signing key.
 
+### Durable execution state
+
+Fabro derives run state from persisted events. The projection includes the run spec, start and status records, checkpoints, stage results, conclusion, and sandbox information. Artifact payloads live in CAS.
+
+Use `fabro dump` to export a run as files, including `run.json`, `graph.fabro`, and per-stage artifacts.
+
 ### Metadata branch
 
-The metadata branch (`fabro/meta/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly. Fabro writes it from inside the sandbox with Git plumbing commands, without checking out a metadata worktree. It is initialized at run start with:
-
-- **`run.json`** — Current projection snapshot: run spec, start/status records, current checkpoint, conclusion, sandbox, and other run-level metadata
-- **`graph.fabro`** — Workflow source for the run
-
-After each node, the metadata branch is updated with:
-
-- **`run.json`** — Refreshed projection snapshot with the new current checkpoint
-- **`stages/{rank:03}-{node_id}@{visit}/...`** — Execution-order-prefixed per-stage trace files (prompts, responses, status, diffs, command output, and tool metadata)
+Fabro no longer creates or pushes `fabro/meta/{run_id}` branches. Existing metadata branches remain untouched. Historical metadata snapshot events remain readable.
 
 ## What's in a checkpoint
 
-The `run.json.checkpoint` snapshot captures everything needed to resume a run:
+The checkpoint projection captures the execution state needed to resume a run:
 
 | Field | Description |
 |---|---|
@@ -87,7 +84,7 @@ This means your original working directory stays untouched while the agent makes
 If the working directory has uncommitted changes, the worktree starts from committed `HEAD` and those uncommitted changes are not included. Fabro logs a warning so you can commit, stash, or run explicitly in place when that is what you want.
 </Note>
 
-For Docker and Daytona sandboxes, the repository is cloned into the sandbox and checkpoint Git operations run there. Both the run branch and metadata branch are pushed to origin from the sandbox after each checkpoint when pushing is configured.
+For Docker and Daytona sandboxes, the repository is cloned into the sandbox and checkpoint Git operations run there. The run branch is pushed to origin from the sandbox after each checkpoint when pushing is configured.
 
 ## Resuming a run
 
@@ -117,14 +114,14 @@ The number after `@` is the stage execution ordinal. It is separate from the gra
 
 ## The checkpoint cycle
 
-Here's the full sequence that runs after every node completes:
+After a node completes, Fabro:
 
-1. **Append checkpoint event** — Persist the new checkpoint into durable run state
-2. **Write metadata branch** — Serialize the checkpoint and any new artifacts to the metadata branch (shadow commit)
-3. **Commit to run branch** — Stage all file changes, commit with structured trailers linking to the shadow commit SHA
-4. **Update durable checkpoint** — Persist the `git_commit_sha` associated with the run-branch commit
+1. Stores offloaded context payloads in CAS.
+2. Creates a code checkpoint commit when Git checkpointing is enabled.
+3. Pushes the run branch when configured and collects the code diff.
+4. Emits a checkpoint event with execution state and the code commit SHA. The run store persists this event and updates the projection.
 
-Steps 2-4 are best-effort — if any Git operation fails, the run continues and emits a `RunNotice` warning event. Resume still uses the durable checkpoint in the run store.
+A checkpoint commit failure stops execution. Intermediate push and diff failures emit warning notices. A required final publish failure marks the run as failed.
 
 ## Inspecting run history
 
@@ -140,8 +137,12 @@ git show fabro/run/01JKXYZ...
 # Diff the full run against the starting point
 git diff main..fabro/run/01JKXYZ...
 
-# Read checkpoint data from the metadata branch
-git show fabro/meta/01JKXYZ...:run.json | jq .checkpoint.current_node
+# Inspect execution state and events
+fabro inspect 01JKXYZ
+fabro events 01JKXYZ
+
+# Export the run projection and artifacts
+fabro dump 01JKXYZ --output ./run-dump
 ```
 
 ## Rewinding to an earlier checkpoint
@@ -180,7 +181,7 @@ fabro resume <NEW_RUN_ID>
 
 Use **rewind** when a terminal run should be abandoned and replaced from an earlier point. Use **fork** when you want to try a different approach while keeping the original run as a reference.
 
-`fabro rewind --list`, `fabro fork --list`, `fabro rewind`, and `fabro fork` are server-backed. Timeline listing reads durable run-store checkpoints; it does not rebuild missing metadata branches.
+`fabro rewind --list`, `fabro fork --list`, `fabro rewind`, and `fabro fork` are server-backed. Timeline listing reads checkpoints from the durable run store.
 
 See [`fabro fork`](/reference/cli#fabro-fork) for the full command reference.
 

@@ -18,7 +18,6 @@ use tokio_util::sync::CancellationToken;
 use crate::event::Emitter;
 use crate::handler::HandlerRegistry;
 use crate::interview_runtime::RunInterviewBlocker;
-use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::stage_execution::StageExecutionTracker;
@@ -104,8 +103,6 @@ pub struct RunServices {
     pub llm_source:               Arc<dyn CredentialSource>,
     pub catalog:                  Arc<Catalog>,
     pub(crate) sandbox_git:       Arc<SandboxGitRuntime>,
-    pub(crate) metadata_runtime:  Arc<RunMetadataRuntime>,
-    pub(crate) metadata_writer:   Option<RunMetadataWriterHandle>,
     pub(crate) interview_blocker: Arc<RunInterviewBlocker>,
     /// Run-scoped stage execution allocator, shared between the core
     /// lifecycle and direct-dispatch handlers such as parallel branches.
@@ -126,8 +123,6 @@ impl RunServices {
         llm_source: Arc<dyn CredentialSource>,
         catalog: Arc<Catalog>,
         sandbox_git: Arc<SandboxGitRuntime>,
-        metadata_runtime: Arc<RunMetadataRuntime>,
-        metadata_writer: Option<RunMetadataWriterHandle>,
         stage_executions: StageExecutionTracker,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -142,8 +137,6 @@ impl RunServices {
             llm_source,
             catalog,
             sandbox_git,
-            metadata_runtime,
-            metadata_writer,
             interview_blocker: Arc::new(RunInterviewBlocker::new()),
             stage_executions,
         })
@@ -323,8 +316,6 @@ impl EngineServices {
                 Arc::new(StubCredentialSource),
                 Arc::new(Catalog::from_builtin().expect("default catalog should build")),
                 Arc::new(SandboxGitRuntime::new()),
-                Arc::new(RunMetadataRuntime::new()),
-                None,
                 StageExecutionTracker::default(),
             ),
             registry:        Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
