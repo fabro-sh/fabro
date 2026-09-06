@@ -12,11 +12,17 @@ Posts a completed review's findings to the reviewed GitHub PR in two steps:
   PR state) is confined here. The plan file is untrusted input: apply
   re-validates it before any write.
 
+A third subcommand, ``history``, is the token-holding sibling of apply
+for incremental re-review (P3): it snapshots the PR's prior-review state
+(our earlier comments and the sticky summary's identity tags) into a
+validated ``pr-history.json`` that ``plan`` consumes as a file.
+
 The canonical ``lithoscomputer/code-review`` source repository keeps the
-requirements register at ``.ai/plans/p1-pr-publisher-requirements.md`` and
-the executable specification at ``tests/test_pr_publisher.py``. Packaged
-workflow installs do not need to copy those development files. R-numbers
-below refer to that canonical requirements register.
+requirements registers at ``.ai/plans/p1-pr-publisher-requirements.md``
+(R-numbers) and ``.ai/plans/p3-incremental-re-review-requirements.md``
+(P-numbers), with the executable specifications at
+``tests/test_pr_publisher.py`` and ``tests/test_incremental_rereview.py``.
+Packaged workflow installs do not need to copy those development files.
 
 Python 3.9-compatible. Standard library only.
 """
@@ -24,6 +30,8 @@ Python 3.9-compatible. Standard library only.
 from __future__ import annotations
 
 import argparse
+import base64
+import functools
 import hashlib
 import json
 import os
@@ -42,12 +50,32 @@ import render_report as renderer  # noqa: E402  (the bundle validators)
 from review_contract import FINDING_ID_RE  # noqa: E402
 
 
-PLAN_VERSION = 1
+PLAN_VERSION = 2
+HISTORY_VERSION = 1
 SUMMARY_MARKER = "<!-- fabro-code-review-summary -->"
 COMMENT_TAG_PREFIX = "fabro-code-review-comment"
 RUN_TAG_PREFIX = "fabro-code-review-run"
 COMPLETED_TAG_PREFIX = "fabro-code-review-completed"
+HEAD_TAG_PREFIX = "fabro-code-review-head"
+BASE_TAG_PREFIX = "fabro-code-review-base"
+META_TAG_PREFIX = "fabro-code-review-meta"
 DEFAULT_BATCH_SIZE = 50
+# OCR parity: the incremental overlap threshold defaults to 0.6 and must be
+# strictly inside (0, 1) -- the predicate is IoU > threshold and an identical
+# span has IoU exactly 1.0, so a threshold of 1.0 could never match anything.
+DEFAULT_OVERLAP_THRESHOLD = 0.6
+# Skipped-placement reasons (the plan's third placement kind, P3 item 3/5).
+SKIP_REASONS = ("overlap", "duplicate-of-posted")
+# Partial-span mapping policy (P3 item 4, decided Q6): a history comment
+# whose span was partly rewritten by a later push is treated as covering the
+# rewritten site's replacement lines and still suppresses -- the aggressive
+# choice, recorded here as an explicit constant.
+PARTIAL_MAPPED_SPANS_SUPPRESS = True
+# Only canonical GitHub comment URLs are carried into plan details.
+GITHUB_URL_PREFIX = "https://github.com/"
+# The encoded meta-tag payload is bounded; the short summary is truncated
+# deterministically until the encoding fits.
+META_TAG_PAYLOAD_CAP = 1000
 # GitHub caps a comment body at 65,536 characters; the summary is assembled
 # under this budget so a write can never fail on size (R19).
 SUMMARY_BUDGET = 65000
@@ -68,6 +96,15 @@ REPO_RE = re.compile(
 )
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+HUNK_PAIR_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+COMMENT_TAG_RE = re.compile(
+    r"^<!-- "
+    + re.escape(COMMENT_TAG_PREFIX)
+    + r":([A-Za-z0-9][A-Za-z0-9_.:-]{0,127}):(R[0-9]+) -->"
+)
+META_TAG_RE = re.compile(
+    r"<!-- " + re.escape(META_TAG_PREFIX) + r":([A-Za-z0-9_=-]{1,1000}) -->"
+)
 PLAUSIBLE_WARNING = (
     "> **Needs confirmation:** The verifier could not fully confirm this "
     "finding from the available evidence."
@@ -92,6 +129,89 @@ def run_tag_for(review_id: str) -> str:
 
 def completed_tag_for(completed_at: str) -> str:
     return f"<!-- {COMPLETED_TAG_PREFIX}:{completed_at} -->"
+
+
+def head_tag_for(head: str) -> str:
+    return f"<!-- {HEAD_TAG_PREFIX}:{head} -->"
+
+
+def base_tag_for(base: str) -> str:
+    return f"<!-- {BASE_TAG_PREFIX}:{base} -->"
+
+
+def tag_value(
+    body: str, prefix: str, pattern: str = r"[^>]+"
+) -> Optional[str]:
+    match = re.search(
+        r"<!-- " + re.escape(prefix) + r":(" + pattern + r") -->", body
+    )
+    return match.group(1).strip() if match else None
+
+
+def tagged_sha(body: str, prefix: str) -> Optional[str]:
+    return tag_value(body, prefix, r"[0-9a-f]{40}")
+
+
+def meta_tag_for(finding: Mapping[str, Any]) -> str:
+    """The hidden metadata tag an inline comment carries (P3 item 5).
+
+    Base64url keeps the payload safe inside an HTML comment: its alphabet
+    cannot produce the ``-->`` terminator, so a short summary containing
+    it (or any markup) cannot break out of the tag. The short summary is
+    truncated deterministically until the encoding fits the cap.
+    """
+    short_summary = str(finding["short_summary"])
+    while True:
+        payload = json.dumps(
+            {
+                "category": finding["category"],
+                "severity": finding["severity"],
+                "short_summary": short_summary,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode(
+            "ascii"
+        )
+        if len(encoded) <= META_TAG_PAYLOAD_CAP or not short_summary:
+            return f"<!-- {META_TAG_PREFIX}:{encoded} -->"
+        short_summary = short_summary[:-10]
+
+
+def parse_meta_tag(body: str) -> Optional[Dict[str, str]]:
+    match = META_TAG_RE.search(body)
+    if not match:
+        return None
+    try:
+        payload = json.loads(
+            base64.urlsafe_b64decode(match.group(1).encode("ascii"))
+        )
+    except (ValueError, UnicodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    category = payload.get("category")
+    severity = payload.get("severity")
+    short_summary = payload.get("short_summary")
+    if (
+        category not in renderer.CATEGORIES
+        or severity not in SEVERITY_RANK
+        or not isinstance(short_summary, str)
+    ):
+        return None
+    return {
+        "category": category,
+        "severity": severity,
+        "short_summary": short_summary,
+    }
+
+
+def parse_comment_identity(body: str) -> Optional[Tuple[str, str]]:
+    """(review_id, finding_id) from a body's leading identity tag."""
+    match = COMMENT_TAG_RE.match(body)
+    return (match.group(1), match.group(2)) if match else None
 
 
 # --- Git arithmetic (plan) ---------------------------------------------------
@@ -128,6 +248,13 @@ def resolve_commit(token: str, field: str) -> str:
             "repository; plan must run inside the reviewed checkout"
         )
     return resolved
+
+
+@functools.lru_cache(maxsize=None)
+def commit_exists(sha: str) -> bool:
+    """True when the SHA resolves to a commit in the local repository."""
+    result = run_git("rev-parse", "--verify", "--quiet", sha + "^{commit}")
+    return result.returncode == 0
 
 
 def resolve_diff_base(token: str) -> str:
@@ -213,6 +340,189 @@ def has_diff_range(
     )
 
 
+# --- Span mapping between commits (P3 item 4) --------------------------------
+#
+# Pure git arithmetic shared by `history` (mapping an outdated comment's
+# original span onto the live head) and `apply` (forward-mapping a plan's
+# spans onto a head that moved after the review started).
+
+
+@functools.lru_cache(maxsize=64)
+def pair_diff_map(
+    old_rev: str, new_rev: str
+) -> Mapping[str, Tuple[Optional[str], Tuple[Tuple[int, int, int, int], ...]]]:
+    """Per old path: (new path, or None when deleted; -U0 hunk quadruples).
+
+    Hunks are (old_start, old_count, new_start, new_count). A file absent
+    from the mapping is unchanged between the revisions. Renames are
+    followed. The same preamble discipline as ``right_side_hunks`` keeps a
+    body line that renders as ``--- ``/``+++ `` from being read as a file
+    boundary.
+    """
+    result = run_git(
+        "diff", "--no-color", "--no-ext-diff", "--no-textconv",
+        "--find-renames", "-U0",
+        old_rev, new_rev,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        fail(f"git diff for span mapping failed: {detail}")
+    mapping: Dict[str, Tuple[Optional[str], Tuple[Tuple[int, int, int, int], ...]]] = {}
+    old_path: Optional[str] = None
+    new_path: Optional[str] = None
+    hunks: List[Tuple[int, int, int, int]] = []
+    in_preamble = False
+
+    def flush() -> None:
+        if old_path is not None:
+            mapping[old_path] = (new_path, tuple(hunks))
+
+    for line in result.stdout.decode("utf-8", "replace").splitlines():
+        if line.startswith("diff --git "):
+            flush()
+            old_path = None
+            new_path = None
+            hunks = []
+            in_preamble = True
+        elif in_preamble and line.startswith("rename from "):
+            # A pure rename has no ---/+++ lines at all; the rename
+            # preamble is the only record of the path pair.
+            token = line[len("rename from "):]
+            old_path = None if token.startswith('"') else token
+        elif in_preamble and line.startswith("rename to "):
+            token = line[len("rename to "):]
+            if token.startswith('"'):
+                old_path = None
+            else:
+                new_path = token
+        elif in_preamble and line.startswith("--- "):
+            token = line[4:]
+            if token == "/dev/null" or token.startswith('"'):
+                old_path = None
+            elif token.startswith("a/"):
+                old_path = token[2:]
+            else:
+                old_path = token
+        elif in_preamble and line.startswith("+++ "):
+            token = line[4:]
+            if token == "/dev/null":
+                new_path = None
+            elif token.startswith('"'):
+                old_path = None
+            elif token.startswith("b/"):
+                new_path = token[2:]
+            else:
+                new_path = token
+        elif line.startswith("@@ "):
+            in_preamble = False
+            match = HUNK_PAIR_RE.match(line)
+            if not match:
+                continue
+            old_start = int(match.group(1))
+            old_count = 1 if match.group(2) is None else int(match.group(2))
+            new_start = int(match.group(3))
+            new_count = 1 if match.group(4) is None else int(match.group(4))
+            hunks.append((old_start, old_count, new_start, new_count))
+    flush()
+    return mapping
+
+
+def map_line(
+    hunks: Sequence[Tuple[int, int, int, int]], line: int
+) -> Optional[int]:
+    """The line's image in the new revision, or None inside a removal."""
+    delta = 0
+    for old_start, old_count, _new_start, new_count in hunks:
+        # A pure insertion (-a,0) sits after old line a; line a itself is
+        # untouched by it.
+        boundary = old_start if old_count > 0 else old_start + 1
+        if line < boundary:
+            return line + delta
+        if old_count > 0 and line <= old_start + old_count - 1:
+            return None
+        delta += new_count - old_count
+    return line + delta
+
+
+def map_span(
+    old_rev: str, new_rev: str, path: str, start_line: int, end_line: int
+) -> Optional[Dict[str, Any]]:
+    """The span's image at new_rev: path, lines, and a ``partial`` flag.
+
+    Both endpoints mapping cleanly is a full mapping. A span partly inside
+    a rewritten region maps onto the rewrite's replacement lines and is
+    flagged ``partial`` (policy: PARTIAL_MAPPED_SPANS_SUPPRESS). A deleted
+    file or a fully deleted span has no image and returns None.
+    """
+    entry = pair_diff_map(old_rev, new_rev).get(path)
+    if entry is None:
+        return {
+            "path": path,
+            "start_line": start_line,
+            "end_line": end_line,
+            "partial": False,
+        }
+    new_path, hunks = entry
+    if new_path is None:
+        return None
+    points: List[int] = []
+    partial = False
+    for line in (start_line, end_line):
+        image = map_line(hunks, line)
+        if image is None:
+            partial = True
+        else:
+            points.append(image)
+    # Any removal intersecting the span means span lines changed; the
+    # replacement region is part of the image (the same site, edited).
+    for old_start, old_count, new_start, new_count in hunks:
+        if old_count < 1:
+            continue
+        if old_start > end_line or old_start + old_count - 1 < start_line:
+            continue
+        partial = True
+        if new_count > 0:
+            points.extend((new_start, new_start + new_count - 1))
+    if not points:
+        return None
+    return {
+        "path": new_path,
+        "start_line": min(points),
+        "end_line": max(points),
+        "partial": partial,
+    }
+
+
+# --- Overlap predicate (P3 item 3, OCR parity) --------------------------------
+
+
+def span_overlap_iou(
+    new_start: int,
+    new_end: int,
+    old_start: int,
+    old_end: int,
+    threshold: float,
+) -> Optional[float]:
+    """The IoU when the spans match under OCR's predicate, else None.
+
+    Single-line vs single-line matches on the same line (IoU 1.0);
+    multi-line vs multi-line matches when overlap/union is strictly above
+    the threshold; single vs multi never matches, in either direction.
+    """
+    new_single = new_start == new_end
+    old_single = old_start == old_end
+    if new_single != old_single:
+        return None
+    if new_single:
+        return 1.0 if new_start == old_start else None
+    overlap = min(new_end, old_end) - max(new_start, old_start) + 1
+    if overlap <= 0:
+        return None
+    union = max(new_end, old_end) - min(new_start, old_start) + 1
+    iou = overlap / union
+    return iou if iou > threshold else None
+
+
 # --- Routing configuration (R3-R5, fail-closed) ------------------------------
 
 
@@ -260,6 +570,42 @@ def parse_pr_number(raw: str) -> int:
     if not text.isdigit() or int(text) < 1:
         fail(f"pr must be a positive integer, got {raw!r}")
     return int(text)
+
+
+def parse_incremental_flag(raw: str) -> bool:
+    """Fail-closed boolean for the incremental input."""
+    text = str(raw or "").strip().lower()
+    if text in ("", "false", "0", "no", "off"):
+        return False
+    if text in ("true", "1", "yes", "on"):
+        return True
+    fail(f"incremental must be true or false (or empty), got {raw!r}")
+
+
+def parse_overlap_threshold(raw: str) -> float:
+    """The overlap threshold, strictly inside (0, 1) (fail-closed).
+
+    The predicate is strict ``IoU > threshold`` and an identical span has
+    IoU exactly 1.0, so a threshold of 1.0 could never match anything;
+    dead configuration is refused rather than accepted (unlike OCR, which
+    documents (0, 1] and silently inherits the quirk).
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return DEFAULT_OVERLAP_THRESHOLD
+    try:
+        value = float(text)
+    except ValueError:
+        fail(
+            "incremental-overlap-threshold must be a number strictly "
+            f"between 0 and 1, got {raw!r}"
+        )
+    if not (0.0 < value < 1.0):
+        fail(
+            "incremental-overlap-threshold must be strictly between 0 and "
+            f"1 (exclusive: 1.0 could never match anything), got {raw!r}"
+        )
+    return value
 
 
 def routing_detail(
@@ -365,6 +711,7 @@ def inline_comment_body(finding: Mapping[str, Any], review_id: str) -> str:
     issue_type = str(finding["issue_type"]).lower().capitalize()
     lines = [
         f"<!-- {tag} -->",
+        meta_tag_for(finding),
         "",
         f"**{SEVERITY_EMOJI[finding['severity']]} {issue_type}** — "
         + renderer.escape_markdown(finding["short_summary"]),
@@ -443,18 +790,28 @@ def summary_section(
 
 
 def counts_line(
-    total: int, inline: int, no_position: int, routed: int, failed: int
+    total: int,
+    inline: int,
+    no_position: int,
+    routed: int,
+    failed: int,
+    skipped: int,
 ) -> str:
     if total == 0:
         return (
             "**No findings.** The review completed with nothing to report; "
             "this summary supersedes any earlier run."
         )
-    return (
+    text = (
         f"**{total} finding(s)** — posted inline: {inline} · "
         f"no diff position: {no_position} · routed by policy: {routed} · "
         f"could not be posted: {failed}"
     )
+    # Skipped findings render as the count alone (P3, decided Q4); the
+    # plan's skipped placements are the audit trail.
+    if skipped:
+        text += f" · already reported: {skipped}"
+    return text
 
 
 def rules_coverage_line(
@@ -482,6 +839,35 @@ def rules_coverage_line(
     )
 
 
+def incremental_context_lines(manifest: Mapping[str, Any]) -> List[str]:
+    """The sticky summary's incremental identity and degrade notes (P3)."""
+    record = manifest.get("incremental")
+    if not isinstance(record, dict) or not record.get("requested"):
+        return []
+    lines: List[str] = []
+    delta_from = record.get("from")
+    if isinstance(delta_from, str) and SHA_RE.fullmatch(delta_from):
+        commits = record.get("commits")
+        counted = (
+            f"{commits} commit(s)"
+            if isinstance(commits, int) and not isinstance(commits, bool)
+            else "the commits"
+        )
+        lines.append(
+            f"Incremental review: reviewed {counted} since "
+            + renderer.code_span(delta_from[:12])
+            + "; findings outside this delta were not re-reviewed."
+        )
+    reason = record.get("history_unavailable")
+    if isinstance(reason, str) and reason.strip():
+        lines.append(
+            "History unavailable ("
+            + renderer.escape_markdown(reason.strip())
+            + "); earlier comments may be repeated."
+        )
+    return lines
+
+
 def summary_context_lines(
     manifest: Mapping[str, Any],
     coverage: Mapping[str, Any],
@@ -495,6 +881,7 @@ def summary_context_lines(
         lines.append(renderer.partial_review_warning(reasons))
     if manifest["effort"] == "low":
         lines.append(renderer.LOW_EFFORT_REVIEW_NOTE)
+    lines.extend(incremental_context_lines(manifest))
     rules_text = rules_coverage_line(coverage, findings)
     if rules_text:
         lines.append(rules_text)
@@ -525,15 +912,20 @@ def assemble_summary_body(
     sections: Sequence[str],
     review_id: str,
     run_url: str,
+    identity_tags: Sequence[str] = (),
 ) -> str:
     """Assemble the sticky summary under the size budget (R9, R19).
 
     Sections render in full in ranking order; when the next section would
     overflow the budget, it and every later section are replaced by one
     elision line. Elision affects rendering only, never counts.
+    ``identity_tags`` carries the reviewed-head (and base) tags, written
+    only into the final summary body -- never the anchor -- so a crash
+    after the anchor write cannot leave a tag claiming this head was
+    fully reviewed (P3 item 1).
     """
-    head_parts = [marker, run_tag, completed_tag, "", "## Code review", "",
-                  counts_text]
+    head_parts = [marker, run_tag, completed_tag, *identity_tags, "",
+                  "## Code review", "", counts_text]
     for line in context_lines:
         head_parts.extend(["", line])
     if sections:
@@ -552,6 +944,159 @@ def assemble_summary_body(
     if sections:
         body += "\n\n" + elision_line(len(sections), review_id, run_url)
     return body
+
+
+# --- PR history (P3 item 1) --------------------------------------------------
+
+
+def optional_positive_line(value: Any, field: str) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        fail(f"history {field} must be a positive integer or null")
+    return value
+
+
+def validate_history_document(value: Any) -> Dict[str, Any]:
+    """Validate a pr-history.json document (fail-closed, R5)."""
+    if not isinstance(value, dict):
+        fail("the history file is not a JSON object")
+    if value.get("version") != HISTORY_VERSION:
+        fail(
+            "the history file has an unsupported version "
+            f"(expected {HISTORY_VERSION}, got {value.get('version')!r})"
+        )
+    target = value.get("target")
+    if (
+        not isinstance(target, dict)
+        or not isinstance(target.get("repo"), str)
+        or not REPO_RE.fullmatch(target["repo"])
+        or isinstance(target.get("pr"), bool)
+        or not isinstance(target.get("pr"), int)
+        or target["pr"] < 1
+    ):
+        fail("the history target is invalid")
+    live_head = value.get("live_head")
+    if not isinstance(live_head, str) or not SHA_RE.fullmatch(live_head):
+        fail("the history live_head is not a commit SHA")
+    summary = value.get("summary")
+    if summary is not None:
+        if not isinstance(summary, dict):
+            fail("the history summary must be an object or null")
+        if isinstance(summary.get("comment_id"), bool) or not isinstance(
+            summary.get("comment_id"), int
+        ):
+            fail("the history summary.comment_id must be an integer")
+        for field in ("head", "base"):
+            sha = summary.get(field)
+            if sha is not None and (
+                not isinstance(sha, str) or not SHA_RE.fullmatch(sha)
+            ):
+                fail(f"the history summary.{field} must be a SHA or null")
+    comments = value.get("comments")
+    if not isinstance(comments, list):
+        fail("the history comments must be an array")
+    seen_ids: Set[int] = set()
+    for index, comment in enumerate(comments):
+        field = f"comments[{index}]"
+        if not isinstance(comment, dict):
+            fail(f"history {field} must be an object")
+        comment_id = comment.get("id")
+        if (
+            isinstance(comment_id, bool)
+            or not isinstance(comment_id, int)
+            or comment_id < 1
+            or comment_id in seen_ids
+        ):
+            fail(f"history {field}.id must be a unique positive integer")
+        seen_ids.add(comment_id)
+        try:
+            renderer.safe_repo_path(comment.get("path"), f"history {field}.path")
+        except renderer.RenderError as error:
+            fail(str(error))
+        if comment.get("side") not in ("LEFT", "RIGHT"):
+            fail(f"history {field}.side is invalid")
+        for line_field in (
+            "line",
+            "start_line",
+            "original_line",
+            "original_start_line",
+        ):
+            optional_positive_line(
+                comment.get(line_field), f"{field}.{line_field}"
+            )
+        original_commit = comment.get("original_commit_id")
+        if original_commit is not None and (
+            not isinstance(original_commit, str)
+            or not SHA_RE.fullmatch(original_commit)
+        ):
+            fail(f"history {field}.original_commit_id must be a SHA or null")
+        span = comment.get("mapped_span")
+        if span is not None:
+            if not isinstance(span, dict):
+                fail(f"history {field}.mapped_span must be an object or null")
+            try:
+                renderer.safe_repo_path(
+                    span.get("path"), f"history {field}.mapped_span.path"
+                )
+            except renderer.RenderError as error:
+                fail(str(error))
+            start = optional_positive_line(
+                span.get("start_line"), f"{field}.mapped_span.start_line"
+            )
+            end = optional_positive_line(
+                span.get("end_line"), f"{field}.mapped_span.end_line"
+            )
+            if start is None or end is None or start > end:
+                fail(f"history {field}.mapped_span lines are invalid")
+            if not isinstance(span.get("partial"), bool):
+                fail(f"history {field}.mapped_span.partial must be a boolean")
+        meta = comment.get("meta")
+        if meta is not None:
+            if (
+                not isinstance(meta, dict)
+                or meta.get("category") not in renderer.CATEGORIES
+                or meta.get("severity") not in SEVERITY_RANK
+                or not isinstance(meta.get("short_summary"), str)
+                or len(meta["short_summary"]) > 8000
+            ):
+                fail(f"history {field}.meta is invalid")
+        html_url = comment.get("html_url")
+        if html_url is not None and (
+            not isinstance(html_url, str) or len(html_url) > 2048
+        ):
+            fail(f"history {field}.html_url is invalid")
+    return value
+
+
+def load_history_file(
+    path: str, repo: str, pr: int, reviewed_head: str
+) -> Tuple[Dict[str, Any], str]:
+    """Read, validate, and digest a history file for this plan's target.
+
+    The snapshot must describe exactly the reviewed head: a push landing
+    between the checkout and the history fetch would make every decision
+    built on it wrong from the outset, so a mismatch fails the plan.
+    """
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as error:
+        fail(f"could not read the history file: {error}")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        fail(f"the history file is not valid JSON: {error}")
+    history = validate_history_document(value)
+    if history["target"] != {"repo": repo, "pr": pr}:
+        fail("the history file's target does not match --repo/--pr")
+    if history["live_head"] != reviewed_head:
+        fail(
+            f"the history snapshot describes head "
+            f"{history['live_head'][:12]}, not the reviewed head "
+            f"{reviewed_head[:12]}; the PR moved between the checkout and "
+            "the history fetch -- re-run the review"
+        )
+    return history, hashlib.sha256(raw).hexdigest()
 
 
 # --- plan --------------------------------------------------------------------
@@ -637,6 +1182,114 @@ def resolve_reviewed_range(manifest: Mapping[str, Any]) -> Tuple[str, str, str]:
     return base, head, range_text
 
 
+def duplicate_of_posted_detail(
+    finding: Mapping[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """The skipped-placement detail for a verifier-marked duplicate (item 5)."""
+    record = finding.get("duplicate_of_posted")
+    if not isinstance(record, dict):
+        return None
+    comment_id = record.get("comment_id")
+    if isinstance(comment_id, bool) or not isinstance(comment_id, int):
+        fail(
+            f"finding {finding.get('id')} carries an invalid "
+            "duplicate_of_posted record"
+        )
+    detail: Dict[str, Any] = {"comment_id": comment_id}
+    html_url = record.get("html_url")
+    if isinstance(html_url, str) and html_url.startswith(GITHUB_URL_PREFIX):
+        detail["html_url"] = html_url
+    return detail
+
+
+def suppression_spans(
+    history: Optional[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Our history comments' spans at the live head, for overlap tests.
+
+    A comment suppresses only through a RIGHT-side mapped span (item 4
+    supplies it: live API fields while the comment is live, git-mapped
+    original fields once GitHub marks it outdated). A comment with no
+    usable span never suppresses.
+    """
+    if history is None:
+        return []
+    spans: List[Dict[str, Any]] = []
+    for comment in history["comments"]:
+        if comment.get("side") != "RIGHT":
+            continue
+        span = comment.get("mapped_span")
+        if not isinstance(span, dict):
+            continue
+        if span.get("partial") and not PARTIAL_MAPPED_SPANS_SUPPRESS:
+            continue
+        spans.append(
+            {
+                "comment_id": comment["id"],
+                "review_id": comment.get("review_id"),
+                "finding_id": comment.get("finding_id"),
+                "html_url": comment.get("html_url"),
+                "path": span["path"],
+                "start_line": span["start_line"],
+                "end_line": span["end_line"],
+                "partial": bool(span.get("partial")),
+            }
+        )
+    return spans
+
+
+def overlap_match(
+    finding: Mapping[str, Any],
+    spans: Sequence[Mapping[str, Any]],
+    threshold: float,
+) -> Optional[Dict[str, Any]]:
+    """The best history comment covering this finding's span, or None.
+
+    Deterministic: the highest IoU wins; ties resolve to the lowest
+    comment ID.
+    """
+    location = finding["location"]
+    best: Optional[Dict[str, Any]] = None
+    for span in spans:
+        if span["path"] != finding["file"]:
+            continue
+        iou = span_overlap_iou(
+            location["start_line"],
+            location["end_line"],
+            span["start_line"],
+            span["end_line"],
+            threshold,
+        )
+        if iou is None:
+            continue
+        if (
+            best is None
+            or iou > best["iou"]
+            or (iou == best["iou"] and span["comment_id"] < best["comment_id"])
+        ):
+            best = {**span, "iou": iou}
+    if best is None:
+        return None
+    detail: Dict[str, Any] = {
+        "comment_id": best["comment_id"],
+        "iou": round(best["iou"], 4),
+        "mapped_span": {
+            "path": best["path"],
+            "start_line": best["start_line"],
+            "end_line": best["end_line"],
+            "partial": best["partial"],
+        },
+    }
+    if isinstance(best.get("review_id"), str):
+        detail["review_id"] = best["review_id"]
+    if isinstance(best.get("finding_id"), str):
+        detail["finding_id"] = best["finding_id"]
+    html_url = best.get("html_url")
+    if isinstance(html_url, str) and html_url.startswith(GITHUB_URL_PREFIX):
+        detail["html_url"] = html_url
+    return detail
+
+
 def command_plan(args: argparse.Namespace) -> int:
     repo = args.repo.strip()
     if not REPO_RE.fullmatch(repo) or ".." in repo:
@@ -647,6 +1300,12 @@ def command_plan(args: argparse.Namespace) -> int:
     threshold = parse_severity_threshold(args.route_severity_below)
     categories = parse_route_categories(args.route_categories)
     batch_size = parse_batch_size(args.batch_size)
+    incremental = parse_incremental_flag(args.incremental)
+    overlap_threshold = parse_overlap_threshold(
+        args.incremental_overlap_threshold
+    )
+    if args.history and not incremental:
+        fail("--history requires --incremental true")
     run_url = (args.run_url or "").strip()
     if len(run_url) > 2048:
         fail("run-url exceeds 2048 characters")
@@ -658,12 +1317,24 @@ def command_plan(args: argparse.Namespace) -> int:
     if not isinstance(completed_at, str) or not completed_at.strip():
         fail("the manifest has no completion timestamp")
 
+    history: Optional[Dict[str, Any]] = None
+    history_digest: Optional[str] = None
+    if args.history:
+        history, history_digest = load_history_file(
+            args.history, repo, pr, head
+        )
+    spans = suppression_spans(history)
+
     hunks = right_side_hunks(base, head)
 
     # Exhaustive partition (R1): every finding gets exactly one placement.
-    # Diff position decides first (R2); routing applies only to otherwise
-    # inline-eligible findings, so a finding matching both carries the
-    # no-position reason and routing can never hide a placement.
+    # A verifier-marked duplicate of a posted comment skips first (the
+    # defect already has a visible comment, wherever it sits); then diff
+    # position decides (R2); then overlap suppression (a finding already
+    # posted must not be routed to the summary as new); routing applies
+    # last, only to otherwise inline-eligible findings, so a finding
+    # matching several policies carries the earliest reason and nothing
+    # can hide a placement.
     placements: List[Dict[str, Any]] = []
     for finding in findings:
         location = finding["location"]
@@ -676,6 +1347,17 @@ def command_plan(args: argparse.Namespace) -> int:
             "start_line": start_line,
             "end_line": end_line,
         }
+        posted_duplicate = duplicate_of_posted_detail(finding)
+        if posted_duplicate is not None:
+            placements.append(
+                {
+                    **base_entry,
+                    "placement": "skipped",
+                    "reason": "duplicate-of-posted",
+                    "detail": posted_duplicate,
+                }
+            )
+            continue
         if not has_diff_range(
             hunks, finding["file"], start_line, end_line
         ):
@@ -687,6 +1369,17 @@ def command_plan(args: argparse.Namespace) -> int:
                     "body": summary_section(
                         finding, "no diff position in the reviewed range"
                     ),
+                }
+            )
+            continue
+        overlap = overlap_match(finding, spans, overlap_threshold)
+        if overlap is not None:
+            placements.append(
+                {
+                    **base_entry,
+                    "placement": "skipped",
+                    "reason": "overlap",
+                    "detail": overlap,
                 }
             )
             continue
@@ -727,6 +1420,9 @@ def command_plan(args: argparse.Namespace) -> int:
         for entry in placements
         if entry["placement"] == "summary" and entry["reason"] == "routed"
     )
+    skipped = sum(
+        1 for entry in placements if entry["placement"] == "skipped"
+    )
 
     # Deterministic batching (R13): sorted (path, line, finding ID), then
     # contiguous chunks of at most batch_size. Routed findings never enter
@@ -746,6 +1442,8 @@ def command_plan(args: argparse.Namespace) -> int:
 
     run_tag = run_tag_for(review_id)
     completed_tag = completed_tag_for(completed_at)
+    head_tag = head_tag_for(head)
+    base_tag = base_tag_for(base)
     context = summary_context_lines(
         manifest, coverage, findings, reasons, head, run_url
     )
@@ -756,12 +1454,22 @@ def command_plan(args: argparse.Namespace) -> int:
         SUMMARY_MARKER,
         run_tag,
         completed_tag,
-        counts_line(len(findings), len(inline_entries), no_position, routed, 0),
+        counts_line(
+            len(findings),
+            len(inline_entries),
+            no_position,
+            routed,
+            0,
+            skipped,
+        ),
         context,
         sections,
         review_id,
         run_url,
+        identity_tags=(head_tag, base_tag),
     )
+    # The anchor never carries the head tag: a crash after the anchor
+    # write must not leave a tag claiming this head was fully reviewed.
     anchor_body = "\n".join(
         [
             SUMMARY_MARKER,
@@ -774,6 +1482,13 @@ def command_plan(args: argparse.Namespace) -> int:
         ]
     )
 
+    incremental_record = manifest.get("incremental")
+    history_unavailable = ""
+    if isinstance(incremental_record, dict):
+        reason = incremental_record.get("history_unavailable")
+        if isinstance(reason, str):
+            history_unavailable = reason.strip()
+
     plan = {
         "version": PLAN_VERSION,
         "review_id": review_id,
@@ -784,11 +1499,15 @@ def command_plan(args: argparse.Namespace) -> int:
         "head": head,
         "range": range_text,
         "bundle_digest": bundle_digest(args.evidence_dir),
+        "history_digest": history_digest,
         "config": {
             "batch_size": batch_size,
             "route_severity_below": threshold.lower() if threshold else "",
             "route_categories": categories,
             "run_url": run_url,
+            "incremental": incremental,
+            "incremental_overlap_threshold": overlap_threshold,
+            "history_unavailable": history_unavailable,
         },
         "placements": placements,
         "batches": batches,
@@ -797,6 +1516,8 @@ def command_plan(args: argparse.Namespace) -> int:
             "run_tag": run_tag,
             "completed_tag": completed_tag,
             "completed_at": completed_at,
+            "head_tag": head_tag,
+            "base_tag": base_tag,
             "anchor_body": anchor_body,
             "body": summary_body,
             "context_lines": context,
@@ -806,7 +1527,7 @@ def command_plan(args: argparse.Namespace) -> int:
             "planned_inline": len(inline_entries),
             "no_position": no_position,
             "routed": routed,
-            "skipped": 0,
+            "skipped": skipped,
         },
     }
     output = Path(args.output)
@@ -819,7 +1540,7 @@ def command_plan(args: argparse.Namespace) -> int:
     print(
         f"Planned {len(findings)} placement(s): {len(inline_entries)} inline "
         f"in {len(batches)} batch(es), {no_position} without a diff "
-        f"position, {routed} routed"
+        f"position, {routed} routed, {skipped} skipped (already reported)"
     )
     return 0
 
@@ -840,7 +1561,11 @@ def validate_plan_document(
     if not isinstance(value, dict):
         fail("the plan is not a JSON object")
     if value.get("version") != PLAN_VERSION:
-        fail("the plan has an unsupported version")
+        fail(
+            "the plan has an unsupported version: this apply understands "
+            f"version {PLAN_VERSION}, the plan carries "
+            f"{value.get('version')!r}"
+        )
     review_id = value.get("review_id")
     if not isinstance(review_id, str) or not REVIEW_ID_RE.fullmatch(review_id):
         fail("the plan review_id is invalid")
@@ -855,12 +1580,32 @@ def validate_plan_document(
         sha = value.get(field)
         if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
             fail(f"the plan {field} is not a commit SHA")
+    history_digest = value.get("history_digest")
+    if history_digest is not None and (
+        not isinstance(history_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", history_digest)
+    ):
+        fail("the plan history_digest is invalid")
     config = value.get("config")
     if not isinstance(config, dict):
         fail("the plan config is missing")
     run_url = config.get("run_url", "")
     if not isinstance(run_url, str) or len(run_url) > 2048:
         fail("the plan run_url is invalid")
+    if not isinstance(config.get("incremental"), bool):
+        fail("the plan config.incremental must be a boolean")
+    overlap_threshold = config.get("incremental_overlap_threshold")
+    if (
+        isinstance(overlap_threshold, bool)
+        or not isinstance(overlap_threshold, (int, float))
+        or not (0.0 < float(overlap_threshold) < 1.0)
+    ):
+        fail(
+            "the plan config.incremental_overlap_threshold must be a "
+            "number strictly between 0 and 1"
+        )
+    if not isinstance(config.get("history_unavailable", ""), str):
+        fail("the plan config.history_unavailable must be a string")
 
     placements = value.get("placements")
     if not isinstance(placements, list):
@@ -868,6 +1613,7 @@ def validate_plan_document(
     seen_ids: Set[str] = set()
     inline_ids: List[str] = []
     reason_counts = {"no-position": 0, "routed": 0}
+    skipped_count = 0
     for index, entry in enumerate(placements):
         field = f"placements[{index}]"
         if not isinstance(entry, dict):
@@ -905,8 +1651,43 @@ def validate_plan_document(
                 f"plan {field}.end_line must end at its line and not precede "
                 "start_line"
             )
-        body = require_text(entry.get("body"), f"{field}.body", GITHUB_BODY_CAP)
         placement = entry.get("placement")
+        if placement == "skipped":
+            # The P3 placement kind: a finding already covered by one of
+            # our earlier comments. It carries no body and never posts;
+            # its detail names the covering comment (the audit trail).
+            if entry.get("reason") not in SKIP_REASONS:
+                fail(f"plan {field}.reason is invalid")
+            skipped_count += 1
+            detail = entry.get("detail")
+            if not isinstance(detail, dict):
+                fail(f"plan {field}.detail must name the covering comment")
+            comment_id = detail.get("comment_id")
+            if isinstance(comment_id, bool) or not isinstance(
+                comment_id, int
+            ):
+                fail(f"plan {field}.detail.comment_id must be an integer")
+            html_url = detail.get("html_url")
+            if html_url is not None and (
+                not isinstance(html_url, str)
+                or len(html_url) > 2048
+                or not html_url.startswith(GITHUB_URL_PREFIX)
+            ):
+                fail(
+                    f"plan {field}.detail.html_url must be an "
+                    "https://github.com/ URL or absent"
+                )
+            iou = detail.get("iou")
+            if iou is not None and (
+                isinstance(iou, bool)
+                or not isinstance(iou, (int, float))
+                or not (0.0 <= float(iou) <= 1.0)
+            ):
+                fail(f"plan {field}.detail.iou is invalid")
+            if "body" in entry:
+                fail(f"plan {field} is skipped and must carry no body")
+            continue
+        body = require_text(entry.get("body"), f"{field}.body", GITHUB_BODY_CAP)
         if placement == "inline":
             expected_tag = comment_tag(review_id, finding_id)
             if entry.get("comment_id") != expected_tag:
@@ -952,12 +1733,22 @@ def validate_plan_document(
     )
     if summary.get("completed_tag") != completed_tag_for(completed_at):
         fail("the plan summary completed_tag is inconsistent")
+    if summary.get("head_tag") != head_tag_for(value["head"]):
+        fail("the plan summary head_tag is not the reviewed head's tag")
+    if summary.get("base_tag") != base_tag_for(value["base"]):
+        fail("the plan summary base_tag is not the reviewed base's tag")
     for field in ("anchor_body", "body"):
         body = require_text(
             summary.get(field), f"summary.{field}", GITHUB_BODY_CAP
         )
         if SUMMARY_MARKER not in body:
             fail(f"the plan summary.{field} does not embed the marker")
+    if summary["head_tag"] not in summary["body"]:
+        fail("the plan summary.body does not embed the head tag")
+    # The head tag claims this head was fully reviewed; only the final
+    # summary body may carry it, never the anchor (P3 item 1).
+    if HEAD_TAG_PREFIX in summary["anchor_body"]:
+        fail("the plan summary.anchor_body must not carry a head tag")
     context = summary.get("context_lines")
     if not isinstance(context, list) or len(context) > 100 or not all(
         isinstance(line, str) and len(line) <= GITHUB_BODY_CAP
@@ -977,7 +1768,7 @@ def validate_plan_document(
         or counts["planned_inline"] != len(inline_ids)
         or counts["no_position"] != reason_counts["no-position"]
         or counts["routed"] != reason_counts["routed"]
-        or counts["skipped"] != 0
+        or counts["skipped"] != skipped_count
     ):
         fail("the plan counts do not reconcile with its placements (R1)")
     return value
@@ -1023,11 +1814,12 @@ class GitHubClient:
         except json.JSONDecodeError:
             return status, None
 
-    def list_all(self, path: str) -> List[Dict[str, Any]]:
+    def list_all(self, path: str, params: str = "") -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
+        suffix = f"&{params}" if params else ""
         for page in range(1, 51):
             status, value = self.request(
-                "GET", f"{path}?per_page=100&page={page}"
+                "GET", f"{path}?per_page=100&page={page}{suffix}"
             )
             if status != 200 or not isinstance(value, list):
                 fail(f"could not list {path} (HTTP {status})")
@@ -1054,11 +1846,202 @@ def extract_posted_ids(
     return posted
 
 
-def completed_stamp(body: str) -> Optional[str]:
-    match = re.search(
-        r"<!-- " + re.escape(COMPLETED_TAG_PREFIX) + r":([^>]+) -->", body
+# --- history (P3 item 1: the token-holding sibling of apply) -----------------
+
+
+def resolve_token_login(
+    client: GitHubClient, bot_login: str
+) -> Optional[str]:
+    """The login whose comments count as ours.
+
+    The bot_login input wins when set; otherwise GET /user works on
+    PAT-mode servers. On App-mode servers (where /user returns 403) this
+    returns None: history then degrades to no history -- its write-probe
+    cannot be reused because the probe is a write -- while apply learns
+    the login from its own first write (the anchor response).
+    """
+    login = (bot_login or "").strip()
+    if login:
+        return login
+    status, user = client.request("GET", "/user")
+    if status == 401:
+        fail("GitHub rejected the token (HTTP 401)")
+    if status == 200 and isinstance(user, dict) and user.get("login"):
+        return str(user["login"])
+    return None
+
+
+def comment_line_field(comment: Mapping[str, Any], field: str) -> Optional[int]:
+    value = comment.get(field)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
+def history_mapped_span(
+    comment: Mapping[str, Any], live_head: str
+) -> Optional[Dict[str, Any]]:
+    """The comment's span at the live head (P3 item 4).
+
+    While the comment is live its ``line``/``start_line`` already track
+    the current diff -- the live head. Once a push outdates it those go
+    null and the creation-time ``original_*`` fields are mapped forward
+    from ``original_commit_id`` with pure git arithmetic. An original
+    commit missing from local history (a force-push) cannot be mapped.
+    """
+    path = comment.get("path")
+    if not isinstance(path, str) or not path:
+        return None
+    line = comment_line_field(comment, "line")
+    if line is not None:
+        start = comment_line_field(comment, "start_line") or line
+        return {
+            "path": path,
+            "start_line": min(start, line),
+            "end_line": line,
+            "partial": False,
+        }
+    original_line = comment_line_field(comment, "original_line")
+    original_commit = comment.get("original_commit_id")
+    if original_line is None or not isinstance(original_commit, str) or not (
+        SHA_RE.fullmatch(original_commit)
+    ):
+        return None
+    if not commit_exists(original_commit):
+        return None
+    original_start = (
+        comment_line_field(comment, "original_start_line") or original_line
     )
-    return match.group(1).strip() if match else None
+    try:
+        return map_span(
+            original_commit,
+            live_head,
+            path,
+            min(original_start, original_line),
+            original_line,
+        )
+    except PublishError:
+        return None
+
+
+def command_history(args: argparse.Namespace) -> int:
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        fail("history requires GITHUB_TOKEN in the environment, never argv")
+    repo = args.repo.strip()
+    if not REPO_RE.fullmatch(repo) or ".." in repo:
+        fail(f"repo must look like owner/name, got {args.repo!r}")
+    pr = parse_pr_number(args.pr)
+    client = GitHubClient(args.api_base, token)
+
+    status, pull = client.request("GET", f"/repos/{repo}/pulls/{pr}")
+    if status != 200 or not isinstance(pull, dict):
+        fail(f"could not read the PR (HTTP {status})")
+    live_head = (pull.get("head") or {}).get("sha")
+    if not isinstance(live_head, str) or not SHA_RE.fullmatch(live_head):
+        fail("the PR head is not a commit SHA")
+
+    login = resolve_token_login(client, args.bot_login)
+    if login is None:
+        # History drives range selection and suppression, so ownership
+        # must be attributable; without an identity the run degrades to
+        # no history (decided, Q2).
+        fail(
+            "no identity for the history fetch: GET /user is unavailable "
+            "(a GitHub App installation token?) and the bot_login input "
+            "is not set; degrading to no history"
+        )
+
+    review_comments = client.list_all(
+        f"/repos/{repo}/pulls/{pr}/comments",
+        params="sort=created&direction=desc",
+    )
+    issue_comments = client.list_all(f"/repos/{repo}/issues/{pr}/comments")
+
+    # Only comments that carry our identity tag AND were authored by our
+    # resolved login count: the tag alone is never sufficient -- a forged
+    # tag from another author could shrink the delta or hide a finding.
+    comments: List[Dict[str, Any]] = []
+    for comment in review_comments:
+        body = str(comment.get("body") or "")
+        identity = parse_comment_identity(body)
+        if identity is None:
+            continue
+        if (comment.get("user") or {}).get("login") != login:
+            continue
+        comment_id = comment.get("id")
+        if isinstance(comment_id, bool) or not isinstance(comment_id, int):
+            continue
+        record: Dict[str, Any] = {
+            "id": comment_id,
+            "review_id": identity[0],
+            "finding_id": identity[1],
+            "path": comment.get("path"),
+            "side": comment.get("side") or "RIGHT",
+            "line": comment_line_field(comment, "line"),
+            "start_line": comment_line_field(comment, "start_line"),
+            "original_line": comment_line_field(comment, "original_line"),
+            "original_start_line": comment_line_field(
+                comment, "original_start_line"
+            ),
+            "original_commit_id": comment.get("original_commit_id"),
+            "html_url": str(comment.get("html_url") or "")[:2048],
+            "meta": parse_meta_tag(body),
+            "mapped_span": history_mapped_span(comment, live_head),
+        }
+        comments.append(record)
+    comments.sort(key=lambda record: record["id"])
+
+    summary_record: Optional[Dict[str, Any]] = None
+    owned_summaries = [
+        comment
+        for comment in issue_comments
+        if SUMMARY_MARKER in str(comment.get("body") or "")
+        and (comment.get("user") or {}).get("login") == login
+        and isinstance(comment.get("id"), int)
+    ]
+    if owned_summaries:
+        newest = max(owned_summaries, key=lambda comment: comment["id"])
+        body = str(newest.get("body") or "")
+        summary_record = {
+            "comment_id": newest["id"],
+            "review_id": tag_value(body, RUN_TAG_PREFIX),
+            "completed_at": completed_stamp(body),
+            "head": tagged_sha(body, HEAD_TAG_PREFIX),
+            "base": tagged_sha(body, BASE_TAG_PREFIX),
+        }
+
+    document = {
+        "version": HISTORY_VERSION,
+        "target": {"repo": repo, "pr": pr},
+        "live_head": live_head,
+        "bot_login": login,
+        "summary": summary_record,
+        "comments": comments,
+    }
+    validate_history_document(document)
+    output = Path(args.output)
+    temporary = output.with_name(output.name + ".tmp")
+    temporary.write_text(
+        json.dumps(document, ensure_ascii=True, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, output)
+    print(
+        f"Fetched PR history: {len(comments)} owned inline comment(s), "
+        + (
+            "summary head "
+            + (summary_record.get("head") or "untagged")[:12]
+            if summary_record
+            else "no owned summary"
+        )
+    )
+    return 0
+
+
+def completed_stamp(body: str) -> Optional[str]:
+    return tag_value(body, COMPLETED_TAG_PREFIX)
 
 
 def is_newer_stamp(existing: Optional[str], ours: str) -> bool:
@@ -1072,7 +2055,11 @@ def is_newer_stamp(existing: Optional[str], ours: str) -> bool:
 
 def strip_identity_tag(body: str) -> str:
     return re.sub(
-        r"^<!-- " + re.escape(COMMENT_TAG_PREFIX) + r":[^>]+ -->\n*",
+        r"^(?:<!-- (?:"
+        + re.escape(COMMENT_TAG_PREFIX)
+        + r"|"
+        + re.escape(META_TAG_PREFIX)
+        + r"):[^>]+ -->\n*)+",
         "",
         body,
     )
@@ -1091,11 +2078,12 @@ class BatchPoster:
         pr: int,
         plan: Mapping[str, Any],
         already_posted: Set[str],
+        commit_id: str,
     ) -> None:
         self.client = client
         self.repo = repo
         self.pr = pr
-        self.head = plan["head"]
+        self.head = commit_id
         self.by_id = {
             entry["finding_id"]: entry
             for entry in plan["placements"]
@@ -1160,8 +2148,11 @@ class BatchPoster:
     )
 
     def mark_failed(self, finding_ids: Sequence[str], detail: str) -> None:
+        # A finding that already landed is never also failed: posted and
+        # failed staying disjoint is what keeps the outcome counts honest.
         for finding_id in finding_ids:
-            self.failed[finding_id] = detail
+            if finding_id not in self.posted:
+                self.failed[finding_id] = detail
 
     def reconcile(self, finding_ids: Sequence[str]) -> List[str]:
         """After a possibly-landed failure: absorb what landed, return what
@@ -1212,7 +2203,13 @@ class BatchPoster:
                 self.mark_failed(still_missing, self.DROPPED_DETAIL)
 
     def post_batch(self, batch_ids: Sequence[str]) -> None:
-        to_send = [fid for fid in batch_ids if fid not in self.posted]
+        # A finding pre-marked failed (a span that did not survive drift
+        # mapping) is never attempted; it routes to the summary (R15).
+        to_send = [
+            fid
+            for fid in batch_ids
+            if fid not in self.posted and fid not in self.failed
+        ]
         if to_send:
             self.batches_attempted += 1
             status = self.post_review(to_send)
@@ -1243,6 +2240,67 @@ class BatchPoster:
             self.batches_succeeded += 1
 
 
+def ensure_commit_local(sha: str) -> bool:
+    """True when the commit is available locally, fetching if needed."""
+    if commit_exists(sha):
+        return True
+    # The sandbox clone's HTTPS credentials are ambient; a fetch failure
+    # falls back to the R20 refusal.
+    fetched = run_git("fetch", "origin", sha)
+    if fetched.returncode != 0:
+        return False
+    commit_exists.cache_clear()
+    return commit_exists(sha)
+
+
+def forward_map_placements(
+    plan: Mapping[str, Any], live_head: str
+) -> Dict[str, str]:
+    """Map every planned inline span from plan.head onto the live head.
+
+    Mutates the (validated) placement entries in place and returns the
+    finding IDs whose span did not survive the mapping, with the reason;
+    those route to the summary through the failed-comment path (R15).
+    Raises PublishError when the drift cannot be trusted at all, and the
+    caller falls back to the R20 refusal.
+    """
+    if not ensure_commit_local(live_head):
+        fail(
+            f"the live head {live_head[:12]} could not be fetched for "
+            "drift mapping"
+        )
+    ancestry = run_git(
+        "merge-base", "--is-ancestor", plan["head"], live_head
+    )
+    if ancestry.returncode != 0:
+        fail(
+            f"the plan head {plan['head'][:12]} is not an ancestor of the "
+            f"live head {live_head[:12]} (a force-push?)"
+        )
+    unmapped: Dict[str, str] = {}
+    for entry in plan["placements"]:
+        if entry["placement"] != "inline":
+            continue
+        mapped = map_span(
+            plan["head"],
+            live_head,
+            entry["path"],
+            entry["start_line"],
+            entry["end_line"],
+        )
+        if mapped is None or mapped["partial"]:
+            unmapped[entry["finding_id"]] = (
+                "the PR head moved past the reviewed head and this "
+                "comment's lines did not survive the move"
+            )
+            continue
+        entry["path"] = mapped["path"]
+        entry["start_line"] = mapped["start_line"]
+        entry["end_line"] = mapped["end_line"]
+        entry["line"] = mapped["end_line"]
+    return unmapped
+
+
 def command_apply(args: argparse.Namespace) -> int:
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
@@ -1260,27 +2318,36 @@ def command_apply(args: argparse.Namespace) -> int:
     summary = plan["summary"]
     client = GitHubClient(args.api_base, token)
 
-    # Head drift check before the first write (R20).
+    # Head drift check before the first write (R20, revised by P3 item 4):
+    # when the live head has moved past the plan's head, apply forward-maps
+    # every planned span onto the live head instead of refusing; spans that
+    # do not survive the mapping route to the summary (R15). When the
+    # drift cannot be trusted (fetch failure, force-push, mapping error),
+    # the original refusal stands: exit nonzero before the first write.
     status, pull = client.request("GET", f"/repos/{repo}/pulls/{pr}")
     if status != 200 or not isinstance(pull, dict):
         fail(f"could not read the PR (HTTP {status})")
     live_head = (pull.get("head") or {}).get("sha")
+    drift_failures: Dict[str, str] = {}
+    posting_head = plan["head"]
     if live_head != plan["head"]:
-        fail(
+        refusal = (
             f"the live PR head {str(live_head)[:12]} does not match the "
             f"plan's reviewed head {plan['head'][:12]}; refusing to post "
             "against a drifted head"
         )
+        if not isinstance(live_head, str) or not SHA_RE.fullmatch(live_head):
+            fail(refusal)
+        try:
+            drift_failures = forward_map_placements(plan, live_head)
+        except PublishError as error:
+            fail(f"{refusal} ({error})")
+        posting_head = live_head
 
-    # Token identity (R7). A PAT answers /user; a GitHub App installation
-    # token gets 403 there, so its login is learned from apply's own first
-    # write (the anchor response) below.
-    status, user = client.request("GET", "/user")
-    login: Optional[str] = None
-    if status == 200 and isinstance(user, dict) and user.get("login"):
-        login = str(user["login"])
-    elif status == 401:
-        fail("GitHub rejected the token (HTTP 401)")
+    # Token identity (R7). A GitHub App installation token resolves to
+    # None here and its login is learned from apply's own first write
+    # (the anchor response) below.
+    login: Optional[str] = resolve_token_login(client, args.bot_login)
 
     # Reconcile against comments already carrying this review's tags (R14).
     already_posted = extract_posted_ids(
@@ -1368,7 +2435,13 @@ def command_apply(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
 
-    poster = BatchPoster(client, repo, pr, plan, already_posted)
+    poster = BatchPoster(
+        client, repo, pr, plan, already_posted, commit_id=posting_head
+    )
+    # A drift-unmapped span is failed before any write: it never enters a
+    # posted batch and lands in the summary with its reason (R15).
+    for finding_id, detail in drift_failures.items():
+        poster.mark_failed([finding_id], detail)
     for batch in plan["batches"]:
         poster.post_batch(batch)
 
@@ -1418,11 +2491,13 @@ def command_apply(args: argparse.Namespace) -> int:
                 outcome_counts["no_position"],
                 outcome_counts["routed"],
                 outcome_counts["failed_inline"],
+                outcome_counts["skipped"],
             ),
             summary["context_lines"],
             sections,
             review_id,
             plan["config"].get("run_url") or "",
+            identity_tags=(summary["head_tag"], summary["base_tag"]),
         )
         if summary_comment_id is None and anchor_failed and login is not None:
             # The anchor write may have landed despite its error; re-read
@@ -1471,7 +2546,28 @@ def command_apply(args: argparse.Namespace) -> int:
             {"finding_id": finding_id, "detail": detail}
             for finding_id, detail in sorted(poster.failed.items())
         ],
+        # Skip telemetry (P3): which earlier comment each finding
+        # deferred to, replayable from the plan artifact.
+        "skipped": [
+            {
+                "finding_id": entry["finding_id"],
+                "reason": entry["reason"],
+                "detail": entry["detail"],
+            }
+            for entry in plan["placements"]
+            if entry["placement"] == "skipped"
+        ],
     }
+    if posting_head != plan["head"]:
+        outcome["head_drift"] = {
+            "plan_head": plan["head"],
+            "posted_against": posting_head,
+            "unmapped": sorted(drift_failures),
+        }
+    if plan["config"].get("history_unavailable"):
+        outcome["history_unavailable"] = plan["config"][
+            "history_unavailable"
+        ]
     if stale_skip:
         outcome["summary_skipped"] = (
             "a newer review's summary is already posted"
@@ -1516,14 +2612,29 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--route-categories", default="")
     plan.add_argument("--batch-size", default=str(DEFAULT_BATCH_SIZE))
     plan.add_argument("--run-url", default="")
+    plan.add_argument("--incremental", default="")
+    plan.add_argument("--incremental-overlap-threshold", default="")
+    plan.add_argument("--history", default="")
     plan.add_argument("--output", required=True)
     plan.set_defaults(handler=command_plan)
+
+    history = commands.add_parser(
+        "history",
+        help="fetch this PR's prior-review state into pr-history.json",
+    )
+    history.add_argument("--repo", required=True)
+    history.add_argument("--pr", required=True, type=int)
+    history.add_argument("--api-base", default="https://api.github.com")
+    history.add_argument("--bot-login", default="")
+    history.add_argument("--output", required=True)
+    history.set_defaults(handler=command_history)
 
     apply_ = commands.add_parser("apply", help="execute a publication plan")
     apply_.add_argument("--plan", required=True)
     apply_.add_argument("--repo", required=True)
     apply_.add_argument("--pr", required=True, type=int)
     apply_.add_argument("--api-base", required=True)
+    apply_.add_argument("--bot-login", default="")
     apply_.add_argument("--outcome", required=True)
     apply_.set_defaults(handler=command_apply)
     return parser
