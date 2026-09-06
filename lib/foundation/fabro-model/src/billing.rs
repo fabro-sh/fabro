@@ -423,6 +423,20 @@ impl BilledTokenCounts {
         accumulate_optional_usd_micros(&mut self.total_usd_micros, source.total_usd_micros);
     }
 
+    /// Inverse of [`Self::add_counts`]: retires a previously added cumulative
+    /// counter when a newer counter from the same source replaces it.
+    pub fn sub_counts(&mut self, source: &Self) {
+        self.input_tokens -= source.input_tokens;
+        self.output_tokens -= source.output_tokens;
+        self.total_tokens -= source.total_tokens;
+        self.reasoning_tokens -= source.reasoning_tokens;
+        self.cache_read_tokens -= source.cache_read_tokens;
+        self.cache_write_tokens -= source.cache_write_tokens;
+        if let Some(cost) = source.total_usd_micros {
+            accumulate_optional_usd_micros(&mut self.total_usd_micros, Some(-cost));
+        }
+    }
+
     pub fn add_billed_usage(&mut self, usage: &BilledModelUsage) {
         let tokens = usage.tokens();
         self.input_tokens += tokens.input_tokens;
@@ -901,6 +915,34 @@ cache_input_cost_per_mtok = 0.3
             cache_write_tokens: 66,
             total_usd_micros:   Some(70),
         });
+    }
+
+    #[test]
+    fn billed_token_counts_sub_counts_inverts_add_counts() {
+        let original = BilledTokenCounts {
+            input_tokens:       1,
+            output_tokens:      2,
+            total_tokens:       3,
+            reasoning_tokens:   4,
+            cache_read_tokens:  5,
+            cache_write_tokens: 6,
+            total_usd_micros:   Some(7),
+        };
+        let counter = BilledTokenCounts {
+            input_tokens:       10,
+            output_tokens:      20,
+            total_tokens:       30,
+            reasoning_tokens:   40,
+            cache_read_tokens:  50,
+            cache_write_tokens: 60,
+            total_usd_micros:   Some(70),
+        };
+
+        let mut counts = original.clone();
+        counts.add_counts(&counter);
+        counts.sub_counts(&counter);
+
+        assert_eq!(counts, original);
     }
 
     #[test]

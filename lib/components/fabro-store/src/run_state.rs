@@ -545,11 +545,21 @@ impl RunProjectionReducer for RunProjection {
                 stage.agent_control = AgentControlState::Running;
             }
             EventBody::AgentMessage(props) => {
+                let counter_delta = match (&props.session_billing, stored.session_id.as_deref()) {
+                    (Some(counter), Some(session_id)) => {
+                        Some(self.session_spend_delta(session_id, counter))
+                    }
+                    // Legacy events carry only per-call billing; summing it
+                    // can lose dropped messages but is the best available.
+                    _ => None,
+                };
                 let Some(stage) = stage_at_stored_or_visit(self, stored, props.visit, event.seq)
                 else {
                     return Ok(());
                 };
-                stage.usage.add_counts(&props.billing);
+                stage
+                    .usage
+                    .add_counts(counter_delta.as_ref().unwrap_or(&props.billing));
                 stage.model = Some(props.model.clone());
                 if let Some(context_window) = &props.context_window {
                     let mut context_window = context_window.clone();
@@ -5415,6 +5425,7 @@ mod tests {
             model: billed_usage().model().clone(),
             billing,
             cost_source: None,
+            session_billing: None,
             tool_call_count: 0,
             visit: 1,
             message: None,
@@ -5485,6 +5496,121 @@ mod tests {
         let stage = state.stage(&stage_id).unwrap();
         assert_eq!(stage.usage, live_counts(30, 12));
         assert_eq!(stage.model, Some(model));
+    }
+
+    fn counter_stage_event(
+        seq: u32,
+        session_id: &str,
+        counter: BilledTokenCounts,
+        stage_id: StageId,
+    ) -> EventEnvelope {
+        let props = AgentMessageProps {
+            session_billing: Some(counter),
+            ..live_agent_message_props(live_counts(1, 1))
+        };
+        let mut event = test_stage_event(seq, EventBody::AgentMessage(props), stage_id);
+        event.event.session_id = Some(session_id.to_string());
+        event
+    }
+
+    fn counter(input_tokens: i64, output_tokens: i64, usd_micros: i64) -> BilledTokenCounts {
+        BilledTokenCounts {
+            total_usd_micros: Some(usd_micros),
+            ..live_counts(input_tokens, output_tokens)
+        }
+    }
+
+    #[test]
+    fn agent_message_session_counters_sum_latest_value_per_session() {
+        let mut state = initialized_projection();
+        let stage_id = StageId::new("build", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        // Two counters from the parent session: the second replaces the
+        // first instead of stacking on it.
+        state
+            .apply_event(&counter_stage_event(
+                2,
+                "ses-parent",
+                counter(10, 5, 100),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&counter_stage_event(
+                3,
+                "ses-parent",
+                counter(30, 12, 250),
+                stage_id.clone(),
+            ))
+            .unwrap();
+        // A child session contributes its own counter on top.
+        state
+            .apply_event(&counter_stage_event(
+                4,
+                "ses-child",
+                counter(100, 50, 1000),
+                stage_id.clone(),
+            ))
+            .unwrap();
+
+        let stage = state.stage(&stage_id).unwrap();
+        assert_eq!(stage.usage, counter(130, 62, 1250));
+    }
+
+    #[test]
+    fn shared_session_counters_attribute_only_stage_deltas() {
+        let mut state = initialized_projection();
+        let first_stage = StageId::new("build", 1);
+        let second_stage = StageId::new("verify", 1);
+
+        state
+            .apply_event(&test_stage_event(
+                1,
+                EventBody::StageStarted(started_props()),
+                first_stage.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&counter_stage_event(
+                2,
+                "ses-shared",
+                counter(10, 5, 100),
+                first_stage.clone(),
+            ))
+            .unwrap();
+        // The same session continues in a later stage (shared thread). Only
+        // the spend since its last counter belongs to the new stage.
+        state
+            .apply_event(&test_stage_event(
+                3,
+                EventBody::StageStarted(started_props()),
+                second_stage.clone(),
+            ))
+            .unwrap();
+        state
+            .apply_event(&counter_stage_event(
+                4,
+                "ses-shared",
+                counter(30, 12, 250),
+                second_stage.clone(),
+            ))
+            .unwrap();
+
+        assert_eq!(
+            state.stage(&first_stage).unwrap().usage,
+            counter(10, 5, 100)
+        );
+        assert_eq!(
+            state.stage(&second_stage).unwrap().usage,
+            counter(20, 7, 150)
+        );
     }
 
     #[test]

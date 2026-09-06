@@ -31,7 +31,7 @@ pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<Ev
 #[cfg(test)]
 mod tests {
     use ::fabro_types::{ReasoningOutput, fixtures, run_event as fabro_types};
-    use fabro_agent::AgentEvent;
+    use fabro_agent::{AgentEvent, SessionSpend};
     use fabro_llm::types::TokenCounts as LlmTokenCounts;
     use fabro_model::{ModelRef, ProviderId};
 
@@ -132,6 +132,7 @@ mod tests {
                 usage:           LlmTokenCounts::default(),
                 cost_usd:        None,
                 cost_source:     None,
+                session_spend:   SessionSpend::default(),
                 tool_call_count: 0,
                 context_window:  None,
                 reasoning:       Some(ReasoningOutput::new(

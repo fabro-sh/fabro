@@ -44,6 +44,13 @@ pub struct RunProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retried_from:          Option<RunId>,
     pub pending_interviews:    BTreeMap<String, PendingInterviewRecord>,
+    /// Latest cumulative spend counter seen per agent session. Each counter
+    /// covers that session's own LLM calls only; the delta between successive
+    /// counters is attributed to the stage the message belongs to, so a
+    /// session reused across stages (shared threads) bills each stage for
+    /// exactly its own turns.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub session_usage:         HashMap<String, BilledTokenCounts>,
     stages:                    HashMap<StageId, StageProjection>,
 }
 
@@ -879,8 +886,29 @@ impl RunProjection {
             superseded_by: None,
             retried_from: None,
             pending_interviews: BTreeMap::new(),
+            session_usage: HashMap::new(),
             stages: HashMap::new(),
         }
+    }
+
+    /// Record a session's cumulative spend counter and return the delta since
+    /// that session's previous counter — the spend that belongs to whichever
+    /// stage the current message is part of. Counters are monotonic per
+    /// session, so replayed or dropped messages cannot double count spend, and
+    /// a dropped message's delta is recovered by the session's next counter.
+    pub fn session_spend_delta(
+        &mut self,
+        session_id: &str,
+        counter: &BilledTokenCounts,
+    ) -> BilledTokenCounts {
+        let mut delta = counter.clone();
+        if let Some(previous) = self
+            .session_usage
+            .insert(session_id.to_string(), counter.clone())
+        {
+            delta.sub_counts(&previous);
+        }
+        delta
     }
 
     #[must_use]

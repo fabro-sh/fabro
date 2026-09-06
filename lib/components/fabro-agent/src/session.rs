@@ -52,8 +52,8 @@ use crate::tool_execution::execute_tool_calls;
 use crate::tool_permissions::canonical_tool_name;
 use crate::tool_registry::ToolDefinitionWithSource;
 use crate::types::{
-    AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
-    SkillActivationSource, SkillSummary,
+    AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionSpend,
+    SessionState, SkillActivationSource, SkillSummary,
 };
 use crate::{mcp_integration, task_reminder};
 
@@ -413,6 +413,12 @@ pub struct Session {
     last_input_timing: SessionInputTiming,
     last_input_usage: TokenCounts,
     last_input_cost: Option<UsdMicros>,
+    /// Lifetime spend of this session's own LLM calls, excluding child
+    /// sessions (unlike `last_input_usage`/`last_input_cost`, which fold
+    /// child spend in). Emitted on every `AssistantMessage` as a monotonic
+    /// counter: consumers sum each session's latest value, so a dropped
+    /// event delays the total instead of losing it.
+    own_spend: SessionSpend,
 }
 
 impl Session {
@@ -454,6 +460,7 @@ impl Session {
             last_input_timing: SessionInputTiming::default(),
             last_input_usage: TokenCounts::default(),
             last_input_cost: None,
+            own_spend: SessionSpend::default(),
         }
     }
 
@@ -1408,6 +1415,13 @@ impl Session {
             self.transition(SessionState::Idle);
         }
 
+        // Fold in child-session spend so the published input totals cover the
+        // whole session tree; the workflow backend bills stages from them.
+        if let Some(supervisor) = &self.subagent_supervisor {
+            let child_spend = supervisor.take_child_spend();
+            usage += child_spend.tokens;
+            UsdMicros::accumulate(&mut cost, child_spend.cost);
+        }
         self.last_input_timing = timing;
         self.last_input_usage = usage;
         self.last_input_cost = cost;
@@ -1889,6 +1903,8 @@ impl Session {
             ));
             *usage_accumulator += usage.clone();
             UsdMicros::accumulate(cost_accumulator, response.cost_usd.map(UsdMicros::from_usd));
+            self.own_spend
+                .add_call(&usage, response.cost_usd.map(UsdMicros::from_usd));
 
             if let Some(reminder) = pending_task_reminder {
                 self.history.push(reminder);
@@ -1919,6 +1935,7 @@ impl Session {
                     usage: response.usage.clone(),
                     cost_usd: response.cost_usd,
                     cost_source: response.cost_source,
+                    session_spend: self.own_spend.clone(),
                     tool_call_count: tool_calls.len(),
                     context_window,
                     reasoning,
@@ -2655,6 +2672,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn assistant_messages_carry_cumulative_session_spend() {
+        let mut session = make_session(vec![
+            response_with_cost(text_response("First"), 0.02),
+            response_with_cost(text_response("Second"), 0.03),
+        ])
+        .await;
+        let mut rx = session.subscribe();
+
+        session.process_input("one").await.unwrap();
+        session.process_input("two").await.unwrap();
+
+        let spends: Vec<SessionSpend> = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event.event {
+                AgentEvent::AssistantMessage { session_spend, .. } => Some(session_spend),
+                _ => None,
+            })
+            .collect();
+
+        // Each mock response reports 10 input / 5 output tokens. The counter
+        // is cumulative over the session's lifetime, not reset per input.
+        assert_eq!(spends.len(), 2);
+        assert_eq!(spends[0].tokens.input_tokens, 10);
+        assert_eq!(spends[0].cost, Some(UsdMicros(20_000)));
+        assert_eq!(spends[1].tokens.input_tokens, 20);
+        assert_eq!(spends[1].tokens.output_tokens, 10);
+        assert_eq!(spends[1].cost, Some(UsdMicros(50_000)));
+    }
+
+    #[tokio::test]
     async fn last_input_timing_reports_inference_and_tool_per_call() {
         let mut registry = ToolRegistry::new();
         registry.register(RegisteredTool {
@@ -3258,6 +3304,57 @@ mod tests {
         assert!(notification.contains(&second_id));
         assert!(notification.contains("first result"));
         assert!(notification.contains("second result"));
+
+        supervisor.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn last_input_usage_and_cost_include_subagent_spend() {
+        let supervisor = SubAgentSupervisor::new(3);
+        let child = make_session(vec![response_with_cost(
+            text_response("child result"),
+            1.00,
+        )])
+        .await;
+        let child_id = supervisor
+            .spawn_with_parent_notification(
+                child,
+                "analyze the module".to_string(),
+                "Analyze".to_string(),
+                0,
+            )
+            .unwrap();
+        // Make the child's result ready before the parent reaches its safe
+        // turn boundary so the notification turn is deterministic.
+        supervisor
+            .wait_with_cancel(&child_id, &CancellationToken::new())
+            .await
+            .unwrap();
+
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Response(Box::new(response_with_cost(
+                text_response("Delegated"),
+                0.02,
+            ))),
+            ScriptedStreamCall::Response(Box::new(response_with_cost(
+                text_response("Synthesized the child result"),
+                0.03,
+            ))),
+        ]));
+        let mut parent =
+            make_session_with_provider_and_manager(provider, Some(supervisor.clone())).await;
+        parent.process_input("Delegate the analysis").await.unwrap();
+
+        // The workflow backend bills a stage from these two getters
+        // (AgentApiBackend::record_input_usage), so a child session's spend
+        // must surface here or it is dropped from the stage's billing.
+        // Parent calls: $0.02 + $0.03; child call: $1.00.
+        assert_eq!(parent.last_input_cost(), Some(UsdMicros(1_050_000)));
+        // Every mock response reports 10 input / 5 output tokens: two parent
+        // calls plus one child call.
+        let usage = parent.last_input_usage();
+        assert_eq!(usage.input_tokens, 30);
+        assert_eq!(usage.output_tokens, 15);
 
         supervisor.shutdown_all().await;
     }

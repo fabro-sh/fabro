@@ -397,6 +397,7 @@ mod tests {
                 usage:           fabro_llm::types::TokenCounts::default(),
                 cost_usd:        None,
                 cost_source:     None,
+                session_spend:   fabro_agent::SessionSpend::default(),
                 tool_call_count: 1,
                 context_window:  None,
                 reasoning:       Some(::fabro_types::ReasoningOutput::new(

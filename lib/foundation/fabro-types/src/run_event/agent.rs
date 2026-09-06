@@ -124,6 +124,13 @@ pub struct AgentMessageProps {
     /// Provenance of the optional total in `billing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_source:     Option<CostSource>,
+    /// Cumulative billed totals for the emitting session's own LLM calls
+    /// through this message, excluding its child sessions. Projections keep
+    /// the latest value per session and sum across sessions, so a dropped
+    /// event delays the stage total instead of losing it. Absent on legacy
+    /// events, which fall back to summing `billing` per message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_billing: Option<BilledTokenCounts>,
     pub tool_call_count: usize,
     pub visit:           u32,
     /// Canonical replay-authoritative transcript message. Present on events
@@ -565,6 +572,7 @@ mod tests {
             model:           sample_model_ref(),
             billing:         BilledTokenCounts::default(),
             cost_source:     None,
+            session_billing: None,
             tool_call_count: 1,
             visit:           1,
             message:         None,
@@ -594,6 +602,7 @@ mod tests {
             model:           sample_model_ref(),
             billing:         BilledTokenCounts::default(),
             cost_source:     None,
+            session_billing: None,
             tool_call_count: 0,
             visit:           1,
             message:         Some(msg.clone()),

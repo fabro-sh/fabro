@@ -10388,6 +10388,15 @@ components:
           $ref: "#/components/schemas/BillingModelRef"
         billing:
           $ref: "#/components/schemas/BilledTokenCounts"
+        session_billing:
+          oneOf:
+            - $ref: "#/components/schemas/BilledTokenCounts"
+            - type: "null"
+          description: >-
+            Cumulative billed totals for the emitting session's own LLM calls
+            through this message, excluding its child sessions. Consumers keep
+            the latest value per session and sum across sessions for an exact
+            stage total. Absent on legacy events.
         tool_call_count:
           type: integer
           minimum: 0

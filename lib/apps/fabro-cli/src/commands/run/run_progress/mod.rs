@@ -457,7 +457,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use chrono::{DateTime, Utc};
-    use fabro_agent::{AgentEvent, SandboxEvent};
+    use fabro_agent::{AgentEvent, SandboxEvent, SessionSpend};
     use fabro_llm::types::TokenCounts;
     use fabro_model::{Catalog, ModelRef, ProviderId};
     use fabro_types::run_event::CliEnsureCompletedProps;
@@ -580,6 +580,7 @@ mod tests {
             usage:           TokenCounts::default(),
             cost_usd:        None,
             cost_source:     None,
+            session_spend:   SessionSpend::default(),
             tool_call_count: 0,
             context_window:  None,
             reasoning:       None,

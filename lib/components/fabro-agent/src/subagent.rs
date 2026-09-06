@@ -16,7 +16,7 @@ use crate::error::{Error, InterruptReason};
 use crate::session::{Session, SessionShutdownReason};
 use crate::tool_registry::{RegisteredTool, ToolSource};
 use crate::tools::required_str;
-use crate::types::{AgentEvent, SessionEvent, SessionState};
+use crate::types::{AgentEvent, SessionEvent, SessionSpend, SessionState};
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
 
@@ -168,6 +168,11 @@ struct SupervisorState {
     next_spawn_seq:     u64,
     lifecycle_events:   VecDeque<AgentEvent>,
     lifecycle_draining: bool,
+    /// Child spend not yet folded into the parent session's input totals.
+    /// Recorded at child turn boundaries and drained by the parent when it
+    /// finishes an input, so a child's cost is billed even when its result is
+    /// never waited on.
+    child_spend:        SessionSpend,
 }
 
 impl SupervisorState {
@@ -393,6 +398,18 @@ impl SubAgentHandle {
         outcome
     }
 
+    /// Add one child turn's spend to the supervisor's undelivered ledger.
+    fn record_spend(&self, spend: &SessionSpend) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        state
+            .lock()
+            .expect("subagent state lock poisoned")
+            .child_spend
+            .add(spend);
+    }
+
     /// The generation this agent is on now, or `None` once the supervisor or
     /// the agent itself is gone.
     fn current_generation(&self) -> Option<u64> {
@@ -475,6 +492,11 @@ async fn run_subagent_session(
                         .len()
                         .saturating_sub(generation_start_turns),
                 });
+            // Record even for a failed turn: its LLM calls still cost money.
+            handle.record_spend(&SessionSpend {
+                tokens: session.last_input_usage(),
+                cost:   session.last_input_cost(),
+            });
             let reusable =
                 session.state() == SessionState::Idle && !session.cancel_token().is_cancelled();
             match handle.commit_turn_result(generation, &result, reusable) {
@@ -575,6 +597,19 @@ impl SubAgentSupervisor {
             .event_callback
             .write()
             .expect("subagent callback lock poisoned") = Some(cb);
+    }
+
+    /// Child spend recorded since the last call, cleared on take. The parent
+    /// session folds this into its own per-input totals so a stage's billing
+    /// covers its whole session tree.
+    pub(crate) fn take_child_spend(&self) -> SessionSpend {
+        std::mem::take(
+            &mut self
+                .state
+                .lock()
+                .expect("subagent state lock poisoned")
+                .child_spend,
+        )
     }
 
     pub fn spawn(

@@ -83,8 +83,8 @@ pub use tools::{
 };
 pub use truncation::{TruncationMode, truncate_lines, truncate_output, truncate_tool_output};
 pub use types::{
-    AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
-    SkillActivationSource, SkillSummary,
+    AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionSpend,
+    SessionState, SkillActivationSource, SkillSummary,
 };
 
 #[cfg(test)]

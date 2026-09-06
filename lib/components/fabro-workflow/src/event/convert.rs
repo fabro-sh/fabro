@@ -660,17 +660,21 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 usage,
                 cost_usd,
                 cost_source,
+                session_spend,
                 tool_call_count,
                 context_window,
                 reasoning,
             } => {
                 let billing = billed_token_counts_from_llm(usage)
                     .with_reported_cost(cost_usd.map(UsdMicros::from_usd));
+                let session_billing = billed_token_counts_from_llm(&session_spend.tokens)
+                    .with_reported_cost(session_spend.cost);
                 EventBody::AgentMessage(fabro_types::AgentMessageProps {
                     text: text.clone(),
                     model: model.clone(),
                     billing,
                     cost_source: *cost_source,
+                    session_billing: Some(session_billing),
                     tool_call_count: *tool_call_count,
                     visit: *visit,
                     message: None,
@@ -1469,8 +1473,8 @@ mod tests {
     };
     use chrono::Utc;
     use fabro_agent::{
-        AgentEvent, McpToolSummary, MemoryFileSummary, SandboxEvent, SkillActivationSource,
-        SkillSummary,
+        AgentEvent, McpToolSummary, MemoryFileSummary, SandboxEvent, SessionSpend,
+        SkillActivationSource, SkillSummary,
     };
     use fabro_llm::types::TokenCounts as LlmTokenCounts;
     use fabro_model::{ModelRef, ProviderId};
@@ -2533,6 +2537,7 @@ mod tests {
                 usage:           LlmTokenCounts::default(),
                 cost_usd:        None,
                 cost_source:     None,
+                session_spend:   SessionSpend::default(),
                 tool_call_count: 0,
                 context_window:  None,
                 reasoning:       None,
@@ -2568,6 +2573,7 @@ mod tests {
                 },
                 cost_usd:        None,
                 cost_source:     None,
+                session_spend:   SessionSpend::default(),
                 tool_call_count: 0,
                 context_window:  None,
                 reasoning:       None,
@@ -2585,6 +2591,48 @@ mod tests {
         assert_eq!(message.billing.input_tokens, 12);
         assert_eq!(message.billing.output_tokens, 34);
         assert_eq!(message.billing.total_usd_micros, None);
+    }
+
+    #[test]
+    fn agent_assistant_message_maps_session_spend_to_session_billing() {
+        let stored = to_run_event(&fixtures::RUN_1, &Event::Agent {
+            stage:             "code".to_string(),
+            visit:             1,
+            event:             AgentEvent::AssistantMessage {
+                text:            "ok".to_string(),
+                model:           ModelRef {
+                    provider: ProviderId::anthropic(),
+                    model_id: "claude-sonnet".into(),
+                    speed:    None,
+                },
+                usage:           LlmTokenCounts::default(),
+                cost_usd:        None,
+                cost_source:     None,
+                session_spend:   fabro_agent::SessionSpend {
+                    tokens: LlmTokenCounts {
+                        input_tokens: 200,
+                        output_tokens: 80,
+                        ..LlmTokenCounts::default()
+                    },
+                    cost:   Some(UsdMicros(1_234)),
+                },
+                tool_call_count: 0,
+                context_window:  None,
+                reasoning:       None,
+            },
+            session_id:        Some("ses_agent".to_string()),
+            parent_session_id: None,
+            tool_call_id:      None,
+        });
+
+        let EventBody::AgentMessage(message) = stored.body else {
+            panic!("expected agent message body");
+        };
+        let session_billing = message.session_billing.expect("session billing set");
+        assert_eq!(session_billing.input_tokens, 200);
+        assert_eq!(session_billing.output_tokens, 80);
+        assert_eq!(session_billing.total_tokens, 280);
+        assert_eq!(session_billing.total_usd_micros, Some(1_234));
     }
 
     #[test]
@@ -2606,6 +2654,7 @@ mod tests {
                 },
                 cost_usd:        Some(0.125),
                 cost_source:     Some(fabro_model::CostSource::Authoritative),
+                session_spend:   SessionSpend::default(),
                 tool_call_count: 0,
                 context_window:  None,
                 reasoning:       None,
@@ -2657,6 +2706,7 @@ mod tests {
                 usage:           LlmTokenCounts::default(),
                 cost_usd:        None,
                 cost_source:     None,
+                session_spend:   SessionSpend::default(),
                 tool_call_count: 0,
                 context_window:  Some(context_window),
                 reasoning:       None,
@@ -2692,6 +2742,7 @@ mod tests {
                 usage:           LlmTokenCounts::default(),
                 cost_usd:        None,
                 cost_source:     None,
+                session_spend:   SessionSpend::default(),
                 tool_call_count: 1,
                 context_window:  None,
                 reasoning:       Some(::fabro_types::ReasoningOutput::new(

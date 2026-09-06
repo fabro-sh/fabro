@@ -32,7 +32,8 @@ import type { StageContextWindowProjection } from './stage-context-window-projec
 export interface AgentMessageProps {
     'text': string;
     'model': BillingModelRef;
-    'billing': BilledTokenCounts;
+    'billing': BilledTokenCounts | null;
+    'session_billing'?: BilledTokenCounts | null;
     'tool_call_count': number;
     'visit': number;
     'message'?: { [key: string]: any; } | null;

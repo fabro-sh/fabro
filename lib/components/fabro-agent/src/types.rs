@@ -5,7 +5,7 @@ use fabro_llm::Error as LlmError;
 use fabro_llm::types::{
     ContentPart, Message as LlmMessage, Role, ThinkingData, TokenCounts, ToolCall, ToolResult,
 };
-use fabro_model::{CostSource, ModelRef};
+use fabro_model::{CostSource, ModelRef, UsdMicros};
 use fabro_types::{
     CommandTermination, ExecOutputTail, LlmOutputKind, LlmRetryPhase, ReasoningOutput,
     SessionMessage, StageContextWindowProjection,
@@ -281,6 +281,25 @@ pub struct McpToolSummary {
     pub original_name: String,
 }
 
+/// Billed tokens plus provider-reported cost, accumulated across LLM calls.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionSpend {
+    pub tokens: TokenCounts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost:   Option<UsdMicros>,
+}
+
+impl SessionSpend {
+    pub fn add_call(&mut self, tokens: &TokenCounts, cost: Option<UsdMicros>) {
+        self.tokens += tokens.clone();
+        UsdMicros::accumulate(&mut self.cost, cost);
+    }
+
+    pub fn add(&mut self, other: &Self) {
+        self.add_call(&other.tokens, other.cost);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
     SessionStarted {
@@ -324,6 +343,13 @@ pub enum AgentEvent {
         /// Provenance of `cost_usd`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cost_source:     Option<CostSource>,
+        /// The emitting session's cumulative spend through this message —
+        /// its own LLM calls only, excluding child sessions. A monotonic
+        /// counter: consumers keep each session's latest value and sum
+        /// across sessions, which counts every call exactly once even when
+        /// individual messages are dropped.
+        #[serde(default)]
+        session_spend:   SessionSpend,
         tool_call_count: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context_window:  Option<StageContextWindowProjection>,
@@ -1118,6 +1144,7 @@ mod tests {
             usage:           usage.clone(),
             cost_usd:        Some(0.125),
             cost_source:     Some(CostSource::Authoritative),
+            session_spend:   SessionSpend::default(),
             tool_call_count: 2,
             context_window:  None,
             reasoning:       None,
