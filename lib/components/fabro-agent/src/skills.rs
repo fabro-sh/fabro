@@ -299,6 +299,33 @@ pub fn default_skill_dirs(fabro_skills_dir: Option<&str>, git_root: Option<&str>
     dirs
 }
 
+/// Append configured extra discovery directories to `dirs`.
+///
+/// Extra directories are searched last, so a skill they define wins over a
+/// same-named skill from a convention directory (`discover_skills` keys skills
+/// by name and later directories overwrite earlier ones). A relative entry
+/// resolves against `doc_root` — the git root when known, otherwise the
+/// sandbox working directory — so a repo-relative path such as
+/// `.agents/skills` means the same thing no matter which subdirectory the
+/// agent runs in. Duplicate directories are dropped so the same path is not
+/// globbed twice.
+pub fn extend_skill_dirs(dirs: &mut Vec<String>, extra: &[String], doc_root: &str) {
+    for dir in extra {
+        let dir = dir.trim();
+        if dir.is_empty() {
+            continue;
+        }
+        let resolved = if std::path::Path::new(dir).is_absolute() {
+            dir.to_string()
+        } else {
+            format!("{}/{dir}", doc_root.trim_end_matches('/'))
+        };
+        if !dirs.contains(&resolved) {
+            dirs.push(resolved);
+        }
+    }
+}
+
 pub async fn discover_skills(
     env: &dyn Sandbox,
     dirs: &[String],
@@ -640,6 +667,58 @@ name: trimmed
     fn default_dirs_without_git_root() {
         let dirs = default_skill_dirs(Some("/home/user/.fabro/skills"), None);
         assert_eq!(dirs, vec!["/home/user/.fabro/skills"]);
+    }
+
+    // --- extend_skill_dirs tests ---
+
+    #[test]
+    fn extra_dirs_are_appended_after_the_convention_dirs() {
+        let mut dirs = default_skill_dirs(Some("/home/user/.fabro/skills"), Some("/repo"));
+        extend_skill_dirs(&mut dirs, &[".agents/skills".to_string()], "/repo");
+        assert_eq!(dirs, vec![
+            "/home/user/.fabro/skills",
+            "/repo/.fabro/skills",
+            "/repo/skills",
+            "/repo/.agents/skills",
+        ]);
+    }
+
+    #[test]
+    fn extra_dirs_keep_absolute_paths_verbatim() {
+        let mut dirs = Vec::new();
+        extend_skill_dirs(&mut dirs, &["/opt/shared/skills".to_string()], "/repo");
+        assert_eq!(dirs, vec!["/opt/shared/skills"]);
+    }
+
+    #[test]
+    fn extra_dirs_resolve_against_a_doc_root_with_a_trailing_slash() {
+        let mut dirs = Vec::new();
+        extend_skill_dirs(&mut dirs, &[".agents/skills".to_string()], "/repo/");
+        assert_eq!(dirs, vec!["/repo/.agents/skills"]);
+    }
+
+    #[test]
+    fn extra_dirs_skip_duplicates_and_blank_entries() {
+        let mut dirs = vec!["/repo/skills".to_string()];
+        extend_skill_dirs(
+            &mut dirs,
+            &[
+                "skills".to_string(),
+                "  ".to_string(),
+                String::new(),
+                ".agents/skills".to_string(),
+                ".agents/skills".to_string(),
+            ],
+            "/repo",
+        );
+        assert_eq!(dirs, vec!["/repo/skills", "/repo/.agents/skills"]);
+    }
+
+    #[test]
+    fn extend_skill_dirs_is_a_no_op_without_extra_dirs() {
+        let mut dirs = vec!["/repo/skills".to_string()];
+        extend_skill_dirs(&mut dirs, &[], "/repo");
+        assert_eq!(dirs, vec!["/repo/skills"]);
     }
 
     // --- make_use_skill_tool tests ---

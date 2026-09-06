@@ -194,6 +194,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
               },
               "agent": {
                 "fabro_tools": false,
+                "skill_dirs": [],
                 "mcps": {}
               },
               "hooks": [],

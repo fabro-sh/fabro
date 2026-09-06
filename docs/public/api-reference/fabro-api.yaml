@@ -15088,10 +15088,17 @@ components:
 
     RunAgentSettings:
       type: object
-      required: [fabro_tools, mcps]
+      required: [fabro_tools, skill_dirs, mcps]
       properties:
         fabro_tools:
           type: boolean
+        skill_dirs:
+          description: >-
+            Extra skill discovery directories, searched after the convention
+            directories. Relative entries resolve against the repository root.
+          type: array
+          items:
+            type: string
         mcps:
           type: object
           additionalProperties:

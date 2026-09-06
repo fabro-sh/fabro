@@ -417,17 +417,19 @@ enabled = true
 
 ## `[run.agent]`
 
-`[run.agent]` — agent knobs only (Fabro tools and MCPs)
+`[run.agent]` — agent knobs only (Fabro tools, skill directories, and MCPs)
 
 ```toml title="settings.toml"
 [run.agent]
 fabro_tools = true
+skill_dirs = [".agents/skills"]
 ```
 
 | Key | Type / values | Default | Description |
 |---|---|---|---|
 | `fabro_tools` | boolean | false | Allow workflow agents to use Fabro run-management tools. |
 | `mcps` | table | None | Agent-scoped MCP server entries, keyed by name. |
+| `skill_dirs` | array | None | Extra skill discovery directories for workflow agents, searched after<br />the convention directories (`~/.fabro/skills`,<br />`{git_root}/.fabro/skills`, `{git_root}/skills`), so a skill defined<br />here overrides a same-named convention skill. Relative entries resolve<br />against the repository root. Splice marker supported at layering time. |
 
 ## `[run.agent.mcps.<name>]`
 

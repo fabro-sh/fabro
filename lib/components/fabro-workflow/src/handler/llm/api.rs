@@ -641,6 +641,9 @@ pub struct AgentApiBackend {
     emitted_plan_notices: Mutex<HashSet<String>>,
     tool_env:             Option<Arc<dyn ToolEnvProvider>>,
     mcp_servers:          Vec<McpServerSettings>,
+    /// Extra skill discovery directories from `[run.agent] skill_dirs`, added
+    /// to the convention directories every agent session already searches.
+    skill_dirs:           Vec<String>,
     tool_secrets:         ToolSecrets,
     run_model_controls:   RunModelControls,
     source:               Arc<dyn CredentialSource>,
@@ -820,6 +823,7 @@ impl AgentApiBackend {
             emitted_plan_notices: Mutex::new(HashSet::new()),
             tool_env: None,
             mcp_servers: Vec::new(),
+            skill_dirs: Vec::new(),
             tool_secrets: ToolSecrets::default(),
             run_model_controls: RunModelControls::default(),
             source,
@@ -844,6 +848,12 @@ impl AgentApiBackend {
     #[must_use]
     pub fn with_mcp_servers(mut self, servers: Vec<McpServerSettings>) -> Self {
         self.mcp_servers = servers;
+        self
+    }
+
+    #[must_use]
+    pub fn with_skill_dirs(mut self, dirs: Vec<String>) -> Self {
+        self.skill_dirs = dirs;
         self
     }
 
@@ -1026,6 +1036,7 @@ impl AgentApiBackend {
             self.tool_env.as_ref(),
             tool_hooks,
             self.mcp_servers.clone(),
+            self.skill_dirs.clone(),
             self.tool_secrets.clone(),
             self.fabro_run_tools.clone(),
         )
@@ -1050,6 +1061,7 @@ impl AgentApiBackend {
         tool_env: Option<&Arc<dyn ToolEnvProvider>>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         mcp_servers: Vec<McpServerSettings>,
+        skill_dirs: Vec<String>,
         tool_secrets: ToolSecrets,
         fabro_run_tools: Option<FabroRunToolServices>,
     ) -> Result<Session, Error> {
@@ -1083,6 +1095,11 @@ impl AgentApiBackend {
             speed: controls.speed,
             tool_hooks,
             mcp_servers,
+            // `[run.agent] skill_dirs` adds to the convention directories
+            // rather than replacing them, so it lands in `extra_skill_dirs`
+            // and leaves `skill_dirs` (the SDK's replace-the-defaults knob)
+            // alone.
+            extra_skill_dirs: skill_dirs,
             // Workflow agents run with no `tool_access_policy`, which exposes
             // the entire tool registry (read, write, shell, subagent, MCP) and
             // skips approval gating. Report that truthfully so the UI doesn't
@@ -1106,6 +1123,9 @@ impl AgentApiBackend {
         let factory_fabro_run_tools = fabro_run_tools.clone();
         let factory_permission_level = config.permission_level;
         let factory_tool_hooks = config.tool_hooks.clone();
+        // Subagents run the same repository's skills, so they inherit the
+        // run's extra discovery directories.
+        let factory_skill_dirs = config.extra_skill_dirs.clone();
         let factory: SessionFactory = Arc::new(move || {
             let mut child_profile = factory_profile_builder.build();
             if let Some(services) = factory_fabro_run_tools.clone() {
@@ -1121,6 +1141,7 @@ impl AgentApiBackend {
                     speed: controls.speed,
                     tool_hooks: factory_tool_hooks.clone(),
                     permission_level: factory_permission_level,
+                    extra_skill_dirs: factory_skill_dirs.clone(),
                     ..SessionOptions::default()
                 },
                 None,
@@ -1241,6 +1262,7 @@ impl AgentApiBackend {
                 self.tool_env.as_ref(),
                 request.tool_hooks.clone(),
                 self.mcp_servers.clone(),
+                self.skill_dirs.clone(),
                 self.tool_secrets.clone(),
                 self.fabro_run_tools.clone(),
             )
@@ -3903,6 +3925,81 @@ enabled = true
             panic!("run should return text");
         };
         assert_eq!(text, r#"{"passed":true}"#);
+    }
+
+    /// `[run.agent] skill_dirs` reaches the agent session: a skill living in a
+    /// configured directory is discovered even though that directory is not one
+    /// of the conventions.
+    #[tokio::test]
+    async fn agent_run_discovers_skills_from_configured_skill_dirs() {
+        let server = MockServer::start();
+        let completion = server.mock(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200)
+                .header("content-type", "text/event-stream")
+                .body(chat_completion_stream("Done", 10, 1));
+        });
+        let workspace = tempfile::tempdir().unwrap();
+        let skill_dir = workspace.path().join(".agents/skills/greet");
+        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+        tokio::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: greet\ndescription: Greet the user\n---\nSay hello.",
+        )
+        .await
+        .unwrap();
+
+        let backend = mock_api_backend(&server).with_skill_dirs(vec![".agents/skills".to_string()]);
+        let node = Node::new("greeter");
+        let context = Context::new();
+        let emitter = Arc::new(Emitter::new(fabro_types::RunId::new()));
+        let discovered = Arc::new(Mutex::new(Vec::new()));
+        let discovered_for_listener = Arc::clone(&discovered);
+        emitter.on_event(move |event| {
+            if let fabro_types::EventBody::AgentSkillsDiscovered(props) = &event.body {
+                discovered_for_listener.lock().unwrap().push((
+                    props.source_dirs.clone(),
+                    props
+                        .skills
+                        .iter()
+                        .map(|skill| skill.name.clone())
+                        .collect::<Vec<_>>(),
+                ));
+            }
+        });
+        let sandbox: Arc<dyn fabro_agent::Sandbox> =
+            Arc::new(LocalSandbox::new(workspace.path().to_path_buf()));
+
+        backend
+            .run(CodergenRunRequest {
+                node:               &node,
+                prompt:             "Greet",
+                context:            &context,
+                thread_id:          None,
+                emitter:            &emitter,
+                sandbox:            &sandbox,
+                tool_hooks:         None,
+                cancel_token:       CancellationToken::new(),
+                agent_tool_runtime: fabro_agent::AgentToolRuntime::default(),
+            })
+            .await
+            .unwrap();
+
+        completion.assert_calls(1);
+        let discovered = discovered.lock().unwrap();
+        let (source_dirs, skills) = discovered
+            .first()
+            .expect("agent.skills.discovered should be emitted");
+        let configured = workspace
+            .path()
+            .join(".agents/skills")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(source_dirs.last(), Some(&configured));
+        assert!(
+            skills.iter().any(|name| name == "greet"),
+            "configured skill dir should contribute its skills, got {skills:?}"
+        );
     }
 
     #[tokio::test]
