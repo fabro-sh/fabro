@@ -16,7 +16,6 @@ use daytona_sdk::api_types::SignedPortPreviewUrl;
 use daytona_sdk::toolbox_types::Command as SessionCommandResult;
 use daytona_sdk::{DaytonaError, GitCloneOptions, SessionCommandLogsResult};
 use fabro_github::GitHubCredentials;
-use fabro_github::token_source::InstallationTokenSource;
 use fabro_static::EnvVars;
 use fabro_types::{CommandOutputStream, CommandTermination, RunId, SandboxProviderKind};
 use fabro_util::time::elapsed_ms;
@@ -2053,10 +2052,6 @@ impl Sandbox for DaytonaSandbox {
                 push_credentials::set_auth_url_via_exec(self, auth_url)
             })
             .await
-    }
-
-    fn push_token_source(&self) -> Option<Arc<InstallationTokenSource>> {
-        self.push_credentials.source().cloned()
     }
 
     async fn set_autostop_interval(&self, minutes: i32) -> crate::Result<()> {

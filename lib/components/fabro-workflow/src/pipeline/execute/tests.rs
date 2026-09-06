@@ -1141,9 +1141,8 @@ async fn execute_persists_start_record_and_node_status() {
     let dir = tempfile::tempdir().unwrap();
     let mut run_options = test_run_options(dir.path(), "test-run");
     run_options.git = Some(GitCheckpointOptions {
-        base_sha:    Some("abc123".into()),
-        run_branch:  Some(format!("fabro/run/{}", test_run_id("test-run"))),
-        meta_branch: None,
+        base_sha:   Some("abc123".into()),
+        run_branch: Some(format!("fabro/run/{}", test_run_id("test-run"))),
     });
 
     let executed = execute_test_run_with_options(run_options, simple_graph(), None).await;

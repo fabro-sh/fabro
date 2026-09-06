@@ -250,7 +250,7 @@ the top-level `actor` envelope field.
 
 ### `metadata.snapshot.started`
 
-Emitted when Fabro begins a durable metadata snapshot operation. These are product events for Fabro metadata snapshots, not tracing spans for the underlying git or filesystem work.
+Historical event, no longer emitted. Recorded when Fabro began a Git metadata snapshot operation. Retained for reading older run streams.
 
 Init and finalize metadata snapshots are unscoped. Checkpoint metadata snapshots use the checkpoint stage scope, so they include the checkpoint `node_id`, `node_label`, and `stage_id`.
 
@@ -272,7 +272,7 @@ Init and finalize metadata snapshots are unscoped. Checkpoint metadata snapshots
 
 ### `metadata.snapshot.completed`
 
-Emitted when Fabro commits and pushes a metadata snapshot successfully.
+Historical event, no longer emitted. Recorded when Fabro committed and pushed a metadata snapshot successfully. Retained for reading older run streams.
 
 ```json
 {
@@ -300,7 +300,7 @@ Emitted when Fabro commits and pushes a metadata snapshot successfully.
 
 ### `metadata.snapshot.failed`
 
-Emitted when a real metadata snapshot attempt fails. It is emitted before the matching compatibility `run.notice`, allowing human-facing consumers to suppress duplicate warning text. Compatibility notices with codes `checkpoint_metadata_write_failed` and `checkpoint_metadata_push_failed` may still appear in raw event streams. The `checkpoint_metadata_degraded` notice is a separate summary signal and should not be treated as a duplicate of this event.
+Historical event, no longer emitted. Recorded when a metadata snapshot attempt failed, before the matching compatibility `run.notice`, allowing human-facing consumers to suppress duplicate warning text. Compatibility notices with codes `checkpoint_metadata_write_failed` and `checkpoint_metadata_push_failed` may still appear in raw event streams. The `checkpoint_metadata_degraded` notice is a separate summary signal and should not be treated as a duplicate of this event.
 
 ```json
 {

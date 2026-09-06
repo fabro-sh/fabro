@@ -29,7 +29,7 @@ The rest of this page describes the `app` strategy, which is required for browse
 |---|---|
 | **OAuth login** | Users sign in to the web UI with their GitHub account |
 | **Private repo cloning** | Daytona and Docker sandboxes clone private repositories using short-lived Installation Access Tokens |
-| **Checkpoint pushing** | After each workflow stage, Fabro pushes the run branch and metadata branch back to origin from inside the sandbox |
+| **Checkpoint pushing** | After each workflow stage, Fabro pushes the run branch back to origin from inside the sandbox |
 | **Auto-PR** | When `[run.pull_request] enabled = true` in the [run config](/execution/run-configuration#runpull_request), Fabro opens a PR from the agent's working branch after a successful run |
 | **Auto-merge** | When `[run.pull_request] auto_merge = true`, Fabro enables GitHub's auto-merge on created PRs so they merge automatically once required checks pass |
 | **Sandbox GITHUB_TOKEN** | When `[run.integrations.github.permissions]` are declared at any layer (workflow, project, or user settings), Fabro mints a scoped Installation Access Token and injects it as `GITHUB_TOKEN` in the sandbox |
@@ -315,7 +315,7 @@ The upper bound on what Fabro will mint is whatever permissions the GitHub App i
 
 ### Checkpoint pushing
 
-After each workflow stage, Fabro [checkpoints](/execution/checkpoints) by pushing the run branch and metadata branch to origin. Before a successful run becomes terminal, the publish stage pushes the final commit again and treats failure as a run failure. Inside remote sandboxes, the git remote URL is configured with the Installation Access Token for authenticated pushing.
+After each workflow stage, Fabro [checkpoints](/execution/checkpoints) by pushing the run branch to origin. Before a successful run becomes terminal, the publish stage pushes the final commit again and treats failure as a run failure. Inside remote sandboxes, the git remote URL is configured with the Installation Access Token for authenticated pushing.
 
 When pull request creation is enabled, Fabro then checks that GitHub reports the run branch at the exact final commit before opening the PR. A failed final push, branch check, or PR creation marks the run as failed with `publish_failed`; the terminal run event is emitted only after this step finishes.
 

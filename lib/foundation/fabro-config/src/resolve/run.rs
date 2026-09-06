@@ -9,8 +9,8 @@ use fabro_types::settings::run::{
     NotificationRouteSettings, PreparedStep, PreparedStepRun, PullRequestSettings,
     ResolvedMcpEntry, RunAgentSettings, RunBranchSettings, RunCheckpointSettings, RunCloneSettings,
     RunExecutionSettings, RunGitSettings, RunGoal, RunIntegrationsGithubSettings,
-    RunIntegrationsSettings, RunInterviewsSettings, RunMetaBranchSettings, RunModelControls,
-    RunModelSettings, RunNamespace, RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
+    RunIntegrationsSettings, RunInterviewsSettings, RunModelControls, RunModelSettings,
+    RunNamespace, RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 use fabro_util::workspace_glob::WorkspaceGlob;
 
@@ -20,8 +20,8 @@ use crate::{
     InterviewsLayer, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
     NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
     RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsGithubLayer, RunIntegrationsLayer,
-    RunLayer, RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer,
-    RunRunBranchLayer, RunScmLayer, StickyMap, StringOrSplice,
+    RunLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer, RunScmLayer,
+    StickyMap, StringOrSplice,
 };
 
 pub fn resolve_run(
@@ -32,19 +32,6 @@ pub fn resolve_run(
 ) -> RunNamespace {
     let clone = resolve_clone(layer.clone.as_ref(), errors);
     let run_branch = resolve_run_branch(layer.run_branch.as_ref());
-    let mut meta_branch = resolve_meta_branch(layer.meta_branch.as_ref());
-    if !run_branch.enabled {
-        if meta_branch.enabled || meta_branch.push {
-            tracing::debug!(
-                run_branch_enabled = run_branch.enabled,
-                "Disabling metadata branch because run branch is disabled"
-            );
-        }
-        meta_branch = RunMetaBranchSettings {
-            enabled: false,
-            push:    false,
-        };
-    }
     let pull_request = resolve_pull_request(layer.pull_request.as_ref());
     if pull_request.is_some() && (!run_branch.enabled || !run_branch.push) {
         errors.push(ResolveError::Invalid {
@@ -69,7 +56,6 @@ pub fn resolve_run(
         checkpoint: resolve_checkpoint(layer.checkpoint.as_ref()),
         clone,
         run_branch,
-        meta_branch,
         environment: resolve_run_environment(layer.environment.as_ref(), environments, errors),
         notifications: layer
             .notifications
@@ -391,17 +377,6 @@ fn resolve_run_branch(run_branch: Option<&RunRunBranchLayer>) -> RunBranchSettin
             .unwrap_or(true),
         push:    run_branch
             .and_then(|run_branch| run_branch.push)
-            .unwrap_or(true),
-    }
-}
-
-fn resolve_meta_branch(meta_branch: Option<&RunMetaBranchLayer>) -> RunMetaBranchSettings {
-    RunMetaBranchSettings {
-        enabled: meta_branch
-            .and_then(|meta_branch| meta_branch.enabled)
-            .unwrap_or(true),
-        push:    meta_branch
-            .and_then(|meta_branch| meta_branch.push)
             .unwrap_or(true),
     }
 }

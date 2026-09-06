@@ -28,7 +28,6 @@ fabro-config = { path = "../../foundation/fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-validate = { path = "../fabro-validate" }
-fabro-dump = { path = "../fabro-dump" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-github = { path = "../fabro-github" }
@@ -75,6 +74,7 @@ tempfile = "3"
 toml.workspace = true
 fabro-vault = { path = "../../foundation/fabro-vault" }
 [dev-dependencies]
+fabro-dump = { path = "../fabro-dump" }
 fabro-store = { path = "../fabro-store", features = ["test-support"] }
 fabro-auth = { path = "../../foundation/fabro-auth", features = ["test-support"] }
 fabro-github = { path = "../fabro-github", features = ["test-support"] }

@@ -129,8 +129,6 @@ fn resolves_run_defaults_from_empty_settings() {
     assert_eq!(settings.clone.depth, 100);
     assert!(settings.run_branch.enabled);
     assert!(settings.run_branch.push);
-    assert!(settings.meta_branch.enabled);
-    assert!(settings.meta_branch.push);
     assert!(settings.pull_request.is_none());
 }
 
@@ -315,8 +313,6 @@ push = false
     assert_eq!(settings.clone.depth, 1);
     assert!(settings.run_branch.enabled);
     assert!(!settings.run_branch.push);
-    assert!(settings.meta_branch.enabled);
-    assert!(!settings.meta_branch.push);
 }
 
 #[test]
@@ -359,7 +355,7 @@ depth = -1
 }
 
 #[test]
-fn disabling_run_branch_forces_meta_branch_off() {
+fn legacy_meta_branch_settings_are_ignored() {
     let settings = super::workflow_settings_from_toml(
         r"
 _version = 1
@@ -376,8 +372,20 @@ push = true
     .run;
 
     assert!(!settings.run_branch.enabled);
-    assert!(!settings.meta_branch.enabled);
-    assert!(!settings.meta_branch.push);
+    assert!(
+        serde_json::to_value(&settings)
+            .unwrap()
+            .get("meta_branch")
+            .is_none()
+    );
+    let layer: SettingsLayer = "[run.meta_branch]\nenabled = true\npush = true\n"
+        .parse()
+        .unwrap();
+    assert!(
+        serde_json::to_value(&layer).unwrap()["run"]
+            .get("meta_branch")
+            .is_none()
+    );
 }
 
 #[test]

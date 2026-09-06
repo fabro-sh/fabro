@@ -1,6 +1,6 @@
 # Run Scratch Files
 
-This document maps the files that still live under a run scratch directory. Durable run state lives in the run store and metadata branch; scratch is mostly local runtime state and caches.
+This document maps the files that still live under a run scratch directory. Durable run state lives in the durable event stream, event-derived projections, and CAS; scratch is mostly local runtime state and caches.
 
 Scope:
 - Scratch root: `~/.fabro/scratch/YYYYMMDD-{run_id}/`

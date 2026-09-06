@@ -146,10 +146,16 @@ pub enum EventBody {
     RunFailed(RunFailedProps),
     #[serde(rename = "run.notice")]
     RunNotice(RunNoticeProps),
+    /// Historical metadata snapshot event. Retained for replay; no longer
+    /// emitted.
     #[serde(rename = "metadata.snapshot.started")]
     MetadataSnapshotStarted(MetadataSnapshotStartedProps),
+    /// Historical metadata snapshot event. Retained for replay; no longer
+    /// emitted.
     #[serde(rename = "metadata.snapshot.completed")]
     MetadataSnapshotCompleted(MetadataSnapshotCompletedProps),
+    /// Historical metadata snapshot event. Retained for replay; no longer
+    /// emitted.
     #[serde(rename = "metadata.snapshot.failed")]
     MetadataSnapshotFailed(MetadataSnapshotFailedProps),
     #[serde(rename = "stage.started")]

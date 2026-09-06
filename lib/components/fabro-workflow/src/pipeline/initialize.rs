@@ -29,7 +29,6 @@ use crate::handler::llm::{AgentAcpBackend, AgentApiBackend, BackendRouter, routi
 use crate::handler::{HandlerRegistry, default_registry};
 #[cfg(test)]
 use crate::model_fallback::ModelFallbackPolicy;
-use crate::run_metadata::{RunMetadataRuntime, build_metadata_writer, metadata_branch_name};
 use crate::run_options::{GitCheckpointOptions, RunOptions};
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{
@@ -359,7 +358,6 @@ pub async fn initialize(
     let tool_secrets = tool_secrets_from_configured_sources(&options.vault).await;
     let catalog = Arc::clone(&options.catalog);
     let sandbox_git = Arc::new(SandboxGitRuntime::new());
-    let metadata_runtime = Arc::new(RunMetadataRuntime::new());
 
     let hook_runner = if options.hooks.hooks.is_empty() {
         None
@@ -586,13 +584,6 @@ pub async fn initialize(
                 options.run_options.git = Some(GitCheckpointOptions {
                     base_sha,
                     run_branch: Some(info.run_branch.clone()),
-                    meta_branch: options
-                        .run_options
-                        .settings
-                        .run
-                        .meta_branch
-                        .enabled
-                        .then(|| metadata_branch_name(&options.run_options.run_id.to_string())),
                 });
                 if options.run_options.base_branch.is_none() {
                     options.run_options.base_branch = info.base_branch;
@@ -675,22 +666,6 @@ pub async fn initialize(
         });
     }
 
-    let metadata_writer =
-        match build_metadata_writer(&options.run_options, sandbox.push_token_source()) {
-            Ok(writer) => writer,
-            Err(err) => {
-                let message = format!("failed to initialize checkpoint metadata writer: {err}");
-                if metadata_runtime.mark_metadata_degraded(false) {
-                    options.emitter.notice(
-                        RunNoticeLevel::Warn,
-                        RunNoticeCode::CheckpointMetadataWriteFailed,
-                        message,
-                    );
-                }
-                None
-            }
-        };
-
     let run_services = RunServices::new(
         options.run_store.clone(),
         Arc::clone(&options.emitter),
@@ -703,8 +678,6 @@ pub async fn initialize(
         Arc::clone(&llm_source),
         catalog,
         sandbox_git,
-        metadata_runtime,
-        metadata_writer,
         StageExecutionTracker::seeded(stage_executions),
     );
     let engine = Arc::new(EngineServices {

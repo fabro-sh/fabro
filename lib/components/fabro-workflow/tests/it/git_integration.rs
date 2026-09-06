@@ -296,9 +296,8 @@ async fn git_checkpoint_skips_start_node() {
 
     let mut run_options = test_run_options(run_tmp.path());
     run_options.git = Some(GitCheckpointOptions {
-        base_sha:    Some(base_sha),
-        run_branch:  None,
-        meta_branch: Some(format!("fabro/meta/{}", fixtures::RUN_2)),
+        base_sha:   Some(base_sha),
+        run_branch: None,
     });
 
     Box::pin(run_graph(
@@ -530,7 +529,6 @@ async fn remote_prompt_demotion_stays_outside_checkout_and_survives_checkpoint()
         "work",
         "succeeded",
         1,
-        None,
         &RunCheckpointSettings::default(),
         &GitAuthor::default(),
     )

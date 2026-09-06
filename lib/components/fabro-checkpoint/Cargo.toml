@@ -4,7 +4,7 @@ edition.workspace = true
 version.workspace = true
 publish = false
 license.workspace = true
-description = "Git-backed checkpoint storage for Fabro workflows"
+description = "Git checkpoint commit helpers for Fabro workflows"
 repository = "https://github.com/brynary/arc"
 
 [lib]
@@ -15,14 +15,4 @@ workspace = true
 
 [dependencies]
 fabro-config = { path = "../../foundation/fabro-config" }
-fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../../foundation/fabro-types" }
-git2.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-
-[dev-dependencies]
-chrono.workspace = true
-tempfile = "3"

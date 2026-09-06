@@ -23,7 +23,6 @@ use crate::pipeline;
 use crate::pipeline::types::{Executed, Initialized};
 use crate::pipeline::{billing_from_projection, build_terminal_event};
 use crate::records::Checkpoint;
-use crate::run_metadata::RunMetadataRuntime;
 use crate::run_options::RunOptions;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{EngineServices, RunLocations, RunServices};
@@ -279,8 +278,6 @@ async fn initialized(
                         .unwrap_or_else(auth_test_support::vault_only_credential_source),
                     Arc::new(Catalog::from_builtin().expect("default catalog should build")),
                     Arc::new(SandboxGitRuntime::new()),
-                    Arc::new(RunMetadataRuntime::new()),
-                    None,
                     StageExecutionTracker::default(),
                 ),
                 registry:        Arc::new(registry),

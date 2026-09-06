@@ -260,23 +260,12 @@ push = true
 
 | Field | Description |
 |---|---|
-| `enabled` | When `false`, Fabro does not create the managed run branch or checkpoint commits. This also disables metadata branch writes. |
+| `enabled` | When `false`, Fabro does not create the managed run branch or checkpoint commits. |
 | `push` | When `false`, Fabro creates local checkpoint commits but does not push `fabro/run/<id>` to the remote. |
 
 ### `[run.meta_branch]`
 
-Configure Fabro's managed `fabro/meta/<id>` metadata branch.
-
-```toml title="run.toml"
-[run.meta_branch]
-enabled = true
-push = true
-```
-
-| Field | Description |
-|---|---|
-| `enabled` | When `false`, Fabro skips metadata branch snapshots. |
-| `push` | When `false`, Fabro writes metadata snapshots locally but does not push `fabro/meta/<id>` to the remote. |
+Metadata branches have been retired. Existing `enabled` and `push` settings in this table are accepted but ignored. Resolved settings and API responses omit `meta_branch`. You can remove the table from your configuration. Existing Git metadata branches remain untouched.
 
 ### `[run.environment]` and server-managed environments
 

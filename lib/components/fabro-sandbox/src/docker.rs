@@ -17,7 +17,6 @@ use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::{ContainerInspectResponse, HostConfig};
 use fabro_github::GitHubCredentials;
-use fabro_github::token_source::InstallationTokenSource;
 use fabro_types::settings::run::RunCloneSettings;
 use fabro_types::{CommandOutputStream, CommandTermination, RunId, SandboxProviderKind};
 use fabro_util::time::elapsed_ms;
@@ -2444,10 +2443,6 @@ impl Sandbox for DockerSandbox {
                 push_credentials::set_auth_url_via_exec(self, auth_url)
             })
             .await
-    }
-
-    fn push_token_source(&self) -> Option<Arc<InstallationTokenSource>> {
-        self.push_credentials.source().cloned()
     }
 }
 

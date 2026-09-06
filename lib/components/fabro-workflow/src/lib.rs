@@ -323,7 +323,6 @@ pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, R
 pub use fabro_types::ManifestPath;
 pub use steering_hub::{PairControlError, SteeringHub};
 pub mod run_materialization;
-pub(crate) mod run_metadata;
 pub mod run_options;
 pub mod run_status;
 pub mod runtime_store;

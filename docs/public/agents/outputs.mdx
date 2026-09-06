@@ -227,11 +227,11 @@ When Fabro builds a [preamble](/execution/context#preamble-construction) for a d
 
 This keeps preambles concise while still giving agents a path to read the full output if needed.
 
-## Git storage
+## Durable storage
 
-Large offloaded context values are not stored on the Git [metadata branch](/execution/checkpoints#metadata-branch). The metadata branch keeps checkpoint JSON and stage metadata; blob payloads live in the durable blob store and are referenced by `blob://sha256/...`.
+Checkpoint events and projections reference large offloaded context values with `blob://sha256/...` references. The payloads live in the durable content-addressed store (CAS).
 
-Captured stage artifacts such as screenshots, videos, reports, and traces still use the artifact store and metadata export paths described below.
+Captured stage artifacts such as screenshots, videos, reports, and traces still use the artifact store and export paths described below.
 
 ## Remote sandbox syncing
 

@@ -1,12 +1,7 @@
 use std::sync::Arc;
-use std::time::Instant;
 
-use fabro_dump::RunDump;
 use fabro_hooks::{HookContext, HookEvent};
-use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
 use fabro_types::{BilledTokenCounts, DiffSummary, EventBody, RunFailure, RunProjection};
-use fabro_util::error::collect_causes;
-use fabro_util::time::elapsed_ms;
 
 use super::types::{Concluded, Executed, FinalizeOptions, Finalized, PublishOutcome, Published};
 use crate::billing_rollup;
@@ -14,7 +9,6 @@ use crate::error::{Error, run_failure_from_error, run_failure_from_outcome_failu
 use crate::event::{Event, RunNoticeCode, RunNoticeLevel};
 use crate::outcome::{Outcome, StageOutcome};
 use crate::records::Conclusion;
-use crate::run_metadata::{MetadataSnapshot, metadata_push_failure_is_transient};
 use crate::run_options::RunOptions;
 use crate::run_status::{FailureReason, RunStatus, SuccessReason};
 use crate::runtime_store::RunStoreHandle;
@@ -99,205 +93,8 @@ fn build_conclusion_from_projection(
     }
 }
 
-/// `conclusion` is injected because the terminal event hasn't been emitted
-/// yet — the run store's `projection.conclusion` is still `None` at this point.
-pub async fn write_finalize_commit(
-    run_options: &RunOptions,
-    services: &RunServices,
-    conclusion: &Conclusion,
-) {
-    if services.metadata_runtime.metadata_suspended() {
-        return;
-    }
-    let Some(writer) = services.metadata_writer.as_ref() else {
-        return;
-    };
-    let Some(meta_branch) = run_options
-        .git
-        .as_ref()
-        .and_then(|git| git.meta_branch.as_deref())
-    else {
-        return;
-    };
-
-    let phase = MetadataSnapshotPhase::Finalize;
-    let started = Instant::now();
-    emit_metadata_snapshot_started(services, phase, meta_branch);
-
-    let mut projection = match services.run_store.state().await {
-        Ok(state) => state,
-        Err(err) => {
-            let message = format!("failed to load run state for final metadata snapshot: {err}");
-            emit_metadata_snapshot_failed(
-                services,
-                phase,
-                meta_branch,
-                started,
-                MetadataSnapshotFailureKind::LoadState,
-                message.clone(),
-                collect_causes(err.as_ref()),
-                None,
-                None,
-                None,
-            );
-            emit_metadata_warning(
-                services,
-                RunNoticeCode::CheckpointMetadataWriteFailed,
-                message,
-                false,
-            );
-            return;
-        }
-    };
-    projection.conclusion = Some(conclusion.clone());
-    let dump = match RunDump::from_projection(&projection) {
-        Ok(dump) => dump,
-        Err(err) => {
-            let message = format!("failed to build run dump for final metadata snapshot: {err}");
-            emit_metadata_snapshot_failed(
-                services,
-                phase,
-                meta_branch,
-                started,
-                MetadataSnapshotFailureKind::Write,
-                message.clone(),
-                collect_causes(err.as_ref()),
-                None,
-                None,
-                None,
-            );
-            emit_metadata_warning(
-                services,
-                RunNoticeCode::CheckpointMetadataWriteFailed,
-                message,
-                false,
-            );
-            return;
-        }
-    };
-    match writer.write_snapshot(&dump, "finalize run").await {
-        Ok(snapshot) => {
-            if let Some(detail) = snapshot.push_error.as_deref() {
-                let message =
-                    format!("failed to push metadata ref refs/heads/{meta_branch}: {detail}");
-                emit_metadata_snapshot_failed(
-                    services,
-                    phase,
-                    meta_branch,
-                    started,
-                    MetadataSnapshotFailureKind::Push,
-                    message.clone(),
-                    Vec::new(),
-                    Some(snapshot.commit_sha.clone()),
-                    Some(snapshot.entry_count),
-                    Some(snapshot.bytes),
-                );
-                emit_metadata_warning(
-                    services,
-                    RunNoticeCode::CheckpointMetadataPushFailed,
-                    message,
-                    metadata_push_failure_is_transient(detail, snapshot.token.as_ref()),
-                );
-            } else {
-                services.metadata_runtime.clear_metadata_degraded();
-                emit_metadata_snapshot_completed(services, phase, meta_branch, started, &snapshot);
-            }
-        }
-        Err(err) => {
-            let message = format!("failed to write final checkpoint metadata: {err}");
-            emit_metadata_snapshot_failed(
-                services,
-                phase,
-                meta_branch,
-                started,
-                MetadataSnapshotFailureKind::Write,
-                message.clone(),
-                collect_causes(&err),
-                None,
-                None,
-                None,
-            );
-            emit_metadata_warning(
-                services,
-                RunNoticeCode::CheckpointMetadataWriteFailed,
-                message,
-                false,
-            );
-        }
-    }
-}
-
-fn emit_metadata_snapshot_started(
-    services: &RunServices,
-    phase: MetadataSnapshotPhase,
-    branch: &str,
-) {
-    services.emitter.emit(&Event::MetadataSnapshotStarted {
-        phase,
-        branch: branch.to_string(),
-    });
-}
-
-fn emit_metadata_snapshot_completed(
-    services: &RunServices,
-    phase: MetadataSnapshotPhase,
-    branch: &str,
-    started: Instant,
-    snapshot: &MetadataSnapshot,
-) {
-    services.emitter.emit(&Event::MetadataSnapshotCompleted {
-        phase,
-        branch: branch.to_string(),
-        duration_ms: elapsed_ms(started),
-        entry_count: snapshot.entry_count,
-        bytes: snapshot.bytes,
-        commit_sha: snapshot.commit_sha.clone(),
-    });
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "Metadata failure event carries the full event contract explicitly."
-)]
-fn emit_metadata_snapshot_failed(
-    services: &RunServices,
-    phase: MetadataSnapshotPhase,
-    branch: &str,
-    started: Instant,
-    failure_kind: MetadataSnapshotFailureKind,
-    error: String,
-    causes: Vec<String>,
-    commit_sha: Option<String>,
-    entry_count: Option<usize>,
-    bytes: Option<u64>,
-) {
-    services.emitter.emit(&Event::MetadataSnapshotFailed {
-        phase,
-        branch: branch.to_string(),
-        duration_ms: elapsed_ms(started),
-        failure_kind,
-        error,
-        causes,
-        commit_sha,
-        entry_count,
-        bytes,
-        exec_output_tail: None,
-    });
-}
-
-fn emit_metadata_warning(
-    services: &RunServices,
-    code: RunNoticeCode,
-    message: String,
-    transient: bool,
-) {
-    if services.metadata_runtime.mark_metadata_degraded(transient) {
-        services.emitter.notice(RunNoticeLevel::Warn, code, message);
-    }
-}
-
 /// Failed and cancelled runs use a shorter diff timeout so a corrupted
-/// workspace can't stall downstream consumers waiting on the terminal event.
+/// workspace cannot stall consumers waiting on the terminal event.
 async fn compute_final_patch(
     run_options: &RunOptions,
     services: &RunServices,
@@ -507,16 +304,6 @@ pub async fn finalize(published: Published, options: &FinalizeOptions) -> Result
     conclusion.status = final_status;
     conclusion.failure = failure;
 
-    write_finalize_commit(&run_options, &services, &conclusion).await;
-
-    if services.metadata_runtime.metadata_degraded() {
-        services.emitter.notice(
-            RunNoticeLevel::Warn,
-            RunNoticeCode::CheckpointMetadataDegraded,
-            "checkpoint metadata archive writes were degraded for this run".to_string(),
-        );
-    }
-
     let terminal_event = build_terminal_event(
         &outcome,
         conclusion.timing,
@@ -576,17 +363,14 @@ mod tests {
     use std::time::Duration;
 
     use anyhow::Result;
-    use async_trait::async_trait;
-    use bytes::Bytes;
     use fabro_auth::test_support as auth_test_support;
     use fabro_graphviz::graph::Graph;
     use fabro_model::Catalog;
     use fabro_sandbox::test_support::MockSandbox;
-    use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
-    use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
+    use fabro_store::{Database, RunDatabase, RunProjection};
     use fabro_types::{
-        BilledTokenCounts, BlobHash, EventBody, RunEvent, RunId, RunSpec, StageCompletion,
-        WorkflowSettings, first_event_seq, fixtures, test_support,
+        BilledTokenCounts, EventBody, RunEvent, RunId, RunSpec, StageCompletion, WorkflowSettings,
+        first_event_seq, fixtures, test_support,
     };
     use object_store::memory::InMemory;
 
@@ -595,9 +379,8 @@ mod tests {
     use crate::error::ErrorStage;
     use crate::event::{Emitter, StoreProgressLogger, append_event};
     use crate::records::Checkpoint;
-    use crate::run_metadata::{RunMetadataRuntime, RunMetadataWriterHandle};
     use crate::run_options::{GitCheckpointOptions, RunOptions};
-    use crate::runtime_store::{RunStoreBackend, RunStoreHandle};
+    use crate::runtime_store::RunStoreHandle;
     use crate::sandbox_git_runtime::SandboxGitRuntime;
     use crate::services::EngineServices;
 
@@ -620,16 +403,6 @@ mod tests {
             display_base_sha: None,
             git:              None,
         }
-    }
-
-    fn test_git_run_options(run_dir: &std::path::Path, meta_branch: &str) -> RunOptions {
-        let mut options = test_run_options(run_dir);
-        options.git = Some(GitCheckpointOptions {
-            base_sha:    None,
-            run_branch:  None,
-            meta_branch: Some(meta_branch.to_string()),
-        });
-        options
     }
 
     fn test_executed(
@@ -682,11 +455,12 @@ mod tests {
             run_id:              test_run_id(),
             title:               None,
             settings:            serde_json::to_value(WorkflowSettings::default()).unwrap(),
-            graph:               serde_json::to_value(fabro_types::Graph::new("metadata")).unwrap(),
+            graph:               serde_json::to_value(fabro_types::Graph::new("checkpoint"))
+                .unwrap(),
             workflow_source:     None,
             labels:              std::collections::BTreeMap::new(),
             source_directory:    Some("/tmp/project".to_string()),
-            workflow_slug:       Some("metadata".to_string()),
+            workflow_slug:       Some("checkpoint".to_string()),
             workflow_version_id: None,
             target:              None,
             automation:          None,
@@ -706,7 +480,7 @@ mod tests {
 
     #[expect(
         clippy::disallowed_methods,
-        reason = "metadata event tests use synchronous git commands to set up temporary repositories"
+        reason = "checkpoint tests use synchronous git commands to set up temporary repositories"
     )]
     fn init_git_repo(repo: &Path) {
         let init = std::process::Command::new("git")
@@ -733,7 +507,7 @@ mod tests {
 
     #[expect(
         clippy::disallowed_methods,
-        reason = "metadata event tests use synchronous git commands to set up temporary repositories"
+        reason = "checkpoint tests use synchronous git commands to set up temporary repositories"
     )]
     fn git_commit_all(repo: &Path, msg: &str) -> String {
         let add = std::process::Command::new("git")
@@ -982,8 +756,6 @@ mod tests {
         run_store: RunStoreHandle,
         emitter: Arc<Emitter>,
         sandbox: Arc<dyn fabro_agent::Sandbox>,
-        metadata_runtime: Arc<RunMetadataRuntime>,
-        metadata_writer: Option<RunMetadataWriterHandle>,
     ) -> Arc<RunServices> {
         let locations = crate::services::RunLocations::for_sandbox(
             None,
@@ -1002,8 +774,6 @@ mod tests {
             auth_test_support::vault_only_credential_source(),
             Arc::new(Catalog::from_builtin().expect("default catalog should build")),
             Arc::new(SandboxGitRuntime::new()),
-            metadata_runtime,
-            metadata_writer,
             crate::stage_execution::StageExecutionTracker::default(),
         )
     }
@@ -1035,8 +805,6 @@ mod tests {
             auth_test_support::vault_only_credential_source(),
             Arc::new(Catalog::from_builtin().expect("default catalog should build")),
             Arc::new(SandboxGitRuntime::new()),
-            Arc::new(RunMetadataRuntime::new()),
-            None,
             crate::stage_execution::StageExecutionTracker::default(),
         );
         let executed = test_executed(
@@ -1063,196 +831,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn finalize_metadata_snapshot_success_emits_started_completed_unscoped() {
-        let repo_dir = tempfile::tempdir().unwrap();
-        init_git_repo(repo_dir.path());
-        let branch = "fabro/metadata/run";
-        let run_store = seeded_run_store().await;
-        let handle = RunStoreHandle::local(run_store.clone());
-        let conclusion = Conclusion {
-            timestamp:            chrono::Utc::now(),
-            status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::wall_only(10),
-            failure:              None,
-            final_git_commit_sha: None,
-            stages:               Vec::new(),
-            billing:              None,
-            total_retries:        0,
-            diff:                 fabro_types::RunDiff::default(),
-        };
-        let emitter = Arc::new(Emitter::new(test_run_id()));
-        let events = record_events(&emitter);
-        let services = test_services(
-            handle,
-            emitter,
-            Arc::new(fabro_agent::LocalSandbox::new(
-                repo_dir.path().to_path_buf(),
-            )),
-            Arc::new(RunMetadataRuntime::new()),
-            Some(RunMetadataWriterHandle::new_for_test_repo(
-                repo_dir.path(),
-                branch,
-            )),
-        );
-        let run_options = test_git_run_options(repo_dir.path(), branch);
-
-        write_finalize_commit(&run_options, &services, &conclusion).await;
-
-        let events = events.lock().unwrap();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].event_name(), "metadata.snapshot.started");
-        assert_eq!(events[1].event_name(), "metadata.snapshot.completed");
-        assert!(events[0].node_id.is_none());
-        match &events[1].body {
-            EventBody::MetadataSnapshotCompleted(props) => {
-                assert_eq!(props.phase, MetadataSnapshotPhase::Finalize);
-                assert_eq!(props.branch, branch);
-                assert!(!props.commit_sha.is_empty());
-            }
-            other => panic!("expected metadata completed event, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn finalize_metadata_load_state_failure_emits_failed_before_notice() {
-        let repo_dir = tempfile::tempdir().unwrap();
-        init_git_repo(repo_dir.path());
-        let emitter = Arc::new(Emitter::new(test_run_id()));
-        let events = record_events(&emitter);
-        let services = test_services(
-            RunStoreHandle::new(Arc::new(FailingStateStore)),
-            emitter,
-            Arc::new(fabro_agent::LocalSandbox::new(
-                repo_dir.path().to_path_buf(),
-            )),
-            Arc::new(RunMetadataRuntime::new()),
-            Some(RunMetadataWriterHandle::new_for_test_repo(
-                repo_dir.path(),
-                "fabro/metadata/run",
-            )),
-        );
-        let run_options = test_git_run_options(repo_dir.path(), "fabro/metadata/run");
-        let conclusion = Conclusion {
-            timestamp:            chrono::Utc::now(),
-            status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::wall_only(10),
-            failure:              None,
-            final_git_commit_sha: None,
-            stages:               Vec::new(),
-            billing:              None,
-            total_retries:        0,
-            diff:                 fabro_types::RunDiff::default(),
-        };
-
-        write_finalize_commit(&run_options, &services, &conclusion).await;
-
-        let events = events.lock().unwrap();
-        let names = events.iter().map(RunEvent::event_name).collect::<Vec<_>>();
-        assert_eq!(names, vec![
-            "metadata.snapshot.started",
-            "metadata.snapshot.failed",
-            "run.notice",
-        ]);
-        match &events[1].body {
-            EventBody::MetadataSnapshotFailed(props) => {
-                assert_eq!(props.phase, MetadataSnapshotPhase::Finalize);
-                assert_eq!(props.failure_kind, MetadataSnapshotFailureKind::LoadState);
-            }
-            other => panic!("expected metadata failed event, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn degraded_metadata_runtime_skips_finalize_metadata_events() {
-        let repo_dir = tempfile::tempdir().unwrap();
-        init_git_repo(repo_dir.path());
-        let run_store = seeded_run_store().await;
-        let emitter = Arc::new(Emitter::new(test_run_id()));
-        let events = record_events(&emitter);
-        let runtime = Arc::new(RunMetadataRuntime::new());
-        runtime.mark_metadata_degraded(false);
-        let services = test_services(
-            RunStoreHandle::local(run_store),
-            emitter,
-            Arc::new(fabro_agent::LocalSandbox::new(
-                repo_dir.path().to_path_buf(),
-            )),
-            runtime,
-            Some(RunMetadataWriterHandle::new_for_test_repo(
-                repo_dir.path(),
-                "fabro/metadata/run",
-            )),
-        );
-        let run_options = test_git_run_options(repo_dir.path(), "fabro/metadata/run");
-        let conclusion = Conclusion {
-            timestamp:            chrono::Utc::now(),
-            status:               StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::wall_only(10),
-            failure:              None,
-            final_git_commit_sha: None,
-            stages:               Vec::new(),
-            billing:              None,
-            total_retries:        0,
-            diff:                 fabro_types::RunDiff::default(),
-        };
-
-        write_finalize_commit(&run_options, &services, &conclusion).await;
-
-        assert!(events.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn finalize_emits_metadata_snapshot_before_run_completed() {
-        let repo_dir = tempfile::tempdir().unwrap();
-        init_git_repo(repo_dir.path());
-        let run_store = seeded_run_store().await;
-        let emitter = Arc::new(Emitter::new(test_run_id()));
-        let events = record_events(&emitter);
-        let services = test_services(
-            RunStoreHandle::local(run_store),
-            Arc::clone(&emitter),
-            Arc::new(fabro_agent::LocalSandbox::new(
-                repo_dir.path().to_path_buf(),
-            )),
-            Arc::new(RunMetadataRuntime::new()),
-            Some(RunMetadataWriterHandle::new_for_test_repo(
-                repo_dir.path(),
-                "fabro/metadata/run",
-            )),
-        );
-        let executed = test_executed(
-            Graph::new("test"),
-            Ok(Outcome::success()),
-            test_git_run_options(repo_dir.path(), "fabro/metadata/run"),
-            5,
-            services,
-        );
-
-        finalize_executed(executed, &FinalizeOptions {
-            run_dir:          repo_dir.path().to_path_buf(),
-            run_id:           test_run_id(),
-            workflow_name:    "test".to_string(),
-            preserve_sandbox: false,
-            stop_on_terminal: true,
-            last_git_sha:     None,
-        })
-        .await
-        .unwrap();
-
-        let names = events
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|event| event.event_name().to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(names, vec![
-            "metadata.snapshot.started",
-            "metadata.snapshot.completed",
-            "run.completed",
-        ]);
-    }
-
-    #[tokio::test]
     async fn configured_run_branch_without_remote_is_not_reported_as_pushed() {
         let repo_dir = tempfile::tempdir().unwrap();
         let emitter = Arc::new(Emitter::new(test_run_id()));
@@ -1261,14 +839,11 @@ mod tests {
             RunStoreHandle::local(seeded_run_store().await),
             emitter,
             Arc::new(MockSandbox::linux()),
-            Arc::new(RunMetadataRuntime::new()),
-            None,
         );
         let mut run_options = test_run_options(repo_dir.path());
         run_options.git = Some(GitCheckpointOptions {
-            base_sha:    None,
-            run_branch:  Some("fabro/run/test".to_string()),
-            meta_branch: None,
+            base_sha:   None,
+            run_branch: Some("fabro/run/test".to_string()),
         });
         let executed = test_executed(
             Graph::new("test"),
@@ -1315,14 +890,11 @@ mod tests {
             RunStoreHandle::local(seeded_run_store().await),
             emitter,
             sandbox,
-            Arc::new(RunMetadataRuntime::new()),
-            None,
         );
         let mut run_options = test_run_options(repo_dir.path());
         run_options.git = Some(GitCheckpointOptions {
-            base_sha:    None,
-            run_branch:  Some("fabro/run/test".to_string()),
-            meta_branch: None,
+            base_sha:   None,
+            run_branch: Some("fabro/run/test".to_string()),
         });
         let executed = test_executed(
             Graph::new("test"),
@@ -1408,15 +980,12 @@ mod tests {
             Arc::new(fabro_agent::LocalSandbox::new(
                 repo_dir.path().to_path_buf(),
             )),
-            Arc::new(RunMetadataRuntime::new()),
-            None,
         );
         let mut run_options = test_run_options(repo_dir.path());
         run_options.base_branch = Some("main".to_string());
         run_options.git = Some(GitCheckpointOptions {
-            base_sha:    None,
-            run_branch:  Some("fabro/run/test".to_string()),
-            meta_branch: None,
+            base_sha:   None,
+            run_branch: Some("fabro/run/test".to_string()),
         });
         let executed = test_executed(
             Graph::new("test"),
@@ -1473,15 +1042,12 @@ mod tests {
             Arc::new(fabro_agent::LocalSandbox::new(
                 repo_dir.path().to_path_buf(),
             )),
-            Arc::new(RunMetadataRuntime::new()),
-            None,
         );
         let mut run_options = test_run_options(repo_dir.path());
         run_options.base_branch = Some("main".to_string());
         run_options.git = Some(GitCheckpointOptions {
-            base_sha:    Some("base-sha".to_string()),
-            run_branch:  Some("fabro/run/test".to_string()),
-            meta_branch: None,
+            base_sha:   Some("base-sha".to_string()),
+            run_branch: Some("fabro/run/test".to_string()),
         });
         let executed = test_executed(
             Graph::new("test"),
@@ -1531,15 +1097,12 @@ mod tests {
             Arc::new(fabro_agent::LocalSandbox::new(
                 repo_dir.path().to_path_buf(),
             )),
-            Arc::new(RunMetadataRuntime::new()),
-            None,
         );
         let mut run_options = test_run_options(repo_dir.path());
         run_options.base_branch = Some("main".to_string());
         run_options.git = Some(GitCheckpointOptions {
-            base_sha:    None,
-            run_branch:  Some("fabro/run/test".to_string()),
-            meta_branch: None,
+            base_sha:   None,
+            run_branch: Some("fabro/run/test".to_string()),
         });
         let executed = test_executed(
             Graph::new("test"),
@@ -1602,8 +1165,6 @@ mod tests {
             RunStoreHandle::local(seeded_run_store().await),
             Arc::new(Emitter::new(test_run_id())),
             sandbox.clone(),
-            Arc::new(RunMetadataRuntime::new()),
-            None,
         );
         let executed = test_executed(
             Graph::new("test"),
@@ -1636,8 +1197,6 @@ mod tests {
             RunStoreHandle::local(seeded_run_store().await),
             Arc::new(Emitter::new(test_run_id())),
             sandbox.clone(),
-            Arc::new(RunMetadataRuntime::new()),
-            None,
         );
         let executed = test_executed(
             Graph::new("test"),
@@ -1683,14 +1242,11 @@ mod tests {
             RunStoreHandle::local(run_store),
             Arc::clone(&emitter),
             Arc::new(fabro_agent::LocalSandbox::new(repo.to_path_buf())),
-            Arc::new(RunMetadataRuntime::new()),
-            None,
         );
-        let mut run_options = test_git_run_options(repo, "fabro/metadata/run");
+        let mut run_options = test_run_options(repo);
         run_options.git = Some(GitCheckpointOptions {
-            base_sha:    Some(base),
-            run_branch:  None,
-            meta_branch: None,
+            base_sha:   Some(base),
+            run_branch: None,
         });
         let executed = test_executed(
             Graph::new("test"),
@@ -1725,34 +1281,5 @@ mod tests {
                 "deletions": 0
             })
         );
-    }
-
-    struct FailingStateStore;
-
-    #[async_trait]
-    impl RunStoreBackend for FailingStateStore {
-        async fn load_state(&self) -> Result<RunProjection> {
-            Err(anyhow::anyhow!("state unavailable"))
-        }
-
-        async fn list_events(&self) -> Result<Vec<EventEnvelope>> {
-            Ok(Vec::new())
-        }
-
-        async fn append_run_event(&self, _event: &RunEvent) -> Result<()> {
-            Ok(())
-        }
-
-        async fn write_blob(&self, data: &[u8]) -> Result<BlobHash> {
-            Ok(BlobHash::new(data))
-        }
-
-        async fn read_blob(&self, _blob_hash: &BlobHash) -> Result<Option<Bytes>> {
-            Ok(None)
-        }
-
-        async fn read_run_log(&self) -> Result<Option<Vec<u8>>> {
-            Ok(None)
-        }
     }
 }

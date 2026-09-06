@@ -2398,16 +2398,8 @@ version = "0.347.0-nightly.0"
 name = "fabro-checkpoint"
 version = "0.347.0-nightly.0"
 dependencies = [
- "chrono",
  "fabro-config",
- "fabro-store",
  "fabro-types",
- "git2",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]

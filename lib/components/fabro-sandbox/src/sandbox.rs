@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use fabro_github::token_source::{InstallationTokenSource, TokenSnapshot};
+use fabro_github::token_source::TokenSnapshot;
 pub use fabro_types::run_event::GitCredentialAction as RemoteCredentialAction;
 use fabro_types::{CommandOutputStream, CommandTermination};
 use fabro_util::shell;
@@ -283,12 +283,6 @@ macro_rules! delegate_sandbox {
 
             async fn refresh_push_credentials(&self) -> $crate::Result<$crate::RefreshOutcome> {
                 self.$field.refresh_push_credentials().await
-            }
-
-            fn push_token_source(
-                &self,
-            ) -> Option<std::sync::Arc<$crate::InstallationTokenSource>> {
-                self.$field.push_token_source()
             }
 
             async fn set_autostop_interval(&self, minutes: i32) -> $crate::Result<()> {
@@ -1481,16 +1475,6 @@ pub trait Sandbox: Send + Sync {
     /// what happened to the remote and which token it carries.
     async fn refresh_push_credentials(&self) -> crate::Result<RefreshOutcome> {
         Ok(RefreshOutcome::none())
-    }
-
-    /// The shared installation-token source feeding this sandbox's push
-    /// credentials, when the provider manages GitHub credentials.
-    ///
-    /// Consumers outside the sandbox (e.g. the run-metadata writer) share
-    /// this source so every GitHub-token consumer for the origin repository
-    /// reuses one cached token instead of minting its own.
-    fn push_token_source(&self) -> Option<Arc<InstallationTokenSource>> {
-        None
     }
 
     /// Set the auto-stop interval in minutes (0 to disable).
