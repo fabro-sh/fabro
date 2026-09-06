@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::sync::{Arc, LazyLock};
 
@@ -45,6 +46,14 @@ pub fn classify_sdk_error(err: &LlmError) -> FailureCategory {
         | LlmError::UnsupportedToolChoice { .. } => FailureCategory::Deterministic,
     }
 }
+
+/// Failures caused by a permanent provider spend/billing ceiling.
+///
+/// These are permanent and human-actionable: only a person raising the limit
+/// clears them, so retrying is always wasted work. This list is checked before
+/// `TRANSIENT_INFRA_HINTS` so an explicit permanent ceiling wins if the same
+/// provider payload also contains a transient phrase such as `rate limited`.
+const PERMANENT_BUDGET_EXHAUSTED_HINTS: &[&str] = &["spend limit"];
 
 const TRANSIENT_INFRA_HINTS: &[&str] = &[
     "timeout",
@@ -100,6 +109,7 @@ const BUDGET_EXHAUSTED_HINTS: &[&str] = &[
     "context window exceeded",
     "budget exhausted",
     "token limit exceeded",
+    "you've hit your limit",
 ];
 
 const STRUCTURAL_HINTS: &[&str] = &[
@@ -161,15 +171,122 @@ impl miette::Diagnostic for SharedTemplateError {
 static HEX_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b[0-9a-f]{7,64}\b").expect("hardcoded regex should compile"));
 
+/// Blank a Cargo registry source path in a structured `spawned_at` field.
+///
+/// ACP internal errors include this field as provenance. Its value identifies
+/// where the provider-side process raised the error; it is not fault text.
+/// Removing only this structured value prevents the `index.crates.io` path
+/// component from triggering a transient hint without parsing arbitrary prose
+/// or consuming fault text outside the matched field value.
+fn discount_cargo_registry_source_paths(reason: &str) -> Cow<'_, str> {
+    static JSON_STRING_FIELD_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"(?P<field_prefix>"(?P<field_name>(?:\\.|[^"\\])*)"\s*:\s*")(?P<field_value>(?:\\.|[^"\\])*)(?P<field_end>")"#,
+        )
+        .expect("hardcoded regex should compile")
+    });
+    static REGISTRY_SRC_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(concat!(
+            r#"(?:^|[/\\])registry[/\\]+src[/\\]+"#,
+            r#"[a-z0-9._-]+-(?:[a-f0-9]{7,64}|<hex>)"#,
+            r#"(?:[/\\]|$)"#,
+        ))
+        .expect("hardcoded regex should compile")
+    });
+
+    JSON_STRING_FIELD_RE.replace_all(reason, |captures: &regex::Captures<'_>| {
+        let field_name = captures
+            .name("field_name")
+            .expect("hardcoded regex always captures the field name")
+            .as_str();
+        let decoded_field_name = decode_json_string_contents(field_name);
+        if !decoded_field_name
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case("spawned_at"))
+        {
+            return captures
+                .get(0)
+                .expect("capture zero always contains the full regex match")
+                .as_str()
+                .to_string();
+        }
+
+        let value = captures
+            .name("field_value")
+            .expect("hardcoded regex always captures the field value")
+            .as_str();
+        let Some(decoded_value) = decode_json_string_contents(value) else {
+            return captures
+                .get(0)
+                .expect("capture zero always contains the full regex match")
+                .as_str()
+                .to_string();
+        };
+        let decoded_value = decoded_value.to_lowercase();
+        let is_url = spawned_at_value_is_url(&decoded_value);
+        if is_url || !REGISTRY_SRC_MARKER_RE.is_match(&decoded_value) {
+            return captures
+                .get(0)
+                .expect("capture zero always contains the full regex match")
+                .as_str()
+                .to_string();
+        }
+
+        format!(
+            "{} {}",
+            captures
+                .name("field_prefix")
+                .expect("hardcoded regex always captures the field prefix")
+                .as_str(),
+            captures
+                .name("field_end")
+                .expect("hardcoded regex always captures the field terminator")
+                .as_str(),
+        )
+    })
+}
+
+fn decode_json_string_contents(serialized_value: &str) -> Option<String> {
+    serde_json::from_str(&format!(r#""{serialized_value}""#)).ok()
+}
+
+/// Whether decoded `spawned_at` text describes a URL.
+fn spawned_at_value_is_url(value: &str) -> bool {
+    if value.starts_with("//") {
+        return true;
+    }
+
+    value.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.len() > 1
+            && scheme
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphabetic)
+            && scheme
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    })
+}
+
 /// Classify a failure reason string using heuristics.
 ///
 /// This is the fallback when structured error information is not available
 /// (e.g. for `Handler(String)` or `Engine(String)` errors).
+///
+/// Hint lists are consulted in order and the first match wins, so the order is
+/// load-bearing: permanent provider limits are tested before transient infra
+/// precisely because their payloads also contain transient-looking text.
 #[must_use]
 pub fn classify_failure_reason(reason: &str) -> FailureCategory {
-    // Mask commit SHAs first. They are hex, so one contains "500" or "503"
-    // often enough to matter, which would read as a transient infra hint. The
-    // bare status codes those hints look for are too short to be masked.
+    // Discount structured provenance before normalizing case or masking hex.
+    // JSON escapes are case-sensitive, so lowercasing first could turn an
+    // invalid string into a valid one and cross the structured boundary.
+    // Masking first could rewrite a registry identifier or URI scheme and make
+    // its semantics impossible to recognize. Commit SHAs are then masked
+    // because one contains "500" or "503" often enough to read as a transient
+    // hint. The bare status codes those hints look for are too short to be
+    // masked.
+    let reason = discount_cargo_registry_source_paths(reason);
     let lowered = reason.to_lowercase();
     let lower = HEX_RE.replace_all(&lowered, "<hex>");
 
@@ -179,6 +296,13 @@ pub fn classify_failure_reason(reason: &str) -> FailureCategory {
             && !lower.contains("canceling due to test failure"))
     {
         return FailureCategory::Canceled;
+    }
+
+    if PERMANENT_BUDGET_EXHAUSTED_HINTS
+        .iter()
+        .any(|hint| lower.contains(hint))
+    {
+        return FailureCategory::BudgetExhausted;
     }
 
     if TRANSIENT_INFRA_HINTS
@@ -1349,13 +1473,18 @@ mod tests {
     // --- hints count guards ---
 
     #[test]
+    fn permanent_budget_exhausted_hints_count() {
+        assert_eq!(PERMANENT_BUDGET_EXHAUSTED_HINTS.len(), 1);
+    }
+
+    #[test]
     fn transient_infra_hints_count() {
         assert_eq!(TRANSIENT_INFRA_HINTS.len(), 40);
     }
 
     #[test]
     fn budget_exhausted_hints_count() {
-        assert_eq!(BUDGET_EXHAUSTED_HINTS.len(), 10);
+        assert_eq!(BUDGET_EXHAUSTED_HINTS.len(), 11);
     }
 
     #[test]
@@ -1471,6 +1600,16 @@ mod tests {
     fn classify_reason_token_limit_exceeded() {
         assert_eq!(
             classify_failure_reason("token limit exceeded"),
+            FailureCategory::BudgetExhausted
+        );
+    }
+
+    #[test]
+    fn classify_reason_resetting_provider_limit_is_budget_exhausted() {
+        assert_eq!(
+            classify_failure_reason(
+                "Internal error: You've hit your limit · resets Jul 31, 5am (UTC)"
+            ),
             FailureCategory::BudgetExhausted
         );
     }
@@ -2324,5 +2463,389 @@ mod tests {
             failure.signature.as_deref(),
             Some("api_transient|openai|rate_limited")
         );
+    }
+
+    // --- provider limits: resource exhaustion, not provenance or code faults ---
+
+    /// Representative ACP failure payload. The only
+    /// `TRANSIENT_INFRA_HINTS` entry this payload matches is `index.crates.io`,
+    /// and it matches inside a `spawned_at` cargo registry *source* path.
+    const SPEND_LIMIT_MESSAGE: &str = "ACP turn failed";
+    const SPEND_LIMIT_PROTOCOL_CAUSE: &str = "ACP protocol error";
+    const SPEND_LIMIT_INTERNAL_CAUSE: &str = r#"Internal error: You've hit your org's monthly spend limit · ask your admin to raise it at claude.ai/settings/usage: {
+  "spawned_at": "/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/agent-client-protocol-0.11.1/src/session.rs:567:14",
+  "data": {
+    "errorKind": "rate_limit"
+  }
+}"#;
+    const RESETTING_LIMIT_INTERNAL_CAUSE: &str = r#"Internal error: You've hit your limit · resets Jul 31, 5am (UTC): {
+  "spawned_at": "/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/agent-client-protocol-0.11.1/src/session.rs:567:14",
+  "data": {
+    "errorKind": "rate_limit"
+  }
+}"#;
+
+    #[test]
+    fn classify_reason_provider_spend_limit_is_budget_exhausted() {
+        let rendered = render_with_causes(SPEND_LIMIT_MESSAGE, &[
+            SPEND_LIMIT_PROTOCOL_CAUSE.to_string(),
+            SPEND_LIMIT_INTERNAL_CAUSE.to_string(),
+        ]);
+
+        assert_eq!(
+            classify_failure_reason(&rendered),
+            FailureCategory::BudgetExhausted,
+            "an org spend limit is permanent and human-actionable: retrying never clears it"
+        );
+    }
+
+    #[test]
+    fn classify_reason_spend_limit_wins_over_transient_hint() {
+        assert_eq!(
+            classify_failure_reason("provider rate limited: monthly spend limit reached"),
+            FailureCategory::BudgetExhausted,
+            "an explicit permanent provider ceiling must override a transient phrase"
+        );
+    }
+
+    #[test]
+    fn acp_spend_limit_failure_detail_is_not_transient_infra() {
+        let err = Error::handler_with_source(SPEND_LIMIT_MESSAGE, TestOuterError {
+            message: SPEND_LIMIT_PROTOCOL_CAUSE,
+            source:  TestCause(SPEND_LIMIT_INTERNAL_CAUSE),
+        });
+
+        let detail = err.to_failure_detail();
+        assert_eq!(detail.message, "ACP turn failed");
+        assert_eq!(detail.causes, vec![
+            SPEND_LIMIT_PROTOCOL_CAUSE.to_string(),
+            SPEND_LIMIT_INTERNAL_CAUSE.to_string(),
+        ]);
+        assert_eq!(detail.category, FailureCategory::BudgetExhausted);
+    }
+
+    #[test]
+    fn acp_resetting_limit_failure_detail_is_budget_exhausted() {
+        let err = Error::handler_with_source(SPEND_LIMIT_MESSAGE, TestOuterError {
+            message: SPEND_LIMIT_PROTOCOL_CAUSE,
+            source:  TestCause(RESETTING_LIMIT_INTERNAL_CAUSE),
+        });
+
+        let detail = err.to_failure_detail();
+        assert_eq!(detail.message, SPEND_LIMIT_MESSAGE);
+        assert_eq!(detail.causes, vec![
+            SPEND_LIMIT_PROTOCOL_CAUSE.to_string(),
+            RESETTING_LIMIT_INTERNAL_CAUSE.to_string(),
+        ]);
+        assert_eq!(detail.category, FailureCategory::BudgetExhausted);
+    }
+
+    #[test]
+    fn resetting_limit_does_not_override_a_genuine_transient_fault() {
+        let rendered =
+            format!("{RESETTING_LIMIT_INTERNAL_CAUSE}\n  caused by: connection reset by peer");
+
+        assert_eq!(
+            classify_failure_reason(&rendered),
+            FailureCategory::TransientInfra,
+            "ordinary budget hints remain below genuine transient faults"
+        );
+    }
+
+    #[test]
+    fn classify_reason_cargo_registry_source_path_is_not_a_network_fault() {
+        // `registry/src/index.crates.io-<hash>` names already-extracted crate
+        // source. It rides along as `spawned_at` provenance on ACP internal
+        // errors and describes no network fault whatsoever.
+        let rendered = concat!(
+            "ACP turn failed\n  caused by: ACP protocol error\n  caused by: ",
+            r#"Internal error: agent refused the request: {"spawned_at": "#,
+            r#""/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f"#,
+            r#"/agent-client-protocol-0.11.1/src/session.rs:567:14"}"#,
+        );
+
+        assert_eq!(
+            classify_failure_reason(rendered),
+            FailureCategory::Deterministic,
+            "a cargo registry source path is provenance, not a transient fault"
+        );
+    }
+
+    #[test]
+    fn classify_reason_hex_masked_registry_source_path_is_not_a_network_fault() {
+        // Guards the port to a caller that masks hex blobs before classifying:
+        // the registry hash then reads `index.crates.io-<hex>`, and a strict
+        // `[0-9a-f]+` hash pattern would stop matching without failing loudly.
+        let rendered = concat!(
+            "acp turn failed\n  caused by: acp protocol error\n  caused by: ",
+            r#"internal error: agent refused the request: {"spawned_at": "#,
+            r#""/home/ubuntu/.cargo/registry/src/index.crates.io-<hex>"#,
+            r#"/agent-client-protocol-0.11.1/src/session.rs:567:14"}"#,
+        );
+
+        assert_eq!(
+            classify_failure_reason(rendered),
+            FailureCategory::Deterministic,
+            "a hex-masked registry source path is still provenance, not a fault"
+        );
+    }
+
+    #[test]
+    fn classify_reason_unicode_escaped_registry_source_path_is_not_a_network_fault() {
+        let rendered = r#"internal error: {"spawned_at":"\u002fhome\u002fu\u002f.cargo\u002fregistry\u002fsrc\u002findex.crates.io-1949cf8c6b5b557f\u002fserde\u002fsrc\u002flib.rs"}"#;
+
+        assert_eq!(
+            discount_cargo_registry_source_paths(rendered),
+            r#"internal error: {"spawned_at":" "}"#,
+        );
+        assert_eq!(
+            classify_failure_reason(rendered),
+            FailureCategory::Deterministic,
+            "JSON escapes must not hide structured Cargo source provenance"
+        );
+    }
+
+    #[test]
+    fn classify_reason_partially_escaped_registry_hash_is_not_a_network_fault() {
+        let rendered = r#"{"spawned_at":"/home/u/.cargo/registry/src/index.crates.io-1949cf8\u00636b5b557f/serde/src/lib.rs"}"#;
+
+        assert!(
+            !discount_cargo_registry_source_paths(rendered).contains("index.crates.io"),
+            "the semantic hash must be checked before global hex normalization"
+        );
+        assert_eq!(
+            classify_failure_reason(rendered),
+            FailureCategory::Deterministic
+        );
+    }
+
+    #[test]
+    fn classify_reason_json_escaped_spawned_at_key_is_not_a_network_fault() {
+        for key in [r"spawned\u005fat", r"\u0053pawned_at"] {
+            let rendered = format!(
+                r#"{{"{key}":"/home/u/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde/src/lib.rs"}}"#
+            );
+
+            assert!(
+                !discount_cargo_registry_source_paths(&rendered).contains("index.crates.io"),
+                "JSON-equivalent spellings of the structured key must be recognized"
+            );
+            assert_eq!(
+                classify_failure_reason(&rendered),
+                FailureCategory::Deterministic
+            );
+        }
+    }
+
+    #[test]
+    fn classify_reason_malformed_spawned_at_value_is_not_discounted() {
+        let path = "/home/u/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde/src/lib.rs";
+        let invalid_escape = format!(r#"{{"spawned_at":"connection reset\q {path}"}}"#);
+        let literal_newline = format!("{{\"spawned_at\":\"connection reset\n{path}\"}}");
+        let uppercase_unicode_escapes = r#"{"spawned_at":"connection reset \U002fhome\U002fu\U002f.cargo\U002fregistry\U002fsrc\U002findex.crates.io-1949cf8c6b5b557f\U002fserde"}"#.to_string();
+        let uppercase_newline_escape = format!(r#"{{"spawned_at":"connection reset\N{path}"}}"#);
+        let malformed_key = format!(r#"{{"spawned\U005fat":"connection reset {path}"}}"#);
+
+        for rendered in [
+            invalid_escape,
+            literal_newline,
+            uppercase_unicode_escapes,
+            uppercase_newline_escape,
+            malformed_key,
+        ] {
+            assert_eq!(
+                discount_cargo_registry_source_paths(&rendered),
+                rendered,
+                "malformed JSON is outside the structured-field boundary"
+            );
+            assert_eq!(
+                classify_failure_reason(&rendered),
+                FailureCategory::TransientInfra,
+                "fault text in a malformed value must remain available to the classifier"
+            );
+        }
+    }
+
+    // --- non-weakening guards: genuine registry faults stay transient ---
+
+    #[test]
+    fn classify_reason_registry_download_url_still_transient() {
+        assert_eq!(
+            classify_failure_reason(
+                "error: failed to download from https://index.crates.io/api/v1/crates/serde/1.0.0/download"
+            ),
+            FailureCategory::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_registry_source_shaped_url_still_transient() {
+        for value in [
+            "https://index.crates.io/registry/src/index.crates.io-1949cf8c6b5b557f/config.json",
+            "//index.crates.io/registry/src/index.crates.io-1949cf8c6b5b557f/config.json",
+            r"https:\/\/index.crates.io\/registry\/src\/index.crates.io-1949cf8c6b5b557f\/config.json",
+            r"\/\/index.crates.io\/registry\/src\/index.crates.io-1949cf8c6b5b557f\/config.json",
+            r"file:\/srv\/cargo\/registry\/src\/index.crates.io-1949cf8c6b5b557f\/config.json",
+            r"https:\u002f\u002findex.crates.io\u002fregistry\u002fsrc\u002findex.crates.io-1949cf8c6b5b557f\u002fconfig.json",
+            "abcdef0:/srv/registry/src/index.crates.io-1949cf8c6b5b557f/config.json",
+            "deadbeef+pkg:/srv/registry/src/index.crates.io-1949cf8c6b5b557f/config.json",
+        ] {
+            let rendered = format!(r#"{{"spawned_at":"{value}"}}"#);
+            assert_eq!(
+                discount_cargo_registry_source_paths(&rendered),
+                rendered,
+                "a URL-valued spawned_at field must not be mistaken for a local source path"
+            );
+            assert_eq!(
+                classify_failure_reason(&rendered),
+                FailureCategory::TransientInfra
+            );
+        }
+    }
+
+    #[test]
+    fn discount_spawned_at_preserves_field_structure_and_flexible_spacing() {
+        let rendered = r#"internal error: { "spawned_at" : "/home/u/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.0/src/lib.rs:1:1" }"#;
+
+        assert_eq!(
+            discount_cargo_registry_source_paths(rendered),
+            r#"internal error: { "spawned_at" : " " }"#,
+            "only the provenance value should be blanked"
+        );
+        assert_eq!(
+            classify_failure_reason(rendered),
+            FailureCategory::Deterministic,
+            "spacing around the structured field must not affect classification"
+        );
+    }
+
+    #[test]
+    fn classify_reason_registry_source_path_beside_real_fault_still_transient() {
+        let rendered = concat!(
+            r#"internal error: {"error":"connection reset by peer","spawned_at":"#,
+            r#""/home/u/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/"#,
+            r#"serde-1.0.0/src/lib.rs"}"#,
+        );
+
+        assert_eq!(
+            classify_failure_reason(rendered),
+            FailureCategory::TransientInfra,
+            "discounting spawned_at must not hide a genuine fault elsewhere in the payload"
+        );
+    }
+
+    #[test]
+    fn classify_reason_registry_path_in_an_unrelated_field_is_not_discounted() {
+        let rendered = r#"{"log":"panic at /home/u/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.0/src/lib.rs"}"#;
+
+        assert_eq!(discount_cargo_registry_source_paths(rendered), rendered);
+        assert_eq!(
+            classify_failure_reason(rendered),
+            FailureCategory::TransientInfra,
+            "only the structured spawned_at provenance field is discounted"
+        );
+    }
+
+    #[test]
+    fn classify_reason_mixed_separator_windows_source_path_is_not_a_network_fault() {
+        for rendered in [
+            r#"{"spawned_at":"c:/cargo/registry/src/github.com-1ecc6299db9ec823/serde-1.0.0/src\\timeout.rs"}"#,
+            r#"{"spawned_at":"/cargo/registry/src/github.com-1ecc6299db9ec823/serde-1.0.0/src\\timeout.rs"}"#,
+            r#"{"spawned_at":"cargo/registry/src/github.com-1ecc6299db9ec823/serde-1.0.0/src\\timeout.rs"}"#,
+            r#"{"spawned_at":"/cargo/econnreset\\n/home/registry/src/github.com-1ecc6299db9ec823/serde-1.0.0/src/lib.rs"}"#,
+        ] {
+            let discounted = discount_cargo_registry_source_paths(rendered);
+            assert!(
+                !discounted.contains("timeout") && !discounted.contains("econnreset"),
+                "source-path provenance must not retain fault hints: {rendered}"
+            );
+            assert_eq!(
+                classify_failure_reason(rendered),
+                FailureCategory::Deterministic,
+                "a mixed-separator source path is provenance, not escaped fault text: {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_reason_invalid_registry_hash_is_not_discounted() {
+        let hashes = [
+            "2",
+            "abcdef0z",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ];
+
+        for hash in hashes {
+            let rendered = format!(
+                r#"{{"spawned_at":"/srv/app/registry/src/index.crates.io-{hash}/src/main.rs"}}"#
+            );
+            assert_eq!(
+                discount_cargo_registry_source_paths(&rendered),
+                rendered,
+                "an invalid registry hash must leave spawned_at untouched"
+            );
+            assert_eq!(
+                classify_failure_reason(&rendered),
+                FailureCategory::TransientInfra,
+                "a short, non-hex, or overlong suffix is not a Cargo registry source hash: {hash}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_reason_relative_registry_source_path_is_not_a_network_fault() {
+        assert_eq!(
+            classify_failure_reason(
+                r#"internal error: {"spawned_at":"registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.0/src/lib.rs:1:1"}"#
+            ),
+            FailureCategory::Deterministic,
+            "a relative cargo registry source path in spawned_at is still provenance"
+        );
+    }
+
+    #[test]
+    fn discount_relative_registry_source_path_preserves_spawned_at_quotes() {
+        let rendered = r#"error: {"spawned_at":"registry/src/index.crates.io-1949cf8c6b5b557f/foo/src/lib.rs:1:1"}"#;
+
+        assert_eq!(
+            discount_cargo_registry_source_paths(rendered),
+            r#"error: {"spawned_at":" "}"#,
+            "discounting a relative path must preserve the structured field and its quotes"
+        );
+        assert_eq!(
+            classify_failure_reason(rendered),
+            FailureCategory::Deterministic
+        );
+    }
+
+    #[test]
+    fn classify_reason_non_default_registry_source_path_is_not_a_network_fault() {
+        for registry in ["github.com", "abcdef0", "abcdef0.index.crates.io"] {
+            let rendered = format!(
+                r#"internal error: {{"spawned_at":"/home/u/.cargo/registry/src/{registry}-1ecc6299db9ec823/hyper-timeout-0.5.2/src/lib.rs:1:1"}}"#
+            );
+
+            assert_eq!(
+                classify_failure_reason(&rendered),
+                FailureCategory::Deterministic,
+                "a crate name inside non-default registry {registry:?} is still provenance"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_reason_hint_bearing_registry_source_path_parents_are_not_faults() {
+        for rendered in [
+            r#"{"spawned_at":"/tmp/build-500/econnreset/.cargo/registry/src/github.com-1ecc6299db9ec823/serde-1.0.0/src/lib.rs:1:1"}"#,
+            r#"{"spawned_at":"tmp/build-500/econnreset/.cargo/registry/src/github.com-1ecc6299db9ec823/serde-1.0.0/src/lib.rs:1:1"}"#,
+            r#"{"spawned_at":"/tmp/build 500/econnreset/.cargo/registry/src/github.com-1ecc6299db9ec823/serde-1.0.0/src/lib.rs:1:1"}"#,
+            r#"internal error: {"spawned_at":"C:\\build-500\\econnreset\\.cargo\\registry\\src\\github.com-1ecc6299db9ec823\\serde-1.0.0\\src\\lib.rs:1:1"}"#,
+        ] {
+            assert_eq!(
+                classify_failure_reason(rendered),
+                FailureCategory::Deterministic,
+                "parent components of a cargo registry source path are also provenance: {rendered}"
+            );
+        }
     }
 }
