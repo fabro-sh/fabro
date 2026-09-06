@@ -2252,6 +2252,60 @@ mod tests {
         );
     }
 
+    // Regression (fabro-6a78): run 01M0NJ3QZ1FK53X9DK3BBAN2ED — an LLM
+    // stage emitted routing context_updates (current_seed_id/brief) and the
+    // next stage's COMPACT preamble showed '## Completed stages' with the
+    // model line and nothing else: no '## Context' section, no values. The
+    // implementer re-derived the seed blind (17 wasted tool calls, re-claimed
+    // the seed: role violation). context_updates values are the inter-stage
+    // contract; compact must render them.
+    #[test]
+    fn compact_renders_custom_context_updates_values() {
+        let graph = Graph::new("test");
+        let context = Context::new();
+        let completed_nodes = vec!["planner".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        let mut outcome = Outcome::success();
+        outcome.context_updates.insert(
+            "current_seed_id".to_string(),
+            serde_json::json!("fabro-0879"),
+        );
+        outcome.context_updates.insert(
+            "current_seed_brief".to_string(),
+            serde_json::json!("- add -pretty flag\n- both flags combine"),
+        );
+        node_outcomes.insert("planner".to_string(), outcome);
+
+        // Mirror the real pipeline: record_result applies the planner's
+        // context_updates into the shared Context BEFORE the next node's
+        // preamble is built (fabro-core state.rs record_result).
+        let context = Context::new();
+        for (k, v) in &node_outcomes.get("planner").unwrap().context_updates {
+            context.set(k.clone(), v.clone());
+        }
+
+        let preamble = build_preamble(
+            keys::Fidelity::Compact,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            preamble.contains("current_seed_id"),
+            "compact must name custom context keys, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("fabro-0879"),
+            "compact must render the VALUE of custom context keys, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("current_seed_brief"),
+            "compact must render brief keys, got:\n{preamble}"
+        );
+    }
+
     #[test]
     fn summary_high_command_stage_truncates_long_output() {
         let mut graph = Graph::new("test");
