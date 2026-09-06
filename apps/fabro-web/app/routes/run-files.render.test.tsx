@@ -225,6 +225,39 @@ describe("RunFiles rendering", () => {
     expect(multiFileDiffCalls[0].options.diffStyle).toBe("split");
   });
 
+  test("previews Markdown files and can switch back to their diff", () => {
+    currentFilesPayload = makePayload(1);
+    currentFilesPayload.data[0] = {
+      change_kind: "added",
+      old_file:    { name: "artifacts/planning/spec.md", contents: "" },
+      new_file:    {
+        name:     "artifacts/planning/spec.md",
+        contents: "# Plan\n\n- Review this",
+      },
+    };
+
+    const renderer = renderRunFiles();
+
+    expect(renderer.root.findAllByProps({ "data-markdown-preview": "true" })).toHaveLength(1);
+    const renderedMarkdown = renderer.root.findAll(
+      (node) => typeof node.props.dangerouslySetInnerHTML?.__html === "string",
+    );
+    expect(renderedMarkdown).toHaveLength(1);
+    expect(renderedMarkdown[0].props.dangerouslySetInnerHTML.__html).toContain(
+      "<h1>Plan</h1>",
+    );
+    expect(multiFileDiffCalls).toHaveLength(0);
+
+    const changesButton = renderer.root
+      .findAllByType("button")
+      .find((button) => button.children.includes("Changes"));
+    expect(changesButton).toBeDefined();
+    act(() => {
+      changesButton!.props.onClick();
+    });
+    expect(multiFileDiffCalls).toHaveLength(1);
+  });
+
   test("passes the selected URL scope to useRunFiles", () => {
     currentFilesPayload = makePayload(1);
 
