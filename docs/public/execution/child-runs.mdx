@@ -96,6 +96,50 @@ The parent can create several children in one call:
 }
 ```
 
+Selector strings and selector paths are available only when the parent agent runs in a genuinely shared Local filesystem context. Docker and Daytona agents must send the workflow bytes inline or reuse an exact stored workflow version; a path inside their sandbox is not a usable selector on the worker host.
+
+Send agent-authored workflow content with a strict inline source:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": {
+        "kind": "inline",
+        "entrypoint": "child/workflow.fabro",
+        "files": {
+          "child/workflow.fabro": "digraph Child { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"
+        }
+      },
+      "goal": "Run the workflow content supplied by this parent."
+    }
+  ]
+}
+```
+
+Reuse content already registered with Fabro by supplying its exact immutable ID:
+
+```json
+{
+  "runs": [
+    {
+      "workflow": {
+        "kind": "stored",
+        "workflow_version_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "target": { "kind": "none" },
+      "start": false
+    }
+  ]
+}
+```
+
+Workflow content and workspace target are separate choices. If `target` is omitted, a child inherits the parent's canonical target: a `none` or folder target as-is, and a Git target's repository and branch. The child checks out the branch's current remote HEAD, so commits the parent has pushed are visible to it; the parent's pinned commit and tag are not carried over. Pass an explicit Git target with a `sha` to pin a child. An explicit Git, `none`, or folder target overrides that inheritance while the current run remains the forced parent. Folder targets require a Local parent with a shared host filesystem; Docker and Daytona parents cannot select a server-host folder, even by naming a Local child environment.
+
+`goal_file` is also a shared-filesystem feature. Local agents can read it relative to the operation `cwd`; Docker and Daytona agents must send the resolved `goal` text by value.
+
+Like `fabro run`, `fabro_run_create` transmits only what the request names. Run defaults from the caller's `~/.fabro/settings.toml` `[run]` table, and project or machine run settings, are not applied to the created run. Put workflow-owned behavior in the workflow's `workflow.toml`, and pass explicit `auto_approve`, `dry_run`, `model`, `provider`, `environment`, or `preserve_sandbox` values in the spec when a child needs them. See [Run Configuration](/execution/run-configuration) for the settings layering.
+
 By default, `fabro_run_create` requests start for each created run. Set `"start": false` when the parent should create the child now and start it later.
 
 ## Start and approval

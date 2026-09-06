@@ -640,6 +640,9 @@ pub(crate) async fn create_run_from_intent(
         Ok(id) => id,
         Err(error) => return run_intent_admission_error(error.into()),
     };
+    if let Err(error) = validate_intent_actor_target(&state, &actor, &target).await {
+        return run_intent_admission_error(error);
+    }
     let blobs = state.store_ref().blobs();
     let version_store = fabro_workflow_version::WorkflowVersionStore::new(blobs);
     let closure = match version_store.get_closure(&intent.workflow_version_id).await {
@@ -983,6 +986,7 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
     match &error {
         RunIntentAdmissionError::VersionStore { .. }
         | RunIntentAdmissionError::VariableSnapshot { .. }
+        | RunIntentAdmissionError::WorkerRun { .. }
         | RunIntentAdmissionError::Environment(EnvironmentSelectionError::CredentialStore {
             ..
         }) => {
@@ -1001,6 +1005,7 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
         }
         RunIntentAdmissionError::Target(_)
         | RunIntentAdmissionError::FolderTarget(_)
+        | RunIntentAdmissionError::WorkerRunNotFound { .. }
         | RunIntentAdmissionError::Environment(_) => {}
     }
 
@@ -1074,7 +1079,44 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
             "failed to load run variables",
             "variable_store_error",
         ),
+        RunIntentAdmissionError::WorkerRun { .. } => intent_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to inspect originating worker run",
+            "worker_run_store_error",
+        ),
+        RunIntentAdmissionError::WorkerRunNotFound { .. } => intent_error(
+            StatusCode::NOT_FOUND,
+            "originating worker run not found",
+            "worker_run_not_found",
+        ),
     }
+}
+
+async fn validate_intent_actor_target(
+    state: &AppState,
+    actor: &Principal,
+    target: &RunTarget,
+) -> Result<(), RunIntentAdmissionError> {
+    let (Principal::Worker { run_id }, RunTarget::Folder { .. }) = (actor, target) else {
+        return Ok(());
+    };
+    let projection = state
+        .stores
+        .runs
+        .load_run_projection(run_id)
+        .await
+        .map_err(|source| RunIntentAdmissionError::WorkerRun {
+            run_id: *run_id,
+            source,
+        })?
+        .ok_or(RunIntentAdmissionError::WorkerRunNotFound { run_id: *run_id })?;
+    if !projection.spec.settings.run.environment.provider.is_local() {
+        return Err(EnvironmentSelectionError::TargetUnsupported {
+            detail: "folder targets created by a worker require a Local parent environment",
+        }
+        .into());
+    }
+    Ok(())
 }
 
 fn select_intent_environment_id(

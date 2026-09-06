@@ -77,10 +77,9 @@ impl RunLocations {
 
 #[derive(Clone)]
 pub struct FabroRunToolServices {
-    pub backend:            Arc<dyn fabro_tool::FabroToolBackend>,
-    pub current_run_id:     RunId,
-    pub base_cwd:           PathBuf,
-    pub user_settings_path: PathBuf,
+    pub backend:        Arc<dyn fabro_tool::FabroToolBackend>,
+    pub current_run_id: RunId,
+    pub base_cwd:       PathBuf,
 }
 
 /// Services shared across workflow phases.

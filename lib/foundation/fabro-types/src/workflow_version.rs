@@ -151,29 +151,43 @@ impl WorkflowVersion {
     fn validate_path_collisions(&self) -> Result<(), WorkflowVersionShapeError> {
         // Keys are unique within each map, so equality can only collide
         // across files and workflow dependencies.
-        let mut by_text =
-            HashMap::with_capacity(self.files.len() + self.workflow_dependencies.len());
-        for path in self.files.keys().chain(self.workflow_dependencies.keys()) {
-            if let Some(existing) = by_text.insert(path.as_str(), path) {
+        validate_workflow_path_collisions(
+            self.files.keys().chain(self.workflow_dependencies.keys()),
+        )
+    }
+}
+
+/// Reject a set of workflow paths that cannot coexist on one filesystem: two
+/// identical paths, or a path that is also an ancestor directory of another.
+///
+/// # Errors
+///
+/// Returns [`WorkflowVersionShapeError::PathCollision`] naming the two
+/// conflicting paths.
+pub fn validate_workflow_path_collisions<'a>(
+    paths: impl IntoIterator<Item = &'a WorkflowPath> + Clone,
+) -> Result<(), WorkflowVersionShapeError> {
+    let mut by_text = HashMap::new();
+    for path in paths.clone() {
+        if let Some(existing) = by_text.insert(path.as_str(), path) {
+            return Err(WorkflowVersionShapeError::PathCollision {
+                first:  existing.clone(),
+                second: path.clone(),
+            });
+        }
+    }
+    for path in paths {
+        let text = path.as_str();
+        for (index, _) in text.match_indices('/') {
+            if let Some(ancestor) = by_text.get(&text[..index]) {
                 return Err(WorkflowVersionShapeError::PathCollision {
-                    first:  existing.clone(),
+                    first:  (*ancestor).clone(),
                     second: path.clone(),
                 });
             }
         }
-        for path in self.files.keys().chain(self.workflow_dependencies.keys()) {
-            let text = path.as_str();
-            for (index, _) in text.match_indices('/') {
-                if let Some(ancestor) = by_text.get(&text[..index]) {
-                    return Err(WorkflowVersionShapeError::PathCollision {
-                        first:  (*ancestor).clone(),
-                        second: path.clone(),
-                    });
-                }
-            }
-        }
-        Ok(())
     }
+    Ok(())
 }
 
 impl<'de> Deserialize<'de> for WorkflowVersion {

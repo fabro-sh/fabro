@@ -23,6 +23,7 @@ fabro-types = { path = "../../foundation/fabro-types" }
 fabro-workflow = { path = "../fabro-workflow" }
 fabro-workflow-version = { path = "../fabro-workflow-version" }
 git2.workspace = true
+tempfile = "3"
 thiserror.workspace = true
 toml.workspace = true
 
@@ -31,5 +32,4 @@ fabro-test.workspace = true
 fabro-util = { path = "../../foundation/fabro-util" }
 insta.workspace = true
 serde_json.workspace = true
-tempfile = "3"
 temp-env = "0.3"

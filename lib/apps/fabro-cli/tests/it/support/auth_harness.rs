@@ -25,7 +25,9 @@ use fabro_server::jwt_auth::resolve_auth_mode_with_lookup;
 use fabro_server::server::{RouterOptions, build_router_with_options};
 use fabro_server::test_support::TestAppStateBuilder;
 use fabro_static::EnvVars;
+use fabro_store::Database;
 use fabro_test::{GitHubAppState, TestContext, apply_test_isolation};
+use fabro_types::WorkflowVersionId;
 use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -42,6 +44,7 @@ pub(crate) const TEST_DEV_TOKEN: &str =
 pub(crate) struct RealAuthHarness {
     pub(crate) api_base_url: String,
     api_server:              RunningHttpServer,
+    store:                   Arc<Database>,
     twin:                    fabro_test::TwinGitHub,
     pub(crate) api_requests: ListenerRequestLog,
 }
@@ -84,11 +87,13 @@ impl RealAuthHarness {
         if let Some(token) = dev_token.clone() {
             secrets.insert("FABRO_DEV_TOKEN".to_string(), token);
         }
+        let (store, artifact_store) = fabro_server::test_support::test_store_bundle();
         let state = TestAppStateBuilder::new()
             .runtime_settings(settings, RunLayer::default())
             .max_concurrent_runs(5)
             .env_lookup(|_| None)
             .server_secret_env(secrets)
+            .store_bundle(Arc::clone(&store), artifact_store)
             .vault_entries([
                 ("GITHUB_APP_CLIENT_SECRET", github_client_secret.as_str()),
                 (EnvVars::OPENAI_API_KEY, "test-openai-api-key"),
@@ -113,6 +118,7 @@ impl RealAuthHarness {
         Self {
             api_base_url,
             api_server,
+            store,
             twin,
             api_requests,
         }
@@ -120,6 +126,15 @@ impl RealAuthHarness {
 
     pub(crate) fn api_target(&self) -> String {
         format!("{}/api/v1", self.api_base_url)
+    }
+
+    pub(crate) async fn workflow_version_exists(&self, id: WorkflowVersionId) -> bool {
+        let blob_hash = id.into();
+        self.store
+            .blobs()
+            .exists(&blob_hash)
+            .await
+            .expect("workflow-version blob lookup should succeed")
     }
 
     pub(crate) async fn shutdown(self) {

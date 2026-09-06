@@ -46,11 +46,16 @@ impl WorkflowLocation {
     /// graph file (e.g. `workflow.fabro`); the three forms produce the same
     /// shape.
     pub fn resolve(arg: &Path, cwd: &Path) -> Result<Self> {
-        let resolved = resolve_workflow_arg_from(arg, cwd)?;
-        if resolved.extension().is_some_and(|ext| ext == "toml") {
-            Self::from_toml(resolved)
+        Self::from_exact_path(resolve_workflow_arg_from(arg, cwd)?)
+    }
+
+    /// Locate a workflow at exactly `path`, with no name shorthand. A `.toml`
+    /// path is read as the workflow config; any other path is the graph file.
+    pub fn from_exact_path(path: PathBuf) -> Result<Self> {
+        if path.extension().is_some_and(|ext| ext == "toml") {
+            Self::from_toml(path)
         } else {
-            Ok(Self::from_graph(resolved))
+            Ok(Self::from_graph(path))
         }
     }
 

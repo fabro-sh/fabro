@@ -746,9 +746,8 @@ mod tests {
             &self,
             _spec: &crate::ValidatedCreateRunSpec,
             _cwd: &Path,
-            _user_settings_path: &Path,
             _parent_id: Option<RunId>,
-        ) -> anyhow::Result<RunId> {
+        ) -> anyhow::Result<crate::CreateRunSubmission> {
             unreachable!()
         }
 

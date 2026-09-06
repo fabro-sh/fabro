@@ -750,10 +750,9 @@ async fn build_agent_session(
         .map_err(AskFabroBuildError::Agent)?;
     let backend = ClientBackend::new(Arc::new(api_client)).with_run_scope(run_id);
     let services = FabroRunToolServices {
-        backend:            Arc::new(backend),
-        current_run_id:     run_id,
-        base_cwd:           PathBuf::new(),
-        user_settings_path: PathBuf::new(),
+        backend:        Arc::new(backend),
+        current_run_id: run_id,
+        base_cwd:       PathBuf::new(),
     };
     register_named_fabro_run_tools(
         profile.tool_registry_mut(),
