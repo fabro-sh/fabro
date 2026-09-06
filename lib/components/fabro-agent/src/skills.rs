@@ -66,54 +66,52 @@ fn is_skill_name_char(c: char) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'
 }
 
-/// Find all `/skill-name` tokens in input where the `/` is preceded by
-/// whitespace (or start-of-string) and the name is followed by whitespace (or
-/// end-of-string).
+/// Find a `/skill-name` invocation at the START of the input only.
+///
+/// A slash command expresses the sender's intent to invoke a skill, so it is
+/// only honored where that intent lives: at the very beginning of the input
+/// (optionally after leading whitespace). Mid-text tokens like
+/// "smoke-tested via a /tmp build" or a failure echo mentioning
+/// "unknown skill: /tmp" are prose about paths or errors, not commands —
+/// they routinely appear in preamble context stitched ahead of a stage
+/// prompt, and expanding them either fails the stage ("Unknown skill") or
+/// silently replaces the whole prompt with a matching skill's template.
 fn find_skill_references(input: &str) -> Vec<SkillMatch> {
-    let mut results = Vec::new();
     let bytes = input.as_bytes();
     let len = bytes.len();
+
+    // Skip leading whitespace
     let mut i = 0;
-
-    while i < len {
-        if bytes[i] == b'/' {
-            // Check that preceding char is whitespace or this is start of string
-            let preceded_by_boundary = i == 0 || bytes[i - 1].is_ascii_whitespace();
-            if !preceded_by_boundary {
-                i += 1;
-                continue;
-            }
-
-            // The first char after `/` must be a lowercase letter
-            let name_start = i + 1;
-            if name_start >= len || !bytes[name_start].is_ascii_lowercase() {
-                i += 1;
-                continue;
-            }
-
-            // Consume the rest of the name
-            let mut j = name_start + 1;
-            while j < len && is_skill_name_char(bytes[j] as char) {
-                j += 1;
-            }
-
-            // Check that following char is whitespace or end of string
-            let followed_by_boundary = j >= len || bytes[j].is_ascii_whitespace();
-            if followed_by_boundary {
-                results.push(SkillMatch {
-                    name:  input[name_start..j].to_string(),
-                    start: i,
-                    end:   j,
-                });
-            }
-
-            i = j;
-        } else {
-            i += 1;
-        }
+    while i < len && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= len || bytes[i] != b'/' {
+        return Vec::new();
     }
 
-    results
+    // The first char after `/` must be a lowercase letter
+    let name_start = i + 1;
+    if name_start >= len || !bytes[name_start].is_ascii_lowercase() {
+        return Vec::new();
+    }
+
+    // Consume the rest of the name
+    let mut j = name_start + 1;
+    while j < len && is_skill_name_char(bytes[j] as char) {
+        j += 1;
+    }
+
+    // The name must be followed by whitespace or end of string
+    let followed_by_boundary = j >= len || bytes[j].is_ascii_whitespace();
+    if !followed_by_boundary {
+        return Vec::new();
+    }
+
+    vec![SkillMatch {
+        name:  input[name_start..j].to_string(),
+        start: i,
+        end:   j,
+    }]
 }
 
 #[derive(Debug)]
@@ -464,15 +462,16 @@ name: trimmed
         assert_eq!(result.skill_name.as_deref(), Some("commit"));
     }
 
+    // Mid-line references are intentionally NOT expanded anymore: prose
+    // containing slash-tokens is context, not a command. See
+    // find_skill_references — only input-leading invocations are honored.
     #[test]
-    fn expand_skill_mid_line() {
+    fn expand_skill_mid_line_is_not_a_command() {
         let skills = test_skills();
-        let result = expand_skill(&skills, "please /commit the auth changes").unwrap();
-        assert_eq!(
-            result.text,
-            "Review changes and commit.\n\nplease  the auth changes"
-        );
-        assert_eq!(result.skill_name.as_deref(), Some("commit"));
+        let input = "please /commit the auth changes";
+        let result = expand_skill(&skills, input).unwrap();
+        assert_eq!(result.text, input);
+        assert_eq!(result.skill_name, None);
     }
 
     #[test]
@@ -499,12 +498,67 @@ name: trimmed
         assert_eq!(result.skill_name, None);
     }
 
+    // Real-world regressions: agents mentioning lowercase absolute paths
+    // in their output. The path text re-entered a later stage's input
+    // (preamble context) and was parsed as a skill reference, failing the
+    // stage with "Unknown skill: /tmp" (run 01M0N6ZAP0NAWMWYWKZZ7T7R2B,
+    // planner pass 2; run 01M0NGQXB67674XQ5YCR1MB4BN, implementer pass 1).
     #[test]
-    fn expand_multiple_skills_errors() {
+    fn expand_tolerates_bare_temp_dir_token_from_context() {
         let skills = test_skills();
-        let result = expand_skill(&skills, "/commit and /test");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Only one skill"));
+        let input = "Prior stage summary: smoke-tested via a /tmp build. \
+The gate was green.";
+        let result = expand_skill(&skills, input);
+        assert!(
+            result.is_ok(),
+            "bare lowercase path tokens from prior-stage context must not fail expansion: {result:?}"
+        );
+        let expanded = result.unwrap();
+        assert_eq!(expanded.text, input);
+        assert_eq!(expanded.skill_name, None);
+    }
+
+    // A known skill name inside prior-stage context must not silently
+    // replace the whole stage prompt with the skill template.
+    #[test]
+    fn expand_does_not_hijack_on_known_skill_named_in_context() {
+        let skills = test_skills();
+        let input = "Prior review feedback: run the /commit checks yourself \
+before finishing this pass. Now implement feature X.";
+        let result = expand_skill(&skills, input).unwrap();
+        assert_eq!(
+            result.text, input,
+            "a skill name inside prior-stage context must not replace the stage prompt"
+        );
+        assert_eq!(result.skill_name, None);
+    }
+
+    // The engine's own failure echo re-enters the next stage's preamble
+    // (failure_signature carries the literal error text) and crashed every
+    // subsequent stage of the run.
+    #[test]
+    fn expand_tolerates_engine_failure_echo_of_unknown_skill() {
+        let skills = test_skills();
+        let input = "failure_signature: implementer|structural|precondition \
+failed: agent session failed: invalid state: unknown skill: /tmp";
+        let result = expand_skill(&skills, input);
+        assert!(
+            result.is_ok(),
+            "engine failure echo must not fail expansion: {result:?}"
+        );
+        assert_eq!(result.unwrap().skill_name, None);
+    }
+
+    // With start-only expansion, a leading command plus a mid-line token is
+    // one command with prose that mentions another skill name: the leading
+    // one wins, the rest is user_input. No error.
+    #[test]
+    fn expand_leading_command_wins_over_mid_line_mention() {
+        let skills = test_skills();
+        let result = expand_skill(&skills, "/commit and /test").unwrap();
+        assert_eq!(result.skill_name.as_deref(), Some("commit"));
+        assert!(result.text.starts_with("Review changes and commit."));
+        assert!(result.text.contains("and /test"));
     }
 
     #[test]
