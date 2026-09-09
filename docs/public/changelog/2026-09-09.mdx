@@ -1,0 +1,20 @@
+---
+title: "GLM 5.3 and GLM 5.3 Flash"
+date: "2026-09-09"
+---
+
+## GLM 5.3
+
+Z.ai's GLM 5.3 is now available through the built-in Z.ai provider, OpenRouter, and Fireworks, and replaces GLM 5.2 as the Z.ai provider default. It reasons on every request with three effort levels (`low`, `high`, `max`), carries a 1M-token context window with 128K max output, and supports tools and prompt caching.
+
+```bash
+fabro run workflow.fabro --model glm-5.3
+```
+
+The portable `glm`, `glm5`, `glm53`, and `glm5.3` aliases now resolve to GLM 5.3 across the Z.ai, OpenRouter, and Venice offerings. GLM 5.2 remains selectable by slug or through the `glm52` and `glm5.2` aliases; on the Z.ai coding endpoint, requests for GLM 5.2 (and GLM 5.1) are routed upstream to GLM 5.3.
+
+## GLM 5.3 Flash
+
+GLM 5.3 Flash joins the same providers as the small-default Z.ai model. It is natively multimodal — image, video, and file input alongside text — with the same 1M context, 128K max output, tool use, prompt caching, and reasoning effort controls.
+
+Z.ai, OpenRouter, and Fireworks all serve GLM 5.3 Flash at list rates: $0.15 input / $0.50 output per million tokens.

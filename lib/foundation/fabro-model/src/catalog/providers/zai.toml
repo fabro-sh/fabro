@@ -8,11 +8,67 @@ priority = 60
 [providers.zai.auth]
 credentials = ["env:ZAI_API_KEY", "vault:ZAI_API_KEY"]
 
+# GLM 5.3 and GLM 5.3 Flash run on the same coding endpoint as GLM 5.2.
+# `thinking.type` only accepts `enabled` (reasoning cannot be disabled), so
+# requests reason at one of the three effort levels below. Requests for
+# GLM-5.2/GLM-5.1 are auto-routed upstream to GLM-5.3, and GLM-4.7 requests
+# to GLM-5.3-Flash. Prices are from docs.z.ai/guides/overview/pricing,
+# verified 2026-09-04.
+
+[providers.zai.models."glm-5.3"]
+display_name = "GLM 5.3"
+family = "glm-5"
+default = true
+aliases = ["glm", "glm5", "glm53", "glm5.3"]
+
+[providers.zai.models."glm-5.3".limits]
+context_window = 1048576
+max_output = 131072
+
+[providers.zai.models."glm-5.3".features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[providers.zai.models."glm-5.3".controls]
+reasoning_effort = ["low", "high", "max"]
+
+[providers.zai.models."glm-5.3".costs]
+input_cost_per_mtok = 1.4
+output_cost_per_mtok = 4.4
+cache_input_cost_per_mtok = 0.26
+
+# Native multimodal (image/video/file input).
+[providers.zai.models."glm-5.3-flash"]
+display_name = "GLM 5.3 Flash"
+family = "glm-5"
+small_default = true
+
+[providers.zai.models."glm-5.3-flash".limits]
+context_window = 1048576
+max_output = 131072
+
+[providers.zai.models."glm-5.3-flash".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[providers.zai.models."glm-5.3-flash".controls]
+reasoning_effort = ["low", "high", "max"]
+
+[providers.zai.models."glm-5.3-flash".costs]
+input_cost_per_mtok = 0.15
+output_cost_per_mtok = 0.5
+cache_input_cost_per_mtok = 0.03
+
 [providers.zai.models."glm-5.2"]
 display_name = "GLM 5.2"
 family = "glm-5"
-default = true
-aliases = ["glm", "glm5", "glm52", "glm5.2"]
+aliases = ["glm52", "glm5.2"]
 
 [providers.zai.models."glm-5.2".limits]
 context_window = 1048576

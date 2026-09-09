@@ -178,6 +178,48 @@ input_cost_per_mtok = 0.14
 output_cost_per_mtok = 0.28
 cache_input_cost_per_mtok = 0.028
 
+# Fireworks serves GLM 5.3 at Z.ai's list rates. Verified against
+# docs.fireworks.ai/serverless/pricing on 2026-09-04.
+[providers.fireworks.models."glm-5.3"]
+api_id = "accounts/fireworks/models/glm-5p3"
+display_name = "GLM 5.3 (via Fireworks)"
+family = "glm-5"
+
+[providers.fireworks.models."glm-5.3".limits]
+context_window = 1048576
+max_output = 131072
+
+[providers.fireworks.models."glm-5.3".features]
+tools = true
+vision = false
+reasoning = true
+prompt_cache = true
+
+[providers.fireworks.models."glm-5.3".costs]
+input_cost_per_mtok = 1.4
+output_cost_per_mtok = 4.4
+cache_input_cost_per_mtok = 0.26
+
+[providers.fireworks.models."glm-5.3-flash"]
+api_id = "accounts/fireworks/models/glm-5p3-flash"
+display_name = "GLM 5.3 Flash (via Fireworks)"
+family = "glm-5"
+
+[providers.fireworks.models."glm-5.3-flash".limits]
+context_window = 1048576
+max_output = 131072
+
+[providers.fireworks.models."glm-5.3-flash".features]
+tools = true
+vision = true
+reasoning = true
+prompt_cache = true
+
+[providers.fireworks.models."glm-5.3-flash".costs]
+input_cost_per_mtok = 0.15
+output_cost_per_mtok = 0.5
+cache_input_cost_per_mtok = 0.03
+
 [providers.fireworks.models."glm-5.2"]
 api_id = "accounts/fireworks/models/glm-5p2"
 display_name = "GLM 5.2 (via Fireworks)"

@@ -554,6 +554,170 @@ enabled = true
     assert_eq!(final_response.cost_source, Some(CostSource::Authoritative));
 }
 
+#[fabro_macros::e2e_test(live("ZAI_API_KEY"))]
+async fn zai_glm_5_3_reasoning_tool_round_trip() {
+    let api_key = std::env::var(EnvVars::ZAI_API_KEY).expect("ZAI_API_KEY must be set");
+    let adapter = OpenAiCompatibleAdapter::new(api_key, "https://api.z.ai/api/coding/paas/v4")
+        .with_name("zai")
+        .with_catalog(Arc::new(Catalog::from_builtin().unwrap()));
+    let tool = ToolDefinition::function(
+        "multiply",
+        "Multiply two integers",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "a": {"type": "integer"},
+                "b": {"type": "integer"}
+            },
+            "required": ["a", "b"]
+        }),
+    );
+    let request = Request {
+        model: "glm-5.3".to_string(),
+        messages: vec![Message::user(
+            "Use the multiply tool to calculate 19 times 23. Do not calculate it yourself.",
+        )],
+        tools: Some(vec![tool]),
+        tool_choice: Some(ToolChoice::Required),
+        temperature: Some(0.0),
+        max_tokens: Some(4096),
+        reasoning_effort: Some(ReasoningEffort::High),
+        ..make_request("glm-5.3")
+    };
+
+    let tool_response = adapter.complete(&request).await.unwrap();
+    assert_eq!(tool_response.finish_reason, FinishReason::ToolCalls);
+    let raw_message_keys = tool_response
+        .raw
+        .as_ref()
+        .and_then(|raw| raw.pointer("/choices/0/message"))
+        .and_then(serde_json::Value::as_object)
+        .map(|message| message.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    assert!(
+        tool_response.reasoning().is_some(),
+        "GLM 5.3 should return reasoning content before its tool call; raw message keys: \
+         {raw_message_keys:?}"
+    );
+    let tool_call = tool_response
+        .tool_calls()
+        .into_iter()
+        .next()
+        .expect("GLM 5.3 should call the required tool");
+    assert_eq!(tool_call.name, "multiply");
+
+    let mut messages = request.messages.clone();
+    messages.push(tool_response.message);
+    messages.push(Message::tool_result(
+        tool_call.id,
+        serde_json::json!({"product": 437}),
+        false,
+    ));
+    let final_request = Request {
+        model: "glm-5.3".to_string(),
+        messages,
+        temperature: Some(0.0),
+        max_tokens: Some(2048),
+        reasoning_effort: Some(ReasoningEffort::High),
+        ..make_request("glm-5.3")
+    };
+
+    let final_response = adapter.complete(&final_request).await.unwrap();
+    assert_eq!(final_response.finish_reason, FinishReason::Stop);
+    assert!(
+        final_response.text().contains("437"),
+        "GLM 5.3 should incorporate the replayed tool result"
+    );
+}
+
+#[fabro_macros::e2e_test(live("OPENROUTER_API_KEY"))]
+async fn openrouter_glm_5_3_reasoning_tool_round_trip() {
+    let api_key =
+        std::env::var(EnvVars::OPENROUTER_API_KEY).expect("OPENROUTER_API_KEY must be set");
+    let overrides: LlmCatalogSettings = toml::from_str(
+        r"
+[providers.openrouter]
+enabled = true
+",
+    )
+    .expect("OpenRouter catalog override should parse");
+    let catalog = Catalog::from_builtin_with_overrides(&overrides)
+        .expect("enabled OpenRouter catalog should build");
+    let adapter = OpenAiCompatibleAdapter::new(api_key, "https://openrouter.ai/api/v1")
+        .with_name("openrouter")
+        .with_catalog(Arc::new(catalog));
+    let tool = ToolDefinition::function(
+        "multiply",
+        "Multiply two integers",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "a": {"type": "integer"},
+                "b": {"type": "integer"}
+            },
+            "required": ["a", "b"]
+        }),
+    );
+    let request = Request {
+        model: "z-ai/glm-5.3".to_string(),
+        messages: vec![Message::user(
+            "Use the multiply tool to calculate 19 times 23. Do not calculate it yourself.",
+        )],
+        tools: Some(vec![tool]),
+        tool_choice: Some(ToolChoice::Required),
+        temperature: Some(0.0),
+        max_tokens: Some(4096),
+        reasoning_effort: Some(ReasoningEffort::High),
+        ..make_request("z-ai/glm-5.3")
+    };
+
+    let tool_response = adapter.complete(&request).await.unwrap();
+    assert_eq!(tool_response.finish_reason, FinishReason::ToolCalls);
+    let raw_message_keys = tool_response
+        .raw
+        .as_ref()
+        .and_then(|raw| raw.pointer("/choices/0/message"))
+        .and_then(serde_json::Value::as_object)
+        .map(|message| message.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    assert!(
+        tool_response.reasoning().is_some(),
+        "GLM 5.3 should return reasoning content before its tool call; raw message keys: \
+         {raw_message_keys:?}"
+    );
+    assert_eq!(tool_response.cost_source, Some(CostSource::Authoritative));
+    let tool_call = tool_response
+        .tool_calls()
+        .into_iter()
+        .next()
+        .expect("GLM 5.3 should call the required tool");
+    assert_eq!(tool_call.name, "multiply");
+
+    let mut messages = request.messages.clone();
+    messages.push(tool_response.message);
+    messages.push(Message::tool_result(
+        tool_call.id,
+        serde_json::json!({"product": 437}),
+        false,
+    ));
+    let final_request = Request {
+        model: "z-ai/glm-5.3".to_string(),
+        messages,
+        temperature: Some(0.0),
+        max_tokens: Some(2048),
+        reasoning_effort: Some(ReasoningEffort::High),
+        ..make_request("z-ai/glm-5.3")
+    };
+
+    let final_response = adapter.complete(&final_request).await.unwrap();
+    assert_eq!(final_response.finish_reason, FinishReason::Stop);
+    assert!(
+        final_response.text().contains("437"),
+        "GLM 5.3 should incorporate the replayed tool result"
+    );
+    assert_eq!(final_response.cost_source, Some(CostSource::Authoritative));
+}
+
 #[fabro_macros::e2e_test(live("OPENROUTER_API_KEY"))]
 async fn openrouter_poolside_laguna_complete() {
     let api_key =

@@ -1893,6 +1893,8 @@ const LEGACY_BUILTIN_MODEL_IDENTIFIERS: &[(&str, &str, &str)] = &[
     ("poolside/laguna-xs-2.1", "openrouter", "laguna-xs-2.1"),
     ("qwen/qwen3-coder", "openrouter", "qwen3-coder"),
     ("qwen/qwen3.6-flash", "openrouter", "qwen3.6-flash"),
+    ("z-ai/glm-5.3", "openrouter", "glm-5.3"),
+    ("z-ai/glm-5.3-flash", "openrouter", "glm-5.3-flash"),
     ("z-ai/glm-5.2", "openrouter", "glm-5.2"),
     ("z-ai/glm-4.6", "openrouter", "glm-4.6"),
     (
@@ -3444,7 +3446,7 @@ enabled = true
     }
 
     #[test]
-    fn builtin_glm_5_2_aliases_are_portable() {
+    fn builtin_glm_aliases_are_portable() {
         let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
             r"
 [providers.openrouter]
@@ -3454,14 +3456,23 @@ enabled = true
         .expect("enabled OpenRouter override should build from the built-in provider settings");
 
         for provider in [ProviderId::new("zai"), ProviderId::new("openrouter")] {
-            for alias in ["glm", "glm5", "glm52", "glm5.2"] {
+            for (alias, canonical_id) in [
+                ("glm", "glm-5.3"),
+                ("glm5", "glm-5.3"),
+                ("glm53", "glm-5.3"),
+                ("glm5.3", "glm-5.3"),
+                ("z-ai/glm-5.3", "glm-5.3"),
+                ("z-ai/glm-5.3-flash", "glm-5.3-flash"),
+                ("glm52", "glm-5.2"),
+                ("glm5.2", "glm-5.2"),
+            ] {
                 let model = catalog
                     .resolve_on_provider(&provider, alias)
                     .unwrap_or_else(|error| {
                         panic!("{alias} should resolve on {provider}: {error}")
                     });
                 assert_eq!(model.provider, provider, "{alias}");
-                assert_eq!(model.id, "glm-5.2", "{alias}");
+                assert_eq!(model.id, canonical_id, "{alias}");
             }
         }
     }
@@ -3626,8 +3637,6 @@ enabled = true
             },
             estimated_output_tps: None,
             aliases: [
-                "glm",
-                "glm5",
                 "glm52",
                 "glm5.2",
             ],
@@ -4190,6 +4199,30 @@ enabled = true
                 0.028,
             ),
             (
+                "glm-5.3",
+                "accounts/fireworks/models/glm-5p3",
+                "glm-5",
+                1_048_576,
+                131_072,
+                false,
+                true,
+                1.4,
+                4.4,
+                0.26,
+            ),
+            (
+                "glm-5.3-flash",
+                "accounts/fireworks/models/glm-5p3-flash",
+                "glm-5",
+                1_048_576,
+                131_072,
+                true,
+                true,
+                0.15,
+                0.5,
+                0.03,
+            ),
+            (
                 "glm-5.2",
                 "accounts/fireworks/models/glm-5p2",
                 "glm-5",
@@ -4348,6 +4381,8 @@ enabled = true
                 "kimi-k2.6",
                 "deepseek-v4-pro",
                 "deepseek-v4-flash",
+                "glm-5.3",
+                "glm-5.3-flash",
                 "glm-5.2",
                 "minimax-m2.7",
             ] {
@@ -7264,12 +7299,10 @@ sampling_params = false
             },
             estimated_output_tps: None,
             aliases: [
-                "glm",
-                "glm5",
                 "glm52",
                 "glm5.2",
             ],
-            default: true,
+            default: false,
             small_default: false,
             configured: false,
         }
@@ -7283,10 +7316,149 @@ sampling_params = false
             ReasoningEffort::High,
             ReasoningEffort::Max
         ]);
-        assert_eq!(catalog.get("glm").unwrap().id, "glm-5.2");
-        assert_eq!(catalog.get("glm5").unwrap().id, "glm-5.2");
         assert_eq!(catalog.get("glm52").unwrap().id, "glm-5.2");
         assert_eq!(catalog.get("glm5.2").unwrap().id, "glm-5.2");
+    }
+
+    #[test]
+    fn glm_5_3_in_catalog() {
+        let catalog = Catalog::builtin();
+        let model = catalog.get("glm-5.3").expect("GLM 5.3 should be present");
+        insta::assert_debug_snapshot!(model, @r#"
+        Model {
+            id: "glm-5.3",
+            provider: zai,
+            family: "glm-5",
+            display_name: "GLM 5.3",
+            limits: ModelLimits {
+                context_window: 1048576,
+                max_output: Some(
+                    131072,
+                ),
+            },
+            training: None,
+            knowledge_cutoff: None,
+            features: ModelFeatures {
+                tools: true,
+                vision: false,
+                reasoning: true,
+                reasoning_effort: Levels,
+                prompt_cache: true,
+                cache_control_breakpoints: false,
+                sampling_params: true,
+            },
+            controls: ModelControls {
+                reasoning_effort: [
+                    Low,
+                    High,
+                    Max,
+                ],
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    1.4,
+                ),
+                output_cost_per_mtok: Some(
+                    4.4,
+                ),
+                cache_input_cost_per_mtok: Some(
+                    0.26,
+                ),
+            },
+            estimated_output_tps: None,
+            aliases: [
+                "glm",
+                "glm5",
+                "glm53",
+                "glm5.3",
+            ],
+            default: true,
+            small_default: false,
+            configured: false,
+        }
+        "#);
+
+        let settings = catalog
+            .model_settings("glm-5.3")
+            .expect("GLM 5.3 settings should be present");
+        assert_eq!(settings.api_id, "glm-5.3");
+        assert_eq!(settings.controls.reasoning_effort, vec![
+            ReasoningEffort::Low,
+            ReasoningEffort::High,
+            ReasoningEffort::Max
+        ]);
+        assert_eq!(catalog.get("glm").unwrap().id, "glm-5.3");
+        assert_eq!(catalog.get("glm5").unwrap().id, "glm-5.3");
+        assert_eq!(catalog.get("glm53").unwrap().id, "glm-5.3");
+        assert_eq!(catalog.get("glm5.3").unwrap().id, "glm-5.3");
+    }
+
+    #[test]
+    fn glm_5_3_flash_in_catalog() {
+        let catalog = Catalog::builtin();
+        let model = catalog
+            .get("glm-5.3-flash")
+            .expect("GLM 5.3 Flash should be present");
+        insta::assert_debug_snapshot!(model, @r#"
+        Model {
+            id: "glm-5.3-flash",
+            provider: zai,
+            family: "glm-5",
+            display_name: "GLM 5.3 Flash",
+            limits: ModelLimits {
+                context_window: 1048576,
+                max_output: Some(
+                    131072,
+                ),
+            },
+            training: None,
+            knowledge_cutoff: None,
+            features: ModelFeatures {
+                tools: true,
+                vision: true,
+                reasoning: true,
+                reasoning_effort: Levels,
+                prompt_cache: true,
+                cache_control_breakpoints: false,
+                sampling_params: true,
+            },
+            controls: ModelControls {
+                reasoning_effort: [
+                    Low,
+                    High,
+                    Max,
+                ],
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    0.15,
+                ),
+                output_cost_per_mtok: Some(
+                    0.5,
+                ),
+                cache_input_cost_per_mtok: Some(
+                    0.03,
+                ),
+            },
+            estimated_output_tps: None,
+            aliases: [],
+            default: false,
+            small_default: true,
+            configured: false,
+        }
+        "#);
+
+        let settings = catalog
+            .model_settings("glm-5.3-flash")
+            .expect("GLM 5.3 Flash settings should be present");
+        assert_eq!(settings.api_id, "glm-5.3-flash");
+        assert_eq!(
+            catalog
+                .small_default_for_provider(&ProviderId::new("zai"))
+                .unwrap()
+                .id,
+            "glm-5.3-flash"
+        );
     }
 
     #[test]

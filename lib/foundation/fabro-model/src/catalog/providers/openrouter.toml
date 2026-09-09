@@ -619,11 +619,63 @@ input_cost_per_mtok = 2.0
 output_cost_per_mtok = 6.0
 cache_input_cost_per_mtok = 0.25
 
+[providers.openrouter.models."glm-5.3"]
+api_id = "z-ai/glm-5.3"
+display_name = "GLM 5.3 (via OpenRouter)"
+family = "glm-5"
+aliases = ["glm", "glm5", "glm53", "glm5.3"]
+
+[providers.openrouter.models."glm-5.3".limits]
+context_window = 1048576
+max_output = 131072
+
+[providers.openrouter.models."glm-5.3".features]
+tools = true
+vision = false
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[providers.openrouter.models."glm-5.3".controls]
+reasoning_effort = ["low", "high", "max"]
+
+[providers.openrouter.models."glm-5.3".costs]
+input_cost_per_mtok = 1.4
+output_cost_per_mtok = 4.4
+cache_input_cost_per_mtok = 0.14
+
+# Native multimodal (image/video input). Matches Z.ai's list rates;
+# OpenRouter's authoritative in-band usage.cost supersedes this estimate
+# on completed responses.
+[providers.openrouter.models."glm-5.3-flash"]
+api_id = "z-ai/glm-5.3-flash"
+display_name = "GLM 5.3 Flash (via OpenRouter)"
+family = "glm-5"
+
+[providers.openrouter.models."glm-5.3-flash".limits]
+context_window = 1048576
+max_output = 131072
+
+[providers.openrouter.models."glm-5.3-flash".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[providers.openrouter.models."glm-5.3-flash".controls]
+reasoning_effort = ["low", "high", "max"]
+
+[providers.openrouter.models."glm-5.3-flash".costs]
+input_cost_per_mtok = 0.15
+output_cost_per_mtok = 0.5
+cache_input_cost_per_mtok = 0.03
+
 [providers.openrouter.models."glm-5.2"]
 api_id = "z-ai/glm-5.2"
 display_name = "GLM 5.2 (via OpenRouter)"
 family = "glm-5"
-aliases = ["glm", "glm5", "glm52", "glm5.2"]
+aliases = ["glm52", "glm5.2"]
 
 [providers.openrouter.models."glm-5.2".limits]
 context_window = 1048576

@@ -309,6 +309,7 @@
             "group": "September 2026",
             "icon": "clock-rotate-left",
             "pages": [
+              "changelog/2026-09-09",
               "changelog/2026-09-03"
             ]
           },
