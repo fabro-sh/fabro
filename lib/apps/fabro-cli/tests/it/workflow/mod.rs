@@ -12,7 +12,6 @@ mod command_routing;
 mod conditional_branching;
 mod dry_run_examples;
 mod full_stack;
-mod hooks;
 mod human_gate;
 
 use std::path::{Path, PathBuf};
