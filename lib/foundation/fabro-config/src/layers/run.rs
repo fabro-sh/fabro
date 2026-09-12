@@ -405,7 +405,7 @@ pub struct InterviewProviderLayer {
     pub channel: Option<InterpString>,
 }
 
-/// `[run.agent]` — agent knobs only (Fabro tools and MCPs).
+/// `[run.agent]` — agent knobs only (Fabro tools, skill directories, and MCPs).
 #[derive(
     Debug,
     Clone,
@@ -422,6 +422,15 @@ pub struct RunAgentLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[option(default = "false", value_type = "boolean")]
     pub fabro_tools: Option<bool>,
+
+    /// Extra skill discovery directories for workflow agents, searched after
+    /// the convention directories (`~/.fabro/skills`,
+    /// `{git_root}/.fabro/skills`, `{git_root}/skills`), so a skill defined
+    /// here overrides a same-named convention skill. Relative entries resolve
+    /// against the repository root. Splice marker supported at layering time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[option(value_type = "array")]
+    pub skill_dirs: Vec<StringOrSplice>,
 
     /// Agent-scoped MCP server entries, keyed by name.
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]

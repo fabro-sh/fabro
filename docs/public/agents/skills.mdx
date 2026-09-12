@@ -21,8 +21,28 @@ Within each directory, Fabro looks for `*/SKILL.md` files (one level of nesting)
 
 When the same skill name appears in multiple directories, **later directories override earlier ones**. This means project-level skills take precedence over global skills, letting you customize behavior per-repo.
 
+Fabro follows a symlinked search directory, but it does not recurse through symlinks below it. Symlinking `.fabro/skills/<name>` at a skill directory elsewhere in the repo therefore does not register that skill; add the real directory with `[run.agent] skill_dirs` instead.
+
+### Extra directories for workflow runs
+
+Repositories that keep skills somewhere else — `.agents/skills/` is a common choice — add those directories with `[run.agent] skill_dirs`:
+
+```toml title="workflow.toml"
+[run.agent]
+skill_dirs = [".agents/skills"]
+```
+
+The key layers like every other run setting, so it can live in `workflow.toml`, `.fabro/project.toml`, or `settings.toml`. Configured directories are **added to** the convention directories and searched after them, so a skill defined there overrides a same-named convention skill. Relative entries resolve against the repository root, which keeps them stable regardless of a stage's working directory; absolute entries are used verbatim. Agent stages and their subagents both see the extra directories.
+
+To add a directory while keeping the ones a lower layer configured, splice them in with `"..."`:
+
+```toml title="workflow.toml"
+[run.agent]
+skill_dirs = ["...", ".agents/skills"]
+```
+
 <Note>
-You can override the default directories by setting `skill_dirs` in the session configuration. When set, only the specified directories are searched.
+The Rust SDK's `SessionOptions.skill_dirs` **replaces** the convention directories, and `fabro exec --skills-dir` does the same for a single ad-hoc session. `[run.agent] skill_dirs` is the additive, configuration-driven equivalent for workflow and automation runs.
 </Note>
 
 ## Invocation
