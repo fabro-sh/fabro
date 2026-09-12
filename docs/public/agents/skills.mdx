@@ -40,10 +40,17 @@ Users can reference a skill with a `/` prefix in their input:
 Fabro detects the `/commit` token, finds the matching skill, and expands the input by replacing the skill reference with the full template. The remaining text (`fix the off-by-one error in pagination`) is substituted into the `{{user_input}}` placeholder.
 
 Rules for slash syntax:
-- The `/` must be preceded by whitespace or be at the start of the input
+- The reference must be at the very START of the input (optionally after leading whitespace) — a slash command expresses the sender's intent to invoke a skill, and that intent lives at the beginning of a message, not mid-prose
 - The skill name must be followed by whitespace or end of input
-- Only one skill reference per input is allowed
+- Only one skill reference per input is allowed; with a leading command, later slash tokens are user input, not additional commands
 - File paths like `/usr/bin/bash` are not matched (the character after `/` must be a lowercase letter, and the name cannot contain `/`)
+
+Why start-only: in workflow stages the input is the assembled preamble plus
+prompt, and the preamble carries prior-stage context — agent responses,
+`context_updates`, command output, failure signatures. Mid-text tokens there
+("smoke-tested via a /tmp build") are prose about paths, not commands:
+expanding them either failed stages with "Unknown skill" errors or silently
+replaced the whole prompt with a matching skill's template.
 
 ### use_skill tool (agent-initiated)
 
