@@ -29,6 +29,16 @@ route_severity_below = ""
 route_categories = ""
 # Optional run-report URL included in the sticky summary.
 run_url = ""
+# Incremental re-review (P3): incremental = "true" makes prepare fetch the
+# PR's prior-review history, review only the commits since the last
+# reviewed head, and skip findings already covered by an earlier comment.
+# incremental_overlap_threshold is the span IoU bound, strictly inside
+# (0, 1); empty means 0.6. bot_login names the login whose comments count
+# as ours (required in practice on GitHub App servers, where GET /user is
+# unavailable to installation tokens; e.g. "fabro-sh-fabro[bot]").
+incremental = ""
+incremental_overlap_threshold = ""
+bot_login = ""
 
 # Full history, for arbitrary base and range inputs.
 [run.clone]
@@ -86,6 +96,7 @@ include = [
   "CODE-REVIEW-*/metadata/review-meta.json",
   "CODE-REVIEW-*/pr-publish-plan.json",
   "CODE-REVIEW-*/pr-publish-outcome.json",
+  "CODE-REVIEW-*/pr-history.json",
 ]
 
 [environments.code-review]
