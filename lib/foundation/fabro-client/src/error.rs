@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use fabro_util::exit::{ErrorExt, ExitClass};
+use fabro_util::version::FABRO_VERSION;
 use serde::de::DeserializeOwned;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,11 +151,43 @@ where
             let status = response.status();
             build_structured_error(anyhow!("request failed with status {status}"), status, None)
         }
+        progenitor_client::Error::InvalidResponsePayload(body, source) => StructuredApiError {
+            error:   schema_mismatch_error(&body, &source),
+            failure: None,
+        },
         other => StructuredApiError {
             error:   anyhow::Error::new(other),
             failure: None,
         },
     }
+}
+
+/// Maximum number of body characters echoed back when a response fails to
+/// deserialize. Enough to recognize the payload, short enough that the
+/// remediation hint is not scrolled off the terminal.
+const SCHEMA_MISMATCH_BODY_PREVIEW: usize = 200;
+
+/// The server answered successfully but its payload does not fit the schema
+/// this CLI was generated against. In practice that nearly always means the
+/// two are on different versions, so lead with that rather than dumping the
+/// whole body and leaving the reader to guess.
+fn schema_mismatch_error(body: &[u8], source: &serde_json::Error) -> anyhow::Error {
+    let text = String::from_utf8_lossy(body);
+    let preview: String = text.chars().take(SCHEMA_MISMATCH_BODY_PREVIEW).collect();
+    let ellipsis = if text.chars().nth(SCHEMA_MISMATCH_BODY_PREVIEW).is_some() {
+        "..."
+    } else {
+        ""
+    };
+
+    anyhow!(
+        "server response did not match the schema this CLI expects: {source}\n\n\
+         This usually means the CLI and the server are running different versions. \
+         This CLI is {FABRO_VERSION}; run `fabro version` to compare it with the server, \
+         then upgrade the older side with `fabro upgrade` (add `--prerelease` if the \
+         server runs a nightly build).\n\n\
+         Response body started with: {preview}{ellipsis}"
+    )
 }
 
 pub fn map_api_error<E>(err: progenitor_client::Error<E>) -> anyhow::Error
@@ -236,7 +269,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::{
-        ApiError, ApiFailure, api_failure_for, classify_api_error, map_api_error,
+        ApiError, ApiFailure, FABRO_VERSION, api_failure_for, classify_api_error, map_api_error,
         raw_response_failure_error,
     };
 
@@ -284,6 +317,48 @@ mod tests {
             "authentication_required",
         ));
         assert_eq!(exit::exit_code_for(&err), 4);
+    }
+
+    // A payload the server sent happily but the generated client cannot fit
+    // into the type it was built against, which is what a version skew looks
+    // like from the CLI's side.
+    fn invalid_payload_error(body: &str) -> progenitor_client::Error<serde_json::Value> {
+        let source = serde_json::from_str::<u32>(body)
+            .expect_err("an object should not deserialize into the expected type");
+        progenitor_client::Error::InvalidResponsePayload(
+            bytes::Bytes::copy_from_slice(body.as_bytes()),
+            source,
+        )
+    }
+
+    #[test]
+    fn map_api_error_explains_schema_mismatch_as_a_version_skew() {
+        let err = map_api_error(invalid_payload_error(r#"{"title":"some run"}"#));
+        let rendered = format!("{err}");
+
+        assert!(
+            rendered.contains("did not match the schema this CLI expects"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("fabro version"), "{rendered}");
+        assert!(rendered.contains("fabro upgrade"), "{rendered}");
+        assert!(rendered.contains("--prerelease"), "{rendered}");
+        assert!(rendered.contains(FABRO_VERSION), "{rendered}");
+    }
+
+    #[test]
+    fn schema_mismatch_truncates_the_response_body() {
+        let body = format!(r#"{{"title":"{}"}}"#, "x".repeat(5_000));
+        let err = map_api_error(invalid_payload_error(&body));
+        let rendered = format!("{err}");
+
+        assert!(rendered.contains("Response body started with:"), "{rendered}");
+        assert!(rendered.contains("..."), "{rendered}");
+        assert!(
+            rendered.len() < 1_000,
+            "message should stay readable, got {} chars:\n{rendered}",
+            rendered.len()
+        );
     }
 
     #[test]
