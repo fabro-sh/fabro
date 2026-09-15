@@ -63,7 +63,15 @@ pub mod keys {
     // --- Prefix constants (for filtering and dynamic keys) ---
     pub const GRAPH_PREFIX: &str = "graph.";
     pub const INTERNAL_PREFIX: &str = "internal.";
-    pub const CURRENT_PREFIX: &str = "current";
+    /// Engine-reserved key names starting with "current": the singular
+    /// `current_node` plus the dotted `current.*` namespace. Deliberately NOT
+    /// the bare prefix "current" — user keys like `current_seed_id` or
+    /// `current_task` are natural names and must not be swallowed by the
+    /// engine-internal filter (observed in run 01M0NJ3QZ1FK53X9DK3BBAN2ED:
+    /// planner-emitted `current_seed_id`/`current_seed_brief` never reached
+    /// the next stage's preamble at any fidelity).
+    pub const CURRENT_NODE_KEY: &str = "current_node";
+    pub const CURRENT_PREFIX: &str = "current.";
     pub const THREAD_PREFIX: &str = "thread.";
     pub const RESPONSE_PREFIX: &str = "response.";
     pub const INTERNAL_RETRY_COUNT_PREFIX: &str = "internal.retry_count.";
@@ -110,6 +118,7 @@ pub mod keys {
         key.starts_with(INTERNAL_PREFIX)
             || key.starts_with(GRAPH_PREFIX)
             || key.starts_with(THREAD_PREFIX)
+            || key == CURRENT_NODE_KEY
             || key.starts_with(CURRENT_PREFIX)
     }
 
@@ -149,6 +158,10 @@ pub mod keys {
             assert!(is_engine_internal_key("thread.main.current_node"));
             assert!(is_engine_internal_key("current.preamble"));
             assert!(is_engine_internal_key("current_node"));
+            // Natural user keys starting with "current" are NOT internal
+            assert!(!is_engine_internal_key("current_seed_id"));
+            assert!(!is_engine_internal_key("current_task"));
+            assert!(!is_engine_internal_key("currently_running"));
 
             // Keys that are NOT engine-internal (should propagate)
             assert!(!is_engine_internal_key("response.plan"));
