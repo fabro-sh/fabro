@@ -15,6 +15,7 @@ import {
   PatchDiff,
   type FileContents,
 } from "@pierre/diffs/react";
+import { Markdown } from "../components/markdown";
 import { useToast } from "../components/toast";
 import { importChunk } from "../lib/import-chunk";
 import type {
@@ -74,6 +75,8 @@ const DIFF_STYLE_STORAGE_KEY = "fabro.run-files.diff-style";
 // resolve a cached/304 refetch in tens of ms, leaving the user unsure
 // whether the click registered.
 const MIN_REFRESH_SPIN_MS = 500;
+const MARKDOWN_PREVIEW_CLASS =
+  "rounded-md border border-line bg-panel px-8 py-6";
 
 export const ErrorBoundary = RunFilesErrorBoundary;
 
@@ -251,6 +254,10 @@ const RunFileRow = memo(function RunFileRow({
   const newContents = file.new_file.contents;
   const oldPath = file.old_file.name || display;
   const newPath = file.new_file.name || display;
+  const canPreviewMarkdown =
+    /\.md$/i.test(newPath) && newContents != null && !placeholder;
+  const [showMarkdownPreview, setShowMarkdownPreview] =
+    useState(canPreviewMarkdown);
 
   const oldFile = useMemo<FileContents | null>(() => {
     if (oldContents == null) return null;
@@ -297,6 +304,12 @@ const RunFileRow = memo(function RunFileRow({
   let body: ReactElement | null = null;
   if (placeholder) {
     body = placeholder;
+  } else if (canPreviewMarkdown && showMarkdownPreview) {
+    body = (
+      <div className={MARKDOWN_PREVIEW_CLASS} data-markdown-preview="true">
+        <Markdown content={newContents} />
+      </div>
+    );
   } else if (oldFile && newFile) {
     body = (
       <MultiFileDiff
@@ -323,6 +336,31 @@ const RunFileRow = memo(function RunFileRow({
       aria-label={`${file.change_kind ?? "modified"}: ${display}`}
       className="focus:outline-2 focus:outline-focus focus:outline-offset-2 rounded-md"
     >
+      {canPreviewMarkdown ? (
+        <header className="mb-2 flex items-center justify-between gap-3 rounded-md border border-line bg-panel-alt px-3 py-2">
+          <span className="truncate font-mono text-xs text-fg-2" title={display}>
+            {display}
+          </span>
+          <div className="flex shrink-0 rounded-md bg-overlay p-0.5 text-xs">
+            <button
+              type="button"
+              aria-pressed={showMarkdownPreview}
+              onClick={() => setShowMarkdownPreview(true)}
+              className={`rounded px-2 py-1 ${showMarkdownPreview ? "bg-panel text-fg" : "text-fg-muted hover:text-fg-2"}`}
+            >
+              Preview
+            </button>
+            <button
+              type="button"
+              aria-pressed={!showMarkdownPreview}
+              onClick={() => setShowMarkdownPreview(false)}
+              className={`rounded px-2 py-1 ${showMarkdownPreview ? "text-fg-muted hover:text-fg-2" : "bg-panel text-fg"}`}
+            >
+              Changes
+            </button>
+          </div>
+        </header>
+      ) : null}
       {body}
     </section>
   );
