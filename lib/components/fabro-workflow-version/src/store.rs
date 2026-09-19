@@ -225,11 +225,9 @@ impl WorkflowVersionStore {
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
-    use std::time::Duration;
 
     use fabro_store::{BlobStore, test_support};
     use fabro_types::{WorkflowPath, WorkflowVersion, WorkflowVersionId};
-    use object_store::memory::InMemory;
 
     use super::{WorkflowVersionStore, WorkflowVersionStoreError};
     use crate::ValidatedWorkflowVersion;
@@ -260,12 +258,7 @@ mod tests {
     }
 
     fn stores() -> (Arc<BlobStore>, WorkflowVersionStore) {
-        let database = test_support::test_database(
-            Arc::new(InMemory::new()),
-            "",
-            Duration::from_millis(1),
-            None,
-        );
+        let database = test_support::test_database();
         let blobs = database.blobs();
         let versions = WorkflowVersionStore::new(Arc::clone(&blobs));
         (blobs, versions)

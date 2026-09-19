@@ -20,12 +20,6 @@ macro_rules! cached_style {
 }
 
 cached_style!(
-    style_header_running,
-    "    {spinner:.dim} {wide_msg} {elapsed:.dim}"
-);
-cached_style!(style_header_done, "    {wide_msg:.dim} {prefix:.dim}");
-cached_style!(style_header_failed, "    {wide_msg:.red} {prefix:.dim}");
-cached_style!(
     style_stage_running,
     "    {spinner:.cyan} {wide_msg} {elapsed:.dim}"
 );
@@ -38,7 +32,6 @@ cached_style!(style_tool_done, "      {wide_msg} {prefix:.dim}");
 cached_style!(style_subagent_info, "        {wide_msg}");
 cached_style!(style_branch_done, "        {wide_msg} {prefix:.dim}");
 cached_style!(style_static_dim, "    {wide_msg:.dim}");
-cached_style!(style_sandbox_detail, "             {wide_msg:.dim}");
 cached_style!(style_empty, " ");
 
 pub(super) fn green_check(styles: &Styles) -> String {
@@ -62,10 +55,6 @@ pub(crate) fn format_duration_short(d: Duration) -> String {
     } else {
         format!("{}ms", d.as_millis())
     }
-}
-
-pub(super) fn terminal_hyperlink(url: &str, text: &str) -> String {
-    format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
 }
 
 pub(super) fn truncate(s: &str, max: usize) -> String {

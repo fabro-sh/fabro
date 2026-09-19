@@ -91,7 +91,7 @@ fn dump_exports_large_command_output_backed_by_blob_refs() {
 
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
-    big   [shape=parallelogram, label="Big", script="printf '%*s' 120000 '' | tr ' ' x"]
+    big   [shape=parallelogram, label="Big", script="yes xxxxxxxxxxxxxxxx | head -n 8000"]
 
     start -> big -> exit
 }
@@ -160,7 +160,7 @@ fn dump_exports_blob_refs_and_artifacts_together() {
 
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
-    big   [shape=parallelogram, label="Big", script="mkdir -p assets/shared && printf exported > assets/shared/report.txt && printf '%*s' 120000 '' | tr ' ' x"]
+    big   [shape=parallelogram, label="Big", script="mkdir -p assets/shared && printf exported > assets/shared/report.txt && yes xxxxxxxxxxxxxxxx | head -n 8000"]
 
     start -> big -> exit
 }
@@ -256,14 +256,15 @@ fn dump_exports_completed_run_snapshot() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Exported 13 files for run [ULID] to [TEMP_DIR]/export
+    Exported 14 files for run [ULID] to [TEMP_DIR]/export
     ----- stderr -----
     ");
 
     assert_snapshot!(dump_file_summary(&output_dir), @"
-    checkpoints/0018.json
-    checkpoints/0022.json
-    checkpoints/0026.json
+    checkpoints/0025.json
+    checkpoints/0037.json
+    checkpoints/0049.json
+    checkpoints/0061.json
     events.jsonl
     graph.fabro
     run.json

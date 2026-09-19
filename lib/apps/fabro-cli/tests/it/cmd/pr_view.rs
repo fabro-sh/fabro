@@ -4,8 +4,7 @@
 )]
 
 use fabro_test::{fabro_snapshot, test_context};
-use fabro_types::run_event::PullRequestCreatedProps;
-use fabro_types::{EventBody, RunEvent, RunId};
+use fabro_types::RunId;
 use httpmock::MockServer;
 
 use super::support::{mock_resolved_run, server_endpoint, setup_seeded_completed_dry_run};
@@ -65,34 +64,11 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
     runtime.block_on(async {
         let (client, base_url) =
             server_endpoint(&context.storage_dir).expect("server endpoint should exist");
-        let event = RunEvent {
-            id: ulid::Ulid::new().to_string(),
-            ts: chrono::Utc::now(),
-            run_id,
-            node_id: None,
-            node_label: None,
-            stage_id: None,
-            parallel_group_id: None,
-            parallel_branch_id: None,
-            session_id: None,
-            parent_session_id: None,
-            tool_call_id: None,
-            actor: None,
-            body: EventBody::PullRequestCreated(PullRequestCreatedProps {
-                pr_url:      "https://github.com/fabro-sh/fabro/pull/123".to_string(),
-                pr_number:   123,
-                owner:       "fabro-sh".to_string(),
-                repo:        "fabro".to_string(),
-                base_branch: "main".to_string(),
-                head_branch: "fabro/run/demo".to_string(),
-                head_sha:    Some("final-sha".to_string()),
-                title:       "Map the constellations".to_string(),
-                draft:       false,
-            }),
-        };
         client
-            .post(format!("{base_url}/api/v1/runs/{run_id}/events"))
-            .json(&event)
+            .put(format!("{base_url}/api/v1/runs/{run_id}/pull_request"))
+            .json(&serde_json::json!({
+                "html_url": "https://github.com/fabro-sh/fabro/pull/123"
+            }))
             .send()
             .await
             .unwrap()

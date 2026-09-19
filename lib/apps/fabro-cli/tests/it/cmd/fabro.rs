@@ -19,8 +19,10 @@ fn help() {
       events      View the event log of a workflow run
       logs        View the raw worker tracing log of a workflow run
       resume      Resume an interrupted workflow run
-      rewind      Rewind a workflow run to an earlier checkpoint
+      retry       Retry a finished workflow run from its last checkpoint in a new run
       fork        Fork a workflow run from an earlier checkpoint into a new run
+      rewind      Rewind a workflow run to an earlier checkpoint, replacing it
+      timeline    Show the checkpoint timeline of a workflow run
       wait        Block until a workflow run completes
       steer       Steer a running agent mid-execution
       ask         Ask Fabro a read-only question about a run

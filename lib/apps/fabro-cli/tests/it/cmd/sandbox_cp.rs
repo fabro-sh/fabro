@@ -3,9 +3,14 @@
     reason = "integration tests stage fixtures with sync std::fs; test infrastructure, not Tokio-hot path"
 )]
 
-use fabro_test::{fabro_snapshot, test_context};
+use std::path::Path;
 
-use super::support::{read_text, setup_local_sandbox_run, setup_seeded_created_dry_run, text_tree};
+use fabro_test::{fabro_snapshot, test_context};
+use fabro_types::RunSandbox;
+
+use super::support::{
+    read_text, run_state, setup_local_sandbox_run, setup_seeded_created_dry_run, text_tree,
+};
 
 #[test]
 fn help() {
@@ -113,8 +118,15 @@ fn sandbox_cp_uploads_file_to_run() {
     ----- stdout -----
     ----- stderr -----
     ");
+    // The run executes in its own workspace, not in the target folder: the
+    // upload lands where the run's sandbox works.
+    let working_directory = run_state(&setup.run.run_dir)
+        .sandbox
+        .and_then(RunSandbox::into_instance)
+        .map(|instance| instance.runtime.working_directory)
+        .expect("the run's sandbox instance");
     assert_eq!(
-        read_text(&setup.workspace_dir.join("sandbox_dir/uploaded.txt")),
+        read_text(&Path::new(&working_directory).join("sandbox_dir/uploaded.txt")),
         "uploaded-root"
     );
 }

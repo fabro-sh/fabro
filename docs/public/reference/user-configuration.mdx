@@ -36,7 +36,7 @@ Files that omit `_version` are treated as version `1`. The legacy top-level `ver
 | CLI-only | `[cli.target]`, `[cli.auth]`, `[cli.exec]`, `[cli.output]`, `[cli.updates]`, `[cli.logging]` |
 | Server-side run policy | `[run.model]`, `[run.environment]`, `[environments.<slug>]`, `[run.checkpoint]`, `[run.inputs]`, `[run.prepare]`, `[run.pull_request]`, `[run.integrations.github]`, `[run.hooks]`, `[run.agent.mcps]` |
 | Shared LLM catalog | `[llm]`, a lithos-llm catalog overlay: `[llm.providers.<id>]`, `[llm.providers.<id>.models.<id>]`, and the agent harness under `metadata.agent` |
-| Server-only | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
+| Server-only | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
 
 `[cli.*]` and `[server.*]` stanzas are owner-specific: they are only consumed from `~/.fabro/settings.toml` (plus process-local flags and env overrides). The same stanzas in `.fabro/project.toml` or `workflow.toml` remain schema-valid but runtime-inert.
 

@@ -14,11 +14,19 @@ fn parse_ndjson(stdout: &[u8]) -> Vec<Value> {
         .collect()
 }
 
+/// The name of a stream item: a platform record's kind, or a Petri
+/// event's recorded (or derived) `event` tag.
+fn item_name(item: &Value) -> Option<&str> {
+    if item["kind"] == "platform" {
+        return item["item"]["record"]["kind"].as_str();
+    }
+    item["item"]["record"]["body"]["event"]
+        .as_str()
+        .or_else(|| item["item"]["derived"]["event"].as_str())
+}
+
 fn assert_event_sequence_contains(events: &[Value], expected: &[&str]) {
-    let event_names: Vec<&str> = events
-        .iter()
-        .filter_map(|event| event["event"].as_str())
-        .collect();
+    let event_names: Vec<&str> = events.iter().filter_map(item_name).collect();
 
     let mut cursor = 0;
     for expected_name in expected {
@@ -93,11 +101,12 @@ fn events_completed_run_outputs_raw_ndjson() {
     assert_events_belong_to_run(&events, &run.run_id);
     assert_event_sequence_contains(&events, &[
         "run.created",
-        "run.running",
-        "stage.started",
-        "stage.completed",
-        "run.completed",
-        "sandbox.stop.completed",
+        "run.lifecycle",
+        "run.started",
+        "step.started",
+        "step.finished",
+        "run.finished",
+        "run.lifecycle",
     ]);
 }
 
@@ -115,6 +124,10 @@ fn events_completed_run_reads_store_without_progress_jsonl() {
         r#""id":"[0-9a-f-]+""#.to_string(),
         r#""id":"[EVENT_ID]""#.to_string(),
     ));
+    filters.push((
+        r#""recorded_at":\d{13}"#.to_string(),
+        r#""recorded_at":[EPOCH_MS]"#.to_string(),
+    ));
     let mut cmd = context.command();
     cmd.args(["events", "--tail", "2", &run.run_id]);
 
@@ -122,8 +135,8 @@ fn events_completed_run_reads_store_without_progress_jsonl() {
     success: true
     exit_code: 0
     ----- stdout -----
-    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
-    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.completed","id":"[EVENT_ID]","properties":{"duration_ms":"[DURATION_MS]","provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"run_id":"[ULID]","stream_seq":67,"kind":"petri","id":"coordinator/7/0","recorded_at":[EPOCH_MS],"item":{"id":{"log":"coordinator","seq":7,"index":0},"origin":"external","context":{},"recorded_at":[EPOCH_MS],"record":{"seq":7,"origin":"external","recorded_at":[EPOCH_MS],"body":{"event":"run.finished","status":"success"}}}}
+    {"run_id":"[ULID]","stream_seq":68,"kind":"platform","id":"[EVENT_ID]","recorded_at":[EPOCH_MS],"item":{"seq":14,"recorded_at":[EPOCH_MS],"record":{"kind":"run.lifecycle","transition":"succeeded","status":{"kind":"succeeded","reason":"completed"}}}}
     ----- stderr -----
     "#);
 }
@@ -141,6 +154,10 @@ fn events_tail_limits_output() {
         r#""id":"[0-9a-f-]+""#.to_string(),
         r#""id":"[EVENT_ID]""#.to_string(),
     ));
+    filters.push((
+        r#""recorded_at":\d{13}"#.to_string(),
+        r#""recorded_at":[EPOCH_MS]"#.to_string(),
+    ));
     let mut cmd = context.command();
     cmd.args(["events", "--tail", "2", &run.run_id]);
 
@@ -148,8 +165,8 @@ fn events_tail_limits_output() {
     success: true
     exit_code: 0
     ----- stdout -----
-    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
-    {"actor":{"kind":"worker","run_id":"[ULID]"},"event":"sandbox.stop.completed","id":"[EVENT_ID]","properties":{"duration_ms":"[DURATION_MS]","provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"run_id":"[ULID]","stream_seq":67,"kind":"petri","id":"coordinator/7/0","recorded_at":[EPOCH_MS],"item":{"id":{"log":"coordinator","seq":7,"index":0},"origin":"external","context":{},"recorded_at":[EPOCH_MS],"record":{"seq":7,"origin":"external","recorded_at":[EPOCH_MS],"body":{"event":"run.finished","status":"success"}}}}
+    {"run_id":"[ULID]","stream_seq":68,"kind":"platform","id":"[EVENT_ID]","recorded_at":[EPOCH_MS],"item":{"seq":14,"recorded_at":[EPOCH_MS],"record":{"kind":"run.lifecycle","transition":"succeeded","status":{"kind":"succeeded","reason":"completed"}}}}
     ----- stderr -----
     "#);
 }
@@ -179,6 +196,10 @@ fn events_pretty_formats_small_run() {
         r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
         "[DURATION]".to_string(),
     ));
+    filters.push((
+        r"Checkpoint [0-9a-f]{7}\b".to_string(),
+        "Checkpoint [SHA]".to_string(),
+    ));
     let mut cmd = context.command();
     cmd.args(["events", "--pretty", &run.run_id]);
 
@@ -186,22 +207,33 @@ fn events_pretty_formats_small_run() {
     success: true
     exit_code: 0
     ----- stdout -----
-    [CLOCK]   Sandbox: local  [DURATION]
-    [CLOCK] ▶ Simple  [ULID]
-                Run tests and report results
-
+    [CLOCK] ▶ Run tests and report results  [ULID]
+    [CLOCK]   · submitted
+    [CLOCK]   · start_requested
+    [CLOCK]   · runnable
+    [CLOCK]   · starting
+    [CLOCK]   · running
+    [CLOCK]   Engine: petri run started
     [CLOCK] ▶ Start
-    [CLOCK] ✓ Start    [DURATION]
-    [CLOCK]    → run_tests unconditional
+    [CLOCK] ✓ Start  [DURATION]
+    [CLOCK]   Branch: fabro/run/[ULID] from [SHA]
+    [CLOCK]   Git identity: Fabro <noreply@fabro.sh>  default
+    [CLOCK]    ⎘ Checkpoint [SHA]
     [CLOCK] ▶ Run Tests
-    [CLOCK] ✓ Run Tests    [DURATION]
-    [CLOCK]    → report unconditional
+    [CLOCK]    start → run_tests continue
+    [CLOCK] ✓ Run Tests  [DURATION]
+    [CLOCK]    ⎘ Checkpoint [SHA]
     [CLOCK] ▶ Report
-    [CLOCK] ✓ Report    [DURATION]
-    [CLOCK]    → exit unconditional
+    [CLOCK]    run_tests → report continue
+    [CLOCK] ✓ Report  [DURATION]
+    [CLOCK]    ⎘ Checkpoint [SHA]
     [CLOCK] ▶ Exit
-    [CLOCK] ✓ Exit    [DURATION]
+    [CLOCK]    report → exit continue
+    [CLOCK] ✓ Exit  [DURATION]
+    [CLOCK]    ⎘ Checkpoint [SHA]
+    [CLOCK]   Diff: +0 -0 in 0 file(s)
     [CLOCK] ✓ SUCCEEDED [DURATION]
+    [CLOCK]   · succeeded
     ----- stderr -----
     ");
 }

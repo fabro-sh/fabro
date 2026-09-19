@@ -5,7 +5,9 @@ export type DebugCategory =
   | "command"
   | "lifecycle"
   | "human"
-  | "system";
+  | "system"
+  | "petri"
+  | "platform";
 
 export const DEBUG_CATEGORIES: readonly DebugCategory[] = [
   "agent",
@@ -13,6 +15,8 @@ export const DEBUG_CATEGORIES: readonly DebugCategory[] = [
   "lifecycle",
   "human",
   "system",
+  "petri",
+  "platform",
 ] as const;
 
 const PREFIX_TO_CATEGORY: Record<string, DebugCategory> = {
@@ -34,6 +38,8 @@ const CATEGORY_LABEL: Record<DebugCategory, string> = {
   lifecycle: "Lifecycle",
   human: "Human",
   system: "System",
+  petri: "Petri",
+  platform: "Platform",
 };
 
 const CATEGORY_TONE: Record<DebugCategory, string> = {
@@ -42,6 +48,8 @@ const CATEGORY_TONE: Record<DebugCategory, string> = {
   lifecycle: "bg-amber/15 text-amber",
   human: "bg-coral/15 text-coral",
   system: "bg-overlay-strong text-fg-3",
+  petri: "bg-teal-500/15 text-teal-500",
+  platform: "bg-amber/15 text-amber",
 };
 
 const CATEGORY_COLOR: Record<DebugCategory, string> = {
@@ -50,6 +58,8 @@ const CATEGORY_COLOR: Record<DebugCategory, string> = {
   lifecycle: "var(--color-amber)",
   human: "var(--color-coral)",
   system: "var(--color-ice-300)",
+  petri: "var(--color-teal-500)",
+  platform: "var(--color-amber)",
 };
 
 export function debugCategory(eventName: string | null | undefined): DebugCategory {

@@ -23,7 +23,6 @@ import {
   cancelRun,
   denyRun,
   isLifecycleActionError,
-  retryRun,
   unarchiveRun,
 } from "./run-actions";
 
@@ -82,15 +81,6 @@ export function useUnarchiveRun(id: string | undefined) {
   return useLifecycleMutation(id, "unarchive", unarchiveRun);
 }
 
-export function useRetryRun(id: string | undefined) {
-  return useLifecycleMutation(id, "retry", retryRun, (run, mutate) => {
-    void mutate(queryKeys.runs.detail(run.id), run, { revalidate: false });
-    if (run.parent_id) {
-      mutateRunListCaches(mutate);
-    }
-  });
-}
-
 function useLifecycleMutation(
   id: string | undefined,
   intent: LifecycleAction,
@@ -118,12 +108,10 @@ function useLifecycleMutation(
     {
       onSuccess: (result) => {
         if (!id || !result.ok) return;
-        if (intent !== "retry") {
-          // Keep the returned lifecycle state visible while revalidation
-          // observes the durable follow-up event (notably a 202 cancel).
-          void mutate(queryKeys.runs.detail(id), result.run, { revalidate: true });
-          void mutate(queryKeys.runs.usage(id));
-        }
+        // Keep the returned lifecycle state visible while revalidation
+        // observes the durable follow-up event (notably a 202 cancel).
+        void mutate(queryKeys.runs.detail(id), result.run, { revalidate: true });
+        void mutate(queryKeys.runs.usage(id));
         mutateRunListCaches(mutate);
         onSuccessExtra?.(result.run, mutate);
       },

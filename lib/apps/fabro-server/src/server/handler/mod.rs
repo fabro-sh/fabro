@@ -14,10 +14,12 @@ mod environments;
 pub(in crate::server) mod events;
 pub(in crate::server) mod graph;
 pub(in crate::server) mod lifecycle;
+mod lineage;
 mod llm_sse;
 mod mcp_servers;
 mod models;
 mod pair;
+mod petri;
 pub(in crate::server) mod pull_requests;
 pub(in crate::server) mod runs;
 mod sandbox;
@@ -120,10 +122,6 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/files", get(demo::list_run_files_stub))
         .route("/runs/{id}/commits", get(demo::list_run_commits_stub))
         .route(
-            "/runs/{id}/stages/{stageId}/events",
-            get(demo::get_stage_events),
-        )
-        .route(
             "/runs/{id}/stages/{stageId}/context-window",
             get(not_implemented),
         )
@@ -217,8 +215,10 @@ pub(super) fn real_routes() -> Router<Arc<AppState>> {
         .merge(sandbox::routes())
         .merge(sandboxes::routes())
         .merge(lifecycle::routes())
+        .merge(lineage::routes())
         .merge(steer::routes())
         .merge(pair::routes())
+        .merge(petri::routes())
         .merge(graph::manifest_routes())
         .merge(graph::run_routes())
         .merge(models::routes())

@@ -147,46 +147,6 @@ fabro events 01JKXYZ
 fabro dump 01JKXYZ --output ./run-dump
 ```
 
-## Rewinding to an earlier checkpoint
-
-If a later stage goes off-track, you can rewind a terminal run to an earlier checkpoint and resume from there instead of restarting the entire workflow. Rewind creates a replacement run at the target checkpoint, archives the source run, and prints the new run ID to resume:
-
-```bash
-# List the checkpoint timeline
-fabro rewind <RUN_ID> --list
-
-# Rewind to a specific checkpoint
-fabro rewind <RUN_ID> plan@2
-
-# Resume from the rewound point
-fabro resume <NEW_RUN_ID>
-```
-
-The source run must already be terminal (`succeeded`, `failed`, or `dead`). If the source is archived, unarchive it first. If archive fails after the replacement run is created, do not retry `fabro rewind`; archive the source run manually.
-
-See [`fabro rewind`](/reference/cli#fabro-rewind) for the full command reference.
-
-## Forking a run
-
-If you want to explore an alternate path from a checkpoint without archiving the original run, use `fabro fork` instead of `fabro rewind`. Fork creates a new independent run branching from the target checkpoint; the original run stays intact.
-
-```bash
-# List checkpoints
-fabro fork <RUN_ID> --list
-
-# Fork from a specific checkpoint
-fabro fork <RUN_ID> plan@2
-
-# Resume the forked run
-fabro resume <NEW_RUN_ID>
-```
-
-Use **rewind** when a terminal run should be abandoned and replaced from an earlier point. Use **fork** when you want to try a different approach while keeping the original run as a reference.
-
-`fabro rewind --list`, `fabro fork --list`, `fabro rewind`, and `fabro fork` are server-backed. Timeline listing reads checkpoints from the durable run store.
-
-See [`fabro fork`](/reference/cli#fabro-fork) for the full command reference.
-
 ## When checkpointing is active
 
 Git checkpointing activates automatically when:

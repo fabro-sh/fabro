@@ -15,20 +15,19 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use fabro_api::types::{
-    CreateSecretRequest, DeleteSecretRequest, DiffFile, DiffStats, EventEnvelope, FileDiff,
-    FileDiffChangeKind, PaginatedEventList, PaginatedRunCommitList, PaginatedRunFileList,
-    PaginationMeta, RunArtifactListResponse, RunCommit, RunCommitParent, RunCommitParentSha,
-    RunCommitParentShortSha, RunCommitPerson, RunCommitSha, RunCommitShortSha, RunCommitTreeSha,
-    RunCommitsMeta, RunCommitsMetaBaseSha, RunCommitsMetaHeadSha, RunCommitsMetaSource,
-    RunFilesMeta, RunFilesMetaScope, RunFilesMetaSource, SandboxService,
-    SandboxServiceListResponse,
+    CreateSecretRequest, DeleteSecretRequest, DiffFile, DiffStats, FileDiff, FileDiffChangeKind,
+    PaginatedRunCommitList, PaginatedRunFileList, RunArtifactListResponse, RunCommit,
+    RunCommitParent, RunCommitParentSha, RunCommitParentShortSha, RunCommitPerson, RunCommitSha,
+    RunCommitShortSha, RunCommitTreeSha, RunCommitsMeta, RunCommitsMetaBaseSha,
+    RunCommitsMetaHeadSha, RunCommitsMetaSource, RunFilesMeta, RunFilesMetaScope,
+    RunFilesMetaSource, SandboxService, SandboxServiceListResponse,
 };
 use serde_json::json;
 
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
-use crate::server::{AppState, EventListParams, PaginationParams, parse_stage_id_path};
+use crate::server::{AppState, PaginationParams};
 
 fn paginated_response<T: serde::Serialize>(
     items: Vec<T>,
@@ -118,44 +117,6 @@ pub(crate) async fn get_run_stages(
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
     paginated_response(runs::stages(), &pagination)
-}
-
-pub(crate) async fn get_stage_events(
-    _auth: RequiredUser,
-    State(_state): State<Arc<AppState>>,
-    Path((_id, stage_id)): Path<(String, String)>,
-    Query(params): Query<EventListParams>,
-) -> Response {
-    let stage_id = match parse_stage_id_path(&stage_id) {
-        Ok(stage_id) => stage_id,
-        Err(response) => return response,
-    };
-    let since_seq = params.since_seq();
-    let limit = params.limit();
-    let mut matches: Vec<EventEnvelope> = runs::stage_events()
-        .into_iter()
-        .filter(|envelope| {
-            envelope.seq >= since_seq
-                && (envelope.event.stage_id.as_ref() == Some(&stage_id)
-                    || (envelope.event.stage_id.is_none()
-                        && stage_id.visit() == 1
-                        && envelope.event.node_id.as_deref() == Some(stage_id.node_id())))
-        })
-        .take(limit + 1)
-        .collect();
-    let has_more = matches.len() > limit;
-    matches.truncate(limit);
-    (
-        StatusCode::OK,
-        Json(PaginatedEventList {
-            data: matches,
-            meta: PaginationMeta {
-                has_more,
-                total: None,
-            },
-        }),
-    )
-        .into_response()
 }
 
 pub(crate) async fn list_run_artifacts_stub(
@@ -488,18 +449,23 @@ pub(crate) async fn run_events_stub(
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
+    // One `RunStreamItem`: the platform record that ends the demo run.
     let events = vec![Ok::<_, std::convert::Infallible>(
         Event::default().data(
             json!({
-                "seq": 2,
-                "id": "evt_demo_attach_completed",
-                "ts": "2026-04-06T15:00:02Z",
                 "run_id": "01JQ0000000000000000000001",
-                "event": "run.completed",
-                "properties": {
-                    "duration_ms": 42,
-                    "artifact_count": 0,
-                    "status": "succeeded"
+                "stream_seq": 2,
+                "kind": "platform",
+                "id": "2",
+                "recorded_at": 1_775_487_602_000_u64,
+                "item": {
+                    "seq": 2,
+                    "recorded_at": 1_775_487_602_000_u64,
+                    "record": {
+                        "kind": "run.lifecycle",
+                        "transition": "succeeded",
+                        "status": { "kind": "succeeded", "reason": "completed" }
+                    }
                 }
             })
             .to_string(),
@@ -883,7 +849,7 @@ pub(crate) async fn get_system_info(
             "profile": option_env!("FABRO_BUILD_PROFILE"),
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
-            "storage_engine": "slatedb",
+            "storage_engine": "sqlite",
             "storage_dir": "/demo/fabro/storage",
             "uptime_secs": 42,
             "runs": { "total": 3, "active": 1 },
@@ -1101,8 +1067,9 @@ mod runs {
     };
     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
     use fabro_types::{
-        AuthMethod, IdpIdentity, PendingReason, Principal, RepositoryRef, RunId, RunLifecycle,
-        RunLinks, RunOrigin, RunSize, RunTimestamps, StageId, WorkflowRef, WorkflowSettings,
+        AuthMethod, BlobHash, IdpIdentity, PendingReason, PetriAdmission, PetriGraphRef, Principal,
+        RepositoryRef, RunId, RunLifecycle, RunLinks, RunOrigin, RunSize, RunTimestamps, StageId,
+        WorkflowRef, WorkflowSettings,
     };
     use lithos_llm::catalog::ProviderId;
     use lithos_llm::types::{Cost, CostSource, TokenCounts, Usage};
@@ -1473,55 +1440,23 @@ mod runs {
         ]
     }
 
-    /// The agent stage's stored events: what pebble reports for one prompt
-    /// that finds MCP servers, activates a skill, reads and writes files,
-    /// delegates to a subagent, moves to a fallback route, and compacts,
-    /// plus fabro's own `stage.prompt`.
-    pub(super) fn stage_events() -> Vec<fabro_types::EventEnvelope> {
-        use fabro_types::run_event::stage::StagePromptProps;
-        use fabro_types::{AgentEventProps, EventBody, EventEnvelope, RunEvent};
+    /// The agent stage's coding agent events: what pebble reports for one
+    /// prompt that finds MCP servers, activates a skill, reads and writes
+    /// files, delegates to a subagent, moves to a fallback route, and
+    /// compacts.
+    pub(super) fn agent_events() -> Vec<pebble_coding_agent::events::CodingAgentEvent> {
         use pebble_coding_agent::events::{
             CodingAgentEvent, CodingEvent, CompactionReason, ErrorData, ErrorKind,
             FailoverContinuation, InputSource, McpToolSummary, SkillActivationSource, SkillSummary,
         };
 
-        let run_id = demo_run_id(1);
-        let node_id = "detect-drift";
-        let stage_id = fabro_types::StageId::new(node_id, 1);
         let ts = ts("2026-03-06T14:30:00Z");
 
-        let make_envelope = |seq: u32, id: &str, body: EventBody| EventEnvelope {
-            seq,
-            event: RunEvent {
-                id: id.into(),
-                ts,
-                run_id,
-                node_id: Some(node_id.into()),
-                node_label: Some("Detect Drift".into()),
-                stage_id: Some(stage_id.clone()),
-                parallel_group_id: None,
-                parallel_branch_id: None,
-                session_id: None,
-                parent_session_id: None,
-                tool_call_id: None,
-                actor: None,
-                body,
-            },
-        };
-        let agent = |event: CodingEvent| {
-            EventBody::Agent(AgentEventProps::new(
-                node_id,
-                1,
-                CodingAgentEvent::new("ses_demo_detect_drift", event, ts.into()),
-            ))
-        };
+        let agent =
+            |event: CodingEvent| CodingAgentEvent::new("ses_demo_detect_drift", event, ts.into());
         let subagent = |event: CodingEvent| {
-            EventBody::Agent(AgentEventProps::new(
-                node_id,
-                1,
-                CodingAgentEvent::new("ses_demo_sub_1", event, ts.into())
-                    .with_parent_session_id("ses_demo_detect_drift"),
-            ))
+            CodingAgentEvent::new("ses_demo_sub_1", event, ts.into())
+                .with_parent_session_id("ses_demo_detect_drift")
         };
         let answer =
             |model: &str, text: &str, input: u64, output: u64| CodingEvent::AssistantMessage {
@@ -1573,16 +1508,7 @@ mod runs {
 
         let prompt = "You are a drift detection agent. Compare the production and staging environments and identify any configuration or code drift.";
         let report = "# Drift report\n\n- redis.max_connections: 200 (production) vs 100 (staging)\n- redis.tls: enabled vs disabled\n- iam.session_duration: 3600s vs 1800s\n";
-        let events = vec![
-            EventBody::StagePrompt(StagePromptProps {
-                visit:            1,
-                text:             prompt.into(),
-                mode:             None,
-                provider:         None,
-                model:            None,
-                reasoning_effort: None,
-                speed:            None,
-            }),
+        vec![
             agent(started("anthropic", "claude-opus-4.6")),
             agent(CodingEvent::McpServerReady {
                 server:     "github".into(),
@@ -1705,22 +1631,14 @@ mod runs {
                 260,
             )),
             agent(CodingEvent::ProcessingEnd),
-        ];
-        events
-            .into_iter()
-            .enumerate()
-            .map(|(index, body)| {
-                let seq = u32::try_from(index + 1).expect("the demo stream is short");
-                make_envelope(seq, &format!("evt-detect-drift-{seq}"), body)
-            })
-            .collect()
+        ]
     }
 
     /// The demo run's projection: each stage as `stages()` lists it, and the
-    /// agent stage carrying the coding agent's fold of `stage_events()`.
+    /// agent stage carrying the coding agent's fold of `agent_events()`.
     pub(super) fn run_state() -> fabro_types::RunProjection {
         use fabro_types::{
-            EventBody, Graph, RunProjection, RunProvenance, RunSpec, StageTiming, WorkflowSettings,
+            Graph, RunProjection, RunProvenance, RunSpec, StageTiming, WorkflowSettings,
             first_event_seq,
         };
         use pebble_coding_agent::projection::SessionProjection;
@@ -1746,6 +1664,13 @@ mod runs {
             spec_blob:           None,
             git:                 None,
             fork_source_ref:     None,
+            admission:           PetriAdmission {
+                graph:    PetriGraphRef {
+                    blob:   BlobHash::new(b"demo-run"),
+                    digest: "demo".to_string(),
+                },
+                children: Vec::new(),
+            },
         };
         let mut projection = RunProjection::new(
             "Detect and fix environment drift".to_string(),
@@ -1762,10 +1687,8 @@ mod runs {
             entry.timing = stage.wall_time_ms.map(StageTiming::wall_only);
         }
         let mut agent = SessionProjection::new();
-        for envelope in stage_events() {
-            if let EventBody::Agent(props) = &envelope.event.body {
-                agent.apply(&props.event);
-            }
+        for event in agent_events() {
+            agent.apply(&event);
         }
         let detect = projection.stage_entry("detect-drift", 1, first_event_seq(1));
         detect.agent = Some(agent);

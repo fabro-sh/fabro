@@ -10,13 +10,13 @@ import {
   stageStatusLabel,
   stageStatusTone,
 } from "../lib/stage-sidebar";
-import { deriveRunPhases, type RunPhase } from "../lib/run-phases";
+import type { RunPhase } from "../lib/run-phases";
 import { useTickingNow } from "../lib/time";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 interface WaterfallProps {
   runId: string;
-  events: EventEnvelope[];
+  /** The run's phases from its platform lifecycle records (`deriveRunPhasesFromStream`). */
+  phases: RunPhase[];
   stages: RunStage[];
   createdAtIso: string;
   completedAtIso: string | null;
@@ -157,18 +157,16 @@ function stageRow(runId: string, stage: RunStage, nowMs: number): Row | null {
 
 function buildRows({
   runId,
-  events,
+  phases: givenPhases,
   stages,
-  createdAtIso,
   nowMs,
 }: {
   runId: string;
-  events: EventEnvelope[];
+  phases: RunPhase[];
   stages: RunStage[];
-  createdAtIso: string;
   nowMs: number;
 }): Row[] {
-  const phases = deriveRunPhases(events, createdAtIso).map((p) => phaseRow(p, nowMs));
+  const phases = givenPhases.map((p) => phaseRow(p, nowMs));
   const stageRows: Row[] = [];
   for (const stage of stages) {
     if (!isVisibleStage(stage.node_id)) continue;
@@ -181,15 +179,15 @@ function buildRows({
 
 export function RunWaterfall({
   runId,
-  events,
+  phases,
   stages,
   createdAtIso,
   completedAtIso,
 }: WaterfallProps) {
   const nowMs = useTickingNow(true, 1000);
   const rows = useMemo(
-    () => buildRows({ runId, events, stages, createdAtIso, nowMs }),
-    [runId, events, stages, createdAtIso, nowMs],
+    () => buildRows({ runId, phases, stages, nowMs }),
+    [runId, phases, stages, nowMs],
   );
 
   const createdMs = Date.parse(createdAtIso);

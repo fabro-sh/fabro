@@ -217,12 +217,14 @@ describe("RunSandbox route", () => {
   test("renders panels for a fully populated sandbox", () => {
     currentDetails = sandboxDetails({
       sandbox:           {
-        provider: "docker",
-        image:    "ghcr.io/fabro/sandbox:latest",
-        runtime:  {
+        provider:          "docker",
+        image:             "ghcr.io/fabro/sandbox:latest",
+        runtime:           {
           id:                "abcdef123456",
           working_directory: "/workspace",
         },
+        ready_duration_ms: 1500,
+        retained:          true,
       },
       status:            {
         state:          "running",
@@ -248,6 +250,10 @@ describe("RunSandbox route", () => {
     const copy = textContent(renderer);
     expect(copy).toContain("Allow all");
     expect(copy).toContain("4 GiB");
+    expect(copy).toContain("Ready in");
+    expect(copy).toContain("1.5s");
+    expect(copy).toContain("Retained");
+    expect(copy).toContain("Yes");
   });
 
   test("links to the provider dashboard when a sandbox web URL is present", () => {

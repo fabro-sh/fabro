@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -19,12 +18,7 @@ use crate::helpers::{body_json, settings_from_toml};
 fn test_app(source: &str) -> (axum::Router, Arc<AppState>) {
     let settings = settings_from_toml(source);
     let object_store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
-    let store = Arc::new(fabro_store::test_support::test_database(
-        Arc::clone(&object_store),
-        "",
-        Duration::from_millis(1),
-        None,
-    ));
+    let store = Arc::new(fabro_store::test_support::test_database());
     let artifact_store = ArtifactStore::new(object_store, "artifacts");
     let auth_mode =
         resolve_auth_mode_with_lookup(&settings.server_settings.server, |name| match name {

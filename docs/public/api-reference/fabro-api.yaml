@@ -905,7 +905,9 @@ paths:
       operationId: listSessionEvents
       tags: [Sessions]
       summary: List session events
-      description: Returns run event envelopes filtered to this session's durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+      description: >-
+        Returns this session's events in order. Events are numbered per
+        session from 1; `since_seq` is the first sequence number to include.
       parameters:
         - name: since_seq
           in: query
@@ -922,11 +924,11 @@ paths:
             maximum: 1000
       responses:
         "200":
-          description: Session-scoped run events
+          description: The session's events
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedEventList"
+                $ref: "#/components/schemas/PaginatedSessionEventList"
         "404":
           description: Session not found
           headers:
@@ -948,7 +950,11 @@ paths:
       operationId: attachSessionEvents
       tags: [Sessions]
       summary: Attach to session events
-      description: Replays and streams this session's durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+      description: >-
+        Replays this session's events from `since_seq` (the next unseen event
+        when omitted) as `SessionEvent` frames, then streams new ones as they
+        are recorded. The stream remains open until the client disconnects or
+        the server shuts down.
       parameters:
         - name: since_seq
           in: query
@@ -957,7 +963,7 @@ paths:
             minimum: 1
       responses:
         "200":
-          description: Streamed session-scoped run events
+          description: Streamed session events
           content:
             text/event-stream:
               schema:
@@ -983,7 +989,11 @@ paths:
       operationId: submitSessionTurn
       tags: [Sessions]
       summary: Submit a session turn
-      description: Starts a streamed turn immediately. Background turns are not supported in this API version.
+      description: >-
+        Starts a streamed turn immediately. The stream carries the turn's
+        `SessionEvent` frames, from `run.session.turn.started` to the event
+        that ends the turn. Background turns are not supported in this API
+        version.
       requestBody:
         required: true
         content:
@@ -1056,7 +1066,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EventEnvelope"
+                $ref: "#/components/schemas/SessionEvent"
         "404":
           description: Session not found
           headers:
@@ -1709,11 +1719,21 @@ paths:
       tags: [Human-in-the-Loop]
       summary: Steer Run
       description: |
-        Send a mid-run steering message to the live agent session(s) of a
-        running run. Set `interrupt=true` to atomically interrupt the active
-        steerable agent round first, then deliver this message as the next
-        user turn. Without `interrupt=true`, the message is appended to the
-        steering queue and may buffer until the next steerable agent session.
+        Send a mid-run steering message to a live agent stage of a running
+        run: the stage `stage` names, or the run's one live agent stage.
+        Without `interrupt`, the text is guidance for the stage's session,
+        run as a follow-up turn once its current answer is reached. With
+        `interrupt=true`, the stage's current model turn (the model request
+        and the tool calls it is running) is stopped first, the session is
+        kept, and the text is the stage's next input. The control is
+        forwarded to the run's worker, and the worker's answer is this
+        response: `202` with `outcome: delivered` (and the stage's label)
+        once the worker delivered it, `409` with the refusal's code when
+        the worker or Petri refused it, and `202` with `outcome: pending`
+        when the worker gave no answer within the wait (5 s). A refused
+        control is also a `run.notice` record on the run's event stream
+        under the same code (`steer_refused`, `no_live_turn`,
+        `no_such_stage`, `interrupt_refused`).
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -1724,7 +1744,13 @@ paths:
               $ref: "#/components/schemas/SteerRunRequest"
       responses:
         "202":
-          description: Steer accepted and forwarded to the worker
+          description: |
+            Steer forwarded to the worker: delivered, or pending when the
+            worker gave no answer within the wait.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunControlAcknowledgement"
         "400":
           description: Invalid request body
           headers:
@@ -1745,9 +1771,16 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: |
-            Run is not currently steerable. Returned when the run is in a
-            terminal state, blocked (use the answer endpoint instead), or
-            active agent sessions have no live control channel.
+            Run is not currently steerable, or the worker refused the
+            steer. The error's `code` says which: `run_not_steerable` (a
+            terminal run, or one not running yet), `use_answer_endpoint`
+            (the run is blocked on a question), `agent_not_steerable` (the
+            active agent sessions have no live control channel),
+            `steer_refused` (no live agent stage, or several and none
+            named), `no_such_stage` (the named stage is not running),
+            `no_live_turn` (with `interrupt=true`: the stage has no model
+            turn in flight), `interrupt_refused` (with `interrupt=true`:
+            no live agent stage, or several and none named).
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2027,14 +2060,49 @@ paths:
       tags: [Human-in-the-Loop]
       summary: Interrupt Run
       description: |
-        Interrupt the active steerable agent round without sending steering
-        text. The agent keeps its steering lease and waits for a later steer
-        message before starting another LLM round.
+        Stop the current model turn of a live agent stage (the stage `stage`
+        names, or the run's one live agent stage) and keep its session. With
+        `text`, the text is the stage's next input; without, the stage waits
+        for the next steer message before starting another model turn. The
+        control is forwarded to the run's worker, and the worker's answer is
+        this response: `202` with `outcome: delivered` (and the stage's
+        label) once the worker stopped the turn, `409` with the refusal's
+        code when the worker or Petri refused it (a stage with no model
+        turn in flight, such as an agent between turns or a human gate; a
+        stage that is not running; no live agent stage, or several
+        unnamed), and `202` with `outcome: pending` when the worker gave no
+        answer within the wait (5 s). A refused interrupt is also a
+        `run.notice` record on the run's event stream under the same code
+        (`no_live_turn`, `no_such_stage`, `interrupt_refused`). A delivered
+        interrupt is the stage's `control.requested` record with
+        `$interrupt`, followed by an `attractor.turn.interrupted` progress
+        record.
       parameters:
         - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InterruptRunRequest"
       responses:
         "202":
-          description: Interrupt accepted and forwarded to the worker
+          description: |
+            Interrupt forwarded to the worker: delivered, or pending when
+            the worker gave no answer within the wait.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunControlAcknowledgement"
+        "400":
+          description: Invalid request body
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run not found
           headers:
@@ -2046,10 +2114,14 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: |
-            Run is not currently interruptible. Returned when the run is in a
-            terminal state, blocked (use the answer endpoint instead), has no
-            active steerable agent session, or active agent sessions have no
-            live control channel.
+            Run is not currently interruptible, or the worker refused the
+            interrupt. The error's `code` says which: `run_not_interruptible`
+            (a terminal run, or one not running yet), `agent_not_steerable`
+            (the active agent sessions have no live control channel),
+            `no_live_turn` (the stage has no model turn in flight),
+            `no_such_stage` (the named stage is not running),
+            `interrupt_refused` (no live agent stage, or several and none
+            named).
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2181,44 +2253,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/runs/{id}/retry:
-    post:
-      operationId: retryRun
-      tags: [Runs]
-      summary: Retry Run
-      description: >
-        Creates a fresh run from the terminal source run's captured
-        durable definition, records `retried_from` on the new run, and schedules
-        it for execution. The source run is left unchanged. Active and archived
-        runs are not retryable.
-      parameters:
-        - $ref: "#/components/parameters/RunId"
-      responses:
-        "201":
-          description: New retry run created and scheduled for execution
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Run"
-        "404":
-          description: Run not found
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "409":
-          description: Source run is not retryable
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   /api/v1/runs/{id}/pause:
     post:
       operationId: pauseRun
@@ -2325,16 +2359,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/retry:
+    post:
+      operationId: retryRun
+      tags: [Runs]
+      summary: Retry Run
+      description: >
+        Creates a new run from the terminal source run's last checkpoint and
+        starts it. When the source failed on a stage, that stage runs again on
+        the files of the stage before it; otherwise the new run continues from
+        the last checkpoint as it stands. The new run records `retried_from`
+        and `fork_source_ref`; the source run is left unchanged. Active and
+        archived runs are not retryable.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "201":
+          description: New retry run created and started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          description: The source has no checkpoint to retry from
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Source run is not retryable
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/rewind:
     post:
       operationId: rewindRun
       tags: [Runs]
       summary: Rewind Run
       description: >
-        Creates a new run from an earlier checkpoint of a terminal source run,
-        archives the source run, and records `run.superseded_by` on the source
-        after archive succeeds. Returns 207 when the new run was created but
-        the source archive step failed.
+        Creates a new run from a checkpoint of a terminal source run and
+        starts it, then archives the source run and records
+        `run.superseded_by` on it. Returns 207 when the new run was created
+        but the source archive step failed.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -2383,15 +2466,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "501":
-          description: Operation unsupported for this run
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/runs/{id}/fork:
     post:
@@ -2399,8 +2473,12 @@ paths:
       tags: [Runs]
       summary: Fork Run
       description: >
-        Creates a new run from a checkpoint of the source run. The source run
-        is left untouched.
+        Creates a new run from a checkpoint of the source run and starts it.
+        The new run holds the source's records up to the checkpoint's
+        position and continues from there in a fresh workspace restored to
+        the checkpoint's commit. The source run is left untouched. A
+        checkpoint inside a parallel branch cannot be forked at; fork at the
+        parallel stage instead.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -2411,7 +2489,7 @@ paths:
               $ref: "#/components/schemas/ForkRequest"
       responses:
         "200":
-          description: New run created
+          description: New run created and started
           content:
             application/json:
               schema:
@@ -2443,15 +2521,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "501":
-          description: Operation unsupported for this run
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/runs/{id}/timeline:
     get:
@@ -2459,8 +2528,9 @@ paths:
       tags: [Runs]
       summary: Get Run Timeline
       description: >
-        Returns checkpoint timeline entries from durable run-store checkpoints.
-        Metadata branches are write-only archives and are not read by this endpoint.
+        Returns the run's checkpoints in the order they were recorded, each
+        at its Petri position with the commit it made and the stage it
+        belongs to, and where the run was forked from when it is a fork.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
@@ -2469,20 +2539,9 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/TimelineEntryResponse"
+                $ref: "#/components/schemas/RunTimelineResponse"
         "404":
           description: Run not found
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "501":
-          description: Operation unsupported for this run
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2970,120 +3029,26 @@ paths:
       tags: [Run Internals]
       summary: List Run Events
       description: |
-        Returns a paginated JSON list of stored run events. Ascending order
-        uses `since_seq` as an inclusive cursor. Descending order uses
-        `before_seq` as an exclusive cursor and starts at the newest event
-        when `before_seq` is omitted.
+        Returns one page of the run's stream (`PaginatedRunStreamList`):
+        one ordered delivery of Petri's own `RunEvent`s and Fabro's platform
+        records in the `RunStreamItem` envelope, in `stream_seq` order. The
+        cursor is `after`: the last `stream_seq` the client saw, exclusive;
+        the first page is `after=0`. A client that reconnects resumes from
+        its last `stream_seq` and deduplicates by each item's `id`; every
+        item is delivered once, in order, with no gap.
       parameters:
         - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/SinceSeq"
         - $ref: "#/components/parameters/EventLimit"
-        - $ref: "#/components/parameters/BeforeSeq"
-        - $ref: "#/components/parameters/EventOrder"
+        - $ref: "#/components/parameters/StreamAfter"
       responses:
         "200":
-          description: Paginated list of run events
+          description: One page of the run's stream
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedEventList"
-        "400":
-          description: Invalid cursor and order combination
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/PaginatedRunStreamList"
         "404":
           description: Run not found
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    post:
-      operationId: appendRunEvent
-      tags: [Run Internals]
-      summary: Append Run Event
-      description: Appends a validated event to the run event log. Intended for trusted internal callers.
-      parameters:
-        - $ref: "#/components/parameters/RunId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RunEvent"
-      responses:
-        "200":
-          description: Event appended
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AppendEventResponse"
-        "400":
-          description: Invalid event payload
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: Run not found
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/runs/{id}/events/{seq}:
-    get:
-      operationId: getRunEventDetail
-      tags: [Run Internals]
-      summary: Get Run Event Detail
-      description: Returns one stored run event by source event sequence with content fields separated and truncated.
-      parameters:
-        - $ref: "#/components/parameters/RunId"
-        - name: seq
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 1
-        - name: max_content_length
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200000
-            default: 20000
-      responses:
-        "200":
-          description: Run event detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RunEventDetailResponse"
-        "400":
-          description: Invalid query parameter
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: Run or event not found
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -3097,10 +3062,18 @@ paths:
       operationId: attachRunEvents
       tags: [Run Internals]
       summary: Attach Run Events
-      description: Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
+      description: |
+        Opens an ordered server-sent event stream of the run's stream,
+        replaying committed items and continuing with live ones while the
+        run remains active. Each `data:` frame is one `RunStreamItem`. The
+        stream starts after `after` (the last `stream_seq` the client saw;
+        `0` replays the whole run; the next unseen item when omitted). It
+        ends once the run is no longer active and every committed item has
+        been sent. A reconnecting client passes its last `stream_seq` as
+        `after` and deduplicates by `id`.
       parameters:
         - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/SinceSeq"
+        - $ref: "#/components/parameters/StreamAfter"
       responses:
         "200":
           description: Server-sent event stream
@@ -3187,6 +3160,282 @@ paths:
                 format: binary
         "404":
           description: Run or blob not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Petri run store (worker) ──────────────────────────────────────────
+  #
+  # The Petri run store over HTTP: what a run's worker process uses to reach
+  # the run's Petri records in the server's database. Every endpoint is
+  # worker-scoped: the worker token's run must be the path's run. `id` is
+  # the Petri run key, which is the Fabro run id. Errors carry a
+  # machine-readable `code`; `petri_run_leased` carries the holding owner
+  # under `meta.owner`, and `petri_record_conflict` carries the refused
+  # position under `meta.log` and `meta.seq`.
+
+  /api/v1/runs/{id}/petri/open:
+    post:
+      operationId: openPetriRun
+      tags: [Run Internals]
+      summary: Open Petri Run
+      description: |
+        Opens the run in the Petri run store for the worker. `create` inserts
+        the run and takes its writer lease for `owner`; `write` takes the lease
+        of an existing run; `read` takes no lease. The lease is idempotent per
+        owner: a retry by the owner that holds it gets the same lease. Another
+        live owner is refused with `petri_run_leased`. The lease ends when the
+        worker releases it, when the server observes the worker exit, or by
+        operator release, never by timeout.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PetriOpenRequest"
+      responses:
+        "200":
+          description: Run opened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetriOpenResponse"
+        "404":
+          description: Run not in the store (`petri_run_not_found`)
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            The run exists (`petri_run_exists`, on `create`) or another live
+            owner holds its lease (`petri_run_leased`, with the holder under
+            `meta.owner`).
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/petri/release:
+    post:
+      operationId: releasePetriRun
+      tags: [Run Internals]
+      summary: Release Petri Run
+      description: |
+        Ends the worker's writer lease on the run when `owner` still holds
+        it: what a worker sends when it drops its store handle. A lease that
+        already moved to another owner is left alone.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PetriReleaseRequest"
+      responses:
+        "204":
+          description: Lease released, or not held by this owner
+
+  /api/v1/runs/{id}/petri/logs/{log}/records:
+    get:
+      operationId: listPetriRecords
+      tags: [Run Internals]
+      summary: List Petri Records
+      description: Every record of one log of the run, in `seq` order, unchanged.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/PetriLog"
+      responses:
+        "200":
+          description: The log's records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetriRecordList"
+        "404":
+          description: Run not in the store (`petri_run_not_found`)
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: appendPetriRecords
+      tags: [Run Internals]
+      summary: Append Petri Records
+      description: |
+        Appends one batch of records to one log at the sequences they carry,
+        durably, in one transaction. A record equal to the one already stored
+        at its `seq` is accepted without a second append, so a batch whose
+        reply was lost is safe to resend. A different record at a taken `seq`,
+        or a `seq` past the log's end, is refused with `petri_record_conflict`
+        and the batch stores nothing.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/PetriLog"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PetriAppendRequest"
+      responses:
+        "204":
+          description: Records durable
+        "404":
+          description: Run not in the store (`petri_run_not_found`)
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            A record conflicts with the log (`petri_record_conflict`, with the
+            position under `meta.log` and `meta.seq`), or `owner` no longer
+            holds the run's lease (`petri_stale_owner`).
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/petri/blobs:
+    post:
+      operationId: writePetriBlob
+      tags: [Run Internals]
+      summary: Write Petri Blob
+      description: |
+        Stores a blob by content for the run's owner and returns its SHA-256
+        digest, the same content address Fabro's blob store uses. Idempotent
+        by construction.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/PetriOwner"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Blob stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WriteBlobResponse"
+        "404":
+          description: Run not in the store (`petri_run_not_found`)
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`owner` no longer holds the run's lease (`petri_stale_owner`)"
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/petri/blobs/{blobHash}:
+    get:
+      operationId: readPetriBlob
+      tags: [Run Internals]
+      summary: Read Petri Blob
+      description: The blob with this digest, if the store holds one.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/BlobHash"
+      responses:
+        "200":
+          description: Blob contents
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Run not in the store (`petri_run_not_found`) or no such blob (`petri_blob_not_found`)
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/petri/platform-records:
+    get:
+      operationId: listPetriPlatformRecords
+      tags: [Run Internals]
+      summary: List Petri Platform Records
+      description: |
+        The run's platform records (Fabro's own facts about a Petri run: a
+        checkpoint commit, a pull request, a notification), in `seq` order,
+        optionally of one kind. What a run's worker reads to find an effect
+        it already performed before performing it again.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/PetriPlatformRecordKind"
+      responses:
+        "200":
+          description: The run's platform records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetriPlatformRecordList"
+    post:
+      operationId: appendPetriPlatformRecord
+      tags: [Run Internals]
+      summary: Append Petri Platform Record
+      description: |
+        Stores one platform record at the run's next `seq`, tied to the
+        Petri stage named by `execution` and `firing` when it belongs to one.
+        The record is the JSON of a Fabro platform record, tagged by `kind`.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PetriPlatformRecordAppendRequest"
+      responses:
+        "200":
+          description: The record as stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetriPlatformRecord"
+        "400":
+          description: The record is not a platform record
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -3324,34 +3573,6 @@ paths:
                 $ref: "#/components/schemas/PaginatedRunStageList"
         "404":
           description: Run not found
-          headers:
-            x-request-id:
-              $ref: "#/components/headers/XRequestId"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/runs/{id}/stages/{stageId}/events:
-    get:
-      operationId: listStageEvents
-      tags: [Run Internals]
-      summary: List Stage Events
-      description: Returns a paginated JSON list of stored run events scoped to a single stage visit.
-      parameters:
-        - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/StageId"
-        - $ref: "#/components/parameters/SinceSeq"
-        - $ref: "#/components/parameters/EventLimit"
-      responses:
-        "200":
-          description: Paginated list of stage events
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaginatedEventList"
-        "404":
-          description: Run not found.
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -5247,7 +5468,10 @@ paths:
       operationId: attachEvents
       tags: [System]
       summary: Attach Global Events
-      description: Opens a server-sent event stream for live run events across the server.
+      description: >-
+        Opens a server-sent event stream of every run's stream across the
+        server: each `data:` frame is one `RunStreamItem`, as it is
+        committed.
       parameters:
         - name: run_id
           in: query
@@ -5978,6 +6202,38 @@ components:
         $ref: "#/components/schemas/BlobHash"
       example: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
 
+    PetriLog:
+      name: log
+      in: path
+      required: true
+      description: >-
+        A Petri log of the run, as its id renders: `coordinator`, `resources`,
+        or `execution <n>` for execution `n`. The space is percent-encoded on
+        the wire.
+      schema:
+        type: string
+      example: execution 0
+
+    PetriOwner:
+      name: owner
+      in: query
+      required: true
+      description: The owner id the worker opened the run's writer lease with.
+      schema:
+        type: string
+      example: 18f3c2a9e1b4-42017-0-9f3a1c7e2b5d
+
+    PetriPlatformRecordKind:
+      name: kind
+      in: query
+      required: false
+      description: >-
+        Only the platform records of this kind, as its `kind` tag spells it
+        (`checkpoint`, `pull_request.created`, ...).
+      schema:
+        type: string
+      example: checkpoint
+
     ArtifactFilename:
       name: filename
       in: query
@@ -6009,31 +6265,6 @@ components:
         default: 1
       example: 42
 
-    BeforeSeq:
-      name: before_seq
-      in: query
-      required: false
-      description: |
-        Exclusive upper event sequence cursor for descending order. Omit on
-        the first descending request to start from the newest event.
-      schema:
-        type: integer
-        minimum: 1
-      example: 42
-
-    EventOrder:
-      name: order
-      in: query
-      required: false
-      description: |
-        Event sequence order. `since_seq` is valid only with `asc`;
-        `before_seq` is valid only with `desc`.
-      schema:
-        type: string
-        enum: [asc, desc]
-        default: asc
-      example: desc
-
     EventLimit:
       name: limit
       in: query
@@ -6045,6 +6276,20 @@ components:
         maximum: 1000
         default: 100
       example: 100
+
+    StreamAfter:
+      name: after
+      in: query
+      required: false
+      description: |
+        Run stream cursor for a Petri run: the last `stream_seq` the client
+        saw, exclusive. `0` starts at the first item.
+      schema:
+        type: integer
+        format: uint64
+        minimum: 0
+        default: 0
+      example: 42
 
     QuestionId:
       name: qid
@@ -7939,72 +8184,6 @@ components:
         tool_call_id:
           type: string
 
-    RunEventDetailResponse:
-      type: object
-      required:
-        - event
-        - properties
-        - truncated
-        - redacted
-        - max_content_length
-      properties:
-        event:
-          type: object
-          required:
-            - seq
-            - id
-            - ts
-            - run_id
-            - event
-          properties:
-            seq:
-              type: integer
-              minimum: 1
-            id:
-              type: string
-            ts:
-              type: string
-              format: date-time
-            run_id:
-              type: string
-            event:
-              type: string
-            actor:
-              $ref: "#/components/schemas/Principal"
-            session_id:
-              type: string
-            node_id:
-              type: string
-            node_label:
-              type: string
-            stage_id:
-              type: string
-            tool_call_id:
-              type: string
-        properties:
-          type: object
-          additionalProperties: true
-        content:
-          type: object
-          required: [kind, value]
-          properties:
-            kind:
-              type: string
-              enum:
-                - text
-                - tool_output
-                - tool_arguments
-                - error
-                - details
-            value:
-              type: string
-        truncated:
-          type: boolean
-        redacted:
-          type: boolean
-        max_content_length:
-          type: integer
-
     SessionId:
       description: Durable session identifier.
       type: string
@@ -8118,9 +8297,9 @@ components:
 
     SessionDetail:
       description: >-
-        Session metadata plus the highest run event sequence the session's
-        event stream has reached. The conversation itself is held by the
-        server's durable session record and is not returned over the API.
+        Session metadata plus the sequence number of the session's latest
+        event. The conversation itself is held by the server's durable
+        session record and is not returned over the API.
       type: object
       required:
         - id
@@ -8201,6 +8380,67 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SessionSummary"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    SessionEventName:
+      description: What a session event records.
+      type: string
+      enum:
+        - run.session.created
+        - run.session.turn.started
+        - run.session.user_message
+        - run.session.assistant_delta
+        - run.session.assistant_message
+        - run.session.tool_call.started
+        - run.session.tool_call.completed
+        - run.session.turn.succeeded
+        - run.session.turn.failed
+        - run.session.turn.interrupted
+
+    SessionEvent:
+      description: >-
+        One recorded event of an Ask Fabro session: its position in the
+        session (`seq`, from 1), the session and run it belongs to, when it
+        was recorded, the event's name and its properties. Every event but
+        `run.session.created` carries the `turn_id` it belongs to in its
+        properties.
+      type: object
+      required:
+        - seq
+        - session_id
+        - run_id
+        - ts
+        - event
+        - properties
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+        session_id:
+          $ref: "#/components/schemas/SessionId"
+        run_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        event:
+          $ref: "#/components/schemas/SessionEventName"
+        properties:
+          type: object
+          additionalProperties: true
+
+    PaginatedSessionEventList:
+      description: A page of a session's events, in sequence order.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionEvent"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
@@ -9954,11 +10194,69 @@ components:
         interrupt:
           type: boolean
           description: |
-            When true, apply a worker-control interrupt first, then deliver
-            this text as steering in the same control operation. When false
-            (default), append to the steering queue and let the agent pick it
-            up at the next turn boundary.
+            When true, stop the stage's current model turn first and make
+            this text its next input, in one control. When false (default),
+            the text is guidance the agent runs as a follow-up turn once its
+            current answer is reached.
           default: false
+        stage:
+          type: string
+          description: |
+            The agent stage to steer: its stage identifier (`node_id@visit`)
+            or its node name. Omit it to steer the run's one live agent
+            stage; a run with several live agent stages then refuses the
+            steer with a `run.notice` record.
+          minLength: 1
+          maxLength: 200
+          example: code@2
+
+    RunControlAcknowledgement:
+      description: |
+        The worker's answer to a steer or an interrupt, as the endpoint's
+        `202` body.
+      type: object
+      required:
+        - outcome
+      properties:
+        outcome:
+          $ref: "#/components/schemas/RunControlOutcome"
+        stage:
+          type: string
+          description: >-
+            The label of the stage the control was delivered to
+            (`node@visit`, or `node/e<execution>@visit`); absent when the
+            outcome is `pending`.
+    RunControlOutcome:
+      description: |
+        What became of a forwarded control: `delivered` once the worker
+        delivered it to its stage; `pending` when the worker gave no answer
+        within the wait, in which case the run's event stream says what
+        became of it (a `run.notice` record on refusal).
+      type: string
+      enum:
+        - delivered
+        - pending
+    InterruptRunRequest:
+      description: Request body for interrupting a live agent stage's model turn.
+      type: object
+      properties:
+        stage:
+          type: string
+          description: |
+            The agent stage to interrupt: its stage identifier
+            (`node_id@visit`) or its node name. Omit it to interrupt the
+            run's one live agent stage.
+          minLength: 1
+          maxLength: 200
+          example: code@2
+        text:
+          type: string
+          description: |
+            The stage's next input once its turn is stopped. Omit it to let
+            the stage wait for the next steer message.
+          minLength: 1
+          maxLength: 8192
+          example: Stop and summarize what you have so far.
 
     StartRunRequest:
       description: Request body for starting or resuming a run.
@@ -10184,6 +10482,12 @@ components:
           type: string
           format: uuid
           description: Server-generated request identifier; matches the x-request-id response header.
+        meta:
+          type: object
+          additionalProperties: true
+          description: >-
+            Optional structured details specific to the error `code`, for
+            clients that act on them. Each code documents the members it sets.
 
     ErrorResponse:
       description: Standard error response containing one or more error entries.
@@ -10382,63 +10686,6 @@ components:
         system_kind:
           $ref: "#/components/schemas/SystemActorKind"
 
-    RunEvent:
-      description: >
-        Internal RunEvent-compatible JSON payload. The server validates this
-        body by deserializing into the typed RunEvent struct.
-      type: object
-      required:
-        - id
-        - ts
-        - run_id
-        - event
-      properties:
-        id:
-          type: string
-        ts:
-          type: string
-          format: date-time
-        run_id:
-          type: string
-        node_id:
-          type: ["string", "null"]
-        node_label:
-          type: ["string", "null"]
-        stage_id:
-          type: ["string", "null"]
-          description: Stage execution identity, formatted as "{node_id}@{visit}".
-        parallel_group_id:
-          type: ["string", "null"]
-          description: >
-            Durable identity of one execution of a parallel node, formatted as
-            "{node_id}@{visit}".
-        parallel_branch_id:
-          oneOf:
-            - $ref: "#/components/schemas/ParallelBranchId"
-            - type: "null"
-        session_id:
-          type: ["string", "null"]
-        parent_session_id:
-          type: ["string", "null"]
-        tool_call_id:
-          type: ["string", "null"]
-          description: >
-            Stable identifier for a tool call, present on agent.tool.* events
-            and other durable events that directly describe the same tool
-            call.
-        actor:
-          oneOf:
-            - $ref: "#/components/schemas/Principal"
-            - type: "null"
-        event:
-          type: string
-          description: Event type discriminator.
-          example: stage.started
-        properties:
-          type: object
-          additionalProperties: true
-      additionalProperties: true
-
     AgentSessionActivatedProps:
       description: Properties for the `agent.session.activated` event.
       type: object
@@ -10585,50 +10832,98 @@ components:
           type: integer
           minimum: 1
 
-    EventSeq:
-      description: Assigned sequence number component of a stored event envelope.
+    RunStreamItemKind:
+      description: Which item shape a run stream item carries.
+      type: string
+      enum: [petri, platform]
+
+    RunStreamItem:
+      description: |
+        One item of a Petri run's stream: a Petri `RunEvent` or a Fabro
+        platform record in Fabro's envelope.
+
+        `stream_seq` is the durable per-run delivery sequence the projector
+        assigned when the item's record was committed: dense, strictly
+        increasing within the run, and the cursor for `after`. `id` is the
+        item's own identity, kept beside the cursor so a client deduplicates
+        by it: for a Petri event the `EventId` as `<log>/<seq>/<index>`
+        (`coordinator/3/0`, `execution 1/23/0`); for a platform record its
+        `seq`. Petri's `EventId` is per log and has no platform variant, so
+        it is never the cursor.
+
+        A `petri` item is a Petri `RunEvent` passed through unchanged:
+        `{id: {log, execution?, seq, index}, origin, recorded_at,
+        observed_at?, context: {invocation, execution, parent?}, subject?,
+        record?, derived?}`. Its vocabulary is Petri's public event contract
+        (`crates/core/execution/EVENTS.md` in the Petri repository), not
+        Fabro's: the recorded event's name is `record.body.event`
+        (`<subject>.<verb>`, e.g. `visit.started`, `step.finished`,
+        `run.finished`), a derived view event's is `derived.event`, and the
+        stage a subject names is `(context.execution, subject.firing)` with
+        `subject.node.name` and `subject.visit` as its display label. The
+        server reports the contract version it serves in
+        `PaginatedRunStreamList.event_contract_version`.
+
+        A `platform` item is a stored platform record: `{seq, recorded_at,
+        record: {kind, ...}, position?: {execution, firing}}`. `record.kind`
+        is one of `run.created`, `run.lifecycle`, `run.title`, `run.parent`,
+        `run.archived`, `run.unarchived`, `run.superseded`, `run.notice`,
+        `interview.answered`, `run.branch`, `git.identity`, `checkpoint`,
+        `pull_request.created`, `notification.sent`, `run.paired`.
       type: object
       required:
-        - seq
+        - run_id
+        - stream_seq
+        - kind
+        - id
+        - recorded_at
+        - item
       properties:
-        seq:
+        run_id:
+          type: string
+        stream_seq:
           type: integer
-          description: Assigned event sequence number.
-          example: 42
+          format: uint64
+          minimum: 0
+          description: The delivery sequence; the cursor.
+        kind:
+          $ref: "#/components/schemas/RunStreamItemKind"
+        id:
+          type: string
+          description: The item's own identity, for deduplication.
+        recorded_at:
+          type: integer
+          format: uint64
+          minimum: 0
+          description: Milliseconds since the Unix epoch when the item's record was appended.
+        item:
+          type: object
+          additionalProperties: true
+          description: The Petri `RunEvent` or the stored platform record, unchanged.
 
-    EventEnvelope:
-      description: >
-        Stored event envelope with assigned sequence number. On the wire the
-        envelope is flattened: seq sits alongside the RunEvent payload fields
-        at the top level of the JSON object.
-      allOf:
-        - $ref: "#/components/schemas/EventSeq"
-        - $ref: "#/components/schemas/RunEvent"
-
-    PaginatedEventList:
-      description: Paginated list of stored run events.
+    PaginatedRunStreamList:
+      description: |
+        One page of a Petri run's stream, in `stream_seq` order.
+        `event_contract_version` is Petri's `EVENT_CONTRACT_VERSION` the
+        server was built against: the version of the event contract every
+        `petri` item follows.
       type: object
       required:
         - data
         - meta
+        - event_contract_version
       properties:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/EventEnvelope"
+            $ref: "#/components/schemas/RunStreamItem"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
-
-    AppendEventResponse:
-      description: Assigned sequence number for an appended event.
-      type: object
-      required:
-        - seq
-      properties:
-        seq:
+        event_contract_version:
           type: integer
-          description: Assigned event sequence number.
-          example: 42
+          format: uint32
+          minimum: 0
+          example: 3
 
     BlobHash:
       description: >-
@@ -10646,6 +10941,174 @@ components:
       properties:
         hash:
           $ref: "#/components/schemas/BlobHash"
+
+    PetriAccess:
+      description: >-
+        How a worker opens a Petri run. `create` inserts the run and takes its
+        writer lease, `write` takes the lease of an existing run, `read` takes
+        no lease.
+      type: string
+      enum:
+        - create
+        - write
+        - read
+
+    PetriOpenRequest:
+      description: An open of a Petri run for a worker.
+      type: object
+      required:
+        - access
+      properties:
+        access:
+          $ref: "#/components/schemas/PetriAccess"
+        owner:
+          type: string
+          nullable: true
+          description: >-
+            The owner id the writer lease is taken for. Required for `create`
+            and `write`, absent for `read`.
+          example: 18f3c2a9e1b4-42017-0-9f3a1c7e2b5d
+
+    PetriOpenResponse:
+      description: A Petri run opened for a worker.
+      type: object
+      required:
+        - locator
+      properties:
+        locator:
+          type: string
+          description: Where the run lives, for messages.
+          example: "sqlite database /var/lib/fabro/db/fabro.sqlite3, run `01JNQVR7M0EJ5GKAT2SC4ERS1Z`"
+
+    PetriReleaseRequest:
+      description: A release of a Petri run's writer lease by its owner.
+      type: object
+      required:
+        - owner
+      properties:
+        owner:
+          type: string
+          description: The owner id that holds the lease.
+          example: 18f3c2a9e1b4-42017-0-9f3a1c7e2b5d
+
+    PetriRecord:
+      description: >-
+        One stored line of a Petri log: the record as JSON, with `seq` and
+        `recorded_at` lifted out of it so the store can key and index without
+        reading into the JSON. What the store hands back equals what it was
+        given as a JSON value.
+      type: object
+      required:
+        - seq
+        - recorded_at
+        - record
+      properties:
+        seq:
+          type: integer
+          format: uint64
+          description: The record's position in its log, from 0.
+          example: 7
+        recorded_at:
+          type: integer
+          format: uint64
+          description: Milliseconds since the Unix epoch when Petri appended the record.
+          example: 1758067200123
+        record:
+          type: object
+          additionalProperties: true
+          description: The record itself, stored and read back unchanged.
+
+    PetriAppendRequest:
+      description: One batch of records for one Petri log.
+      type: object
+      required:
+        - owner
+        - records
+      properties:
+        owner:
+          type: string
+          description: The owner id the worker holds the run's writer lease with.
+          example: 18f3c2a9e1b4-42017-0-9f3a1c7e2b5d
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/PetriRecord"
+
+    PetriRecordList:
+      description: Every record of one Petri log, in `seq` order.
+      type: object
+      required:
+        - records
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/PetriRecord"
+
+    PetriPlatformRecord:
+      description: >-
+        One of Fabro's platform records of a Petri run, as stored: the
+        record's JSON tagged by `kind`, its position in the run's platform
+        record sequence, and the Petri stage it belongs to when it belongs
+        to one.
+      type: object
+      required:
+        - seq
+        - recorded_at
+        - record
+      properties:
+        seq:
+          type: integer
+          format: uint64
+          description: The record's position in the run's platform records, from 1.
+          example: 4
+        recorded_at:
+          type: integer
+          format: uint64
+          description: Milliseconds since the Unix epoch when the record was stored.
+          example: 1758067200123
+        record:
+          type: object
+          additionalProperties: true
+          description: The platform record itself, tagged by `kind`.
+        execution:
+          type: integer
+          format: uint64
+          description: The Petri execution the record belongs to, with `firing`.
+        firing:
+          type: integer
+          format: uint64
+          description: The Petri firing the record belongs to, with `execution`.
+
+    PetriPlatformRecordAppendRequest:
+      description: One platform record to store for the run.
+      type: object
+      required:
+        - record
+      properties:
+        record:
+          type: object
+          additionalProperties: true
+          description: The platform record, tagged by `kind`.
+        execution:
+          type: integer
+          format: uint64
+          description: The Petri execution the record belongs to, with `firing`.
+        firing:
+          type: integer
+          format: uint64
+          description: The Petri firing the record belongs to, with `execution`.
+
+    PetriPlatformRecordList:
+      description: The run's platform records, in `seq` order.
+      type: object
+      required:
+        - records
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/PetriPlatformRecord"
 
     CommandTermination:
       description: Terminal state for a command execution.
@@ -12313,6 +12776,7 @@ components:
         - settings
         - graph
         - provenance
+        - admission
       properties:
         run_id:
           type: string
@@ -12359,6 +12823,36 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ForkSourceRef"
             - type: "null"
+        admission:
+          $ref: "#/components/schemas/PetriAdmission"
+          description: |
+            What Petri admitted for the run at create time: the graphs it
+            executes and resumes from.
+
+    PetriAdmission:
+      description: |
+        What Petri admitted for a run at create time: the lowered root graph
+        and the pre-lowered child graphs, every one persisted in the blob
+        store before the run exists.
+      type: object
+      required: [graph]
+      properties:
+        graph:
+          $ref: "#/components/schemas/PetriGraphRef"
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/PetriGraphRef"
+
+    PetriGraphRef:
+      description: An admitted graph in the blob store, verified by digest on load.
+      type: object
+      required: [blob, digest]
+      properties:
+        blob:
+          $ref: "#/components/schemas/BlobHash"
+        digest:
+          type: string
 
     UpdateRunParentRequest:
       type: object
@@ -12533,6 +13027,11 @@ components:
         retried_from:
           type: ["string", "null"]
           description: Source run ID when this run was created by manual retry.
+        forked_from:
+          oneOf:
+            - $ref: "#/components/schemas/ForkOrigin"
+            - type: "null"
+          description: Where the run's records came from when it is a fork.
         git_identity:
           oneOf:
             - $ref: "#/components/schemas/GitIdentity"
@@ -12883,6 +13382,29 @@ components:
           type: ["string", "null"]
           format: uri
 
+    ForkOrigin:
+      description: >-
+        Where a forked run came from: the source run, the position (an
+        execution and a firing of its root invocation) the source's records
+        were kept up to, and whether that firing runs again in the fork.
+      type: object
+      required:
+        - source_run_id
+        - execution
+        - firing
+        - rerun_last
+      properties:
+        source_run_id:
+          type: string
+        execution:
+          type: integer
+          format: uint64
+        firing:
+          type: integer
+          format: uint64
+        rerun_last:
+          type: boolean
+
     ForkRequest:
       description: Request body for creating a new run from a source run checkpoint.
       type: object
@@ -12892,12 +13414,16 @@ components:
           description: Optional checkpoint target such as `@2`, `build`, or `build@1`. Defaults to the latest checkpoint.
 
     ForkResponse:
-      description: Response returned after creating a forked run.
+      description: Response returned after creating and starting a forked run.
       type: object
       required:
         - source_run_id
         - new_run_id
         - target
+        - checkpoint_sha
+        - execution
+        - firing
+        - rerun_last
       properties:
         source_run_id:
           type: string
@@ -12905,6 +13431,21 @@ components:
           type: string
         target:
           type: string
+          description: The checkpoint the fork was resolved to, as `@ordinal`.
+        checkpoint_sha:
+          type: string
+          description: The commit the new run's workspace starts on.
+        execution:
+          type: integer
+          format: uint64
+          description: The Petri execution of the fork position.
+        firing:
+          type: integer
+          format: uint64
+          description: The Petri firing of the fork position.
+        rerun_last:
+          type: boolean
+          description: Whether the position's stage runs again in the new run.
 
     RewindRequest:
       description: Request body for creating a replacement run from a source run checkpoint.
@@ -12915,12 +13456,15 @@ components:
           description: Optional checkpoint target such as `@2`, `build`, or `build@1`. Defaults to the latest checkpoint.
 
     RewindResponse:
-      description: Response returned after rewind creates a new run.
+      description: Response returned after rewind creates and starts a new run.
       type: object
       required:
         - source_run_id
         - new_run_id
         - target
+        - checkpoint_sha
+        - execution
+        - firing
         - archived
       properties:
         source_run_id:
@@ -12929,35 +13473,84 @@ components:
           type: string
         target:
           type: string
+          description: The checkpoint the rewind was resolved to, as `@ordinal`.
+        checkpoint_sha:
+          type: string
+        execution:
+          type: integer
+          format: uint64
+        firing:
+          type: integer
+          format: uint64
         archived:
           type: boolean
         archive_error:
           type: ["string", "null"]
 
+    RunTimelineResponse:
+      description: The run's checkpoints in order, and its fork origin when it is a fork.
+      type: object
+      required:
+        - entries
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimelineEntryResponse"
+        forked_from:
+          oneOf:
+            - $ref: "#/components/schemas/ForkOrigin"
+            - type: "null"
+
     TimelineEntryResponse:
-      description: Checkpoint timeline entry for a run.
+      description: One checkpoint of a run.
       type: object
       required:
         - ordinal
+        - checkpoint_seq
+        - execution
+        - firing
+        - attempt
         - node_name
         - visit
-        - checkpoint_seq
       properties:
         ordinal:
           type: integer
-          minimum: 1
+          format: uint64
+          description: 1-based, in the order the checkpoints were recorded; the `@ordinal` a fork target names.
+        checkpoint_seq:
+          type: integer
+          format: uint64
+          description: The checkpoint record's position among the run's platform records.
+        execution:
+          type: integer
+          format: uint64
+          description: The Petri execution the checkpoint belongs to.
+        firing:
+          type: integer
+          format: uint64
+          description: The Petri firing the checkpoint belongs to.
+        attempt:
+          type: integer
+          format: uint32
+          description: The attempt of the firing whose files the commit holds, from 1.
+        stage:
+          type: ["string", "null"]
+          description: The stage id (`node@visit`) when the projection shows the stage.
         node_name:
           type: string
         visit:
           type: integer
-          minimum: 1
-        checkpoint_seq:
-          type: integer
-          minimum: 1
+          format: uint32
+        workspace:
+          type: ["string", "null"]
+          description: The Petri workspace id the commit was made in.
         run_commit_sha:
           type: ["string", "null"]
-
-    # ── Run Board Schemas ────────────────────────────────────────────────
+        diff_summary:
+          oneOf:
+            - $ref: "#/components/schemas/DiffSummary"
+            - type: "null"
 
     BoardColumn:
       description: |
@@ -13557,6 +14150,17 @@ components:
           type: ["string", "null"]
         runtime:
           $ref: "#/components/schemas/RunSandboxRuntime"
+        ready_duration_ms:
+          type: ["integer", "null"]
+          format: uint64
+          minimum: 0
+          description: How long the sandbox took to become ready, when recorded.
+        retained:
+          type: ["boolean", "null"]
+          description: |
+            Whether the sandbox still exists after the run released it
+            (kept, stopped or running) or was removed. Absent until the
+            release.
 
     RunSandboxFailure:
       description: Sandbox initialization failure details.
@@ -13659,54 +14263,24 @@ components:
           example: Propose Changes
 
     RunCheckpoint:
-      description: Serializable snapshot of execution state for crash recovery and resume.
+      description: >-
+        A checkpoint Fabro recorded for the run: when, at which node, and
+        the commit the workspace was checkpointed at, when it was committed.
       type: object
       required:
         - timestamp
         - current_node
-        - completed_nodes
-        - node_retries
-        - context_values
       properties:
         timestamp:
           type: string
           format: date-time
-          description: ISO 8601 timestamp when the checkpoint was created.
+          description: When the checkpoint was recorded.
         current_node:
           type: string
-          description: Identifier of the node being executed at checkpoint time.
-        completed_nodes:
-          type: array
-          items:
-            type: string
-          description: Identifiers of nodes that have completed execution.
-        node_retries:
-          type: object
-          additionalProperties:
-            type: integer
-          description: Map of node identifier to retry count.
-        context_values:
-          type: object
-          additionalProperties: true
-          description: Key-value context map accumulated during execution.
-        node_outcomes:
-          type: object
-          additionalProperties: true
-          description: Map of node identifier to outcome data for goal gate checks after resume.
-        next_node_id:
-          type: string
-          description: The node to resume execution at after this checkpoint.
+          description: The node the checkpoint was recorded for.
         git_commit_sha:
           type: string
           description: SHA of the git commit created at this checkpoint.
-        loop_failure_signatures:
-          type: object
-          additionalProperties: true
-          description: Failure signature counts within the main loop.
-        restart_failure_signatures:
-          type: object
-          additionalProperties: true
-          description: Failure signature counts across loop_restart edges.
 
     # ── Stage / Turn Schemas ─────────────────────────────────────────────
 
@@ -14813,7 +15387,6 @@ components:
         - sandbox
         - storage
         - artifacts
-        - slatedb
         - scheduler
         - logging
         - integrations
@@ -14832,8 +15405,6 @@ components:
           $ref: "#/components/schemas/ServerStorageSettings"
         artifacts:
           $ref: "#/components/schemas/ServerArtifactsSettings"
-        slatedb:
-          $ref: "#/components/schemas/ServerSlateDbSettings"
         scheduler:
           $ref: "#/components/schemas/ServerSchedulerSettings"
         logging:
@@ -14970,19 +15541,6 @@ components:
           type: string
         store:
           $ref: "#/components/schemas/ObjectStoreSettings"
-
-    ServerSlateDbSettings:
-      type: object
-      required: [prefix, store, flush_interval, disk_cache]
-      properties:
-        prefix:
-          type: string
-        store:
-          $ref: "#/components/schemas/ObjectStoreSettings"
-        flush_interval:
-          type: string
-        disk_cache:
-          type: boolean
 
     ObjectStoreSettings:
       oneOf:

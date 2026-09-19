@@ -89,21 +89,6 @@ fn resolves_server_defaults_from_empty_settings() {
         ObjectStoreSettings::S3 { .. } => panic!("expected local artifact store by default"),
     }
     assert_eq!(settings.artifacts.prefix, "");
-
-    match settings.slatedb.store {
-        ObjectStoreSettings::Local { root } => {
-            assert_eq!(
-                root,
-                default_storage_dir()
-                    .join("objects")
-                    .join("slatedb")
-                    .to_string_lossy()
-            );
-        }
-        ObjectStoreSettings::S3 { .. } => panic!("expected local slatedb store by default"),
-    }
-
-    assert!(!settings.slatedb.disk_cache);
 }
 
 #[test]
@@ -540,22 +525,6 @@ enabled = true
         settings.integrations.github.strategy,
         GithubIntegrationStrategy::Token
     );
-}
-
-#[test]
-fn resolves_disk_cache_true_from_settings() {
-    let file = parse(
-        r"
-_version = 1
-
-[server.slatedb]
-disk_cache = true
-",
-    );
-
-    let settings = resolve_server(&file);
-
-    assert!(settings.slatedb.disk_cache);
 }
 
 #[test]

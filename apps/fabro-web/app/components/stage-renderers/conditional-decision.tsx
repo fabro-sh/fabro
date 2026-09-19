@@ -4,11 +4,10 @@ import {
   ArrowLongRightIcon,
   ArrowsRightLeftIcon,
 } from "@heroicons/react/20/solid";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 import type { Stage } from "../stage-sidebar";
 import { StageMetaBar } from "./meta-bar";
-import { findEdgeForNode } from "./helpers";
+import type { EdgeSelection } from "./helpers";
 
 const REASON_LABEL: Record<string, string> = {
   condition: "Matched condition",
@@ -23,19 +22,16 @@ function reasonLabel(reason: string): string {
 
 export function ConditionalDecision({
   stage,
-  runEvents,
+  edge,
   allStages,
   runId,
 }: {
   stage: Stage;
-  runEvents: EventEnvelope[];
+  /** The edge the stage took (its `route.applied`), or null while undecided. */
+  edge: EdgeSelection | null;
   allStages: Stage[];
   runId: string;
 }) {
-  const edge = useMemo(
-    () => findEdgeForNode(runEvents, stage.nodeId),
-    [runEvents, stage.nodeId],
-  );
   const targetStage = useMemo(() => {
     if (!edge) return null;
     let pick: Stage | null = null;

@@ -2,14 +2,8 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_interview::Interviewer;
 use fabro_server::server::spawn_scheduler;
-use fabro_server::test_support::test_app_state_with_runtime_settings_and_registry_factory;
-use fabro_workflow::handler::HandlerRegistry;
-use fabro_workflow::handler::agent::AgentHandler;
-use fabro_workflow::handler::exit::ExitHandler;
-use fabro_workflow::handler::human::HumanHandler;
-use fabro_workflow::handler::start::StartHandler;
+use fabro_server::test_support::test_app_state_with_runtime_settings_in_process;
 use tokio::time::sleep;
 use tower::ServiceExt;
 
@@ -17,15 +11,6 @@ use crate::helpers::{
     POLL_ATTEMPTS, POLL_INTERVAL, api, minimal_intent_json, response_json, response_status,
     run_json, test_settings, wait_for_run_status,
 };
-
-fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
-    registry.register("start", Box::new(StartHandler));
-    registry.register("exit", Box::new(ExitHandler));
-    registry.register("agent", Box::new(AgentHandler::new(None)));
-    registry.register("human", Box::new(HumanHandler::new(interviewer)));
-    registry
-}
 
 async fn wait_for_question_id(app: &axum::Router, run_id: &str) -> String {
     for _ in 0..POLL_ATTEMPTS {
@@ -119,10 +104,9 @@ const GATE_DOT: &str = r#"digraph GateTest {
 async fn full_http_lifecycle_approve_and_complete() {
     let workspace = tempfile::tempdir().unwrap();
     let settings = test_settings();
-    let state = test_app_state_with_runtime_settings_and_registry_factory(
+    let state = test_app_state_with_runtime_settings_in_process(
         settings.server_settings,
         settings.manifest_run_defaults,
-        gate_registry,
     );
     spawn_scheduler(Arc::clone(&state));
     let app = fabro_server::test_support::build_test_router(Arc::clone(&state));
@@ -159,15 +143,19 @@ async fn full_http_lifecycle_approve_and_complete() {
     // 2. Poll for question to appear (run goes start -> work -> gate, then blocks)
     let question = wait_for_question(&app, &run_id).await;
     let question_id = question["id"].as_str().unwrap().to_string();
-    assert_eq!(question["stage"], "gate");
+    assert_eq!(question["stage"], "gate@1");
     assert!(question["timeout_seconds"].is_null());
     assert!(question["context_display"].is_null() || question["context_display"].is_string());
 
-    // 3. Submit answer selecting first option (Approve)
+    // 3. Submit answer selecting first option (Approve). Petri's id
+    // (`gate#3`) travels as one percent-encoded path segment.
+    let encoded_id =
+        percent_encoding::utf8_percent_encode(&question_id, percent_encoding::NON_ALPHANUMERIC)
+            .to_string();
     let req = Request::builder()
         .method("POST")
         .uri(api(&format!(
-            "/runs/{run_id}/questions/{question_id}/answer"
+            "/runs/{run_id}/questions/{encoded_id}/answer"
         )))
         .header("content-type", "application/json")
         .body(Body::from(
@@ -213,10 +201,9 @@ async fn full_http_lifecycle_approve_and_complete() {
 async fn full_http_lifecycle_cancel() {
     let workspace = tempfile::tempdir().unwrap();
     let settings = test_settings();
-    let state = test_app_state_with_runtime_settings_and_registry_factory(
+    let state = test_app_state_with_runtime_settings_in_process(
         settings.server_settings,
         settings.manifest_run_defaults,
-        gate_registry,
     );
     spawn_scheduler(Arc::clone(&state));
     let app = fabro_server::test_support::build_test_router(Arc::clone(&state));
@@ -297,10 +284,9 @@ async fn full_http_lifecycle_cancel() {
 async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
     let workspace = tempfile::tempdir().unwrap();
     let settings = test_settings();
-    let state = test_app_state_with_runtime_settings_and_registry_factory(
+    let state = test_app_state_with_runtime_settings_in_process(
         settings.server_settings,
         settings.manifest_run_defaults,
-        gate_registry,
     );
     spawn_scheduler(Arc::clone(&state));
     let app = fabro_server::test_support::build_test_router(Arc::clone(&state));
@@ -348,37 +334,19 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
     let status = wait_for_run_status(&app, &run_id, &["failed"]).await;
     assert_eq!(status, "failed");
 
+    // The run's record says it was cancelled: Petri's finish, and the
+    // terminal lifecycle record Fabro wrote after it, both name the reason.
     let req = Request::builder()
         .method("GET")
-        .uri(api(&format!("/runs/{run_id}/events")))
+        .uri(api(&format!("/runs/{run_id}")))
         .body(Body::empty())
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     let body = response_json(
         response,
         StatusCode::OK,
-        format!("GET /api/v1/runs/{run_id}/events"),
+        format!("GET /api/v1/runs/{run_id}"),
     )
     .await;
-    let failed_reasons = body["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|&event| event["event"] == "run.failed")
-        .map(|event| {
-            (
-                event["properties"]["failure"]["reason"]
-                    .as_str()
-                    .map(ToOwned::to_owned),
-                event["properties"]["failure"]["detail"]["message"]
-                    .as_str()
-                    .map(ToOwned::to_owned),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(failed_reasons, vec![(
-        Some("cancelled".to_string()),
-        Some("Pipeline cancelled".to_string())
-    )]);
+    assert_eq!(body["lifecycle"]["status"]["reason"], "cancelled", "{body}");
 }

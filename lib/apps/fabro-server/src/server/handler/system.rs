@@ -332,22 +332,12 @@ async fn get_system_repair_runs(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    let issues = match state.stores.runs.list_unreadable_runs().await {
-        Ok(issues) => issues,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-    let total_count = to_i64(issues.len());
-    let runs = issues
-        .into_iter()
-        .map(|issue| SystemRepairRunIssue {
-            run_id:     issue.run_id.to_string(),
-            created_at: issue.created_at,
-            error:      issue.error,
-        })
-        .collect();
+    // A run's history is Petri's records and Fabro's platform records; a
+    // record the projector cannot read holds that run's view where it
+    // stands and is reported on the run, not repaired here.
+    let _ = state;
+    let runs: Vec<SystemRepairRunIssue> = Vec::new();
+    let total_count = to_i64(runs.len());
 
     (
         StatusCode::OK,

@@ -309,7 +309,9 @@ function ConfirmationBody({
 export function shouldStackOptions(options: InterviewOption[]): boolean {
   return options.some(
     (option) =>
-      option.label.length > STACK_LABEL_LENGTH || Boolean(option.description),
+      option.label.length > STACK_LABEL_LENGTH ||
+      Boolean(option.description) ||
+      Boolean(option.preview),
   );
 }
 
@@ -463,6 +465,14 @@ function OptionLabel({ option }: { option: InterviewOption }) {
       {option.description && (
         <span className="mt-0.5 block text-xs/5 font-normal text-fg-muted">
           {option.description}
+        </span>
+      )}
+      {option.preview && (
+        <span
+          data-testid="interview-option-preview"
+          className="mt-1 block whitespace-pre-wrap rounded bg-overlay-strong px-2 py-1 font-mono text-[11px]/4 font-normal text-fg-3"
+        >
+          {option.preview}
         </span>
       )}
     </span>

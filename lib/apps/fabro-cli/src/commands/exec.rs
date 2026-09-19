@@ -22,12 +22,10 @@ use fabro_llm::gateway::{GatewayAdapter, GatewayError, GatewayTransport};
 use fabro_llm::lithos_catalog::{Catalog, CatalogProvider};
 use fabro_llm::middleware::{Call, Middleware, Next, Output};
 use fabro_llm::{Client, ClientOptions, Error as LlmError, ErrorKind};
-use fabro_mcp::config::McpServerSettings;
-use fabro_mcp::pebble::pebble_servers;
 use fabro_sandbox::{RunSandbox, SecretRedactor, local_sandbox};
 use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
-use fabro_types::settings::run::ResolvedMcpEntry;
+use fabro_types::settings::run::{McpServerSettings, ResolvedMcpEntry};
 use fabro_util::exit::{self, ErrorExt, ExitClass};
 use fabro_util::home::Home;
 use fabro_util::terminal::Styles;
@@ -45,6 +43,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::args::{AgentArgs, ExecArgs, ExecOutputFormat};
 use crate::command_context::CommandContext;
+use crate::mcp_servers::pebble_servers;
 #[cfg(feature = "sleep_inhibitor")]
 use crate::sleep_inhibitor;
 use crate::{server_client, user_config};

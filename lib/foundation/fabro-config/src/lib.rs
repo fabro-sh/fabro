@@ -54,8 +54,8 @@ pub use layers::{
     ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer, ServerAuthLayer,
     ServerIntegrationsLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
     ServerSandboxLayer, ServerSandboxProviderLayer, ServerSandboxProvidersLayer,
-    ServerSchedulerLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer, SettingsLayer,
-    SlackIntegrationLayer, StickyMap, StringOrSplice, WorkflowLayer,
+    ServerSchedulerLayer, ServerStorageLayer, ServerWebLayer, SettingsLayer, SlackIntegrationLayer,
+    StickyMap, StringOrSplice, WorkflowLayer,
 };
 pub use logging::{resolve_log_destination, resolve_log_destination_with_env};
 pub use parse::ParseError;

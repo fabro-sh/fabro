@@ -37,9 +37,68 @@ impl EnvVars {
     pub const FABRO_TEST_IN_MEMORY_STORE: &'static str = "FABRO_TEST_IN_MEMORY_STORE";
     pub const FABRO_TEST_DISABLE_SPA_ASSETS: &'static str = "FABRO_TEST_DISABLE_SPA_ASSETS";
     pub const FABRO_TEST_MODE: &'static str = "FABRO_TEST_MODE";
+    /// A directory of hold and release files a test uses to pause a Petri
+    /// run's checkpoint at a named point (`fabro_petri::hooks`); unset
+    /// outside tests.
+    pub const FABRO_TEST_CHECKPOINT_GATES: &'static str = "FABRO_TEST_CHECKPOINT_GATES";
+    /// `1` makes a Petri worker apply every control but acknowledge none,
+    /// so a test sees the server's wait for an answer run out; unset
+    /// outside tests.
+    pub const FABRO_TEST_CONTROL_ACKS_MUTED: &'static str = "FABRO_TEST_CONTROL_ACKS_MUTED";
     pub const FABRO_VERBOSE: &'static str = "FABRO_VERBOSE";
     pub const FABRO_WEB_URL: &'static str = "FABRO_WEB_URL";
     pub const FABRO_WORKER_TOKEN: &'static str = "FABRO_WORKER_TOKEN";
+
+    // Petri's sandbox-driver plugins: where each provider's plugin executable
+    // is, its checksum override, dev mode for unpinned plugins, and how a
+    // remote Docker daemon's containers reach this machine. A run's worker
+    // resolves the plugins, so these cross into the worker process.
+    pub const PETRI_SANDBOX_HOST_PLUGIN: &'static str = "PETRI_SANDBOX_HOST_PLUGIN";
+    pub const PETRI_SANDBOX_HOST_SHA256: &'static str = "PETRI_SANDBOX_HOST_SHA256";
+    pub const PETRI_SANDBOX_DOCKER_PLUGIN: &'static str = "PETRI_SANDBOX_DOCKER_PLUGIN";
+    pub const PETRI_SANDBOX_DOCKER_SHA256: &'static str = "PETRI_SANDBOX_DOCKER_SHA256";
+    pub const PETRI_SANDBOX_DAYTONA_PLUGIN: &'static str = "PETRI_SANDBOX_DAYTONA_PLUGIN";
+    pub const PETRI_SANDBOX_DAYTONA_SHA256: &'static str = "PETRI_SANDBOX_DAYTONA_SHA256";
+    pub const PETRI_SANDBOX_PLUGIN_DEV: &'static str = "PETRI_SANDBOX_PLUGIN_DEV";
+    pub const PETRI_SANDBOX_DOCKER_HOST_ADDRESS: &'static str = "PETRI_SANDBOX_DOCKER_HOST_ADDRESS";
+    pub const PETRI_SANDBOX_ACTION_HOST_IMAGE: &'static str = "PETRI_SANDBOX_ACTION_HOST_IMAGE";
+
+    /// Every Petri plugin variable, in one list for the process boundaries
+    /// that forward them.
+    pub const PETRI_SANDBOX_PLUGIN_VARS: &'static [&'static str] = &[
+        Self::PETRI_SANDBOX_HOST_PLUGIN,
+        Self::PETRI_SANDBOX_HOST_SHA256,
+        Self::PETRI_SANDBOX_DOCKER_PLUGIN,
+        Self::PETRI_SANDBOX_DOCKER_SHA256,
+        Self::PETRI_SANDBOX_DAYTONA_PLUGIN,
+        Self::PETRI_SANDBOX_DAYTONA_SHA256,
+        Self::PETRI_SANDBOX_PLUGIN_DEV,
+        Self::PETRI_SANDBOX_DOCKER_HOST_ADDRESS,
+        Self::PETRI_SANDBOX_ACTION_HOST_IMAGE,
+    ];
+
+    // The Docker daemon selection the Docker CLI and its client libraries
+    // read: which daemon, over which transport, with which TLS material,
+    // client configuration and context. Petri's Docker plugin forwards them
+    // from the process that launches it, so a run's worker must carry the
+    // server's.
+    pub const DOCKER_HOST: &'static str = "DOCKER_HOST";
+    pub const DOCKER_TLS_VERIFY: &'static str = "DOCKER_TLS_VERIFY";
+    pub const DOCKER_CERT_PATH: &'static str = "DOCKER_CERT_PATH";
+    pub const DOCKER_API_VERSION: &'static str = "DOCKER_API_VERSION";
+    pub const DOCKER_CONFIG: &'static str = "DOCKER_CONFIG";
+    pub const DOCKER_CONTEXT: &'static str = "DOCKER_CONTEXT";
+
+    /// Every Docker daemon selection variable, in one list for the process
+    /// boundaries that forward them.
+    pub const DOCKER_VARS: &'static [&'static str] = &[
+        Self::DOCKER_HOST,
+        Self::DOCKER_TLS_VERIFY,
+        Self::DOCKER_CERT_PATH,
+        Self::DOCKER_API_VERSION,
+        Self::DOCKER_CONFIG,
+        Self::DOCKER_CONTEXT,
+    ];
 
     // LLM providers and tool integrations
     pub const ANTHROPIC_API_KEY: &'static str = "ANTHROPIC_API_KEY";
@@ -192,9 +251,26 @@ mod tests {
             EnvVars::FABRO_TEST_IN_MEMORY_STORE,
             EnvVars::FABRO_TEST_DISABLE_SPA_ASSETS,
             EnvVars::FABRO_TEST_MODE,
+            EnvVars::FABRO_TEST_CHECKPOINT_GATES,
+            EnvVars::FABRO_TEST_CONTROL_ACKS_MUTED,
             EnvVars::FABRO_VERBOSE,
             EnvVars::FABRO_WEB_URL,
             EnvVars::FABRO_WORKER_TOKEN,
+            EnvVars::PETRI_SANDBOX_HOST_PLUGIN,
+            EnvVars::PETRI_SANDBOX_HOST_SHA256,
+            EnvVars::PETRI_SANDBOX_DOCKER_PLUGIN,
+            EnvVars::PETRI_SANDBOX_DOCKER_SHA256,
+            EnvVars::PETRI_SANDBOX_DAYTONA_PLUGIN,
+            EnvVars::PETRI_SANDBOX_DAYTONA_SHA256,
+            EnvVars::PETRI_SANDBOX_PLUGIN_DEV,
+            EnvVars::PETRI_SANDBOX_DOCKER_HOST_ADDRESS,
+            EnvVars::PETRI_SANDBOX_ACTION_HOST_IMAGE,
+            EnvVars::DOCKER_HOST,
+            EnvVars::DOCKER_TLS_VERIFY,
+            EnvVars::DOCKER_CERT_PATH,
+            EnvVars::DOCKER_API_VERSION,
+            EnvVars::DOCKER_CONFIG,
+            EnvVars::DOCKER_CONTEXT,
             EnvVars::ANTHROPIC_API_KEY,
             EnvVars::ANTHROPIC_BASE_URL,
             EnvVars::AWS_BEARER_TOKEN_BEDROCK,

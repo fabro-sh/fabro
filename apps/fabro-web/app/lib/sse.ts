@@ -4,8 +4,8 @@ export type KeyMatcher = (key: Key) => boolean;
 export type KeyOrMatcher = Key | KeyMatcher;
 export type MutateFn = (key: KeyOrMatcher) => ReturnType<MutatorCallback>;
 
+/** A parsed SSE frame: a run stream item, read through `isStreamItemPayload`. */
 export interface EventPayload {
-  event?: string;
   [key: string]: unknown;
 }
 

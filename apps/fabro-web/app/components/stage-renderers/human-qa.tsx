@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import {
   ArrowPathIcon,
   ChatBubbleLeftEllipsisIcon,
@@ -7,7 +6,6 @@ import {
   ExclamationTriangleIcon,
   NoSymbolIcon,
 } from "@heroicons/react/20/solid";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 import type { Stage } from "../stage-sidebar";
 import {
@@ -19,11 +17,10 @@ import { formatAbsoluteTs, formatDurationMs } from "../../lib/format";
 import { ACTIVE_STAGE_STATES } from "../../lib/stage-sidebar";
 import { Markdown } from "./primitives";
 import { StageMetaBar } from "./meta-bar";
-import {
-  parseHumanInterviewPairs,
-  type HumanInterviewPair,
-  type HumanResolution,
-  type InterviewOption,
+import type {
+  HumanInterviewPair,
+  HumanResolution,
+  InterviewOption,
 } from "./helpers";
 
 function questionTypeLabel(type: string): string {
@@ -203,6 +200,11 @@ function QuestionBlock({
                       {option.description}
                     </span>
                   )}
+                  {option.preview && (
+                    <span className="mt-1 block whitespace-pre-wrap rounded bg-overlay-strong px-2 py-1 font-mono text-[11px]/4 text-fg-3">
+                      {option.preview}
+                    </span>
+                  )}
                 </span>
               </li>
             ))}
@@ -224,12 +226,12 @@ function QuestionBlock({
 
 export function HumanQA({
   stage,
-  events,
+  pairs,
 }: {
   stage: Stage;
-  events: EventEnvelope[];
+  /** The stage's questions and their answers (`parsePetriInterviewPairs`). */
+  pairs: HumanInterviewPair[];
 }) {
-  const pairs = useMemo(() => parseHumanInterviewPairs(events), [events]);
   const stageActive = ACTIVE_STAGE_STATES.has(stage.status);
   const pendingCount = pairs.filter((p) => p.resolution == null).length;
 

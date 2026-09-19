@@ -1,503 +1,255 @@
-use anyhow::Result as AnyResult;
-use chrono::Utc;
-use fabro_store::{Database, RunProjection, RunProjectionReducer};
-use fabro_types::{EventBody, EventEnvelope, ForkSourceRef, RunId, RunTarget};
+//! Forking a run at a checkpoint: the Fabro run the fork becomes.
+//!
+//! A fork is a new run whose records Petri seeds from the source's up to a
+//! checkpoint's position (`fabro_petri::fork`, over the timeline here). What
+//! Fabro itself makes of it is a run row like any other: the `run.created`
+//! record carrying the source's spec (its admission, settings and target)
+//! under the new id, with `fork_source_ref` naming the source and the
+//! checkpoint's commit, and `retried_from` when the fork is a retry; then
+//! the `submitted` lifecycle transition. The run is then started in resume
+//! mode, as a run left in flight is.
 
-use super::timeline::{ForkTarget, RunTimeline, TimelineEntry, build_timeline};
+use std::path::PathBuf;
+
+use fabro_store::Database;
+use fabro_store::platform_records::{
+    PlatformRecord, RunCreatedRecord, RunLifecycleKind, RunLifecycleRecord,
+};
+use fabro_types::{ForkSourceRef, RunId, RunProjection, RunProvenance, RunStatus};
+use tokio::fs;
+
+use super::ensure_not_archived;
+use super::timeline::{TimelineEntry, TimelinePosition};
 use crate::error::Error;
-use crate::event::{self, Event};
-use crate::records::{Checkpoint, RunSpec};
 
-#[derive(Debug, Clone)]
-pub struct ForkRunInput {
-    pub source_run_id: RunId,
-    pub target:        Option<ForkTarget>,
-}
-
+/// The checkpoint a fork was resolved to, as the API reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedForkTarget {
     pub checkpoint_ordinal: usize,
     pub node_id:            String,
     pub visit:              usize,
+    pub position:           TimelinePosition,
+    pub checkpoint_sha:     String,
 }
 
 impl ResolvedForkTarget {
+    /// The entry as a fork target, refused when it has no commit.
+    pub fn of(entry: &TimelineEntry) -> Result<Self, Error> {
+        let checkpoint_sha = entry.run_commit_sha.clone().ok_or_else(|| {
+            Error::Validation(format!(
+                "checkpoint @{} has no git_commit_sha; cannot fork",
+                entry.ordinal
+            ))
+        })?;
+        Ok(Self {
+            checkpoint_ordinal: entry.ordinal,
+            node_id: entry.node_name.clone(),
+            visit: usize::try_from(entry.visit).unwrap_or(1),
+            position: entry.position,
+            checkpoint_sha,
+        })
+    }
+
     #[must_use]
     pub fn response_target(&self) -> String {
         format!("@{}", self.checkpoint_ordinal)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ForkOutcome {
-    pub source_run_id: RunId,
-    pub new_run_id:    RunId,
-    pub target:        ResolvedForkTarget,
+/// The new run a fork creates.
+#[derive(Debug)]
+pub struct ForkedRunInput<'a> {
+    pub source:         &'a RunProjection,
+    pub new_run_id:     RunId,
+    /// The new run's scratch directory.
+    pub run_dir:        PathBuf,
+    pub checkpoint_sha: String,
+    /// Who forked, when the fork records its own provenance; `None` keeps
+    /// the source's.
+    pub provenance:     Option<RunProvenance>,
+    pub web_url:        Option<String>,
+    /// The source, when the fork is a retry of it.
+    pub retried_from:   Option<RunId>,
 }
 
-pub async fn fork_run(
-    store: &Database,
-    input: &ForkRunInput,
-) -> std::result::Result<ForkOutcome, Error> {
-    let source_run_id = input.source_run_id;
-    let run_store = store
-        .open_run(&source_run_id)
-        .await
-        .map_err(|err| Error::engine(err.to_string()))?;
-    let state = run_store
-        .state()
-        .await
-        .map_err(|err| Error::engine(err.to_string()))?;
-    validate_target_support(state.spec.target.as_ref())?;
-    let timeline = build_timeline(&state).map_err(|err| Error::engine(err.to_string()))?;
-    let entry = resolve_fork_entry(&timeline, &source_run_id, input.target.as_ref())
-        .map_err(|err| Error::Validation(err.to_string()))?;
-    let checkpoint_sha = entry.run_commit_sha.clone().ok_or_else(|| {
-        Error::Validation(format!(
-            "checkpoint @{} has no git_commit_sha; cannot fork",
-            entry.ordinal
+/// A run can be forked unless it is archived.
+pub fn ensure_forkable(source: &RunProjection, run_id: &RunId) -> Result<(), Error> {
+    ensure_not_archived(source.archived_at.is_some(), run_id)
+}
+
+/// A run must be terminal to be rewound or retried: its records are
+/// complete, and nothing is writing them.
+pub fn ensure_terminal(source: &RunProjection, run_id: &RunId, verb: &str) -> Result<(), Error> {
+    let current = source.status;
+    if current.is_terminal() {
+        Ok(())
+    } else {
+        Err(Error::Precondition(format!(
+            "run {run_id} must be terminal (succeeded, failed, or dead) to {verb}; current status \
+             is {current}"
+        )))
+    }
+}
+
+/// The `run.created` record of the fork: the source's spec under the new
+/// id, naming where it came from.
+#[must_use]
+pub fn forked_run_record(input: &ForkedRunInput<'_>) -> RunCreatedRecord {
+    let mut spec = input.source.spec.clone();
+    spec.run_id = input.new_run_id;
+    spec.fork_source_ref = Some(ForkSourceRef {
+        source_run_id:  input.source.spec.run_id,
+        checkpoint_sha: input.checkpoint_sha.clone(),
+    });
+    if let Some(provenance) = &input.provenance {
+        spec.provenance = provenance.clone();
+    }
+    RunCreatedRecord {
+        spec,
+        title: Some(input.source.title().into_owned()),
+        parent_id: input.source.parent_id,
+        retried_from: input.retried_from,
+        web_url: input.web_url.clone(),
+    }
+}
+
+/// Create the fork's run: its scratch directory, then its first records
+/// (`run.created` and the `submitted` transition), which wake its
+/// projector.
+pub async fn persist_forked_run(store: &Database, input: &ForkedRunInput<'_>) -> Result<(), Error> {
+    fs::create_dir_all(&input.run_dir).await.map_err(|err| {
+        Error::Io(format!(
+            "creating run directory {}: {err}",
+            input.run_dir.display()
         ))
     })?;
-
-    validate_source_spec(&state.spec, &checkpoint_sha)?;
-
-    let events = run_store
-        .list_events()
-        .await
-        .map_err(|err| Error::engine(err.to_string()))?;
-    let historical_events = events
-        .into_iter()
-        .filter(|event| event.seq <= entry.checkpoint_seq)
-        .collect::<Vec<_>>();
-    let mut projection = RunProjection::apply_events(&historical_events)
-        .map_err(|err| Error::engine(err.to_string()))?;
-    let mut run_spec = projection.spec.clone();
-
-    let new_run_id = RunId::new();
-    run_spec.run_id = new_run_id;
-    run_spec.fork_source_ref = Some(ForkSourceRef {
-        source_run_id,
-        checkpoint_sha: checkpoint_sha.clone(),
-    });
-    projection.spec = run_spec;
-    projection.start = None;
-    projection.sandbox = None;
-    projection.conclusion = None;
-    projection.pull_request = None;
-    projection.superseded_by = None;
-    if let Some(record) = projection.checkpoints.last_mut() {
-        record.checkpoint.git_commit_sha = Some(checkpoint_sha);
-    }
-
-    persist_forked_run(store, &projection, &historical_events).await?;
-
-    Ok(ForkOutcome {
-        source_run_id,
-        new_run_id,
-        target: ResolvedForkTarget {
-            checkpoint_ordinal: entry.ordinal,
-            node_id:            entry.node_name.clone(),
-            visit:              entry.visit,
-        },
-    })
-}
-
-fn validate_target_support(target: Option<&RunTarget>) -> std::result::Result<(), Error> {
-    if matches!(target, Some(RunTarget::Folder { .. })) {
-        return Err(Error::Validation(
-            "Local folder runs execute in place without Git checkpoints; cannot fork or rewind"
-                .to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_source_spec(spec: &RunSpec, checkpoint_sha: &str) -> std::result::Result<(), Error> {
-    if checkpoint_sha.trim().is_empty() {
-        return Err(Error::Validation(
-            "target checkpoint has an empty git_commit_sha; cannot fork".to_string(),
-        ));
-    }
-    let Some(origin) = spec.repo_origin_url() else {
-        return Err(Error::Validation(
-            "source run has no repo_origin_url; cannot validate fork origin".to_string(),
-        ));
-    };
-    if fabro_github::normalize_repo_origin_url(origin).is_empty() {
-        return Err(Error::Validation(
-            "source run has an empty repo_origin_url; cannot validate fork origin".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn resolve_fork_entry<'a>(
-    timeline: &'a RunTimeline,
-    source_run_id: &RunId,
-    target: Option<&ForkTarget>,
-) -> AnyResult<&'a TimelineEntry> {
-    match target {
-        Some(target) => timeline.resolve(target),
-        None => timeline
-            .entries
-            .last()
-            .ok_or_else(|| anyhow::anyhow!("no checkpoints found for run {source_run_id}")),
-    }
-}
-
-async fn persist_forked_run(
-    store: &Database,
-    projection: &RunProjection,
-    historical_events: &[EventEnvelope],
-) -> std::result::Result<(), Error> {
-    let spec = &projection.spec;
-    let checkpoint = projection
-        .current_checkpoint()
-        .ok_or_else(|| Error::engine("forked run projection has no checkpoint"))?;
-
-    let first_event = Event::RunCreated {
-        run_id:              spec.run_id,
-        title:               None,
-        settings:            serde_json::to_value(&spec.settings)
-            .map_err(|err| Error::engine(err.to_string()))?,
-        graph:               serde_json::to_value(&spec.graph)
-            .map_err(|err| Error::engine(err.to_string()))?,
-        workflow_source:     projection.spec.graph_source.clone(),
-        labels:              spec.labels.clone().into_iter().collect(),
-        source_directory:    spec.source_directory.clone(),
-        workflow_slug:       spec.workflow_slug.clone(),
-        workflow_version_id: spec.workflow_version_id,
-        target:              spec.target.clone(),
-        automation:          spec.automation.clone(),
-        provenance:          spec.provenance.clone(),
-        // Content-addressed, so the forked run reads the source run's
-        // unredacted spec bytes through the same id.
-        spec_blob:           spec.spec_blob,
-        git:                 spec.git.clone(),
-        fork_source_ref:     spec.fork_source_ref.clone(),
-        retried_from:        None,
-        parent_id:           None,
-        web_url:             None,
-    };
-    let run_store = event::create_run(store, &spec.run_id, &first_event, Utc::now())
-        .await
-        .map_err(|err| Error::engine(err.to_string()))?;
-
-    let replayed_checkpoint =
-        replay_historical_projection_events(&run_store, spec.run_id, historical_events).await?;
-    if !replayed_checkpoint {
-        event::append_event(
-            &run_store,
-            &spec.run_id,
-            &checkpoint_completed_event(checkpoint),
-        )
-        .await
-        .map_err(|err| Error::engine(err.to_string()))?;
-    }
-    event::append_event(&run_store, &spec.run_id, &Event::RunSubmitted {
-        definition_blob: spec.definition_blob,
-    })
-    .await
-    .map_err(|err| Error::engine(err.to_string()))
-}
-
-async fn replay_historical_projection_events(
-    run_store: &fabro_store::RunDatabase,
-    new_run_id: RunId,
-    historical_events: &[EventEnvelope],
-) -> std::result::Result<bool, Error> {
-    let mut replayed_checkpoint = false;
-    for envelope in historical_events {
-        if !replay_event_for_fork_projection(&envelope.event.body) {
-            continue;
-        }
-        if matches!(envelope.event.body, EventBody::CheckpointCompleted(_)) {
-            replayed_checkpoint = true;
-        }
-        let mut event = envelope.event.clone();
-        event.id = format!("{new_run_id}-fork-{}", envelope.seq);
-        event.run_id = new_run_id;
-        let payload = event::build_redacted_event_payload(&event, &new_run_id)
-            .map_err(|err| Error::engine(err.to_string()))?;
-        run_store
-            .append_event(&payload)
+    let created = PlatformRecord::RunCreated(forked_run_record(input));
+    let submitted = PlatformRecord::RunLifecycle(
+        RunLifecycleRecord::new(RunLifecycleKind::Submitted).with_status(RunStatus::Submitted),
+    );
+    let summaries = store.run_summary_store();
+    let platform_records = summaries.platform_records();
+    for record in [created, submitted] {
+        platform_records
+            .append(&input.new_run_id, &record, None)
             .await
-            .map_err(|err| Error::engine(err.to_string()))?;
+            .map_err(|err| Error::engine_with_source("run store operation failed", err))?;
     }
-    Ok(replayed_checkpoint)
-}
-
-fn replay_event_for_fork_projection(body: &EventBody) -> bool {
-    matches!(
-        body,
-        EventBody::StageCompleted(_)
-            | EventBody::StageFailed(_)
-            | EventBody::StagePrompt(_)
-            | EventBody::PromptCompleted(_)
-            | EventBody::CheckpointCompleted(_)
-            | EventBody::InterviewStarted(_)
-            | EventBody::InterviewCompleted(_)
-            | EventBody::InterviewTimeout(_)
-            | EventBody::InterviewInterrupted(_)
-            | EventBody::AgentSessionActivated(_)
-            | EventBody::AgentToolsAvailable(_)
-            | EventBody::AgentAcpStarted(_)
-            | EventBody::AgentAcpCancelled(_)
-            | EventBody::AgentAcpTimedOut(_)
-            | EventBody::CommandStarted(_)
-            | EventBody::CommandCompleted(_)
-            | EventBody::ParallelCompleted(_)
-    )
-}
-
-fn checkpoint_completed_event(checkpoint: &Checkpoint) -> Event {
-    let status = checkpoint
-        .node_outcomes
-        .get(&checkpoint.current_node)
-        .map_or_else(
-            || "success".to_string(),
-            |outcome| outcome.status.to_string(),
-        );
-
-    Event::CheckpointCompleted {
-        node_id: checkpoint.current_node.clone(),
-        status,
-        current_node: checkpoint.current_node.clone(),
-        completed_nodes: checkpoint.completed_nodes.clone(),
-        node_retries: checkpoint.node_retries.clone().into_iter().collect(),
-        context_values: checkpoint.context_values.clone().into_iter().collect(),
-        node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
-        next_node_id: checkpoint.next_node_id.clone(),
-        git_commit_sha: checkpoint.git_commit_sha.clone(),
-        loop_failure_signatures: checkpoint
-            .loop_failure_signatures
-            .iter()
-            .map(|(signature, count)| (signature.to_string(), *count))
-            .collect(),
-        restart_failure_signatures: checkpoint
-            .restart_failure_signatures
-            .iter()
-            .map(|(signature, count)| (signature.to_string(), *count))
-            .collect(),
-        node_visits: checkpoint.node_visits.clone().into_iter().collect(),
-        diff: None,
-        diff_summary: None,
-        graph_visit: None,
-        resumed_from_stage_id: None,
-    }
+    summaries.notify_platform_record(input.new_run_id);
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use fabro_graphviz::graph::Graph;
-    use fabro_store::{Database, RunProjectionReducer};
-    use fabro_types::{StageId, WorkflowSettings, fixtures, test_support};
-    use object_store::memory::InMemory;
+    use chrono::Utc;
+    use fabro_types::{FailureReason, Graph, PetriAdmission, RunSpec, WorkflowSettings, fixtures};
 
     use super::*;
 
-    fn test_store() -> Database {
-        fabro_store::test_support::test_database(
-            Arc::new(InMemory::new()),
-            "",
-            Duration::from_millis(1),
-            None,
-        )
+    fn source(status: RunStatus) -> RunProjection {
+        let mut projection = RunProjection::new(
+            "Source title".to_string(),
+            RunSpec {
+                run_id:              fixtures::RUN_1,
+                settings:            WorkflowSettings::default(),
+                graph:               Graph::new("source"),
+                graph_source:        Some("digraph source { start -> exit }".to_string()),
+                workflow_slug:       Some("source".to_string()),
+                workflow_version_id: None,
+                target:              None,
+                automation:          None,
+                source_directory:    None,
+                labels:              std::collections::HashMap::new(),
+                provenance:          fabro_types::test_support::test_run_provenance(),
+                definition_blob:     None,
+                spec_blob:           None,
+                git:                 None,
+                fork_source_ref:     None,
+                admission:           PetriAdmission::default(),
+            },
+            Utc::now(),
+        );
+        projection.status = status;
+        projection.parent_id = Some(fixtures::RUN_2);
+        projection
     }
 
-    #[test]
-    fn folder_targets_report_that_fork_and_rewind_are_unsupported() {
-        let target = RunTarget::Folder {
-            path: "/canonical/project".to_string(),
-        };
-
-        let error = validate_target_support(Some(&target)).unwrap_err();
-
-        assert!(error.to_string().contains("cannot fork or rewind"));
-    }
-
-    #[test]
-    fn fork_replay_keeps_stage_scoped_session_activation_only() {
-        assert!(replay_event_for_fork_projection(
-            &EventBody::AgentSessionActivated(fabro_types::run_event::AgentSessionActivatedProps {
-                thread_id:        None,
-                provider:         Some("openai".to_string()),
-                model:            Some("gpt-5.4".to_string()),
-                reasoning_effort: None,
-                speed:            None,
-                permission_level: None,
-                capabilities:     vec![fabro_types::SessionCapability::Steer],
-                visit:            1,
-            })
-        ));
-        assert!(replay_event_for_fork_projection(
-            &EventBody::AgentToolsAvailable(fabro_types::run_event::AgentToolsAvailableProps {
-                tools: Vec::new(),
-                visit: 1,
-            })
-        ));
-    }
-
-    #[test]
-    fn fork_replay_preserves_agent_acp_projection_events() {
-        assert!(replay_event_for_fork_projection(
-            &EventBody::AgentAcpStarted(fabro_types::run_event::AgentAcpStartedProps {
-                visit:       1,
-                command:     "python fake_agent.py".to_string(),
-                config_name: Some("fake".to_string()),
-            })
-        ));
-        assert!(replay_event_for_fork_projection(
-            &EventBody::AgentAcpCancelled(fabro_types::run_event::AgentAcpCancelledProps {
-                stdout:      "partial".to_string(),
-                stderr:      "cancelled".to_string(),
-                duration_ms: 7,
-            })
-        ));
-        assert!(replay_event_for_fork_projection(
-            &EventBody::AgentAcpTimedOut(fabro_types::run_event::AgentAcpTimedOutProps {
-                stdout:      "partial".to_string(),
-                stderr:      "timeout".to_string(),
-                duration_ms: 99,
-            })
-        ));
-        assert!(!replay_event_for_fork_projection(
-            &EventBody::AgentAcpCompleted(fabro_types::run_event::AgentAcpCompletedProps {
-                stdout:      "done".to_string(),
-                stderr:      String::new(),
-                stop_reason: "end_turn".to_string(),
-                duration_ms: 42,
-            })
-        ));
-    }
-
-    #[tokio::test]
-    async fn fork_persists_historical_node_projection_through_target_checkpoint() {
-        let store = test_store();
-        let source_run_id = fixtures::RUN_1;
-        let source = store.create_run(&source_run_id).await.unwrap();
-        let graph = Graph::new("fork-source");
-        let settings = WorkflowSettings::default();
-        let workflow_version_id = test_support::test_workflow_version_id();
-
-        event::append_event(&source, &source_run_id, &Event::RunCreated {
-            run_id:              source_run_id,
-            title:               None,
-            settings:            serde_json::to_value(&settings).unwrap(),
-            graph:               serde_json::to_value(&graph).unwrap(),
-            workflow_source:     Some("digraph fork_source {}".to_string()),
-            labels:              BTreeMap::new(),
-            source_directory:    Some("/client/source".to_string()),
-            workflow_slug:       Some("fork-source".to_string()),
-            workflow_version_id: Some(workflow_version_id),
-            target:              Some(fabro_types::RunTarget::Git(fabro_types::GitRunTarget {
-                repo:   "example/repo".to_string(),
-                branch: "main".to_string(),
-                tag:    None,
-                sha:    None,
-            })),
-            automation:          None,
-            provenance:          test_support::test_run_provenance(),
-            spec_blob:           None,
-            git:                 Some(fabro_types::GitContext {
-                origin_url: "https://github.com/example/repo".to_string(),
-                branch:     "main".to_string(),
-                sha:        None,
-                dirty:      fabro_types::DirtyStatus::Clean,
-            }),
-            fork_source_ref:     None,
-            retried_from:        None,
-            parent_id:           None,
-            web_url:             None,
-        })
-        .await
-        .unwrap();
-
-        let mut node_visits = BTreeMap::new();
-        node_visits.insert("work".to_string(), 1);
-        event::append_event(&source, &source_run_id, &Event::StageCompleted {
-            node_id: "work".to_string(),
-            name: "Work".to_string(),
-            index: 1,
-            timing: fabro_types::StageTiming::wall_only(10),
-            status: "succeeded".to_string(),
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            usage_by_model: Vec::new(),
-            usage: None,
-            failure: None,
-            notes: None,
-            files_touched: Vec::new(),
-            context_updates: None,
-            jump_to_node: None,
-            context_values: None,
-            node_visits: Some(node_visits.clone()),
-            loop_failure_signatures: None,
-            restart_failure_signatures: None,
-            response: Some("historical response".to_string()),
-            attempt: 1,
-            max_attempts: 1,
-        })
-        .await
-        .unwrap();
-
-        event::append_event(&source, &source_run_id, &Event::CheckpointCompleted {
-            graph_visit: None,
-            resumed_from_stage_id: None,
-            node_id: "work".to_string(),
-            status: "succeeded".to_string(),
-            current_node: "work".to_string(),
-            completed_nodes: vec!["work".to_string()],
-            node_retries: BTreeMap::new(),
-            context_values: BTreeMap::new(),
-            node_outcomes: BTreeMap::new(),
-            next_node_id: None,
-            git_commit_sha: Some("abc123".to_string()),
-            loop_failure_signatures: BTreeMap::new(),
-            restart_failure_signatures: BTreeMap::new(),
-            node_visits,
-            diff: None,
+    fn entry(ordinal: usize, sha: Option<&str>) -> TimelineEntry {
+        TimelineEntry {
+            ordinal,
+            checkpoint_seq: 3,
+            position: TimelinePosition {
+                execution: 0,
+                firing:    2,
+                attempt:   1,
+            },
+            stage_id: Some("build@1".to_string()),
+            node_name: "build".to_string(),
+            visit: 1,
+            workspace: None,
+            run_commit_sha: sha.map(ToOwned::to_owned),
             diff_summary: None,
-        })
-        .await
-        .unwrap();
+        }
+    }
 
-        let outcome = fork_run(&store, &ForkRunInput {
-            source_run_id,
-            target: None,
-        })
-        .await
-        .unwrap();
+    #[test]
+    fn the_record_carries_the_source_spec_under_the_new_id_and_names_the_source() {
+        let source = source(RunStatus::Succeeded {
+            reason: fabro_types::SuccessReason::Completed,
+        });
+        let record = forked_run_record(&ForkedRunInput {
+            source:         &source,
+            new_run_id:     fixtures::RUN_3,
+            run_dir:        PathBuf::from("/tmp/unused"),
+            checkpoint_sha: "abc".to_string(),
+            provenance:     None,
+            web_url:        Some("http://localhost/runs/x".to_string()),
+            retried_from:   Some(fixtures::RUN_1),
+        });
+        assert_eq!(record.spec.run_id, fixtures::RUN_3);
+        assert_eq!(
+            record.spec.fork_source_ref,
+            Some(ForkSourceRef {
+                source_run_id:  fixtures::RUN_1,
+                checkpoint_sha: "abc".to_string(),
+            })
+        );
+        assert_eq!(record.spec.graph.name, "source");
+        assert_eq!(record.title.as_deref(), Some("Source title"));
+        assert_eq!(record.parent_id, Some(fixtures::RUN_2));
+        assert_eq!(record.retried_from, Some(fixtures::RUN_1));
+        assert_eq!(record.web_url.as_deref(), Some("http://localhost/runs/x"));
+    }
 
-        let forked = store.open_run(&outcome.new_run_id).await.unwrap();
-        let forked_events = forked.list_events().await.unwrap();
-        let forked_state = fabro_store::RunProjection::apply_events(&forked_events).unwrap();
-        let node = forked_state
-            .stage(&StageId::new("work", 1))
-            .expect("forked state should retain historical node projection");
+    #[test]
+    fn a_target_needs_a_commit() {
+        let resolved = ResolvedForkTarget::of(&entry(2, Some("abc"))).unwrap();
+        assert_eq!(resolved.response_target(), "@2");
+        assert_eq!(resolved.checkpoint_sha, "abc");
+        assert!(matches!(
+            ResolvedForkTarget::of(&entry(2, None)),
+            Err(Error::Validation(message)) if message.contains("no git_commit_sha")
+        ));
+    }
 
-        assert_eq!(node.response.as_deref(), Some("historical response"));
-        assert_eq!(forked_state.checkpoints.len(), 1);
-        assert_eq!(
-            forked_state.spec.workflow_version_id,
-            Some(workflow_version_id)
-        );
-        assert_eq!(
-            forked_state.spec.target,
-            Some(fabro_types::RunTarget::Git(fabro_types::GitRunTarget {
-                repo:   "example/repo".to_string(),
-                branch: "main".to_string(),
-                tag:    None,
-                sha:    None,
-            }))
-        );
-        assert_eq!(
-            forked_state.spec.fork_source_ref.unwrap().source_run_id,
-            source_run_id
-        );
+    #[test]
+    fn a_rewind_or_retry_needs_a_terminal_source() {
+        let running = source(RunStatus::Running);
+        assert!(matches!(
+            ensure_terminal(&running, &fixtures::RUN_1, "rewind"),
+            Err(Error::Precondition(message)) if message.contains("must be terminal")
+        ));
+        for status in [
+            RunStatus::Dead,
+            RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            },
+            RunStatus::Succeeded {
+                reason: fabro_types::SuccessReason::Completed,
+            },
+        ] {
+            ensure_terminal(&source(status), &fixtures::RUN_1, "retry").unwrap();
+        }
+        ensure_forkable(&running, &fixtures::RUN_1).unwrap();
     }
 }

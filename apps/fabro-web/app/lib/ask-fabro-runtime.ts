@@ -91,43 +91,22 @@ function snapshot(acc: TurnAccumulator): ChatModelRunResult {
   return { content: acc.parts.slice() };
 }
 
-/**
- * Apply a single `EventEnvelope` to the accumulator. Returns true if the
- * accumulator changed and a fresh `ChatModelRunResult` should be yielded.
- */
-interface NestedRunEvent {
-  event?: string;
-  properties?: Record<string, unknown>;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function eventPayload(envelope: SessionStreamEvent): {
-  eventName: string;
-  props: Record<string, unknown>;
-} {
-  const raw = envelope as unknown as Record<string, unknown>;
-  if (typeof raw.event === "string") {
-    return {
-      eventName: raw.event,
-      props: isRecord(raw.properties) ? raw.properties : {},
-    };
-  }
-
-  const nested = isRecord(raw.event) ? (raw.event as NestedRunEvent) : {};
-  return {
-    eventName: nested.event ?? "",
-    props: isRecord(nested.properties) ? nested.properties : {},
-  };
-}
-
+/**
+ * Apply a single `SessionEvent` to the accumulator. Returns true if the
+ * accumulator changed and a fresh `ChatModelRunResult` should be yielded.
+ */
 export function applyTurnEvent(
   acc: TurnAccumulator,
-  envelope: SessionStreamEvent,
+  event: SessionStreamEvent,
 ): boolean {
-  const { eventName, props } = eventPayload(envelope);
+  const eventName = event.event;
+  const props: Record<string, unknown> = isRecord(event.properties)
+    ? event.properties
+    : {};
 
   if (eventName === "run.session.assistant_delta") {
     const delta = typeof props.delta === "string" ? props.delta : "";

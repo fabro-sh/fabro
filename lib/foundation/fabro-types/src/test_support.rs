@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    AuthMethod, BlobHash, Graph, IdpIdentity, Principal, RunProvenance, RunSpec, WorkflowSettings,
-    WorkflowVersionId, fixtures,
+    AuthMethod, BlobHash, Graph, IdpIdentity, PetriAdmission, PetriGraphRef, Principal,
+    RunProvenance, RunSpec, WorkflowSettings, WorkflowVersionId, fixtures,
 };
 
 #[must_use]
@@ -54,6 +54,27 @@ pub fn test_run_spec() -> RunSpec {
         spec_blob:           None,
         git:                 None,
         fork_source_ref:     None,
+        admission:           test_admission(),
+    }
+}
+
+/// An admission whose graph blob names nothing a store holds: enough for a
+/// spec that is never executed. It is also the `Default` a test fixture
+/// takes for the field.
+#[must_use]
+pub fn test_admission() -> PetriAdmission {
+    PetriAdmission {
+        graph:    PetriGraphRef {
+            blob:   BlobHash::new(b"test-admission"),
+            digest: "sha256:test-admission".to_string(),
+        },
+        children: Vec::new(),
+    }
+}
+
+impl Default for PetriAdmission {
+    fn default() -> Self {
+        test_admission()
     }
 }
 

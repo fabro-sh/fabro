@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
 import TestRenderer, { act } from "react-test-renderer";
 
-import { makeEventEnvelope, setupReactTestEnv } from "../../lib/test-utils";
+import { setupReactTestEnv } from "../../lib/test-utils";
 import { makeUsage } from "../../lib/test-fixtures";
 import type { Stage } from "../stage-sidebar";
 import { FanInResults } from "./fan-in-results";
+import type { ReducerTranscript } from "./helpers";
 
 let teardown: () => void;
 beforeEach(() => {
@@ -26,22 +26,18 @@ const fanInStage: Stage = {
   usage: makeUsage(),
 };
 
-function event(seq: number, partial: Partial<EventEnvelope>): EventEnvelope {
-  return makeEventEnvelope(seq, { stage_id: "join@1", ...partial });
-}
-
-function renderFanIn(events: EventEnvelope[]): string {
+function renderFanIn(reducer: ReducerTranscript | null): string {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
-    renderer = TestRenderer.create(<FanInResults stage={fanInStage} events={events} />);
+    renderer = TestRenderer.create(<FanInResults stage={fanInStage} reducer={reducer} />);
   });
   return JSON.stringify(renderer.toJSON());
 }
 
 describe("FanInResults", () => {
   test("renders a neutral joined state without best-branch selection UI", () => {
-    const rendered = renderFanIn([]);
+    const rendered = renderFanIn(null);
 
     expect(rendered).toContain("Joined");
     expect(rendered).not.toContain("Selected branch");
@@ -50,23 +46,13 @@ describe("FanInResults", () => {
   });
 
   test("optionally renders the standard reducer transcript", () => {
-    const rendered = renderFanIn([
-      event(1, {
-        event: "stage.prompt",
-        properties: {
-          mode: "prompt",
-          text: "Combine the useful findings.",
-          model: "claude-sonnet-4-6",
-        },
-      }),
-      event(2, {
-        event: "prompt.completed",
-        properties: {
-          response: "All branch findings are now available.",
-          usage: { model: { provider: "anthropic", model_id: "claude-sonnet-4-6" }, usage: { tokens: { input: 1200, output: 340 } } },
-        },
-      }),
-    ]);
+    const rendered = renderFanIn({
+      prompt: "Combine the useful findings.",
+      response: "All branch findings are now available.",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1200,
+      outputTokens: 340,
+    });
 
     expect(rendered).toContain("Reducer transcript");
     expect(rendered).toContain("Combine the useful findings.");

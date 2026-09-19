@@ -303,7 +303,7 @@ impl InterpString {
     ///
     /// This is a footgun for consumers: passing the raw source downstream
     /// leaks `{{ ... }}` tokens as literal text. Resolve via
-    /// [`InterpString::resolve`] / [`InterpString::resolve_with`] (or
+    /// [`InterpString::resolve_with`] (or
     /// substitute via [`InterpString::substitute_with`]) instead. Intentional
     /// uses — serialization, error messages, deliberate source preservation —
     /// must document themselves with

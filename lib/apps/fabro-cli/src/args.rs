@@ -234,6 +234,10 @@ pub(crate) struct RunArgs {
     pub(crate) inputs: InputOverrideArgs,
 
     /// Workflow name, path, or OWNER/REPO[@REF]:WORKFLOW
+    #[allow(
+        rustdoc::broken_intra_doc_links,
+        reason = "the help text's `[@REF]` is an optional segment, not a link"
+    )]
     #[arg(required = true)]
     pub(crate) workflow: Option<PathBuf>,
 
@@ -758,7 +762,33 @@ pub(crate) struct ResumeArgs {
     pub(crate) detach: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Args)]
+pub(crate) struct RetryArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Run ID (or unambiguous prefix)
+    pub(crate) run_id: String,
+}
+
+#[derive(Args)]
+pub(crate) struct ForkArgs {
+    #[command(flatten)]
+    pub(crate) server: ServerTargetArgs,
+
+    /// Run ID (or unambiguous prefix)
+    pub(crate) run_id: String,
+
+    /// Target checkpoint: node name, node@visit, or @ordinal (omit to fork from
+    /// latest)
+    pub(crate) target: Option<String>,
+
+    /// Show the checkpoint timeline instead of forking
+    #[arg(long)]
+    pub(crate) list: bool,
+}
+
+#[derive(Args)]
 pub(crate) struct RewindArgs {
     #[command(flatten)]
     pub(crate) server: ServerTargetArgs,
@@ -774,21 +804,13 @@ pub(crate) struct RewindArgs {
     pub(crate) list: bool,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct ForkArgs {
+#[derive(Args)]
+pub(crate) struct TimelineArgs {
     #[command(flatten)]
     pub(crate) server: ServerTargetArgs,
 
     /// Run ID (or unambiguous prefix)
     pub(crate) run_id: String,
-
-    /// Target checkpoint: node name, node@visit, or @ordinal (omit to fork from
-    /// latest)
-    pub(crate) target: Option<String>,
-
-    /// Show the checkpoint timeline instead of forking
-    #[arg(long)]
-    pub(crate) list: bool,
 }
 
 #[derive(Args)]
@@ -827,6 +849,11 @@ pub(crate) struct SteerArgs {
     /// as the next user turn (default: append to the steering queue).
     #[arg(long)]
     pub(crate) interrupt: bool,
+
+    /// Agent stage to steer, as its stage id (node@visit) or node name
+    /// (default: the run's one live agent stage)
+    #[arg(long, value_name = "STAGE")]
+    pub(crate) stage: Option<String>,
 }
 
 #[derive(Args)]
@@ -1089,6 +1116,11 @@ pub(crate) struct RunWorkerArgs {
     /// Worker mode
     #[arg(long, value_enum)]
     pub(crate) mode: RunWorkerMode,
+
+    /// The Fabro home the server runs under, for the skills a Petri run's
+    /// agents read
+    #[arg(long, hide = true)]
+    pub(crate) fabro_home: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -1295,10 +1327,14 @@ pub(crate) enum RunCommands {
     Logs(LogsArgs),
     /// Resume an interrupted workflow run
     Resume(ResumeArgs),
-    /// Rewind a workflow run to an earlier checkpoint
-    Rewind(RewindArgs),
+    /// Retry a finished workflow run from its last checkpoint in a new run
+    Retry(RetryArgs),
     /// Fork a workflow run from an earlier checkpoint into a new run
     Fork(ForkArgs),
+    /// Rewind a workflow run to an earlier checkpoint, replacing it
+    Rewind(RewindArgs),
+    /// Show the checkpoint timeline of a workflow run
+    Timeline(TimelineArgs),
     /// Block until a workflow run completes
     Wait(WaitArgs),
     /// Steer a running agent mid-execution
@@ -1319,10 +1355,12 @@ impl RunCommands {
             Self::Events(_) => "events",
             Self::Logs(_) => "logs",
             Self::Resume(_) => "resume",
+            Self::Retry(_) => "retry",
+            Self::Fork(_) => "fork",
             Self::Rewind(_) => "rewind",
+            Self::Timeline(_) => "timeline",
             Self::Steer(_) => "steer",
             Self::Ask(_) => "ask",
-            Self::Fork(_) => "fork",
             Self::Wait(_) => "wait",
         }
     }

@@ -26,15 +26,15 @@ import type { CreateRunSessionRequest } from '../models';
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
-import type { EventEnvelope } from '../models';
-// @ts-ignore
-import type { PaginatedEventList } from '../models';
+import type { PaginatedSessionEventList } from '../models';
 // @ts-ignore
 import type { PaginatedSessionList } from '../models';
 // @ts-ignore
 import type { RunSessionMetadata } from '../models';
 // @ts-ignore
 import type { SessionDetail } from '../models';
+// @ts-ignore
+import type { SessionEvent } from '../models';
 // @ts-ignore
 import type { SubmitTurnRequest } from '../models';
 /**
@@ -43,7 +43,7 @@ import type { SubmitTurnRequest } from '../models';
 export const SessionsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Replays and streams this session\'s durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+         * Replays this session\'s events from `since_seq` (the next unseen event when omitted) as `SessionEvent` frames, then streams new ones as they are recorded. The stream remains open until the client disconnects or the server shuts down.
          * @summary Attach to session events
          * @param {string} id
          * @param {number} [sinceSeq]
@@ -272,7 +272,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             };
         },
         /**
-         * Returns run event envelopes filtered to this session\'s durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+         * Returns this session\'s events in order. Events are numbered per session from 1; `since_seq` is the first sequence number to include.
          * @summary List session events
          * @param {string} id
          * @param {number} [sinceSeq]
@@ -322,7 +322,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             };
         },
         /**
-         * Starts a streamed turn immediately. Background turns are not supported in this API version.
+         * Starts a streamed turn immediately. The stream carries the turn\'s `SessionEvent` frames, from `run.session.turn.started` to the event that ends the turn. Background turns are not supported in this API version.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
@@ -376,7 +376,7 @@ export const SessionsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = SessionsApiAxiosParamCreator(configuration)
     return {
         /**
-         * Replays and streams this session\'s durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+         * Replays this session\'s events from `since_seq` (the next unseen event when omitted) as `SessionEvent` frames, then streams new ones as they are recorded. The stream remains open until the client disconnects or the server shuts down.
          * @summary Attach to session events
          * @param {string} id
          * @param {number} [sinceSeq]
@@ -424,7 +424,7 @@ export const SessionsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async interruptSessionTurn(id: string, turnId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EventEnvelope>> {
+        async interruptSessionTurn(id: string, turnId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SessionEvent>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.interruptSessionTurn(id, turnId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SessionsApi.interruptSessionTurn']?.[localVarOperationServerIndex]?.url;
@@ -447,7 +447,7 @@ export const SessionsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns run event envelopes filtered to this session\'s durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+         * Returns this session\'s events in order. Events are numbered per session from 1; `since_seq` is the first sequence number to include.
          * @summary List session events
          * @param {string} id
          * @param {number} [sinceSeq]
@@ -455,14 +455,14 @@ export const SessionsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listSessionEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedEventList>> {
+        async listSessionEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedSessionEventList>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listSessionEvents(id, sinceSeq, limit, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SessionsApi.listSessionEvents']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Starts a streamed turn immediately. Background turns are not supported in this API version.
+         * Starts a streamed turn immediately. The stream carries the turn\'s `SessionEvent` frames, from `run.session.turn.started` to the event that ends the turn. Background turns are not supported in this API version.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
@@ -485,7 +485,7 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
     const localVarFp = SessionsApiFp(configuration)
     return {
         /**
-         * Replays and streams this session\'s durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+         * Replays this session\'s events from `since_seq` (the next unseen event when omitted) as `SessionEvent` frames, then streams new ones as they are recorded. The stream remains open until the client disconnects or the server shuts down.
          * @summary Attach to session events
          * @param {string} id
          * @param {number} [sinceSeq]
@@ -524,7 +524,7 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        interruptSessionTurn(id: string, turnId: string, options?: RawAxiosRequestConfig): AxiosPromise<EventEnvelope> {
+        interruptSessionTurn(id: string, turnId: string, options?: RawAxiosRequestConfig): AxiosPromise<SessionEvent> {
             return localVarFp.interruptSessionTurn(id, turnId, options).then((request) => request(axios, basePath));
         },
         /**
@@ -541,7 +541,7 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
             return localVarFp.listRunSessions(id, pageLimit, pageOffset, order, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns run event envelopes filtered to this session\'s durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+         * Returns this session\'s events in order. Events are numbered per session from 1; `since_seq` is the first sequence number to include.
          * @summary List session events
          * @param {string} id
          * @param {number} [sinceSeq]
@@ -549,11 +549,11 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listSessionEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedEventList> {
+        listSessionEvents(id: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedSessionEventList> {
             return localVarFp.listSessionEvents(id, sinceSeq, limit, options).then((request) => request(axios, basePath));
         },
         /**
-         * Starts a streamed turn immediately. Background turns are not supported in this API version.
+         * Starts a streamed turn immediately. The stream carries the turn\'s `SessionEvent` frames, from `run.session.turn.started` to the event that ends the turn. Background turns are not supported in this API version.
          * @summary Submit a session turn
          * @param {string} id
          * @param {SubmitTurnRequest} submitTurnRequest
@@ -571,7 +571,7 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
  */
 export class SessionsApi extends BaseAPI {
     /**
-     * Replays and streams this session\'s durable `run.session.*` events from the owning run event log. The stream remains open until the client disconnects or the server shuts down.
+     * Replays this session\'s events from `since_seq` (the next unseen event when omitted) as `SessionEvent` frames, then streams new ones as they are recorded. The stream remains open until the client disconnects or the server shuts down.
      * @summary Attach to session events
      * @param {string} id
      * @param {number} [sinceSeq]
@@ -632,7 +632,7 @@ export class SessionsApi extends BaseAPI {
     }
 
     /**
-     * Returns run event envelopes filtered to this session\'s durable `run.session.*` events. `since_seq` uses the owning run event sequence.
+     * Returns this session\'s events in order. Events are numbered per session from 1; `since_seq` is the first sequence number to include.
      * @summary List session events
      * @param {string} id
      * @param {number} [sinceSeq]
@@ -645,7 +645,7 @@ export class SessionsApi extends BaseAPI {
     }
 
     /**
-     * Starts a streamed turn immediately. Background turns are not supported in this API version.
+     * Starts a streamed turn immediately. The stream carries the turn\'s `SessionEvent` frames, from `run.session.turn.started` to the event that ends the turn. Background turns are not supported in this API version.
      * @summary Submit a session turn
      * @param {string} id
      * @param {SubmitTurnRequest} submitTurnRequest

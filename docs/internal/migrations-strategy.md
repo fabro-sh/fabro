@@ -20,7 +20,7 @@ The crate-local `src/migrations.rs` module is the registry. It imports numbered 
 Examples:
 
 - `fabro-config` owns settings-file migrations.
-- `fabro-server` owns server startup activation migrations for SQLite blob storage and run history.
+- `fabro-db` owns the SQL schema migrations under `lib/foundation/fabro-db/migrations/`.
 
 Keep migration APIs `pub(crate)` unless another crate genuinely orchestrates the migration.
 

@@ -14,6 +14,29 @@ pub fn parse_blob_ref(value: &str) -> Option<BlobHash> {
     value.strip_prefix(BLOB_REF_PREFIX)?.parse().ok()
 }
 
+/// How the bytes behind a blob reference decode back into a value.
+///
+/// Petri stores a large string as its own bytes and marks a structured value
+/// with a `#json` suffix on the reference (`blob://sha256/<hex>#json`), so a
+/// reader knows whether to parse the bytes or take them as text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlobRefEncoding {
+    /// The bytes are the text of a string value.
+    Text,
+    /// The bytes are compact JSON of a structured value.
+    Json,
+}
+
+/// A blob reference with its encoding: a plain reference is text, one with
+/// the `#json` suffix is JSON.
+#[must_use]
+pub fn parse_blob_ref_encoded(value: &str) -> Option<(BlobHash, BlobRefEncoding)> {
+    match value.strip_suffix("#json") {
+        Some(body) => parse_blob_ref(body).map(|hash| (hash, BlobRefEncoding::Json)),
+        None => parse_blob_ref(value).map(|hash| (hash, BlobRefEncoding::Text)),
+    }
+}
+
 #[must_use]
 pub fn parse_managed_blob_file_ref(value: &str) -> Option<BlobHash> {
     let path = value.strip_prefix("file://")?;
@@ -45,7 +68,10 @@ fn has_path_suffix(path: &str, suffix: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_blob_ref, parse_blob_ref, parse_managed_blob_file_ref};
+    use super::{
+        BlobRefEncoding, format_blob_ref, parse_blob_ref, parse_blob_ref_encoded,
+        parse_managed_blob_file_ref,
+    };
     use crate::BlobHash;
 
     #[test]
@@ -54,6 +80,21 @@ mod tests {
         let formatted = format_blob_ref(&blob_hash);
 
         assert_eq!(parse_blob_ref(&formatted), Some(blob_hash));
+    }
+
+    #[test]
+    fn a_json_suffix_names_the_encoding() {
+        let blob_hash = BlobHash::new(b"text");
+        let formatted = format_blob_ref(&blob_hash);
+        assert_eq!(
+            parse_blob_ref_encoded(&formatted),
+            Some((blob_hash, BlobRefEncoding::Text))
+        );
+        assert_eq!(
+            parse_blob_ref_encoded(&format!("{formatted}#json")),
+            Some((blob_hash, BlobRefEncoding::Json))
+        );
+        assert_eq!(parse_blob_ref_encoded("not a reference"), None);
     }
 
     #[test]

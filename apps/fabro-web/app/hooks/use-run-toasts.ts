@@ -1,8 +1,16 @@
 import { useEffect, useRef } from "react";
+import type { RunStreamItem } from "@qltysh/fabro-api-client";
 
 import { useToast } from "../components/toast";
-import { subscribeToRunEvents, type RunEventPayload } from "../lib/run-events";
+import { eventDedupeKey } from "../lib/cross-tab-sse";
+import {
+  petriBody,
+  petriEventName,
+  platformRecordKind,
+} from "../lib/petri-stream";
+import { subscribeToRunEvents } from "../lib/run-events";
 import type { MutateFn } from "../lib/sse";
+import { getBool, getObject, getString } from "../lib/unknown";
 
 const NOOP_MUTATE = (() => undefined) as MutateFn;
 const DEDUPE_WINDOW = 256;
@@ -13,19 +21,19 @@ const DEDUPE_WINDOW = 256;
  */
 export function useRunToasts(runId: string | undefined) {
   const { push } = useToast();
-  const seenEventIdsRef = useRef(new Set<string>());
+  const seenItemKeysRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (!runId) return;
 
     const seen = new Set<string>();
-    seenEventIdsRef.current = seen;
+    seenItemKeysRef.current = seen;
     return subscribeToRunEvents(runId, NOOP_MUTATE, undefined, {
-      onEvent: (payload) => {
-        const dedupeId = eventDedupeId(payload);
-        if (dedupeId) {
-          if (seen.has(dedupeId)) return;
-          seen.add(dedupeId);
+      onItem: (item) => {
+        const dedupeKey = eventDedupeKey(item);
+        if (dedupeKey) {
+          if (seen.has(dedupeKey)) return;
+          seen.add(dedupeKey);
           if (seen.size > DEDUPE_WINDOW) {
             // Set iteration order is insertion order; drop the oldest.
             const oldest = seen.values().next().value;
@@ -33,7 +41,7 @@ export function useRunToasts(runId: string | undefined) {
           }
         }
 
-        const message = steeringToastMessage(payload);
+        const message = steeringToastMessage(item);
         if (message) {
           push({ message });
         }
@@ -42,35 +50,27 @@ export function useRunToasts(runId: string | undefined) {
   }, [push, runId]);
 }
 
-function eventDedupeId(payload: RunEventPayload): string | null {
-  if (typeof payload.id === "string") return payload.id;
-  if (typeof payload.seq === "number") return `seq:${payload.seq}`;
-  return null;
-}
-
-function steeringToastMessage(payload: RunEventPayload): string | null {
-  const props = payload.properties ?? {};
-
-  switch (payload.event) {
-    case "run.interrupt":
-      return "Agent interrupted.";
-    case "run.steer":
-      return "Steer accepted.";
-    case "agent.steering.injected":
-      return "Steer delivered.";
-    case "agent.steer.buffered":
-      return "Steer queued — will apply when an agent stage runs.";
-    case "agent.steer.dropped": {
-      const reason = props.reason;
-      if (reason === "queue_full") {
-        return "Steer rate limit reached; oldest queued steer dropped.";
-      }
-      if (reason === "run_ended") {
-        return "Run ended before queued steer(s) could apply.";
-      }
-      return null;
-    }
-    default:
-      return null;
+/**
+ * The toast a steering item earns: a `control.requested` that delivers a
+ * `$steer` (queued until an agent stage runs when Petri says it is not
+ * deliverable) or cancels the firing (an interrupt), and the `run.notice`
+ * the worker records when it refuses a steer.
+ */
+export function steeringToastMessage(item: RunStreamItem): string | null {
+  if (platformRecordKind(item) === "run.notice") {
+    const record = getObject(item.item, "record");
+    if (getString(record, "code") !== "steer_refused") return null;
+    return getString(record, "message") ?? "Steer refused: no agent stage is running.";
   }
+  if (petriEventName(item) !== "control.requested") return null;
+  const ctl = getObject(petriBody(item), "ctl");
+  if (!ctl) return null;
+  if (getObject(ctl, "deliver")?.$steer !== undefined) {
+    const deliverable = getBool(getObject(item.item, "derived"), "deliverable");
+    return deliverable === false
+      ? "Steer queued — will apply when an agent stage runs."
+      : "Steer delivered.";
+  }
+  if (ctl.cancel !== undefined) return "Agent interrupted.";
+  return null;
 }

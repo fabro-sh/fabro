@@ -11,6 +11,7 @@ mod landing;
 mod local_server;
 mod logging;
 mod manifest_args;
+mod mcp_servers;
 mod server_client;
 mod server_runs;
 mod shared;

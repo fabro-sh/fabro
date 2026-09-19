@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use fabro_api::types::CreateRunSessionRequest;
-use fabro_store::EventEnvelope;
+use fabro_types::{SessionEvent, SessionEventBody};
 
 use crate::args::AskArgs;
 use crate::command_context::CommandContext;
@@ -24,21 +24,13 @@ pub(crate) async fn run(args: AskArgs, base_ctx: &CommandContext) -> Result<()> 
     let mut saw_terminal = false;
     while let Some(event) = stream.next_event().await? {
         render_event(&event, ctx.json_output())?;
-        match event.event.event_name() {
-            "run.session.turn.succeeded" | "run.session.turn.interrupted" => {
+        match &event.body {
+            SessionEventBody::TurnSucceeded(_) | SessionEventBody::TurnInterrupted(_) => {
                 saw_terminal = true;
             }
-            "run.session.turn.failed" => {
+            SessionEventBody::TurnFailed(props) => {
                 saw_terminal = true;
-                terminal_error = Some(
-                    event
-                        .event
-                        .properties()?
-                        .get("error")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("session turn failed")
-                        .to_string(),
-                );
+                terminal_error = Some(props.error.clone());
             }
             _ => {}
         }
@@ -68,28 +60,18 @@ fn session_title(prompt: &str) -> String {
     clippy::print_stdout,
     reason = "The ask command streams assistant output and JSON events to stdout."
 )]
-fn render_event(event: &EventEnvelope, json_output: bool) -> Result<()> {
+fn render_event(event: &SessionEvent, json_output: bool) -> Result<()> {
     if json_output {
         println!("{}", serde_json::to_string(event)?);
         return Ok(());
     }
 
-    match event.event.event_name() {
-        "run.session.assistant_delta" => {
-            let properties = event.event.properties()?;
-            if let Some(delta) = properties.get("delta").and_then(serde_json::Value::as_str) {
-                print!("{delta}");
-            }
+    match &event.body {
+        SessionEventBody::AssistantDelta(props) => {
+            print!("{}", props.delta);
         }
-        "run.session.assistant_message" => {
-            let properties = event.event.properties()?;
-            if let Some(text) = properties
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .filter(|text| !text.is_empty())
-            {
-                println!("{text}");
-            }
+        SessionEventBody::AssistantMessage(props) if !props.text.is_empty() => {
+            println!("{}", props.text);
         }
         _ => {}
     }

@@ -4,8 +4,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("SlateDB error: {0}")]
-    Slate(#[from] slatedb::Error),
     #[error("Object store error: {0}")]
     ObjectStore(#[from] object_store::Error),
     #[error("Serialization error: {0}")]

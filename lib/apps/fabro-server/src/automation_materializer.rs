@@ -533,9 +533,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use std::sync::Mutex;
-    use std::time::Duration;
 
-    use object_store::memory::InMemory;
     use tempfile::TempDir;
 
     use super::*;
@@ -762,12 +760,7 @@ mod tests {
     }
 
     fn test_version_store() -> WorkflowVersionStore {
-        let database = fabro_store::test_support::test_database(
-            Arc::new(InMemory::new()),
-            "",
-            Duration::from_millis(1),
-            None,
-        );
+        let database = fabro_store::test_support::test_database();
         WorkflowVersionStore::new(database.blobs())
     }
 

@@ -181,7 +181,6 @@ mock.module("../lib/mutations", () => ({
   useDenyRun:              mutationState,
   useInterruptRun:         mutationState,
   usePreviewRun:           mutationState,
-  useRetryRun:             mutationState,
   useSteerRun:             mutationState,
   useSubmitInterviewAnswer: submitAnswerHookMock,
   useUpdateRunTitle:       mutationState,
@@ -550,7 +549,6 @@ describe("handleLifecycleToastResult", () => {
       deny:      null,
       archive:   null,
       unarchive: null,
-      retry:     null,
     },
   };
 
@@ -623,7 +621,6 @@ describe("handleLifecycleToastResult", () => {
         deny:      null,
         archive:   null,
         unarchive: null,
-        retry:     null,
       },
     };
 
@@ -744,63 +741,6 @@ describe("RunDetail full-height child routes", () => {
 
     const badges = tabCountBadges(renderer);
     expect(badges.map((badge) => badge.children.join(""))).toContain("7");
-  });
-
-  test("successful retry result navigates to the new run once", () => {
-    const pushed: Array<{ message: string; tone?: string }> = [];
-    const navigated: string[] = [];
-    const result: RunDetailActionResult = {
-      intent: "retry",
-      ok:     true,
-      run:    {
-        ...makeRunSummary({ status: "runnable" }),
-        id:           "run_retry",
-        retried_from: "run_1",
-      },
-    };
-    const initialState: LifecycleToastState = {
-      activeArchiveToastId: null,
-      lastProcessed:        {
-        cancel:    null,
-        approve:   null,
-        deny:      null,
-        archive:   null,
-        unarchive: null,
-        retry:     null,
-      },
-    };
-
-    const next = handleLifecycleToastResult(
-      "retry",
-      result,
-      initialState,
-      {
-        push:    (toast) => {
-          pushed.push(toast);
-          return "toast-1";
-        },
-        dismiss: () => undefined,
-      },
-      (path) => navigated.push(path),
-    );
-    const replay = handleLifecycleToastResult(
-      "retry",
-      result,
-      next,
-      {
-        push:    (toast) => {
-          pushed.push(toast);
-          return "toast-2";
-        },
-        dismiss: () => undefined,
-      },
-      (path) => navigated.push(path),
-    );
-
-    expect(next.lastProcessed.retry).toBe(result);
-    expect(replay).toBe(next);
-    expect(pushed).toEqual([{ message: "Retry started." }]);
-    expect(navigated).toEqual(["/runs/run_retry"]);
   });
 
   test("hides the Sandbox tab for a planned sandbox without an instance", async () => {

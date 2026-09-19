@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import type { RunStreamItem } from "@qltysh/fabro-api-client";
 
 import {
   createCrossTabSseCoordinator,
   type BroadcastChannelLike,
 } from "./cross-tab-sse";
-import { subscribeToLiveEvents, type LiveEventPayload } from "./live-events";
+import { subscribeToLiveEvents } from "./live-events";
+import { makePetriItem, makePlatformItem } from "./test-utils";
 import type { EventSourceLike } from "./sse";
 
 type MessageHandler = ((event: { data: string }) => void) | null;
@@ -34,7 +36,7 @@ describe("subscribeToLiveEvents", () => {
   test("coordinated mode opens /api/v1/attach and forwards every payload", async () => {
     const source = new FakeEventSource();
     const created: string[] = [];
-    const seen: LiveEventPayload[] = [];
+    const seen: RunStreamItem[] = [];
     const coordinator = createCoordinator((url) => {
       created.push(url);
       return source;
@@ -50,8 +52,10 @@ describe("subscribeToLiveEvents", () => {
 
     await waitFor(() => created.length === 1);
 
-    source.emit({ id: "evt-1", event: "stage.started", run_id: "run-a" });
-    source.emit({ id: "evt-2", event: "agent.message", run_id: "run-b" });
+    source.emit(makePetriItem(1, { event: "step.started", firing: 1 }, { run_id: "run-a" }));
+    source.emit(makePlatformItem(1, { kind: "checkpoint" }, { run_id: "run-b" }));
+    // A frame that is not a stream item is dropped.
+    source.emit({ event: "stage.started", run_id: "run-c" });
 
     expect(created).toEqual(["/api/v1/attach"]);
     expect(seen.map((p) => p.run_id)).toEqual(["run-a", "run-b"]);
@@ -63,7 +67,7 @@ describe("subscribeToLiveEvents", () => {
   test("fallback mode opens /api/v1/attach (not a per-run URL) and forwards payloads", () => {
     const source = new FakeEventSource();
     const created: string[] = [];
-    const seen: LiveEventPayload[] = [];
+    const seen: RunStreamItem[] = [];
     const coordinator = createFallbackCoordinator();
 
     const cleanup = subscribeToLiveEvents(
@@ -75,8 +79,12 @@ describe("subscribeToLiveEvents", () => {
       { coordinator },
     );
 
-    source.emit({ id: "evt-1", event: "run.completed", run_id: "run-a" });
-    source.emit({ id: "evt-2", event: "run.failed", run_id: "run-b" });
+    source.emit(
+      makePlatformItem(9, { kind: "run.lifecycle", transition: "succeeded" }, { run_id: "run-a" }),
+    );
+    source.emit(
+      makePlatformItem(9, { kind: "run.lifecycle", transition: "failed" }, { run_id: "run-b" }),
+    );
 
     expect(created).toEqual(["/api/v1/attach"]);
     expect(seen.map((p) => p.run_id)).toEqual(["run-a", "run-b"]);

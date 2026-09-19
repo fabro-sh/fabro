@@ -20,7 +20,6 @@ import {
   denyRun,
   isCancellationPendingState,
   mapError,
-  retryRun,
   unarchiveRun,
 } from "../../lib/run-actions";
 import type { LifecycleAction } from "../../lib/run-actions";
@@ -44,7 +43,6 @@ export function RowActionsMenu({ run }: { run: RunWithStatus }) {
   const status = run.lifecycleStatus;
   const showApprove = run.pendingApproval === true;
   const showDeny = run.pendingApproval === true;
-  const showRetry = status === "failed" || status === "dead";
   const showArchive = canArchive(status);
   const showUnarchive = canUnarchive(status);
   const showCancel = canCancel(status);
@@ -56,7 +54,7 @@ export function RowActionsMenu({ run }: { run: RunWithStatus }) {
   );
   const pending = pendingAction !== null || cancellationPending;
 
-  const hasLifecycle = showRetry || showArchive || showUnarchive;
+  const hasLifecycle = showArchive || showUnarchive;
   const hasDestructive = showDeny || showCancel || showDelete;
 
   async function runAction<T>(
@@ -159,20 +157,6 @@ export function RowActionsMenu({ run }: { run: RunWithStatus }) {
                 className={MENU_ITEM_CLASS}
               >
                 Approve
-              </button>
-            </MenuItem>
-          )}
-          {showRetry && (
-            <MenuItem>
-              <button
-                type="button"
-                onClick={() =>
-                  void runAction("retry", () => retryRun(run.id), "Retried run.")
-                }
-                disabled={pending}
-                className={MENU_ITEM_CLASS}
-              >
-                Retry
               </button>
             </MenuItem>
           )}

@@ -415,7 +415,6 @@ pub fn write_object_store_settings(
                 let root_table = root_table_mut(doc)?;
                 let server = ensure_table(root_table, "server")?;
                 write_local_store_settings(server, "artifacts", "artifacts", root)?;
-                write_local_store_settings(server, "slatedb", "slatedb", root)?;
             }
             Ok(InstallObjectStoreEnvPlan {
                 writes:   Vec::new(),
@@ -437,7 +436,6 @@ pub fn write_object_store_settings(
             let root = root_table_mut(doc)?;
             let server = ensure_table(root, "server")?;
             write_s3_store_settings(server, "artifacts", "artifacts", bucket, region)?;
-            write_s3_store_settings(server, "slatedb", "slatedb", bucket, region)?;
 
             let removals = object_store_env_removals();
             let writes = match credential_mode {
@@ -1327,32 +1325,7 @@ stale = "remove-me"
                 .and_then(toml::Value::as_str),
             Some("/srv/fabro/objects")
         );
-        assert_eq!(
-            server
-                .get("slatedb")
-                .and_then(toml::Value::as_table)
-                .and_then(|slatedb| slatedb.get("provider"))
-                .and_then(toml::Value::as_str),
-            Some("local")
-        );
-        assert_eq!(
-            server
-                .get("slatedb")
-                .and_then(toml::Value::as_table)
-                .and_then(|slatedb| slatedb.get("prefix"))
-                .and_then(toml::Value::as_str),
-            Some("slatedb")
-        );
-        assert_eq!(
-            server
-                .get("slatedb")
-                .and_then(toml::Value::as_table)
-                .and_then(|slatedb| slatedb.get("local"))
-                .and_then(toml::Value::as_table)
-                .and_then(|local| local.get("root"))
-                .and_then(toml::Value::as_str),
-            Some("/srv/fabro/objects")
-        );
+        assert!(server.get("slatedb").is_none());
         assert!(plan.writes.is_empty());
         assert_eq!(plan.removals.len(), 2);
     }
@@ -1381,14 +1354,7 @@ stale = "remove-me"
                 .and_then(toml::Value::as_str),
             Some("artifacts")
         );
-        assert_eq!(
-            server
-                .get("slatedb")
-                .and_then(toml::Value::as_table)
-                .and_then(|slatedb| slatedb.get("prefix"))
-                .and_then(toml::Value::as_str),
-            Some("slatedb")
-        );
+        assert!(server.get("slatedb").is_none());
         assert!(plan.writes.is_empty());
     }
 

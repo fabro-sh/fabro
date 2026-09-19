@@ -434,9 +434,9 @@ impl<'a> WorkflowBundler<'a> {
         for image in layer.environment_images() {
             self.collect_environment_dockerfile(files, base_dir, config_path, image)?;
         }
-        if self.workflow_version_projection {
-            self.collect_config_goal_files(files, base_dir, config_path, entrypoint, &layer)?;
-        }
+        // The goal file rides with the manifest: Petri reads `[run.goal]
+        // file` from the bundle at check, as it does for a version.
+        self.collect_config_goal_files(files, base_dir, config_path, entrypoint, &layer)?;
         Ok(())
     }
 

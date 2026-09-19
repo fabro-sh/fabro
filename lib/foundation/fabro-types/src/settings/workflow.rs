@@ -1,7 +1,7 @@
 //! Workflow domain.
 //!
 //! `[workflow]` is descriptive: `name`, `description`, optional `graph` (a
-//! path override for the default `workflow.fabro` file), and `metadata`.
+//! path override for the default `workflow.fabro` file) and `metadata`.
 
 use std::collections::HashMap;
 

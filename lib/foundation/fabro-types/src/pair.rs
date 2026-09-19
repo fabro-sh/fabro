@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 use strum::{Display, EnumString, IntoStaticStr};
 
 use crate::id::ulid_id;
@@ -209,55 +208,4 @@ pub struct PairTranscriptWarning {
 pub enum PairSystemMessageKind {
     HumanJoined,
     HumanLeft,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunEventDetailResponse {
-    pub event:              RunEventDetailEnvelope,
-    pub properties:         Map<String, Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content:            Option<RunEventDetailContent>,
-    pub truncated:          bool,
-    pub redacted:           bool,
-    pub max_content_length: usize,
-}
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString, IntoStaticStr,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum RunEventDetailContentKind {
-    Text,
-    ToolOutput,
-    ToolArguments,
-    Error,
-    Details,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunEventDetailEnvelope {
-    pub seq:          u32,
-    pub id:           String,
-    pub ts:           DateTime<Utc>,
-    pub run_id:       RunId,
-    pub event:        String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor:        Option<crate::Principal>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id:   Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_id:      Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_label:   Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stage_id:     Option<StageId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RunEventDetailContent {
-    pub kind:  RunEventDetailContentKind,
-    pub value: String,
 }

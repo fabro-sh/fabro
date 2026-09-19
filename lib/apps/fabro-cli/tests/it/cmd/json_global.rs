@@ -207,7 +207,7 @@ fn events_json_wins_over_pretty() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     let first_line = stdout.lines().find(|line| !line.is_empty()).unwrap();
     let value: Value = serde_json::from_str(first_line).expect("events output should remain JSONL");
-    assert!(value.get("event").is_some());
+    assert!(value.get("stream_seq").is_some());
 }
 
 #[test]

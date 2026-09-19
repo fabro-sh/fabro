@@ -13,14 +13,44 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { DiffSummary } from './diff-summary';
 
 /**
- * Checkpoint timeline entry for a run.
+ * One checkpoint of a run.
  */
 export interface TimelineEntryResponse {
+    /**
+     * 1-based, in the order the checkpoints were recorded; the `@ordinal` a fork target names.
+     */
     'ordinal': number;
+    /**
+     * The checkpoint record\'s position among the run\'s platform records.
+     */
+    'checkpoint_seq': number;
+    /**
+     * The Petri execution the checkpoint belongs to.
+     */
+    'execution': number;
+    /**
+     * The Petri firing the checkpoint belongs to.
+     */
+    'firing': number;
+    /**
+     * The attempt of the firing whose files the commit holds, from 1.
+     */
+    'attempt': number;
+    /**
+     * The stage id (`node@visit`) when the projection shows the stage.
+     */
+    'stage'?: string | null;
     'node_name': string;
     'visit': number;
-    'checkpoint_seq': number;
+    /**
+     * The Petri workspace id the commit was made in.
+     */
+    'workspace'?: string | null;
     'run_commit_sha'?: string | null;
+    'diff_summary'?: DiffSummary | null;
 }

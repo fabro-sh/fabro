@@ -3,19 +3,21 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 use fabro_api::types;
-use fabro_config::{RunLayer, WorkflowSettingsBuilder};
+use fabro_config::{RunLayer, SettingsLayer, WorkflowSettingsBuilder};
 use fabro_manifest::CollectedWorkflowClosure;
+use fabro_petri::runtime::RuntimeSpec;
 use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 use fabro_workflow::pipeline::TEMPLATE_UNDEFINED_VARIABLE_RULE;
 
-use crate::{run_intent, run_manifest};
+use crate::{petri_check, run_intent, run_manifest};
 
 /// Validate a manifest without a model catalog.
 ///
 /// Every caller is a client — the CLI, an MCP server, a run worker — and a
 /// client's catalog is its own, not the server's. Judging model and provider
-/// availability here would reject workflows the server can run, so that is
-/// left to the server on create.
+/// availability here would reject workflows the server can run, so Petri
+/// checks the bundle with no model client: the structure, the settings and
+/// the templates, with every model node left for the server on create.
 pub fn validate_manifest(
     manifest_run_defaults: &RunLayer,
     manifest: &types::RunManifest,
@@ -26,9 +28,38 @@ pub fn validate_manifest(
         &HashMap::new(),
         manifest,
     )?;
-    let validated = run_manifest::validate_prepared_manifest_structural(&prepared)
-        .map_err(anyhow::Error::new)?;
+    let validated = run_manifest::validate_prepared_manifest(
+        &prepared,
+        &HashMap::new(),
+        petri_check::launch_without_catalog(&prepared.settings),
+        offline_runtime(Some(manifest_run_defaults)),
+        true,
+        true,
+    )
+    .map_err(anyhow::Error::new)?;
     Ok(run_manifest::validate_response(&prepared, &validated))
+}
+
+/// Petri's runtime for a check away from the server: the seeded environment
+/// catalog and the given `[run]` layer as the settings layer, the same
+/// defaults the legacy validation judges against, so a bundle that names a
+/// seeded environment validates; no MCP catalog, no model client, no Fabro
+/// home, no run tools.
+fn offline_runtime(run: Option<&RunLayer>) -> RuntimeSpec {
+    let layer = SettingsLayer {
+        version: Some(1),
+        environments: fabro_environment::seeded_catalog_layer(),
+        run: run.cloned(),
+        ..SettingsLayer::default()
+    };
+    RuntimeSpec {
+        settings_toml:    toml::to_string(&layer).ok(),
+        mcp_catalog_toml: None,
+        model_client:     None,
+        dry_run:          false,
+        fabro_home:       None,
+        run_tools:        None,
+    }
 }
 
 /// Validate an already collected local workflow before any version upload.
@@ -46,8 +77,8 @@ pub fn validate_collected_workflow(
     let lowered = run_intent::lower_collected_workflow_closure(closure)?;
     let workflow = lowered
         .workflow_bundle
-        .into_workflows()
-        .remove(&lowered.entrypoint)
+        .workflow(&lowered.entrypoint)
+        .cloned()
         .ok_or_else(|| anyhow!("lowered root workflow is missing from its bundle"))?;
     let mut builder = WorkflowSettingsBuilder::new()
         .server_manifest_defaults(
@@ -63,14 +94,26 @@ pub fn validate_collected_workflow(
     }
     let mut settings = builder.build().map_err(anyhow::Error::new)?;
     settings.run.inputs.extend(input_overrides.clone());
-    let validated = validate(ValidateInput {
-        workflow: WorkflowInput::Bundled(workflow),
-        settings,
-        vars: HashMap::new(),
-        cwd: PathBuf::from("/workspace"),
+    let mut validated = validate(ValidateInput {
+        workflow:          WorkflowInput::Bundled(workflow),
+        settings:          settings.clone(),
+        vars:              HashMap::new(),
+        cwd:               PathBuf::from("/workspace"),
         custom_transforms: Vec::new(),
     })
     .map_err(anyhow::Error::new)?;
+    let request = petri_check::check_request(
+        &lowered.workflow_bundle,
+        &lowered.entrypoint,
+        &settings,
+        &HashMap::new(),
+        petri_check::launch_without_catalog(&settings),
+        offline_runtime(run_overrides),
+        false,
+    )
+    .map_err(anyhow::Error::new)?;
+    let checked = petri_check::check(&request, true).map_err(anyhow::Error::new)?;
+    validated.extend_diagnostics(checked.diagnostics);
     let mut response = types::ValidateResponse {
         ok:       !validated.has_errors(),
         workflow: run_manifest::workflow_summary(&validated, lowered.entrypoint.as_path()),
@@ -120,6 +163,8 @@ mod tests {
             r#"_version = 1
 [workflow]
 graph = "workflow.fabro"
+[environments.default]
+provider = "local"
 [run.goal]
 file = "goal.md"
 [run.environment.image]
@@ -240,7 +285,7 @@ dockerfile = { path = "Dockerfile" }
                 .iter()
                 .all(|diagnostic| { diagnostic.rule != TEMPLATE_UNDEFINED_VARIABLE_RULE })
         );
-        assert!(present.ok);
+        assert!(present.ok, "{:?}", present.workflow.diagnostics);
         assert_eq!(present.workflow.goal, "resolved inline goal");
         assert!(present.workflow.diagnostics.iter().all(|diagnostic| {
             !diagnostic.message.contains("future-provider")

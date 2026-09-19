@@ -55,10 +55,10 @@ fn sandbox_details_json_matches_openapi_shape() {
     ));
     let details = SandboxDetails {
         sandbox: RunSandboxInstance {
-            provider: SandboxProviderKind::DOCKER,
-            image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
-            snapshot: None,
-            runtime:  RunSandboxRuntime {
+            provider:          SandboxProviderKind::DOCKER,
+            image:             Some("ghcr.io/fabro/sandbox:latest".to_string()),
+            snapshot:          None,
+            runtime:           RunSandboxRuntime {
                 id:                "container-abc123".to_string(),
                 working_directory: "/workspace".to_string(),
                 repo_cloned:       None,
@@ -69,6 +69,8 @@ fn sandbox_details_json_matches_openapi_shape() {
                 primary_repo_path: Some("/repos/fabro-sh/fabro".to_string()),
                 primary_repo_link: Some("/workspace/fabro".to_string()),
             },
+            ready_duration_ms: None,
+            retained:          None,
         },
         status,
     };

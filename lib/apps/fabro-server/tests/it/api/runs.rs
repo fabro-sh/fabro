@@ -372,17 +372,20 @@ async fn link_relink_and_unlink_parent_are_idempotent() {
         format!("GET /api/v1/runs/{child_id}/events"),
     )
     .await;
-    let event_names = events["data"]
+    // The run's stream holds Fabro's platform records: the run's creation,
+    // its submission, and one `run.parent` record per link.
+    let record_kinds = events["data"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|event| event["event"].as_str().unwrap())
+        .filter(|item| item["kind"] == "platform")
+        .map(|item| item["item"]["record"]["kind"].as_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(event_names, vec![
+    assert_eq!(record_kinds, vec![
         "run.created",
-        "run.submitted",
-        "run.parent.linked",
-        "run.parent.linked"
+        "run.lifecycle",
+        "run.parent",
+        "run.parent"
     ]);
 
     let unlink_request = Request::builder()

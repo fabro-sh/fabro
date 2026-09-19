@@ -27,7 +27,7 @@ export interface Provider {
      */
     'display_name': string;
     /**
-     * lithos adapter id the provider uses: `http` or `bedrock`, or a custom adapter's id.
+     * lithos adapter id the provider uses: `http` or `bedrock`, or a custom adapter\'s id.
      */
     'adapter': string;
     /**

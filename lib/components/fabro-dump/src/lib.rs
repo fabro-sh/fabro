@@ -14,10 +14,8 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
-use fabro_store::{
-    EventEnvelope, RunProjection, SerializableProjection, StageId, retry_storage_segment,
-};
-use fabro_types::{BlobHash, parse_blob_ref};
+use fabro_store::{RunProjection, SerializableProjection, StageId, retry_storage_segment};
+use fabro_types::{BlobHash, BlobRefEncoding, RunStreamItem, parse_blob_ref_encoded};
 use futures::future::BoxFuture;
 
 pub type BlobReader = Box<dyn FnMut(BlobHash) -> BoxFuture<'static, Result<Option<Bytes>>> + Send>;
@@ -146,15 +144,17 @@ impl RunDump {
         })
     }
 
-    pub fn from_store_state_and_events(
+    /// The dump of a run's projection with its stream: one `RunStreamItem`
+    /// per line of `events.jsonl`, in `stream_seq` order.
+    pub fn from_store_state_and_stream(
         state: &RunProjection,
-        events: &[EventEnvelope],
+        items: &[RunStreamItem],
     ) -> Result<Self> {
         let mut dump = Self::from_projection(state)?;
 
         let mut events_jsonl = Vec::new();
-        for event in events {
-            serde_json::to_writer(&mut events_jsonl, event)?;
+        for item in items {
+            serde_json::to_writer(&mut events_jsonl, item)?;
             events_jsonl.write_all(b"\n")?;
         }
         dump.entries
@@ -215,23 +215,21 @@ impl RunDump {
         for entry in &mut self.entries {
             match &mut entry.contents {
                 RunDumpContents::Json(value) => {
-                    let mut blob_hashes = Vec::new();
-                    collect_blob_refs_in_value(value, &mut blob_hashes);
-                    for blob_hash in blob_hashes {
+                    let mut blob_refs = Vec::new();
+                    collect_blob_refs_in_value(value, &mut blob_refs);
+                    for (blob_hash, encoding) in blob_refs {
                         if cache.contains_key(&blob_hash) {
                             continue;
                         }
                         let blob = read_blob(blob_hash).await?.with_context(|| {
                             format!("blob {blob_hash:?} is missing from the store")
                         })?;
-                        let hydrated: serde_json::Value = serde_json::from_slice(&blob)
-                            .with_context(|| format!("blob {blob_hash:?} is not valid JSON"))?;
-                        cache.insert(blob_hash, hydrated);
+                        cache.insert(blob_hash, decode_blob(blob_hash, encoding, &blob)?);
                     }
                     replace_blob_refs_in_value(value, &cache)?;
                 }
                 RunDumpContents::Text(text) => {
-                    let Some(blob_hash) = parse_blob_ref(text) else {
+                    let Some((blob_hash, encoding)) = parse_blob_ref_encoded(text.trim()) else {
                         continue;
                     };
                     let hydrated = match cache.entry(blob_hash) {
@@ -240,17 +238,13 @@ impl RunDump {
                             let blob = read_blob(blob_hash).await?.with_context(|| {
                                 format!("blob {blob_hash:?} is missing from the store")
                             })?;
-                            let hydrated: serde_json::Value = serde_json::from_slice(&blob)
-                                .with_context(|| format!("blob {blob_hash:?} is not valid JSON"))?;
-                            entry.insert(hydrated)
+                            entry.insert(decode_blob(blob_hash, encoding, &blob)?)
                         }
                     };
-                    *text = hydrated
-                        .as_str()
-                        .with_context(|| {
-                            format!("blob {blob_hash:?} is not a JSON string text log")
-                        })?
-                        .to_string();
+                    *text = match hydrated {
+                        serde_json::Value::String(text) => text.clone(),
+                        other => serde_json::to_string_pretty(other)?,
+                    };
                 }
                 RunDumpContents::Bytes(_) => {}
             }
@@ -398,21 +392,40 @@ fn validate_relative_path(kind: &str, value: &str) -> Result<PathBuf> {
     Ok(normalized)
 }
 
-fn collect_blob_refs_in_value(value: &serde_json::Value, blob_hashes: &mut Vec<BlobHash>) {
+/// The value a blob's bytes stand for: the text itself for a text blob, the
+/// parsed document for a JSON one.
+fn decode_blob(
+    blob_hash: BlobHash,
+    encoding: BlobRefEncoding,
+    bytes: &[u8],
+) -> Result<serde_json::Value> {
+    match encoding {
+        BlobRefEncoding::Text => Ok(serde_json::Value::String(
+            String::from_utf8_lossy(bytes).into_owned(),
+        )),
+        BlobRefEncoding::Json => serde_json::from_slice(bytes)
+            .with_context(|| format!("blob {blob_hash:?} is not valid JSON")),
+    }
+}
+
+fn collect_blob_refs_in_value(
+    value: &serde_json::Value,
+    blob_refs: &mut Vec<(BlobHash, BlobRefEncoding)>,
+) {
     match value {
         serde_json::Value::String(current) => {
-            if let Some(blob_hash) = parse_blob_ref(current) {
-                blob_hashes.push(blob_hash);
+            if let Some(blob_ref) = parse_blob_ref_encoded(current) {
+                blob_refs.push(blob_ref);
             }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                collect_blob_refs_in_value(item, blob_hashes);
+                collect_blob_refs_in_value(item, blob_refs);
             }
         }
         serde_json::Value::Object(map) => {
             for item in map.values() {
-                collect_blob_refs_in_value(item, blob_hashes);
+                collect_blob_refs_in_value(item, blob_refs);
             }
         }
         serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
@@ -425,7 +438,7 @@ fn replace_blob_refs_in_value(
 ) -> Result<()> {
     match value {
         serde_json::Value::String(current) => {
-            let Some(blob_hash) = parse_blob_ref(current) else {
+            let Some((blob_hash, _)) = parse_blob_ref_encoded(current) else {
                 return Ok(());
             };
             let hydrated = cache.get(&blob_hash).cloned().with_context(|| {
@@ -511,20 +524,12 @@ mod tests {
 
     fn sample_checkpoint() -> Checkpoint {
         Checkpoint {
-            timestamp:                  Utc
+            timestamp:      Utc
                 .with_ymd_and_hms(2026, 4, 20, 12, 0, 0)
                 .single()
                 .unwrap(),
-            current_node:               "build".to_string(),
-            completed_nodes:            vec!["build".to_string()],
-            node_retries:               HashMap::new(),
-            context_values:             HashMap::new(),
-            node_outcomes:              HashMap::new(),
-            next_node_id:               Some("ship".to_string()),
-            git_commit_sha:             Some("abc123".to_string()),
-            loop_failure_signatures:    HashMap::new(),
-            restart_failure_signatures: HashMap::new(),
-            node_visits:                HashMap::from([("build".to_string(), 2usize)]),
+            current_node:   "build".to_string(),
+            git_commit_sha: Some("abc123".to_string()),
         }
     }
 
@@ -569,10 +574,10 @@ mod tests {
                 snapshot: None,
             },
             RunSandboxInstance {
-                provider: SandboxProviderKind::LOCAL,
-                image:    None,
-                snapshot: None,
-                runtime:  fabro_types::RunSandboxRuntime {
+                provider:          SandboxProviderKind::LOCAL,
+                image:             None,
+                snapshot:          None,
+                runtime:           fabro_types::RunSandboxRuntime {
                     id:                "sandbox-1".to_string(),
                     working_directory: "/tmp/project".to_string(),
                     repo_cloned:       None,
@@ -583,6 +588,8 @@ mod tests {
                     primary_repo_path: None,
                     primary_repo_link: None,
                 },
+                ready_duration_ms: None,
+                retained:          None,
             },
         ));
         let stage =
@@ -758,10 +765,49 @@ mod tests {
     }
 
     #[test]
-    fn hydrate_referenced_blobs_fetches_shared_blobs_once() {
-        let blob = serde_json::to_vec("offloaded response text").unwrap();
+    fn hydrate_referenced_blobs_takes_a_plain_reference_as_text() {
+        // A large string leaves the run context as its own bytes, under a
+        // plain reference: the bytes are the text, not JSON.
+        let blob = b"x".repeat(12);
         let blob_hash = fabro_types::BlobHash::new(&blob);
         let blob_ref = fabro_types::format_blob_ref(&blob_hash);
+        let mut dump = RunDump {
+            entries:        vec![
+                RunDumpEntry::json("run.json", serde_json::json!({ "output": blob_ref })),
+                RunDumpEntry::text("stages/001-big@1/output.log", blob_ref.clone()),
+            ],
+            stage_ranks:    HashMap::new(),
+            dump_log_index: None,
+        };
+
+        executor::block_on(async {
+            dump.hydrate_referenced_blobs_with_reader(|read_blob_hash| {
+                let blob = blob.clone();
+                Box::pin(async move {
+                    assert_eq!(read_blob_hash, blob_hash);
+                    Ok(Some(bytes::Bytes::from(blob)))
+                })
+            })
+            .await
+        })
+        .unwrap();
+
+        let RunDumpContents::Json(value) = &dump.entries[0].contents else {
+            panic!("entry should be JSON");
+        };
+        assert_eq!(value["output"], "xxxxxxxxxxxx");
+        let RunDumpContents::Text(text) = &dump.entries[1].contents else {
+            panic!("entry should be text");
+        };
+        assert_eq!(text, "xxxxxxxxxxxx");
+    }
+
+    #[test]
+    fn hydrate_referenced_blobs_fetches_shared_blobs_once() {
+        // A structured value's blob is JSON, and its reference says so.
+        let blob = serde_json::to_vec("offloaded response text").unwrap();
+        let blob_hash = fabro_types::BlobHash::new(&blob);
+        let blob_ref = format!("{}#json", fabro_types::format_blob_ref(&blob_hash));
         let mut dump = RunDump {
             entries:        vec![
                 RunDumpEntry::json("run.json", serde_json::json!({ "response": blob_ref })),

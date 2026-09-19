@@ -34,7 +34,6 @@ export function createLifecycleToastState(): LifecycleToastState {
       deny:      null,
       archive:   null,
       unarchive: null,
-      retry:     null,
     },
   };
 }
@@ -44,14 +43,12 @@ export function updateLifecycleToastState(
   result: RunDetailActionResult | undefined,
   stateRef: { current: LifecycleToastState },
   toastApi: ToastApi,
-  navigate?: (path: string) => void,
 ) {
   stateRef.current = handleLifecycleToastResult(
     intent,
     result,
     stateRef.current,
     toastApi,
-    navigate,
   );
 }
 
@@ -75,7 +72,6 @@ export function handleLifecycleToastResult(
   result: RunDetailActionResult | undefined,
   state: LifecycleToastState,
   toastApi: ToastApi,
-  navigate?: (path: string) => void,
 ): LifecycleToastState {
   if (!result || result.intent !== intent) return state;
   if (state.lastProcessed[intent] === result) return state;
@@ -104,12 +100,6 @@ export function handleLifecycleToastResult(
 
   if (intent === "deny") {
     toastApi.push({ message: "Run denied." });
-    return nextState;
-  }
-
-  if (intent === "retry") {
-    toastApi.push({ message: "Retry started." });
-    navigate?.(`/runs/${result.run.id}`);
     return nextState;
   }
 

@@ -22,25 +22,35 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
-import type { AppendEventResponse } from '../models';
-// @ts-ignore
 import type { ArtifactListResponse } from '../models';
 // @ts-ignore
 import type { CommandLogResponse } from '../models';
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
-import type { PaginatedEventList } from '../models';
-// @ts-ignore
 import type { PaginatedRunStageList } from '../models';
+// @ts-ignore
+import type { PaginatedRunStreamList } from '../models';
+// @ts-ignore
+import type { PetriAppendRequest } from '../models';
+// @ts-ignore
+import type { PetriOpenRequest } from '../models';
+// @ts-ignore
+import type { PetriOpenResponse } from '../models';
+// @ts-ignore
+import type { PetriPlatformRecord } from '../models';
+// @ts-ignore
+import type { PetriPlatformRecordAppendRequest } from '../models';
+// @ts-ignore
+import type { PetriPlatformRecordList } from '../models';
+// @ts-ignore
+import type { PetriRecordList } from '../models';
+// @ts-ignore
+import type { PetriReleaseRequest } from '../models';
 // @ts-ignore
 import type { RunArtifactListResponse } from '../models';
 // @ts-ignore
 import type { RunCheckpoint } from '../models';
-// @ts-ignore
-import type { RunEvent } from '../models';
-// @ts-ignore
-import type { RunEventDetailResponse } from '../models';
 // @ts-ignore
 import type { RunProjection } from '../models';
 // @ts-ignore
@@ -57,19 +67,19 @@ import type { WriteRunBlobRequest } from '../models';
 export const RunInternalsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Appends a validated event to the run event log. Intended for trusted internal callers.
-         * @summary Append Run Event
+         * Stores one platform record at the run\'s next `seq`, tied to the Petri stage named by `execution` and `firing` when it belongs to one. The record is the JSON of a Fabro platform record, tagged by `kind`.
+         * @summary Append Petri Platform Record
          * @param {string} id Unique run identifier (ULID).
-         * @param {RunEvent} runEvent
+         * @param {PetriPlatformRecordAppendRequest} petriPlatformRecordAppendRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        appendRunEvent: async (id: string, runEvent: RunEvent, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        appendPetriPlatformRecord: async (id: string, petriPlatformRecordAppendRequest: PetriPlatformRecordAppendRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('appendRunEvent', 'id', id)
-            // verify required parameter 'runEvent' is not null or undefined
-            assertParamExists('appendRunEvent', 'runEvent', runEvent)
-            const localVarPath = `/api/v1/runs/{id}/events`
+            assertParamExists('appendPetriPlatformRecord', 'id', id)
+            // verify required parameter 'petriPlatformRecordAppendRequest' is not null or undefined
+            assertParamExists('appendPetriPlatformRecord', 'petriPlatformRecordAppendRequest', petriPlatformRecordAppendRequest)
+            const localVarPath = `/api/v1/runs/{id}/petri/platform-records`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -94,7 +104,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(runEvent, localVarRequestOptions, configuration)
+            localVarRequestOptions.data = serializeDataIfNeeded(petriPlatformRecordAppendRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -102,14 +112,63 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
-         * @summary Attach Run Events
+         * Appends one batch of records to one log at the sequences they carry, durably, in one transaction. A record equal to the one already stored at its `seq` is accepted without a second append, so a batch whose reply was lost is safe to resend. A different record at a taken `seq`, or a `seq` past the log\'s end, is refused with `petri_record_conflict` and the batch stores nothing.
+         * @summary Append Petri Records
          * @param {string} id Unique run identifier (ULID).
-         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {string} log A Petri log of the run, as its id renders: &#x60;coordinator&#x60;, &#x60;resources&#x60;, or &#x60;execution &lt;n&gt;&#x60; for execution &#x60;n&#x60;. The space is percent-encoded on the wire.
+         * @param {PetriAppendRequest} petriAppendRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        attachRunEvents: async (id: string, sinceSeq?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        appendPetriRecords: async (id: string, log: string, petriAppendRequest: PetriAppendRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('appendPetriRecords', 'id', id)
+            // verify required parameter 'log' is not null or undefined
+            assertParamExists('appendPetriRecords', 'log', log)
+            // verify required parameter 'petriAppendRequest' is not null or undefined
+            assertParamExists('appendPetriRecords', 'petriAppendRequest', petriAppendRequest)
+            const localVarPath = `/api/v1/runs/{id}/petri/logs/{log}/records`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"log"}}`, encodeURIComponent(String(log)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(petriAppendRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Opens an ordered server-sent event stream of the run\'s stream, replaying committed items and continuing with live ones while the run remains active. Each `data:` frame is one `RunStreamItem`. The stream starts after `after` (the last `stream_seq` the client saw; `0` replays the whole run; the next unseen item when omitted). It ends once the run is no longer active and every committed item has been sent. A reconnecting client passes its last `stream_seq` as `after` and deduplicates by `id`.
+         * @summary Attach Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [after] Run stream cursor for a Petri run: the last &#x60;stream_seq&#x60; the client saw, exclusive. &#x60;0&#x60; starts at the first item.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        attachRunEvents: async (id: string, after?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('attachRunEvents', 'id', id)
             const localVarPath = `/api/v1/runs/{id}/attach`
@@ -131,8 +190,8 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
-            if (sinceSeq !== undefined) {
-                localVarQueryParameter['since_seq'] = sinceSeq;
+            if (after !== undefined) {
+                localVarQueryParameter['after'] = after;
             }
 
             localVarHeaderParameter['Accept'] = 'text/event-stream,application/json';
@@ -176,55 +235,6 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
             localVarHeaderParameter['Accept'] = 'application/zip,application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Returns one stored run event by source event sequence with content fields separated and truncated.
-         * @summary Get Run Event Detail
-         * @param {string} id Unique run identifier (ULID).
-         * @param {number} seq
-         * @param {number} [maxContentLength]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getRunEventDetail: async (id: string, seq: number, maxContentLength?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('getRunEventDetail', 'id', id)
-            // verify required parameter 'seq' is not null or undefined
-            assertParamExists('getRunEventDetail', 'seq', seq)
-            const localVarPath = `/api/v1/runs/{id}/events/{seq}`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
-                .replace(`{${"seq"}}`, encodeURIComponent(String(seq)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication SessionCookie required
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            if (maxContentLength !== undefined) {
-                localVarQueryParameter['max_content_length'] = maxContentLength;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -472,6 +482,95 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
+         * The run\'s platform records (Fabro\'s own facts about a Petri run: a checkpoint commit, a pull request, a notification), in `seq` order, optionally of one kind. What a run\'s worker reads to find an effect it already performed before performing it again.
+         * @summary List Petri Platform Records
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} [kind] Only the platform records of this kind, as its &#x60;kind&#x60; tag spells it (&#x60;checkpoint&#x60;, &#x60;pull_request.created&#x60;, ...).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listPetriPlatformRecords: async (id: string, kind?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listPetriPlatformRecords', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/petri/platform-records`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (kind !== undefined) {
+                localVarQueryParameter['kind'] = kind;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Every record of one log of the run, in `seq` order, unchanged.
+         * @summary List Petri Records
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} log A Petri log of the run, as its id renders: &#x60;coordinator&#x60;, &#x60;resources&#x60;, or &#x60;execution &lt;n&gt;&#x60; for execution &#x60;n&#x60;. The space is percent-encoded on the wire.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listPetriRecords: async (id: string, log: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listPetriRecords', 'id', id)
+            // verify required parameter 'log' is not null or undefined
+            assertParamExists('listPetriRecords', 'log', log)
+            const localVarPath = `/api/v1/runs/{id}/petri/logs/{log}/records`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"log"}}`, encodeURIComponent(String(log)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Lists captured artifact files for a run.
          * @summary List Run Artifacts
          * @param {string} id Unique run identifier (ULID).
@@ -512,17 +611,15 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns a paginated JSON list of stored run events. Ascending order uses `since_seq` as an inclusive cursor. Descending order uses `before_seq` as an exclusive cursor and starts at the newest event when `before_seq` is omitted.
+         * Returns one page of the run\'s stream (`PaginatedRunStreamList`): one ordered delivery of Petri\'s own `RunEvent`s and Fabro\'s platform records in the `RunStreamItem` envelope, in `stream_seq` order. The cursor is `after`: the last `stream_seq` the client saw, exclusive; the first page is `after=0`. A client that reconnects resumes from its last `stream_seq` and deduplicates by each item\'s `id`; every item is delivered once, in order, with no gap.
          * @summary List Run Events
          * @param {string} id Unique run identifier (ULID).
-         * @param {number} [sinceSeq] First event sequence number to include.
          * @param {number} [limit] Maximum number of events to return.
-         * @param {number} [beforeSeq] Exclusive upper event sequence cursor for descending order. Omit on the first descending request to start from the newest event.
-         * @param {ListRunEventsOrderEnum} [order] Event sequence order. &#x60;since_seq&#x60; is valid only with &#x60;asc&#x60;; &#x60;before_seq&#x60; is valid only with &#x60;desc&#x60;.
+         * @param {number} [after] Run stream cursor for a Petri run: the last &#x60;stream_seq&#x60; the client saw, exclusive. &#x60;0&#x60; starts at the first item.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRunEvents: async (id: string, sinceSeq?: number, limit?: number, beforeSeq?: number, order?: ListRunEventsOrderEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listRunEvents: async (id: string, limit?: number, after?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('listRunEvents', 'id', id)
             const localVarPath = `/api/v1/runs/{id}/events`
@@ -544,20 +641,12 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
-            if (sinceSeq !== undefined) {
-                localVarQueryParameter['since_seq'] = sinceSeq;
-            }
-
             if (limit !== undefined) {
                 localVarQueryParameter['limit'] = limit;
             }
 
-            if (beforeSeq !== undefined) {
-                localVarQueryParameter['before_seq'] = beforeSeq;
-            }
-
-            if (order !== undefined) {
-                localVarQueryParameter['order'] = order;
+            if (after !== undefined) {
+                localVarQueryParameter['after'] = after;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -666,23 +755,20 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
-         * @summary List Stage Events
+         * Opens the run in the Petri run store for the worker. `create` inserts the run and takes its writer lease for `owner`; `write` takes the lease of an existing run; `read` takes no lease. The lease is idempotent per owner: a retry by the owner that holds it gets the same lease. Another live owner is refused with `petri_run_leased`. The lease ends when the worker releases it, when the server observes the worker exit, or by operator release, never by timeout.
+         * @summary Open Petri Run
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {number} [sinceSeq] First event sequence number to include.
-         * @param {number} [limit] Maximum number of events to return.
+         * @param {PetriOpenRequest} petriOpenRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listStageEvents: async (id: string, stageId: string, sinceSeq?: number, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        openPetriRun: async (id: string, petriOpenRequest: PetriOpenRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('listStageEvents', 'id', id)
-            // verify required parameter 'stageId' is not null or undefined
-            assertParamExists('listStageEvents', 'stageId', stageId)
-            const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/events`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
-                .replace(`{${"stageId"}}`, encodeURIComponent(String(stageId)));
+            assertParamExists('openPetriRun', 'id', id)
+            // verify required parameter 'petriOpenRequest' is not null or undefined
+            assertParamExists('openPetriRun', 'petriOpenRequest', petriOpenRequest)
+            const localVarPath = `/api/v1/runs/{id}/petri/open`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -690,7 +776,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
                 baseOptions = configuration.baseOptions;
             }
 
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -700,19 +786,13 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
-            if (sinceSeq !== undefined) {
-                localVarQueryParameter['since_seq'] = sinceSeq;
-            }
-
-            if (limit !== undefined) {
-                localVarQueryParameter['limit'] = limit;
-            }
-
+            localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(petriOpenRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -781,6 +861,50 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
+         * The blob with this digest, if the store holds one.
+         * @summary Read Petri Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} blobHash Content-addressed blob hash.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        readPetriBlob: async (id: string, blobHash: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('readPetriBlob', 'id', id)
+            // verify required parameter 'blobHash' is not null or undefined
+            assertParamExists('readPetriBlob', 'blobHash', blobHash)
+            const localVarPath = `/api/v1/runs/{id}/petri/blobs/{blobHash}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"blobHash"}}`, encodeURIComponent(String(blobHash)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Reads a previously stored blob by hash.
          * @summary Read Run Blob
          * @param {string} id Unique run identifier (ULID).
@@ -818,6 +942,50 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Ends the worker\'s writer lease on the run when `owner` still holds it: what a worker sends when it drops its store handle. A lease that already moved to another owner is left alone.
+         * @summary Release Petri Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {PetriReleaseRequest} petriReleaseRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        releasePetriRun: async (id: string, petriReleaseRequest: PetriReleaseRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('releasePetriRun', 'id', id)
+            // verify required parameter 'petriReleaseRequest' is not null or undefined
+            assertParamExists('releasePetriRun', 'petriReleaseRequest', petriReleaseRequest)
+            const localVarPath = `/api/v1/runs/{id}/petri/release`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(petriReleaseRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -905,6 +1073,58 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
+         * Stores a blob by content for the run\'s owner and returns its SHA-256 digest, the same content address Fabro\'s blob store uses. Idempotent by construction.
+         * @summary Write Petri Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} owner The owner id the worker opened the run\&#39;s writer lease with.
+         * @param {File} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        writePetriBlob: async (id: string, owner: string, body: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('writePetriBlob', 'id', id)
+            // verify required parameter 'owner' is not null or undefined
+            assertParamExists('writePetriBlob', 'owner', owner)
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('writePetriBlob', 'body', body)
+            const localVarPath = `/api/v1/runs/{id}/petri/blobs`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (owner !== undefined) {
+                localVarQueryParameter['owner'] = owner;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/octet-stream';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Writes an opaque binary blob and returns its content-addressed blob hash.
          * @summary Write Run Blob
          * @param {string} id Unique run identifier (ULID).
@@ -959,29 +1179,44 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = RunInternalsApiAxiosParamCreator(configuration)
     return {
         /**
-         * Appends a validated event to the run event log. Intended for trusted internal callers.
-         * @summary Append Run Event
+         * Stores one platform record at the run\'s next `seq`, tied to the Petri stage named by `execution` and `firing` when it belongs to one. The record is the JSON of a Fabro platform record, tagged by `kind`.
+         * @summary Append Petri Platform Record
          * @param {string} id Unique run identifier (ULID).
-         * @param {RunEvent} runEvent
+         * @param {PetriPlatformRecordAppendRequest} petriPlatformRecordAppendRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async appendRunEvent(id: string, runEvent: RunEvent, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AppendEventResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.appendRunEvent(id, runEvent, options);
+        async appendPetriPlatformRecord(id: string, petriPlatformRecordAppendRequest: PetriPlatformRecordAppendRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PetriPlatformRecord>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.appendPetriPlatformRecord(id, petriPlatformRecordAppendRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.appendRunEvent']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.appendPetriPlatformRecord']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
-         * @summary Attach Run Events
+         * Appends one batch of records to one log at the sequences they carry, durably, in one transaction. A record equal to the one already stored at its `seq` is accepted without a second append, so a batch whose reply was lost is safe to resend. A different record at a taken `seq`, or a `seq` past the log\'s end, is refused with `petri_record_conflict` and the batch stores nothing.
+         * @summary Append Petri Records
          * @param {string} id Unique run identifier (ULID).
-         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {string} log A Petri log of the run, as its id renders: &#x60;coordinator&#x60;, &#x60;resources&#x60;, or &#x60;execution &lt;n&gt;&#x60; for execution &#x60;n&#x60;. The space is percent-encoded on the wire.
+         * @param {PetriAppendRequest} petriAppendRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async attachRunEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.attachRunEvents(id, sinceSeq, options);
+        async appendPetriRecords(id: string, log: string, petriAppendRequest: PetriAppendRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.appendPetriRecords(id, log, petriAppendRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.appendPetriRecords']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Opens an ordered server-sent event stream of the run\'s stream, replaying committed items and continuing with live ones while the run remains active. Each `data:` frame is one `RunStreamItem`. The stream starts after `after` (the last `stream_seq` the client saw; `0` replays the whole run; the next unseen item when omitted). It ends once the run is no longer active and every committed item has been sent. A reconnecting client passes its last `stream_seq` as `after` and deduplicates by `id`.
+         * @summary Attach Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [after] Run stream cursor for a Petri run: the last &#x60;stream_seq&#x60; the client saw, exclusive. &#x60;0&#x60; starts at the first item.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async attachRunEvents(id: string, after?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.attachRunEvents(id, after, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.attachRunEvents']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -997,21 +1232,6 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.downloadRunArtifacts(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.downloadRunArtifacts']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Returns one stored run event by source event sequence with content fields separated and truncated.
-         * @summary Get Run Event Detail
-         * @param {string} id Unique run identifier (ULID).
-         * @param {number} seq
-         * @param {number} [maxContentLength]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async getRunEventDetail(id: string, seq: number, maxContentLength?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunEventDetailResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.getRunEventDetail(id, seq, maxContentLength, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.getRunEventDetail']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1087,6 +1307,34 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * The run\'s platform records (Fabro\'s own facts about a Petri run: a checkpoint commit, a pull request, a notification), in `seq` order, optionally of one kind. What a run\'s worker reads to find an effect it already performed before performing it again.
+         * @summary List Petri Platform Records
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} [kind] Only the platform records of this kind, as its &#x60;kind&#x60; tag spells it (&#x60;checkpoint&#x60;, &#x60;pull_request.created&#x60;, ...).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listPetriPlatformRecords(id: string, kind?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PetriPlatformRecordList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listPetriPlatformRecords(id, kind, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listPetriPlatformRecords']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Every record of one log of the run, in `seq` order, unchanged.
+         * @summary List Petri Records
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} log A Petri log of the run, as its id renders: &#x60;coordinator&#x60;, &#x60;resources&#x60;, or &#x60;execution &lt;n&gt;&#x60; for execution &#x60;n&#x60;. The space is percent-encoded on the wire.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listPetriRecords(id: string, log: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PetriRecordList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listPetriRecords(id, log, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listPetriRecords']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Lists captured artifact files for a run.
          * @summary List Run Artifacts
          * @param {string} id Unique run identifier (ULID).
@@ -1100,18 +1348,16 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns a paginated JSON list of stored run events. Ascending order uses `since_seq` as an inclusive cursor. Descending order uses `before_seq` as an exclusive cursor and starts at the newest event when `before_seq` is omitted.
+         * Returns one page of the run\'s stream (`PaginatedRunStreamList`): one ordered delivery of Petri\'s own `RunEvent`s and Fabro\'s platform records in the `RunStreamItem` envelope, in `stream_seq` order. The cursor is `after`: the last `stream_seq` the client saw, exclusive; the first page is `after=0`. A client that reconnects resumes from its last `stream_seq` and deduplicates by each item\'s `id`; every item is delivered once, in order, with no gap.
          * @summary List Run Events
          * @param {string} id Unique run identifier (ULID).
-         * @param {number} [sinceSeq] First event sequence number to include.
          * @param {number} [limit] Maximum number of events to return.
-         * @param {number} [beforeSeq] Exclusive upper event sequence cursor for descending order. Omit on the first descending request to start from the newest event.
-         * @param {ListRunEventsOrderEnum} [order] Event sequence order. &#x60;since_seq&#x60; is valid only with &#x60;asc&#x60;; &#x60;before_seq&#x60; is valid only with &#x60;desc&#x60;.
+         * @param {number} [after] Run stream cursor for a Petri run: the last &#x60;stream_seq&#x60; the client saw, exclusive. &#x60;0&#x60; starts at the first item.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listRunEvents(id: string, sinceSeq?: number, limit?: number, beforeSeq?: number, order?: ListRunEventsOrderEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedEventList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listRunEvents(id, sinceSeq, limit, beforeSeq, order, options);
+        async listRunEvents(id: string, limit?: number, after?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunStreamList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRunEvents(id, limit, after, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listRunEvents']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1146,19 +1392,17 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
-         * @summary List Stage Events
+         * Opens the run in the Petri run store for the worker. `create` inserts the run and takes its writer lease for `owner`; `write` takes the lease of an existing run; `read` takes no lease. The lease is idempotent per owner: a retry by the owner that holds it gets the same lease. Another live owner is refused with `petri_run_leased`. The lease ends when the worker releases it, when the server observes the worker exit, or by operator release, never by timeout.
+         * @summary Open Petri Run
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {number} [sinceSeq] First event sequence number to include.
-         * @param {number} [limit] Maximum number of events to return.
+         * @param {PetriOpenRequest} petriOpenRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listStageEvents(id: string, stageId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedEventList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listStageEvents(id, stageId, sinceSeq, limit, options);
+        async openPetriRun(id: string, petriOpenRequest: PetriOpenRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PetriOpenResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.openPetriRun(id, petriOpenRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listStageEvents']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.openPetriRun']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1179,6 +1423,20 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * The blob with this digest, if the store holds one.
+         * @summary Read Petri Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} blobHash Content-addressed blob hash.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async readPetriBlob(id: string, blobHash: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.readPetriBlob(id, blobHash, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.readPetriBlob']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Reads a previously stored blob by hash.
          * @summary Read Run Blob
          * @param {string} id Unique run identifier (ULID).
@@ -1190,6 +1448,20 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.readRunBlob(id, blobHash, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.readRunBlob']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Ends the worker\'s writer lease on the run when `owner` still holds it: what a worker sends when it drops its store handle. A lease that already moved to another owner is left alone.
+         * @summary Release Petri Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {PetriReleaseRequest} petriReleaseRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async releasePetriRun(id: string, petriReleaseRequest: PetriReleaseRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.releasePetriRun(id, petriReleaseRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.releasePetriRun']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1219,6 +1491,21 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Stores a blob by content for the run\'s owner and returns its SHA-256 digest, the same content address Fabro\'s blob store uses. Idempotent by construction.
+         * @summary Write Petri Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} owner The owner id the worker opened the run\&#39;s writer lease with.
+         * @param {File} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async writePetriBlob(id: string, owner: string, body: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<WriteBlobResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.writePetriBlob(id, owner, body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.writePetriBlob']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Writes an opaque binary blob and returns its content-addressed blob hash.
          * @summary Write Run Blob
          * @param {string} id Unique run identifier (ULID).
@@ -1242,26 +1529,38 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
     const localVarFp = RunInternalsApiFp(configuration)
     return {
         /**
-         * Appends a validated event to the run event log. Intended for trusted internal callers.
-         * @summary Append Run Event
+         * Stores one platform record at the run\'s next `seq`, tied to the Petri stage named by `execution` and `firing` when it belongs to one. The record is the JSON of a Fabro platform record, tagged by `kind`.
+         * @summary Append Petri Platform Record
          * @param {string} id Unique run identifier (ULID).
-         * @param {RunEvent} runEvent
+         * @param {PetriPlatformRecordAppendRequest} petriPlatformRecordAppendRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        appendRunEvent(id: string, runEvent: RunEvent, options?: RawAxiosRequestConfig): AxiosPromise<AppendEventResponse> {
-            return localVarFp.appendRunEvent(id, runEvent, options).then((request) => request(axios, basePath));
+        appendPetriPlatformRecord(id: string, petriPlatformRecordAppendRequest: PetriPlatformRecordAppendRequest, options?: RawAxiosRequestConfig): AxiosPromise<PetriPlatformRecord> {
+            return localVarFp.appendPetriPlatformRecord(id, petriPlatformRecordAppendRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
-         * @summary Attach Run Events
+         * Appends one batch of records to one log at the sequences they carry, durably, in one transaction. A record equal to the one already stored at its `seq` is accepted without a second append, so a batch whose reply was lost is safe to resend. A different record at a taken `seq`, or a `seq` past the log\'s end, is refused with `petri_record_conflict` and the batch stores nothing.
+         * @summary Append Petri Records
          * @param {string} id Unique run identifier (ULID).
-         * @param {number} [sinceSeq] First event sequence number to include.
+         * @param {string} log A Petri log of the run, as its id renders: &#x60;coordinator&#x60;, &#x60;resources&#x60;, or &#x60;execution &lt;n&gt;&#x60; for execution &#x60;n&#x60;. The space is percent-encoded on the wire.
+         * @param {PetriAppendRequest} petriAppendRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        attachRunEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig): AxiosPromise<string> {
-            return localVarFp.attachRunEvents(id, sinceSeq, options).then((request) => request(axios, basePath));
+        appendPetriRecords(id: string, log: string, petriAppendRequest: PetriAppendRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.appendPetriRecords(id, log, petriAppendRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Opens an ordered server-sent event stream of the run\'s stream, replaying committed items and continuing with live ones while the run remains active. Each `data:` frame is one `RunStreamItem`. The stream starts after `after` (the last `stream_seq` the client saw; `0` replays the whole run; the next unseen item when omitted). It ends once the run is no longer active and every committed item has been sent. A reconnecting client passes its last `stream_seq` as `after` and deduplicates by `id`.
+         * @summary Attach Run Events
+         * @param {string} id Unique run identifier (ULID).
+         * @param {number} [after] Run stream cursor for a Petri run: the last &#x60;stream_seq&#x60; the client saw, exclusive. &#x60;0&#x60; starts at the first item.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        attachRunEvents(id: string, after?: number, options?: RawAxiosRequestConfig): AxiosPromise<string> {
+            return localVarFp.attachRunEvents(id, after, options).then((request) => request(axios, basePath));
         },
         /**
          * Streams a ZIP archive with the latest captured version of each artifact path. Stage order, retry number, and then stage ID determine the latest version, matching the artifacts page. Captures from the graph\'s boundary nodes are excluded, identified by their `start` and `exit` handler type rather than by node name.  The archive streams, so the response status is sent before the first artifact is read. A failure after that point aborts the transfer rather than returning `500`. The ZIP central directory is written last, so a truncated download does not open as a valid archive.
@@ -1272,18 +1571,6 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          */
         downloadRunArtifacts(id: string, options?: RawAxiosRequestConfig): AxiosPromise<File> {
             return localVarFp.downloadRunArtifacts(id, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Returns one stored run event by source event sequence with content fields separated and truncated.
-         * @summary Get Run Event Detail
-         * @param {string} id Unique run identifier (ULID).
-         * @param {number} seq
-         * @param {number} [maxContentLength]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getRunEventDetail(id: string, seq: number, maxContentLength?: number, options?: RawAxiosRequestConfig): AxiosPromise<RunEventDetailResponse> {
-            return localVarFp.getRunEventDetail(id, seq, maxContentLength, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns the worker tracing log for a run when it is available.
@@ -1343,6 +1630,28 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.getStageArtifact(id, stageId, filename, retry, options).then((request) => request(axios, basePath));
         },
         /**
+         * The run\'s platform records (Fabro\'s own facts about a Petri run: a checkpoint commit, a pull request, a notification), in `seq` order, optionally of one kind. What a run\'s worker reads to find an effect it already performed before performing it again.
+         * @summary List Petri Platform Records
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} [kind] Only the platform records of this kind, as its &#x60;kind&#x60; tag spells it (&#x60;checkpoint&#x60;, &#x60;pull_request.created&#x60;, ...).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listPetriPlatformRecords(id: string, kind?: string, options?: RawAxiosRequestConfig): AxiosPromise<PetriPlatformRecordList> {
+            return localVarFp.listPetriPlatformRecords(id, kind, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Every record of one log of the run, in `seq` order, unchanged.
+         * @summary List Petri Records
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} log A Petri log of the run, as its id renders: &#x60;coordinator&#x60;, &#x60;resources&#x60;, or &#x60;execution &lt;n&gt;&#x60; for execution &#x60;n&#x60;. The space is percent-encoded on the wire.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listPetriRecords(id: string, log: string, options?: RawAxiosRequestConfig): AxiosPromise<PetriRecordList> {
+            return localVarFp.listPetriRecords(id, log, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Lists captured artifact files for a run.
          * @summary List Run Artifacts
          * @param {string} id Unique run identifier (ULID).
@@ -1353,18 +1662,16 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.listRunArtifacts(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns a paginated JSON list of stored run events. Ascending order uses `since_seq` as an inclusive cursor. Descending order uses `before_seq` as an exclusive cursor and starts at the newest event when `before_seq` is omitted.
+         * Returns one page of the run\'s stream (`PaginatedRunStreamList`): one ordered delivery of Petri\'s own `RunEvent`s and Fabro\'s platform records in the `RunStreamItem` envelope, in `stream_seq` order. The cursor is `after`: the last `stream_seq` the client saw, exclusive; the first page is `after=0`. A client that reconnects resumes from its last `stream_seq` and deduplicates by each item\'s `id`; every item is delivered once, in order, with no gap.
          * @summary List Run Events
          * @param {string} id Unique run identifier (ULID).
-         * @param {number} [sinceSeq] First event sequence number to include.
          * @param {number} [limit] Maximum number of events to return.
-         * @param {number} [beforeSeq] Exclusive upper event sequence cursor for descending order. Omit on the first descending request to start from the newest event.
-         * @param {ListRunEventsOrderEnum} [order] Event sequence order. &#x60;since_seq&#x60; is valid only with &#x60;asc&#x60;; &#x60;before_seq&#x60; is valid only with &#x60;desc&#x60;.
+         * @param {number} [after] Run stream cursor for a Petri run: the last &#x60;stream_seq&#x60; the client saw, exclusive. &#x60;0&#x60; starts at the first item.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listRunEvents(id: string, sinceSeq?: number, limit?: number, beforeSeq?: number, order?: ListRunEventsOrderEnum, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedEventList> {
-            return localVarFp.listRunEvents(id, sinceSeq, limit, beforeSeq, order, options).then((request) => request(axios, basePath));
+        listRunEvents(id: string, limit?: number, after?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunStreamList> {
+            return localVarFp.listRunEvents(id, limit, after, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns the ordered list of stages in a run\'s workflow graph with their current status and timing. Stages are bounded by the workflow graph size, typically fewer than 20.
@@ -1390,17 +1697,15 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.listStageArtifacts(id, stageId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns a paginated JSON list of stored run events scoped to a single stage visit.
-         * @summary List Stage Events
+         * Opens the run in the Petri run store for the worker. `create` inserts the run and takes its writer lease for `owner`; `write` takes the lease of an existing run; `read` takes no lease. The lease is idempotent per owner: a retry by the owner that holds it gets the same lease. Another live owner is refused with `petri_run_leased`. The lease ends when the worker releases it, when the server observes the worker exit, or by operator release, never by timeout.
+         * @summary Open Petri Run
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {number} [sinceSeq] First event sequence number to include.
-         * @param {number} [limit] Maximum number of events to return.
+         * @param {PetriOpenRequest} petriOpenRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listStageEvents(id: string, stageId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedEventList> {
-            return localVarFp.listStageEvents(id, stageId, sinceSeq, limit, options).then((request) => request(axios, basePath));
+        openPetriRun(id: string, petriOpenRequest: PetriOpenRequest, options?: RawAxiosRequestConfig): AxiosPromise<PetriOpenResponse> {
+            return localVarFp.openPetriRun(id, petriOpenRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
@@ -1417,6 +1722,17 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.putStageArtifact(id, stageId, retry, body, filename, options).then((request) => request(axios, basePath));
         },
         /**
+         * The blob with this digest, if the store holds one.
+         * @summary Read Petri Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} blobHash Content-addressed blob hash.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        readPetriBlob(id: string, blobHash: string, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.readPetriBlob(id, blobHash, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Reads a previously stored blob by hash.
          * @summary Read Run Blob
          * @param {string} id Unique run identifier (ULID).
@@ -1426,6 +1742,17 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          */
         readRunBlob(id: string, blobHash: string, options?: RawAxiosRequestConfig): AxiosPromise<File> {
             return localVarFp.readRunBlob(id, blobHash, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Ends the worker\'s writer lease on the run when `owner` still holds it: what a worker sends when it drops its store handle. A lease that already moved to another owner is left alone.
+         * @summary Release Petri Run
+         * @param {string} id Unique run identifier (ULID).
+         * @param {PetriReleaseRequest} petriReleaseRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        releasePetriRun(id: string, petriReleaseRequest: PetriReleaseRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.releasePetriRun(id, petriReleaseRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns the latest checkpoint data for a run, or null if no checkpoint has been recorded yet.
@@ -1448,6 +1775,18 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.retrieveRunSettings(id, options).then((request) => request(axios, basePath));
         },
         /**
+         * Stores a blob by content for the run\'s owner and returns its SHA-256 digest, the same content address Fabro\'s blob store uses. Idempotent by construction.
+         * @summary Write Petri Blob
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} owner The owner id the worker opened the run\&#39;s writer lease with.
+         * @param {File} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        writePetriBlob(id: string, owner: string, body: File, options?: RawAxiosRequestConfig): AxiosPromise<WriteBlobResponse> {
+            return localVarFp.writePetriBlob(id, owner, body, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Writes an opaque binary blob and returns its content-addressed blob hash.
          * @summary Write Run Blob
          * @param {string} id Unique run identifier (ULID).
@@ -1466,27 +1805,40 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
  */
 export class RunInternalsApi extends BaseAPI {
     /**
-     * Appends a validated event to the run event log. Intended for trusted internal callers.
-     * @summary Append Run Event
+     * Stores one platform record at the run\'s next `seq`, tied to the Petri stage named by `execution` and `firing` when it belongs to one. The record is the JSON of a Fabro platform record, tagged by `kind`.
+     * @summary Append Petri Platform Record
      * @param {string} id Unique run identifier (ULID).
-     * @param {RunEvent} runEvent
+     * @param {PetriPlatformRecordAppendRequest} petriPlatformRecordAppendRequest
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public appendRunEvent(id: string, runEvent: RunEvent, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).appendRunEvent(id, runEvent, options).then((request) => request(this.axios, this.basePath));
+    public appendPetriPlatformRecord(id: string, petriPlatformRecordAppendRequest: PetriPlatformRecordAppendRequest, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).appendPetriPlatformRecord(id, petriPlatformRecordAppendRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
-     * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
-     * @summary Attach Run Events
+     * Appends one batch of records to one log at the sequences they carry, durably, in one transaction. A record equal to the one already stored at its `seq` is accepted without a second append, so a batch whose reply was lost is safe to resend. A different record at a taken `seq`, or a `seq` past the log\'s end, is refused with `petri_record_conflict` and the batch stores nothing.
+     * @summary Append Petri Records
      * @param {string} id Unique run identifier (ULID).
-     * @param {number} [sinceSeq] First event sequence number to include.
+     * @param {string} log A Petri log of the run, as its id renders: &#x60;coordinator&#x60;, &#x60;resources&#x60;, or &#x60;execution &lt;n&gt;&#x60; for execution &#x60;n&#x60;. The space is percent-encoded on the wire.
+     * @param {PetriAppendRequest} petriAppendRequest
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public attachRunEvents(id: string, sinceSeq?: number, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).attachRunEvents(id, sinceSeq, options).then((request) => request(this.axios, this.basePath));
+    public appendPetriRecords(id: string, log: string, petriAppendRequest: PetriAppendRequest, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).appendPetriRecords(id, log, petriAppendRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Opens an ordered server-sent event stream of the run\'s stream, replaying committed items and continuing with live ones while the run remains active. Each `data:` frame is one `RunStreamItem`. The stream starts after `after` (the last `stream_seq` the client saw; `0` replays the whole run; the next unseen item when omitted). It ends once the run is no longer active and every committed item has been sent. A reconnecting client passes its last `stream_seq` as `after` and deduplicates by `id`.
+     * @summary Attach Run Events
+     * @param {string} id Unique run identifier (ULID).
+     * @param {number} [after] Run stream cursor for a Petri run: the last &#x60;stream_seq&#x60; the client saw, exclusive. &#x60;0&#x60; starts at the first item.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public attachRunEvents(id: string, after?: number, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).attachRunEvents(id, after, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1498,19 +1850,6 @@ export class RunInternalsApi extends BaseAPI {
      */
     public downloadRunArtifacts(id: string, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).downloadRunArtifacts(id, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Returns one stored run event by source event sequence with content fields separated and truncated.
-     * @summary Get Run Event Detail
-     * @param {string} id Unique run identifier (ULID).
-     * @param {number} seq
-     * @param {number} [maxContentLength]
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public getRunEventDetail(id: string, seq: number, maxContentLength?: number, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).getRunEventDetail(id, seq, maxContentLength, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1576,6 +1915,30 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
+     * The run\'s platform records (Fabro\'s own facts about a Petri run: a checkpoint commit, a pull request, a notification), in `seq` order, optionally of one kind. What a run\'s worker reads to find an effect it already performed before performing it again.
+     * @summary List Petri Platform Records
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} [kind] Only the platform records of this kind, as its &#x60;kind&#x60; tag spells it (&#x60;checkpoint&#x60;, &#x60;pull_request.created&#x60;, ...).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listPetriPlatformRecords(id: string, kind?: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).listPetriPlatformRecords(id, kind, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Every record of one log of the run, in `seq` order, unchanged.
+     * @summary List Petri Records
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} log A Petri log of the run, as its id renders: &#x60;coordinator&#x60;, &#x60;resources&#x60;, or &#x60;execution &lt;n&gt;&#x60; for execution &#x60;n&#x60;. The space is percent-encoded on the wire.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listPetriRecords(id: string, log: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).listPetriRecords(id, log, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Lists captured artifact files for a run.
      * @summary List Run Artifacts
      * @param {string} id Unique run identifier (ULID).
@@ -1587,18 +1950,16 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Returns a paginated JSON list of stored run events. Ascending order uses `since_seq` as an inclusive cursor. Descending order uses `before_seq` as an exclusive cursor and starts at the newest event when `before_seq` is omitted.
+     * Returns one page of the run\'s stream (`PaginatedRunStreamList`): one ordered delivery of Petri\'s own `RunEvent`s and Fabro\'s platform records in the `RunStreamItem` envelope, in `stream_seq` order. The cursor is `after`: the last `stream_seq` the client saw, exclusive; the first page is `after=0`. A client that reconnects resumes from its last `stream_seq` and deduplicates by each item\'s `id`; every item is delivered once, in order, with no gap.
      * @summary List Run Events
      * @param {string} id Unique run identifier (ULID).
-     * @param {number} [sinceSeq] First event sequence number to include.
      * @param {number} [limit] Maximum number of events to return.
-     * @param {number} [beforeSeq] Exclusive upper event sequence cursor for descending order. Omit on the first descending request to start from the newest event.
-     * @param {ListRunEventsOrderEnum} [order] Event sequence order. &#x60;since_seq&#x60; is valid only with &#x60;asc&#x60;; &#x60;before_seq&#x60; is valid only with &#x60;desc&#x60;.
+     * @param {number} [after] Run stream cursor for a Petri run: the last &#x60;stream_seq&#x60; the client saw, exclusive. &#x60;0&#x60; starts at the first item.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listRunEvents(id: string, sinceSeq?: number, limit?: number, beforeSeq?: number, order?: ListRunEventsOrderEnum, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).listRunEvents(id, sinceSeq, limit, beforeSeq, order, options).then((request) => request(this.axios, this.basePath));
+    public listRunEvents(id: string, limit?: number, after?: number, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).listRunEvents(id, limit, after, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1627,17 +1988,15 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Returns a paginated JSON list of stored run events scoped to a single stage visit.
-     * @summary List Stage Events
+     * Opens the run in the Petri run store for the worker. `create` inserts the run and takes its writer lease for `owner`; `write` takes the lease of an existing run; `read` takes no lease. The lease is idempotent per owner: a retry by the owner that holds it gets the same lease. Another live owner is refused with `petri_run_leased`. The lease ends when the worker releases it, when the server observes the worker exit, or by operator release, never by timeout.
+     * @summary Open Petri Run
      * @param {string} id Unique run identifier (ULID).
-     * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-     * @param {number} [sinceSeq] First event sequence number to include.
-     * @param {number} [limit] Maximum number of events to return.
+     * @param {PetriOpenRequest} petriOpenRequest
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public listStageEvents(id: string, stageId: string, sinceSeq?: number, limit?: number, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).listStageEvents(id, stageId, sinceSeq, limit, options).then((request) => request(this.axios, this.basePath));
+    public openPetriRun(id: string, petriOpenRequest: PetriOpenRequest, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).openPetriRun(id, petriOpenRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1656,6 +2015,18 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
+     * The blob with this digest, if the store holds one.
+     * @summary Read Petri Blob
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} blobHash Content-addressed blob hash.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public readPetriBlob(id: string, blobHash: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).readPetriBlob(id, blobHash, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Reads a previously stored blob by hash.
      * @summary Read Run Blob
      * @param {string} id Unique run identifier (ULID).
@@ -1665,6 +2036,18 @@ export class RunInternalsApi extends BaseAPI {
      */
     public readRunBlob(id: string, blobHash: string, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).readRunBlob(id, blobHash, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Ends the worker\'s writer lease on the run when `owner` still holds it: what a worker sends when it drops its store handle. A lease that already moved to another owner is left alone.
+     * @summary Release Petri Run
+     * @param {string} id Unique run identifier (ULID).
+     * @param {PetriReleaseRequest} petriReleaseRequest
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public releasePetriRun(id: string, petriReleaseRequest: PetriReleaseRequest, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).releasePetriRun(id, petriReleaseRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1690,6 +2073,19 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
+     * Stores a blob by content for the run\'s owner and returns its SHA-256 digest, the same content address Fabro\'s blob store uses. Idempotent by construction.
+     * @summary Write Petri Blob
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} owner The owner id the worker opened the run\&#39;s writer lease with.
+     * @param {File} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public writePetriBlob(id: string, owner: string, body: File, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).writePetriBlob(id, owner, body, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Writes an opaque binary blob and returns its content-addressed blob hash.
      * @summary Write Run Blob
      * @param {string} id Unique run identifier (ULID).
@@ -1701,9 +2097,3 @@ export class RunInternalsApi extends BaseAPI {
         return RunInternalsApiFp(this.configuration).writeRunBlob(id, body, options).then((request) => request(this.axios, this.basePath));
     }
 }
-
-export const ListRunEventsOrderEnum = {
-    ASC: 'asc',
-    DESC: 'desc'
-} as const;
-export type ListRunEventsOrderEnum = typeof ListRunEventsOrderEnum[keyof typeof ListRunEventsOrderEnum];

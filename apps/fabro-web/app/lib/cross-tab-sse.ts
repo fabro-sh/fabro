@@ -1162,16 +1162,16 @@ function candidateKey(candidate: CandidateMessage): string {
   return `${candidate.candidateGeneration}:${candidate.candidateId}`;
 }
 
-export function eventDedupeKey(payload: EventPayload): string | undefined {
-  if (typeof payload.id === "string" && payload.id.length > 0) {
-    return payload.id;
-  }
-
-  const runId = typeof payload.run_id === "string" ? payload.run_id : undefined;
-  const seq = typeof payload.seq === "number" ? payload.seq : undefined;
-  const event = typeof payload.event === "string" ? payload.event : undefined;
-  if (runId && seq != null && event) {
-    return `${runId}:${seq}:${event}`;
+/** The key that dedupes a stream item across tabs and sources, from a parsed frame or a typed item. */
+export function eventDedupeKey(payload: {
+  run_id?: unknown;
+  stream_seq?: unknown;
+}): string | undefined {
+  // A run stream item's `id` is the item's own identity within its run (a
+  // Petri `EventId` or a platform record seq), so two runs share ids; the
+  // run and the delivery sequence together are unique.
+  if (typeof payload.stream_seq === "number" && typeof payload.run_id === "string") {
+    return `${payload.run_id}:stream:${payload.stream_seq}`;
   }
   return undefined;
 }

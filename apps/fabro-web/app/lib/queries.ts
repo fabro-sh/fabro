@@ -11,7 +11,6 @@ import type {
   CommandLogResponse,
   Environment,
   EnvironmentListResponse,
-  EventEnvelope,
   ListRunsDirectionEnum,
   ListRunsSortEnum,
   McpServer,
@@ -27,6 +26,7 @@ import type {
   RunArtifactListResponse,
   RunProjection,
   Run,
+  RunStreamItem,
   RunUsage,
   SandboxDetails,
   SecretListResponse,
@@ -52,7 +52,6 @@ import {
   automationsApi,
   environmentsApi,
   fetchAllPages,
-  fetchAllStageEvents,
   generatedAxios,
   humanInTheLoopApi,
   insightsApi,
@@ -367,16 +366,6 @@ export function useRunPullRequest(id: string | undefined) {
   );
 }
 
-export function useRunStageEvents(id: string | undefined, stageId: string | undefined) {
-  return useSWR<EventEnvelope[]>(
-    id && stageId ? queryKeys.runs.stageEvents(id, stageId) : null,
-    () =>
-      fetchAllStageEvents(`run ${id} stage ${stageId}`, (sinceSeq, limit) =>
-        apiData(() => runInternalsApi.listStageEvents(id!, stageId!, sinceSeq, limit)),
-      ),
-  );
-}
-
 export function useRunStageContextWindow(
   id: string | undefined,
   stageId: string | undefined,
@@ -387,13 +376,37 @@ export function useRunStageContextWindow(
   );
 }
 
-export function useRunEventsList(id: string | undefined) {
-  return useSWR<EventEnvelope[]>(
-    id ? queryKeys.runs.events(id, 1000) : null,
-    () =>
-      fetchAllStageEvents(`run ${id} events`, (sinceSeq, limit) =>
-        apiData(() => runInternalsApi.listRunEvents(id!, sinceSeq, limit)),
-      ),
+const STREAM_PAGE_LIMIT = 1000;
+const STREAM_MAX_PAGES = 50;
+
+/**
+ * Every item of a run's stream (`GET /runs/{id}/events`), paged by `after`
+ * (the last `stream_seq` seen).
+ */
+async function fetchRunStream(id: string): Promise<RunStreamItem[]> {
+  const items: RunStreamItem[] = [];
+  let after = 0;
+  for (let pages = 0; pages < STREAM_MAX_PAGES; pages += 1) {
+    const page = await apiData(() =>
+      runInternalsApi.listRunEvents(id, STREAM_PAGE_LIMIT, after),
+    );
+    if (page.data.length === 0) return items;
+    items.push(...page.data);
+    const last = page.data[page.data.length - 1];
+    if (!page.meta.has_more || last.stream_seq <= after) return items;
+    after = last.stream_seq;
+  }
+  console.warn(
+    `Stopped run stream fetch for ${id} after ${STREAM_MAX_PAGES} pages and ${items.length} items because the safety cap was reached.`,
+  );
+  return items;
+}
+
+/** A run's stream: Petri's events and Fabro's platform records, in order. */
+export function useRunStream(id: string | undefined) {
+  return useSWR<RunStreamItem[]>(
+    id ? queryKeys.runs.stream(id) : null,
+    () => fetchRunStream(id!),
   );
 }
 

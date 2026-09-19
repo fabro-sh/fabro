@@ -24,12 +24,19 @@ pub struct RunSandboxPlan {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSandboxInstance {
-    pub provider: SandboxProviderKind,
+    pub provider:          SandboxProviderKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image:    Option<String>,
+    pub image:             Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot: Option<String>,
-    pub runtime:  RunSandboxRuntime,
+    pub snapshot:          Option<String>,
+    pub runtime:           RunSandboxRuntime,
+    /// How long the sandbox took to become ready, when its record says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ready_duration_ms: Option<u64>,
+    /// Whether the sandbox still exists after the run released it: kept
+    /// (stopped or running), or removed. Absent until the release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained:          Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +95,14 @@ impl RunSandbox {
 
     pub fn instance(&self) -> Option<&RunSandboxInstance> {
         self.instance.as_ref()
+    }
+
+    /// Record the release outcome on the instance: whether the sandbox
+    /// still exists. Nothing to record without an instance.
+    pub fn set_retained(&mut self, retained: bool) {
+        if let Some(instance) = self.instance.as_mut() {
+            instance.retained = Some(retained);
+        }
     }
 
     pub fn into_instance(self) -> Option<RunSandboxInstance> {

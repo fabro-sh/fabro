@@ -8,14 +8,15 @@ use std::sync::{Arc, RwLock};
 use anyhow::{Context as _, Result, anyhow, bail};
 use bytes::Bytes;
 use fabro_api::types;
+use fabro_api::types::RunControlAcknowledgement;
 use fabro_http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use fabro_http::multipart::{Form, Part};
 use fabro_types::settings::run::MergeStrategy;
 use fabro_types::{
-    ArtifactUpload, BlobHash, EventEnvelope, Model, ModelTestMode, PairId, PairMessageRecord,
-    PairMessageRequest, PairRecord, PairStartRequest, PairTranscriptResponse, Run, RunEvent,
-    RunEventDetailResponse, RunId, RunPairStatusResponse, RunProjection, RunSessionMetadata,
-    SessionId, StageId, WorkflowVersion, WorkflowVersionId,
+    ArtifactUpload, BlobHash, Model, ModelTestMode, PairId, PairMessageRecord, PairMessageRequest,
+    PairRecord, PairStartRequest, PairTranscriptResponse, Run, RunId, RunPairStatusResponse,
+    RunProjection, RunSessionMetadata, RunStreamItem, SessionEvent, SessionId, StageId,
+    WorkflowVersion, WorkflowVersionId,
 };
 use fabro_util::exit::{ErrorExt, ExitClass};
 use futures::future::BoxFuture;
@@ -50,20 +51,36 @@ const PULL_REQUEST_CREATION_POLL_DEADLINE: std::time::Duration = std::time::Dura
 
 type TransportFuture = BoxFuture<'static, Result<(fabro_http::HttpClient, String)>>;
 
-pub struct RunEventStream {
-    stream:          progenitor_client::ByteStream,
-    pending_bytes:   Vec<u8>,
-    buffered_events: VecDeque<EventEnvelope>,
+/// The live stream of a Petri run, as `GET /runs/{id}/attach` serves it:
+/// one `RunStreamItem` per `data:` frame, in `stream_seq` order.
+pub struct RunStreamItemStream {
+    stream:         progenitor_client::ByteStream,
+    pending_bytes:  Vec<u8>,
+    buffered_items: VecDeque<RunStreamItem>,
+}
+
+/// One page of a Petri run's stream.
+#[derive(Debug, Clone)]
+pub struct RunStreamPage {
+    pub items:                  Vec<RunStreamItem>,
+    pub has_more:               bool,
+    /// Petri's `EVENT_CONTRACT_VERSION` the server serves; `None` when the
+    /// page was empty and the server reported no version beside it.
+    pub event_contract_version: Option<u32>,
 }
 
 type HttpByteStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>;
 
+/// The live stream of an Ask Fabro turn, as `POST /sessions/{id}/turns`
+/// serves it: one `SessionEvent` per `data:` frame, in `seq` order.
 pub struct SessionEventStream {
     stream:          HttpByteStream,
     pending_bytes:   Vec<u8>,
-    buffered_events: VecDeque<EventEnvelope>,
+    buffered_events: VecDeque<SessionEvent>,
 }
 
+/// What a rewind returned: the response, and the status that says whether
+/// the source was archived.
 pub struct RewindRunResult {
     pub status:   u16,
     pub response: types::RewindResponse,
@@ -150,36 +167,36 @@ struct ArtifactBatchUploadEntry {
     content_type:   Option<String>,
 }
 
-impl RunEventStream {
+impl RunStreamItemStream {
     #[must_use]
     pub fn new(stream: progenitor_client::ByteStream) -> Self {
         Self {
             stream,
             pending_bytes: Vec::new(),
-            buffered_events: VecDeque::new(),
+            buffered_items: VecDeque::new(),
         }
     }
 
-    pub async fn next_event(&mut self) -> Result<Option<EventEnvelope>> {
+    pub async fn next_item(&mut self) -> Result<Option<RunStreamItem>> {
         loop {
-            if let Some(event) = self.buffered_events.pop_front() {
-                return Ok(Some(event));
+            if let Some(item) = self.buffered_items.pop_front() {
+                return Ok(Some(item));
             }
 
             if let Some(chunk) = self.stream.next().await {
                 let chunk = chunk.map_err(anyhow::Error::new)?;
                 self.pending_bytes.extend_from_slice(&chunk);
-                self.buffer_sse_events(false)?;
+                self.buffer_sse_items(false)?;
             } else {
-                self.buffer_sse_events(true)?;
-                return Ok(self.buffered_events.pop_front());
+                self.buffer_sse_items(true)?;
+                return Ok(self.buffered_items.pop_front());
             }
         }
     }
 
-    fn buffer_sse_events(&mut self, finalize: bool) -> Result<()> {
+    fn buffer_sse_items(&mut self, finalize: bool) -> Result<()> {
         for payload in sse::drain_sse_payloads(&mut self.pending_bytes, finalize) {
-            self.buffered_events
+            self.buffered_items
                 .push_back(serde_json::from_str(&payload)?);
         }
         Ok(())
@@ -196,7 +213,7 @@ impl SessionEventStream {
         }
     }
 
-    pub async fn next_event(&mut self) -> Result<Option<EventEnvelope>> {
+    pub async fn next_event(&mut self) -> Result<Option<SessionEvent>> {
         loop {
             if let Some(event) = self.buffered_events.pop_front() {
                 return Ok(Some(event));
@@ -1119,33 +1136,83 @@ impl Client {
         convert_type(response.into_inner())
     }
 
-    pub async fn interrupt_run(&self, run_id: &RunId) -> Result<()> {
-        self.send_api(|client| async move {
-            client.interrupt_run().id(run_id.to_string()).send().await
-        })
-        .await?;
-        Ok(())
+    /// Interrupt a run's live agent stage: stop its current model turn and
+    /// keep its session. The stage is the one `stage` names (`node@visit`,
+    /// or the node name) or the run's one live agent stage; `text`, when
+    /// given, is the stage's next input, else the stage waits for the next
+    /// steer.
+    pub async fn interrupt_run(
+        &self,
+        run_id: &RunId,
+        stage: Option<String>,
+        text: Option<String>,
+    ) -> Result<RunControlAcknowledgement> {
+        let stage = stage
+            .map(|stage| {
+                types::InterruptRunRequestStage::try_from(stage)
+                    .map_err(|e| anyhow!("invalid interrupt stage: {e}"))
+            })
+            .transpose()?;
+        let text = text
+            .map(|text| {
+                types::InterruptRunRequestText::try_from(text)
+                    .map_err(|e| anyhow!("invalid interrupt text: {e}"))
+            })
+            .transpose()?;
+        let body = types::InterruptRunRequest { stage, text };
+        let response = self
+            .send_api(|client| {
+                let body = body.clone();
+                async move {
+                    client
+                        .interrupt_run()
+                        .id(run_id.to_string())
+                        .body(body)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
+        Ok(response.into_inner())
     }
 
-    pub async fn steer_run(&self, run_id: &RunId, text: String, interrupt: bool) -> Result<()> {
+    /// Steer a run: the named stage (`node@visit`, or the node name), or
+    /// the run's one live agent stage when `stage` is `None`. The worker's
+    /// answer: delivered, or pending when none came in time. A refusal is
+    /// the error, with the refusal's code as its API failure code.
+    pub async fn steer_run(
+        &self,
+        run_id: &RunId,
+        text: String,
+        interrupt: bool,
+        stage: Option<String>,
+    ) -> Result<RunControlAcknowledgement> {
+        let stage = stage
+            .map(|stage| {
+                types::SteerRunRequestStage::try_from(stage)
+                    .map_err(|e| anyhow!("invalid steer stage: {e}"))
+            })
+            .transpose()?;
         let body: types::SteerRunRequest = types::SteerRunRequest::builder()
             .text(text)
             .interrupt(interrupt)
+            .stage(stage)
             .try_into()
             .map_err(|e| anyhow!("failed to build SteerRunRequest: {e}"))?;
-        self.send_api(|client| {
-            let body = body.clone();
-            async move {
-                client
-                    .steer_run()
-                    .id(run_id.to_string())
-                    .body(body)
-                    .send()
-                    .await
-            }
-        })
-        .await?;
-        Ok(())
+        let response = self
+            .send_api(|client| {
+                let body = body.clone();
+                async move {
+                    client
+                        .steer_run()
+                        .id(run_id.to_string())
+                        .body(body)
+                        .send()
+                        .await
+                }
+            })
+            .await?;
+        Ok(response.into_inner())
     }
 
     pub async fn get_run_pair_status(&self, run_id: &RunId) -> Result<RunPairStatusResponse> {
@@ -1256,29 +1323,6 @@ impl Client {
         convert_type(response.into_inner())
     }
 
-    pub async fn get_run_event_detail(
-        &self,
-        run_id: &RunId,
-        seq: u32,
-        max_content_length: Option<u32>,
-    ) -> Result<RunEventDetailResponse> {
-        let seq = non_zero_u64_from_u32(seq).context("event seq must be non-zero")?;
-        let max_content_length = max_content_length.and_then(non_zero_u64_from_u32);
-        let response = self
-            .send_api(|client| async move {
-                let mut builder = client
-                    .get_run_event_detail()
-                    .id(run_id.to_string())
-                    .seq(seq);
-                if let Some(max_content_length) = max_content_length {
-                    builder = builder.max_content_length(max_content_length);
-                }
-                builder.send().await
-            })
-            .await?;
-        convert_type(response.into_inner())
-    }
-
     pub async fn archive_run(&self, run_id: &RunId) -> Result<Run> {
         let response = self
             .send_api(
@@ -1295,59 +1339,6 @@ impl Client {
             )
             .await?;
         convert_type(response.into_inner())
-    }
-
-    pub async fn rewind_run(
-        &self,
-        run_id: &RunId,
-        request: types::RewindRequest,
-    ) -> Result<RewindRunResult> {
-        let response = self
-            .send_api(|client| async move {
-                client
-                    .rewind_run()
-                    .id(run_id.to_string())
-                    .body(request)
-                    .send()
-                    .await
-            })
-            .await?;
-        let status = response.status().as_u16();
-        Ok(RewindRunResult {
-            status,
-            response: response.into_inner(),
-        })
-    }
-
-    pub async fn fork_run(
-        &self,
-        run_id: &RunId,
-        request: types::ForkRequest,
-    ) -> Result<types::ForkResponse> {
-        let response = self
-            .send_api(|client| async move {
-                client
-                    .fork_run()
-                    .id(run_id.to_string())
-                    .body(request)
-                    .send()
-                    .await
-            })
-            .await?;
-        Ok(response.into_inner())
-    }
-
-    pub async fn run_timeline(&self, run_id: &RunId) -> Result<Vec<types::TimelineEntryResponse>> {
-        let response = self
-            .send_api(|client| async move {
-                client
-                    .get_run_timeline()
-                    .id(run_id.to_string())
-                    .send()
-                    .await
-            })
-            .await?;
-        Ok(response.into_inner())
     }
 
     pub async fn list_store_runs(&self) -> Result<Vec<Run>> {
@@ -1440,6 +1431,74 @@ impl Client {
         let response = self
             .send_api(
                 |client| async move { client.retrieve_run().id(run_id.to_string()).send().await },
+            )
+            .await?;
+        convert_type(response.into_inner())
+    }
+
+    /// The run's checkpoint timeline, and where it was forked from.
+    pub async fn run_timeline(&self, run_id: &RunId) -> Result<types::RunTimelineResponse> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .get_run_timeline()
+                    .id(run_id.to_string())
+                    .send()
+                    .await
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    /// Fork the run at a checkpoint into a new run, started in resume mode.
+    pub async fn fork_run(
+        &self,
+        run_id: &RunId,
+        request: types::ForkRequest,
+    ) -> Result<types::ForkResponse> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .fork_run()
+                    .id(run_id.to_string())
+                    .body(request)
+                    .send()
+                    .await
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    /// Rewind the run to a checkpoint: a fork that archives and supersedes
+    /// the source. The status says whether the archive succeeded (200) or
+    /// the new run was made without it (207).
+    pub async fn rewind_run(
+        &self,
+        run_id: &RunId,
+        request: types::RewindRequest,
+    ) -> Result<RewindRunResult> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .rewind_run()
+                    .id(run_id.to_string())
+                    .body(request)
+                    .send()
+                    .await
+            })
+            .await?;
+        let status = response.status().as_u16();
+        Ok(RewindRunResult {
+            status,
+            response: response.into_inner(),
+        })
+    }
+
+    /// Retry a terminal run from its last checkpoint: the new run.
+    pub async fn retry_run(&self, run_id: &RunId) -> Result<Run> {
+        let response = self
+            .send_api(
+                |client| async move { client.retry_run().id(run_id.to_string()).send().await },
             )
             .await?;
         convert_type(response.into_inner())
@@ -1676,136 +1735,17 @@ impl Client {
         convert_type(response.into_inner())
     }
 
-    pub async fn list_run_events(
+    /// One page of a Petri run's stream: up to `limit` items with
+    /// `stream_seq > after`, in order.
+    pub async fn list_run_stream_page(
         &self,
         run_id: &RunId,
-        since_seq: Option<u32>,
+        after: u64,
         limit: Option<usize>,
-    ) -> Result<Vec<EventEnvelope>> {
-        let mut next_since_seq = since_seq;
-        let mut all_events = Vec::new();
-
-        loop {
-            let page = EventPageCursor::Ascending {
-                since_seq: next_since_seq,
-            };
-            let (page_events, has_more) = self.fetch_run_events_page(run_id, page, limit).await?;
-            let next_page_since_seq = page_events.last().map(|event| event.seq.saturating_add(1));
-            all_events.extend(page_events);
-
-            if limit.is_some() || !has_more || next_page_since_seq.is_none() {
-                break;
-            }
-            next_since_seq = next_page_since_seq;
-        }
-
-        Ok(all_events)
-    }
-
-    /// Returns the newest `max_events` in ascending sequence order.
-    pub async fn list_run_events_tail(
-        &self,
-        run_id: &RunId,
-        max_events: usize,
-    ) -> Result<Vec<EventEnvelope>> {
-        if max_events == 0 {
-            return Ok(Vec::new());
-        }
-
-        // Fetch two events when the caller asks for one so an older server
-        // that silently ignores the new order parameter can be detected.
-        let fetch_target = max_events.max(2);
-        let mut before_seq = None;
-        let mut descending_events: Vec<EventEnvelope> = Vec::new();
-        loop {
-            let remaining = fetch_target - descending_events.len();
-            let (page_events, has_more) = self
-                .fetch_run_events_page(
-                    run_id,
-                    EventPageCursor::Descending { before_seq },
-                    Some(remaining),
-                )
-                .await?;
-
-            let keeps_descending = descending_events
-                .last()
-                .into_iter()
-                .chain(&page_events)
-                .is_sorted_by(|previous, next| previous.seq > next.seq);
-            if !keeps_descending {
-                // An older server ignored the order parameter and returned
-                // ascending history; fetch everything and slice the tail.
-                let mut events = self.list_run_events(run_id, None, None).await?;
-                let tail_start = events.len().saturating_sub(max_events);
-                return Ok(events.split_off(tail_start));
-            }
-
-            before_seq = page_events.last().map(|event| event.seq);
-            descending_events.extend(page_events);
-            if descending_events.len() >= fetch_target || !has_more || before_seq.is_none() {
-                break;
-            }
-        }
-
-        descending_events.reverse();
-        let tail_start = descending_events.len().saturating_sub(max_events);
-        Ok(descending_events.split_off(tail_start))
-    }
-
-    pub async fn list_run_events_until(
-        &self,
-        run_id: &RunId,
-        since_seq: Option<u32>,
-        max_events: usize,
-    ) -> Result<Vec<EventEnvelope>> {
-        if max_events == 0 {
-            return Ok(Vec::new());
-        }
-
-        let mut next_since_seq = since_seq;
-        let mut all_events = Vec::new();
-        while all_events.len() < max_events {
-            let remaining = max_events - all_events.len();
-            let page = EventPageCursor::Ascending {
-                since_seq: next_since_seq,
-            };
-            let (page_events, has_more) = self
-                .fetch_run_events_page(run_id, page, Some(remaining))
-                .await?;
-            let next_page_since_seq = page_events.last().map(|event| event.seq.saturating_add(1));
-            all_events.extend(page_events);
-
-            if !has_more || next_page_since_seq.is_none() {
-                break;
-            }
-            next_since_seq = next_page_since_seq;
-        }
-
-        Ok(all_events)
-    }
-
-    async fn fetch_run_events_page(
-        &self,
-        run_id: &RunId,
-        cursor: EventPageCursor,
-        limit: Option<usize>,
-    ) -> Result<(Vec<EventEnvelope>, bool)> {
+    ) -> Result<RunStreamPage> {
         let response = self
             .send_api(|client| async move {
-                let mut request = client.list_run_events().id(run_id.to_string());
-                match cursor {
-                    EventPageCursor::Ascending { since_seq } => {
-                        if let Some(seq) = since_seq.and_then(non_zero_u64_from_u32) {
-                            request = request.since_seq(seq);
-                        }
-                    }
-                    EventPageCursor::Descending { before_seq } => {
-                        request = request.order(types::ListRunEventsOrder::Desc);
-                        if let Some(seq) = before_seq.and_then(non_zero_u64_from_u32) {
-                            request = request.before_seq(seq);
-                        }
-                    }
-                }
+                let mut request = client.list_run_events().id(run_id.to_string()).after(after);
                 let page_limit = limit.map(|limit| limit.min(1000));
                 if let Some(limit) = page_limit.and_then(non_zero_u64_from_usize) {
                     request = request.limit(limit);
@@ -1813,30 +1753,80 @@ impl Client {
                 request.send().await
             })
             .await?;
-        let parsed = response.into_inner();
-        let events = parsed
-            .data
-            .into_iter()
-            .map(convert_type::<_, EventEnvelope>)
-            .collect::<Result<Vec<EventEnvelope>>>()?;
-        Ok((events, parsed.meta.has_more))
+        let page = response.into_inner();
+        Ok(RunStreamPage {
+            items:                  page.data,
+            has_more:               page.meta.has_more,
+            event_contract_version: Some(page.event_contract_version),
+        })
     }
 
-    pub async fn attach_run_events(
+    /// At most `max_items` items of a Petri run's stream past `after`, in
+    /// order, page by page.
+    pub async fn list_run_stream_until(
         &self,
         run_id: &RunId,
-        since_seq: Option<u32>,
-    ) -> Result<RunEventStream> {
+        after: u64,
+        max_items: usize,
+    ) -> Result<Vec<RunStreamItem>> {
+        let mut cursor = after;
+        let mut all = Vec::new();
+        while all.len() < max_items {
+            let remaining = max_items - all.len();
+            let page = self
+                .list_run_stream_page(run_id, cursor, Some(remaining))
+                .await?;
+            let Some(last) = page.items.last() else {
+                break;
+            };
+            cursor = last.stream_seq;
+            let has_more = page.has_more;
+            all.extend(page.items);
+            if !has_more {
+                break;
+            }
+        }
+        all.truncate(max_items);
+        Ok(all)
+    }
+
+    /// Every item of a Petri run's stream past `after`, page by page.
+    pub async fn list_run_stream(&self, run_id: &RunId, after: u64) -> Result<Vec<RunStreamItem>> {
+        let mut cursor = after;
+        let mut all = Vec::new();
+        loop {
+            let page = self.list_run_stream_page(run_id, cursor, None).await?;
+            let Some(last) = page.items.last() else {
+                break;
+            };
+            cursor = last.stream_seq;
+            let has_more = page.has_more;
+            all.extend(page.items);
+            if !has_more {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
+    /// The live stream of a Petri run from `after` (the last `stream_seq`
+    /// seen; `Some(0)` replays the whole run; `None` starts at the next
+    /// unseen item).
+    pub async fn attach_run_stream(
+        &self,
+        run_id: &RunId,
+        after: Option<u64>,
+    ) -> Result<RunStreamItemStream> {
         let response = self
             .send_api(|client| async move {
                 let mut request = client.attach_run_events().id(run_id.to_string());
-                if let Some(seq) = since_seq.and_then(non_zero_u64_from_u32) {
-                    request = request.since_seq(seq);
+                if let Some(after) = after {
+                    request = request.after(after);
                 }
                 request.send().await
             })
             .await?;
-        Ok(RunEventStream::new(response.into_inner()))
+        Ok(RunStreamItemStream::new(response.into_inner()))
     }
 
     pub async fn list_run_questions(&self, run_id: &RunId) -> Result<Vec<types::ApiQuestion>> {
@@ -1871,21 +1861,6 @@ impl Client {
         })
         .await?;
         Ok(())
-    }
-
-    pub async fn append_run_event(&self, run_id: &RunId, event: &RunEvent) -> Result<u32> {
-        let body: types::RunEvent = convert_type(event)?;
-        let response = self
-            .send_api(|client| async move {
-                client
-                    .append_run_event()
-                    .id(run_id.to_string())
-                    .body(body.clone())
-                    .send()
-                    .await
-            })
-            .await?;
-        u32::try_from(response.into_inner().seq).context("append_run_event returned invalid seq")
     }
 
     pub async fn write_run_blob(&self, run_id: &RunId, data: &[u8]) -> Result<BlobHash> {
@@ -1932,6 +1907,182 @@ impl Client {
                 } else {
                     Err(err)
                 }
+            }
+        }
+    }
+
+    // ── The Petri run store, as a worker reaches it ──────────────────────
+    //
+    // Each method is one request and answers with the server's reply as it
+    // is: an error carries the store's `code` and `meta` in its `ApiFailure`
+    // (see `api_failure_for`), and a transport failure carries none. Retry
+    // policy belongs to the store implementation over these calls, not here.
+
+    /// Open the run in the Petri run store for the worker.
+    pub async fn open_petri_run(
+        &self,
+        run_id: &RunId,
+        body: types::PetriOpenRequest,
+    ) -> Result<types::PetriOpenResponse> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .open_petri_run()
+                    .id(run_id.to_string())
+                    .body(body.clone())
+                    .send()
+                    .await
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    /// End the worker's writer lease on the run when `owner` still holds it.
+    pub async fn release_petri_run(&self, run_id: &RunId, owner: &str) -> Result<()> {
+        self.send_api(|client| async move {
+            client
+                .release_petri_run()
+                .id(run_id.to_string())
+                .body(types::PetriReleaseRequest {
+                    owner: owner.to_string(),
+                })
+                .send()
+                .await
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// Append one batch of records to one log of the run. `log` is the log
+    /// id as text; the generated client percent-encodes it.
+    pub async fn append_petri_records(
+        &self,
+        run_id: &RunId,
+        log: &str,
+        body: types::PetriAppendRequest,
+    ) -> Result<()> {
+        self.send_api(|client| async move {
+            client
+                .append_petri_records()
+                .id(run_id.to_string())
+                .log(log)
+                .body(body.clone())
+                .send()
+                .await
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// Every record of one log of the run, in `seq` order.
+    pub async fn list_petri_records(
+        &self,
+        run_id: &RunId,
+        log: &str,
+    ) -> Result<Vec<types::PetriRecord>> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .list_petri_records()
+                    .id(run_id.to_string())
+                    .log(log)
+                    .send()
+                    .await
+            })
+            .await?;
+        Ok(response.into_inner().records)
+    }
+
+    /// Store a blob by content for the run's `owner` and get its digest.
+    pub async fn write_petri_blob(
+        &self,
+        run_id: &RunId,
+        owner: &str,
+        data: &[u8],
+    ) -> Result<BlobHash> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .write_petri_blob()
+                    .id(run_id.to_string())
+                    .owner(owner)
+                    .body(data.to_vec())
+                    .send()
+                    .await
+            })
+            .await?;
+        Ok(response.into_inner().hash)
+    }
+
+    /// Store one of Fabro's platform records for the run, tied to a Petri
+    /// stage when it belongs to one, and get it back as stored.
+    pub async fn append_petri_platform_record(
+        &self,
+        run_id: &RunId,
+        body: types::PetriPlatformRecordAppendRequest,
+    ) -> Result<types::PetriPlatformRecord> {
+        let response = self
+            .send_api(|client| async move {
+                client
+                    .append_petri_platform_record()
+                    .id(run_id.to_string())
+                    .body(body.clone())
+                    .send()
+                    .await
+            })
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    /// The run's platform records in `seq` order, of one kind when `kind`
+    /// names it.
+    pub async fn list_petri_platform_records(
+        &self,
+        run_id: &RunId,
+        kind: Option<&str>,
+    ) -> Result<Vec<types::PetriPlatformRecord>> {
+        let response = self
+            .send_api(|client| async move {
+                let mut request = client.list_petri_platform_records().id(run_id.to_string());
+                if let Some(kind) = kind {
+                    request = request.kind(kind);
+                }
+                request.send().await
+            })
+            .await?;
+        Ok(response.into_inner().records)
+    }
+
+    /// The blob with this digest, or `None` when the store holds no such
+    /// blob. A run the store does not hold is an error.
+    pub async fn read_petri_blob(
+        &self,
+        run_id: &RunId,
+        blob_hash: &BlobHash,
+    ) -> Result<Option<Bytes>> {
+        let response = self
+            .current_state()
+            .client
+            .read_petri_blob()
+            .id(run_id.to_string())
+            .blob_hash(*blob_hash)
+            .send()
+            .await;
+        match response {
+            Ok(response) => {
+                let mut stream = response.into_inner();
+                let mut bytes = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.map_err(anyhow::Error::new)?;
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok(Some(Bytes::from(bytes)))
+            }
+            Err(err) => {
+                let err = classify_api_error(err).await.error;
+                let blob_missing = api_failure_for(&err)
+                    .is_some_and(|failure| failure.code.as_deref() == Some("petri_blob_not_found"));
+                if blob_missing { Ok(None) } else { Err(err) }
             }
         }
     }
@@ -2295,12 +2446,6 @@ pub fn apply_bearer_token_auth(
     Ok(builder.default_headers(headers))
 }
 
-#[derive(Clone, Copy)]
-enum EventPageCursor {
-    Ascending { since_seq: Option<u32> },
-    Descending { before_seq: Option<u32> },
-}
-
 fn non_zero_u64_from_u32(value: u32) -> Option<NonZeroU64> {
     NonZeroU64::new(u64::from(value))
 }
@@ -2365,17 +2510,6 @@ mod tests {
             },
             logged_in_at:             now,
         }
-    }
-
-    fn run_event_json(run_id: &RunId, seq: u32) -> serde_json::Value {
-        json!({
-            "seq": seq,
-            "event": "run.running",
-            "id": format!("evt-{seq}"),
-            "run_id": run_id,
-            "ts": "2026-07-24T12:00:00Z",
-            "properties": {},
-        })
     }
 
     fn test_workflow_version(
@@ -2815,116 +2949,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_run_events_tail_pages_backward_and_returns_ascending() {
-        let server = MockServer::start_async().await;
-        let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
-        let newest_page = server
-            .mock_async(|when, then| {
-                when.method(GET)
-                    .path(format!("/api/v1/runs/{run_id}/events"))
-                    .query_param("order", "desc")
-                    .query_param("limit", "5");
-                then.status(200)
-                    .header("Content-Type", "application/json")
-                    .json_body(json!({
-                        "data": [
-                            run_event_json(&run_id, 6),
-                            run_event_json(&run_id, 5),
-                            run_event_json(&run_id, 4),
-                        ],
-                        "meta": { "has_more": true },
-                    }));
-            })
-            .await;
-        let older_page = server
-            .mock_async(|when, then| {
-                when.method(GET)
-                    .path(format!("/api/v1/runs/{run_id}/events"))
-                    .query_param("order", "desc")
-                    .query_param("before_seq", "4")
-                    .query_param("limit", "2");
-                then.status(200)
-                    .header("Content-Type", "application/json")
-                    .json_body(json!({
-                        "data": [
-                            run_event_json(&run_id, 3),
-                            run_event_json(&run_id, 2),
-                        ],
-                        "meta": { "has_more": true },
-                    }));
-            })
-            .await;
-
-        let client = Client::new_no_proxy(&server.url("")).unwrap();
-        let events = client.list_run_events_tail(&run_id, 5).await.unwrap();
-
-        newest_page.assert_async().await;
-        older_page.assert_async().await;
-        let seqs = events
-            .into_iter()
-            .map(|event| event.seq)
-            .collect::<Vec<_>>();
-        assert_eq!(seqs, vec![2, 3, 4, 5, 6]);
-    }
-
-    #[tokio::test]
-    async fn list_run_events_tail_falls_back_when_server_ignores_descending_order() {
-        let server = MockServer::start_async().await;
-        let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
-        let unsupported_descending_page = server
-            .mock_async(|when, then| {
-                when.method(GET)
-                    .path(format!("/api/v1/runs/{run_id}/events"))
-                    .query_param("order", "desc")
-                    .query_param("limit", "3");
-                then.status(200)
-                    .header("Content-Type", "application/json")
-                    .json_body(json!({
-                        "data": [
-                            run_event_json(&run_id, 1),
-                            run_event_json(&run_id, 2),
-                            run_event_json(&run_id, 3),
-                        ],
-                        "meta": { "has_more": true },
-                    }));
-            })
-            .await;
-        let full_history = server
-            .mock_async(|when, then| {
-                when.method(GET)
-                    .path(format!("/api/v1/runs/{run_id}/events"))
-                    .query_param_missing("order")
-                    .query_param_missing("before_seq")
-                    .query_param_missing("since_seq")
-                    .query_param_missing("limit");
-                then.status(200)
-                    .header("Content-Type", "application/json")
-                    .json_body(json!({
-                        "data": [
-                            run_event_json(&run_id, 1),
-                            run_event_json(&run_id, 2),
-                            run_event_json(&run_id, 3),
-                            run_event_json(&run_id, 4),
-                            run_event_json(&run_id, 5),
-                        ],
-                        "meta": { "has_more": false },
-                    }));
-            })
-            .await;
-
-        let client = Client::new_no_proxy(&server.url("")).unwrap();
-        let events = client.list_run_events_tail(&run_id, 3).await.unwrap();
-
-        unsupported_descending_page.assert_async().await;
-        full_history.assert_async().await;
-        let seqs = events
-            .into_iter()
-            .map(|event| event.seq)
-            .collect::<Vec<_>>();
-        assert_eq!(seqs, vec![3, 4, 5]);
-    }
-
-    #[tokio::test]
     async fn test_provider_credentials_posts_api_key() {
         let server = MockServer::start_async().await;
         let mock = server
@@ -3261,10 +3285,7 @@ mod tests {
     fn add_pr_upgrade_hint_appends_on_unstructured_404() {
         let err = tag_with_failure(
             anyhow!("request failed with status 404 Not Found"),
-            ApiFailure {
-                status: fabro_http::StatusCode::NOT_FOUND,
-                code:   None,
-            },
+            ApiFailure::new(fabro_http::StatusCode::NOT_FOUND, None),
         );
         let wrapped = super::add_pr_upgrade_hint(err);
         let message = wrapped.to_string();
@@ -3279,10 +3300,10 @@ mod tests {
     fn add_pr_upgrade_hint_does_not_touch_structured_404() {
         let err = tag_with_failure(
             anyhow!("No pull request found in store. Create one first with: fabro pr create abc"),
-            ApiFailure {
-                status: fabro_http::StatusCode::NOT_FOUND,
-                code:   Some("no_stored_record".to_string()),
-            },
+            ApiFailure::new(
+                fabro_http::StatusCode::NOT_FOUND,
+                Some("no_stored_record".to_string()),
+            ),
         );
         let wrapped = super::add_pr_upgrade_hint(err);
         let message = wrapped.to_string();

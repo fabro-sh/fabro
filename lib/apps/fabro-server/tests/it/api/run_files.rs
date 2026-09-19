@@ -7,22 +7,12 @@
 //! unit tests on the sandbox-git helpers and by `stitch_file_diff` tests
 //! in `run_files.rs`.
 
-use std::sync::Arc;
-use std::time::Duration;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_server::test_support::test_app_state_with_store;
-use fabro_store::{ArtifactStore, Database};
-use fabro_types::{Graph, RunId, SandboxProviderKind, WorkflowSettings, test_support};
-use fabro_workflow::event as workflow_event;
-use fabro_workflow::run_status::SuccessReason;
-use object_store::memory::InMemory as MemoryObjectStore;
 use tower::ServiceExt;
 
 use crate::helpers::{
     MINIMAL_DOT, api, minimal_intent_json, response_json, response_status, test_app_state,
-    test_settings,
 };
 
 fn files_url(run_id: &str) -> String {
@@ -35,120 +25,6 @@ fn commits_url(run_id: &str) -> String {
 
 fn files_url_with_scope(run_id: &str, scope: &str) -> String {
     format!("{}?scope={scope}", files_url(run_id))
-}
-
-fn store_bundle() -> (Arc<Database>, ArtifactStore) {
-    let object_store: Arc<dyn object_store::ObjectStore> = Arc::new(MemoryObjectStore::new());
-    let store = Arc::new(fabro_store::test_support::test_database(
-        Arc::clone(&object_store),
-        "",
-        Duration::from_millis(1),
-        None,
-    ));
-    let artifact_store = ArtifactStore::new(object_store, "artifacts");
-    (store, artifact_store)
-}
-
-async fn append_completed_run_with_final_patch(
-    store: &Database,
-    run_id: &RunId,
-    final_patch: &str,
-) {
-    let run_store = store.create_run(run_id).await.expect("create run store");
-    workflow_event::append_event(&run_store, run_id, &workflow_event::Event::RunCreated {
-        run_id:              *run_id,
-        title:               None,
-        settings:            serde_json::to_value(WorkflowSettings::default())
-            .expect("workflow settings should serialize"),
-        graph:               serde_json::to_value(Graph::new("test"))
-            .expect("graph should serialize"),
-        workflow_source:     None,
-        labels:              std::collections::BTreeMap::default(),
-        source_directory:    None,
-        workflow_slug:       None,
-        workflow_version_id: None,
-        target:              None,
-        automation:          None,
-        provenance:          test_support::test_run_provenance(),
-        spec_blob:           None,
-        git:                 None,
-        fork_source_ref:     None,
-        retried_from:        None,
-        parent_id:           None,
-        web_url:             None,
-    })
-    .await
-    .expect("append RunCreated");
-    workflow_event::append_event(&run_store, run_id, &workflow_event::Event::RunRunnable {
-        source: fabro_types::RunRunnableSource::StartRequested,
-        actor:  None,
-    })
-    .await
-    .expect("append RunRunnable");
-    workflow_event::append_event(&run_store, run_id, &workflow_event::Event::RunStarting)
-        .await
-        .expect("append RunStarting");
-    workflow_event::append_event(
-        &run_store,
-        run_id,
-        &workflow_event::Event::WorkflowRunStarted {
-            name:         "test".to_string(),
-            run_id:       *run_id,
-            base_branch:  Some("main".to_string()),
-            base_sha:     Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
-            run_branch:   Some("fabro/run/test".to_string()),
-            worktree_dir: None,
-            goal:         Some("Test degraded files".to_string()),
-        },
-    )
-    .await
-    .expect("append WorkflowRunStarted");
-    workflow_event::append_event(&run_store, run_id, &workflow_event::Event::RunRunning)
-        .await
-        .expect("append RunRunning");
-    workflow_event::append_event(
-        &run_store,
-        run_id,
-        &workflow_event::Event::WorkflowRunCompleted {
-            timing:               fabro_types::RunTiming::wall_only(1),
-            artifact_count:       0,
-            status:               "succeeded".to_string(),
-            reason:               SuccessReason::Completed,
-            final_git_commit_sha: Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()),
-            final_patch:          Some(final_patch.to_string()),
-            diff_summary:         None,
-            usage:                None,
-        },
-    )
-    .await
-    .expect("append WorkflowRunCompleted");
-}
-
-async fn append_local_sandbox_initialized(store: &Database, run_id: &RunId) {
-    let run_store = store.open_run(run_id).await.expect("open run store");
-    workflow_event::append_event(
-        &run_store,
-        run_id,
-        &workflow_event::Event::SandboxInitialized {
-            working_directory: std::env::current_dir()
-                .expect("test should run inside a source checkout")
-                .display()
-                .to_string(),
-            provider:          SandboxProviderKind::LOCAL,
-            id:                "local:test-sandbox".to_string(),
-            image:             None,
-            snapshot:          None,
-            repo_cloned:       None,
-            clone_origin_url:  None,
-            clone_branch:      None,
-            workspace_root:    None,
-            repos_root:        None,
-            primary_repo_path: None,
-            primary_repo_link: None,
-        },
-    )
-    .await
-    .expect("append SandboxInitialized");
 }
 
 #[tokio::test]
@@ -308,112 +184,6 @@ async fn submitted_run_without_sandbox_returns_empty_envelope() {
     // Degraded is false because there's no final_patch either — the run
     // simply hasn't produced anything to diff.
     assert_eq!(body["meta"]["degraded"].as_bool(), Some(false));
-}
-
-#[tokio::test]
-async fn degraded_run_returns_file_diff_shape_without_meta_patch() {
-    let settings = test_settings();
-    let (store, artifact_store) = store_bundle();
-    let state = test_app_state_with_store(
-        settings.server_settings,
-        settings.manifest_run_defaults,
-        5,
-        Arc::clone(&store),
-        artifact_store,
-    );
-    let app = fabro_server::test_support::build_test_router(state);
-    let run_id = RunId::new();
-    let patch = "\
-diff --git a/src/lib.rs b/src/lib.rs
---- a/src/lib.rs
-+++ b/src/lib.rs
-@@ -1 +1,2 @@
- old
-+new
-diff --git a/.env.production b/.env.production
---- a/.env.production
-+++ b/.env.production
-@@ -1 +1 @@
--SECRET=old
-+SECRET=new
-";
-    append_completed_run_with_final_patch(&store, &run_id, patch).await;
-    append_local_sandbox_initialized(&store, &run_id).await;
-
-    let req = Request::builder()
-        .method("GET")
-        .uri(files_url(&run_id.to_string()))
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    let body = response_json(
-        resp,
-        StatusCode::OK,
-        format!("GET /api/v1/runs/{run_id}/files"),
-    )
-    .await;
-
-    assert_eq!(body["meta"]["degraded"].as_bool(), Some(true));
-    assert!(body["meta"]["degraded_reason"].is_string());
-    assert_eq!(body["meta"]["source"].as_str(), Some("final_patch"));
-    assert_eq!(body["meta"]["scope"].as_str(), Some("committed"));
-    assert!(body["meta"].get("patch").is_none());
-    assert_eq!(body["meta"]["total_changed"], 2);
-    assert_eq!(body["meta"]["truncated"].as_bool(), Some(false));
-
-    let data = body["data"].as_array().expect("data should be an array");
-    assert_eq!(data.len(), 2);
-    assert_eq!(data[0]["old_file"]["contents"], serde_json::Value::Null);
-    assert_eq!(data[0]["new_file"]["contents"], serde_json::Value::Null);
-    assert!(data[0]["unified_patch"].is_string());
-    assert_eq!(data[1]["sensitive"].as_bool(), Some(true));
-    assert_eq!(data[1]["old_file"]["contents"], serde_json::Value::Null);
-    assert_eq!(data[1]["new_file"]["contents"], serde_json::Value::Null);
-    assert!(data[1].get("unified_patch").is_none());
-}
-
-#[tokio::test]
-async fn planned_sandbox_rejects_files_for_every_scope() {
-    let settings = test_settings();
-    let (store, artifact_store) = store_bundle();
-    let state = test_app_state_with_store(
-        settings.server_settings,
-        settings.manifest_run_defaults,
-        5,
-        Arc::clone(&store),
-        artifact_store,
-    );
-    let app = fabro_server::test_support::build_test_router(state);
-    let run_id = RunId::new();
-    let patch = "\
-diff --git a/src/lib.rs b/src/lib.rs
---- a/src/lib.rs
-+++ b/src/lib.rs
-@@ -1 +1,2 @@
- old
-+new
-";
-    append_completed_run_with_final_patch(&store, &run_id, patch).await;
-
-    for scope in ["committed", "uncommitted", "all"] {
-        let req = Request::builder()
-            .method("GET")
-            .uri(files_url_with_scope(&run_id.to_string(), scope))
-            .body(Body::empty())
-            .unwrap();
-        let resp = app.clone().oneshot(req).await.unwrap();
-        let body = response_json(
-            resp,
-            StatusCode::NOT_FOUND,
-            format!("GET /api/v1/runs/{run_id}/files?scope={scope}"),
-        )
-        .await;
-
-        assert_eq!(
-            body["errors"][0]["detail"].as_str(),
-            Some("Run sandbox was not created.")
-        );
-    }
 }
 
 #[tokio::test]

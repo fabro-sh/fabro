@@ -14,6 +14,7 @@ use fabro_api::types;
 use fabro_config::user::active_settings_path;
 use fabro_graphviz::render;
 use fabro_manifest::{ManifestBuildInput, build_run_manifest};
+use fabro_types::diagnostic::Severity;
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
@@ -47,7 +48,7 @@ pub(crate) async fn run(
     print_diagnostics(&diagnostics, styles, printer);
     let has_errors = diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error);
+        .any(|diagnostic| diagnostic.severity == Severity::Error);
     if has_errors && !args.allow_invalid {
         bail!("Validation failed");
     }

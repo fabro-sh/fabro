@@ -38,12 +38,10 @@ export default function SettingsStorage() {
       {settings && resources ? (
         <>
           <StorageRootPanel settings={settings} disk={resources.disk} />
-          <SlateDbPanel settings={settings} />
           <ArtifactsPanel settings={settings} />
         </>
       ) : (
         <>
-          <PanelSkeleton />
           <PanelSkeleton />
           <PanelSkeleton />
         </>
@@ -71,15 +69,6 @@ function StorageRootPanel({
       <Row title="Reclaimable" help="Bytes Fabro can reclaim by pruning inactive data.">
         {formatBytesAsMemory(disk.fabro_reclaimable_bytes, 0)}
       </Row>
-    </Panel>
-  );
-}
-
-function SlateDbPanel({ settings }: { settings: ServerSettings }) {
-  const { slatedb } = settings.server;
-  return (
-    <Panel title="SlateDB">
-      <ObjectStoreRows store={slatedb.store} prefix={slatedb.prefix} />
     </Panel>
   );
 }

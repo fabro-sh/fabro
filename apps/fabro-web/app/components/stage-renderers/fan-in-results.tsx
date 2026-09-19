@@ -1,25 +1,22 @@
-import { useMemo } from "react";
 import {
   CheckCircleIcon,
   CpuChipIcon,
 } from "@heroicons/react/20/solid";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 import type { Stage } from "../stage-sidebar";
 import { formatTokenCount } from "../../lib/format";
 import { Markdown } from "./primitives";
 import { StageMetaBar } from "./meta-bar";
-import { parseReducerTranscript } from "./helpers";
+import type { ReducerTranscript } from "./helpers";
 
 export function FanInResults({
   stage,
-  events,
+  reducer,
 }: {
   stage: Stage;
-  events: EventEnvelope[];
+  /** The reducer's transcript from the projection, or null when none ran. */
+  reducer: ReducerTranscript | null;
 }) {
-  const reducer = useMemo(() => parseReducerTranscript(events), [events]);
-
   return (
     <div className="space-y-6 pl-3 pr-4 sm:pr-6 lg:pr-8">
       <StageMetaBar stage={stage}>

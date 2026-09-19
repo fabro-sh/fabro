@@ -17,10 +17,21 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use fabro_github::token_source::TokenSnapshot;
-pub use fabro_types::run_event::GitPushRetryReason as GitRetryReason;
 use sandbox_driver::{GitBackoff, GitCredentials, GitFailure, GitFailureKind, GitRetryPolicy};
+use serde::{Deserialize, Serialize};
 
 use crate::credentials::GITHUB_TOKEN_USERNAME;
+
+/// Why a failed git push attempt is safe to retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum GitRetryReason {
+    /// A recently minted token may not have reached every GitHub git endpoint.
+    TokenReplication,
+    /// The failure came from transient network or service infrastructure.
+    TransientInfra,
+}
 
 /// Backoff between attempts: 3s, then 9s.
 ///

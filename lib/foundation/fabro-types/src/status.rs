@@ -578,3 +578,23 @@ mod tests {
         assert_eq!(err, InvalidTransition { from, to });
     }
 }
+
+/// What made a run runnable: its start request, or its approval.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum RunRunnableSource {
+    StartRequested,
+    Approved,
+}

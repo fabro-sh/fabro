@@ -3,7 +3,6 @@
     reason = "This test module prefers explicit type paths over extra imports."
 )]
 
-mod acp;
 mod agent_linear;
 mod artifacts;
 mod command_agent_mixed;
@@ -12,7 +11,6 @@ mod command_routing;
 mod conditional_branching;
 mod dry_run_examples;
 mod full_stack;
-mod git_identity;
 mod hooks;
 mod human_gate;
 pub(super) mod plugin;
@@ -20,8 +18,8 @@ pub(super) mod plugin;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, expect_reqwest_status};
+use fabro_types::RunStreamItem;
 use serde_json::Value;
 
 use crate::cmd::support::{RunProjection, server_endpoint};
@@ -45,18 +43,22 @@ pub(super) fn read_run_spec(run_dir: &Path) -> Value {
     serde_json::to_value(run_state(run_dir).spec).expect("run spec should serialize")
 }
 
+/// The nodes whose stages succeeded, in the order they first ran.
 pub(super) fn completed_nodes(run_dir: &Path) -> Vec<String> {
     let state = run_state(run_dir);
-    let cp = state
-        .current_checkpoint()
-        .expect("run store checkpoint should exist");
-    cp.completed_nodes.clone()
+    let mut nodes = state
+        .iter_stages()
+        .filter(|(_, stage)| stage.state == fabro_types::StageState::Succeeded)
+        .map(|(stage_id, _)| stage_id.node_id().to_string())
+        .collect::<Vec<_>>();
+    nodes.dedup();
+    nodes
 }
 
 pub(super) fn has_event(run_dir: &Path, event_name: &str) -> bool {
-    run_events(run_dir)
+    run_stream_items(run_dir)
         .into_iter()
-        .any(|event| event.event.event_name() == event_name)
+        .any(|item| item.name() == Some(event_name))
 }
 
 pub(super) fn dump_export(context: &TestContext, run_id: &str) -> PathBuf {
@@ -158,15 +160,15 @@ fn run_state(run_dir: &Path) -> RunProjection {
     ))
 }
 
-fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
+fn run_stream_items(run_dir: &Path) -> Vec<RunStreamItem> {
     let run_id = infer_run_id(run_dir);
     let runs_dir = run_dir.parent().expect("run dir should have parent");
     let storage_dir = runs_dir.parent().expect("runs dir should have parent");
     let response: serde_json::Value = block_on(get_server_json_for_storage(
         storage_dir,
-        &format!("/api/v1/runs/{run_id}/events"),
+        &format!("/api/v1/runs/{run_id}/events?after=0&limit=1000"),
     ));
-    crate::support::parse_event_envelopes(&response)
+    crate::support::parse_stream_items(&response)
 }
 
 /// Runs a scenario against every sandbox provider fabro supports:

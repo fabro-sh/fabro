@@ -11,12 +11,13 @@ use pebble_coding_agent::events::{
 use pebble_coding_agent::projection::SessionProjection;
 use strum::{Display, EnumString, IntoStaticStr};
 
-use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
+use crate::agent_props::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
-    AgentBackend, Checkpoint, Conclusion, GitIdentity, InterviewQuestionRecord, InvalidTransition,
-    ModelRef, ModelUsage, ParallelBranchId, PullRequestCreation, PullRequestLink, RunApproval,
-    RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus, RunTiming, StageCompletion,
-    StageHandler, StageId, StageState, StageTiming, StartRecord, timing,
+    AgentBackend, BlobHash, Checkpoint, Conclusion, GitIdentity, InterviewQuestionRecord,
+    InvalidTransition, ModelRef, ModelUsage, ParallelBranchId, PullRequestCreation,
+    PullRequestLink, RunApproval, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
+    RunTiming, StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
+    timing,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -46,18 +47,53 @@ pub struct RunProjection {
     pub superseded_by:         Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retried_from:          Option<RunId>,
+    /// Where the run's records came from when it is a fork: the source run
+    /// and the position its records were kept up to, as Petri's own run
+    /// declaration names them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from:           Option<ForkOrigin>,
     /// The Git author/committer identity the run resolved for its commits.
     /// Absent until the run's first initialization resolves it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_identity:          Option<GitIdentity>,
     pub pending_interviews:    BTreeMap<String, PendingInterviewRecord>,
+    /// The files collected from the run's workspaces under
+    /// `[run.artifacts] include`, one entry per capture, in the order they
+    /// were recorded. The bytes are in the blob table under `blob`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts:             Vec<RunArtifact>,
     stages:                    HashMap<StageId, StageProjection>,
+}
+
+/// One file a stage's attempt left in its workspace and the run collected.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RunArtifact {
+    /// The stage that produced the file, as the projection labels it.
+    pub stage_id:      StageId,
+    /// The attempt of the stage, 1-based, as the artifact listing's `retry`.
+    pub retry:         u32,
+    /// The file's path relative to the workspace root.
+    pub relative_path: String,
+    pub size:          u64,
+    /// The blob that holds the file's bytes.
+    pub blob:          BlobHash,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PendingInterviewRecord {
     pub question:   InterviewQuestionRecord,
     pub started_at: DateTime<Utc>,
+}
+
+/// The source of a forked run: the run whose records were copied, the
+/// position (a firing of one of its root executions) they were kept up to,
+/// and whether that firing runs again in the fork.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ForkOrigin {
+    pub source_run_id: RunId,
+    pub execution:     u64,
+    pub firing:        u64,
+    pub rerun_last:    bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -692,8 +728,10 @@ impl RunProjection {
             pull_request_creation: None,
             superseded_by: None,
             retried_from: None,
+            forked_from: None,
             git_identity: None,
             pending_interviews: BTreeMap::new(),
+            artifacts: Vec::new(),
             stages: HashMap::new(),
         }
     }
@@ -744,7 +782,8 @@ impl RunProjection {
         entries.into_iter()
     }
 
-    /// Mutable counterpart of [`iter_stages`]. Same chronological ordering.
+    /// Mutable counterpart of [`Self::iter_stages`]. Same chronological
+    /// ordering.
     pub fn iter_stages_mut(&mut self) -> impl Iterator<Item = (&StageId, &mut StageProjection)> {
         let mut entries: Vec<(&StageId, &mut StageProjection)> = self.stages.iter_mut().collect();
         entries.sort_by(|(left_id, left_stage), (right_id, right_stage)| {

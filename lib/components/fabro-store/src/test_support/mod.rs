@@ -1,15 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
-use fabro_types::{BlobHash, RunId};
-use object_store::ObjectStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
-use crate::keys::SlateKey;
 #[cfg(test)]
 use crate::{AuthCodeStore, AuthSessionStore};
-use crate::{BlobStore, Database, Result, RunSummaryStore};
+use crate::{BlobStore, Database, RunSummaryStore};
 
 /// Returns an isolated SQLite blob authority backed by its own in-memory
 /// database.
@@ -25,16 +21,22 @@ pub fn test_blob_store() -> Arc<BlobStore> {
     ])))
 }
 
+/// The migrations a run summary fixture installs: the `runs` row, the
+/// platform records and the projection tables.
+const RUN_SUMMARY_MIGRATIONS: &[&str] = &[
+    fabro_db::RUNS_MIGRATION_SQL,
+    fabro_db::DROP_RUN_EVENTS_MIGRATION_SQL,
+    fabro_db::PETRI_PROJECTION_MIGRATION_SQL,
+];
+
 /// Returns an isolated SQLite run-summary store backed by its own in-memory
-/// database and the production `runs` and `run_events` schemas.
+/// database and the production `runs`, platform record and projection
+/// schemas.
 #[must_use]
 pub fn test_run_summary_store() -> Arc<RunSummaryStore> {
-    Arc::new(RunSummaryStore::new(lazy_in_memory_pool(&[
-        fabro_db::RUNS_MIGRATION_SQL,
-        fabro_db::RUN_EVENTS_MIGRATION_SQL,
-        fabro_db::RUN_HISTORY_ACTIVATION_MIGRATION_SQL,
-        fabro_db::RUN_EVENT_SESSION_OWNER_MIGRATION_SQL,
-    ])))
+    Arc::new(RunSummaryStore::new(lazy_in_memory_pool(
+        RUN_SUMMARY_MIGRATIONS,
+    )))
 }
 
 /// An isolated in-memory SQLite pool with `migrations` installed on first
@@ -110,12 +112,7 @@ pub fn test_run_summary_store_at(store_dir: &Path) -> Arc<RunSummaryStore> {
     Arc::new(RunSummaryStore::new(lazy_file_pool(
         test_run_summary_store_path(store_dir),
         "runs",
-        &[
-            fabro_db::RUNS_MIGRATION_SQL,
-            fabro_db::RUN_EVENTS_MIGRATION_SQL,
-            fabro_db::RUN_HISTORY_ACTIVATION_MIGRATION_SQL,
-            fabro_db::RUN_EVENT_SESSION_OWNER_MIGRATION_SQL,
-        ],
+        RUN_SUMMARY_MIGRATIONS,
     )))
 }
 
@@ -158,123 +155,40 @@ fn lazy_file_pool(
         .connect_lazy_with(options)
 }
 
-/// Builds a test database whose SQLite blob and run-history authorities are
-/// durable beside `store_dir` and shared by reopen-style handles.
+/// Builds a test database whose blob and run summary stores are durable
+/// beside `store_dir` and shared by reopen-style handles.
 #[must_use]
-pub fn test_database_at(
-    object_store: Arc<dyn ObjectStore>,
-    base_prefix: impl Into<String>,
-    flush_interval: Duration,
-    cache_path: Option<PathBuf>,
-    store_dir: &Path,
-) -> Database {
-    test_database_with_stores(
-        object_store,
-        base_prefix,
-        flush_interval,
-        cache_path,
+pub fn test_database_at(store_dir: &Path) -> Database {
+    Database::new(
         test_blob_store_at(store_dir),
         test_run_summary_store_at(store_dir),
     )
 }
 
-/// Builds a Slate-backed run database with its own isolated blob authority.
+/// Builds a run database with its own isolated blob and run summary
+/// stores.
 #[must_use]
-pub fn test_database(
-    object_store: Arc<dyn ObjectStore>,
-    base_prefix: impl Into<String>,
-    flush_interval: Duration,
-    cache_path: Option<PathBuf>,
-) -> Database {
-    test_database_with_blobs(
-        object_store,
-        base_prefix,
-        flush_interval,
-        cache_path,
-        test_blob_store(),
-    )
+pub fn test_database() -> Database {
+    Database::new(test_blob_store(), test_run_summary_store())
 }
 
-/// Builds a Slate-backed run database sharing an explicit blob authority.
+/// Builds a run database sharing an explicit blob store.
 ///
 /// Use this for reopen-style tests where two store handles must observe the
-/// same signed SQLite blob table, mirroring the one blob authority a
-/// production process shares across every run handle.
+/// same blob table, mirroring the one blob authority a production process
+/// shares across every run handle.
 #[must_use]
-pub fn test_database_with_blobs(
-    object_store: Arc<dyn ObjectStore>,
-    base_prefix: impl Into<String>,
-    flush_interval: Duration,
-    cache_path: Option<PathBuf>,
-    blobs: Arc<BlobStore>,
-) -> Database {
-    test_database_with_stores(
-        object_store,
-        base_prefix,
-        flush_interval,
-        cache_path,
-        blobs,
-        test_run_summary_store(),
-    )
+pub fn test_database_with_blobs(blobs: Arc<BlobStore>) -> Database {
+    Database::new(blobs, test_run_summary_store())
 }
 
-/// Builds a Slate-backed run database with explicit shared SQLite stores.
-///
-/// Use this only when a test needs a failing, persistent, or shared store;
-/// ordinary fixtures should use [`test_database`].
+/// Builds a run database with explicit shared stores.
 #[must_use]
 pub fn test_database_with_stores(
-    object_store: Arc<dyn ObjectStore>,
-    base_prefix: impl Into<String>,
-    flush_interval: Duration,
-    cache_path: Option<PathBuf>,
     blobs: Arc<BlobStore>,
     run_summaries: Arc<RunSummaryStore>,
 ) -> Database {
-    Database::new(
-        object_store,
-        base_prefix,
-        flush_interval,
-        cache_path,
-        blobs,
-        run_summaries,
-    )
-}
-
-/// Seeds one canonical row in the legacy SlateDB blob keyspace.
-pub async fn put_legacy_blob(database: &Database, bytes: &[u8]) -> Result<BlobHash> {
-    let hash = BlobHash::new(bytes);
-    let source = database.open_db().await?;
-    source
-        .put(SlateKey::new("blobs").with("sha256").with(hash), bytes)
-        .await?;
-    source.flush().await?;
-    Ok(hash)
-}
-
-/// Writes an event without append validation to model a log corrupted by an
-/// older Fabro version.
-pub async fn put_unvalidated_run_event(
-    database: &Database,
-    run_id: &RunId,
-    seq: u32,
-    payload: &serde_json::Value,
-) -> Result<()> {
-    database
-        .put_unvalidated_run_event(run_id, seq, payload)
-        .await
-}
-
-/// Seeds one event in the retired Slate run-history keyspace.
-pub async fn put_legacy_run_event(
-    database: &Database,
-    run_id: &RunId,
-    seq: u32,
-    payload: &serde_json::Value,
-) -> Result<()> {
-    database
-        .put_unvalidated_legacy_run_event(run_id, seq, payload)
-        .await
+    Database::new(blobs, run_summaries)
 }
 
 /// Connects to a migrated `fabro.sqlite3` in `directory` and returns its pool.

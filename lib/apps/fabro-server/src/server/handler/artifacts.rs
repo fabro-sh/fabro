@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
 
@@ -5,8 +6,8 @@ use async_zip::base::write::ZipFileWriter;
 use async_zip::error::ZipError;
 use async_zip::{Compression, ZipEntryBuilder};
 use axum::http::HeaderValue;
-use fabro_store::{ArtifactStore, Error as StoreError};
-use fabro_types::RunProjection;
+use fabro_store::{ArtifactStore, BlobStore, Error as StoreError};
+use fabro_types::{BlobHash, RunProjection};
 use fabro_util::error::collect_chain;
 use futures_util::SinkExt as _;
 use futures_util::io::AsyncWriteExt as _;
@@ -103,14 +104,14 @@ async fn write_run_blob(
     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
         return response;
     }
-    match state.stores.runs.open_run(&id).await {
-        Ok(run_store) => match run_store.write_blob(&body).await {
-            Ok(blob_hash) => Json(WriteBlobResponse { hash: blob_hash }).into_response(),
-            Err(err) => {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-            }
-        },
-        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    if let Err(err) = state.load_run_projection(&id).await {
+        return err.into_response();
+    }
+    match state.store_ref().blobs().write(&body).await {
+        Ok(blob_hash) => Json(WriteBlobResponse { hash: blob_hash }).into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -118,15 +119,15 @@ async fn read_run_blob(
     RequireRunBlob(id, blob_hash): RequireRunBlob,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    match state.stores.runs.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.read_blob(&blob_hash).await {
-            Ok(Some(bytes)) => octet_stream_response(bytes),
-            Ok(None) => ApiError::not_found("Blob not found.").into_response(),
-            Err(err) => {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-            }
-        },
-        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    if let Err(err) = state.load_run_projection(&id).await {
+        return err.into_response();
+    }
+    match state.store_ref().blobs().read(&blob_hash).await {
+        Ok(Some(bytes)) => octet_stream_response(bytes),
+        Ok(None) => ApiError::not_found("Blob not found.").into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -145,6 +146,63 @@ async fn ensure_run_exists(state: &AppState, run_id: &RunId) -> Result<(), Respo
     }
 }
 
+/// Where an artifact's bytes are: the blob table, for one the run's
+/// hooks collected, or the artifact store, for one uploaded to the stage
+/// artifact endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArtifactBytes {
+    Blob(BlobHash),
+    Store,
+}
+
+/// Every artifact of the run, each once: the ones the run's projection
+/// records, with their bytes in the blob table, and the ones uploaded to
+/// the artifact store. A path uploaded for a stage and retry the projection
+/// also collected is the projection's.
+async fn run_artifacts(
+    state: &AppState,
+    run_id: &RunId,
+    projection: &RunProjection,
+) -> Result<Vec<(NodeArtifact, ArtifactBytes)>, Response> {
+    let mut artifacts: BTreeMap<ArtifactKey, (NodeArtifact, ArtifactBytes)> = BTreeMap::new();
+    for artifact in &projection.artifacts {
+        let key = ArtifactKey::new(
+            artifact.stage_id.clone(),
+            artifact.retry,
+            artifact.relative_path.clone(),
+        );
+        artifacts.entry(key).or_insert((
+            NodeArtifact {
+                node:     artifact.stage_id.clone(),
+                retry:    artifact.retry,
+                filename: artifact.relative_path.clone(),
+                size:     artifact.size,
+            },
+            ArtifactBytes::Blob(artifact.blob),
+        ));
+    }
+    let uploaded = state
+        .artifact_store
+        .list_for_run(run_id)
+        .await
+        .map_err(|err| {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        })?;
+    for artifact in uploaded {
+        let key = ArtifactKey::new(
+            artifact.node.clone(),
+            artifact.retry,
+            artifact.filename.clone(),
+        );
+        artifacts
+            .entry(key)
+            .or_insert((artifact, ArtifactBytes::Store));
+    }
+    let mut artifacts: Vec<_> = artifacts.into_values().collect();
+    artifacts.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(artifacts)
+}
+
 async fn list_run_artifacts(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -154,18 +212,19 @@ async fn list_run_artifacts(
         Ok(id) => id,
         Err(response) => return response,
     };
-    if let Err(response) = ensure_run_exists(state.as_ref(), &id).await {
-        return response;
-    }
-
-    match state.artifact_store.list_for_run(&id).await {
+    let projection = match state.load_run_projection(&id).await {
+        Ok(projection) => projection,
+        Err(error) => return error.into_response(),
+    };
+    match run_artifacts(state.as_ref(), &id, &projection).await {
         Ok(entries) => Json(RunArtifactListResponse {
-            data: entries.into_iter().map(run_artifact_entry_from).collect(),
+            data: entries
+                .into_iter()
+                .map(|(entry, _)| run_artifact_entry_from(entry))
+                .collect(),
         })
         .into_response(),
-        Err(err) => {
-            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-        }
+        Err(response) => response,
     }
 }
 
@@ -201,9 +260,9 @@ enum ArtifactArchiveError {
 /// somebody extracts. An unsafe path is skipped, not fatal — one bad path must
 /// not cost the caller every other artifact.
 fn latest_run_artifacts(
-    entries: Vec<NodeArtifact>,
+    entries: Vec<(NodeArtifact, ArtifactBytes)>,
     projection: &RunProjection,
-) -> Vec<NodeArtifact> {
+) -> Vec<(NodeArtifact, ArtifactBytes)> {
     let stage_order = projection
         .iter_stages()
         .enumerate()
@@ -219,9 +278,9 @@ fn latest_run_artifacts(
             artifact.node.to_string(),
         )
     };
-    let mut latest_by_path: HashMap<String, NodeArtifact> = HashMap::new();
+    let mut latest_by_path: HashMap<String, (NodeArtifact, ArtifactBytes)> = HashMap::new();
 
-    for artifact in entries {
+    for (artifact, bytes) in entries {
         if projection.is_boundary_stage(artifact.node.node_id()) {
             continue;
         }
@@ -235,31 +294,48 @@ fn latest_run_artifacts(
         }
 
         match latest_by_path.get(&artifact.filename) {
-            Some(existing) if capture_rank(existing) >= capture_rank(&artifact) => {}
+            Some((existing, _)) if capture_rank(existing) >= capture_rank(&artifact) => {}
             _ => {
-                latest_by_path.insert(artifact.filename.clone(), artifact);
+                latest_by_path.insert(artifact.filename.clone(), (artifact, bytes));
             }
         }
     }
 
     let mut latest = latest_by_path.into_values().collect::<Vec<_>>();
-    latest.sort_by(|left, right| left.filename.cmp(&right.filename));
+    latest.sort_by(|left, right| left.0.filename.cmp(&right.0.filename));
     latest
+}
+
+/// The bytes of one artifact, from wherever they are; `None` when they are
+/// gone.
+async fn read_artifact(
+    artifact_store: &ArtifactStore,
+    blobs: &BlobStore,
+    run_id: &RunId,
+    key: &ArtifactKey,
+    bytes: ArtifactBytes,
+) -> Result<Option<Bytes>, StoreError> {
+    match bytes {
+        ArtifactBytes::Blob(hash) => blobs.read(&hash).await,
+        ArtifactBytes::Store => artifact_store.get(run_id, key).await,
+    }
 }
 
 async fn write_artifact_archive<W>(
     writer: W,
     artifact_store: ArtifactStore,
+    blobs: Arc<BlobStore>,
     run_id: RunId,
-    artifacts: Vec<NodeArtifact>,
+    artifacts: Vec<(NodeArtifact, ArtifactBytes)>,
 ) -> Result<(), ArtifactArchiveError>
 where
     W: AsyncWrite + Unpin,
 {
     let mut archive = ZipFileWriter::with_tokio(writer);
-    for artifact in artifacts {
+    for (artifact, bytes) in artifacts {
         let key = ArtifactKey::new(artifact.node, artifact.retry, artifact.filename.clone());
-        let Some(mut source) = artifact_store.get_stream(&run_id, &key).await? else {
+        let Some(source) = read_artifact(&artifact_store, &blobs, &run_id, &key, bytes).await?
+        else {
             // Deleted between the listing and this read, which in practice means
             // the run was pruned mid-download. Leave it out and keep going: an
             // archive missing one file beats a truncated one missing the rest.
@@ -274,9 +350,7 @@ where
         // the end of this function is a tokio one, so both `AsyncWriteExt`
         // traits are in scope and each call resolves to a different one.
         let mut destination = archive.write_entry_stream(entry).await?;
-        while let Some(chunk) = source.next().await {
-            destination.write_all(&chunk?).await?;
-        }
+        destination.write_all(&source).await?;
         destination.close().await?;
     }
     let mut writer = archive.close().await?.into_inner();
@@ -286,8 +360,9 @@ where
 
 fn artifact_archive_body(
     artifact_store: ArtifactStore,
+    blobs: Arc<BlobStore>,
     run_id: RunId,
-    artifacts: Vec<NodeArtifact>,
+    artifacts: Vec<(NodeArtifact, ArtifactBytes)>,
 ) -> Body {
     // A channel of `Result`, rather than `tokio::io::duplex`, so a failure
     // partway through can poison the body. Dropping a duplex writer ends the
@@ -309,7 +384,8 @@ fn artifact_archive_body(
     );
 
     tokio::spawn(async move {
-        if let Err(error) = write_artifact_archive(writer, artifact_store, run_id, artifacts).await
+        if let Err(error) =
+            write_artifact_archive(writer, artifact_store, blobs, run_id, artifacts).await
         {
             // Log before signalling: the send fails when the caller has already
             // gone away, and that is exactly when this log is the only record
@@ -341,21 +417,23 @@ async fn download_run_artifacts(
         Ok(projection) => projection,
         Err(error) => return error.into_response(),
     };
-    let entries = match state.artifact_store.list_for_run(&id).await {
-        Ok(entries) => entries,
-        Err(error) => {
-            warn!(run_id = %id, %error, "failed to list artifacts for ZIP download");
-            return ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Artifact archive could not be prepared.",
-            )
-            .into_response();
-        }
+    let Ok(entries) = run_artifacts(state.as_ref(), &id, &projection).await else {
+        warn!(run_id = %id, "failed to list artifacts for ZIP download");
+        return ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Artifact archive could not be prepared.",
+        )
+        .into_response();
     };
     let artifacts = latest_run_artifacts(entries, &projection);
 
     let content_disposition = format!("attachment; filename=\"fabro-artifacts-{id}.zip\"");
-    let body = artifact_archive_body(state.artifact_store.clone(), id, artifacts);
+    let body = artifact_archive_body(
+        state.artifact_store.clone(),
+        state.store_ref().blobs(),
+        id,
+        artifacts,
+    );
     let mut response = body.into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -404,18 +482,26 @@ async fn list_stage_artifacts(
         Ok(stage_id) => stage_id,
         Err(response) => return response,
     };
-    if let Err(response) = ensure_run_exists(state.as_ref(), &id).await {
-        return response;
-    }
-
-    match state.artifact_store.list_for_node(&id, &stage_id).await {
+    let projection = match state.load_run_projection(&id).await {
+        Ok(projection) => projection,
+        Err(error) => return error.into_response(),
+    };
+    match run_artifacts(state.as_ref(), &id, &projection).await {
         Ok(entries) => Json(ArtifactListResponse {
-            data: entries.into_iter().map(artifact_entry_from).collect(),
+            data: entries
+                .into_iter()
+                .filter(|(entry, _)| entry.node == stage_id)
+                .map(|(entry, _)| {
+                    artifact_entry_from(StageArtifactEntry {
+                        retry:    entry.retry,
+                        filename: entry.filename,
+                        size:     entry.size,
+                    })
+                })
+                .collect(),
         })
         .into_response(),
-        Err(err) => {
-            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-        }
+        Err(response) => response,
     }
 }
 
@@ -854,17 +940,30 @@ async fn get_stage_artifact(
         Ok(path) => path,
         Err(response) => return response,
     };
-    if let Err(response) = ensure_run_exists(state.as_ref(), &id).await {
-        return response;
-    }
-
-    match state
-        .artifact_store
-        .get(
-            &id,
-            &ArtifactKey::new(stage_id.clone(), retry, relative_path),
-        )
-        .await
+    let projection = match state.load_run_projection(&id).await {
+        Ok(projection) => projection,
+        Err(error) => return error.into_response(),
+    };
+    let key = ArtifactKey::new(stage_id.clone(), retry, relative_path);
+    let bytes = projection
+        .artifacts
+        .iter()
+        .find(|artifact| {
+            artifact.stage_id == key.stage_id
+                && artifact.retry == key.retry
+                && artifact.relative_path == key.relative_path
+        })
+        .map_or(ArtifactBytes::Store, |artifact| {
+            ArtifactBytes::Blob(artifact.blob)
+        });
+    match read_artifact(
+        &state.artifact_store,
+        &state.store_ref().blobs(),
+        &id,
+        &key,
+        bytes,
+    )
+    .await
     {
         Ok(Some(bytes)) => octet_stream_response(bytes),
         Ok(None) => ApiError::not_found("Artifact not found.").into_response(),

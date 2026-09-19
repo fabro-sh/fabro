@@ -5,8 +5,8 @@ use std::sync::Arc;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser;
 use fabro_template::{TemplateContext, validate_static_reference};
+use fabro_types::diagnostic::{Diagnostic, Severity};
 use fabro_types::graph::ReferenceKind;
-use fabro_validate::{Diagnostic, Severity};
 
 use super::file_inlining::template_render_store;
 use super::{FileInliningTransform, Transform};

@@ -43,82 +43,53 @@ impl ProjectionUsageRollup {
         (self.usage_visit_count > 0).then_some(self.totals)
     }
 
-    /// Reconstruct the conclusion's per-node summaries from checkpoint and
-    /// stage events. Repeated visits share one row, ordered by the node's
-    /// first stage event.
+    /// The conclusion's per-node summaries: one row per node the run
+    /// visited, ordered by the node's first stage event, with the usage
+    /// and timing summed over its visits and the retries counted past the
+    /// first visit.
     #[must_use]
     pub fn conclusion_stages(&self, projection: &RunProjection) -> (Vec<StageSummary>, u32) {
         let projection_order = stage_projection_order(projection);
-        // Looping workflows revisit nodes; `completed_nodes` accumulates duplicates
-        // while the other checkpoint maps are keyed by node_id. Dedupe to one row
-        // per node so the stages table matches the deduped usage total.
-        if let Some(cp) = projection.current_checkpoint() {
-            let usage_by_node = self
-                .stages
-                .iter()
-                .map(|stage| (stage.node_id.as_str(), stage))
-                .collect::<HashMap<_, _>>();
-            let mut stage_rows = Vec::new();
-            let mut seen = std::collections::HashSet::new();
-            let mut retries_sum: u32 = 0;
-            let mut stage_order = Vec::new();
-
-            for (original_checkpoint_order, node_id) in cp.completed_nodes.iter().enumerate() {
-                if !seen.insert(node_id.as_str()) {
-                    continue;
-                }
-                stage_order.push((original_checkpoint_order, node_id.as_str()));
+        let usage_by_node = self
+            .stages
+            .iter()
+            .map(|stage| (stage.node_id.as_str(), stage))
+            .collect::<HashMap<_, _>>();
+        let mut nodes = projection
+            .iter_stages()
+            .map(|(stage_id, _)| stage_id.node_id())
+            .collect::<Vec<_>>();
+        nodes.dedup();
+        let mut seen = std::collections::HashSet::new();
+        let mut retries_sum: u32 = 0;
+        let mut stage_rows = Vec::new();
+        for node_id in nodes {
+            if !seen.insert(node_id) {
+                continue;
             }
-            let mut extra_node_outcomes = cp
-                .node_outcomes
-                .keys()
-                .filter(|node_id| !seen.contains(node_id.as_str()))
-                .map(String::as_str)
-                .collect::<Vec<_>>();
-            extra_node_outcomes.sort_unstable();
-            let extra_offset = stage_order.len();
-            for (extra_index, node_id) in extra_node_outcomes.into_iter().enumerate() {
-                seen.insert(node_id);
-                stage_order.push((extra_offset + extra_index, node_id));
-            }
-
-            for (original_checkpoint_order, node_id) in stage_order {
-                let retries = cp
-                    .node_retries
-                    .get(node_id)
-                    .copied()
-                    .unwrap_or(1)
-                    .saturating_sub(1);
-                retries_sum += retries;
-                let row = usage_by_node.get(node_id);
-
-                let summary = StageSummary {
-                    stage_id: node_id.to_string(),
-                    stage_label: node_id.to_string(),
-                    timing: row.map_or_else(StageTiming::default, |stage| stage.timing),
-                    usage: row.map_or_else(Usage::default, |stage| stage.usage),
-                    retries,
-                };
-                stage_rows.push((
-                    projection_order.get(node_id).copied().unwrap_or(u32::MAX),
-                    original_checkpoint_order,
-                    summary,
-                ));
-            }
-            stage_rows.sort_by(|left, right| {
-                left.0
-                    .cmp(&right.0)
-                    .then_with(|| left.1.cmp(&right.1))
-                    .then_with(|| left.2.stage_id.cmp(&right.2.stage_id))
-            });
-            let stages = stage_rows
-                .into_iter()
-                .map(|(_, _, summary)| summary)
-                .collect();
-            (stages, retries_sum)
-        } else {
-            (vec![], 0)
+            let visits = projection.list_node_visits(node_id).len();
+            let retries = u32::try_from(visits.saturating_sub(1)).unwrap_or(u32::MAX);
+            retries_sum = retries_sum.saturating_add(retries);
+            let row = usage_by_node.get(node_id);
+            let summary = StageSummary {
+                stage_id: node_id.to_string(),
+                stage_label: node_id.to_string(),
+                timing: row.map_or_else(StageTiming::default, |stage| stage.timing),
+                usage: row.map_or_else(Usage::default, |stage| stage.usage),
+                retries,
+            };
+            stage_rows.push((
+                projection_order.get(node_id).copied().unwrap_or(u32::MAX),
+                summary,
+            ));
         }
+        stage_rows.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.stage_id.cmp(&right.1.stage_id))
+        });
+        let stages = stage_rows.into_iter().map(|(_, summary)| summary).collect();
+        (stages, retries_sum)
     }
 }
 

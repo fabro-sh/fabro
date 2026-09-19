@@ -13,8 +13,6 @@ const TEMPLATE_RENDER_ALLOWED_PATH_FRAGMENTS: &[&str] = &[
     "lib/foundation/fabro-template/src/lib.rs",
     // Workflow-definition rendering must stay centralized here.
     "lib/components/fabro-workflow/src/transforms/variable_expansion.rs",
-    // Hook header/env interpolation is a separate system.
-    "lib/components/fabro-hooks/src/executor.rs",
     // This policy test names the forbidden patterns.
     "/tests/it/policy.rs",
 ];

@@ -1,13 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
+import type { RunStreamItem, StageProjection } from "@qltysh/fabro-api-client";
 
 import {
   buildChatItems,
-  buildStageActivity,
+  buildPetriStageActivity,
   buildThreadDnaItems,
   EVENT_KINDS,
   eventsTabLabel,
-  eventsToActivity,
   filterDisplayItems,
   filterThreadDnaItems,
   formatStageModelUsageLabel,
@@ -20,16 +19,20 @@ import {
   type EventKind,
 } from "./run-stages";
 import { threadSelectionId } from "../components/event-debug";
+import { makeUsage } from "../lib/test-fixtures";
+import { makePebbleItem } from "../lib/test-utils";
+import type { UnknownRecord } from "../lib/unknown";
 
-function envelope(seq: number, partial: Partial<EventEnvelope>): EventEnvelope {
-  return {
-    seq,
-    id: `evt-${seq}`,
-    ts: "2026-04-09T12:00:00Z",
-    run_id: "run-1",
-    event: "stage.prompt",
-    ...partial,
-  } as EventEnvelope;
+const CODE_STAGE = { name: "code", visit: 1 };
+const TS = "2026-04-09T12:00:00Z";
+
+/** One Pebble envelope the `code@1` stage recorded. */
+function pebble(seq: number, variant: string, payload: UnknownRecord, ts = TS): RunStreamItem {
+  return makePebbleItem(seq, ts, CODE_STAGE, variant, payload);
+}
+
+function agentTurns(items: RunStreamItem[]) {
+  return buildPetriStageActivity(items, undefined, "agent").turns;
 }
 
 function toolTurn(opts: {
@@ -71,461 +74,8 @@ function expectSingleItem(
   return item;
 }
 
-describe("eventsToActivity", () => {
-  test("filters events by stage_id (verify@1 vs verify@2 do not cross-contaminate)", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "stage.prompt",
-        stage_id: "verify@1",
-        node_id: "verify",
-        properties: { text: "first visit prompt" },
-      }),
-      envelope(2, {
-        event: "stage.prompt",
-        stage_id: "verify@2",
-        node_id: "verify",
-        properties: { text: "second visit prompt" },
-      }),
-      envelope(3, {
-        event: "agent.message",
-        stage_id: "verify@1",
-        node_id: "verify",
-        properties: {
-          event: { AssistantMessage: { text: "first visit reply" } },
-        },
-      }),
-      envelope(4, {
-        event: "agent.message",
-        stage_id: "verify@2",
-        node_id: "verify",
-        properties: {
-          event: { AssistantMessage: { text: "second visit reply" } },
-        },
-      }),
-    ];
-
-    const firstVisit = eventsToActivity(events, "verify@1");
-    expect(firstVisit).toEqual([
-      {
-        kind: "system",
-        ts: "2026-04-09T12:00:00Z",
-        content: "first visit prompt",
-      },
-      {
-        kind: "assistant",
-        ts: "2026-04-09T12:00:00Z",
-        content: "first visit reply",
-        inputTokens: 0,
-        outputTokens: 0,
-        toolCallCount: null,
-        reasoning: null,
-      },
-    ]);
-
-    const secondVisit = eventsToActivity(events, "verify@2");
-    expect(secondVisit).toEqual([
-      {
-        kind: "system",
-        ts: "2026-04-09T12:00:00Z",
-        content: "second visit prompt",
-      },
-      {
-        kind: "assistant",
-        ts: "2026-04-09T12:00:00Z",
-        content: "second visit reply",
-        inputTokens: 0,
-        outputTokens: 0,
-        toolCallCount: null,
-        reasoning: null,
-      },
-    ]);
-  });
-
-  test("pairs command.started + command.completed into a single command turn", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "command.started",
-        node_id: "fmt",
-        properties: { script: "cargo fmt", language: "shell" },
-      }),
-      envelope(2, {
-        event: "command.completed",
-        node_id: "fmt",
-        properties: {
-          output: "blob://sha256/abc",
-          output_bytes: 42,
-          exit_code: 0,
-          duration_ms: 12,
-          termination: "exited",
-        },
-      }),
-    ];
-
-    const turns = eventsToActivity(events, "fmt");
-    expect(turns).toHaveLength(1);
-    expect(turns[0]).toMatchObject({
-      kind: "command",
-      script: "cargo fmt",
-      running: false,
-      outputBytes: 42,
-    });
-  });
-
-  test("command turn carries the requested stage_id, no @1 fallback", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "command.started",
-        stage_id: "verify@2",
-        node_id: "verify",
-        properties: { script: "echo hi", language: "shell" },
-      }),
-      envelope(2, {
-        event: "command.completed",
-        stage_id: "verify@2",
-        node_id: "verify",
-        properties: {
-          output: "hi",
-          exit_code: 0,
-          duration_ms: 5,
-          termination: "exited",
-        },
-      }),
-    ];
-
-    const turns = eventsToActivity(events, "verify@2");
-    expect(turns).toHaveLength(1);
-    const turn = turns[0];
-    expect(turn.kind).toBe("command");
-    if (turn.kind === "command") {
-      expect(turn.script).toBe("echo hi");
-      expect(turn.running).toBe(false);
-    }
-  });
-
-  test("pairs agent.tool.started + agent.tool.completed into a single tool turn", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.tool.started",
-        node_id: "detect-drift",
-        properties: {
-          event: { ToolCallStarted: { tool_call_id: "call-1",
-          tool_name: "read_file",
-          arguments: { path: "config.toml" } } },
-        },
-      }),
-      envelope(2, {
-        event: "agent.tool.completed",
-        node_id: "detect-drift",
-        properties: {
-          event: { ToolCallCompleted: { tool_call_id: "call-1",
-          tool_name: "read_file",
-          output: "[redis]",
-          is_error: false } },
-        },
-      }),
-    ];
-
-    const turns = eventsToActivity(events, "detect-drift");
-    expect(turns).toHaveLength(1);
-    expect(turns[0].kind).toBe("tool");
-    if (turns[0].kind === "tool") {
-      expect(turns[0]).toMatchObject({
-        toolName: "read_file",
-        isError: false,
-      });
-    }
-  });
-
-  test("renders injected steering as a transcript turn for the matching stage", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "run.steer",
-        properties: { text: "say hello" },
-      }),
-      envelope(2, {
-        event: "agent.steering.injected",
-        stage_id: "nap@1",
-        node_id: "nap",
-        properties: {
-          event: { SteeringInjected: { text: "say hello" } },
-        },
-      }),
-      envelope(3, {
-        event: "agent.steering.injected",
-        stage_id: "other@1",
-        node_id: "other",
-        properties: {
-          event: { SteeringInjected: { text: "wrong stage" } },
-        },
-      }),
-    ];
-
-    expect(eventsToActivity(events, "nap@1")).toEqual([
-      {
-        kind: "steer",
-        ts: "2026-04-09T12:00:00Z",
-        content: "say hello",
-      },
-    ]);
-  });
-
-  test("renders injected interrupt as a transcript turn for the matching stage", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "run.interrupt",
-        properties: {},
-      }),
-      envelope(2, {
-        event: "agent.interrupt.injected",
-        stage_id: "nap@1",
-        node_id: "nap",
-        properties: { visit: 1 },
-      }),
-      envelope(3, {
-        event: "agent.interrupt.injected",
-        stage_id: "other@1",
-        node_id: "other",
-        properties: { visit: 1 },
-      }),
-    ];
-
-    expect(eventsToActivity(events, "nap@1")).toEqual([
-      {
-        kind: "interrupt",
-        ts: "2026-04-09T12:00:00Z",
-        content: "Agent interrupted",
-      },
-    ]);
-  });
-
-  test("renders settled interrupt as waiting for steering", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.round.interrupted",
-        stage_id: "nap@1",
-        node_id: "nap",
-        properties: { generation: 1, visit: 1 },
-      }),
-      envelope(2, {
-        event: "agent.round.interrupted",
-        stage_id: "other@1",
-        node_id: "other",
-        properties: { generation: 1, visit: 1 },
-      }),
-    ];
-
-    expect(eventsToActivity(events, "nap@1")).toEqual([
-      {
-        kind: "interrupt",
-        ts: "2026-04-09T12:00:00Z",
-        content: "Interrupted — waiting for steering",
-      },
-    ]);
-  });
-
-  test("renders pair messages as transcript turns for the matching stage", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.pair.system_message",
-        ts: "2026-04-09T12:00:00Z",
-        stage_id: "nap@1",
-        node_id: "nap",
-        properties: {
-          text: "A human has joined this workflow run for live pairing.",
-          kind: "human_joined",
-          visit: 1,
-        },
-      }),
-      envelope(2, {
-        event: "agent.pair.user_message",
-        ts: "2026-04-09T12:00:05Z",
-        stage_id: "nap@1",
-        node_id: "nap",
-        properties: { text: "try a smaller diff", visit: 1 },
-      }),
-      envelope(3, {
-        event: "agent.pair.user_message",
-        ts: "2026-04-09T12:00:06Z",
-        stage_id: "other@1",
-        node_id: "other",
-        properties: { text: "wrong stage", visit: 1 },
-      }),
-    ];
-
-    expect(eventsToActivity(events, "nap@1")).toEqual([
-      {
-        kind: "pair_system",
-        ts: "2026-04-09T12:00:00Z",
-        content: "A human has joined this workflow run for live pairing.",
-      },
-      {
-        kind: "pair_user",
-        ts: "2026-04-09T12:00:05Z",
-        content: "try a smaller diff",
-      },
-    ]);
-  });
-
-  test("renders prompt.completed as an assistant turn for prompt-shape stages", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "stage.prompt",
-        stage_id: "summarize@1",
-        node_id: "summarize",
-        properties: { text: "summarize the diff" },
-      }),
-      envelope(2, {
-        event: "prompt.completed",
-        stage_id: "summarize@1",
-        node_id: "summarize",
-        properties: {
-          response: "Refactored auth module",
-          model: "claude-sonnet-4-6",
-          provider: "anthropic",
-          usage: { model: { provider: "anthropic", model_id: "claude-sonnet-4-6" }, usage: { tokens: { input: 120, output: 30 } } },
-        },
-      }),
-    ];
-
-    expect(eventsToActivity(events, "summarize@1")).toEqual([
-      {
-        kind: "system",
-        ts: "2026-04-09T12:00:00Z",
-        content: "summarize the diff",
-      },
-      {
-        kind: "assistant",
-        ts: "2026-04-09T12:00:00Z",
-        content: "Refactored auth module",
-        inputTokens: 120,
-        outputTokens: 30,
-        toolCallCount: null,
-        reasoning: null,
-      },
-    ]);
-  });
-
-  test("does not duplicate the assistant turn when prompt.completed follows agent.message", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "stage.prompt",
-        stage_id: "simplify@1",
-        node_id: "simplify",
-        properties: { text: "simplify" },
-      }),
-      envelope(2, {
-        event: "agent.message",
-        stage_id: "simplify@1",
-        node_id: "simplify",
-        properties: {
-          event: { AssistantMessage: { text: "Done.",
-          usage: { input: 10, output: 5 } } },
-        },
-      }),
-      envelope(3, {
-        event: "prompt.completed",
-        stage_id: "simplify@1",
-        node_id: "simplify",
-        properties: {
-          response: "Done.",
-          model: "claude-sonnet-4-6",
-          provider: "anthropic",
-          usage: { model: { provider: "anthropic", model_id: "claude-sonnet-4-6" }, usage: { tokens: { input: 10, output: 5 } } },
-        },
-      }),
-    ];
-
-    const turns = eventsToActivity(events, "simplify@1");
-    expect(turns).toEqual([
-      {
-        kind: "system",
-        ts: "2026-04-09T12:00:00Z",
-        content: "simplify",
-      },
-      {
-        kind: "assistant",
-        ts: "2026-04-09T12:00:00Z",
-        content: "Done.",
-        inputTokens: 10,
-        outputTokens: 5,
-        toolCallCount: null,
-        reasoning: null,
-      },
-    ]);
-  });
-
-  test("renders prompt.completed even with no preceding stage.prompt", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "prompt.completed",
-        stage_id: "summarize@1",
-        node_id: "summarize",
-        properties: {
-          response: "All clear.",
-          model: "claude-sonnet-4-6",
-          provider: "anthropic",
-          usage: { model: { provider: "anthropic", model_id: "claude-sonnet-4-6" }, usage: { tokens: { input: 0, output: 4 } } },
-        },
-      }),
-    ];
-
-    expect(eventsToActivity(events, "summarize@1")).toEqual([
-      {
-        kind: "assistant",
-        ts: "2026-04-09T12:00:00Z",
-        content: "All clear.",
-        inputTokens: 0,
-        outputTokens: 4,
-        toolCallCount: null,
-        reasoning: null,
-      },
-    ]);
-  });
-
-  test("reads disclosed reasoning off agent.message", () => {
-    function reasoningOf(properties: Record<string, unknown>) {
-      const turns = eventsToActivity(
-        [
-          envelope(1, {
-            event: "agent.message",
-            stage_id: "plan@1",
-            node_id: "plan",
-            properties: { event: { AssistantMessage: properties } },
-          }),
-        ],
-        "plan@1",
-      );
-      expect(turns[0].kind).toBe("assistant");
-      return turns[0].kind === "assistant" ? turns[0].reasoning : undefined;
-    }
-
-    expect(
-      reasoningOf({
-        text: "Done.",
-        reasoning: { summary: "Checked the config", trace: "step one…" },
-      }),
-    ).toEqual({ summary: "Checked the config", trace: "step one…" });
-
-    // Anthropic thinking arrives as a trace with no summary.
-    expect(
-      reasoningOf({ text: "Done.", reasoning: { trace: "step one…" } }),
-    ).toEqual({ trace: "step one…" });
-    expect(
-      reasoningOf({
-        text: "Done.",
-        reasoning: { summary: "Checked the config" },
-      }),
-    ).toEqual({ summary: "Checked the config" });
-
-    expect(reasoningOf({ text: "Done." })).toBe(null);
-    // A provider that sends the key but nothing usable reads as "none".
-    expect(reasoningOf({ text: "Done.", reasoning: {} })).toBe(null);
-    expect(
-      reasoningOf({ text: "Done.", reasoning: { summary: "", trace: "" } }),
-    ).toBe(null);
-  });
-
-  test("formatStageModelUsageLabel includes reasoning effort when present", () => {
+describe("formatStageModelUsageLabel", () => {
+  test("includes reasoning effort when present", () => {
     expect(
       formatStageModelUsageLabel({
         mode: "agent",
@@ -537,7 +87,7 @@ describe("eventsToActivity", () => {
     ).toBe("gpt-5.5[high]");
   });
 
-  test("formatStageModelUsageLabel returns null when the projection has no model", () => {
+  test("returns null when the projection has no model", () => {
     expect(
       formatStageModelUsageLabel({
         mode: "acp",
@@ -545,41 +95,6 @@ describe("eventsToActivity", () => {
         model: null,
       }),
     ).toBe(null);
-  });
-
-  test("ignores unknown event types and events for other stages", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "stage.started",
-        node_id: "detect-drift",
-        properties: {},
-      }),
-      envelope(2, {
-        event: "agent.message",
-        node_id: "detect-drift",
-        properties: {
-          event: { AssistantMessage: { text: "signal" } },
-        },
-      }),
-      envelope(3, {
-        event: "run.running",
-        node_id: "detect-drift",
-        properties: {},
-      }),
-      envelope(4, {
-        event: "agent.message",
-        node_id: "other-stage",
-        properties: {
-          event: { AssistantMessage: { text: "wrong stage" } },
-        },
-      }),
-    ];
-
-    const turns = eventsToActivity(events, "detect-drift");
-    expect(turns).toHaveLength(1);
-    if (turns[0].kind === "assistant") {
-      expect(turns[0].content).toBe("signal");
-    }
   });
 });
 
@@ -946,39 +461,22 @@ describe("buildChatItems", () => {
   });
 });
 
-describe("buildStageActivity pending tools", () => {
+describe("buildPetriStageActivity pending tools", () => {
   test("returns started-but-not-completed calls for the stage", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.tool.started",
-        stage_id: "plan@1",
-        node_id: "plan",
-        properties: {
-          event: { ToolCallStarted: { tool_call_id: "call-1",
-          tool_name: "shell",
-          arguments: { command: "cargo build" } } },
-        },
+    const items = [
+      pebble(1, "ToolCallStarted", {
+        tool_call_id: "call-1",
+        tool_name: "shell",
+        arguments: { command: "cargo build" },
       }),
-      envelope(2, {
-        event: "agent.tool.started",
-        stage_id: "plan@1",
-        node_id: "plan",
-        properties: {
-          event: { ToolCallStarted: { tool_call_id: "call-2",
-          tool_name: "read_file",
-          arguments: { file_path: "/tmp/x" } } },
-        },
+      pebble(2, "ToolCallStarted", {
+        tool_call_id: "call-2",
+        tool_name: "read_file",
+        arguments: { file_path: "/tmp/x" },
       }),
-      envelope(3, {
-        event: "agent.tool.completed",
-        stage_id: "plan@1",
-        node_id: "plan",
-        properties: {
-          event: { ToolCallCompleted: { tool_call_id: "call-1", output: "ok" } },
-        },
-      }),
+      pebble(3, "ToolCallCompleted", { tool_call_id: "call-1", output: "ok" }),
     ];
-    expect(buildStageActivity(events, "plan@1").pendingTools).toEqual([
+    expect(buildPetriStageActivity(items, undefined, "agent").pendingTools).toEqual([
       {
         toolCallId: "call-2",
         toolName: "read_file",
@@ -987,45 +485,21 @@ describe("buildStageActivity pending tools", () => {
     ]);
   });
 
-  test("ignores events from other stage visits", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.tool.started",
-        stage_id: "plan@2",
-        node_id: "plan",
-        properties: {
-          event: { ToolCallStarted: { tool_call_id: "call-1",
-          tool_name: "shell",
-          arguments: {} } },
-        },
-      }),
-    ];
-    expect(buildStageActivity(events, "plan@1").pendingTools).toEqual([]);
-  });
-
   test("keeps stable identities for simultaneous calls with the same tool name", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.tool.started",
-        stage_id: "plan@1",
-        properties: {
-          event: { ToolCallStarted: { tool_call_id: "call-1",
-          tool_name: "shell",
-          arguments: { command: "cargo build" } } },
-        },
+    const items = [
+      pebble(1, "ToolCallStarted", {
+        tool_call_id: "call-1",
+        tool_name: "shell",
+        arguments: { command: "cargo build" },
       }),
-      envelope(2, {
-        event: "agent.tool.started",
-        stage_id: "plan@1",
-        properties: {
-          event: { ToolCallStarted: { tool_call_id: "call-2",
-          tool_name: "shell",
-          arguments: { command: "cargo test" } } },
-        },
+      pebble(2, "ToolCallStarted", {
+        tool_call_id: "call-2",
+        tool_name: "shell",
+        arguments: { command: "cargo test" },
       }),
     ];
 
-    expect(buildStageActivity(events, "plan@1").pendingTools).toEqual([
+    expect(buildPetriStageActivity(items, undefined, "agent").pendingTools).toEqual([
       {
         toolCallId: "call-1",
         toolName: "shell",
@@ -1039,34 +513,18 @@ describe("buildStageActivity pending tools", () => {
     ]);
   });
 
-  test("ignores malformed tool events without a call id", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.tool.started",
-        stage_id: "plan@1",
-        properties: {
-          event: { ToolCallStarted: { tool_name: "shell", arguments: { command: "ignored" } } },
-        },
+  test("ignores malformed tool envelopes without a call id", () => {
+    const items = [
+      pebble(1, "ToolCallStarted", { tool_name: "shell", arguments: { command: "ignored" } }),
+      pebble(2, "ToolCallStarted", {
+        tool_call_id: "call-1",
+        tool_name: "shell",
+        arguments: { command: "kept" },
       }),
-      envelope(2, {
-        event: "agent.tool.started",
-        stage_id: "plan@1",
-        properties: {
-          event: { ToolCallStarted: { tool_call_id: "call-1",
-          tool_name: "shell",
-          arguments: { command: "kept" } } },
-        },
-      }),
-      envelope(3, {
-        event: "agent.tool.completed",
-        stage_id: "plan@1",
-        properties: {
-          event: { ToolCallCompleted: { output: "must not clear call-1" } },
-        },
-      }),
+      pebble(3, "ToolCallCompleted", { output: "must not clear call-1" }),
     ];
 
-    const activity = buildStageActivity(events, "plan@1");
+    const activity = buildPetriStageActivity(items, undefined, "agent");
     expect(activity.turns).toEqual([]);
     expect(activity.pendingTools).toEqual([
       {
@@ -1263,22 +721,17 @@ describe("buildThreadDnaItems", () => {
 });
 
 describe("tool-call-only agent responses", () => {
-  test("retains an empty agent.message with its timestamp, usage, and tool-call count", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.message",
-        ts: "2026-04-09T12:00:42Z",
-        stage_id: "code@1",
-        node_id: "code",
-        properties: {
-          event: { AssistantMessage: { text: "",
-          usage: { input: 4200, output: 96 },
-          tool_call_count: 2 } },
-        },
-      }),
+  test("retains an empty assistant message with its timestamp, usage, and tool-call count", () => {
+    const items = [
+      pebble(
+        1,
+        "AssistantMessage",
+        { text: "", usage: { input: 4200, output: 96 }, tool_call_count: 2 },
+        "2026-04-09T12:00:42Z",
+      ),
     ];
 
-    expect(eventsToActivity(events, "code@1")).toEqual([
+    expect(agentTurns(items)).toEqual([
       {
         kind: "assistant",
         ts: "2026-04-09T12:00:42Z",
@@ -1291,28 +744,16 @@ describe("tool-call-only agent responses", () => {
     ]);
   });
 
-  test("does not synthesize a prompt.completed turn after an empty agent.message", () => {
-    const events: EventEnvelope[] = [
-      envelope(1, {
-        event: "agent.message",
-        stage_id: "code@1",
-        node_id: "code",
-        properties: {
-          event: { AssistantMessage: { text: "", tool_call_count: 1 } },
-        },
-      }),
-      envelope(2, {
-        event: "prompt.completed",
-        stage_id: "code@1",
-        node_id: "code",
-        properties: {
-          response: "",
-          usage: { model: { provider: "anthropic", model_id: "claude-sonnet-4-6" }, usage: { tokens: { input: 1, output: 2 } } },
-        },
-      }),
-    ];
+  test("does not add the projection's response after an empty assistant message", () => {
+    const items = [pebble(1, "AssistantMessage", { text: "", tool_call_count: 1 })];
+    const stage: StageProjection = {
+      first_event_seq: 1,
+      state: "succeeded",
+      usage: makeUsage({ input: 1, output: 2 }),
+      response: "",
+    };
 
-    const turns = eventsToActivity(events, "code@1");
+    const turns = buildPetriStageActivity(items, stage, "agent").turns;
     expect(turns).toHaveLength(1);
     expect(turns[0]).toMatchObject({ kind: "assistant", toolCallCount: 1 });
   });
@@ -1346,7 +787,6 @@ describe("tool-call-only agent responses", () => {
 });
 
 describe("tool batch boundaries", () => {
-  const STAGE = "code@1";
   const RUN_START = "2026-04-09T12:00:00Z";
 
   function modelResponse(
@@ -1354,18 +794,13 @@ describe("tool batch boundaries", () => {
     ts: string,
     toolCallCount: number,
     text = "",
-  ): EventEnvelope {
-    return envelope(seq, {
-      event: "agent.message",
+  ): RunStreamItem {
+    return pebble(
+      seq,
+      "AssistantMessage",
+      { text, usage: { input: 1000, output: 20 }, tool_call_count: toolCallCount },
       ts,
-      stage_id: STAGE,
-      node_id: "code",
-      properties: {
-          event: { AssistantMessage: { text,
-        usage: { input: 1000, output: 20 },
-        tool_call_count: toolCallCount } },
-        },
-    });
+    );
   }
 
   function shellCall(
@@ -1374,42 +809,28 @@ describe("tool batch boundaries", () => {
     startTs: string,
     endTs: string,
     command: string,
-  ): EventEnvelope[] {
+  ): RunStreamItem[] {
     return [
-      envelope(seq, {
-        event: "agent.tool.started",
-        ts: startTs,
-        stage_id: STAGE,
-        node_id: "code",
-        properties: {
-          event: { ToolCallStarted: { tool_call_id: callId,
-          tool_name: "shell",
-          arguments: { command } } },
-        },
-      }),
-      envelope(seq + 1, {
-        event: "agent.tool.completed",
-        ts: endTs,
-        stage_id: STAGE,
-        node_id: "code",
-        properties: {
-          event: { ToolCallCompleted: { tool_call_id: callId, tool_name: "shell", output: "ok" } },
-        },
-      }),
+      pebble(
+        seq,
+        "ToolCallStarted",
+        { tool_call_id: callId, tool_name: "shell", arguments: { command } },
+        startTs,
+      ),
+      pebble(
+        seq + 1,
+        "ToolCallCompleted",
+        { tool_call_id: callId, tool_name: "shell", output: "ok" },
+        endTs,
+      ),
     ];
   }
 
   // Anonymized reproduction: eight sub-100ms shell calls issued across five
   // model responses, each response separated by a minute or more of model
   // time and carrying no text of its own.
-  const REPRO_EVENTS: EventEnvelope[] = [
-    envelope(1, {
-      event: "stage.prompt",
-      ts: RUN_START,
-      stage_id: STAGE,
-      node_id: "code",
-      properties: { text: "investigate the failure" },
-    }),
+  const REPRO_EVENTS: RunStreamItem[] = [
+    pebble(1, "UserInput", { text: "investigate the failure" }, RUN_START),
     modelResponse(2, "2026-04-09T12:00:30Z", 2),
     ...shellCall(
       3,
@@ -1475,7 +896,7 @@ describe("tool batch boundaries", () => {
   ];
 
   function reproItems(): DisplayItem[] {
-    const turns = eventsToActivity(REPRO_EVENTS, STAGE);
+    const turns = agentTurns(REPRO_EVENTS);
     return groupConsecutiveTools(turns.map((turn, index) => ({ turn, index })));
   }
 

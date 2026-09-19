@@ -446,28 +446,17 @@ fn run_id_matches(run_id: RunId, prefix: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::Duration;
 
-    use fabro_store::Database;
-    use fabro_types::{RunStatus, fixtures, test_support};
-    use object_store::memory::InMemory;
+    use fabro_store::RunSummaryStore;
+    use fabro_types::{RunProjection, RunStatus, fixtures, test_support};
 
     use super::scan_runs_combined;
-    use crate::event::{Event, append_event};
     use crate::operations::make_run_dir;
     use crate::records::RunSpec;
 
-    fn memory_store() -> Arc<Database> {
-        Arc::new(fabro_store::test_support::test_database(
-            Arc::new(InMemory::new()),
-            "",
-            Duration::from_millis(1),
-            None,
-        ))
-    }
-
     fn sample_run_spec() -> RunSpec {
         RunSpec {
+            run_id: fixtures::RUN_1,
             workflow_slug: Some("test".to_string()),
             source_directory: Some("/tmp/project".to_string()),
             git: Some(fabro_types::GitContext {
@@ -486,36 +475,24 @@ mod tests {
         let run_dir = make_run_dir(temp.path(), &fixtures::RUN_1);
         std::fs::create_dir_all(&run_dir).unwrap();
 
-        let store = memory_store();
-        let run_spec = sample_run_spec();
-        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
-            run_id:              fixtures::RUN_1,
-            title:               None,
-            settings:            serde_json::to_value(&run_spec.settings).unwrap(),
-            graph:               serde_json::to_value(&run_spec.graph).unwrap(),
-            workflow_source:     None,
-            labels:              run_spec.labels.clone().into_iter().collect(),
-            source_directory:    run_spec.source_directory.clone(),
-            workflow_slug:       run_spec.workflow_slug.clone(),
-            workflow_version_id: None,
-            target:              None,
-            automation:          None,
-            provenance:          run_spec.provenance.clone(),
-            spec_blob:           None,
-            git:                 run_spec.git.clone(),
-            fork_source_ref:     run_spec.fork_source_ref.clone(),
-            retried_from:        None,
-            parent_id:           None,
-            web_url:             None,
-        })
+        let store = Arc::new(fabro_store::test_support::test_database());
+        // The run's row as its projector writes it once the run is submitted.
+        let mut projection = RunProjection::new(
+            "test".to_string(),
+            sample_run_spec(),
+            fixtures::RUN_1.created_at(),
+        );
+        projection.status = RunStatus::Submitted;
+        let summaries = store.run_summary_store();
+        let mut transaction = summaries.pool().begin().await.unwrap();
+        RunSummaryStore::write_petri_run_row_on_connection(
+            &mut transaction,
+            &fixtures::RUN_1,
+            &projection,
+        )
         .await
         .unwrap();
-        append_event(&run_store, &fixtures::RUN_1, &Event::RunSubmitted {
-            definition_blob: None,
-        })
-        .await
-        .unwrap();
+        transaction.commit().await.unwrap();
 
         let runs = scan_runs_combined(&store, temp.path()).await.unwrap();
         let run = runs

@@ -6,6 +6,28 @@ use serde::de::DeserializeOwned;
 pub struct ApiFailure {
     pub status: fabro_http::StatusCode,
     pub code:   Option<String>,
+    /// The error entry's `meta`: structured details specific to `code`.
+    pub meta:   Option<serde_json::Value>,
+}
+
+impl ApiFailure {
+    #[must_use]
+    pub fn new(status: fabro_http::StatusCode, code: Option<String>) -> Self {
+        Self {
+            status,
+            code,
+            meta: None,
+        }
+    }
+}
+
+/// The first entry of an `ErrorResponse` body, as far as a client acts on
+/// it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ParsedErrorEntry {
+    pub detail: Option<String>,
+    pub code:   Option<String>,
+    pub meta:   Option<serde_json::Value>,
 }
 
 // Transparent wrapper that attaches an ApiFailure to an anyhow error while
@@ -66,19 +88,31 @@ impl ApiError {
 }
 
 pub fn parse_error_response_value(value: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let entry = parse_error_response_entry(value);
+    (entry.detail, entry.code)
+}
+
+/// The first error entry of an `ErrorResponse` body: its detail, code and
+/// `meta`, each absent when the body does not carry it.
+pub fn parse_error_response_entry(value: &serde_json::Value) -> ParsedErrorEntry {
     let first = value
         .get("errors")
         .and_then(serde_json::Value::as_array)
         .and_then(|errors| errors.first());
-    let detail = first
-        .and_then(|entry| entry.get("detail"))
-        .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned);
-    let code = first
-        .and_then(|entry| entry.get("code"))
-        .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned);
-    (detail, code)
+    let text = |field: &str| {
+        first
+            .and_then(|entry| entry.get(field))
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned)
+    };
+    ParsedErrorEntry {
+        detail: text("detail"),
+        code:   text("code"),
+        meta:   first
+            .and_then(|entry| entry.get("meta"))
+            .filter(|meta| meta.is_object())
+            .cloned(),
+    }
 }
 
 fn classify_from_status(err: anyhow::Error, status: fabro_http::StatusCode) -> anyhow::Error {
@@ -92,9 +126,13 @@ fn classify_from_status(err: anyhow::Error, status: fabro_http::StatusCode) -> a
 fn build_structured_error(
     error: anyhow::Error,
     status: fabro_http::StatusCode,
-    code: Option<String>,
+    entry: ParsedErrorEntry,
 ) -> StructuredApiError {
-    let failure = ApiFailure { status, code };
+    let failure = ApiFailure {
+        status,
+        code: entry.code,
+        meta: entry.meta,
+    };
     let tagged = tag_with_failure(error, failure.clone());
     StructuredApiError {
         error:   classify_from_status(tagged, status),
@@ -110,12 +148,11 @@ where
         progenitor_client::Error::UnexpectedResponse(response) => {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            let mut code = None;
+            let mut entry = ParsedErrorEntry::default();
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
-                let (detail, parsed_code) = parse_error_response_value(&value);
-                code = parsed_code;
-                if let Some(detail) = detail {
-                    return build_structured_error(anyhow!("{detail}"), status, code);
+                entry = parse_error_response_entry(&value);
+                if let Some(detail) = entry.detail.take() {
+                    return build_structured_error(anyhow!("{detail}"), status, entry);
                 }
             }
             let error = if body.is_empty() {
@@ -123,7 +160,7 @@ where
             } else {
                 anyhow!("request failed with status {status}: {body}")
             };
-            build_structured_error(error, status, code)
+            build_structured_error(error, status, entry)
         }
         other => map_api_error_structured(other),
     }
@@ -136,19 +173,26 @@ where
     match err {
         progenitor_client::Error::ErrorResponse(response) => {
             let status = response.status();
-            let mut code = None;
+            let mut entry = ParsedErrorEntry::default();
             if let Ok(value) = serde_json::to_value(response.into_inner()) {
-                let (detail, parsed_code) = parse_error_response_value(&value);
-                code = parsed_code;
-                if let Some(detail) = detail {
-                    return build_structured_error(anyhow!("{detail}"), status, code);
+                entry = parse_error_response_entry(&value);
+                if let Some(detail) = entry.detail.take() {
+                    return build_structured_error(anyhow!("{detail}"), status, entry);
                 }
             }
-            build_structured_error(anyhow!("request failed with status {status}"), status, code)
+            build_structured_error(
+                anyhow!("request failed with status {status}"),
+                status,
+                entry,
+            )
         }
         progenitor_client::Error::UnexpectedResponse(response) => {
             let status = response.status();
-            build_structured_error(anyhow!("request failed with status {status}"), status, None)
+            build_structured_error(
+                anyhow!("request failed with status {status}"),
+                status,
+                ParsedErrorEntry::default(),
+            )
         }
         other => StructuredApiError {
             error:   anyhow::Error::new(other),
@@ -202,17 +246,19 @@ pub async fn classify_http_response(
     let status = response.status();
     let headers = response.headers().clone();
     let body = response.text().await.unwrap_or_default();
-    let mut code = None;
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
-        let (_, parsed_code) = parse_error_response_value(&value);
-        code = parsed_code;
-    }
+    let entry = serde_json::from_str::<serde_json::Value>(&body)
+        .map(|value| parse_error_response_entry(&value))
+        .unwrap_or_default();
 
     Ok(Err(ApiError {
         status,
         headers,
         body,
-        failure: ApiFailure { status, code },
+        failure: ApiFailure {
+            status,
+            code: entry.code,
+            meta: entry.meta,
+        },
     }))
 }
 
@@ -269,10 +315,7 @@ mod tests {
                 }]
             }))
             .unwrap(),
-            failure: ApiFailure {
-                status,
-                code: Some(code.to_string()),
-            },
+            failure: ApiFailure::new(status, Some(code.to_string())),
         }
     }
 
@@ -311,6 +354,27 @@ mod tests {
         let failure = api_failure_for(&err).expect("error should carry API failure metadata");
         assert_eq!(failure.status, fabro_http::StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(failure.code.as_deref(), Some("invalid_manifest"));
+    }
+
+    #[test]
+    fn map_api_error_carries_the_entry_meta() {
+        let response = progenitor_client::ResponseValue::new(
+            json!({
+                "errors": [{
+                    "detail": "run is leased",
+                    "code": "petri_run_leased",
+                    "meta": { "owner": "worker-1" },
+                }]
+            }),
+            fabro_http::StatusCode::CONFLICT,
+            fabro_http::HeaderMap::new(),
+        );
+        let err =
+            map_api_error(progenitor_client::Error::<serde_json::Value>::ErrorResponse(response));
+
+        let failure = api_failure_for(&err).expect("error should carry API failure metadata");
+        assert_eq!(failure.code.as_deref(), Some("petri_run_leased"));
+        assert_eq!(failure.meta, Some(json!({ "owner": "worker-1" })));
     }
 
     #[test]

@@ -90,7 +90,8 @@ fabro [OPTIONS] [COMMAND]
 | `fabro provider` | Provider operations |
 | `fabro repo` | Repository commands |
 | `fabro resume` | Resume an interrupted workflow run |
-| `fabro rewind` | Rewind a workflow run to an earlier checkpoint |
+| `fabro retry` | Retry a finished workflow run from its last checkpoint in a new run |
+| `fabro rewind` | Rewind a workflow run to an earlier checkpoint, replacing it |
 | `fabro rm` | Remove one or more workflow runs |
 | `fabro run` | Register a workflow version, create a run, and start it |
 | `fabro sandbox` | Sandbox operations (cp, ssh, preview) |
@@ -100,6 +101,7 @@ fabro [OPTIONS] [COMMAND]
 | `fabro start` | Start a created workflow run on the server |
 | `fabro steer` | Steer a running agent mid-execution |
 | `fabro system` | System maintenance commands |
+| `fabro timeline` | Show the checkpoint timeline of a workflow run |
 | `fabro unarchive` | Restore archived runs to their prior terminal status |
 | `fabro uninstall` | Uninstall Fabro from this machine |
 | `fabro upgrade` | Upgrade fabro to the latest version |
@@ -1022,9 +1024,29 @@ fabro resume [OPTIONS] <RUN>
 | `-d, --detach` | Run in the background and print the run ID |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
+### `fabro retry`
+
+Retry a finished workflow run from its last checkpoint in a new run
+
+```bash
+fabro retry [OPTIONS] <RUN_ID>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `RUN_ID` | Run ID (or unambiguous prefix) |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+
 ### `fabro rewind`
 
-Rewind a workflow run to an earlier checkpoint
+Rewind a workflow run to an earlier checkpoint, replacing it
 
 ```bash
 fabro rewind [OPTIONS] <RUN_ID> [TARGET]
@@ -1406,6 +1428,7 @@ fabro steer [OPTIONS] <RUN> [TEXT]
 | --- | --- |
 | `--interrupt` | Cancel the in-flight LLM stream / tool calls and deliver the message as the next user turn (default: append to the steering queue) |
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
+| `--stage <stage>` | Agent stage to steer, as its stage id (node@visit) or node name (default: the run's one live agent stage) |
 | `--text-stdin` | Read steer text from stdin instead of a positional arg |
 
 ### `fabro system`
@@ -1524,6 +1547,26 @@ fabro system repair runs [OPTIONS]
 | `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 | `--storage-dir <storage_dir>` | Local storage directory (default: ~/.fabro/storage) |
 | `--yes` | Actually delete unreadable runs (default is dry-run) |
+
+### `fabro timeline`
+
+Show the checkpoint timeline of a workflow run
+
+```bash
+fabro timeline [OPTIONS] <RUN_ID>
+```
+
+#### Arguments
+
+| Name | Description |
+| --- | --- |
+| `RUN_ID` | Run ID (or unambiguous prefix) |
+
+#### Options
+
+| Option | Description |
+| --- | --- |
+| `--server <server>` | Fabro server target: http(s) URL or absolute Unix socket path |
 
 ### `fabro unarchive`
 

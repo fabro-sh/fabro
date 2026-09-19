@@ -1,6 +1,6 @@
 import {
   SessionsApiAxiosParamCreator,
-  type EventEnvelope,
+  type SessionEvent,
   type SubmitTurnRequest,
 } from "@qltysh/fabro-api-client";
 
@@ -9,7 +9,7 @@ import {
   generatedApiConfiguration,
 } from "./api-client";
 
-export type SessionStreamEvent = EventEnvelope;
+export type SessionStreamEvent = SessionEvent;
 
 type FetchLike = (
   input: string,

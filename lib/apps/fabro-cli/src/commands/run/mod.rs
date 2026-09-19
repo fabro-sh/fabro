@@ -20,10 +20,13 @@ pub(crate) mod fork;
 pub(crate) mod logs;
 pub(crate) mod output;
 pub(crate) mod overrides;
+pub(crate) mod petri_stream;
+mod petri_worker;
 pub(crate) mod preview;
 mod remote_workflow;
 mod resolution;
 pub(crate) mod resume;
+pub(crate) mod retry;
 pub(crate) mod rewind;
 pub(crate) mod run_progress;
 pub(crate) mod runner;
@@ -33,6 +36,7 @@ pub(crate) mod start;
 pub(crate) mod steer;
 #[cfg(test)]
 pub(crate) mod test_support;
+pub(crate) mod timeline;
 pub(crate) mod wait;
 
 pub(crate) async fn dispatch(
@@ -100,6 +104,7 @@ pub(crate) async fn dispatch(
             run_dir,
             run_id,
             mode,
+            fabro_home,
         }) => {
             let worker_token = worker_token
                 .filter(|token| !token.trim().is_empty())
@@ -108,15 +113,23 @@ pub(crate) async fn dispatch(
                 })?;
             let run_span = tracing::info_span!("run", id = %run_id);
             Box::pin(
-                runner::execute(run_id, server, storage_dir, run_dir, mode, &worker_token)
-                    .instrument(run_span),
+                runner::execute(
+                    run_id,
+                    server,
+                    storage_dir,
+                    run_dir,
+                    mode,
+                    fabro_home,
+                    &worker_token,
+                )
+                .instrument(run_span),
             )
             .await
         }
         RunCommands::Diff(args) => diff::run(args, base_ctx).await,
         RunCommands::Events(args) => {
             let styles = Styles::detect_stdout();
-            events::run(&args, &styles, base_ctx).await
+            Box::pin(events::run(&args, &styles, base_ctx)).await
         }
         RunCommands::Logs(args) => logs::run(&args, base_ctx).await,
         RunCommands::Resume(args) => {
@@ -128,13 +141,18 @@ pub(crate) async fn dispatch(
             };
             Box::pin(resume::resume_command(args, styles, base_ctx)).await
         }
+        RunCommands::Retry(args) => retry::run(&args, base_ctx).await,
+        RunCommands::Fork(args) => {
+            let styles = Styles::detect_stderr();
+            Box::pin(fork::run(&args, &styles, base_ctx)).await
+        }
         RunCommands::Rewind(args) => {
             let styles = Styles::detect_stderr();
             Box::pin(rewind::run(&args, &styles, base_ctx)).await
         }
-        RunCommands::Fork(args) => {
+        RunCommands::Timeline(args) => {
             let styles = Styles::detect_stderr();
-            Box::pin(fork::run(&args, &styles, base_ctx)).await
+            timeline::run(&args, &styles, base_ctx).await
         }
         RunCommands::Wait(args) => {
             let styles = Styles::detect_stderr();

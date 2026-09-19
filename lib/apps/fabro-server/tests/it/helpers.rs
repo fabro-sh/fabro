@@ -9,7 +9,7 @@ use fabro_server::server::{AppState, spawn_scheduler};
 use fabro_server::test_support::{
     TestAppStateBuilder, build_test_router, llm_overlay_with_provider_base_url,
     test_app_state as server_test_app_state, test_app_state_with_runtime_settings_and_env_lookup,
-    test_app_state_with_runtime_settings_and_options_and_registry_factory,
+    test_app_state_with_runtime_settings_and_options_in_process,
 };
 use fabro_test::{
     assert_axum_status, assert_reqwest_status, expect_axum_json, expect_axum_status,
@@ -83,11 +83,10 @@ pub(crate) fn test_app_state_with_options(
     settings: TestAppSettings,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
-    test_app_state_with_runtime_settings_and_options_and_registry_factory(
+    test_app_state_with_runtime_settings_and_options_in_process(
         settings.server_settings,
         settings.manifest_run_defaults,
         max_concurrent_runs,
-        |interviewer| fabro_workflow::handler::default_registry(interviewer, || None),
     )
 }
 

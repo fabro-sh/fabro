@@ -360,50 +360,6 @@ export async function fetchAllPages<TItem, TExtra extends object = {}>(
   }
 }
 
-export async function fetchAllStageEvents<TItem extends { seq: number }>(
-  label: string,
-  loadPage: (sinceSeq: number, limit: number) => Promise<PaginatedEnvelope<TItem>>,
-): Promise<TItem[]> {
-  const PAGE_LIMIT = 1000;
-  const MAX_PAGES = 50;
-  const data: TItem[] = [];
-  let sinceSeq = 1;
-  let pagesLoaded = 0;
-
-  while (true) {
-    const page = await loadPage(sinceSeq, PAGE_LIMIT);
-    pagesLoaded += 1;
-
-    if (page.data.length === 0) {
-      if (page.meta.has_more) {
-        console.warn(
-          `Stage events fetch for ${label} returned an empty page with has_more=true; stopping at ${data.length} items to avoid spinning.`,
-        );
-      }
-      return data;
-    }
-
-    data.push(...page.data);
-    if (!page.meta.has_more) return data;
-
-    if (pagesLoaded >= MAX_PAGES) {
-      console.warn(
-        `Stopped stage events fetch for ${label} after ${pagesLoaded} pages and ${data.length} items because the safety cap was reached.`,
-      );
-      return data;
-    }
-
-    const highestSeq = page.data.reduce((max, event) => Math.max(max, event.seq), sinceSeq - 1);
-    if (highestSeq < sinceSeq) {
-      console.warn(
-        `Stage events fetch for ${label} returned a non-advancing page at since_seq=${sinceSeq}; stopping at ${data.length} items to avoid spinning.`,
-      );
-      return data;
-    }
-    sinceSeq = highestSeq + 1;
-  }
-}
-
 export function requestSignalOptions(request?: Request): RawAxiosRequestConfig {
   return request?.signal ? { signal: request.signal } : {};
 }

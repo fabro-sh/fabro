@@ -11,25 +11,23 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use fabro_api::types::{
-    CreateRunSessionRequest, PaginatedEventList, PaginationMeta, SubmitTurnRequest,
+    CreateRunSessionRequest, PaginatedSessionEventList, PaginationMeta, SubmitTurnRequest,
 };
 use fabro_llm::lithos_catalog::Catalog;
 use fabro_llm::{FabroClient, ModelSelectionError, selection};
 use fabro_sandbox::SecretRedactor;
 use fabro_sandbox::reconnect::reconnect_for_run;
-use fabro_store::{
-    EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_sessions,
-};
+use fabro_store::{ProjectedRunSession, project_run_session, project_run_sessions};
 use fabro_tool::fabro_client::ClientBackend;
-use fabro_types::run_event::{
-    RunSessionAssistantDeltaProps, RunSessionAssistantMessageProps, RunSessionCreatedProps,
-    RunSessionToolCallCompletedProps, RunSessionToolCallStartedProps, RunSessionTurnFailedCode,
-    RunSessionTurnFailedProps, RunSessionTurnInterruptedProps, RunSessionTurnStartedProps,
-    RunSessionTurnSucceededProps, RunSessionUserMessageProps,
+use fabro_types::session_event::{
+    SessionAssistantDeltaProps, SessionAssistantMessageProps, SessionCreatedProps,
+    SessionToolCallCompletedProps, SessionToolCallStartedProps, SessionTurnFailedCode,
+    SessionTurnFailedProps, SessionTurnInterruptedProps, SessionTurnStartedProps,
+    SessionTurnSucceededProps, SessionUserMessageProps,
 };
 use fabro_types::settings::ModelRef as SettingsModelRef;
-use fabro_types::{EventBody, EventEnvelope, RunEvent, RunId, SessionDetail, SessionId, TurnId};
-use fabro_workflow::handler::llm::register_named_fabro_run_tools;
+use fabro_types::{RunId, SessionDetail, SessionEvent, SessionEventBody, SessionId, TurnId};
+use fabro_workflow::run_tools::register_named_fabro_run_tools;
 use fabro_workflow::services::FabroRunToolServices;
 use lithos_llm::catalog::ProviderId;
 use pebble_coding_agent::environment::Environment;
@@ -44,15 +42,12 @@ use pebble_coding_agent::{CodingAgent, CodingAgentOptions, Error as AgentError, 
 use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
-use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
 use super::super::session_runtime::{InterruptTurnError, SessionTurnLease, StartTurnError};
-use super::super::{
-    AppState, EventListParams, PaginationParams, paginate_items, parse_run_id_path,
-};
+use super::super::{AppState, PaginationParams, paginate_items, parse_run_id_path};
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::worker_token::issue_worker_token;
@@ -116,13 +111,12 @@ async fn list_run_sessions(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let run_store = match open_run_reader(&state, run_id).await {
-        Ok(store) => store,
-        Err(response) => return response,
-    };
-    match run_store.list_events().await {
+    if let Err(response) = ensure_run(&state, run_id).await {
+        return response;
+    }
+    match state.stores.session_events.list_for_run(run_id).await {
         Ok(events) => {
-            let mut sessions = project_run_sessions(run_id, &events);
+            let mut sessions = project_run_sessions(&events);
             match params.order {
                 RunSessionListOrder::UpdatedDesc => sessions.sort_by(|left, right| {
                     right
@@ -159,10 +153,9 @@ async fn create_run_session(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let run_store = match open_run(&state, run_id).await {
-        Ok(store) => store,
-        Err(response) => return response,
-    };
+    if let Err(response) = ensure_run(&state, run_id).await {
+        return response;
+    }
     let llm_result = match state.resolve_llm_client().await {
         Ok(result) => result,
         Err(err) => {
@@ -187,10 +180,10 @@ async fn create_run_session(
     let session_id = SessionId::new();
     let now = Utc::now();
     let event = match append_run_session_event(
-        &run_store,
+        &state,
         run_id,
         session_id,
-        EventBody::RunSessionCreated(RunSessionCreatedProps {
+        SessionEventBody::Created(SessionCreatedProps {
             title:    request.title,
             model:    Some(model),
             provider: Some(provider),
@@ -203,8 +196,7 @@ async fn create_run_session(
         Err(err) => return store_error(&err).into_response(),
     };
 
-    let events = vec![event];
-    match project_run_session(run_id, session_id, &events) {
+    match project_run_session(session_id, &[event]) {
         Some(session) => (StatusCode::CREATED, Json(session.record)).into_response(),
         None => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -223,7 +215,7 @@ async fn get_session(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let (_, session) = match load_session_read(&state, session_id).await {
+    let (_, session) = match load_session(&state, session_id).await {
         Ok(context) => context,
         Err(response) => return response,
     };
@@ -234,29 +226,50 @@ async fn session_method_not_found() -> Response {
     StatusCode::NOT_FOUND.into_response()
 }
 
+/// Query parameters for `/sessions/{id}/events`: the first sequence number
+/// to include and the page size.
+#[derive(serde::Deserialize)]
+struct SessionEventListParams {
+    #[serde(default)]
+    since_seq: Option<u32>,
+    #[serde(default)]
+    limit:     Option<usize>,
+}
+
+impl SessionEventListParams {
+    fn since_seq(&self) -> u32 {
+        self.since_seq.unwrap_or(1).max(1)
+    }
+
+    fn limit(&self) -> usize {
+        self.limit.unwrap_or(100).clamp(1, 1000)
+    }
+}
+
 async fn list_session_events(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Query(params): Query<EventListParams>,
+    Query(params): Query<SessionEventListParams>,
 ) -> Response {
     let session_id = match parse_session_id(&id) {
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let (_, run_store) = match load_session_run_reader(&state, session_id).await {
-        Ok(context) => context,
-        Err(response) => return response,
-    };
-    match run_store
-        .list_events_for_session_from_with_limit(session_id, params.since_seq(), params.limit())
+    if let Err(response) = load_session_owner(&state, session_id).await {
+        return response;
+    }
+    let limit = params.limit();
+    match state
+        .stores
+        .session_events
+        .list_from(session_id, params.since_seq(), limit.saturating_add(1))
         .await
     {
         Ok(mut data) => {
-            let limit = params.limit();
             let has_more = data.len() > limit;
             data.truncate(limit);
-            Json(PaginatedEventList {
+            Json(PaginatedSessionEventList {
                 data,
                 meta: PaginationMeta {
                     has_more,
@@ -287,13 +300,12 @@ async fn attach_session_events(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let (_, run_store) = match load_session_run_reader(&state, session_id).await {
-        Ok(context) => context,
-        Err(response) => return response,
-    };
+    if let Err(response) = load_session_owner(&state, session_id).await {
+        return response;
+    }
     let start_seq = match params.since_seq {
         Some(seq) => seq.max(1),
-        None => match run_store.last_event_seq().await {
+        None => match state.stores.session_events.last_seq(session_id).await {
             Ok(last_seq) => last_seq.map_or(1, |seq| seq.saturating_add(1)),
             Err(err) => return store_error(&err).into_response(),
         },
@@ -301,58 +313,57 @@ async fn attach_session_events(
     let shutdown = state.shutdown_token();
     let (sender, receiver) = mpsc::channel(SESSION_SSE_BUFFER_CAPACITY);
     tokio::spawn(async move {
+        let events = &state.stores.session_events;
         let mut next_seq = start_seq;
-
-        loop {
-            let Ok(replay_batch) = run_store
-                .list_events_for_session_from_with_limit(
-                    session_id,
-                    next_seq,
-                    ATTACH_REPLAY_BATCH_LIMIT,
-                )
-                .await
-            else {
-                return;
-            };
-            let replay_has_more = replay_batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
-
-            for event in replay_batch.into_iter().take(ATTACH_REPLAY_BATCH_LIMIT) {
-                next_seq = event.seq.saturating_add(1);
-                if let Some(sse_event) = session_sse_event(&event) {
-                    if !send_attach_sse_event(&sender, &shutdown, sse_event).await {
+        // Subscribed before the replay, so an event committed between the
+        // replay's last page and the live loop is not missed: the live loop
+        // skips what the replay already sent by sequence number.
+        let mut live = events.subscribe();
+        'replay: loop {
+            loop {
+                let Ok(batch) = events
+                    .list_from(session_id, next_seq, ATTACH_REPLAY_BATCH_LIMIT + 1)
+                    .await
+                else {
+                    return;
+                };
+                let has_more = batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
+                for event in batch.into_iter().take(ATTACH_REPLAY_BATCH_LIMIT) {
+                    next_seq = event.seq.saturating_add(1);
+                    if !send_attach_sse_event(&sender, &shutdown, session_sse_event(&event)).await {
                         return;
                     }
                 }
+                if !has_more {
+                    break;
+                }
             }
 
-            if replay_has_more {
-                continue;
-            }
-            break;
-        }
-
-        let Ok(mut live_stream) = run_store.watch_events_from(next_seq) else {
-            return;
-        };
-        let session_id_string = session_id.to_string();
-        loop {
-            tokio::select! {
-                biased;
-                () = shutdown.cancelled() => break,
-                () = sender.closed() => break,
-                next = live_stream.next() => {
-                    let Some(result) = next else {
-                        return;
-                    };
-                    let Ok(event) = result else {
-                        return;
-                    };
-                    if event_matches_session(&event, &session_id_string) {
-                        if let Some(sse_event) = session_sse_event(&event) {
-                            if !send_attach_sse_event(&sender, &shutdown, sse_event).await {
+            loop {
+                tokio::select! {
+                    biased;
+                    () = shutdown.cancelled() => return,
+                    () = sender.closed() => return,
+                    next = live.recv() => match next {
+                        Ok(event) => {
+                            if event.session_id != session_id || event.seq < next_seq {
+                                continue;
+                            }
+                            next_seq = event.seq.saturating_add(1);
+                            if !send_attach_sse_event(
+                                &sender,
+                                &shutdown,
+                                session_sse_event(&event),
+                            )
+                            .await
+                            {
                                 return;
                             }
                         }
+                        // The subscriber fell behind the store's buffer; the
+                        // table holds what it missed.
+                        Err(RecvError::Lagged(_)) => continue 'replay,
+                        Err(RecvError::Closed) => return,
                     }
                 }
             }
@@ -374,7 +385,7 @@ async fn submit_turn(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let (run_id, run_store, session) = match load_session(&state, session_id).await {
+    let (run_id, session) = match load_session(&state, session_id).await {
         Ok(context) => context,
         Err(response) => return response,
     };
@@ -405,16 +416,16 @@ async fn submit_turn(
     let (sender, receiver) = mpsc::channel(SESSION_SSE_BUFFER_CAPACITY);
     let now = Utc::now();
     for body in [
-        EventBody::RunSessionTurnStarted(RunSessionTurnStartedProps {
+        SessionEventBody::TurnStarted(SessionTurnStartedProps {
             turn_id,
             input: input.clone(),
         }),
-        EventBody::RunSessionUserMessage(RunSessionUserMessageProps {
+        SessionEventBody::UserMessage(SessionUserMessageProps {
             turn_id,
             text: input.clone(),
         }),
     ] {
-        match append_and_send_event(&run_store, &sender, run_id, session_id, body, now).await {
+        match append_and_send_event(&state, &sender, run_id, session_id, body, now).await {
             Ok(()) => {}
             Err(err) => {
                 drop(turn_lease);
@@ -424,7 +435,7 @@ async fn submit_turn(
     }
 
     tokio::spawn(run_streaming_turn(
-        state, run_id, run_store, session, turn_id, input, sender, turn_lease,
+        state, run_id, session, turn_id, input, sender, turn_lease,
     ));
     let mut response = Sse::new(ReceiverStream::new(receiver))
         .keep_alive(KeepAlive::default())
@@ -448,7 +459,7 @@ async fn interrupt_turn(
         Ok(id) => id,
         Err(err) => return err.into_response(),
     };
-    let (run_id, run_store, _) = match load_session(&state, session_id).await {
+    let (run_id, _) = match load_session(&state, session_id).await {
         Ok(context) => context,
         Err(response) => return response,
     };
@@ -463,10 +474,10 @@ async fn interrupt_turn(
         }
     };
     match append_run_session_event(
-        &run_store,
+        &state,
         run_id,
         session_id,
-        EventBody::RunSessionTurnInterrupted(RunSessionTurnInterruptedProps {
+        SessionEventBody::TurnInterrupted(SessionTurnInterruptedProps {
             turn_id,
             error: Some("Interrupted.".to_string()),
         }),
@@ -488,7 +499,6 @@ async fn interrupt_turn(
 async fn run_streaming_turn(
     state: Arc<AppState>,
     run_id: RunId,
-    run_store: RunDatabase,
     session: ProjectedRunSession,
     turn_id: TurnId,
     input: String,
@@ -498,11 +508,11 @@ async fn run_streaming_turn(
     let session_id = session.record.id;
     if turn_lease.interrupt_requested() {
         let _ = append_and_send_event(
-            &run_store,
+            &state,
             &sender,
             run_id,
             session_id,
-            EventBody::RunSessionTurnInterrupted(RunSessionTurnInterruptedProps {
+            SessionEventBody::TurnInterrupted(SessionTurnInterruptedProps {
                 turn_id,
                 error: Some("Interrupted.".to_string()),
             }),
@@ -516,14 +526,14 @@ async fn run_streaming_turn(
         let runtime_entry = turn_lease.entry();
         let mut agent_slot = runtime_entry.lock_agent().await;
         if agent_slot.is_none() {
-            match build_agent(&state, run_id, &run_store, &session).await {
+            match build_agent(&state, run_id, &session).await {
                 Ok(agent) => {
                     *agent_slot = Some(agent);
                 }
                 Err(err) => {
                     error!(error = ?err, session_id = %session_id, turn_id = %turn_id, "Failed to build run-backed session runtime");
                     let _ = append_and_send_event(
-                        &run_store,
+                        &state,
                         &sender,
                         run_id,
                         session_id,
@@ -546,14 +556,14 @@ async fn run_streaming_turn(
             .expect("session runtime slot should be loaded");
         let cancel_token = CancellationToken::new();
         turn_lease.attach_cancel_token(&cancel_token);
-        let model_input = match run_store.state().await {
+        let model_input = match state.load_run_projection(&run_id).await {
             Ok(projection) => {
                 let snapshot = build_ask_fabro_run_snapshot(&projection, run_id);
                 build_ask_fabro_turn_input(&input, &snapshot)
             }
             Err(err) => {
                 warn!(
-                    error = %err,
+                    error = err.detail(),
                     session_id = %session_id,
                     turn_id = %turn_id,
                     "Failed to build Ask Fabro run snapshot"
@@ -566,7 +576,7 @@ async fn run_streaming_turn(
         };
         let mut output = None;
         let result = Box::pin(drive_agent(
-            &run_store,
+            &state,
             agent,
             run_id,
             session_id,
@@ -596,11 +606,11 @@ async fn run_streaming_turn(
     match outcome.result {
         Ok(Ok(())) => {
             let _ = append_and_send_event(
-                &run_store,
+                &state,
                 &sender,
                 run_id,
                 session_id,
-                EventBody::RunSessionTurnSucceeded(RunSessionTurnSucceededProps {
+                SessionEventBody::TurnSucceeded(SessionTurnSucceededProps {
                     turn_id,
                     output: outcome.output,
                 }),
@@ -611,7 +621,7 @@ async fn run_streaming_turn(
         Ok(Err(err)) => {
             turn_lease.entry().clear_agent().await;
             let body = if matches!(err, AgentError::Interrupted(_)) {
-                EventBody::RunSessionTurnInterrupted(RunSessionTurnInterruptedProps {
+                SessionEventBody::TurnInterrupted(SessionTurnInterruptedProps {
                     turn_id,
                     error: Some(err.to_string()),
                 })
@@ -620,13 +630,12 @@ async fn run_streaming_turn(
                 turn_failed_body(turn_id, err.to_string(), outcome.output, code, false)
             };
             let _ =
-                append_and_send_event(&run_store, &sender, run_id, session_id, body, Utc::now())
-                    .await;
+                append_and_send_event(&state, &sender, run_id, session_id, body, Utc::now()).await;
         }
         Err(err) => {
             turn_lease.entry().clear_agent().await;
             let _ = append_and_send_event(
-                &run_store,
+                &state,
                 &sender,
                 run_id,
                 session_id,
@@ -634,7 +643,7 @@ async fn run_streaming_turn(
                     turn_id,
                     err.to_string(),
                     outcome.output,
-                    RunSessionTurnFailedCode::AgentError,
+                    SessionTurnFailedCode::AgentError,
                     false,
                 ),
                 Utc::now(),
@@ -664,13 +673,13 @@ enum AskFabroBuildError {
 }
 
 impl AskFabroBuildError {
-    fn code(&self) -> RunSessionTurnFailedCode {
+    fn code(&self) -> SessionTurnFailedCode {
         match self {
-            Self::NoSandbox => RunSessionTurnFailedCode::NoSandbox,
-            Self::SandboxUnavailable(_) => RunSessionTurnFailedCode::SandboxUnavailable,
-            Self::LlmUnconfigured(_) => RunSessionTurnFailedCode::LlmUnconfigured,
-            Self::ModelUnavailable(_) => RunSessionTurnFailedCode::ModelUnavailable,
-            Self::Agent(_) => RunSessionTurnFailedCode::AgentError,
+            Self::NoSandbox => SessionTurnFailedCode::NoSandbox,
+            Self::SandboxUnavailable(_) => SessionTurnFailedCode::SandboxUnavailable,
+            Self::LlmUnconfigured(_) => SessionTurnFailedCode::LlmUnconfigured,
+            Self::ModelUnavailable(_) => SessionTurnFailedCode::ModelUnavailable,
+            Self::Agent(_) => SessionTurnFailedCode::AgentError,
         }
     }
 
@@ -684,7 +693,6 @@ impl AskFabroBuildError {
 async fn build_agent(
     state: &AppState,
     run_id: RunId,
-    run_store: &RunDatabase,
     session: &ProjectedRunSession,
 ) -> Result<CodingAgent, AskFabroBuildError> {
     let catalog = state.catalog();
@@ -707,10 +715,10 @@ async fn build_agent(
         };
     }
 
-    let projection = run_store
-        .state()
+    let projection = state
+        .load_run_projection(&run_id)
         .await
-        .map_err(|err| AskFabroBuildError::Agent(anyhow::Error::new(err)))?;
+        .map_err(|err| AskFabroBuildError::Agent(anyhow::anyhow!("{}", err.detail())))?;
     let sandbox_record = projection
         .sandbox
         .as_ref()
@@ -756,8 +764,8 @@ async fn build_agent(
 
     // A resumed session continues its stored conversation on the model it
     // recorded; a record whose events outran it (a crash between the event
-    // log and the record write) is moved past the log's last sequence so the
-    // stream never reuses a number.
+    // append and the record write) is moved past the session's last
+    // sequence so the stream never reuses a number.
     let stored = state
         .stores
         .session_records
@@ -767,7 +775,12 @@ async fn build_agent(
     let builder = match stored {
         Some(stored) => {
             let mut record = stored.record;
-            if let Ok(Some(last_seq)) = run_store.last_event_seq().await {
+            if let Ok(Some(last_seq)) = state
+                .stores
+                .session_events
+                .last_seq(session.record.id)
+                .await
+            {
                 record.resume_after(u64::from(last_seq));
             }
             CodingAgent::resume(
@@ -1151,7 +1164,7 @@ User question:
 }
 
 async fn drive_agent(
-    run_store: &RunDatabase,
+    state: &AppState,
     agent: &mut CodingAgent,
     run_id: RunId,
     session_id: SessionId,
@@ -1171,7 +1184,7 @@ async fn drive_agent(
                 while let Ok(event) = receiver.try_recv() {
                     record_turn_output(output, &event);
                     Box::pin(persist_agent_event(
-                        run_store, run_id, session_id, turn_id, event, sender,
+                        state, run_id, session_id, turn_id, event, sender,
                     ))
                     .await?;
                 }
@@ -1182,7 +1195,7 @@ async fn drive_agent(
                     Ok(event) => {
                         record_turn_output(output, &event);
                         Box::pin(persist_agent_event(
-                            run_store, run_id, session_id, turn_id, event, sender,
+                            state, run_id, session_id, turn_id, event, sender,
                         ))
                         .await?;
                     }
@@ -1203,10 +1216,10 @@ fn turn_failed_body(
     turn_id: TurnId,
     error: String,
     output: Option<String>,
-    code: RunSessionTurnFailedCode,
+    code: SessionTurnFailedCode,
     retryable: bool,
-) -> EventBody {
-    EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+) -> SessionEventBody {
+    SessionEventBody::TurnFailed(SessionTurnFailedProps {
         turn_id,
         error,
         output,
@@ -1215,19 +1228,19 @@ fn turn_failed_body(
     })
 }
 
-fn agent_failure_code(err: &AgentError) -> RunSessionTurnFailedCode {
+fn agent_failure_code(err: &AgentError) -> SessionTurnFailedCode {
     match err {
         AgentError::ToolExecution(message)
             if message.contains("denied") || message.contains("not allowed") =>
         {
-            RunSessionTurnFailedCode::ToolDenied
+            SessionTurnFailedCode::ToolDenied
         }
-        _ => RunSessionTurnFailedCode::AgentError,
+        _ => SessionTurnFailedCode::AgentError,
     }
 }
 
 async fn persist_agent_event(
-    run_store: &RunDatabase,
+    state: &AppState,
     run_id: RunId,
     session_id: SessionId,
     turn_id: TurnId,
@@ -1238,25 +1251,25 @@ async fn persist_agent_event(
     let Some(body) = agent_event_payload(turn_id, event.event) else {
         return Ok(());
     };
-    append_and_send_event(run_store, sender, run_id, session_id, body, ts)
+    append_and_send_event(state, sender, run_id, session_id, body, ts)
         .await
         .map_err(Into::into)
 }
 
-fn agent_event_payload(event_turn_id: TurnId, event: CodingEvent) -> Option<EventBody> {
+fn agent_event_payload(event_turn_id: TurnId, event: CodingEvent) -> Option<SessionEventBody> {
     match event {
         CodingEvent::AssistantMessage {
             text, model, usage, ..
-        } => Some(EventBody::RunSessionAssistantMessage(
-            RunSessionAssistantMessageProps {
+        } => Some(SessionEventBody::AssistantMessage(
+            SessionAssistantMessageProps {
                 turn_id: event_turn_id,
                 text,
                 model: Some(model),
                 usage: serde_json::to_value(usage).unwrap_or(Value::Null),
             },
         )),
-        CodingEvent::TextDelta { delta } => Some(EventBody::RunSessionAssistantDelta(
-            RunSessionAssistantDeltaProps {
+        CodingEvent::TextDelta { delta } => Some(SessionEventBody::AssistantDelta(
+            SessionAssistantDeltaProps {
                 turn_id: event_turn_id,
                 delta,
             },
@@ -1265,8 +1278,8 @@ fn agent_event_payload(event_turn_id: TurnId, event: CodingEvent) -> Option<Even
             tool_name,
             tool_call_id,
             arguments,
-        } => Some(EventBody::RunSessionToolCallStarted(
-            RunSessionToolCallStartedProps {
+        } => Some(SessionEventBody::ToolCallStarted(
+            SessionToolCallStartedProps {
                 turn_id: event_turn_id,
                 tool_name,
                 tool_call_id,
@@ -1282,8 +1295,8 @@ fn agent_event_payload(event_turn_id: TurnId, event: CodingEvent) -> Option<Even
             output_bytes_retained,
             output_bytes_omitted,
             ..
-        } => Some(EventBody::RunSessionToolCallCompleted(
-            RunSessionToolCallCompletedProps {
+        } => Some(SessionEventBody::ToolCallCompleted(
+            SessionToolCallCompletedProps {
                 turn_id: event_turn_id,
                 tool_name,
                 tool_call_id,
@@ -1303,65 +1316,42 @@ fn agent_event_payload(event_turn_id: TurnId, event: CodingEvent) -> Option<Even
 }
 
 async fn append_and_send_event(
-    run_store: &RunDatabase,
+    state: &AppState,
     sender: &SessionSseSender,
     run_id: RunId,
     session_id: SessionId,
-    body: EventBody,
+    body: SessionEventBody,
     ts: DateTime<Utc>,
 ) -> fabro_store::Result<()> {
-    let event = append_run_session_event(run_store, run_id, session_id, body, ts).await?;
+    let event = append_run_session_event(state, run_id, session_id, body, ts).await?;
     send_sse_event(sender, &event).await;
     Ok(())
 }
 
 async fn append_run_session_event(
-    run_store: &RunDatabase,
+    state: &AppState,
     run_id: RunId,
     session_id: SessionId,
-    body: EventBody,
+    body: SessionEventBody,
     ts: DateTime<Utc>,
-) -> fabro_store::Result<EventEnvelope> {
-    let event = RunEvent {
-        id: format!("evt_{}", ulid::Ulid::new()),
-        ts,
-        run_id,
-        node_id: None,
-        node_label: None,
-        stage_id: None,
-        parallel_group_id: None,
-        parallel_branch_id: None,
-        session_id: Some(session_id.to_string()),
-        parent_session_id: None,
-        tool_call_id: None,
-        actor: None,
-        body,
-    };
-    let payload = EventPayload::new(event.to_value()?, &run_id)?;
-    run_store.append_event_envelope(&payload).await
-}
-
-async fn send_sse_event(sender: &SessionSseSender, event: &EventEnvelope) -> bool {
-    let Ok(data) = serde_json::to_string(event) else {
-        return true;
-    };
-    sender
-        .send(Ok(Event::default()
-            .id(event.seq.to_string())
-            .event(event.event.event_name())
-            .data(data)))
+) -> fabro_store::Result<SessionEvent> {
+    state
+        .stores
+        .session_events
+        .append(run_id, session_id, body, ts)
         .await
-        .is_ok()
 }
 
-fn session_sse_event(event: &EventEnvelope) -> Option<Event> {
-    let data = serde_json::to_string(event).ok()?;
-    Some(
-        Event::default()
-            .id(event.seq.to_string())
-            .event(event.event.event_name())
-            .data(data),
-    )
+async fn send_sse_event(sender: &SessionSseSender, event: &SessionEvent) -> bool {
+    sender.send(Ok(session_sse_event(event))).await.is_ok()
+}
+
+fn session_sse_event(event: &SessionEvent) -> Event {
+    let data = serde_json::to_string(event).unwrap_or_else(|_| "null".to_string());
+    Event::default()
+        .id(event.seq.to_string())
+        .event(event.event_name())
+        .data(data)
 }
 
 async fn send_attach_sse_event(
@@ -1377,100 +1367,39 @@ async fn send_attach_sse_event(
     }
 }
 
-fn event_matches_session(event: &EventEnvelope, session_id: &str) -> bool {
-    event
-        .event
-        .session_id
-        .as_deref()
-        .is_some_and(|id| id == session_id)
-        && event.event.body.is_run_session_event()
-}
-
+/// The session as its events describe it, with the run that owns it.
 async fn load_session(
     state: &AppState,
     session_id: SessionId,
-) -> Result<(RunId, RunDatabase, ProjectedRunSession), Response> {
-    let run_id = match state.store_ref().find_session_owner(&session_id).await {
-        Ok(Some(run_id)) => run_id,
-        Ok(None) => return Err(ApiError::not_found("Session not found.").into_response()),
-        Err(err) => return Err(store_error(&err).into_response()),
-    };
-    let run_store = open_run(state, run_id).await?;
-    let events = match run_store.list_events().await {
-        Ok(events) => events,
-        Err(err) => return Err(store_error(&err).into_response()),
-    };
-    match project_run_session(run_id, session_id, &events) {
-        Some(session) => Ok((run_id, run_store, session)),
-        None => Err(ApiError::not_found("Session not found.").into_response()),
-    }
-}
-
-async fn load_session_read(
-    state: &AppState,
-    session_id: SessionId,
 ) -> Result<(RunId, ProjectedRunSession), Response> {
-    let run_id = match state.store_ref().find_session_owner(&session_id).await {
-        Ok(Some(run_id)) => run_id,
-        Ok(None) => return Err(ApiError::not_found("Session not found.").into_response()),
-        Err(err) => return Err(store_error(&err).into_response()),
-    };
-    let run_store = open_run_reader(state, run_id).await?;
-    let events = match run_store.list_events().await {
-        Ok(events) => events,
-        Err(err) => return Err(store_error(&err).into_response()),
-    };
-    match project_run_session(run_id, session_id, &events) {
+    let run_id = load_session_owner(state, session_id).await?;
+    let events = state
+        .stores
+        .session_events
+        .list_from(session_id, 1, usize::MAX)
+        .await
+        .map_err(|err| store_error(&err).into_response())?;
+    match project_run_session(session_id, &events) {
         Some(session) => Ok((run_id, session)),
         None => Err(ApiError::not_found("Session not found.").into_response()),
     }
 }
 
-async fn load_session_run_reader(
-    state: &AppState,
-    session_id: SessionId,
-) -> Result<(RunId, RunDatabase), Response> {
-    let run_id = match state.store_ref().find_session_owner(&session_id).await {
-        Ok(Some(run_id)) => run_id,
-        Ok(None) => return Err(ApiError::not_found("Session not found.").into_response()),
-        Err(err) => return Err(store_error(&err).into_response()),
-    };
-    let run_store = open_run_reader(state, run_id).await?;
-    let events = match run_store
-        .list_events_for_session_from_with_limit(session_id, 1, 0)
-        .await
-    {
-        Ok(events) => events,
-        Err(err) => return Err(store_error(&err).into_response()),
-    };
-    if events.is_empty() {
-        return Err(ApiError::not_found("Session not found.").into_response());
+/// The run that owns `session_id`, from the session's creation event.
+async fn load_session_owner(state: &AppState, session_id: SessionId) -> Result<RunId, Response> {
+    match state.stores.session_events.owner(session_id).await {
+        Ok(Some(run_id)) => Ok(run_id),
+        Ok(None) => Err(ApiError::not_found("Session not found.").into_response()),
+        Err(err) => Err(store_error(&err).into_response()),
     }
-    Ok((run_id, run_store))
 }
 
-async fn open_run(state: &AppState, run_id: RunId) -> Result<RunDatabase, Response> {
-    state.store_ref().open_run(&run_id).await.map_err(|err| {
-        if matches!(err, fabro_store::Error::RunNotFound(_)) {
-            ApiError::not_found("Run not found.").into_response()
-        } else {
-            store_error(&err).into_response()
-        }
-    })
-}
-
-async fn open_run_reader(state: &AppState, run_id: RunId) -> Result<RunDatabase, Response> {
-    state
-        .store_ref()
-        .open_run_reader(&run_id)
-        .await
-        .map_err(|err| {
-            if matches!(err, fabro_store::Error::RunNotFound(_)) {
-                ApiError::not_found("Run not found.").into_response()
-            } else {
-                store_error(&err).into_response()
-            }
-        })
+async fn ensure_run(state: &AppState, run_id: RunId) -> Result<(), Response> {
+    match state.stores.run_summaries.contains(&run_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ApiError::not_found("Run not found.").into_response()),
+        Err(err) => Err(store_error(&err).into_response()),
+    }
 }
 
 fn store_error(err: &fabro_store::Error) -> ApiError {
@@ -1493,7 +1422,7 @@ fn parse_turn_id(value: &str) -> Result<TurnId, ApiError> {
 mod tests {
     use std::collections::HashMap;
 
-    use fabro_types::test_support;
+    use fabro_types::{PetriAdmission, test_support};
     use pebble_coding_agent::events::{ToolCategory, ToolSource};
 
     use super::*;
@@ -1728,7 +1657,7 @@ enabled = true
         });
 
         match body {
-            Some(EventBody::RunSessionAssistantDelta(props)) => {
+            Some(SessionEventBody::AssistantDelta(props)) => {
                 assert_eq!(props.turn_id, turn_id);
                 assert_eq!(props.delta, "Hello");
             }
@@ -1898,6 +1827,7 @@ enabled = true
             spec_blob: None,
             git: None,
             fork_source_ref: None,
+            admission: PetriAdmission::default(),
         };
         let mut projection = fabro_types::RunProjection::new(String::new(), spec, now);
         for (index, node_id) in ["start", "plan", "code", "test", "review", "deploy"]
@@ -2039,9 +1969,7 @@ mod resume_tests {
             .max_concurrent_runs(2)
             // A registry factory runs the dry run in this process, so no
             // worker executable is needed.
-            .registry_factory(|interviewer| {
-                fabro_workflow::handler::default_registry(interviewer, || None)
-            })
+            .in_process_execution()
             .llm_overlay(llm_overlay_with_provider_base_url("openai", base_url))
             .vault_entries([(EnvVars::OPENAI_API_KEY, namespace.to_string())])
             .env_lookup(move |name| (name == EnvVars::OPENAI_API_KEY).then(|| api_key.clone()))
@@ -2296,14 +2224,12 @@ mod resume_tests {
             .clear_agent()
             .await;
         let log_head_before_resume = state
-            .store_ref()
-            .open_run_reader(&run_id)
+            .stores
+            .session_events
+            .last_seq(session_id)
             .await
             .unwrap()
-            .last_event_seq()
-            .await
-            .unwrap()
-            .expect("the run has events");
+            .expect("the session has events");
 
         turn(&app, session_id, "Second question").await;
 

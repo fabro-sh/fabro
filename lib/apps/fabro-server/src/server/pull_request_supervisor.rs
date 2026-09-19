@@ -9,6 +9,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use fabro_store::platform_records::{
+    PlatformRecord, PullRequestCreatedRecord, PullRequestFailedRecord,
+};
 use fabro_types::{PullRequestCreation, PullRequestCreationId, RunId};
 use tokio::task::{self, JoinHandle, JoinSet};
 use tokio::time;
@@ -17,7 +20,7 @@ use tracing::{Instrument as _, info_span, warn};
 use super::handler::pull_requests::{
     RunPrInputs, load_server_github_credentials, server_github_context,
 };
-use super::{AppState, pull_request, workflow_event};
+use super::{AppState, pull_request, run_records};
 
 const PULL_REQUEST_CREATION_TIMEOUT: Duration = Duration::from_mins(10);
 const PULL_REQUEST_CREATION_SCAN_INTERVAL: Duration = Duration::from_secs(30);
@@ -87,38 +90,28 @@ impl AppState {
             .expect("pull request creation queue lock poisoned")
             .pop()
     }
-
-    #[cfg(test)]
-    pub(super) fn pull_request_creation_queue_len(&self) -> usize {
-        self.pull_request_creation_queue
-            .lock()
-            .expect("pull request creation queue lock poisoned")
-            .len()
-    }
-
-    #[cfg(test)]
-    pub(super) fn drain_pull_request_creation_queue(&self) -> Vec<RunId> {
-        let mut queue = self
-            .pull_request_creation_queue
-            .lock()
-            .expect("pull request creation queue lock poisoned");
-        std::iter::from_fn(|| queue.pop()).collect()
-    }
 }
 
 async fn append_pull_request_creation_failure(
-    run_store: &fabro_store::RunDatabase,
+    state: &AppState,
     run_id: &RunId,
     creation_id: PullRequestCreationId,
     error: String,
 ) -> anyhow::Result<()> {
-    let event = workflow_event::Event::PullRequestFailed {
-        creation_id: Some(creation_id),
-        error,
-    };
-    workflow_event::append_event_if(run_store, run_id, &event, |projection| {
-        is_pending_creation(projection, creation_id)
-    })
+    let still_pending = run_records::projection(state, *run_id)
+        .await?
+        .is_some_and(|projection| is_pending_creation(&projection, creation_id));
+    if !still_pending {
+        return Ok(());
+    }
+    run_records::append(
+        state,
+        *run_id,
+        PlatformRecord::PullRequestFailed(PullRequestFailedRecord {
+            creation_id: Some(creation_id),
+            error,
+        }),
+    )
     .await?;
     Ok(())
 }
@@ -138,8 +131,7 @@ pub(in crate::server) async fn process_pull_request_creation(
     run_id: RunId,
 ) -> anyhow::Result<()> {
     let _create_guard = state.pull_request_create_locks.lock(run_id).await;
-    let run_store = state.stores.runs.open_run(&run_id).await?;
-    let Some(run_state) = state.stores.runs.load_run_projection(&run_id).await? else {
+    let Some(run_state) = run_records::projection(&state, run_id).await? else {
         return Ok(());
     };
     let Some(creation) = run_state
@@ -151,10 +143,10 @@ pub(in crate::server) async fn process_pull_request_creation(
         return Ok(());
     };
 
-    match attempt_pull_request_creation(&state, &run_store, &run_id, &run_state, &creation).await? {
+    match attempt_pull_request_creation(&state, &run_id, &run_state, &creation).await? {
         Ok(()) => Ok(()),
         Err(error) => {
-            append_pull_request_creation_failure(&run_store, &run_id, creation.id, error).await
+            append_pull_request_creation_failure(&state, &run_id, creation.id, error).await
         }
     }
 }
@@ -165,7 +157,6 @@ pub(in crate::server) async fn process_pull_request_creation(
 /// infrastructure failure — nothing was recorded, so the supervisor may retry.
 async fn attempt_pull_request_creation(
     state: &AppState,
-    run_store: &fabro_store::RunDatabase,
     run_id: &RunId,
     run_state: &fabro_store::RunProjection,
     creation: &PullRequestCreation,
@@ -183,7 +174,6 @@ async fn attempt_pull_request_creation(
         Err(err) => return Ok(Err(err.detail().to_string())),
     };
     let catalog = state.catalog();
-    let run_store_handle = run_store.clone().into();
     let request = pull_request::OpenPullRequestRequest {
         github,
         origin_url: &inputs.normalized_origin,
@@ -195,7 +185,6 @@ async fn attempt_pull_request_creation(
         model: &creation.model,
         draft: true,
         auto_merge: None,
-        run_store: &run_store_handle,
         llm_source: Arc::clone(&state.llm_source),
         catalog,
         conclusion: Some(inputs.conclusion),
@@ -217,18 +206,28 @@ async fn attempt_pull_request_creation(
         }
     };
 
-    let event = workflow_event::Event::pull_request_created(
-        &created_pull_request.link,
-        &created_pull_request.base_branch,
-        &created_pull_request.head_branch,
-        inputs.final_git_sha,
-        &created_pull_request.title,
-        true,
-    );
-    workflow_event::append_event_if(run_store, run_id, &event, |projection| {
-        projection.pull_request.is_none() && is_pending_creation(projection, creation.id)
-    })
-    .await?;
+    let still_pending = run_records::projection(state, *run_id)
+        .await?
+        .is_some_and(|projection| {
+            projection.pull_request.is_none() && is_pending_creation(&projection, creation.id)
+        });
+    if still_pending {
+        let link = &created_pull_request.link;
+        run_records::append(
+            state,
+            *run_id,
+            PlatformRecord::PullRequestCreated(PullRequestCreatedRecord {
+                number:    link.number,
+                owner:     link.owner.clone(),
+                repo:      link.repo.clone(),
+                html_url:  link.html_url(),
+                head_sha:  Some(inputs.final_git_sha.to_string()),
+                draft:     true,
+                operation: None,
+            }),
+        )
+        .await?;
+    }
     Ok(Ok(()))
 }
 
@@ -257,7 +256,7 @@ pub(super) async fn recover_pending_pull_request_creations(
         if !can_dispatch(&run_id, active, failures) {
             continue;
         }
-        let projection = match state.stores.runs.load_run_projection(&run_id).await {
+        let projection = match run_records::projection(state, run_id).await {
             Ok(Some(projection)) => projection,
             Ok(None) => continue,
             Err(error) => {

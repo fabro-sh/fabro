@@ -60,7 +60,8 @@ export const queryKeys = {
     usage: (id: string) => ["runs", "usage", id] as const,
     questions: (id: string, limit = 1, offset = 0) =>
       ["runs", "questions", id, limit, offset] as const,
-    events: (id: string, limit = 1000) => ["runs", "events", id, limit] as const,
+    /** A Petri run's stream: every `RunStreamItem` in `stream_seq` order. */
+    stream: (id: string) => ["runs", "stream", id] as const,
     stageEvents: (id: string, stageId: string) =>
       ["runs", "stage-events", id, stageId] as const,
     stageContextWindow: (id: string, stageId: string) =>
@@ -79,7 +80,6 @@ export const queryKeys = {
     cancel: (id: string) => ["runs", "cancel", id] as const,
     approve: (id: string) => ["runs", "approve", id] as const,
     deny: (id: string) => ["runs", "deny", id] as const,
-    retry: (id: string) => ["runs", "retry", id] as const,
     archive: (id: string) => ["runs", "archive", id] as const,
     unarchive: (id: string) => ["runs", "unarchive", id] as const,
     updateTitle: (id: string) => ["runs", "update-title", id] as const,

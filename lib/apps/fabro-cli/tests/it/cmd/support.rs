@@ -12,7 +12,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Output;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -22,11 +21,10 @@ use fabro_client::Client;
 use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{Storage, envfile};
-use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, expect_reqwest_status};
 use fabro_types::test_support::test_principal;
 use fabro_types::{
-    GitRunTarget, RunId, RunIntent, RunIntentArgs, RunTarget, StageId, WorkflowPath,
+    GitRunTarget, RunId, RunIntent, RunIntentArgs, RunStreamItem, RunTarget, StageId, WorkflowPath,
     WorkflowVersion,
 };
 use httpmock::{HttpMockResponse, Mock, MockServer};
@@ -35,7 +33,6 @@ use shlex::try_quote;
 
 const LOCAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const CI_COMMAND_TIMEOUT: Duration = Duration::from_secs(90);
-static NEXT_SEEDED_EVENT_ID: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) use fabro_store::RunProjection;
 
@@ -56,29 +53,20 @@ pub(crate) struct RunSetup {
     pub(crate) run_dir: PathBuf,
 }
 
-pub(crate) struct SeededGitRunSetup {
-    pub(crate) run:          RunSetup,
-    pub(crate) step_one_sha: String,
-}
-
 pub(crate) struct ProjectFixture {
     pub(crate) project_dir: PathBuf,
     pub(crate) fabro_root:  PathBuf,
 }
 
+/// A run whose workflow populated its sandbox. The run executes in its own
+/// workspace, not in the target folder, so the sandbox's files are read
+/// back through the run.
 pub(crate) struct WorkspaceRunSetup {
-    pub(crate) run:           RunSetup,
-    pub(crate) workspace_dir: PathBuf,
+    pub(crate) run: RunSetup,
 }
 
 pub(crate) struct WorkflowGate {
     gate_path: PathBuf,
-}
-
-#[derive(Clone, Copy)]
-enum SeededRunState {
-    Submitted,
-    Completed,
 }
 
 fn command_timeout() -> Duration {
@@ -388,12 +376,14 @@ pub(crate) fn setup_completed_fast_dry_run(context: &TestContext) -> RunSetup {
     run_completed_dry_run(context, &workflow)
 }
 
+/// A completed run of the fast simple workflow: a real dry run, since a
+/// run's history is what the engine recorded.
 pub(crate) fn setup_seeded_completed_dry_run(context: &TestContext) -> RunSetup {
-    block_on(seed_dry_run(context, SeededRunState::Completed))
+    setup_completed_fast_dry_run(context)
 }
 
 pub(crate) fn setup_seeded_created_dry_run(context: &TestContext) -> RunSetup {
-    block_on(seed_dry_run(context, SeededRunState::Submitted))
+    block_on(seed_dry_run(context))
 }
 
 fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
@@ -411,12 +401,25 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
             stderr(&output)
         );
     }
-    let run_setup = single_run_setup(context);
-    wait_for_event_names(&run_setup.run_dir, &[
-        "run.completed",
-        "sandbox.stop.completed",
-    ]);
+    let run_id = run_id_from_run_output(&output);
+    let run_setup = RunSetup {
+        run_dir: context.find_run_dir(&run_id),
+        run_id,
+    };
+    wait_for_run_finished(&run_setup.run_dir);
     run_setup
+}
+
+/// The run id `fabro run` prints (`Run: <id>`) for the run it created.
+fn run_id_from_run_output(output: &Output) -> String {
+    let text = stderr(output);
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix("Run: "))
+        .map_or_else(
+            || panic!("fabro run should print the run id:\n{text}"),
+            str::trim,
+        )
+        .to_string()
 }
 
 fn fast_simple_workflow(context: &TestContext) -> PathBuf {
@@ -471,7 +474,7 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
     let run_id = created_run_id(&output);
     let run = resolve_run(context, &run_id);
     let deadline = Instant::now() + command_timeout();
-    while run_events(&run.run_dir).is_empty() {
+    while run_stream_items(&run.run_dir).is_empty() {
         assert!(
             Instant::now() < deadline,
             "timed out waiting for store events for {run_id}"
@@ -481,16 +484,8 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
     run
 }
 
-pub(crate) fn setup_seeded_git_backed_changed_run(context: &TestContext) -> SeededGitRunSetup {
-    block_on(seed_git_backed_changed_run(context))
-}
-
-pub(crate) fn setup_seeded_git_backed_noop_run(context: &TestContext) -> RunSetup {
-    block_on(seed_git_backed_noop_run(context))
-}
-
 pub(crate) fn setup_seeded_artifact_run(context: &TestContext) -> RunSetup {
-    block_on(seed_artifact_run(context))
+    seed_artifact_run(context)
 }
 
 pub(crate) fn setup_project_fixture(context: &TestContext) -> ProjectFixture {
@@ -509,6 +504,65 @@ impl WorkflowGate {
     pub(crate) fn release(&self) {
         write_text_file(&self.gate_path, "open\n");
     }
+}
+
+/// A git-backed workspace whose run appends two lines to `story.txt`, one
+/// per stage: `step_one` adds `line 2`, `step_two` adds `line 3`.
+pub(crate) fn setup_git_backed_changed_run(context: &TestContext) -> WorkspaceRunSetup {
+    git_backed_run(
+        context,
+        "changed",
+        "step_one [shape=parallelogram, script=\"printf 'line 2\\n' >> story.txt\"]\n  \
+         step_two [shape=parallelogram, script=\"printf 'line 3\\n' >> story.txt\"]",
+        "start -> step_one -> step_two -> exit",
+    )
+}
+
+/// A git-backed workspace whose run changes nothing.
+pub(crate) fn setup_git_backed_noop_run(context: &TestContext) -> WorkspaceRunSetup {
+    git_backed_run(
+        context,
+        "noop",
+        "step_one [shape=parallelogram, script=\"cat story.txt\"]",
+        "start -> step_one -> exit",
+    )
+}
+
+/// A run on the local provider from a workspace with one commit, so the
+/// run branch starts from a base the run's diff is measured against.
+fn git_backed_run(
+    context: &TestContext,
+    name: &str,
+    stages: &str,
+    edges: &str,
+) -> WorkspaceRunSetup {
+    let workspace_dir = context.temp_dir.join(format!("git-{name}"));
+    std::fs::create_dir_all(&workspace_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", workspace_dir.display()));
+    write_text_file(&workspace_dir.join("story.txt"), "line 1\n");
+    write_text_file(
+        &workspace_dir.join("story.fabro"),
+        &format!(
+            "digraph Story {{\n  graph [goal=\"Change the story\", default_max_retries=0]\n  \
+             start [shape=Mdiamond]\n  exit [shape=Msquare]\n  {stages}\n  {edges}\n}}\n"
+        ),
+    );
+    write_text_file(
+        &workspace_dir.join("workflow.toml"),
+        "_version = 1\n\n[workflow]\ngraph = \"story.fabro\"\n\n[run]\ngoal = \"Change the \
+         story\"\n\n[run.environment]\nid = \"local\"\n",
+    );
+    init_remote_fixture(&workspace_dir, "main");
+    let run = run_local_workflow(context, &workspace_dir, "workflow.toml");
+    WorkspaceRunSetup { run }
+}
+
+/// The run output filters plus one for commit shas, which a patch names in
+/// its index lines.
+pub(crate) fn git_filters(context: &TestContext) -> Vec<(String, String)> {
+    let mut filters = context.filters();
+    filters.push((r"\b[0-9a-f]{7,40}\b".to_string(), "[SHA]".to_string()));
+    filters
 }
 
 pub(crate) fn setup_local_sandbox_run(context: &TestContext) -> WorkspaceRunSetup {
@@ -539,14 +593,13 @@ goal = "Exercise sandbox commands"
 
 [run.environment]
 id = "local"
-
 "#,
     );
 
     let run = run_local_workflow(context, &workspace_dir, "workflow.toml");
     assert!(run_state(&run.run_dir).sandbox.is_some());
 
-    WorkspaceRunSetup { run, workspace_dir }
+    WorkspaceRunSetup { run }
 }
 
 fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
@@ -687,32 +740,6 @@ fn run_dirs_for_test_case(context: &TestContext) -> Vec<PathBuf> {
         })
         .filter_map(|run| find_run_dir(&context.storage_dir, &run.run_id))
         .collect()
-}
-
-pub(crate) fn git_filters(context: &TestContext) -> Vec<(String, String)> {
-    let mut filters = context.filters();
-    filters.push((r"\b[0-9a-f]{7,40}\b".to_string(), "[SHA]".to_string()));
-    filters.push((
-        r"(fabro resume )[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
-        "$1[RUN_PREFIX]".to_string(),
-    ));
-    filters.push((
-        r"(Forked run )[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
-        "$1[RUN_PREFIX]".to_string(),
-    ));
-    filters.push((
-        r"(-> )[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
-        "$1[RUN_PREFIX]".to_string(),
-    ));
-    filters.push((
-        r"(Rewound )[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
-        "$1[RUN_PREFIX]".to_string(),
-    ));
-    filters.push((
-        r"(; new run )[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
-        "$1[RUN_PREFIX]".to_string(),
-    ));
-    filters
 }
 
 #[expect(
@@ -882,20 +909,13 @@ pub(crate) fn run_state(run_dir: &Path) -> RunProjection {
     ))
 }
 
-pub(crate) fn run_state_by_id(context: &TestContext, run_id: &str) -> RunProjection {
-    block_on(get_server_json_for_storage(
-        &context.storage_dir,
-        &format!("/api/v1/runs/{run_id}/state"),
-    ))
-}
-
-pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
+pub(crate) fn run_stream_items(run_dir: &Path) -> Vec<RunStreamItem> {
     let run_id = infer_run_id(run_dir);
     let response: serde_json::Value = block_on(get_server_json(
         run_dir,
-        &format!("/api/v1/runs/{run_id}/events"),
+        &format!("/api/v1/runs/{run_id}/events?after=0&limit=1000"),
     ));
-    crate::support::parse_event_envelopes(&response)
+    crate::support::parse_stream_items(&response)
 }
 
 pub(crate) fn command_log_text(run_dir: &Path, stage_id: &StageId) -> String {
@@ -910,36 +930,55 @@ pub(crate) fn command_log_text(run_dir: &Path, stage_id: &StageId) -> String {
     String::from_utf8(bytes).expect("command log should be UTF-8")
 }
 
+/// Wait until the run's stream holds the terminal lifecycle record.
+pub(crate) fn wait_for_run_finished(run_dir: &Path) {
+    wait_for_stream_item(run_dir, "the terminal lifecycle record", |item| {
+        crate::support::is_terminal_lifecycle(item)
+    });
+}
+
+/// Wait until the run's stream holds the `run.lifecycle` record of
+/// `transition` (`running`, `succeeded`, ...).
+pub(crate) fn wait_for_lifecycle(run_dir: &Path, transition: &str) {
+    wait_for_stream_item(
+        run_dir,
+        &format!("the {transition} lifecycle record"),
+        |item| {
+            let record = item.item.get("record");
+            record
+                .and_then(|record| record.get("kind"))
+                .and_then(serde_json::Value::as_str)
+                == Some("run.lifecycle")
+                && record
+                    .and_then(|record| record.get("transition"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some(transition)
+        },
+    );
+}
+
 #[expect(
     clippy::disallowed_methods,
-    reason = "This sync integration helper polls stored events without requiring a Tokio runtime."
+    reason = "This sync integration helper polls the run stream without requiring a Tokio runtime."
 )]
-pub(crate) fn wait_for_event_names(run_dir: &Path, expected: &[&str]) {
+fn wait_for_stream_item(run_dir: &Path, what: &str, matches: impl Fn(&RunStreamItem) -> bool) {
     let deadline = std::time::Instant::now() + command_timeout();
-
     loop {
-        let event_names = run_events(run_dir)
-            .into_iter()
-            .map(|event| event.event.event_name().to_string())
-            .collect::<Vec<_>>();
-
-        if expected
-            .iter()
-            .all(|expected_name| event_names.iter().any(|name| name == expected_name))
-        {
+        if run_stream_items(run_dir).iter().any(&matches) {
             return;
         }
-
         assert!(
             std::time::Instant::now() < deadline,
-            "timed out waiting for events {expected:?}; saw {event_names:?}"
+            "timed out waiting for {what} in {}",
+            run_dir.display()
         );
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
-async fn seed_dry_run(context: &TestContext, state: SeededRunState) -> RunSetup {
-    let run = create_seeded_run(
+/// A created, unstarted dry run of the fast simple workflow.
+async fn seed_dry_run(context: &TestContext) -> RunSetup {
+    create_seeded_run(
         context,
         "simple.fabro",
         fast_simple_workflow_source(),
@@ -951,112 +990,40 @@ async fn seed_dry_run(context: &TestContext, state: SeededRunState) -> RunSetup 
         },
         false,
     )
-    .await;
-
-    if matches!(state, SeededRunState::Completed) {
-        let (client, base_url) = server_endpoint(&context.storage_dir)
-            .expect("test server endpoint should be available for seeded run events");
-        append_seeded_simple_completion_events(&client, &base_url, &run, context).await;
-    }
-
-    run
+    .await
 }
 
-async fn seed_git_backed_changed_run(context: &TestContext) -> SeededGitRunSetup {
-    let step_one_sha = "2222222222222222222222222222222222222222";
-    let step_two_sha = "3333333333333333333333333333333333333333";
-    let run = create_seeded_run(
-        context,
-        "flow.fabro",
-        changed_git_workflow_source(),
-        RunIntentArgs {
-            provider: Some("openai".to_string()),
-            labels: test_label_map(context),
-            ..Default::default()
-        },
-        true,
-    )
-    .await;
-
-    let base_sha = run_git(&context.temp_dir, &["rev-parse", "HEAD"]);
-    let base_sha = base_sha.trim();
-    let (client, base_url) = server_endpoint(&context.storage_dir)
-        .expect("test server endpoint should be available for seeded run events");
-    append_seeded_git_completion_events(
-        &client,
-        &base_url,
-        &run,
-        context,
-        base_sha,
-        step_one_sha,
-        step_two_sha,
-    )
-    .await;
-
-    SeededGitRunSetup {
-        run,
-        step_one_sha: step_one_sha.to_string(),
-    }
-}
-
-async fn seed_git_backed_noop_run(context: &TestContext) -> RunSetup {
-    let run = create_seeded_run(
-        context,
-        "flow.fabro",
-        noop_git_workflow_source(),
-        RunIntentArgs {
-            provider: Some("openai".to_string()),
-            labels: test_label_map(context),
-            ..Default::default()
-        },
-        true,
-    )
-    .await;
-
-    let base_sha = run_git(&context.temp_dir, &["rev-parse", "HEAD"]);
-    let base_sha = base_sha.trim();
-    let (client, base_url) = server_endpoint(&context.storage_dir)
-        .expect("test server endpoint should be available for seeded run events");
-    append_seeded_git_noop_events(&client, &base_url, &run, context, base_sha).await;
-    run
-}
-
-async fn seed_artifact_run(context: &TestContext) -> RunSetup {
-    let run = create_seeded_run(
-        context,
-        "artifact_run.fabro",
-        artifact_workflow_source(),
-        RunIntentArgs {
-            labels: test_label_map(context),
-            ..Default::default()
-        },
-        false,
-    )
-    .await;
+/// A completed dry run of the artifact workflow, with artifacts uploaded
+/// for its stages through the API.
+fn seed_artifact_run(context: &TestContext) -> RunSetup {
+    let workflow = context.temp_dir.join("artifact_run.fabro");
+    write_text_file(&workflow, artifact_workflow_source());
+    let run = run_completed_dry_run(context, &workflow);
 
     let (client, base_url) = server_endpoint(&context.storage_dir)
         .expect("test server endpoint should be available for seeded artifacts");
-    append_seeded_artifact_run_events(&client, &base_url, &run, context).await;
-    for (stage_id, retry, path, contents) in [
-        ("create_assets@1", 1, "assets/node_a/summary.txt", "alpha"),
-        ("create_assets@1", 1, "assets/shared/report.txt", "one"),
-        ("create_assets@2", 1, "assets/shared/report.txt", "two"),
-        ("create_colliding@1", 1, "assets/other/summary.txt", "beta"),
-        ("create_colliding@1", 1, "assets/retry/report.txt", "second"),
-        ("retry_assets@1", 1, "assets/retry/report.txt", "first"),
-        ("retry_assets@1", 2, "assets/retry/report.txt", "second"),
-    ] {
-        upload_seeded_artifact(
-            &client,
-            &base_url,
-            &run.run_id,
-            stage_id,
-            retry,
-            path,
-            contents,
-        )
-        .await;
-    }
+    block_on(async {
+        for (stage_id, retry, path, contents) in [
+            ("create_assets@1", 1, "assets/node_a/summary.txt", "alpha"),
+            ("create_assets@1", 1, "assets/shared/report.txt", "one"),
+            ("create_assets@2", 1, "assets/shared/report.txt", "two"),
+            ("create_colliding@1", 1, "assets/other/summary.txt", "beta"),
+            ("create_colliding@1", 1, "assets/retry/report.txt", "second"),
+            ("retry_assets@1", 1, "assets/retry/report.txt", "first"),
+            ("retry_assets@1", 2, "assets/retry/report.txt", "second"),
+        ] {
+            upload_seeded_artifact(
+                &client,
+                &base_url,
+                &run.run_id,
+                stage_id,
+                retry,
+                path,
+                contents,
+            )
+            .await;
+        }
+    });
 
     run
 }
@@ -1119,459 +1086,6 @@ async fn create_seeded_run(
     }
 }
 
-async fn append_seeded_simple_completion_events(
-    client: &fabro_http::HttpClient,
-    base_url: &str,
-    run: &RunSetup,
-    context: &TestContext,
-) {
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "sandbox.ready",
-        serde_json::json!({
-            "provider": "local",
-            "duration_ms": 1,
-            "name": null,
-            "cpu": null,
-            "memory": null,
-            "url": null,
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "sandbox.initialized",
-        serde_json::json!({
-            "working_directory": context.temp_dir.display().to_string(),
-            "provider": "local",
-            "id": fabro_sandbox::test_support::local_sandbox_id(&context.temp_dir).await,
-            "repo_cloned": false,
-            "clone_origin_url": null,
-            "clone_branch": null,
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.started",
-        serde_json::json!({
-            "name": "Simple",
-            "base_branch": null,
-            "base_sha": null,
-            "run_branch": null,
-            "worktree_dir": null,
-            "goal": "Run tests and report results",
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.runnable",
-        serde_json::json!({ "source": "start_requested" }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.starting",
-        serde_json::json!({}),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.running",
-        serde_json::json!({}),
-    )
-    .await;
-
-    append_seeded_stage(client, base_url, &run.run_id, "start", "Start", 0, None).await;
-    append_seeded_edge(client, base_url, &run.run_id, "start", "run_tests").await;
-    append_seeded_stage(
-        client,
-        base_url,
-        &run.run_id,
-        "run_tests",
-        "Run Tests",
-        1,
-        Some("Dry run: would execute `true`."),
-    )
-    .await;
-    append_seeded_edge(client, base_url, &run.run_id, "run_tests", "report").await;
-    append_seeded_stage(
-        client,
-        base_url,
-        &run.run_id,
-        "report",
-        "Report",
-        2,
-        Some("Dry run: would execute `true`."),
-    )
-    .await;
-    append_seeded_edge(client, base_url, &run.run_id, "report", "exit").await;
-    append_seeded_stage(client, base_url, &run.run_id, "exit", "Exit", 3, None).await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        Some("report"),
-        "checkpoint.completed",
-        checkpoint_properties(
-            "success",
-            "report",
-            &["start", "run_tests", "report"],
-            Some("exit"),
-            None,
-            None,
-        ),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.completed",
-        serde_json::json!({
-            "timing": {"wall_time_ms": 123, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
-            "artifact_count": 0,
-            "status": "succeeded",
-            "reason": "completed",
-            "final_git_commit_sha": null,
-            "final_patch": null,
-            "usage": null,
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "sandbox.stop.started",
-        serde_json::json!({
-            "provider": "local",
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "sandbox.stop.completed",
-        serde_json::json!({
-            "provider": "local",
-            "duration_ms": 1,
-        }),
-    )
-    .await;
-}
-
-async fn append_seeded_git_completion_events(
-    client: &fabro_http::HttpClient,
-    base_url: &str,
-    run: &RunSetup,
-    context: &TestContext,
-    base_sha: &str,
-    step_one_sha: &str,
-    step_two_sha: &str,
-) {
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "sandbox.ready",
-        serde_json::json!({
-            "provider": "local",
-            "duration_ms": 1,
-            "name": null,
-            "cpu": null,
-            "memory": null,
-            "url": null,
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "sandbox.initialized",
-        serde_json::json!({
-            "working_directory": context.temp_dir.display().to_string(),
-            "provider": "local",
-            "id": fabro_sandbox::test_support::local_sandbox_id(&context.temp_dir).await,
-            "repo_cloned": false,
-            "clone_origin_url": null,
-            "clone_branch": null,
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.started",
-        serde_json::json!({
-            "name": "Flow",
-            "base_branch": "main",
-            "base_sha": base_sha,
-            "run_branch": format!("fabro/run/{}", run.run_id),
-            "worktree_dir": context.temp_dir.display().to_string(),
-            "goal": "Edit a tracked file",
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.runnable",
-        serde_json::json!({ "source": "start_requested" }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.starting",
-        serde_json::json!({}),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.running",
-        serde_json::json!({}),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        Some("start"),
-        "checkpoint.completed",
-        checkpoint_properties(
-            "succeeded",
-            "start",
-            &["start"],
-            Some("step_one"),
-            None,
-            None,
-        ),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        Some("step_one"),
-        "checkpoint.completed",
-        checkpoint_properties(
-            "success",
-            "step_one",
-            &["start", "step_one"],
-            Some("step_two"),
-            Some(step_one_sha),
-            Some(step_one_patch()),
-        ),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        Some("step_two"),
-        "checkpoint.completed",
-        checkpoint_properties(
-            "success",
-            "step_two",
-            &["start", "step_one", "step_two"],
-            Some("exit"),
-            Some(step_two_sha),
-            Some(step_two_patch()),
-        ),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.completed",
-        serde_json::json!({
-            "timing": {"wall_time_ms": 456, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
-            "artifact_count": 0,
-            "status": "succeeded",
-            "reason": "completed",
-            "final_git_commit_sha": step_two_sha,
-            "final_patch": final_story_patch(),
-            "usage": null,
-        }),
-    )
-    .await;
-}
-
-async fn append_seeded_git_noop_events(
-    client: &fabro_http::HttpClient,
-    base_url: &str,
-    run: &RunSetup,
-    context: &TestContext,
-    base_sha: &str,
-) {
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.started",
-        serde_json::json!({
-            "name": "Flow",
-            "base_branch": "main",
-            "base_sha": base_sha,
-            "run_branch": format!("fabro/run/{}", run.run_id),
-            "worktree_dir": context.temp_dir.display().to_string(),
-            "goal": "Leave tracked files unchanged",
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.runnable",
-        serde_json::json!({ "source": "start_requested" }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.starting",
-        serde_json::json!({}),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.running",
-        serde_json::json!({}),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.completed",
-        serde_json::json!({
-            "timing": {"wall_time_ms": 123, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
-            "artifact_count": 0,
-            "status": "succeeded",
-            "reason": "completed",
-            "final_git_commit_sha": base_sha,
-            "final_patch": null,
-            "usage": null,
-        }),
-    )
-    .await;
-}
-
-async fn append_seeded_artifact_run_events(
-    client: &fabro_http::HttpClient,
-    base_url: &str,
-    run: &RunSetup,
-    context: &TestContext,
-) {
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.started",
-        serde_json::json!({
-            "name": "ArtifactRun",
-            "base_branch": null,
-            "base_sha": null,
-            "run_branch": null,
-            "worktree_dir": context.temp_dir.display().to_string(),
-            "goal": "Exercise artifact commands",
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.runnable",
-        serde_json::json!({ "source": "start_requested" }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.starting",
-        serde_json::json!({}),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.running",
-        serde_json::json!({}),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        &run.run_id,
-        None,
-        "run.completed",
-        serde_json::json!({
-            "timing": {"wall_time_ms": 123, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
-            "artifact_count": 7,
-            "status": "succeeded",
-            "reason": "completed",
-            "final_git_commit_sha": null,
-            "final_patch": null,
-            "usage": null,
-        }),
-    )
-    .await;
-}
-
 async fn upload_seeded_artifact(
     client: &fabro_http::HttpClient,
     base_url: &str,
@@ -1598,109 +1112,6 @@ async fn upload_seeded_artifact(
     .await;
 }
 
-async fn append_seeded_stage(
-    client: &fabro_http::HttpClient,
-    base_url: &str,
-    run_id: &str,
-    node_id: &str,
-    name: &str,
-    index: usize,
-    response: Option<&str>,
-) {
-    append_run_event(
-        client,
-        base_url,
-        run_id,
-        Some(node_id),
-        "stage.started",
-        serde_json::json!({
-            "index": index,
-            "handler_type": "noop",
-            "attempt": 1,
-            "max_attempts": 1,
-        }),
-    )
-    .await;
-    append_run_event(
-        client,
-        base_url,
-        run_id,
-        Some(node_id),
-        "stage.completed",
-        stage_completed_properties(index, response),
-    )
-    .await;
-
-    let _ = name;
-}
-
-async fn append_seeded_edge(
-    client: &fabro_http::HttpClient,
-    base_url: &str,
-    run_id: &str,
-    from_node: &str,
-    to_node: &str,
-) {
-    append_run_event(
-        client,
-        base_url,
-        run_id,
-        Some(from_node),
-        "edge.selected",
-        serde_json::json!({
-            "from_node": from_node,
-            "to_node": to_node,
-            "label": null,
-            "condition": null,
-            "reason": "unconditional",
-            "preferred_label": null,
-            "suggested_next_ids": [],
-            "stage_status": "succeeded",
-            "is_jump": false,
-        }),
-    )
-    .await;
-}
-
-async fn append_run_event(
-    client: &fabro_http::HttpClient,
-    base_url: &str,
-    run_id: &str,
-    node_id: Option<&str>,
-    event_name: &str,
-    properties: serde_json::Value,
-) {
-    let event_id = NEXT_SEEDED_EVENT_ID.fetch_add(1, Ordering::Relaxed);
-    let mut event = serde_json::json!({
-        "id": format!("00000000-0000-0000-0000-{event_id:012x}"),
-        "ts": chrono::Utc::now().to_rfc3339(),
-        "run_id": run_id,
-        "event": event_name,
-        "properties": properties,
-        "actor": {
-            "kind": "worker",
-            "run_id": run_id,
-        },
-    });
-    if let Some(node_id) = node_id {
-        event["node_id"] = serde_json::Value::String(node_id.to_string());
-        event["node_label"] = serde_json::Value::String(node_label(node_id).to_string());
-    }
-
-    let response = client
-        .post(format!("{base_url}/api/v1/runs/{run_id}/events"))
-        .json(&event)
-        .send()
-        .await
-        .unwrap_or_else(|err| panic!("append seeded event {event_name} should execute: {err}"));
-    expect_reqwest_status(
-        response,
-        fabro_http::StatusCode::OK,
-        format!("POST /api/v1/runs/{run_id}/events ({event_name})"),
-    )
-    .await;
-}
-
 fn test_label_map(context: &TestContext) -> std::collections::HashMap<String, String> {
     test_labels(context)
         .into_iter()
@@ -1715,67 +1126,6 @@ fn test_label_map(context: &TestContext) -> std::collections::HashMap<String, St
 
 fn test_labels(context: &TestContext) -> Vec<String> {
     vec![context.test_run_label(), context.test_case_label()]
-}
-
-fn stage_completed_properties(index: usize, response: Option<&str>) -> serde_json::Value {
-    serde_json::json!({
-        "index": index,
-        "timing": {"wall_time_ms": 1, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
-        "status": "succeeded",
-        "preferred_label": null,
-        "suggested_next_ids": [],
-        "usage": null,
-        "failure": null,
-        "notes": null,
-        "files_touched": [],
-        "context_updates": null,
-        "jump_to_node": null,
-        "context_values": null,
-        "node_visits": null,
-        "loop_failure_signatures": null,
-        "restart_failure_signatures": null,
-        "response": response,
-        "attempt": 1,
-        "max_attempts": 1,
-    })
-}
-
-fn checkpoint_properties(
-    status: &str,
-    current_node: &str,
-    completed_nodes: &[&str],
-    next_node_id: Option<&str>,
-    git_commit_sha: Option<&str>,
-    diff: Option<&str>,
-) -> serde_json::Value {
-    serde_json::json!({
-        "status": status,
-        "current_node": current_node,
-        "completed_nodes": completed_nodes,
-        "node_retries": {},
-        "context_values": {},
-        "node_outcomes": {},
-        "next_node_id": next_node_id,
-        "git_commit_sha": git_commit_sha,
-        "loop_failure_signatures": {},
-        "restart_failure_signatures": {},
-        "node_visits": {
-            (current_node): 1,
-        },
-        "diff": diff,
-    })
-}
-
-fn node_label(node_id: &str) -> &str {
-    match node_id {
-        "start" => "Start",
-        "run_tests" => "Run Tests",
-        "report" => "Report",
-        "exit" => "Exit",
-        "step_one" => "step_one",
-        "step_two" => "step_two",
-        other => other,
-    }
 }
 
 fn fast_simple_workflow_source() -> &'static str {
@@ -1794,29 +1144,6 @@ fn fast_simple_workflow_source() -> &'static str {
 "#
 }
 
-fn changed_git_workflow_source() -> &'static str {
-    r#"digraph Flow {
-  graph [goal="Edit a tracked file"];
-  start [shape=Mdiamond];
-  exit [shape=Msquare];
-  step_one [shape=parallelogram, script="printf 'line 1\nline 2\n' > story.txt"];
-  step_two [shape=parallelogram, script="printf 'line 1\nline 2\nline 3\n' > story.txt"];
-  start -> step_one -> step_two -> exit;
-}
-"#
-}
-
-fn noop_git_workflow_source() -> &'static str {
-    r#"digraph Flow {
-  graph [goal="Leave tracked files unchanged"];
-  start [shape=Mdiamond];
-  exit [shape=Msquare];
-  check [shape=parallelogram, script="test -f story.txt"];
-  start -> check -> exit;
-}
-"#
-}
-
 fn artifact_workflow_source() -> &'static str {
     r#"digraph ArtifactRun {
   graph [goal="Exercise artifact commands", default_max_retries=0]
@@ -1828,18 +1155,6 @@ fn artifact_workflow_source() -> &'static str {
   start -> create_assets -> retry_assets -> create_colliding -> exit
 }
 "#
-}
-
-fn step_one_patch() -> &'static str {
-    "diff --git a/story.txt b/story.txt\nindex 1111111..2222222 100644\n--- a/story.txt\n+++ b/story.txt\n@@ -1 +1,2 @@\n line 1\n+line 2\n"
-}
-
-fn step_two_patch() -> &'static str {
-    "diff --git a/story.txt b/story.txt\nindex 2222222..3333333 100644\n--- a/story.txt\n+++ b/story.txt\n@@ -1,2 +1,3 @@\n line 1\n line 2\n+line 3\n"
-}
-
-fn final_story_patch() -> &'static str {
-    "diff --git a/story.txt b/story.txt\nindex 1111111..3333333 100644\n--- a/story.txt\n+++ b/story.txt\n@@ -1 +1,3 @@\n line 1\n+line 2\n+line 3\n"
 }
 
 pub(crate) fn text_tree(root: &Path) -> Vec<String> {
@@ -1931,70 +1246,6 @@ pub(crate) fn compact_inspect(output: &Output) -> Value {
                     "sandbox": sandbox.as_object().map(|_| {
                         serde_json::json!({
                             "provider": compact_sandbox_provider(&sandbox),
-                        })
-                    }),
-                })
-            })
-            .collect(),
-    )
-}
-
-pub(crate) fn compact_git_inspect(output: &Output) -> Value {
-    let items: Vec<Value> =
-        serde_json::from_str(&stdout(output)).expect("inspect output should be valid JSON");
-    Value::Array(
-        items.into_iter()
-            .map(|item| {
-                let run_spec = item["run_spec"].clone();
-                let start_record = item["start_record"].clone();
-                let checkpoint = item["checkpoint"].clone();
-                let conclusion = item["conclusion"].clone();
-                let sandbox = item["sandbox"].clone();
-                serde_json::json!({
-                    "run_id": "[ULID]",
-                    "status": item["status"],
-                    "run_spec": {
-                        "goal": run_spec.pointer("/settings/run/goal"),
-                        "workflow_name": run_spec.pointer("/graph/name"),
-                        "workflow_slug": run_spec.pointer("/workflow_slug"),
-                        "llm_provider": run_spec.pointer("/settings/run/model/provider"),
-                        "sandbox_provider": run_spec.pointer("/settings/run/sandbox/provider"),
-                        "provenance": run_spec.pointer("/provenance").as_ref().map(|_| {
-                            serde_json::json!({
-                                "server_version": "[VERSION]",
-                                "client_name": run_spec.pointer("/provenance/client/name"),
-                                "client_version": "[VERSION]",
-                                "subject_auth_method": run_spec.pointer("/provenance/subject/auth_method"),
-                            })
-                        }),
-                    },
-                    "start_record": start_record.as_object().map(|_| {
-                        serde_json::json!({
-                            "has_start_time": true,
-                            "run_branch": "fabro/run/[ULID]",
-                            "base_sha": "[SHA]",
-                        })
-                    }),
-                    "conclusion": conclusion.as_object().map(|_| {
-                        serde_json::json!({
-                            "status": conclusion["status"],
-                            "timing": "[TIMING]",
-                            "final_git_commit_sha": "[SHA]",
-                            "stage_count": conclusion["stages"].as_array().map(|stages| stages.len()),
-                        })
-                    }),
-                    "checkpoint": checkpoint.as_object().map(|_| {
-                        serde_json::json!({
-                            "current_node": checkpoint["current_node"],
-                            "completed_nodes": checkpoint["completed_nodes"],
-                            "next_node_id": checkpoint["next_node_id"],
-                            "git_commit_sha": "[SHA]",
-                        })
-                    }),
-                    "sandbox": sandbox.as_object().map(|_| {
-                        serde_json::json!({
-                            "provider": compact_sandbox_provider(&sandbox),
-                            "working_directory": "[WORKTREE]",
                         })
                     }),
                 })

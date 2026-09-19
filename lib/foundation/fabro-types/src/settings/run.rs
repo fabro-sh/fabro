@@ -954,7 +954,7 @@ impl RunPrepareSettings {
     ///
     /// A missing or non-token secret is a hard error. Unsupported `env` and
     /// template-only `inputs` tokens surface as
-    /// [`ResolveErrorKind::Unavailable`] errors.
+    /// [`ResolveErrorKind::Unavailable`](super::interp::ResolveErrorKind::Unavailable) errors.
     pub fn resolve_step_secrets(
         &self,
         mut secrets_lookup: impl FnMut(&str) -> Option<String>,
@@ -1778,7 +1778,7 @@ impl McpServerSettings {
     /// Unsupported tokens fail instead of reaching the transport.
     ///
     /// This is the late, use-time half of MCP interpolation, the counterpart
-    /// to [`substitute_mcp_transport`]: `{{ vars.* }}` are substituted
+    /// to `substitute_mcp_transport`: `{{ vars.* }}` are substituted
     /// earlier, server-side, while `{{ secrets.* }}` resolves in whichever
     /// process actually launches the server (the run worker for `fabro run`,
     /// the CLI process for `fabro exec`). Carrying the source form out of the
@@ -1786,7 +1786,7 @@ impl McpServerSettings {
     ///
     /// A missing or non-token secret is a hard error. Unsupported `env` and
     /// template-only `inputs` tokens surface as
-    /// [`ResolveErrorKind::Unavailable`] errors.
+    /// [`ResolveErrorKind::Unavailable`](super::interp::ResolveErrorKind::Unavailable) errors.
     pub fn resolve_transport_secrets(
         &self,
         mut secrets_lookup: impl FnMut(&str) -> Option<String>,

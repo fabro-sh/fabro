@@ -12,16 +12,15 @@ use std::process::{Child, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use fabro_client::ServerTarget;
-use fabro_store::EventEnvelope;
 use fabro_test::{
     assert_reqwest_status, expect_reqwest_json, fabro_json_snapshot, fabro_snapshot, test_context,
 };
-use fabro_types::{EventBody, FailureReason, RunEvent, StageId};
+use fabro_types::{FailureReason, RunStreamItem, StageId};
 use httpmock::MockServer;
 
 use super::support::{
-    command_log_text, created_run_id, find_run_dir, local_dev_token, output_stderr, run_events,
-    run_state, server_endpoint, server_target, wait_for_event_names, wait_for_status,
+    command_log_text, created_run_id, find_run_dir, local_dev_token, output_stderr, run_state,
+    run_stream_items, server_endpoint, server_target, wait_for_lifecycle, wait_for_status,
     write_gated_workflow,
 };
 use crate::support::{issue_test_worker_jwt, seed_dev_token_auth, unique_run_id};
@@ -36,12 +35,24 @@ fn auth_context() -> fabro_test::TestContext {
     context
 }
 
-fn stored_worker_events(run_dir: &std::path::Path) -> Vec<RunEvent> {
-    run_events(run_dir).iter().map(run_event).collect()
+fn stored_worker_events(run_dir: &std::path::Path) -> Vec<RunStreamItem> {
+    run_stream_items(run_dir)
 }
 
-fn run_event(event: &EventEnvelope) -> RunEvent {
-    event.event.clone()
+/// The platform record of `item`, when it carries one.
+fn platform_record(item: &RunStreamItem) -> Option<&serde_json::Value> {
+    item.item.get("record")
+}
+
+/// Whether `item` is the `run.lifecycle` record that moved the run to
+/// `status` (`succeeded`, `failed`, ...) for `reason`.
+fn is_lifecycle(item: &RunStreamItem, status: &str, reason: &str) -> bool {
+    let Some(record) = platform_record(item) else {
+        return false;
+    };
+    record["kind"] == "run.lifecycle"
+        && record["status"]["kind"] == status
+        && record["status"]["reason"] == reason
 }
 
 fn assert_worker_succeeded(run_dir: &std::path::Path, stdout: &[u8]) {
@@ -50,10 +61,11 @@ fn assert_worker_succeeded(run_dir: &std::path::Path, stdout: &[u8]) {
         "worker should not emit event transport on stdout"
     );
     let events = stored_worker_events(run_dir);
-    assert!(events.iter().any(|event| matches!(
-        &event.body,
-        EventBody::RunCompleted(props) if props.status == "succeeded"
-    )));
+    assert!(
+        events
+            .iter()
+            .any(|item| is_lifecycle(item, "succeeded", "completed"))
+    );
 }
 
 fn spawn_worker_process(
@@ -513,7 +525,7 @@ methods = ["dev-token"]
         std::fs::read_to_string(storage_dir.join("logs/server.log")).unwrap_or_default();
     assert_no_worker_env_leak("server log", &server_log);
     assert!(
-        server_log.contains("Workflow run started"),
+        server_log.contains("Petri worker starting"),
         "main server log should include worker tracing, got:\n{server_log}"
     );
     assert!(
@@ -529,7 +541,7 @@ methods = ["dev-token"]
     );
     let run_log = std::fs::read_to_string(&run_log_path).expect("run log should be readable");
     assert!(
-        run_log.contains("Workflow run started"),
+        run_log.contains("Petri worker starting"),
         "per-run log should include worker tracing, got:\n{run_log}"
     );
     assert!(
@@ -749,11 +761,12 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
             .expect("question id should be present")
             .to_string();
 
-        assert_eq!(question["stage"], "approve");
+        assert_eq!(question["stage"], "approve@1");
 
         let response = client
             .post(format!(
-                "{base_url}/api/v1/runs/{run_id}/questions/{question_id}/answer"
+                "{base_url}/api/v1/runs/{run_id}/questions/{}/answer",
+                question_id.replace('#', "%23")
             ))
             .json(&serde_json::json!({ "kind": "selected", "option_key": "A" }))
             .send()
@@ -777,11 +790,13 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
         .success();
 
     let events = stored_worker_events(&run_dir);
-    assert!(events.iter().any(|event| matches!(
-        &event.body,
-        EventBody::InterviewCompleted(props)
-            if props.question_id == question_id && props.answer == "A"
-    )));
+    assert!(events.iter().any(|item| {
+        platform_record(item).is_some_and(|record| {
+            record["kind"] == "interview.answered"
+                && record["question"] == question_id
+                && record["answer"] == "A"
+        })
+    }));
 }
 
 #[test]
@@ -815,7 +830,7 @@ fn detached_run_cancel_reaches_worker_over_control_websocket() {
     let run_id = created_run_id(&output);
 
     let run_dir = context.find_run_dir(&run_id);
-    wait_for_event_names(&run_dir, &["run.running"]);
+    wait_for_lifecycle(&run_dir, "running");
     tokio::runtime::Runtime::new()
         .expect("test runtime should build")
         .block_on(async {
@@ -836,10 +851,11 @@ fn detached_run_cancel_reaches_worker_over_control_websocket() {
 
     wait_for_status(&run_dir, &["failed"]);
     let events = stored_worker_events(&run_dir);
-    assert!(events.iter().any(|event| matches!(
-        &event.body,
-        EventBody::RunFailed(props) if props.failure.reason == FailureReason::Cancelled
-    )));
+    assert!(
+        events
+            .iter()
+            .any(|item| is_lifecycle(item, "failed", "cancelled"))
+    );
 }
 
 #[cfg(unix)]
@@ -867,7 +883,7 @@ fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
     let mut child = spawn_worker_process(&context, &server, &run_dir, &run_id, "start");
     let stdin = child.stdin.take().expect("worker stdin should be piped");
 
-    wait_for_event_names(&run_dir, &["run.running"]);
+    wait_for_lifecycle(&run_dir, "running");
     let worker_pid = child.id();
     assert!(worker_pid > 0, "worker pid should be present");
     fabro_proc::sigterm(worker_pid);

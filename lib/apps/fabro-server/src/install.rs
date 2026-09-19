@@ -1270,32 +1270,26 @@ async fn validate_install_object_store_selection(
         Some(&build_options),
     )?;
 
-    let probe_prefix = |index: usize, prefix: &'static str| {
-        let object_store = &object_store;
-        async move {
-            let path = ObjectStorePath::from(prefix);
-            object_store
-                .list_with_delimiter(Some(&path))
-                .await
-                .map(|_| ())
-                .map_err(|err| (index, err))
-        }
-    };
+    // The bucket answers for the one prefix Fabro keeps objects under.
     let probe = async {
-        tokio::try_join!(probe_prefix(0, "artifacts"), probe_prefix(1, "slatedb")).map(|_| ())
+        let path = ObjectStorePath::from("artifacts");
+        object_store
+            .list_with_delimiter(Some(&path))
+            .await
+            .map(|_| ())
     };
 
     match timeout(VALIDATION_TIMEOUT, probe).await {
         Ok(Ok(())) => Ok(()),
         Err(_) => bail!(VALIDATION_TIMEOUT_MSG),
-        Ok(Err((index, err))) => bail!(
+        Ok(Err(err)) => bail!(
             "{}",
-            classify_object_store_validation_error(bucket, region, index, &err)
+            classify_object_store_validation_error(bucket, region, &err)
         ),
     }
 }
 
-const PREFIX_ACCESS_ERROR_MSG: &str = "Fabro reached the bucket but could not verify access to slatedb/ and artifacts/. Validation requires bucket list access plus object access under both prefixes.";
+const PREFIX_ACCESS_ERROR_MSG: &str = "Fabro reached the bucket but could not verify access to artifacts/. Validation requires bucket list access plus object access under that prefix.";
 const VALIDATION_TIMEOUT_MSG: &str = "Timed out while checking S3 access. Verify the bucket, region, and network path, then try again.";
 
 fn bucket_credentials_error(bucket: &str, region: &str) -> String {
@@ -1305,16 +1299,9 @@ fn bucket_credentials_error(bucket: &str, region: &str) -> String {
 fn classify_object_store_validation_error(
     bucket: &str,
     region: &str,
-    prefix_index: usize,
     err: &object_store::Error,
 ) -> String {
-    let credentials_or_prefix_error = || {
-        if prefix_index == 0 {
-            bucket_credentials_error(bucket, region)
-        } else {
-            PREFIX_ACCESS_ERROR_MSG.to_string()
-        }
-    };
+    let credentials_or_prefix_error = || bucket_credentials_error(bucket, region);
     match err {
         object_store::Error::PermissionDenied { .. }
         | object_store::Error::Unauthenticated { .. } => credentials_or_prefix_error(),
@@ -2745,7 +2732,7 @@ AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/fabro-web-identity-token\n",
         };
 
         assert_eq!(
-            classify_object_store_validation_error("fabro-data", "us-east-1", 0, &err),
+            classify_object_store_validation_error("fabro-data", "us-east-1", &err),
             "Bucket fabro-data is not reachable in region us-east-1. Verify the AWS region and try again."
         );
     }

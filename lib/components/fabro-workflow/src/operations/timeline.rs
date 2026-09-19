@@ -1,14 +1,18 @@
-use std::collections::HashMap;
+//! The checkpoint timeline of a run: every checkpoint Fabro recorded, at
+//! its Petri position, with the commit it made and the stage it belongs
+//! to, and the targets a fork names one of them by.
+
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use anyhow::{Context, Result, bail};
-use fabro_graphviz::graph::Graph;
-use fabro_graphviz::parser;
-use fabro_store::{Database, RunProjection};
-use fabro_types::RunId;
+use fabro_store::platform_records::{CheckpointRecord, DecisionRef};
+use fabro_store::{PlatformRecord, StoredPlatformRecord};
+use fabro_types::DiffSummary;
 
 use crate::error::Error;
 
+/// How a caller names a checkpoint: by ordinal (`@2`), by the latest visit
+/// of a node (`build`), or by one visit of it (`build@1`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForkTarget {
     Ordinal(usize),
@@ -17,350 +21,307 @@ pub enum ForkTarget {
 }
 
 impl FromStr for ForkTarget {
-    type Err = anyhow::Error;
+    type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self> {
+    fn from_str(s: &str) -> Result<Self, Error> {
         if let Some(rest) = s.strip_prefix('@') {
             let n: usize = rest
                 .parse()
-                .with_context(|| format!("invalid ordinal: @{rest}"))?;
+                .map_err(|_| Error::Validation(format!("invalid ordinal: @{rest}")))?;
             if n == 0 {
-                bail!("ordinal must be >= 1");
+                return Err(Error::Validation("ordinal must be >= 1".to_string()));
             }
             return Ok(Self::Ordinal(n));
         }
-        if let Some(at_pos) = s.rfind('@') {
-            let name = &s[..at_pos];
-            let visit_str = &s[at_pos + 1..];
-            if !name.is_empty() && !visit_str.is_empty() {
-                if let Ok(visit) = visit_str.parse::<usize>() {
+        if let Some((name, visit)) = s.rsplit_once('@') {
+            if !name.is_empty() && !visit.is_empty() {
+                if let Ok(visit) = visit.parse::<usize>() {
                     if visit == 0 {
-                        bail!("visit number must be >= 1");
+                        return Err(Error::Validation("visit number must be >= 1".to_string()));
                     }
                     return Ok(Self::SpecificVisit(name.to_string(), visit));
                 }
             }
         }
+        if s.trim().is_empty() {
+            return Err(Error::Validation("a target names a checkpoint".to_string()));
+        }
         Ok(Self::LatestVisit(s.to_string()))
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TimelineEntry {
-    pub ordinal:        usize,
-    pub node_name:      String,
-    pub visit:          usize,
-    pub checkpoint_seq: u32,
-    pub run_commit_sha: Option<String>,
+/// A stage as the run's projection labels it, by its Petri position: what
+/// the timeline shows beside a checkpoint and what a target such as
+/// `build@2` resolves through.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StageLabel {
+    /// The stage id (`node@visit`) when the projection shows the stage.
+    pub stage_id:  Option<String>,
+    pub node_name: String,
+    pub visit:     u32,
 }
 
-#[derive(Debug, Clone)]
+/// The stages of a run by `(execution, firing)`.
+pub type StageLabels = BTreeMap<(u64, u64), StageLabel>;
+
+/// The Petri position of a checkpoint: the attempt whose files it holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimelinePosition {
+    pub execution: u64,
+    pub firing:    u64,
+    pub attempt:   u32,
+}
+
+/// One checkpoint of the run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TimelineEntry {
+    /// 1-based, in the order the checkpoints were recorded.
+    pub ordinal:        usize,
+    /// The checkpoint record's seq among the run's platform records.
+    pub checkpoint_seq: u64,
+    pub position:       TimelinePosition,
+    /// The stage id (`node@visit`) when the projection shows the stage.
+    pub stage_id:       Option<String>,
+    pub node_name:      String,
+    pub visit:          u32,
+    /// The Petri workspace id the commit was made in.
+    pub workspace:      Option<String>,
+    pub run_commit_sha: Option<String>,
+    pub diff_summary:   Option<DiffSummary>,
+}
+
+/// The run's checkpoints in order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RunTimeline {
-    pub entries:      Vec<TimelineEntry>,
-    pub parallel_map: HashMap<String, String>,
+    pub entries: Vec<TimelineEntry>,
 }
 
 impl RunTimeline {
-    pub fn resolve(&self, target: &ForkTarget) -> Result<&TimelineEntry> {
-        match target {
-            ForkTarget::Ordinal(n) => {
-                self.entries
-                    .iter()
-                    .find(|e| e.ordinal == *n)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("ordinal @{n} out of range (max @{})", self.entries.len())
-                    })
-            }
-            ForkTarget::LatestVisit(name) => {
-                let effective_name = self.parallel_map.get(name).unwrap_or(name);
-                self.entries
-                    .iter()
-                    .rev()
-                    .find(|e| e.node_name == *effective_name)
-                    .ok_or_else(|| {
-                        if effective_name == name {
-                            anyhow::anyhow!("no checkpoint found for node '{name}'")
-                        } else {
-                            anyhow::anyhow!(
-                                "node '{name}' is inside parallel '{effective_name}'; \
-                                 no checkpoint found for '{effective_name}'"
-                            )
-                        }
-                    })
-            }
-            ForkTarget::SpecificVisit(name, visit) => {
-                let effective_name = self.parallel_map.get(name).unwrap_or(name);
-                self.entries
-                    .iter()
-                    .find(|e| e.node_name == *effective_name && e.visit == *visit)
-                    .ok_or_else(|| {
-                        if effective_name == name {
-                            anyhow::anyhow!("no visit {visit} found for node '{name}'")
-                        } else {
-                            anyhow::anyhow!(
-                                "node '{name}' is inside parallel '{effective_name}'; \
-                                 no visit {visit} found for '{effective_name}'"
-                            )
-                        }
-                    })
-            }
-        }
-    }
-}
-
-pub fn build_timeline(state: &RunProjection) -> Result<RunTimeline> {
-    let mut entries = Vec::new();
-    for record in &state.checkpoints {
-        let checkpoint = &record.checkpoint;
-        let ordinal = entries.len() + 1;
-        let visit = checkpoint
-            .node_visits
-            .get(&checkpoint.current_node)
-            .copied()
-            .unwrap_or(1);
-        entries.push(TimelineEntry {
-            ordinal,
-            node_name: checkpoint.current_node.clone(),
-            visit,
-            checkpoint_seq: record.seq,
-            run_commit_sha: checkpoint.git_commit_sha.clone(),
-        });
-    }
-
-    Ok(RunTimeline {
-        entries,
-        parallel_map: load_parallel_map(state),
-    })
-}
-
-pub async fn timeline(store: &Database, run_id: &RunId) -> Result<Vec<TimelineEntry>, Error> {
-    let run = store
-        .open_run(run_id)
-        .await
-        .map_err(|err| Error::engine(err.to_string()))?;
-    let state = run
-        .state()
-        .await
-        .map_err(|err| Error::engine(err.to_string()))?;
-    build_timeline(&state)
-        .map(|timeline| timeline.entries)
-        .map_err(|err| Error::engine(err.to_string()))
-}
-
-fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
-    let mut interior_map = HashMap::new();
-
-    for node in graph.nodes.values() {
-        if node.handler_type() != Some("parallel") {
-            continue;
-        }
-        let parallel_id = &node.id;
-        let mut queue: Vec<String> = graph
-            .outgoing_edges(parallel_id)
-            .iter()
-            .map(|e| e.to.clone())
-            .collect();
-        let mut visited = std::collections::HashSet::new();
-
-        while let Some(current) = queue.pop() {
-            if !visited.insert(current.clone()) {
+    /// The timeline of `checkpoints` (the run's `checkpoint` platform
+    /// records, in seq order), labelled through `labels`.
+    #[must_use]
+    pub fn build(checkpoints: &[StoredPlatformRecord], labels: &StageLabels) -> Self {
+        let mut entries = Vec::new();
+        for stored in checkpoints {
+            let PlatformRecord::Checkpoint(record) = &stored.record else {
                 continue;
-            }
-            if let Some(n) = graph.nodes.get(&current) {
-                if n.handler_type() == Some("parallel.fan_in") {
-                    continue;
-                }
-            }
-            interior_map.insert(current.clone(), parallel_id.clone());
-            for edge in graph.outgoing_edges(&current) {
-                queue.push(edge.to.clone());
-            }
+            };
+            let position = position_of(record);
+            let label = labels.get(&(position.execution, position.firing));
+            entries.push(TimelineEntry {
+                ordinal: entries.len() + 1,
+                checkpoint_seq: stored.seq,
+                position,
+                stage_id: label.and_then(|label| label.stage_id.clone()),
+                node_name: label
+                    .map(|label| label.node_name.clone())
+                    .unwrap_or_default(),
+                visit: label.map_or(1, |label| label.visit),
+                workspace: record.workspace.clone(),
+                run_commit_sha: record.git_commit_sha.clone(),
+                diff_summary: record.diff_summary,
+            });
+        }
+        Self { entries }
+    }
+
+    /// The latest checkpoint, the default target.
+    pub fn latest(&self) -> Result<&TimelineEntry, Error> {
+        self.entries
+            .last()
+            .ok_or_else(|| Error::Validation("the run has no checkpoint to fork at".to_string()))
+    }
+
+    /// The checkpoint `target` names.
+    pub fn resolve(&self, target: &ForkTarget) -> Result<&TimelineEntry, Error> {
+        match target {
+            ForkTarget::Ordinal(n) => self
+                .entries
+                .iter()
+                .find(|entry| entry.ordinal == *n)
+                .ok_or_else(|| {
+                    Error::Validation(format!(
+                        "ordinal @{n} out of range (max @{})",
+                        self.entries.len()
+                    ))
+                }),
+            ForkTarget::LatestVisit(name) => self
+                .entries
+                .iter()
+                .rev()
+                .find(|entry| entry.node_name == *name)
+                .ok_or_else(|| Error::Validation(format!("no checkpoint found for node '{name}'"))),
+            ForkTarget::SpecificVisit(name, visit) => self
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.node_name == *name && usize::try_from(entry.visit) == Ok(*visit)
+                })
+                .ok_or_else(|| {
+                    Error::Validation(format!("no visit {visit} found for node '{name}'"))
+                }),
         }
     }
 
-    interior_map
+    /// The checkpoint `target` names, or the latest one.
+    pub fn resolve_or_latest(&self, target: Option<&ForkTarget>) -> Result<&TimelineEntry, Error> {
+        match target {
+            Some(target) => self.resolve(target),
+            None => self.latest(),
+        }
+    }
 }
 
-fn load_parallel_map(state: &RunProjection) -> HashMap<String, String> {
-    let spec = &state.spec;
-    let map = detect_parallel_interior(&spec.graph);
-    if !map.is_empty() {
-        return map;
+/// The position a checkpoint record names: its operation identity's
+/// attempt, else the attempt it recorded, else the first.
+fn position_of(record: &CheckpointRecord) -> TimelinePosition {
+    let attempt = match record
+        .operation
+        .as_ref()
+        .map(|operation| &operation.decision)
+    {
+        Some(DecisionRef::AttemptStart { attempt, .. } | DecisionRef::Route { attempt, .. }) => {
+            *attempt
+        }
+        Some(DecisionRef::ExecutionStart) | None => record.attempt.unwrap_or(1),
+    };
+    TimelinePosition {
+        execution: record.execution,
+        firing: record.firing,
+        attempt,
     }
-
-    let Some(dot_source) = spec.graph_source.as_ref() else {
-        return HashMap::new();
-    };
-    let Ok(graph) = parser::parse(dot_source) else {
-        return HashMap::new();
-    };
-    detect_parallel_interior(&graph)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use chrono::Utc;
-    use fabro_types::{
-        Checkpoint, CheckpointRecord, Graph, RunDiff, RunSpec, WorkflowSettings, fixtures,
-        test_support,
-    };
+    use fabro_store::platform_records::OperationKey;
 
     use super::*;
 
     fn checkpoint(
-        seq: u32,
-        current_node: &str,
-        visit: usize,
-        git_commit_sha: Option<&str>,
-    ) -> CheckpointRecord {
-        let mut node_visits = HashMap::new();
-        node_visits.insert(current_node.to_string(), visit);
-        let checkpoint = Checkpoint {
-            timestamp: Utc::now(),
-            current_node: current_node.to_string(),
-            completed_nodes: Vec::new(),
-            node_retries: HashMap::new(),
-            context_values: HashMap::new(),
-            node_outcomes: HashMap::new(),
-            next_node_id: None,
-            git_commit_sha: git_commit_sha.map(ToOwned::to_owned),
-            loop_failure_signatures: HashMap::new(),
-            restart_failure_signatures: HashMap::new(),
-            node_visits,
-        };
-        CheckpointRecord {
+        seq: u64,
+        execution: u64,
+        firing: u64,
+        sha: Option<&str>,
+    ) -> StoredPlatformRecord {
+        StoredPlatformRecord {
             seq,
-            checkpoint,
-            diff: RunDiff::default(),
+            recorded_at: seq * 1_000,
+            record: PlatformRecord::Checkpoint(CheckpointRecord {
+                execution,
+                firing,
+                attempt: Some(1),
+                workspace: Some("invocation-0-scope-0".to_string()),
+                git_commit_sha: sha.map(ToOwned::to_owned),
+                diff_summary: None,
+                patch_blob: None,
+                operation: Some(OperationKey {
+                    execution,
+                    decision: DecisionRef::AttemptStart { firing, attempt: 1 },
+                    effect: "checkpoint".to_string(),
+                }),
+            }),
+            position: None,
         }
     }
 
-    fn test_projection() -> RunProjection {
-        RunProjection::new(
-            "Test run".to_string(),
-            RunSpec {
-                run_id:              fixtures::RUN_1,
-                settings:            WorkflowSettings::default(),
-                graph:               Graph::new("test"),
-                graph_source:        None,
-                workflow_slug:       None,
-                workflow_version_id: None,
-                target:              None,
-                automation:          None,
-                source_directory:    None,
-                labels:              HashMap::new(),
-                provenance:          test_support::test_run_provenance(),
-                definition_blob:     None,
-                spec_blob:           None,
-                git:                 None,
-                fork_source_ref:     None,
-            },
-            Utc::now(),
+    fn label(node: &str, visit: u32) -> StageLabel {
+        StageLabel {
+            stage_id: Some(format!("{node}@{visit}")),
+            node_name: node.to_string(),
+            visit,
+        }
+    }
+
+    fn timeline() -> RunTimeline {
+        let labels: StageLabels = [
+            ((0, 1), label("start", 1)),
+            ((0, 2), label("build", 1)),
+            ((0, 3), label("build", 2)),
+        ]
+        .into_iter()
+        .collect();
+        RunTimeline::build(
+            &[
+                checkpoint(7, 0, 1, Some("aaa")),
+                checkpoint(9, 0, 2, Some("bbb")),
+                checkpoint(11, 0, 3, Some("ccc")),
+            ],
+            &labels,
         )
     }
 
     #[test]
-    fn parse_target_ordinal() {
+    fn a_target_parses_as_an_ordinal_a_node_or_a_visit() {
         assert_eq!("@4".parse::<ForkTarget>().unwrap(), ForkTarget::Ordinal(4));
-    }
-
-    #[test]
-    fn parse_target_latest_visit() {
         assert_eq!(
             "step2".parse::<ForkTarget>().unwrap(),
             ForkTarget::LatestVisit("step2".to_string())
         );
+        assert_eq!(
+            "build@2".parse::<ForkTarget>().unwrap(),
+            ForkTarget::SpecificVisit("build".to_string(), 2)
+        );
+        assert!("@0".parse::<ForkTarget>().is_err());
+        assert!("@x".parse::<ForkTarget>().is_err());
     }
 
     #[test]
-    fn build_timeline_simple() {
-        let mut state = test_projection();
-        state.checkpoints = vec![
-            checkpoint(7, "start", 1, Some("aaa")),
-            checkpoint(9, "build", 1, Some("bbb")),
-        ];
-
-        let timeline = build_timeline(&state).unwrap();
-        assert_eq!(timeline.entries.len(), 2);
-        assert_eq!(timeline.entries[0].node_name, "start");
-        assert_eq!(timeline.entries[0].checkpoint_seq, 7);
-        assert_eq!(timeline.entries[1].node_name, "build");
-    }
-
-    #[test]
-    fn resolve_latest_visit() {
-        let timeline = RunTimeline {
-            entries:      vec![
-                TimelineEntry {
-                    ordinal:        1,
-                    node_name:      "start".to_string(),
-                    visit:          1,
-                    checkpoint_seq: 7,
-                    run_commit_sha: Some("aaa".to_string()),
-                },
-                TimelineEntry {
-                    ordinal:        2,
-                    node_name:      "build".to_string(),
-                    visit:          1,
-                    checkpoint_seq: 9,
-                    run_commit_sha: Some("bbb".to_string()),
-                },
-                TimelineEntry {
-                    ordinal:        3,
-                    node_name:      "build".to_string(),
-                    visit:          2,
-                    checkpoint_seq: 11,
-                    run_commit_sha: Some("ccc".to_string()),
-                },
-            ],
-            parallel_map: HashMap::new(),
-        };
-
-        let entry = timeline
-            .resolve(&ForkTarget::LatestVisit("build".to_string()))
-            .unwrap();
-        assert_eq!(entry.ordinal, 3);
-    }
-
-    #[test]
-    fn parallel_interior_detection() {
-        let mut graph = Graph::new("test");
-        let mut parallel_node = fabro_graphviz::graph::Node::new("parallel1");
-        parallel_node.attrs.insert(
-            "shape".to_string(),
-            fabro_graphviz::graph::AttrValue::String("component".to_string()),
-        );
-        graph.nodes.insert("parallel1".to_string(), parallel_node);
-
-        let mut fan_in = fabro_graphviz::graph::Node::new("fan_in1");
-        fan_in.attrs.insert(
-            "shape".to_string(),
-            fabro_graphviz::graph::AttrValue::String("tripleoctagon".to_string()),
-        );
-        graph.nodes.insert("fan_in1".to_string(), fan_in);
-
-        let mut a = fabro_graphviz::graph::Node::new("a");
-        a.attrs.insert(
-            "shape".to_string(),
-            fabro_graphviz::graph::AttrValue::String("box".to_string()),
-        );
-        graph.nodes.insert("a".to_string(), a);
-
-        graph.edges.push(fabro_graphviz::graph::Edge {
-            from:  "parallel1".to_string(),
-            to:    "a".to_string(),
-            attrs: HashMap::new(),
+    fn the_timeline_orders_checkpoints_and_labels_them() {
+        let timeline = timeline();
+        let ordinals: Vec<_> = timeline
+            .entries
+            .iter()
+            .map(|entry| (entry.ordinal, entry.node_name.as_str(), entry.visit))
+            .collect();
+        assert_eq!(ordinals, [
+            (1, "start", 1),
+            (2, "build", 1),
+            (3, "build", 2)
+        ]);
+        assert_eq!(timeline.entries[1].checkpoint_seq, 9);
+        assert_eq!(timeline.entries[1].position, TimelinePosition {
+            execution: 0,
+            firing:    2,
+            attempt:   1,
         });
-        graph.edges.push(fabro_graphviz::graph::Edge {
-            from:  "a".to_string(),
-            to:    "fan_in1".to_string(),
-            attrs: HashMap::new(),
-        });
+        assert_eq!(timeline.entries[2].stage_id.as_deref(), Some("build@2"));
+    }
 
-        let map = detect_parallel_interior(&graph);
-        assert_eq!(map.get("a"), Some(&"parallel1".to_string()));
-        assert!(!map.contains_key("parallel1"));
+    #[test]
+    fn a_target_resolves_to_its_entry() {
+        let timeline = timeline();
+        assert_eq!(
+            timeline.resolve(&ForkTarget::Ordinal(2)).unwrap().ordinal,
+            2
+        );
+        assert_eq!(
+            timeline
+                .resolve(&ForkTarget::LatestVisit("build".to_string()))
+                .unwrap()
+                .ordinal,
+            3
+        );
+        assert_eq!(
+            timeline
+                .resolve(&ForkTarget::SpecificVisit("build".to_string(), 1))
+                .unwrap()
+                .ordinal,
+            2
+        );
+        assert_eq!(timeline.resolve_or_latest(None).unwrap().ordinal, 3);
+        assert!(matches!(
+            timeline.resolve(&ForkTarget::Ordinal(4)),
+            Err(Error::Validation(message)) if message.contains("out of range")
+        ));
+        assert!(matches!(
+            timeline.resolve(&ForkTarget::LatestVisit("test".to_string())),
+            Err(Error::Validation(message)) if message.contains("no checkpoint found")
+        ));
+    }
+
+    #[test]
+    fn an_empty_timeline_has_no_latest() {
+        assert!(RunTimeline::default().latest().is_err());
     }
 }

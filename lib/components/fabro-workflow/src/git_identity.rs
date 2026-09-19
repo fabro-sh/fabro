@@ -3,7 +3,7 @@
 //! The run resolves its identity once, after its GitHub credentials are
 //! selected and before anything can commit, then uses it everywhere: engine
 //! checkpoints and metadata commits read it through
-//! [`RunOptions::git_author`](crate::run_options::RunOptions::git_author),
+//! [`git_author_from_settings`](crate::git::git_author_from_settings),
 //! and every workflow command, prepare step, native agent shell tool, and ACP
 //! agent launch receives it as the four `GIT_AUTHOR_*` / `GIT_COMMITTER_*`
 //! variables so plain `git commit` inside the sandbox agrees with the engine.

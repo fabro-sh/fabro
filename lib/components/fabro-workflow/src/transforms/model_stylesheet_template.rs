@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_template::TemplateContext;
-use fabro_validate::Diagnostic;
+use fabro_types::diagnostic::Diagnostic;
 
 use super::file_inlining::template_render_store;
 use super::variable_expansion::{

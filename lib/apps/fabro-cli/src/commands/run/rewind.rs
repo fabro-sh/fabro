@@ -2,11 +2,12 @@ use anyhow::Result;
 use fabro_api::types::RewindRequest;
 use fabro_util::terminal::Styles;
 
-use super::checkpoints::{ensure_origin_if_local, print_timeline, short_id, timeline_entries_json};
+use super::checkpoints::{print_timeline, short_id, timeline_json};
 use crate::args::RewindArgs;
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
+/// Rewind a run to a checkpoint: a new run replaces it and starts at once.
 pub(crate) async fn run(
     args: &RewindArgs,
     styles: &Styles,
@@ -16,25 +17,20 @@ pub(crate) async fn run(
     let ctx = base_ctx.with_target(&args.server)?;
     let client = ctx.server().await?;
     let run_id = client.resolve_run(&args.run_id).await?.id;
-    ensure_origin_if_local(client.as_ref(), &run_id, "rewind").await?;
 
     if args.list || args.target.is_none() {
         let timeline = client.run_timeline(&run_id).await?;
         if ctx.json_output() {
-            print_json_pretty(&timeline_entries_json(&timeline))?;
-            return Ok(());
+            print_json_pretty(&timeline_json(&timeline))?;
+        } else {
+            print_timeline(&timeline, styles, printer);
         }
-        print_timeline(&timeline_entries_json(&timeline), styles, printer);
         return Ok(());
     }
 
-    let target = args
-        .target
-        .clone()
-        .expect("rewind target should be present unless listing");
     let result = client
         .rewind_run(&run_id, RewindRequest {
-            target: Some(target),
+            target: args.target.clone(),
         })
         .await?;
     let response = result.response;
@@ -44,6 +40,9 @@ pub(crate) async fn run(
             "source_run_id": response.source_run_id,
             "new_run_id": response.new_run_id,
             "target": response.target,
+            "checkpoint_sha": response.checkpoint_sha,
+            "execution": response.execution,
+            "firing": response.firing,
             "archived": response.archived,
             "archive_error": response.archive_error,
             "status": result.status,
@@ -51,13 +50,14 @@ pub(crate) async fn run(
     } else {
         fabro_util::printerr!(
             printer,
-            "\nRewound {}; new run {}",
+            "\nRewound {} to {}; new run {}",
             short_id(&response.source_run_id),
+            response.target,
             short_id(&response.new_run_id)
         );
         fabro_util::printerr!(
             printer,
-            "To resume: fabro resume {}",
+            "To follow: fabro attach {}",
             short_id(&response.new_run_id)
         );
         if !response.archived {

@@ -2,12 +2,14 @@ use std::any::{TypeId, type_name};
 
 use chrono::{TimeZone, Utc};
 use fabro_api::types::{
-    RunSessionMetadata as ApiRunSessionMetadata, SessionDetail as ApiSessionDetail,
+    PaginatedSessionEventList, RunSessionMetadata as ApiRunSessionMetadata,
+    SessionDetail as ApiSessionDetail, SessionEvent as ApiSessionEvent,
     SessionSummary as ApiSessionSummary, SessionTurn as ApiSessionTurn, SubmitTurnRequest,
 };
+use fabro_types::session_event::SessionTurnStartedProps;
 use fabro_types::{
-    RunSessionMetadata, SessionDetail, SessionId, SessionStatus, SessionSummary, SessionTurn,
-    TurnId, fixtures,
+    RunSessionMetadata, SessionDetail, SessionEvent, SessionEventBody, SessionId, SessionStatus,
+    SessionSummary, SessionTurn, TurnId, fixtures,
 };
 use serde_json::json;
 
@@ -17,6 +19,35 @@ fn session_contract_reuses_domain_types() {
     assert_same_type::<ApiRunSessionMetadata, RunSessionMetadata>();
     assert_same_type::<ApiSessionSummary, SessionSummary>();
     assert_same_type::<ApiSessionDetail, SessionDetail>();
+    assert_same_type::<ApiSessionEvent, SessionEvent>();
+}
+
+#[test]
+fn a_session_event_page_round_trips_the_flattened_event() {
+    let session_id = SessionId::new();
+    let turn_id = TurnId::new();
+    let value = json!({
+        "data": [{
+            "seq": 2,
+            "session_id": session_id.to_string(),
+            "run_id": fixtures::RUN_1,
+            "ts": "2026-05-20T12:00:01Z",
+            "event": "run.session.turn.started",
+            "properties": { "turn_id": turn_id.to_string(), "input": "What changed?" }
+        }],
+        "meta": { "has_more": false }
+    });
+
+    let page: PaginatedSessionEventList =
+        serde_json::from_value(value.clone()).expect("page should deserialize");
+    assert_eq!(
+        page.data[0].body,
+        SessionEventBody::TurnStarted(SessionTurnStartedProps {
+            turn_id,
+            input: "What changed?".to_string(),
+        })
+    );
+    assert_eq!(serde_json::to_value(&page).unwrap(), value);
 }
 
 #[test]

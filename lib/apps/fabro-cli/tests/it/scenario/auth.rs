@@ -95,7 +95,7 @@ fn auth_login_refresh_logout_flow() {
                 "os": "darwin",
                 "arch": "arm64",
                 "storage_dir": "/tmp/fabro-auth-flow",
-                "storage_engine": "slatedb",
+                "storage_engine": "sqlite",
                 "runs": { "total": 0, "active": 0 },
                 "uptime_secs": 42
             }));

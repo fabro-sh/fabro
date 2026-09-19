@@ -23,30 +23,29 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 pub use fabro_api::types::{
-    AggregateUsage, AggregateUsageTotals, ApiQuestion, AppendEventResponse, ArtifactEntry,
-    ArtifactListResponse, BatchDeleteRunsRequest, BatchDeleteRunsResponse, BatchDeleteRunsResult,
+    AggregateUsage, AggregateUsageTotals, ApiQuestion, ArtifactEntry, ArtifactListResponse,
+    BatchDeleteRunsRequest, BatchDeleteRunsResponse, BatchDeleteRunsResult,
     BatchDeleteRunsResultOutcome, BatchDeleteRunsSummary, BatchRunLifecycleRequest,
     BatchRunLifecycleResponse, BatchRunLifecycleResult, BatchRunLifecycleResultOutcome,
     BatchRunLifecycleSummary, CloseRunPullRequestResponse, CompletionResponse,
     CreateCompletionRequest, CreateRunPullRequestRequest, CreateSecretRequest,
     CreateVariableRequest, DeleteRunResponse, DeleteRunSandbox, DeleteSecretRequest,
     DenyRunRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, ErrorResponseEntry,
-    ForkRequest, ForkResponse, IntegrationConnectionKind, IntegrationConnectionState,
-    IntegrationConnectionStatus, IntegrationProvider, IntegrationStatus, LinkRunPullRequestRequest,
-    MergeRunPullRequestRequest, MergeRunPullRequestResponse, ModelReference, PaginatedEventList,
-    PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
-    Provider, ProviderCredentialTestRequest, ProviderCredentialTestResponse, ProviderList,
-    PruneRunEntry, PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection,
-    RenderWorkflowGraphRequest, RewindRequest, RewindResponse, Run, RunArtifactEntry,
-    RunArtifactListResponse, RunError, RunManifest, RunStage, RunUsage, RunUsageStage,
-    RunUsageTotals, SandboxDetails, SandboxFileEntry, SandboxFileListResponse, SandboxService,
-    SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
-    StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
+    IntegrationConnectionKind, IntegrationConnectionState, IntegrationConnectionStatus,
+    IntegrationProvider, IntegrationStatus, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
+    MergeRunPullRequestResponse, ModelReference, PaginatedRunList, PaginationMeta,
+    PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, Provider,
+    ProviderCredentialTestRequest, ProviderCredentialTestResponse, ProviderList, PruneRunEntry,
+    PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest,
+    Run, RunArtifactEntry, RunArtifactListResponse, RunError, RunManifest, RunStage, RunUsage,
+    RunUsageStage, RunUsageTotals, SandboxDetails, SandboxFileEntry, SandboxFileListResponse,
+    SandboxService, SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler,
+    StageState, StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
     SystemDiskResourceScope, SystemDiskResources, SystemInfoResponse, SystemIntegrationStatus,
     SystemIntegrationsResponse, SystemMemoryResourceScope, SystemMemoryResources,
     SystemRepairRunIssue, SystemRepairRunsResponse, SystemResourcesResponse, SystemRunCounts,
-    TimelineEntryResponse, UpdateVariableRequest, UsageByModel, UsageStageRef,
-    VariableListResponse, VncPreviewResponse, WriteBlobResponse,
+    UpdateVariableRequest, UsageByModel, UsageStageRef, VariableListResponse, VncPreviewResponse,
+    WriteBlobResponse,
 };
 use fabro_auth::SqlVaultCredentialSource;
 use fabro_automation::{self, AutomationStore};
@@ -55,12 +54,15 @@ use fabro_config::{LlmLayer, RunLayer, Storage, WorkflowSettingsBuilder};
 use fabro_db::DbPool;
 use fabro_environment::EnvironmentStore;
 use fabro_interview::{
-    Answer, AnswerSubmission, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
+    Answer, AnswerSubmission, ControlInterviewer, Question, WorkerControlEnvelope,
+    WorkerControlOutcome,
 };
 use fabro_llm::credentials::CredentialProvider;
 use fabro_llm::lithos_catalog::Catalog;
 use fabro_llm::{ClientOptions, FabroClient};
 use fabro_mcp_store::McpServerStore;
+use fabro_petri::controls::{RunControls, SteerError};
+use fabro_petri::projector::Projector;
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::details::sandbox_details;
 use fabro_sandbox::driver::{DaytonaCredentials, ProviderAccess, ProviderConnectOptions};
@@ -75,23 +77,27 @@ use fabro_slack::payload::SlackAnswerSubmission;
 use fabro_slack::threads::ThreadRegistry;
 use fabro_slack::{blocks as slack_blocks, connection as slack_connection};
 use fabro_static::EnvVars;
+use fabro_store::platform_records::{
+    InterviewAnsweredRecord, NotificationSentRecord, PlatformRecord, PlatformRecordKind,
+    RunLifecycleKind, RunLifecycleRecord,
+};
 use fabro_store::{
-    ArtifactKey, ArtifactStore, AuthCodeStore, AuthSessionStore, Database, EventEnvelope,
-    EventPayload, KeyedMutex, NodeArtifact, PendingInterviewRecord, RunSessionRecordStore,
+    ArtifactKey, ArtifactStore, AuthCodeStore, AuthSessionStore, Database, KeyedMutex,
+    NodeArtifact, PendingInterviewRecord, RunSessionEventStore, RunSessionRecordStore,
     RunSummaryStore, StageArtifactEntry, StageId,
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
 use fabro_types::settings::RunNamespace;
-use fabro_types::settings::run::{NotificationRouteSettings, RunMode};
+use fabro_types::settings::run::NotificationRouteSettings;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination,
 };
 use fabro_types::{
-    AgentBackend, AskFabro, AskFabroUnavailableReason, BlobHash, EventBody,
-    InterviewQuestionRecord, ModelRef, ModelTestMode, PairId, PairMessageId, PairTarget,
-    PendingReason, Principal, PullRequestLink, QuestionType, RunControlAction, RunEvent, RunId,
-    RunRunnableSource, RunStatusKind, SandboxProviderKind, ServerSettings, SessionCapability,
+    AskFabro, AskFabroUnavailableReason, BlobHash, InterviewQuestionRecord, ModelRef,
+    ModelTestMode, PendingReason, Principal, PullRequestLink, QuestionType, RunControlAction,
+    RunId, RunRunnableSource, RunStatusKind, RunStreamItem, RunStreamItemKind, SandboxProviderKind,
+    ServerSettings,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -99,13 +105,6 @@ use fabro_util::error::{
 use fabro_util::version::FABRO_VERSION;
 use fabro_variable::{Error as VariableError, VariableStore};
 use fabro_vault::{SecretStore, SecretStoreError, SecretType, Vault};
-use fabro_workflow::artifact_upload::ArtifactSink;
-#[cfg(test)]
-use fabro_workflow::command_log::command_log_path;
-use fabro_workflow::event::{self as workflow_event, Emitter};
-use fabro_workflow::handler::HandlerRegistry;
-use fabro_workflow::pipeline::Persisted;
-use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_lookup::{
     RunInfo, StatusFilter, filter_runs, scan_runs_with_summaries, scratch_base,
 };
@@ -121,9 +120,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{
-    Mutex as AsyncMutex, Notify, RwLock as AsyncRwLock, Semaphore, broadcast, mpsc, oneshot,
-};
+use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore, broadcast, mpsc, oneshot};
 use tokio::task::spawn_blocking;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
@@ -146,16 +143,20 @@ use crate::github_webhooks::{
     WEBHOOK_ROUTE, WEBHOOK_SECRET_ENV, parse_event_metadata, verify_signature,
 };
 use crate::jwt_auth::{self, AuthMode};
+use crate::petri_runs::PetriRuns;
 use crate::principal_middleware::{
     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunManagementTarget,
-    RequireRunScoped, RequireRunStageScoped, RequireStageArtifact, RequireWorkerRunScoped,
+    RequireRunScoped, RequireStageArtifact, RequireWorkerRunScoped, RequireWorkerRunSegment,
     RequiredUser, principal_middleware,
 };
 use crate::request_id::{self, RequestId};
 use crate::run_files::{FilesInFlight, new_files_in_flight};
 use crate::server_secrets::ServerSecrets;
 use crate::spawn_env::apply_render_graph_env;
-use crate::worker_control::{LocalWorkerControlBus, WorkerControlBus, WorkerControlBusError};
+use crate::worker_control::{
+    LocalWorkerControlBus, WORKER_CONTROL_ACK_WAIT, WorkerControlAcks, WorkerControlBus,
+    WorkerControlBusError,
+};
 use crate::worker_runtime::{
     LocalWorkerRuntime, WorkerExit, WorkerLaunchSpec, WorkerRef, WorkerRuntime,
 };
@@ -166,14 +167,14 @@ use crate::{
 
 mod automation_scheduler;
 mod handler;
+pub(crate) mod petri_runs;
 mod pull_request_supervisor;
 pub(crate) mod resource_sampler;
+pub(crate) mod run_records;
 mod session_runtime;
+pub(crate) mod stream_follower;
 
 pub(crate) use automation_scheduler::spawn_automation_scheduler;
-pub(crate) use handler::events::EventListParams;
-#[cfg(test)]
-pub(in crate::server) use handler::events::filtered_global_events;
 pub(crate) use handler::graph::render_graph_bytes;
 #[cfg(test)]
 pub(in crate::server) use handler::graph::{
@@ -266,12 +267,9 @@ struct ManagedRun {
     active_steerable_stages: HashMap<StageId, String>,
     /// API-mode session targets eligible for live pair control. ACP sessions
     /// can be steerable but are intentionally excluded from pairing.
-    active_api_targets: HashMap<StageId, PairTarget>,
     /// Stage IDs of currently running agent sessions that have no live
     /// steering capability, keyed to the session id that owns the marker.
     active_non_steerable_stages: HashMap<StageId, String>,
-    event_tx: Option<broadcast::Sender<RunEvent>>,
-    checkpoint: Option<Checkpoint>,
     cancel_tx: Option<oneshot::Sender<()>>,
     cancel_token: Option<CancellationToken>,
     worker_ref: Option<WorkerRef>,
@@ -310,11 +308,6 @@ enum RunExecutionMode {
     Resume,
 }
 
-enum ExecutionResult {
-    Completed(Box<Result<operations::Started, WorkflowError>>),
-    CancelledBySignal,
-}
-
 const WORKER_CANCEL_GRACE: Duration = Duration::from_secs(5);
 const TERMINAL_DELETE_WORKER_GRACE: Duration = Duration::from_millis(50);
 const WORKER_CONTROL_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -333,18 +326,19 @@ pub(crate) struct UsageAccumulator {
     pub(crate) by_model:     HashMap<ModelRef, ModelUsageTotals>,
 }
 
-pub(crate) type RegistryFactoryOverride =
-    dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync;
-
 #[derive(Clone)]
 enum RunAnswerTransport {
     Worker {
         run_id: RunId,
         bus:    Arc<dyn WorkerControlBus>,
+        /// Where the worker's answers to steers and interrupts arrive.
+        acks:   Arc<WorkerControlAcks>,
     },
     InProcess {
-        interviewer:  Arc<ControlInterviewer>,
-        steering_hub: Arc<fabro_workflow::SteeringHub>,
+        interviewer: Arc<ControlInterviewer>,
+        /// The run's controls, answered in place: the in-process run has
+        /// no worker to forward a steer or an interrupt to.
+        controls:    RunControls,
     },
 }
 
@@ -354,11 +348,44 @@ enum AnswerTransportError {
     Timeout,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PairTransportError {
-    Closed,
-    Timeout,
-    Control(fabro_workflow::PairControlError),
+/// What a steer or an interrupt came to, as far as the caller is told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RunControlAnswer {
+    /// The worker delivered it, to the stage named when it had one.
+    Delivered { stage: Option<String> },
+    /// The worker (or Petri) refused it: the code and the reason.
+    Refused { code: String, message: String },
+    /// The control was forwarded but no answer arrived within
+    /// [`WORKER_CONTROL_ACK_WAIT`]; the run's stream says what became of it.
+    Pending,
+}
+
+impl From<WorkerControlOutcome> for RunControlAnswer {
+    fn from(outcome: WorkerControlOutcome) -> Self {
+        match outcome {
+            WorkerControlOutcome::Delivered { stage } => Self::Delivered { stage },
+            WorkerControlOutcome::Refused { code, message } => Self::Refused { code, message },
+        }
+    }
+}
+
+impl RunControlAnswer {
+    /// The answer to a control the run's own controls settled in place:
+    /// `control` names it in the refusal's message, `refused_code` is the
+    /// code of a refusal whose reason has none of its own.
+    fn from_controls(
+        control: &str,
+        refused_code: &str,
+        result: Result<String, SteerError>,
+    ) -> Self {
+        match result {
+            Ok(stage) => Self::Delivered { stage: Some(stage) },
+            Err(error) => Self::Refused {
+                code:    error.code().unwrap_or(refused_code).to_string(),
+                message: format!("{control} refused: {error}"),
+            },
+        }
+    }
 }
 
 impl RunAnswerTransport {
@@ -382,13 +409,25 @@ impl RunAnswerTransport {
         }
     }
 
-    fn pair_error_from_bus(error: &WorkerControlBusError) -> PairTransportError {
-        match error {
-            WorkerControlBusError::PublishTimeout => PairTransportError::Timeout,
-            WorkerControlBusError::Closed
-            | WorkerControlBusError::Unavailable
-            | WorkerControlBusError::InvalidCursor { .. } => PairTransportError::Closed,
-        }
+    /// Publish a control the worker answers: registered with the run's
+    /// acknowledgements first, so the answer has a waiter, then published
+    /// with the request id, then waited for. `Pending` when no answer
+    /// arrives within [`WORKER_CONTROL_ACK_WAIT`].
+    async fn publish_answered_control(
+        run_id: RunId,
+        bus: &Arc<dyn WorkerControlBus>,
+        acks: &WorkerControlAcks,
+        message: WorkerControlEnvelope,
+    ) -> Result<RunControlAnswer, AnswerTransportError> {
+        let pending = acks.register(run_id);
+        let message = message.with_request_id(pending.request_id.clone());
+        Self::publish_worker_control(run_id, bus, message)
+            .await
+            .map_err(|err| Self::answer_error_from_bus(&err))?;
+        Ok(acks
+            .wait(pending)
+            .await
+            .map_or(RunControlAnswer::Pending, RunControlAnswer::from))
     }
 
     async fn submit(
@@ -397,7 +436,7 @@ impl RunAnswerTransport {
         submission: AnswerSubmission,
     ) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Worker { run_id, bus } => {
+            Self::Worker { run_id, bus, .. } => {
                 let message = WorkerControlEnvelope::interview_answer(qid.to_string(), submission);
                 Self::publish_worker_control(*run_id, bus, message)
                     .await
@@ -412,7 +451,7 @@ impl RunAnswerTransport {
 
     async fn cancel_run(&self) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Worker { run_id, bus } => {
+            Self::Worker { run_id, bus, .. } => {
                 let message = WorkerControlEnvelope::cancel_run();
                 Self::publish_worker_control(*run_id, bus, message)
                     .await
@@ -425,127 +464,56 @@ impl RunAnswerTransport {
         }
     }
 
-    /// Forward a steer to the worker (subprocess) or directly into the
-    /// in-process steering hub.
-    async fn steer(&self, text: String, actor: Principal) -> Result<(), AnswerTransportError> {
-        match self {
-            Self::Worker { run_id, bus } => {
-                let message = WorkerControlEnvelope::steer(text, actor);
-                Self::publish_worker_control(*run_id, bus, message)
-                    .await
-                    .map_err(|err| Self::answer_error_from_bus(&err))
-            }
-            Self::InProcess { steering_hub, .. } => {
-                steering_hub.deliver_steer(text, Some(actor));
-                Ok(())
-            }
-        }
-    }
-
-    async fn interrupt(&self, actor: Principal) -> Result<(), AnswerTransportError> {
-        match self {
-            Self::Worker { run_id, bus } => {
-                let message = WorkerControlEnvelope::interrupt(actor);
-                Self::publish_worker_control(*run_id, bus, message)
-                    .await
-                    .map_err(|err| Self::answer_error_from_bus(&err))
-            }
-            Self::InProcess { steering_hub, .. } => {
-                steering_hub.interrupt(Some(&actor));
-                Ok(())
-            }
-        }
-    }
-
-    async fn interrupt_then_steer(
+    /// Forward a steer to the worker, for the stage it names or the run's
+    /// one live agent stage, and wait for its answer. The in-process path
+    /// answers from the run's own controls at once.
+    async fn steer(
         &self,
         text: String,
+        stage: Option<String>,
         actor: Principal,
-    ) -> Result<(), AnswerTransportError> {
+    ) -> Result<RunControlAnswer, AnswerTransportError> {
         match self {
-            Self::Worker { run_id, bus } => {
-                let message = WorkerControlEnvelope::interrupt_then_steer(text, actor);
-                Self::publish_worker_control(*run_id, bus, message)
-                    .await
-                    .map_err(|err| Self::answer_error_from_bus(&err))
+            Self::Worker { run_id, bus, acks } => {
+                let message = WorkerControlEnvelope::steer(text, stage, actor);
+                Self::publish_answered_control(*run_id, bus, acks, message).await
             }
-            Self::InProcess { steering_hub, .. } => {
-                steering_hub.interrupt_then_steer(&text, Some(&actor));
-                Ok(())
-            }
+            Self::InProcess { controls, .. } => Ok(RunControlAnswer::from_controls(
+                "Steer",
+                "steer_refused",
+                controls.steer(stage.as_deref(), &text).await,
+            )),
         }
     }
 
-    async fn start_pair(
+    /// Forward an interrupt to the worker, for the stage it names or the
+    /// run's one live agent stage, and wait for its answer; `text`, when
+    /// given, is the stage's next input.
+    async fn interrupt(
         &self,
-        run_id: RunId,
-        pair_id: PairId,
-        target: PairTarget,
+        stage: Option<String>,
+        text: Option<String>,
         actor: Principal,
-    ) -> Result<(), PairTransportError> {
+    ) -> Result<RunControlAnswer, AnswerTransportError> {
         match self {
-            Self::Worker {
-                run_id: worker_run_id,
-                bus,
-            } => {
-                let message = WorkerControlEnvelope::start_pair(run_id, pair_id, target, actor);
-                Self::publish_worker_control(*worker_run_id, bus, message)
-                    .await
-                    .map_err(|err| Self::pair_error_from_bus(&err))
+            Self::Worker { run_id, bus, acks } => {
+                let message = match text {
+                    Some(text) => WorkerControlEnvelope::interrupt_then_steer(text, stage, actor),
+                    None => WorkerControlEnvelope::interrupt(stage, actor),
+                };
+                Self::publish_answered_control(*run_id, bus, acks, message).await
             }
-            Self::InProcess { steering_hub, .. } => steering_hub
-                .start_pair(run_id, pair_id, target, Some(actor))
-                .map(|_| ())
-                .map_err(PairTransportError::Control),
-        }
-    }
-
-    async fn send_pair_message(
-        &self,
-        pair_id: PairId,
-        message_id: PairMessageId,
-        text: String,
-        client_message_id: Option<String>,
-        actor: Principal,
-    ) -> Result<(), PairTransportError> {
-        match self {
-            Self::Worker { run_id, bus } => {
-                let message = WorkerControlEnvelope::pair_message(
-                    pair_id,
-                    message_id,
-                    text.clone(),
-                    client_message_id.clone(),
-                    actor,
-                );
-                Self::publish_worker_control(*run_id, bus, message)
-                    .await
-                    .map_err(|err| Self::pair_error_from_bus(&err))
-            }
-            Self::InProcess { steering_hub, .. } => steering_hub
-                .send_pair_message(pair_id, message_id, text, client_message_id, Some(actor))
-                .map(|_| ())
-                .map_err(PairTransportError::Control),
-        }
-    }
-
-    async fn end_pair(&self, pair_id: PairId, actor: Principal) -> Result<(), PairTransportError> {
-        match self {
-            Self::Worker { run_id, bus } => {
-                let message = WorkerControlEnvelope::end_pair(pair_id, actor);
-                Self::publish_worker_control(*run_id, bus, message)
-                    .await
-                    .map_err(|err| Self::pair_error_from_bus(&err))
-            }
-            Self::InProcess { steering_hub, .. } => steering_hub
-                .end_pair(pair_id, Some(actor))
-                .map(|_| ())
-                .map_err(PairTransportError::Control),
+            Self::InProcess { controls, .. } => Ok(RunControlAnswer::from_controls(
+                "Interrupt",
+                "interrupt_refused",
+                controls.interrupt(stage.as_deref(), text.as_deref()).await,
+            )),
         }
     }
 
     async fn pause_run(&self) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Worker { run_id, bus } => {
+            Self::Worker { run_id, bus, .. } => {
                 let message = WorkerControlEnvelope::pause_run();
                 Self::publish_worker_control(*run_id, bus, message)
                     .await
@@ -557,7 +525,7 @@ impl RunAnswerTransport {
 
     async fn unpause_run(&self) -> Result<(), AnswerTransportError> {
         match self {
-            Self::Worker { run_id, bus } => {
+            Self::Worker { run_id, bus, .. } => {
                 let message = WorkerControlEnvelope::unpause_run();
                 Self::publish_worker_control(*run_id, bus, message)
                     .await
@@ -577,16 +545,13 @@ struct LoadedPendingInterview {
 
 #[derive(Debug, Clone)]
 struct SlackLifecycleDetails {
-    kind:               slack_blocks::RunLifecycleKind,
-    started_event_name: Option<String>,
-    result:             Option<String>,
-    duration_ms:        Option<u64>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct PriorSlackLifecycleEventDetails {
-    started_event_name: Option<String>,
-    pull_request:       Option<SlackLifecyclePullRequest>,
+    kind:        slack_blocks::RunLifecycleKind,
+    /// The legacy name of the lifecycle event, which the notification
+    /// routes in the run's settings name: `run.started`, `run.completed`,
+    /// `run.failed`.
+    event_name:  &'static str,
+    result:      Option<String>,
+    duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -594,6 +559,14 @@ struct SlackLifecyclePullRequest {
     number: u64,
     title:  Option<String>,
     url:    Option<String>,
+}
+
+/// A question posted to Slack: the message, and the question's text for
+/// the update that closes it.
+#[derive(Debug, Clone)]
+struct SlackPostedQuestion {
+    message: SlackPostedMessage,
+    text:    String,
 }
 
 #[derive(Debug, Clone)]
@@ -624,7 +597,7 @@ struct SlackService {
     client:          SlackClient,
     app_token:       String,
     default_channel: Option<String>,
-    posted_messages: Arc<Mutex<HashMap<(RunId, String), SlackPostedMessage>>>,
+    posted_messages: Arc<Mutex<HashMap<(RunId, String), SlackPostedQuestion>>>,
     thread_registry: Arc<ThreadRegistry>,
     connection:      Arc<Mutex<SlackConnectionRuntimeState>>,
 }
@@ -679,118 +652,156 @@ impl SlackService {
         })
     }
 
-    async fn handle_event(
-        &self,
-        state: &AppState,
-        envelope: &EventEnvelope,
-        run_web_url: Option<&str>,
-    ) {
-        let event = &envelope.event;
-        match &event.body {
-            EventBody::InterviewStarted(props) => {
-                if props.question_id.is_empty() {
-                    return;
-                }
-                let Some(default_channel) = self.default_channel.as_deref() else {
-                    return;
-                };
-                let key = (event.run_id, props.question_id.clone());
-                if self
-                    .posted_messages
-                    .lock()
-                    .expect("slack posted messages lock poisoned")
-                    .contains_key(&key)
-                {
-                    return;
-                }
-
-                let question = runtime_question_from_interview_record(&InterviewQuestionRecord {
-                    id:              props.question_id.clone(),
-                    text:            props.question.clone(),
-                    stage:           props.stage.clone(),
-                    question_type:   props.question_type.parse().unwrap_or_default(),
-                    options:         props.options.clone(),
-                    allow_freeform:  props.allow_freeform,
-                    timeout_seconds: props.timeout_seconds,
-                    context_display: props.context_display.clone(),
-                    review_target:   props.review_target.clone(),
-                });
-                let blocks = slack_blocks::question_to_blocks(
-                    &event.run_id.to_string(),
-                    &props.question_id,
-                    &question,
-                    run_web_url,
-                );
-
-                if let Ok(posted) = self
-                    .client
-                    .post_message(default_channel, &blocks, None)
-                    .await
-                {
-                    if question.allow_freeform || question.question_type == QuestionType::Freeform {
-                        self.thread_registry.register(
-                            &posted.ts,
-                            &event.run_id.to_string(),
-                            &props.question_id,
-                        );
+    /// What the run's stream says since the last look: a question asked,
+    /// answered or expired, and the lifecycle transitions the notification
+    /// routes name.
+    async fn observe(&self, state: &AppState, run_id: RunId, items: &[RunStreamItem]) {
+        let run_web_url = state.run_web_url(&run_id);
+        for item in items {
+            match item.kind {
+                RunStreamItemKind::Platform => {
+                    let Some(record) = platform_record_of(item) else {
+                        continue;
+                    };
+                    match record {
+                        PlatformRecord::InterviewAnswered(answered) => {
+                            self.finish_interview(
+                                run_id,
+                                &answered.question,
+                                answered.text.as_deref().unwrap_or_default(),
+                                answered.answer.as_deref().unwrap_or("Answered"),
+                            )
+                            .await;
+                        }
+                        PlatformRecord::RunLifecycle(lifecycle) => {
+                            if let Some(details) = slack_lifecycle_details(&lifecycle) {
+                                self.handle_lifecycle(
+                                    state,
+                                    run_id,
+                                    &details,
+                                    run_web_url.as_deref(),
+                                )
+                                .await;
+                            }
+                        }
+                        _ => {}
                     }
-                    self.posted_messages
-                        .lock()
-                        .expect("slack posted messages lock poisoned")
-                        .insert(key, posted);
+                }
+                RunStreamItemKind::Petri => {
+                    let Some(parsed) = petri_parsed(item) else {
+                        continue;
+                    };
+                    match parsed.get("kind").and_then(serde_json::Value::as_str) {
+                        Some("question") => {
+                            if let Some(question_id) = parsed
+                                .get("question")
+                                .and_then(|question| question.get("id"))
+                                .and_then(serde_json::Value::as_str)
+                            {
+                                self.post_question(
+                                    state,
+                                    run_id,
+                                    question_id,
+                                    run_web_url.as_deref(),
+                                )
+                                .await;
+                            }
+                        }
+                        Some("question_expired") => {
+                            if let Some(question_id) =
+                                parsed.get("question").and_then(serde_json::Value::as_str)
+                            {
+                                let text = self.posted_question_text(run_id, question_id);
+                                self.finish_interview(run_id, question_id, &text, "Timed out")
+                                    .await;
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
-            EventBody::InterviewCompleted(props) => {
-                self.finish_interview(
-                    event.run_id,
-                    &props.question_id,
-                    &props.question,
-                    &props.answer,
-                )
-                .await;
-            }
-            EventBody::InterviewTimeout(props) => {
-                self.finish_interview(
-                    event.run_id,
-                    &props.question_id,
-                    &props.question,
-                    "Timed out",
-                )
-                .await;
-            }
-            EventBody::InterviewInterrupted(props) => {
-                self.finish_interview(
-                    event.run_id,
-                    &props.question_id,
-                    &props.question,
-                    "Interrupted",
-                )
-                .await;
-            }
-            EventBody::RunStarted(_) | EventBody::RunCompleted(_) | EventBody::RunFailed(_) => {
-                self.handle_lifecycle_event(state, envelope, run_web_url)
-                    .await;
-            }
-            _ => {}
         }
     }
 
-    async fn handle_lifecycle_event(
+    /// Post a pending question to the default channel, once.
+    async fn post_question(
         &self,
         state: &AppState,
-        envelope: &EventEnvelope,
+        run_id: RunId,
+        question_id: &str,
         run_web_url: Option<&str>,
     ) {
-        let event = &envelope.event;
-        let Some(details) = slack_lifecycle_details(event) else {
+        let Some(default_channel) = self.default_channel.as_deref() else {
             return;
         };
-        let event_name = event.body.event_name();
-        let projection = match state.stores.runs.load_run_projection(&event.run_id).await {
+        let key = (run_id, question_id.to_string());
+        if self
+            .posted_messages
+            .lock()
+            .expect("slack posted messages lock poisoned")
+            .contains_key(&key)
+        {
+            return;
+        }
+        let projection = match run_records::projection(state, run_id).await {
+            Ok(Some(projection)) => projection,
+            Ok(None) => return,
+            Err(err) => {
+                warn!(run_id = %run_id, error = %err, "Skipping Slack question: the run's projection could not be loaded");
+                return;
+            }
+        };
+        let Some(pending) = projection.pending_interviews.get(question_id) else {
+            return;
+        };
+        let question = runtime_question_from_interview_record(&pending.question);
+        let blocks = slack_blocks::question_to_blocks(
+            &run_id.to_string(),
+            question_id,
+            &question,
+            run_web_url,
+        );
+        if let Ok(posted) = self
+            .client
+            .post_message(default_channel, &blocks, None)
+            .await
+        {
+            if question.allow_freeform || question.question_type == QuestionType::Freeform {
+                self.thread_registry
+                    .register(&posted.ts, &run_id.to_string(), question_id);
+            }
+            self.posted_messages
+                .lock()
+                .expect("slack posted messages lock poisoned")
+                .insert(key, SlackPostedQuestion {
+                    message: posted,
+                    text:    pending.question.text.clone(),
+                });
+        }
+    }
+
+    fn posted_question_text(&self, run_id: RunId, question_id: &str) -> String {
+        self.posted_messages
+            .lock()
+            .expect("slack posted messages lock poisoned")
+            .get(&(run_id, question_id.to_string()))
+            .map(|posted| posted.text.clone())
+            .unwrap_or_default()
+    }
+
+    async fn handle_lifecycle(
+        &self,
+        state: &AppState,
+        run_id: RunId,
+        details: &SlackLifecycleDetails,
+        run_web_url: Option<&str>,
+    ) {
+        let event_name = details.event_name;
+        let projection = match run_records::projection(state, run_id).await {
             Ok(Some(projection)) => projection,
             Ok(None) => {
                 warn!(
-                    run_id = %event.run_id,
+                    run_id = %run_id,
                     event = event_name,
                     "Skipping Slack lifecycle notification because run projection is missing"
                 );
@@ -798,7 +809,7 @@ impl SlackService {
             }
             Err(err) => {
                 warn!(
-                    run_id = %event.run_id,
+                    run_id = %run_id,
                     event = event_name,
                     error = %err,
                     "Skipping Slack lifecycle notification because run projection could not be loaded"
@@ -825,28 +836,34 @@ impl SlackService {
         }
         routes.sort_by_key(|(route_name, _)| *route_name);
 
-        // Only completed/failed events need to recover prior PR details (a
-        // run.started event cannot have a prior PullRequestCreated).
-        let prior = if matches!(details.kind, slack_blocks::RunLifecycleKind::Started) {
-            PriorSlackLifecycleEventDetails::default()
-        } else {
-            load_prior_slack_lifecycle_event_details(state, event.run_id, envelope.seq).await
+        // A notification is sent once per route and event: the `notification.sent`
+        // record is the memory that survives a restart.
+        let sent = match state
+            .stores
+            .run_summaries
+            .platform_records()
+            .read_kind(&run_id, PlatformRecordKind::NotificationSent)
+            .await
+        {
+            Ok(records) => records
+                .into_iter()
+                .filter_map(|stored| match stored.record {
+                    PlatformRecord::NotificationSent(record) => Some((record.route, record.event)),
+                    _ => None,
+                })
+                .collect::<HashSet<_>>(),
+            Err(err) => {
+                warn!(run_id = %run_id, error = %err, "Skipping Slack lifecycle notification: sent notifications could not be read");
+                return;
+            }
         };
-        let workflow_label = slack_lifecycle_workflow_label(
-            projection.as_ref(),
-            details
-                .started_event_name
-                .as_deref()
-                .or(prior.started_event_name.as_deref()),
-            event_name,
-        );
-        let pull_request = prior.pull_request.or_else(|| {
-            projection
-                .pull_request
-                .as_ref()
-                .map(slack_lifecycle_pull_request_from_link)
-        });
-        let run_id = event.run_id.to_string();
+
+        let workflow_label = slack_lifecycle_workflow_label(projection.as_ref(), None, event_name);
+        let pull_request = projection
+            .pull_request
+            .as_ref()
+            .map(slack_lifecycle_pull_request_from_link);
+        let run_id_text = run_id.to_string();
         let run_url = run_web_url.or(projection.web_url.as_deref());
         let pull_request_blocks =
             pull_request
@@ -858,7 +875,7 @@ impl SlackService {
                 });
         let blocks =
             slack_blocks::run_lifecycle_blocks(details.kind, &slack_blocks::RunLifecycleBlocks {
-                run_id: &run_id,
+                run_id: &run_id_text,
                 run_url,
                 workflow_label: &workflow_label,
                 result: details.result.as_deref(),
@@ -868,17 +885,36 @@ impl SlackService {
 
         let blocks = &blocks;
         let posts = routes.into_iter().filter_map(|(route_name, route)| {
+            if sent.contains(&(route_name.clone(), event_name.to_string())) {
+                return None;
+            }
             let channel =
-                resolve_slack_lifecycle_route_channel(event.run_id, route_name, route, event_name)?;
+                resolve_slack_lifecycle_route_channel(run_id, route_name, route, event_name)?;
             Some(async move {
-                if let Err(err) = self.client.post_message(&channel, blocks, None).await {
-                    warn!(
-                        run_id = %event.run_id,
-                        event = event_name,
-                        notification_route = route_name.as_str(),
-                        error = %err,
-                        "Failed to post Slack lifecycle notification"
-                    );
+                match self.client.post_message(&channel, blocks, None).await {
+                    Ok(posted) => {
+                        let record = PlatformRecord::NotificationSent(NotificationSentRecord {
+                            route:      route_name.clone(),
+                            event:      event_name.to_string(),
+                            channel:    Some(posted.channel_id.clone()),
+                            thread:     None,
+                            message_id: Some(posted.ts.clone()),
+                            question:   None,
+                            operation:  None,
+                        });
+                        if let Err(err) = run_records::append(state, run_id, record).await {
+                            warn!(run_id = %run_id, error = %err, "the Slack notification was sent but not recorded");
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            run_id = %run_id,
+                            event = event_name,
+                            notification_route = route_name.as_str(),
+                            error = %err,
+                            "Failed to post Slack lifecycle notification"
+                        );
+                    }
                 }
             })
         });
@@ -901,12 +937,17 @@ impl SlackService {
         let Some(posted) = posted else {
             return;
         };
+        let question_text = if question_text.is_empty() {
+            posted.text.as_str()
+        } else {
+            question_text
+        };
 
-        self.thread_registry.remove(&posted.ts);
+        self.thread_registry.remove(&posted.message.ts);
         let blocks = slack_blocks::answered_blocks(question_text, answer_text);
         let _ = self
             .client
-            .update_message(&posted.channel_id, &posted.ts, &blocks)
+            .update_message(&posted.message.channel_id, &posted.message.ts, &blocks)
             .await;
     }
 
@@ -924,101 +965,60 @@ impl SlackService {
     }
 }
 
-fn slack_lifecycle_details(event: &RunEvent) -> Option<SlackLifecycleDetails> {
-    match &event.body {
-        EventBody::RunStarted(props) => Some(SlackLifecycleDetails {
-            kind:               slack_blocks::RunLifecycleKind::Started,
-            started_event_name: Some(props.name.clone()),
-            result:             None,
-            duration_ms:        None,
+fn slack_lifecycle_details(record: &RunLifecycleRecord) -> Option<SlackLifecycleDetails> {
+    match record.transition {
+        RunLifecycleKind::Running => Some(SlackLifecycleDetails {
+            kind:        slack_blocks::RunLifecycleKind::Started,
+            event_name:  "run.started",
+            result:      None,
+            duration_ms: None,
         }),
-        EventBody::RunCompleted(props) => Some(SlackLifecycleDetails {
-            kind:               slack_blocks::RunLifecycleKind::Completed,
-            started_event_name: None,
-            result:             Some(slack_lifecycle_completed_result(
-                &props.status,
-                props.reason,
-            )),
-            duration_ms:        Some(props.timing.wall_time_ms),
+        RunLifecycleKind::Succeeded => Some(SlackLifecycleDetails {
+            kind:        slack_blocks::RunLifecycleKind::Completed,
+            event_name:  "run.completed",
+            result:      Some(match record.status {
+                Some(RunStatus::Succeeded { reason }) => reason.to_string(),
+                _ => "completed".to_string(),
+            }),
+            duration_ms: None,
         }),
-        EventBody::RunFailed(props) => Some(SlackLifecycleDetails {
-            kind:               slack_blocks::RunLifecycleKind::Failed,
-            started_event_name: None,
-            result:             Some(slack_lifecycle_failed_result(&props.failure)),
-            duration_ms:        Some(props.timing.wall_time_ms),
+        RunLifecycleKind::Failed | RunLifecycleKind::Dead => Some(SlackLifecycleDetails {
+            kind:        slack_blocks::RunLifecycleKind::Failed,
+            event_name:  "run.failed",
+            result:      Some(slack_lifecycle_failed_result(record)),
+            duration_ms: None,
         }),
         _ => None,
     }
 }
 
-fn slack_lifecycle_completed_result(status: &str, reason: SuccessReason) -> String {
-    let status = status.trim();
-    let reason = reason.to_string();
-    if status.is_empty() || status == reason {
-        reason
-    } else {
-        format!("{status} — {reason}")
+fn slack_lifecycle_failed_result(record: &RunLifecycleRecord) -> String {
+    let reason = match record.status {
+        Some(RunStatus::Failed { reason }) => reason.to_string(),
+        Some(RunStatus::Dead) => "dead".to_string(),
+        _ => "failed".to_string(),
+    };
+    match record.reason.as_deref().map(str::trim) {
+        Some(message) if !message.is_empty() => format!("{reason} — {message}"),
+        _ => reason,
     }
 }
 
-fn slack_lifecycle_failed_result(failure: &fabro_types::RunFailure) -> String {
-    let reason = failure.reason.to_string();
-    let message = failure.detail.message.trim();
-    if message.is_empty() {
-        reason
-    } else {
-        format!("{reason} — {message}")
+/// The platform record a stream item carries, when it carries one.
+fn platform_record_of(item: &RunStreamItem) -> Option<PlatformRecord> {
+    if item.kind != RunStreamItemKind::Platform {
+        return None;
     }
+    serde_json::from_value(item.item.get("record")?.clone()).ok()
 }
 
-async fn load_prior_slack_lifecycle_event_details(
-    state: &AppState,
-    run_id: RunId,
-    before_seq: u32,
-) -> PriorSlackLifecycleEventDetails {
-    let run_store = match state.stores.runs.open_run_reader(&run_id).await {
-        Ok(run_store) => run_store,
-        Err(err) => {
-            warn!(
-                run_id = %run_id,
-                error = %err,
-                "Unable to inspect prior run events for Slack lifecycle notification"
-            );
-            return PriorSlackLifecycleEventDetails::default();
-        }
-    };
-    let events = match run_store.list_events().await {
-        Ok(events) => events,
-        Err(err) => {
-            warn!(
-                run_id = %run_id,
-                error = %err,
-                "Unable to load prior run events for Slack lifecycle notification"
-            );
-            return PriorSlackLifecycleEventDetails::default();
-        }
-    };
-
-    let mut details = PriorSlackLifecycleEventDetails::default();
-    for envelope in events {
-        if envelope.seq >= before_seq {
-            break;
-        }
-        match envelope.event.body {
-            EventBody::RunStarted(props) if !props.name.trim().is_empty() => {
-                details.started_event_name = Some(props.name);
-            }
-            EventBody::PullRequestCreated(props) => {
-                details.pull_request = Some(SlackLifecyclePullRequest {
-                    number: props.pr_number,
-                    title:  Some(props.title),
-                    url:    Some(props.pr_url),
-                });
-            }
-            _ => {}
-        }
+/// What a Petri event of the stream parsed out of a step's progress: a
+/// question, an expiry, a note.
+fn petri_parsed(item: &RunStreamItem) -> Option<&serde_json::Value> {
+    if item.kind != RunStreamItemKind::Petri {
+        return None;
     }
-    details
+    item.item.get("derived")?.get("parsed")
 }
 
 fn slack_lifecycle_workflow_label(
@@ -1111,21 +1111,34 @@ pub struct AppState {
     resource_sampler: resource_sampler::ResourceSampler,
     max_concurrent_runs: usize,
     pub(crate) worker_control_bus: Arc<dyn WorkerControlBus>,
+    /// The steers and interrupts awaiting their worker's answer.
+    pub(crate) worker_control_acks: Arc<WorkerControlAcks>,
     pub(crate) worker_runtime: Arc<dyn WorkerRuntime>,
+    /// The Petri runs held open for workers over the API.
+    pub(crate) petri_runs: PetriRuns,
+    /// The projector of Petri runs: signalled after each committed record.
+    pub(crate) petri_projector: Arc<Projector>,
+    /// The server's reader of every run's stream, into the live state.
+    pub(crate) stream_follower: Arc<stream_follower::StreamFollower>,
     scheduler_notify: Notify,
     automation_scheduler_notify: Notify,
     pull_request_scheduler_notify: Notify,
     pull_request_creation_queue: Mutex<pull_request_supervisor::PendingPullRequestCreationQueue>,
-    global_event_tx: broadcast::Sender<EventEnvelope>,
+    global_event_tx: broadcast::Sender<RunStreamItem>,
     /// Per-run coalescing registry for `GET /runs/{id}/files`. Concurrent
     /// callers for the same run share one materialization; different runs
     /// proceed in parallel. See `crate::run_files` for semantics.
     pub(crate) files_in_flight: FilesInFlight,
     pull_request_create_locks: KeyedMutex<RunId>,
+    /// One lock per run around a control request's check-and-append.
+    control_request_locks: KeyedMutex<RunId>,
     parent_link_lock: AsyncMutex<()>,
 
     pub(super) server_secrets: ServerSecrets,
     pub(crate) llm_source: Arc<dyn CredentialProvider>,
+    /// The database pool the stores share, for the Petri run store a
+    /// server-process run writes its records through.
+    pub(crate) db_pool: DbPool,
     manifest_run_defaults: RwLock<Arc<RunLayer>>,
     manifest_run_settings: RwLock<std::result::Result<RunNamespace, SharedError>>,
     pub(crate) server_settings: RwLock<Arc<ServerSettings>>,
@@ -1138,7 +1151,8 @@ pub struct AppState {
     sandbox_inventory: SandboxInventory,
     shutdown: CancellationToken,
     shutting_down: AtomicBool,
-    registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+    /// Test switch: execute runs in this process instead of a worker.
+    execute_in_process: bool,
     slack_service: Option<Arc<SlackService>>,
     slack_started: AtomicBool,
     github_webhook_secret: Option<String>,
@@ -1149,6 +1163,8 @@ pub(crate) struct AppStores {
     pub(crate) run_summaries:   Arc<RunSummaryStore>,
     /// Ask Fabro conversations, keyed by session id.
     pub(crate) session_records: Arc<RunSessionRecordStore>,
+    /// The events of Ask Fabro sessions, numbered per session.
+    pub(crate) session_events:  Arc<RunSessionEventStore>,
     pub(crate) auth_codes:      Arc<AuthCodeStore>,
     pub(crate) auth_sessions:   Arc<AuthSessionStore>,
     pub(crate) automations:     Arc<AutomationStore>,
@@ -1171,6 +1187,33 @@ impl AppState {
     #[must_use]
     pub fn test_auth_code_store(&self) -> &Arc<AuthCodeStore> {
         &self.stores.auth_codes
+    }
+
+    /// The Petri run store the worker endpoints answer from, so a test can
+    /// release a lease as an operator would and read who holds one.
+    #[must_use]
+    pub fn test_petri_run_store(&self) -> &fabro_petri::SqliteRunStore {
+        self.petri_runs.store()
+    }
+
+    /// The projector of Petri runs, so a test can wait for a run's view to
+    /// settle before it reads it.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_petri_projector(&self) -> &Arc<Projector> {
+        &self.petri_projector
+    }
+
+    /// The pool the Petri view tables live in, so a test can read them.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_petri_view_pool(&self) -> DbPool {
+        self.stores.runs.run_summary_store().pool()
+    }
+
+    /// A worker token for `run_id` with the plain `run:worker` scope, as the
+    /// server mints for the worker it launches.
+    pub fn test_issue_worker_token(&self, run_id: &RunId) -> String {
+        issue_worker_token_with_scopes(&self.worker_tokens, run_id, WorkerScopeSet::run_worker())
+            .expect("a test worker token signs")
     }
 }
 
@@ -1269,7 +1312,8 @@ impl AskFabroReadiness {
 
 pub(crate) struct AppStateConfig {
     pub(crate) resolved_settings: ResolvedAppStateSettings,
-    pub(crate) registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+    /// Execute runs in this process instead of a worker (tests only).
+    pub(crate) execute_in_process: bool,
     pub(crate) max_concurrent_runs: usize,
     pub(crate) store: Arc<Database>,
     pub(crate) artifact_store: ArtifactStore,
@@ -1295,6 +1339,25 @@ pub(crate) struct ResolvedAppStateSettings {
     pub(crate) server_settings:       ServerSettings,
     pub(crate) manifest_run_defaults: RunLayer,
     pub(crate) llm_overlay:           LlmLayer,
+}
+
+/// Add a concluded run's usage to the server's aggregate; a run that
+/// recorded no conclusion adds nothing.
+pub(crate) fn accumulate_concluded_run_usage(
+    state: &AppState,
+    final_state: &fabro_store::RunProjection,
+) {
+    if final_state.conclusion.is_none() {
+        return;
+    }
+    let mut agg = state
+        .aggregate_usage
+        .lock()
+        .expect("aggregate_usage lock poisoned");
+    accumulate_usage_rollup(
+        &mut agg,
+        &fabro_workflow::usage_rollup_from_projection(final_state),
+    );
 }
 
 fn accumulate_usage_rollup(
@@ -1519,12 +1582,7 @@ impl AppState {
         &self,
         run_id: &RunId,
     ) -> Result<Arc<fabro_store::RunProjection>, ApiError> {
-        self.stores
-            .runs
-            .load_run_projection(run_id)
-            .await
-            .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-            .ok_or_else(|| ApiError::not_found("Run not found."))
+        run_records::require_projection(self, *run_id).await
     }
 
     pub(crate) fn session_runtimes(&self) -> &SessionRuntimeManager {
@@ -1724,14 +1782,13 @@ fn start_optional_slack_service(state: &Arc<AppState>) {
         let mut rx = event_state.global_event_tx.subscribe();
         loop {
             match rx.recv().await {
-                Ok(envelope) => {
-                    // Resolve the run's web URL once per event so the Slack
-                    // message can deep-link back to Fabro. Returns None when
-                    // the web UI is disabled or `server.web.url` is unset, in
-                    // which case `question_to_blocks` simply omits the link.
-                    let run_web_url = event_state.run_web_url(&envelope.event.run_id);
+                Ok(item) => {
                     event_service
-                        .handle_event(event_state.as_ref(), &envelope, run_web_url.as_deref())
+                        .observe(
+                            event_state.as_ref(),
+                            item.run_id,
+                            std::slice::from_ref(&item),
+                        )
                         .await;
                 }
                 Err(RecvError::Lagged(_)) => {}
@@ -2409,7 +2466,7 @@ where
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
-        registry_factory_override,
+        execute_in_process,
         max_concurrent_runs,
         store,
         artifact_store,
@@ -2430,6 +2487,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         automation_materializer_override,
     } = config;
 
+    let store_pool = db_pool.clone();
     let automation_migration_pool = db_pool.clone();
     load_store_blocking("automation environment migration", move || async move {
         fabro_automation::backfill_environment_selectors(&automation_migration_pool)
@@ -2467,7 +2525,17 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         .context("load mcp servers")?,
     );
     let variables = Arc::new(VariableStore::new(db_pool.clone()));
+    let petri_runs = PetriRuns::new(db_pool.clone());
+    // Petri's records live on the shared pool; the view tables live where the
+    // run summary store keeps the `runs` row (the same database in the
+    // server, a fixture of its own in a test).
+    let petri_projector = Projector::new(db_pool.clone(), store.run_summary_store().pool());
+    {
+        let projector = Arc::clone(&petri_projector);
+        store.set_platform_record_hook(Arc::new(move |run_id| projector.signal(run_id)));
+    }
     let session_records = Arc::new(RunSessionRecordStore::new(db_pool.clone()));
+    let session_events = Arc::new(RunSessionEventStore::new(db_pool.clone()));
     let secret_store = Arc::new(SecretStore::new(db_pool));
     let vault = preloaded_vault;
     // Read vault secrets needed for synchronous setup before we wrap the vault in
@@ -2564,6 +2632,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             runs: store,
             run_summaries,
             session_records,
+            session_events,
             auth_codes,
             auth_sessions,
             automations: automation_store,
@@ -2582,7 +2651,11 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         resource_sampler: resource_sampler::ResourceSampler::new(),
         max_concurrent_runs,
         worker_control_bus,
+        worker_control_acks: Arc::new(WorkerControlAcks::new(WORKER_CONTROL_ACK_WAIT)),
         worker_runtime,
+        petri_runs,
+        petri_projector,
+        stream_follower: Arc::new(stream_follower::StreamFollower::default()),
         scheduler_notify: Notify::new(),
         automation_scheduler_notify: Notify::new(),
         pull_request_scheduler_notify: Notify::new(),
@@ -2592,9 +2665,11 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         global_event_tx,
         files_in_flight: new_files_in_flight(),
         pull_request_create_locks: KeyedMutex::new(),
+        control_request_locks: KeyedMutex::new(),
         parent_link_lock: AsyncMutex::new(()),
         server_secrets,
         llm_source,
+        db_pool: store_pool,
         manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
         manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
@@ -2607,7 +2682,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         sandbox_inventory,
         shutdown,
         shutting_down: AtomicBool::new(false),
-        registry_factory_override,
+        execute_in_process,
         slack_service,
         slack_started: AtomicBool::new(false),
         // Startup snapshot for the sync router build; rotating the webhook
@@ -2703,9 +2778,21 @@ async fn delete_run_internal(
         .delete_run(&id)
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    state.petri_runs.worker_exited(id);
+    state
+        .petri_projector
+        .delete_run(id)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     state
         .artifact_store
         .delete_for_run(&id)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    state
+        .stores
+        .session_events
+        .delete_for_run(id)
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     match delete_outcome {
@@ -2721,15 +2808,13 @@ async fn delete_run_sandbox_resource(
     id: RunId,
     force: bool,
 ) -> Result<SandboxDeleteOutcome, ApiError> {
-    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
-        return Ok(SandboxDeleteOutcome::Absent);
-    };
-    let projection = match run_store.state().await {
-        Ok(projection) => projection,
+    let projection = match run_records::projection(state, id).await {
+        Ok(Some(projection)) => projection,
+        Ok(None) => return Ok(SandboxDeleteOutcome::Absent),
         Err(err) if force => {
             tracing::warn!(
                 run_id = %id,
-                error = %render_with_causes(&err.to_string(), &collect_causes(&err)),
+                error = %format!("{err:#}"),
                 "Skipping sandbox provider delete because run projection cannot be loaded"
             );
             return Ok(SandboxDeleteOutcome::Cleaned);
@@ -2744,9 +2829,13 @@ async fn delete_run_sandbox_resource(
     let delete_started = matches!(projection.status, RunStatus::Removing);
     let can_mark_removing = projection.status.can_transition_to(RunStatus::Removing);
     if !delete_started && can_mark_removing {
-        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunRemoving)
-            .await
-            .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        run_records::lifecycle(
+            state,
+            id,
+            run_records::transition(RunLifecycleKind::Removing, RunStatus::Removing),
+        )
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     }
 
     let preserve = projection
@@ -3004,10 +3093,8 @@ fn octet_stream_response(bytes: Bytes) -> Response {
 fn clear_live_run_state(run: &mut ManagedRun) {
     run.answer_transport = None;
     run.accepted_questions.clear();
-    run.active_api_targets.clear();
     run.active_steerable_stages.clear();
     run.active_non_steerable_stages.clear();
-    run.event_tx = None;
     run.cancel_tx = None;
     run.cancel_token = None;
     run.worker_ref = None;
@@ -3016,26 +3103,37 @@ fn clear_live_run_state(run: &mut ManagedRun) {
 
 fn cleanup_worker_control_bus_for_run(state: &AppState, run_id: RunId) {
     let bus = Arc::clone(&state.worker_control_bus);
+    state.worker_control_acks.forget_run(run_id);
     tokio::spawn(async move {
         bus.cleanup_run(run_id).await;
     });
 }
 
-fn reconcile_live_interview_state_for_event(run: &mut ManagedRun, event: &RunEvent) {
-    match &event.body {
-        EventBody::InterviewCompleted(props) => {
-            run.accepted_questions.remove(&props.question_id);
+/// A question the run's stream closed (answered, or expired) no longer holds
+/// an accepted-answer claim; a terminal run holds none.
+fn reconcile_live_interview_state(run: &mut ManagedRun, item: &RunStreamItem) {
+    match platform_record_of(item) {
+        Some(PlatformRecord::InterviewAnswered(answered)) => {
+            run.accepted_questions.remove(&answered.question);
         }
-        EventBody::InterviewTimeout(props) => {
-            run.accepted_questions.remove(&props.question_id);
-        }
-        EventBody::InterviewInterrupted(props) => {
-            run.accepted_questions.remove(&props.question_id);
-        }
-        EventBody::RunCompleted(_) | EventBody::RunFailed(_) => {
+        Some(PlatformRecord::RunLifecycle(record))
+            if matches!(
+                record.transition,
+                RunLifecycleKind::Succeeded | RunLifecycleKind::Failed | RunLifecycleKind::Dead
+            ) =>
+        {
             run.accepted_questions.clear();
         }
         _ => {}
+    }
+    if let Some(question_id) = petri_parsed(item)
+        .filter(|parsed| {
+            parsed.get("kind").and_then(serde_json::Value::as_str) == Some("question_expired")
+        })
+        .and_then(|parsed| parsed.get("question"))
+        .and_then(serde_json::Value::as_str)
+    {
+        run.accepted_questions.remove(question_id);
     }
 }
 
@@ -3117,25 +3215,45 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
     let mut reconciled = 0usize;
 
     for summary in summaries {
-        let run_store = state.stores.runs.open_run(&summary.id).await?;
+        let Some(run_state) = run_records::projection(state, summary.id).await? else {
+            continue;
+        };
+        // A run continues from its records in a new worker, unless a cancel
+        // was pending or the run was being removed: those end failed.
+        if petri_run_resumes_on_restart(&summary) {
+            petri_runs::reconcile_on_startup(state, summary.id, &run_state).await?;
+            reconciled += 1;
+            continue;
+        }
         let (error, reason) = failure_for_incomplete_run(
             summary.lifecycle.pending_control,
             "Fabro server restarted before the run reached a terminal state.".to_string(),
         );
-        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &error,
-            fabro_types::RunTiming::default(),
-            reason,
-            None,
-            None,
-            None,
-            None,
-        );
-        workflow_event::append_event(&run_store, &summary.id, &failure_event).await?;
+        run_records::lifecycle(
+            state,
+            summary.id,
+            run_records::failed(reason, error.to_string()),
+        )
+        .await?;
         reconciled += 1;
     }
 
     Ok(reconciled)
+}
+
+/// Whether a run the server finds in flight at startup is one a Petri
+/// worker can continue: it was runnable or running (blocked or paused
+/// count), no cancel was pending, and it was not being removed.
+fn petri_run_resumes_on_restart(summary: &fabro_types::Run) -> bool {
+    summary.lifecycle.pending_control != Some(RunControlAction::Cancel)
+        && matches!(
+            summary.lifecycle.status,
+            RunStatus::Runnable
+                | RunStatus::Starting
+                | RunStatus::Running
+                | RunStatus::Blocked { .. }
+                | RunStatus::Paused { .. }
+        )
 }
 
 fn live_worker_processes(state: &AppState) -> Vec<LiveWorkerProcess> {
@@ -3163,8 +3281,9 @@ async fn persist_shutdown_run_failures(
         .collect::<HashSet<_>>();
 
     for run_id in run_ids {
-        let run_store = state.stores.runs.open_run(&run_id).await?;
-        let run_state = run_store.state().await?;
+        let Some(run_state) = run_records::projection(state, run_id).await? else {
+            continue;
+        };
         if run_state.status.is_terminal() {
             continue;
         }
@@ -3173,16 +3292,12 @@ async fn persist_shutdown_run_failures(
             run_state.pending_control,
             "Fabro server shut down before the run reached a terminal state.".to_string(),
         );
-        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-            &error,
-            fabro_types::RunTiming::default(),
-            reason,
-            None,
-            None,
-            None,
-            None,
-        );
-        workflow_event::append_event(&run_store, &run_id, &failure_event).await?;
+        run_records::lifecycle(
+            state,
+            run_id,
+            run_records::failed(reason, error.to_string()),
+        )
+        .await?;
     }
 
     Ok(())
@@ -3259,39 +3374,22 @@ async fn alive_refs(state: &AppState, refs: &[WorkerRef]) -> Vec<WorkerRef> {
 }
 
 async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
-    let run_store = state.stores.runs.open_run(&run_id).await?;
-    let run_state = run_store.state().await?;
+    let Some(run_state) = run_records::projection(state, run_id).await? else {
+        anyhow::bail!("run {run_id} not found");
+    };
     if run_state.status.is_terminal() {
         return Ok(());
     }
-
-    let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-        &WorkflowError::Cancelled,
-        fabro_types::RunTiming::default(),
-        FailureReason::Cancelled,
-        None,
-        None,
-        None,
-        None,
-    );
-    workflow_event::append_event(&run_store, &run_id, &failure_event).await
-}
-
-async fn finish_cancelled_run_before_execution(state: &Arc<AppState>, run_id: RunId) {
-    if let Err(err) = persist_cancelled_run_status(state.as_ref(), run_id).await {
-        error!(run_id = %run_id, error = %err, "Failed to persist cancelled run status");
-    }
-
-    let mut runs = state.runs.lock().expect("runs lock poisoned");
-    if let Some(managed_run) = runs.get_mut(&run_id) {
-        managed_run.status = RunStatus::Failed {
-            reason: FailureReason::Cancelled,
-        };
-        clear_live_run_state(managed_run);
-    }
-    drop(runs);
-    cleanup_worker_control_bus_for_run(state.as_ref(), run_id);
-    state.scheduler_notify.notify_one();
+    run_records::lifecycle(
+        state,
+        run_id,
+        run_records::failed(
+            FailureReason::Cancelled,
+            WorkflowError::Cancelled.to_string(),
+        ),
+    )
+    .await
+    .map(|_| ())
 }
 
 /// Reject the run before execution if its effective sandbox provider is
@@ -3318,50 +3416,14 @@ async fn fail_run_before_execution(
     reason: FailureReason,
     message: String,
 ) {
-    match state.stores.runs.open_run(&run_id).await {
-        Ok(run_store) => {
-            let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-                &WorkflowError::engine(message.clone()),
-                fabro_types::RunTiming::default(),
-                reason,
-                None,
-                None,
-                None,
-                None,
-            );
-            if let Err(err) =
-                workflow_event::append_event(&run_store, &run_id, &failure_event).await
-            {
-                error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
-            }
-        }
-        Err(err) => {
-            error!(run_id = %run_id, error = %err, "Failed to open run store while persisting run failure");
-        }
+    if let Err(err) =
+        run_records::lifecycle(state, run_id, run_records::failed(reason, message.clone())).await
+    {
+        error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
     }
 
     fail_managed_run(state, run_id, reason, message);
     state.scheduler_notify.notify_one();
-}
-
-async fn forward_run_events_to_global(
-    state: Arc<AppState>,
-    run_id: RunId,
-    mut run_events: broadcast::Receiver<EventEnvelope>,
-) {
-    loop {
-        match run_events.recv().await {
-            Ok(event) => {
-                let mut runs = state.runs.lock().expect("runs lock poisoned");
-                if let Some(managed_run) = runs.get_mut(&run_id) {
-                    reconcile_live_interview_state_for_event(managed_run, &event.event);
-                }
-                let _ = state.global_event_tx.send(event);
-            }
-            Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => break,
-        }
-    }
 }
 
 fn managed_run(
@@ -3378,11 +3440,8 @@ fn managed_run(
         created_at,
         answer_transport: None,
         accepted_questions: HashSet::new(),
-        active_api_targets: HashMap::new(),
         active_steerable_stages: HashMap::new(),
         active_non_steerable_stages: HashMap::new(),
-        event_tx: None,
-        checkpoint: None,
         cancel_tx: None,
         cancel_token: None,
         worker_ref: None,
@@ -3430,50 +3489,42 @@ fn fail_managed_run(state: &Arc<AppState>, run_id: RunId, reason: FailureReason,
     cleanup_worker_control_bus_for_run(state.as_ref(), run_id);
 }
 
-fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent) {
-    use fabro_types::EventBody;
-
+/// Fold one lifecycle record of the run's stream into the in-memory run:
+/// the status the scheduler and the control handlers read. A `runnable`
+/// record is not folded: scheduling is owned by the start and approve
+/// handlers, which set the live status and notify the scheduler themselves.
+fn apply_lifecycle_to_managed_run(state: &AppState, run_id: RunId, record: &RunLifecycleRecord) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     let Some(managed_run) = runs.get_mut(&run_id) else {
         return;
     };
-
-    if matches!(&event.body, EventBody::RunRunnable(_)) {
-        // Scheduling is owned by the start/approve lifecycle handlers, which
-        // set the live status and notify the scheduler explicitly. Direct
-        // event ingestion still records durable history, but must not make
-        // externally injected events schedulable.
-        return;
-    }
-
-    match &event.body {
-        EventBody::RunSubmitted(_) => managed_run.status = RunStatus::Submitted,
-        EventBody::RunPending(props) => {
-            managed_run.status = RunStatus::Pending {
-                reason: props.reason,
-            };
+    match record.transition {
+        RunLifecycleKind::Submitted => managed_run.status = RunStatus::Submitted,
+        RunLifecycleKind::Pending => {
+            if let Some(status) = record.status {
+                managed_run.status = status;
+            }
         }
-        EventBody::RunStarting(_) => managed_run.status = RunStatus::Starting,
-        EventBody::RunRunning(_) => managed_run.status = RunStatus::Running,
-        EventBody::RunBlocked(props) => {
+        RunLifecycleKind::Starting => managed_run.status = RunStatus::Starting,
+        RunLifecycleKind::Running => managed_run.status = RunStatus::Running,
+        RunLifecycleKind::Blocked => {
+            let Some(RunStatus::Blocked { blocked_reason }) = record.status else {
+                return;
+            };
             managed_run.status = match managed_run.status {
                 RunStatus::Paused { .. } => RunStatus::Paused {
-                    prior_block: Some(props.blocked_reason),
+                    prior_block: Some(blocked_reason),
                 },
-                _ => RunStatus::Blocked {
-                    blocked_reason: props.blocked_reason,
-                },
+                _ => RunStatus::Blocked { blocked_reason },
             };
         }
-        EventBody::RunUnblocked(_) => {
+        RunLifecycleKind::Unblocked => {
             managed_run.status = match managed_run.status {
-                RunStatus::Paused {
-                    prior_block: Some(_) | None,
-                } => RunStatus::Paused { prior_block: None },
+                RunStatus::Paused { .. } => RunStatus::Paused { prior_block: None },
                 _ => RunStatus::Running,
             };
         }
-        EventBody::RunPaused(_) => {
+        RunLifecycleKind::Paused => {
             let prior_block = match managed_run.status {
                 RunStatus::Blocked { blocked_reason } => Some(blocked_reason),
                 RunStatus::Paused { prior_block } => prior_block,
@@ -3481,7 +3532,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             };
             managed_run.status = RunStatus::Paused { prior_block };
         }
-        EventBody::RunUnpaused(_) => {
+        RunLifecycleKind::Unpaused => {
             managed_run.status = match managed_run.status {
                 RunStatus::Paused {
                     prior_block: Some(blocked_reason),
@@ -3489,105 +3540,32 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 _ => RunStatus::Running,
             };
         }
-        EventBody::RunRemoving(_) => managed_run.status = RunStatus::Removing,
-        EventBody::RunCompleted(_) => {
-            let EventBody::RunCompleted(props) = &event.body else {
-                unreachable!(
-                    "outer match arm already verified event.body is EventBody::RunCompleted"
-                )
-            };
-            managed_run.status = RunStatus::Succeeded {
-                reason: props.reason,
-            };
+        RunLifecycleKind::Removing => managed_run.status = RunStatus::Removing,
+        RunLifecycleKind::Succeeded => {
+            managed_run.status = record.status.unwrap_or(RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            });
             managed_run.error = None;
-            managed_run.active_api_targets.clear();
             managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_stages.clear();
             cleanup_worker_control_bus_for_run(state, run_id);
         }
-        EventBody::RunFailed(props) => {
-            managed_run.status = RunStatus::Failed {
-                reason: props.failure.reason,
-            };
-            managed_run.error = Some(render_compact_with_causes(
-                &props.failure.detail.message,
-                &props.failure.detail.causes,
-            ));
-            managed_run.active_api_targets.clear();
+        RunLifecycleKind::Failed | RunLifecycleKind::Dead => {
+            managed_run.status = record.status.unwrap_or(RunStatus::Failed {
+                reason: FailureReason::WorkflowError,
+            });
+            managed_run.error.clone_from(&record.reason);
             managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_stages.clear();
             cleanup_worker_control_bus_for_run(state, run_id);
         }
-        // Track active agent sessions by steerability. Activated/deactivated
-        // are leased by session id so stale deactivations cannot clear a newer
-        // binding for the same stage.
-        EventBody::AgentSessionActivated(props) => {
-            if let (Some(stage_id), Some(session_id)) =
-                (event.stage_id.as_ref(), event.session_id.as_ref())
-            {
-                if props.capabilities.contains(&SessionCapability::Steer) {
-                    managed_run
-                        .active_steerable_stages
-                        .insert(stage_id.clone(), session_id.clone());
-                    managed_run.active_non_steerable_stages.remove(stage_id);
-                    let acp_provider: &'static str = AgentBackend::Acp.into();
-                    if props.provider.as_deref() == Some(acp_provider) {
-                        managed_run.active_api_targets.remove(stage_id);
-                    } else {
-                        managed_run
-                            .active_api_targets
-                            .insert(stage_id.clone(), PairTarget {
-                                stage_id:   stage_id.clone(),
-                                node_label: event
-                                    .node_label
-                                    .clone()
-                                    .unwrap_or_else(|| stage_id.node_id().to_string()),
-                            });
-                    }
-                } else {
-                    managed_run
-                        .active_non_steerable_stages
-                        .insert(stage_id.clone(), session_id.clone());
-                    managed_run.active_steerable_stages.remove(stage_id);
-                    managed_run.active_api_targets.remove(stage_id);
-                }
-            }
-        }
-        EventBody::AgentSessionDeactivated(_) => {
-            if let (Some(stage_id), Some(session_id)) =
-                (event.stage_id.as_ref(), event.session_id.as_ref())
-            {
-                if managed_run
-                    .active_steerable_stages
-                    .get(stage_id)
-                    .is_some_and(|current| current == session_id)
-                {
-                    managed_run.active_steerable_stages.remove(stage_id);
-                    managed_run.active_api_targets.remove(stage_id);
-                }
-                if managed_run
-                    .active_non_steerable_stages
-                    .get(stage_id)
-                    .is_some_and(|current| current == session_id)
-                {
-                    managed_run.active_non_steerable_stages.remove(stage_id);
-                }
-            }
-        }
-        // ACP sessions are steerable via `agent.session.activated`; terminal
-        // ACP events and stage lifecycle events are still backstops for cleanup.
-        EventBody::AgentAcpCompleted(_)
-        | EventBody::AgentAcpCancelled(_)
-        | EventBody::AgentAcpTimedOut(_)
-        | EventBody::StageCompleted(_)
-        | EventBody::StageFailed(_) => {
-            if let Some(stage_id) = &event.stage_id {
-                managed_run.active_api_targets.remove(stage_id);
-                managed_run.active_steerable_stages.remove(stage_id);
-                managed_run.active_non_steerable_stages.remove(stage_id);
-            }
-        }
-        _ => {}
+        RunLifecycleKind::Runnable
+        | RunLifecycleKind::StartRequested
+        | RunLifecycleKind::Approved
+        | RunLifecycleKind::Denied
+        | RunLifecycleKind::CancelRequested
+        | RunLifecycleKind::PauseRequested
+        | RunLifecycleKind::UnpauseRequested => {}
     }
 }
 
@@ -3604,15 +3582,10 @@ async fn drain_worker_stderr(
     Ok(())
 }
 
-async fn fail_worker_launch(
-    state: &Arc<AppState>,
-    run_store: &fabro_store::RunDatabase,
-    run_id: RunId,
-    err: anyhow::Error,
-) {
+async fn fail_worker_launch(state: &Arc<AppState>, run_id: RunId, err: anyhow::Error) {
     tracing::error!(run_id = %run_id, error = %err, "Failed to spawn worker");
-    let pending_control = match run_store.state().await {
-        Ok(run_state) => run_state.pending_control,
+    let pending_control = match run_records::projection(state, run_id).await {
+        Ok(run_state) => run_state.and_then(|run_state| run_state.pending_control),
         Err(state_err) => {
             tracing::warn!(
                 run_id = %run_id,
@@ -3634,57 +3607,45 @@ async fn fail_worker_launch(
     } else {
         launch_message
     };
-    let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-        &error,
-        fabro_types::RunTiming::default(),
-        reason,
-        None,
-        None,
-        None,
-        None,
-    );
-    let _ = workflow_event::append_event(run_store, &run_id, &failure_event).await;
+    let _ = run_records::lifecycle(
+        state,
+        run_id,
+        run_records::failed(reason, error.to_string()),
+    )
+    .await;
     fail_managed_run(state, run_id, reason, message);
     state.scheduler_notify.notify_one();
 }
 
-async fn append_worker_exit_failure(
-    run_store: &fabro_store::RunDatabase,
-    run_id: RunId,
-    worker_exit: &WorkerExit,
-) {
-    let state = match run_store.state().await {
-        Ok(state) => state,
+/// A worker that exited without recording the run's end left it failed.
+async fn append_worker_exit_failure(state: &AppState, run_id: RunId, worker_exit: &WorkerExit) {
+    let run_state = match run_records::projection(state, run_id).await {
+        Ok(Some(run_state)) => run_state,
+        Ok(None) => return,
         Err(err) => {
             tracing::warn!(run_id = %run_id, error = %err, "Failed to load run state after worker exit");
             return;
         }
     };
-
-    let terminal = state.status.is_terminal();
-    if terminal {
+    if run_state.status.is_terminal() {
         return;
     }
 
     let (error, reason) = failure_for_incomplete_run(
-        state.pending_control,
+        run_state.pending_control,
         format!(
             "Worker exited before emitting a terminal run event: {}",
             worker_exit.detail
         ),
     );
-    let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-        &error,
-        fabro_types::RunTiming::default(),
-        reason,
-        None,
-        None,
-        None,
-        None,
-    );
-
-    if let Err(err) = workflow_event::append_event(run_store, &run_id, &failure_event).await {
-        tracing::warn!(run_id = %run_id, error = %err, "Failed to append worker exit failure");
+    if let Err(err) = run_records::lifecycle(
+        state,
+        run_id,
+        run_records::failed(reason, error.to_string()),
+    )
+    .await
+    {
+        tracing::warn!(run_id = %run_id, error = %err, "Failed to record the worker exit failure");
     }
 }
 
@@ -3699,6 +3660,7 @@ fn worker_launch_spec(
     run_dir: &std::path::Path,
     agent_fabro_tools_enabled: bool,
     github_app_private_key: Option<String>,
+    daytona_api_key: Option<String>,
 ) -> anyhow::Result<WorkerLaunchSpec> {
     let current_exe = std::env::current_exe().context("reading current executable path")?;
     let executable =
@@ -3737,6 +3699,8 @@ fn worker_launch_spec(
         fabro_log,
         active_config_path: state.active_config_path().to_path_buf(),
         github_app_private_key,
+        daytona_api_key,
+        fabro_home: fabro_config::Home::from_env().root().to_path_buf(),
     })
 }
 
@@ -3902,7 +3866,21 @@ async fn deliver_answer_to_run(
         }
     };
 
+    let answered = InterviewAnsweredRecord {
+        question:  qid.to_string(),
+        principal: Some(submission.actor.clone()),
+        channel:   None,
+        text:      None,
+        answer:    Some(answer_text(&submission.answer)),
+    };
     if let Ok(()) = transport.submit(qid, submission).await {
+        // The answer reached the run; who gave it, and what, is Fabro's
+        // record beside the answer Petri records.
+        if let Err(err) =
+            run_records::append(state, run_id, PlatformRecord::InterviewAnswered(answered)).await
+        {
+            warn!(run_id = %run_id, question = qid, error = %err, "the answer was delivered but not recorded");
+        }
         Ok(())
     } else {
         release_run_answer_claim(state, run_id, qid);
@@ -3911,6 +3889,22 @@ async fn deliver_answer_to_run(
             "Failed to deliver answer to the active run.",
         )
         .into_response())
+    }
+}
+
+/// An answer as text, for the record and the readers that show it.
+fn answer_text(answer: &fabro_interview::Answer) -> String {
+    use fabro_interview::AnswerValue;
+    match &answer.value {
+        AnswerValue::Yes => "yes".to_string(),
+        AnswerValue::No => "no".to_string(),
+        AnswerValue::Cancelled => "cancelled".to_string(),
+        AnswerValue::Interrupted => "interrupted".to_string(),
+        AnswerValue::Skipped => "skipped".to_string(),
+        AnswerValue::Timeout => "timed out".to_string(),
+        AnswerValue::Selected(key) => key.clone(),
+        AnswerValue::MultiSelected(keys) => keys.join(", "),
+        AnswerValue::Text(text) => text.clone(),
     }
 }
 
@@ -3957,336 +3951,15 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
         return;
     }
 
-    if state.registry_factory_override.is_some() {
-        Box::pin(execute_run_in_process(state, run_id)).await;
+    // A run executes in its worker process. Under the test override it
+    // executes in this process instead, so the scenario tests need no worker
+    // binary.
+    if state.execute_in_process {
+        Box::pin(petri_runs::execute(state, run_id)).await;
         return;
     }
 
     Box::pin(execute_run_subprocess(state, run_id)).await;
-}
-
-async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
-    // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, run_dir, event_tx, cancel_token, execution_mode) = {
-        let mut runs = state.runs.lock().expect("runs lock poisoned");
-        let managed_run = match runs.get_mut(&run_id) {
-            Some(r) if r.status == RunStatus::Runnable => r,
-            _ => return,
-        };
-        let Some(run_dir) = managed_run.run_dir.clone() else {
-            return;
-        };
-
-        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-        let cancel_token = CancellationToken::new();
-        let (event_tx, _) = broadcast::channel(256);
-
-        managed_run.status = RunStatus::Starting;
-        managed_run.cancel_tx = Some(cancel_tx);
-        managed_run.cancel_token = Some(cancel_token.clone());
-        managed_run.event_tx = Some(event_tx);
-
-        (
-            cancel_rx,
-            run_dir,
-            managed_run.event_tx.clone(),
-            cancel_token,
-            managed_run.execution_mode,
-        )
-    };
-
-    // Create interviewer and event plumbing (this is the "provisioning" phase)
-    let interviewer = Arc::new(ControlInterviewer::new());
-    let interview_runtime: Arc<dyn Interviewer> = interviewer.clone();
-    let emitter = Emitter::new(run_id);
-    if let Some(tx_clone) = event_tx {
-        emitter.on_event(move |event| {
-            let _ = tx_clone.send(event.clone());
-        });
-    }
-    let registry_override = state
-        .registry_factory_override
-        .as_ref()
-        .map(|factory| Arc::new(factory(Arc::clone(&interview_runtime))));
-    let emitter = Arc::new(emitter);
-    let steering_hub = Arc::new(fabro_workflow::SteeringHub::new(Arc::clone(&emitter)));
-
-    // Transition to Running, populate interviewer
-    let cancelled_during_setup = {
-        let mut runs = state.runs.lock().expect("runs lock poisoned");
-        if let Some(managed_run) = runs.get_mut(&run_id) {
-            if managed_run.status == RunStatus::Starting {
-                managed_run.status = RunStatus::Running;
-                managed_run.answer_transport = Some(RunAnswerTransport::InProcess {
-                    interviewer:  Arc::clone(&interviewer),
-                    steering_hub: Arc::clone(&steering_hub),
-                });
-                false
-            } else {
-                // Was cancelled during setup
-                clear_live_run_state(managed_run);
-                state.scheduler_notify.notify_one();
-                true
-            }
-        } else {
-            false
-        }
-    };
-    if cancelled_during_setup {
-        if let Err(err) = persist_cancelled_run_status(state.as_ref(), run_id).await {
-            error!(run_id = %run_id, error = %err, "Failed to persist cancelled run status");
-        }
-        return;
-    }
-
-    let run_store = match state.stores.runs.open_run(&run_id).await {
-        Ok(run_store) => run_store,
-        Err(e) => {
-            tracing::error!(run_id = %run_id, error = %e, "Failed to open run store");
-            let mut runs = state.runs.lock().expect("runs lock poisoned");
-            if let Some(managed_run) = runs.get_mut(&run_id) {
-                managed_run.status = RunStatus::Failed {
-                    reason: FailureReason::WorkflowError,
-                };
-                managed_run.error = Some(format!("Failed to open run store: {e}"));
-                clear_live_run_state(managed_run);
-            }
-            state.scheduler_notify.notify_one();
-            return;
-        }
-    };
-    tokio::spawn(forward_run_events_to_global(
-        Arc::clone(&state),
-        run_id,
-        run_store.subscribe(),
-    ));
-    let persisted = match Persisted::load_from_store(&run_store.clone().into(), &run_dir).await {
-        Ok(persisted) => persisted,
-        Err(e) => {
-            tracing::error!(run_id = %run_id, error = %e, "Failed to load persisted run");
-            fail_run_before_execution(
-                &state,
-                run_id,
-                FailureReason::WorkflowError,
-                format!("Failed to load persisted run: {e}"),
-            )
-            .await;
-            return;
-        }
-    };
-    let server_settings = state.server_settings();
-    let github_settings = &server_settings.server.integrations.github;
-    if cancel_token.is_cancelled() {
-        finish_cancelled_run_before_execution(&state, run_id).await;
-        return;
-    }
-    if reject_run_if_sandbox_provider_disabled(
-        &state,
-        &server_settings,
-        run_id,
-        &persisted.run_spec().settings.run,
-    )
-    .await
-    {
-        return;
-    }
-    let github_app_result = {
-        let run_spec = persisted.run_spec();
-        let settings = &run_spec.settings.run;
-        let clone_can_use_github_credentials = settings.execution.mode != RunMode::DryRun
-            && settings.environment.provider.clones_workspace()
-            && run_spec
-                .repo_origin_url()
-                .is_some_and(|origin| !origin.trim().is_empty());
-        let pull_request_can_use_github_credentials =
-            settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some();
-        if settings.integrations.github.is_token_requested() {
-            state.github_credentials(github_settings).await
-        } else if clone_can_use_github_credentials || pull_request_can_use_github_credentials {
-            match state.github_credentials(github_settings).await {
-                Ok(github_app) => Ok(github_app),
-                Err(err) => {
-                    tracing::warn!(
-                        run_id = %run_id,
-                        error = %err,
-                        "GitHub credentials unavailable; pull request creation will be skipped"
-                    );
-                    Ok(None)
-                }
-            }
-        } else {
-            Ok(None)
-        }
-    };
-    let github_app = match github_app_result {
-        Ok(github_app) => github_app,
-        Err(e) => {
-            if cancel_token.is_cancelled() {
-                finish_cancelled_run_before_execution(&state, run_id).await;
-                return;
-            }
-            tracing::error!(run_id = %run_id, error = %e, "Invalid GitHub credentials");
-            fail_run_before_execution(
-                &state,
-                run_id,
-                FailureReason::WorkflowError,
-                format!("Invalid GitHub credentials: {e}"),
-            )
-            .await;
-            return;
-        }
-    };
-    let github_integration = match persisted
-        .run_spec()
-        .settings
-        .run
-        .integrations
-        .github
-        .resolve_integration()
-    {
-        Ok(integration) => integration,
-        Err(err) => {
-            tracing::error!(
-                run_id = %run_id,
-                error = %err,
-                "GitHub permission interpolation failed"
-            );
-            fail_run_before_execution(
-                &state,
-                run_id,
-                FailureReason::WorkflowError,
-                format!("Failed to resolve GitHub permissions: {err}"),
-            )
-            .await;
-            return;
-        }
-    };
-    let vault = match state.stores.vault.snapshot().await {
-        Ok(vault) => vault,
-        Err(err) => {
-            tracing::error!(run_id = %run_id, error = ?err, "Loading run secrets failed");
-            fail_run_before_execution(
-                &state,
-                run_id,
-                FailureReason::WorkflowError,
-                "Loading run secrets failed".to_string(),
-            )
-            .await;
-            return;
-        }
-    };
-    let services = operations::StartServices {
-        run_id,
-        cancel_token: cancel_token.clone(),
-        emitter: Arc::clone(&emitter),
-        interviewer: Arc::clone(&interview_runtime),
-        steering_hub: Arc::clone(&steering_hub),
-        run_store: run_store.clone().into(),
-        event_sink: workflow_event::RunEventSink::store(run_store.clone()),
-        artifact_sink: Some(ArtifactSink::Store(state.artifact_store.clone())),
-        run_control: None,
-        github_app,
-        github_integration,
-        vault: Arc::new(AsyncRwLock::new(vault.into_vault())),
-        sandbox_providers: state.server_settings().server.sandbox.providers.clone(),
-        catalog: state.catalog(),
-        on_node: None,
-        registry_override,
-        fabro_run_tools: None,
-    };
-
-    let execution = async {
-        match execution_mode {
-            RunExecutionMode::Start => operations::start(&run_dir, services).await,
-            RunExecutionMode::Resume => operations::resume(&run_dir, services).await,
-        }
-    };
-
-    let result = tokio::select! {
-        result = execution => ExecutionResult::Completed(Box::new(result)),
-        _ = cancel_rx => {
-            cancel_token.cancel();
-            ExecutionResult::CancelledBySignal
-        }
-    };
-
-    if matches!(&result, ExecutionResult::CancelledBySignal) {
-        if let Err(err) = persist_cancelled_run_status(state.as_ref(), run_id).await {
-            error!(run_id = %run_id, error = %err, "Failed to persist cancelled run status");
-        }
-    }
-
-    // Save final projection
-    let final_projection = match run_store.state().await {
-        Ok(state) => Some(state),
-        Err(err) => {
-            tracing::warn!(run_id = %run_id, error = %err, "Failed to load run state from store");
-            None
-        }
-    };
-
-    // Accumulate aggregate usage after execution completes.
-    if let Some(ref projection) = final_projection {
-        if projection.current_checkpoint().is_some() {
-            let mut agg = state
-                .aggregate_usage
-                .lock()
-                .expect("aggregate_usage lock poisoned");
-            accumulate_usage_rollup(
-                &mut agg,
-                &fabro_workflow::usage_rollup_from_projection(projection),
-            );
-        }
-    }
-
-    let mut runs = state.runs.lock().expect("runs lock poisoned");
-    if let Some(managed_run) = runs.get_mut(&run_id) {
-        match &result {
-            ExecutionResult::Completed(result) => {
-                // A run can fail either before it produces a `Started` or in
-                // its own outcome; both carry the same `WorkflowError`.
-                let outcome = match result.as_ref() {
-                    Ok(started) => started.finalized.outcome.as_ref().map(|_| ()),
-                    Err(e) => Err(e),
-                };
-                match outcome {
-                    Ok(()) => {
-                        info!(run_id = %run_id, "Run completed");
-                        managed_run.status = RunStatus::Succeeded {
-                            reason: SuccessReason::Completed,
-                        };
-                    }
-                    Err(WorkflowError::Cancelled) => {
-                        info!(run_id = %run_id, "Run cancelled");
-                        managed_run.status = RunStatus::Failed {
-                            reason: FailureReason::Cancelled,
-                        };
-                    }
-                    Err(e) => {
-                        let detail = e.display_with_causes();
-                        error!(run_id = %run_id, error = %detail, "Run failed");
-                        managed_run.status = RunStatus::Failed {
-                            reason: e.failure_reason(),
-                        };
-                        managed_run.error = Some(detail);
-                    }
-                }
-            }
-            ExecutionResult::CancelledBySignal => {
-                info!(run_id = %run_id, "Run cancelled");
-                managed_run.status = RunStatus::Failed {
-                    reason: FailureReason::Cancelled,
-                };
-            }
-        }
-        managed_run.checkpoint = final_projection
-            .as_ref()
-            .and_then(|projection| projection.current_checkpoint().cloned());
-        managed_run.run_dir = Some(run_dir);
-        clear_live_run_state(managed_run);
-    }
-    drop(runs);
-    state.scheduler_notify.notify_one();
 }
 
 async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
@@ -4306,28 +3979,20 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         (run_dir, managed_run.execution_mode)
     };
 
-    let run_store = match state.stores.runs.open_run(&run_id).await {
-        Ok(run_store) => run_store,
-        Err(err) => {
-            tracing::error!(run_id = %run_id, error = %err, "Failed to open run store");
+    stream_follower::follow_run(&state, run_id).await;
+    let run_state = match run_records::projection(&state, run_id).await {
+        Ok(Some(run_state)) => run_state,
+        Ok(None) => {
+            tracing::error!(run_id = %run_id, "Run not found at launch");
             fail_managed_run(
                 &state,
                 run_id,
                 FailureReason::WorkflowError,
-                format!("Failed to open run store: {err}"),
+                "Run not found at launch".to_string(),
             );
             state.scheduler_notify.notify_one();
             return;
         }
-    };
-    tokio::spawn(forward_run_events_to_global(
-        Arc::clone(&state),
-        run_id,
-        run_store.subscribe(),
-    ));
-
-    let run_state = match run_store.state().await {
-        Ok(run_state) => run_state,
         Err(err) => {
             tracing::error!(run_id = %run_id, error = %err, "Failed to load run state");
             fail_managed_run(
@@ -4352,7 +4017,21 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         return;
     }
 
-    let github_app_private_key = match state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY).await {
+    // A Daytona run's worker hands the vault's key to Petri's Daytona
+    // plugin through its own environment; any other run's worker never
+    // sees it.
+    let wants_daytona =
+        run_state.spec.settings.run.environment.provider == SandboxProviderKind::DAYTONA;
+    let secrets = async {
+        let github_app_private_key = state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY).await?;
+        let daytona_api_key = if wants_daytona {
+            state.vault_secret(EnvVars::DAYTONA_API_KEY).await?
+        } else {
+            None
+        };
+        Ok::<_, SecretStoreError>((github_app_private_key, daytona_api_key))
+    };
+    let (github_app_private_key, daytona_api_key) = match secrets.await {
         Ok(value) => value,
         Err(err) => {
             fail_run_before_execution(
@@ -4376,6 +4055,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             &run_dir_for_build,
             agent_fabro_tools_enabled,
             github_app_private_key,
+            daytona_api_key,
         )
     })
     .await
@@ -4389,7 +4069,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     let started_worker = match launch_result {
         Ok(worker) => worker,
         Err(err) => {
-            fail_worker_launch(&state, &run_store, run_id, err).await;
+            fail_worker_launch(&state, run_id, err).await;
             return;
         }
     };
@@ -4403,6 +4083,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             managed_run.answer_transport = Some(RunAnswerTransport::Worker {
                 run_id,
                 bus: Arc::clone(&state.worker_control_bus),
+                acks: Arc::clone(&state.worker_control_acks),
             });
         }
     }
@@ -4415,16 +4096,12 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             tracing::error!(run_id = %run_id, error = %err, "Failed while waiting on worker");
             let message = format!("Worker wait failed: {err}");
             state.worker_runtime.force_stop(&worker_ref).await;
-            let failure_event = workflow_event::Event::workflow_run_failed_from_error(
-                &WorkflowError::engine_with_source("Worker wait failed", err),
-                fabro_types::RunTiming::default(),
-                FailureReason::Terminated,
-                None,
-                None,
-                None,
-                None,
-            );
-            let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
+            let _ = run_records::lifecycle(
+                &state,
+                run_id,
+                run_records::failed(FailureReason::Terminated, message.clone()),
+            )
+            .await;
             fail_managed_run(&state, run_id, FailureReason::Terminated, message);
             state.scheduler_notify.notify_one();
             return;
@@ -4455,10 +4132,25 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         return;
     }
 
-    append_worker_exit_failure(&run_store, run_id, &worker_exit).await;
+    // The worker is gone: whatever Petri run handles it held open over the
+    // API drop here, so its lease never outlives it.
+    state.petri_runs.worker_exited(run_id);
+    state.petri_projector.signal(run_id);
+    append_worker_exit_failure(&state, run_id, &worker_exit).await;
 
-    let final_state = match run_store.state().await {
-        Ok(state) => state,
+    let final_state = match run_records::projection(&state, run_id).await {
+        Ok(Some(final_state)) => final_state,
+        Ok(None) => {
+            tracing::warn!(run_id = %run_id, "The run's final state is missing from the store");
+            fail_managed_run(
+                &state,
+                run_id,
+                FailureReason::WorkflowError,
+                "The run's final state is missing from the store".to_string(),
+            );
+            state.scheduler_notify.notify_one();
+            return;
+        }
         Err(err) => {
             tracing::warn!(run_id = %run_id, error = %err, "Failed to load final run state from store");
             fail_managed_run(
@@ -4472,16 +4164,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
 
-    if final_state.current_checkpoint().is_some() {
-        let mut agg = state
-            .aggregate_usage
-            .lock()
-            .expect("aggregate_usage lock poisoned");
-        accumulate_usage_rollup(
-            &mut agg,
-            &fabro_workflow::usage_rollup_from_projection(&final_state),
-        );
-    }
+    accumulate_concluded_run_usage(&state, &final_state);
 
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
@@ -4501,7 +4184,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 })
             })
             .or_else(|| managed_run.error.clone());
-        managed_run.checkpoint = final_state.current_checkpoint().cloned();
         managed_run.run_dir = Some(run_dir);
         clear_live_run_state(managed_run);
     }
@@ -4511,6 +4193,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
 
 /// Background task that promotes runnable runs when capacity is available.
 pub fn spawn_scheduler(state: Arc<AppState>) {
+    stream_follower::spawn_stream_follower(Arc::clone(&state));
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -4562,21 +4245,29 @@ async fn append_control_request(
     action: RunControlAction,
     actor: Option<Principal>,
 ) -> anyhow::Result<()> {
-    let run_store = state.stores.runs.open_run(&run_id).await?;
-    let event = match action {
-        RunControlAction::Cancel => workflow_event::Event::RunCancelRequested { actor },
-        RunControlAction::Pause => workflow_event::Event::RunPauseRequested { actor },
-        RunControlAction::Unpause => workflow_event::Event::RunUnpauseRequested { actor },
+    let _ = actor;
+    let kind = match action {
+        RunControlAction::Cancel => RunLifecycleKind::CancelRequested,
+        RunControlAction::Pause => RunLifecycleKind::PauseRequested,
+        RunControlAction::Unpause => RunLifecycleKind::UnpauseRequested,
     };
+    // The check and the append are one step under the run's control lock,
+    // so two concurrent requests for the same control record it once.
+    let _guard = state.control_request_locks.lock(run_id).await;
     if action == RunControlAction::Cancel {
-        workflow_event::append_event_if(&run_store, &run_id, &event, |projection| {
-            projection.pending_control != Some(RunControlAction::Cancel)
-        })
+        // A cancel already pending is not asked for twice.
+        let pending = run_records::projection(state, run_id)
+            .await?
+            .and_then(|projection| projection.pending_control);
+        if pending == Some(RunControlAction::Cancel) {
+            return Ok(());
+        }
+    }
+    let mut record = RunLifecycleRecord::new(kind);
+    record.action = Some(action);
+    run_records::lifecycle(state, run_id, record)
         .await
         .map(|_| ())
-    } else {
-        workflow_event::append_event(&run_store, &run_id, &event).await
-    }
 }
 
 /// Returns a 409 response with an actionable "unarchive first" message if the

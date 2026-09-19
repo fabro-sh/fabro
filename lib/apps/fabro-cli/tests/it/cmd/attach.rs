@@ -66,37 +66,41 @@ fn format_output_snapshot(output: &Output, filters: &[(String, String)]) -> Stri
 }
 
 fn normalize_attach_json_progress_event(mut event: Value) -> Value {
-    // Definition and spec blob hashes are already rewritten to
-    // [BLOB_HASH] by the shared json_snapshot_filters regexes.
-    // Strip v2-shape server/version fields that the bridge emits,
-    // since the test fixture's socket path is randomised per run.
-    if let Some(settings) = event
-        .pointer_mut("/properties/settings")
-        .and_then(Value::as_object_mut)
-    {
-        settings.remove("_version");
-        settings.remove("server");
-        settings.remove("version");
-    }
-    if let Some(target) = event
-        .pointer_mut("/properties/settings/cli/target")
-        .and_then(Value::as_object_mut)
-    {
-        if target.contains_key("path") {
-            target.insert(
-                "path".to_string(),
-                Value::String("[CLI_SOCKET]".to_string()),
-            );
+    // The `run.created` record carries the whole run spec, whose graph
+    // and settings vary with the fixture's socket path and node order;
+    // the test does not check it.
+    if event.pointer("/item/record/kind") == Some(&Value::String("run.created".to_string())) {
+        if let Some(spec) = event.pointer_mut("/item/record/spec") {
+            *spec = Value::String("[RUN_SPEC]".to_string());
         }
     }
-    if let Some(model_name) = event.pointer_mut("/properties/settings/run/model/name") {
-        assert!(
-            model_name.is_string(),
-            "default model should serialize as a string"
-        );
-        *model_name = Value::String("[DEFAULT_MODEL]".to_string());
-    }
+    redact_volatile_fields(&mut event);
     event
+}
+
+/// Replace, at every depth, the wall-clock epoch milliseconds a stream
+/// item carries, the content digests of the graph, which hashes the
+/// fixture's temporary path, and the commit shas of the fixture's repository.
+fn redact_volatile_fields(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            for (key, field) in fields.iter_mut() {
+                if key == "recorded_at" {
+                    *field = Value::String("[EPOCH_MS]".to_string());
+                } else {
+                    redact_volatile_fields(field);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(redact_volatile_fields),
+        Value::String(text)
+            if matches!(text.len(), 40 | 64)
+                && text.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+        {
+            *text = "[DIGEST]".to_string();
+        }
+        _ => {}
+    }
 }
 
 fn wait_for_output_signal(
@@ -388,8 +392,8 @@ fn attach_replays_completed_detached_run() {
     ----- stdout -----
     ----- stderr -----
         Web UI: http://localhost:3000/runs/[ULID]
-        Sandbox: local (ready in [TIME])
         ✓ Start  [TIME]
+        Base: [BASE]
         ✓ Run Tests  [TIME]
         ✓ Report  [TIME]
         ✓ Exit  [TIME]
@@ -502,7 +506,8 @@ fn attach_advances_when_pending_question_is_answered_elsewhere() {
     runtime.block_on(async {
         let response = client
             .post(format!(
-                "{base_url}/api/v1/runs/{run_id}/questions/{question_id}/answer"
+                "{base_url}/api/v1/runs/{run_id}/questions/{}/answer",
+                question_id.replace('#', "%23")
             ))
             .json(&serde_json::json!({ "kind": "selected", "option_key": "A" }))
             .send()
@@ -632,8 +637,8 @@ fn attach_before_completion_streams_to_finished_state() {
     ----- stdout -----
     ----- stderr -----
         Web UI: http://localhost:3000/runs/[ULID]
-        Sandbox: local (ready in [TIME])
         ✓ start  [DURATION]
+        Base: [BASE]
         ✓ wait  [DURATION]
         ✓ exit  [DURATION]
     ");
@@ -705,10 +710,9 @@ fn attach_json_errors_without_prompting_for_human_input() {
             .filter(|line| !line.trim().is_empty())
             .map(|line| serde_json::from_str(line).expect("log line should be valid JSON"))
             .collect();
-        if log_events.iter().any(|event| {
-            event["event"] == "stage.started"
-                && event["node_id"] == "approve"
-                && event["properties"]["handler_type"] == "human"
+        // The gate's question: Petri records it as a parsed step progress.
+        if log_events.iter().any(|item| {
+            item.pointer("/item/derived/parsed/kind") == Some(&Value::String("question".into()))
         }) {
             break;
         }
@@ -746,10 +750,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
         .map(|line| serde_json::from_str(line).expect("log line should be valid JSON"))
         .collect();
     assert!(
-        log_events.iter().any(|event| {
-            event["event"] == "stage.started"
-                && event["node_id"] == "approve"
-                && event["properties"]["handler_type"] == "human"
+        log_events.iter().any(|item| {
+            item.pointer("/item/derived/parsed/kind") == Some(&Value::String("question".into()))
         }),
         "the run should still be waiting on the human gate"
     );
@@ -774,660 +776,1902 @@ fn attach_json_errors_without_prompting_for_human_input() {
     fabro_json_snapshot!(context, &progress, @r#"
     [
       {
-        "actor": {
-          "auth_method": "dev_token",
-          "identity": {
-            "issuer": "fabro:dev",
-            "subject": "dev"
-          },
-          "kind": "user",
-          "login": "dev"
-        },
-        "event": "run.created",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "graph": {
-            "attrs": {
-              "goal": {
-                "String": "Wait for approval"
-              }
-            },
-            "edges": [
-              {
-                "attrs": {},
-                "from": "start",
-                "to": "approve"
-              },
-              {
-                "attrs": {
-                  "label": {
-                    "String": "[A] Approve"
-                  }
-                },
-                "from": "approve",
-                "to": "ship"
-              },
-              {
-                "attrs": {
-                  "label": {
-                    "String": "[R] Revise"
-                  }
-                },
-                "from": "approve",
-                "to": "revise"
-              },
-              {
-                "attrs": {},
-                "from": "ship",
-                "to": "exit"
-              },
-              {
-                "attrs": {},
-                "from": "revise",
-                "to": "exit"
-              }
-            ],
-            "name": "HumanGate",
-            "nodes": {
-              "approve": {
-                "attrs": {
-                  "label": {
-                    "String": "Approve?"
-                  },
-                  "shape": {
-                    "String": "hexagon"
-                  }
-                },
-                "id": "approve"
-              },
-              "exit": {
-                "attrs": {
-                  "label": {
-                    "String": "Exit"
-                  },
-                  "shape": {
-                    "String": "Msquare"
-                  }
-                },
-                "id": "exit"
-              },
-              "revise": {
-                "attrs": {
-                  "script": {
-                    "String": "echo revised"
-                  },
-                  "shape": {
-                    "String": "parallelogram"
-                  }
-                },
-                "id": "revise"
-              },
-              "ship": {
-                "attrs": {
-                  "script": {
-                    "String": "echo shipped"
-                  },
-                  "shape": {
-                    "String": "parallelogram"
-                  }
-                },
-                "id": "ship"
-              },
-              "start": {
-                "attrs": {
-                  "label": {
-                    "String": "Start"
-                  },
-                  "shape": {
-                    "String": "Mdiamond"
-                  }
-                },
-                "id": "start"
-              }
-            }
-          },
-          "provenance": {
-            "client": {
-              "name": "fabro-cli",
-              "user_agent": "fabro-cli/[VERSION]",
-              "version": "[VERSION]"
-            },
-            "server": {
-              "version": "[VERSION]"
-            },
-            "subject": {
-              "auth_method": "dev_token",
-              "identity": {
-                "issuer": "fabro:dev",
-                "subject": "dev"
-              },
-              "kind": "user",
-              "login": "dev"
-            }
-          },
-          "settings": {
-            "project": {
-              "description": null,
-              "metadata": {},
-              "name": null
-            },
-            "run": {
-              "agent": {
-                "fabro_tools": false,
-                "mcps": {}
-              },
-              "artifacts": {
-                "include": []
-              },
-              "checkpoint": {
-                "commit_timeout_ms": 30000,
-                "exclude_globs": [],
-                "skip_git_hooks": false
-              },
-              "clone": {
-                "depth": 100,
-                "enabled": true
-              },
-              "environment": {
-                "env": {},
-                "id": "local",
-                "image": {
-                  "docker": null,
-                  "dockerfile": null
-                },
-                "labels": {},
-                "lifecycle": {
-                  "auto_stop": null,
-                  "preserve": false,
-                  "stop_on_terminal": true
-                },
-                "network": {
-                  "allow": [],
-                  "mode": "allow_all"
-                },
-                "provider": "local",
-                "resources": {
-                  "cpu": null,
-                  "disk": null,
-                  "memory": null
-                }
-              },
-              "execution": {
-                "approval": "prompt",
-                "mode": "normal"
-              },
-              "git": {
-                "author": null
-              },
-              "goal": {
-                "type": "inline",
-                "value": "Wait for approval"
-              },
-              "hooks": [],
-              "inputs": {},
-              "integrations": {
-                "github": {
-                  "permissions": {}
-                }
-              },
-              "interviews": {
-                "provider": null,
-                "slack": null
-              },
-              "metadata": {},
-              "model": {
-                "controls": {
-                  "reasoning_effort": null,
-                  "speed": null
-                },
-                "fallbacks": {},
-                "name": "[DEFAULT_MODEL]",
-                "provider": "openai"
-              },
-              "notifications": {},
-              "prepare": {
-                "steps": [],
-                "timeout_ms": 300000
-              },
-              "pull_request": null,
-              "run_branch": {
-                "enabled": true,
-                "push": true
-              },
-              "scm": {
-                "github": null,
-                "owner": null,
-                "provider": null,
-                "repository": null
-              },
-              "working_dir": null
-            },
-            "workflow": {
-              "description": null,
-              "graph": "workflow.fabro",
-              "metadata": {},
-              "name": null
-            }
-          },
-          "source_directory": "[TEMP_DIR]",
-          "spec_blob": "[BLOB_HASH]",
-          "target": {
-            "kind": "folder",
-            "path": "[TEMP_DIR]"
-          },
-          "title": "Wait for approval",
-          "web_url": "http://localhost:3000/runs/[ULID]",
-          "workflow_slug": "human-gate",
-          "workflow_source": "digraph HumanGate {/n  graph [goal=\"Wait for approval\"]/n  start [shape=Mdiamond, label=\"Start\"]/n  exit  [shape=Msquare, label=\"Exit\"]/n  approve [shape=hexagon, label=\"Approve?\"]/n  ship   [shape=parallelogram, script=\"echo shipped\"]/n  revise [shape=parallelogram, script=\"echo revised\"]/n  start -> approve/n  approve -> ship   [label=\"[A] Approve\"]/n  approve -> revise [label=\"[R] Revise\"]/n  ship -> exit/n  revise -> exit/n}/n",
-          "workflow_version_id": "fc1611d3be115f2db472e4ac05a5034f449743089259566b18f204ff961a0c18"
-        },
         "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "run.submitted",
+        "stream_seq": 1,
+        "kind": "platform",
         "id": "[EVENT_ID]",
-        "properties": {
-          "definition_blob": "[BLOB_HASH]"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "auth_method": "dev_token",
-          "identity": {
-            "issuer": "fabro:dev",
-            "subject": "dev"
-          },
-          "kind": "user",
-          "login": "dev"
-        },
-        "event": "run.start_requested",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "resume": false
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "auth_method": "dev_token",
-          "identity": {
-            "issuer": "fabro:dev",
-            "subject": "dev"
-          },
-          "kind": "user",
-          "login": "dev"
-        },
-        "event": "run.runnable",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "source": "start_requested"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "run.starting",
-        "id": "[EVENT_ID]",
-        "properties": {},
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "sandbox.initializing",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "provider": "local"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "sandbox.create.started",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "action": "create",
-          "correlation_id": "[ULID]",
-          "id": {
-            "sequence": 1,
-            "source_id": "[HEX]"
-          },
-          "occurred_at": "[TIMESTAMP]",
-          "operation_id": "[HEX]",
-          "provider": "host",
-          "subject": {
-            "id": "host-dir-[HEX]",
-            "type": "sandbox"
-          },
-          "type": "operation_started"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "sandbox.create.progress",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "action": "create",
-          "correlation_id": "[ULID]",
-          "id": {
-            "sequence": 2,
-            "source_id": "[HEX]"
-          },
-          "occurred_at": "[TIMESTAMP]",
-          "operation_id": "[HEX]",
-          "progress": {
-            "code": "sandbox.provision"
-          },
-          "provider": "host",
-          "subject": {
-            "id": "host-dir-[HEX]",
-            "type": "sandbox"
-          },
-          "type": "operation_progress"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "sandbox.create.completed",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "action": "create",
-          "correlation_id": "[ULID]",
-          "duration": {
-            "nanos": "[NANOS]",
-            "secs": 0
-          },
-          "id": {
-            "sequence": 3,
-            "source_id": "[HEX]"
-          },
-          "occurred_at": "[TIMESTAMP]",
-          "operation_id": "[HEX]",
-          "provider": "host",
-          "subject": {
-            "id": "host-dir-[HEX]",
-            "type": "sandbox"
-          },
-          "type": "operation_completed"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "sandbox.ready",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "duration_ms": "[DURATION_MS]",
-          "provider": "local"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "sandbox.initialized",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "id": "host-dir-[HEX]",
-          "provider": "local",
-          "repo_cloned": false,
-          "repos_root": "[TEMP_DIR]/.repos",
-          "working_directory": "[TEMP_DIR]",
-          "workspace_root": "[TEMP_DIR]"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "git.identity.resolved",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "email": "noreply@fabro.sh",
-          "name": "Fabro",
-          "source": "default"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "run.started",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "goal": "Wait for approval",
-          "name": "HumanGate"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "run.running",
-        "id": "[EVENT_ID]",
-        "properties": {},
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "stage.started",
-        "id": "[EVENT_ID]",
-        "node_id": "start",
-        "node_label": "Start",
-        "properties": {
-          "attempt": 1,
-          "graph_visit": 1,
-          "handler_type": "start",
-          "index": 0,
-          "max_attempts": 1
-        },
-        "run_id": "[ULID]",
-        "stage_id": "start@1",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "stage.completed",
-        "id": "[EVENT_ID]",
-        "node_id": "start",
-        "node_label": "Start",
-        "properties": {
-          "attempt": 1,
-          "context_values": {
-            "current_node": "start",
-            "graph.goal": "Wait for approval",
-            "internal.fidelity": "compact",
-            "internal.node_visit_count": 1,
-            "internal.run_id": "[ULID]",
-            "internal.thread_id": null
-          },
-          "index": 0,
-          "max_attempts": 1,
-          "node_visits": {
-            "start": 1
-          },
-          "status": "succeeded",
-          "timing": {
-            "active_time_ms": "[ACTIVE_TIME_MS]",
-            "inference_time_ms": "[INFERENCE_TIME_MS]",
-            "tool_time_ms": "[TOOL_TIME_MS]",
-            "wall_time_ms": "[WALL_TIME_MS]"
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 1,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "run.created",
+            "spec": "[RUN_SPEC]",
+            "title": "Wait for approval",
+            "web_url": "http://localhost:3000/runs/[ULID]"
           }
-        },
-        "run_id": "[ULID]",
-        "stage_id": "start@1",
-        "ts": "[TIMESTAMP]"
+        }
       },
       {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "edge.selected",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "from_node": "start",
-          "is_jump": false,
-          "reason": "unconditional",
-          "stage_status": "succeeded",
-          "to_node": "approve"
-        },
         "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "checkpoint.completed",
+        "stream_seq": 2,
+        "kind": "platform",
         "id": "[EVENT_ID]",
-        "node_id": "start",
-        "node_label": "start",
-        "properties": {
-          "completed_nodes": [
-            "start"
-          ],
-          "context_values": {
-            "current_node": "start",
-            "failure_class": "",
-            "failure_signature": "",
-            "graph.goal": "Wait for approval",
-            "internal.fidelity": "compact",
-            "internal.node_visit_count": 1,
-            "internal.retry_count.start": 0,
-            "internal.run_id": "[ULID]",
-            "internal.thread_id": null,
-            "outcome": "succeeded"
-          },
-          "current_node": "start",
-          "graph_visit": 1,
-          "next_node_id": "approve",
-          "node_outcomes": {
-            "start": {
-              "status": "succeeded",
-              "usage": null
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 2,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "run.lifecycle",
+            "transition": "submitted",
+            "status": {
+              "kind": "submitted"
             }
-          },
-          "node_visits": {
-            "start": 1
-          },
-          "status": "succeeded"
-        },
-        "run_id": "[ULID]",
-        "stage_id": "start@1",
-        "ts": "[TIMESTAMP]"
+          }
+        }
       },
       {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "stage.started",
-        "id": "[EVENT_ID]",
-        "node_id": "approve",
-        "node_label": "Approve?",
-        "properties": {
-          "attempt": 1,
-          "graph_visit": 1,
-          "handler_type": "human",
-          "index": 1,
-          "max_attempts": 1
-        },
         "run_id": "[ULID]",
-        "stage_id": "approve@1",
-        "ts": "[TIMESTAMP]"
+        "stream_seq": 3,
+        "kind": "platform",
+        "id": "[EVENT_ID]",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 3,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "run.lifecycle",
+            "transition": "start_requested",
+            "source": "start"
+          }
+        }
       },
       {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "interview.started",
+        "run_id": "[ULID]",
+        "stream_seq": 4,
+        "kind": "platform",
         "id": "[EVENT_ID]",
-        "node_id": "approve",
-        "node_label": "approve",
-        "properties": {
-          "allow_freeform": false,
-          "options": [
-            {
-              "key": "A",
-              "label": "[A] Approve"
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 4,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "run.lifecycle",
+            "transition": "runnable",
+            "status": {
+              "kind": "runnable"
             },
-            {
-              "key": "R",
-              "label": "[R] Revise"
-            }
-          ],
-          "question": "Approve?",
-          "question_id": "[ULID]",
-          "question_type": "multiple_choice",
-          "stage": "approve"
-        },
-        "run_id": "[ULID]",
-        "stage_id": "approve@1",
-        "ts": "[TIMESTAMP]"
+            "source": "start_requested"
+          }
+        }
       },
       {
-        "actor": {
-          "kind": "worker",
-          "run_id": "[ULID]"
-        },
-        "event": "run.blocked",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "blocked_reason": "human_input_required"
-        },
         "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
+        "stream_seq": 5,
+        "kind": "platform",
+        "id": "[EVENT_ID]",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 5,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "run.lifecycle",
+            "transition": "starting",
+            "status": {
+              "kind": "starting"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 6,
+        "kind": "platform",
+        "id": "[EVENT_ID]",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 6,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "run.lifecycle",
+            "transition": "running",
+            "status": {
+              "kind": "running"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 7,
+        "kind": "petri",
+        "id": "coordinator/0/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "coordinator",
+            "seq": 0,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 0,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "run.started",
+              "format_version": 7,
+              "key": "[ULID]",
+              "root": 0,
+              "middleware_chain": [
+                "circuit-breaker"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 8,
+        "kind": "petri",
+        "id": "coordinator/1/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "coordinator",
+            "seq": 1,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {},
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 1,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "graph.registered",
+              "digest": "[DIGEST]"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 9,
+        "kind": "petri",
+        "id": "coordinator/2/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "coordinator",
+            "seq": 2,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 2,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "invocation.declared",
+              "invocation": 0,
+              "call": null,
+              "graph": "[DIGEST]",
+              "context": {},
+              "secret_bindings": "none",
+              "sandbox": "isolated"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 10,
+        "kind": "petri",
+        "id": "coordinator/3/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "coordinator",
+            "seq": 3,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 3,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "execution.declared",
+              "execution": 0,
+              "invocation": 0,
+              "predecessor": null,
+              "start": {
+                "entry": "graph_entries",
+                "context": {},
+                "prior_firings": {},
+                "execution_index": 0,
+                "max_executions": 32
+              },
+              "middleware_state": {
+                "circuit-breaker": [
+                  1,
+                  {
+                    "loop_signatures": {},
+                    "restart_signatures": {},
+                    "pending": {}
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 11,
+        "kind": "petri",
+        "id": "execution 0/0/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 0,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 0,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "execution.started",
+              "entry": "graph_entries",
+              "context": {},
+              "prior_firings": {},
+              "execution_index": 0,
+              "max_executions": 32
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 12,
+        "kind": "petri",
+        "id": "execution 0/1/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 1,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 1,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "admission.decided",
+              "decision_id": "execution_start",
+              "decision": "admit",
+              "trace": []
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 13,
+        "kind": "petri",
+        "id": "execution 0/1/1",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 1,
+            "index": 1
+          },
+          "origin": "derived",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "derived": {
+            "event": "visit.started",
+            "inputs": [
+              {
+                "edge": 5,
+                "generation": 0,
+                "payload": null,
+                "from": 0
+              }
+            ]
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 14,
+        "kind": "petri",
+        "id": "execution 0/1/2",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 1,
+            "index": 2
+          },
+          "origin": "derived",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "derived": {
+            "event": "wait.state.changed",
+            "state": "awaiting_admission"
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 15,
+        "kind": "petri",
+        "id": "execution 0/2/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 2,
+            "index": 0
+          },
+          "origin": "core",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 2,
+            "origin": "core",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "token.emitted",
+              "edge": 5,
+              "generation": 0,
+              "payload": null,
+              "from": 0
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 16,
+        "kind": "petri",
+        "id": "execution 0/3/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 3,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 3,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "admission.decided",
+              "decision_id": {
+                "attempt_start": {
+                  "firing": 1,
+                  "attempt": 1
+                }
+              },
+              "decision": "admit",
+              "trace": []
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 17,
+        "kind": "petri",
+        "id": "execution 0/4/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 4,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 4,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "scope.acquired",
+              "scope": 0,
+              "lease": 0,
+              "workspace": "invocation-0-scope-0",
+              "provider": "host",
+              "instance": "host-g[ID]",
+              "working_directory": "[RUN_DIR]/petri/scopes/invocation-0-scope-0/work",
+              "duration_ms": "[DURATION_MS]"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 18,
+        "kind": "petri",
+        "id": "execution 0/5/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 5,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 5,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "step.started",
+              "firing": 1,
+              "attempt": 1
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 19,
+        "kind": "petri",
+        "id": "execution 0/5/1",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 5,
+            "index": 1
+          },
+          "origin": "derived",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "derived": {
+            "event": "wait.state.changed",
+            "state": "running"
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 20,
+        "kind": "petri",
+        "id": "execution 0/6/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 6,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 6,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "step.progress.recorded",
+              "firing": 1,
+              "ev": {
+                "log": {
+                  "stream": "stderr",
+                  "line": "checkout: [TEMP_DIR] is not a Git repository; the workspace starts empty"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 21,
+        "kind": "petri",
+        "id": "execution 0/7/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 7,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 7,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "step.progress.recorded",
+              "firing": 1,
+              "ev": {
+                "custom": {
+                  "$note": {
+                    "kind": "fabro.checkpoint",
+                    "payload": {
+                      "execution": 0,
+                      "firing": 1,
+                      "attempt": 1,
+                      "workspace": "invocation-0-scope-0",
+                      "git_commit_sha": "[DIGEST]",
+                      "reused": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "derived": {
+            "parsed": {
+              "kind": "note",
+              "note": {
+                "kind": "fabro.checkpoint",
+                "payload": {
+                  "execution": 0,
+                  "firing": 1,
+                  "attempt": 1,
+                  "workspace": "invocation-0-scope-0",
+                  "git_commit_sha": "[DIGEST]",
+                  "reused": false
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 22,
+        "kind": "petri",
+        "id": "execution 0/8/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 8,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 8,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "step.finished",
+              "firing": 1,
+              "attempt": 1,
+              "outcome": {
+                "status": "success",
+                "output": {
+                  "outcome": "succeeded",
+                  "failure_class": ""
+                },
+                "metrics": {
+                  "duration_ms": "[DURATION_MS]"
+                },
+                "context_updates": {
+                  "failure_class": "",
+                  "internal.run_id": "petri"
+                }
+              }
+            }
+          },
+          "derived": {
+            "final": true,
+            "exhausted": false
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 23,
+        "kind": "petri",
+        "id": "execution 0/8/1",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 8,
+            "index": 1
+          },
+          "origin": "derived",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "derived": {
+            "event": "visit.completed",
+            "outcome": {
+              "status": "success",
+              "output": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": "[DURATION_MS]"
+              },
+              "context_updates": {
+                "failure_class": "",
+                "internal.run_id": "petri"
+              }
+            },
+            "executed": true,
+            "attempts": 1
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 24,
+        "kind": "platform",
+        "id": "[EVENT_ID]",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 7,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "run.branch",
+            "run_branch": "fabro/run/[ULID]",
+            "base_sha": "[DIGEST]",
+            "workspace": "invocation-0-scope-0"
+          },
+          "position": {
+            "execution": 0,
+            "firing": 1
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 25,
+        "kind": "platform",
+        "id": "[EVENT_ID]",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 8,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "git.identity",
+            "name": "Fabro",
+            "email": "noreply@fabro.sh",
+            "source": "default"
+          },
+          "position": {
+            "execution": 0,
+            "firing": 1
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 26,
+        "kind": "platform",
+        "id": "[EVENT_ID]",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "seq": 9,
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "kind": "checkpoint",
+            "execution": 0,
+            "firing": 1,
+            "attempt": 1,
+            "workspace": "invocation-0-scope-0",
+            "git_commit_sha": "[DIGEST]",
+            "operation": {
+              "execution": 0,
+              "decision": {
+                "attempt_start": {
+                  "firing": 1,
+                  "attempt": 1
+                }
+              },
+              "effect": "checkpoint"
+            }
+          },
+          "position": {
+            "execution": 0,
+            "firing": 1
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 27,
+        "kind": "petri",
+        "id": "execution 0/9/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 9,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 9,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "routing.resolved",
+              "decision_id": {
+                "route": {
+                  "firing": 1,
+                  "attempt": 1
+                }
+              },
+              "groups": [
+                {
+                  "group": 0,
+                  "draw": null,
+                  "trace": [],
+                  "decision": {
+                    "emit": 0
+                  }
+                }
+              ]
+            }
+          },
+          "derived": {
+            "groups": [
+              {
+                "group": 0,
+                "target": {
+                  "id": 2,
+                  "name": "approve",
+                  "kind": "attractor/human",
+                  "meta": {
+                    "label": "Approve?",
+                    "shape": "hexagon",
+                    "kind": "human",
+                    "classes": [],
+                    "span": {
+                      "line": 5,
+                      "column": 3
+                    },
+                    "edges": {
+                      "1": {
+                        "to": "ship",
+                        "label": "[A] Approve"
+                      },
+                      "2": {
+                        "to": "revise",
+                        "label": "[R] Revise"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 28,
+        "kind": "petri",
+        "id": "execution 0/9/1",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 9,
+            "index": 1
+          },
+          "origin": "derived",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "firing": 2,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "derived": {
+            "event": "visit.started",
+            "inputs": [
+              {
+                "edge": 0,
+                "generation": 0,
+                "payload": {
+                  "outcome": "succeeded",
+                  "failure_class": ""
+                },
+                "from": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 29,
+        "kind": "petri",
+        "id": "execution 0/9/2",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 9,
+            "index": 2
+          },
+          "origin": "derived",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "firing": 2,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "derived": {
+            "event": "wait.state.changed",
+            "state": "awaiting_admission"
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 30,
+        "kind": "petri",
+        "id": "execution 0/10/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 10,
+            "index": 0
+          },
+          "origin": "core",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 10,
+            "origin": "core",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "route.applied",
+              "kind": "edge",
+              "firing": 1,
+              "group": 0,
+              "edge": 0
+            }
+          },
+          "derived": {
+            "target": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "transition": "Continue",
+            "back": false
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 31,
+        "kind": "petri",
+        "id": "execution 0/11/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 11,
+            "index": 0
+          },
+          "origin": "core",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 0,
+              "name": "start",
+              "kind": "attractor/stage",
+              "meta": {
+                "label": "Start",
+                "shape": "Mdiamond",
+                "kind": "start",
+                "classes": [],
+                "span": {
+                  "line": 3,
+                  "column": 3
+                },
+                "admission_hooks": "step",
+                "edges": {
+                  "0": {
+                    "to": "approve",
+                    "label": null
+                  }
+                }
+              }
+            },
+            "firing": 1,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 11,
+            "origin": "core",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "token.emitted",
+              "edge": 0,
+              "generation": 0,
+              "payload": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "from": 1
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 32,
+        "kind": "petri",
+        "id": "execution 0/12/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 12,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "firing": 2,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 12,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "admission.decided",
+              "decision_id": {
+                "attempt_start": {
+                  "firing": 2,
+                  "attempt": 1
+                }
+              },
+              "decision": "admit",
+              "trace": []
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 33,
+        "kind": "petri",
+        "id": "execution 0/13/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 13,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "firing": 2,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 13,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "step.started",
+              "firing": 2,
+              "attempt": 1
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 34,
+        "kind": "petri",
+        "id": "execution 0/13/1",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 13,
+            "index": 1
+          },
+          "origin": "derived",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "firing": 2,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "derived": {
+            "event": "wait.state.changed",
+            "state": "running"
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 35,
+        "kind": "petri",
+        "id": "execution 0/14/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 14,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "firing": 2,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 14,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "step.progress.recorded",
+              "firing": 2,
+              "ev": {
+                "custom": {
+                  "$question": {
+                    "id": "approve#2",
+                    "text": "Approve?",
+                    "options": [
+                      {
+                        "key": "A",
+                        "label": "[A] Approve"
+                      },
+                      {
+                        "key": "R",
+                        "label": "[R] Revise"
+                      }
+                    ],
+                    "default": "A",
+                    "freeform": false,
+                    "sensitive": false
+                  }
+                }
+              }
+            }
+          },
+          "derived": {
+            "parsed": {
+              "kind": "question",
+              "question": {
+                "id": "approve#2",
+                "text": "Approve?",
+                "options": [
+                  {
+                    "key": "A",
+                    "label": "[A] Approve"
+                  },
+                  {
+                    "key": "R",
+                    "label": "[R] Revise"
+                  }
+                ],
+                "default": "A",
+                "freeform": false,
+                "sensitive": false
+              }
+            }
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 36,
+        "kind": "petri",
+        "id": "execution 0/14/1",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 14,
+            "index": 1
+          },
+          "origin": "derived",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "firing": 2,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "derived": {
+            "event": "wait.state.changed",
+            "state": "awaiting_answer"
+          }
+        }
+      },
+      {
+        "run_id": "[ULID]",
+        "stream_seq": 37,
+        "kind": "petri",
+        "id": "execution 0/15/0",
+        "recorded_at": "[EPOCH_MS]",
+        "item": {
+          "id": {
+            "log": "execution",
+            "execution": 0,
+            "seq": 15,
+            "index": 0
+          },
+          "origin": "external",
+          "context": {
+            "invocation": 0,
+            "execution": 0
+          },
+          "subject": {
+            "node": {
+              "id": 2,
+              "name": "approve",
+              "kind": "attractor/human",
+              "meta": {
+                "label": "Approve?",
+                "shape": "hexagon",
+                "kind": "human",
+                "classes": [],
+                "span": {
+                  "line": 5,
+                  "column": 3
+                },
+                "edges": {
+                  "1": {
+                    "to": "ship",
+                    "label": "[A] Approve"
+                  },
+                  "2": {
+                    "to": "revise",
+                    "label": "[R] Revise"
+                  }
+                }
+              }
+            },
+            "firing": 2,
+            "visit": 1,
+            "attempt": 1,
+            "generation": 0,
+            "branch": {
+              "role": "none"
+            }
+          },
+          "recorded_at": "[EPOCH_MS]",
+          "record": {
+            "seq": 15,
+            "origin": "external",
+            "recorded_at": "[EPOCH_MS]",
+            "body": {
+              "event": "step.progress.recorded",
+              "firing": 2,
+              "ev": {
+                "log": {
+                  "stream": "stdout",
+                  "line": "waiting for an answer: Approve?"
+                }
+              }
+            }
+          }
+        }
       }
     ]
     "#);
@@ -1445,7 +2689,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
 
             let response = client
                 .post(format!(
-                    "{base_url}/api/v1/runs/{run_id}/questions/{question_id}/answer"
+                    "{base_url}/api/v1/runs/{run_id}/questions/{}/answer",
+                    question_id.replace('#', "%23")
                 ))
                 .json(&serde_json::json!({ "kind": "selected", "option_key": "A" }))
                 .send()

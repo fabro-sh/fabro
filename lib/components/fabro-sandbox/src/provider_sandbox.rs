@@ -115,12 +115,35 @@ pub async fn attach_provider_sandbox(
     let provider = connect(&kind, access, run_id.as_ref()).await?;
     let id = SandboxId::try_new(sandbox_id)
         .map_err(|error| crate::Error::context(format!("Invalid {kind} sandbox id"), error))?;
-    let handle = provider.attach(&id, events).await.map_err(|error| {
-        crate::Error::context(
-            format!("Failed to reconnect {kind} sandbox '{sandbox_id}'"),
-            error,
-        )
-    })?;
+    let handle = match provider.attach(&id, events.clone()).await {
+        Ok(handle) => handle,
+        // A host sandbox is the directory it designates. An id the host
+        // provider minted for a long path lives only in the registry of the
+        // process that created it (a run's Petri worker, say), so a
+        // reconnect from another process designates the directory again:
+        // the same workspace, whatever the id.
+        Err(error)
+            if kind.bundled() == Some(BundledProvider::Local)
+                && matches!(error, sandbox_driver::Error::NotFound { .. }) =>
+        {
+            let spec = DriverSpec::new(SandboxSource::HostDirectory)
+                .working_directory(working_directory.clone());
+            provider.create(&spec, events).await.map_err(|error| {
+                crate::Error::context(
+                    format!(
+                        "Failed to reconnect {kind} sandbox '{sandbox_id}' at {working_directory}"
+                    ),
+                    error,
+                )
+            })?
+        }
+        Err(error) => {
+            return Err(crate::Error::context(
+                format!("Failed to reconnect {kind} sandbox '{sandbox_id}'"),
+                error,
+            ));
+        }
+    };
     let status = handle.describe().await?;
     let workspace = RepoWorkspace::attached(
         layout_source(&kind),

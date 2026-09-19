@@ -30,20 +30,12 @@ fn sample_run_spec() -> RunSpec {
 
 fn sample_checkpoint() -> Checkpoint {
     Checkpoint {
-        timestamp:                  Utc
+        timestamp:      Utc
             .with_ymd_and_hms(2026, 4, 20, 12, 0, 0)
             .single()
             .expect("timestamp should be representable"),
-        current_node:               "build".to_string(),
-        completed_nodes:            vec!["build".to_string()],
-        node_retries:               HashMap::new(),
-        context_values:             HashMap::new(),
-        node_outcomes:              HashMap::new(),
-        next_node_id:               Some("ship".to_string()),
-        git_commit_sha:             Some("abc123".to_string()),
-        loop_failure_signatures:    HashMap::new(),
-        restart_failure_signatures: HashMap::new(),
-        node_visits:                HashMap::from([("build".to_string(), 2usize)]),
+        current_node:   "build".to_string(),
+        git_commit_sha: Some("abc123".to_string()),
     }
 }
 
@@ -91,10 +83,10 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         snapshot: None,
     };
     projection.sandbox = Some(RunSandbox::ready(sandbox_plan, RunSandboxInstance {
-        provider: SandboxProviderKind::LOCAL,
-        image:    None,
-        snapshot: None,
-        runtime:  RunSandboxRuntime {
+        provider:          SandboxProviderKind::LOCAL,
+        image:             None,
+        snapshot:          None,
+        runtime:           RunSandboxRuntime {
             id:                "sandbox-1".to_string(),
             working_directory: "/tmp/project".to_string(),
             repo_cloned:       None,
@@ -105,6 +97,8 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
             primary_repo_path: None,
             primary_repo_link: None,
         },
+        ready_duration_ms: None,
+        retained:          None,
     }));
     projection.pending_interviews = BTreeMap::new();
     let stage = projection.stage_entry(stage_id.node_id(), stage_id.visit(), first_event_seq(2));

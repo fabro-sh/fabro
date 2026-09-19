@@ -4,16 +4,15 @@ use std::sync::{Arc, LazyLock};
 use fabro_graphviz::Error as GraphvizError;
 use fabro_llm::{ErrorData, ErrorKind, ModelSelectionError, failure_signature_hint};
 use fabro_template::TemplateError;
+use fabro_types::diagnostic::Diagnostic;
 pub use fabro_types::failure_signature::FailureSignature;
 pub use fabro_types::outcome::FailureCategory;
 use fabro_types::settings::{AmbiguousModelRef, ResolveError};
 use fabro_types::{ExecOutputTail, FailureReason, RunFailure};
 use fabro_util::error::{SharedError, collect_causes, collect_chain, render_with_causes};
-use fabro_validate::Diagnostic;
 use regex::Regex;
 use thiserror::Error as ThisError;
 
-use crate::event::RunEventPersistenceError;
 use crate::outcome::{FailureDetail, Outcome, StageOutcome};
 
 /// Classify an LLM error into a `FailureCategory` based on its structure.
@@ -712,18 +711,6 @@ impl From<fabro_template::TemplateError> for Error {
     }
 }
 
-impl From<fabro_validate::ValidationError> for Error {
-    fn from(e: fabro_validate::ValidationError) -> Self {
-        Self::Validation(e.0)
-    }
-}
-
-impl From<RunEventPersistenceError> for Error {
-    fn from(err: RunEventPersistenceError) -> Self {
-        Self::engine_with_source("run event persistence failed", err)
-    }
-}
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
@@ -748,7 +735,6 @@ mod tests {
                 .with_retry(RetryClassification::Safe),
         )
     }
-    use crate::outcome::OutcomeExt;
 
     #[derive(Debug)]
     struct TestCause(&'static str);
@@ -796,7 +782,7 @@ mod tests {
         let err = Error::ValidationFailed {
             diagnostics: vec![Diagnostic {
                 rule: "test".to_string(),
-                severity: fabro_validate::Severity::Error,
+                severity: fabro_types::diagnostic::Severity::Error,
                 message: "missing start node".to_string(),
                 node_id: None,
                 edge: None,
@@ -1942,18 +1928,6 @@ mod tests {
     }
 
     #[test]
-    fn to_fail_outcome_includes_error_message_as_reason() {
-        let err = Error::from(transient_error(ErrorKind::Network, "connection refused"));
-        let outcome = err.to_fail_outcome();
-        assert!(
-            outcome
-                .failure_reason()
-                .unwrap()
-                .contains("connection refused")
-        );
-    }
-
-    #[test]
     fn to_fail_outcome_no_context_updates() {
         let err = Error::from(transient_error(ErrorKind::Network, "refused"));
         let outcome = err.to_fail_outcome();
@@ -1995,7 +1969,7 @@ mod tests {
             Error::ValidationFailed {
                 diagnostics: vec![Diagnostic {
                     rule: "test".into(),
-                    severity: fabro_validate::Severity::Error,
+                    severity: fabro_types::diagnostic::Severity::Error,
                     message: "bad".into(),
                     node_id: None,
                     edge: None,
@@ -2097,74 +2071,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn to_fail_outcome_preserves_class() {
-        let err = Error::handler("timeout");
-        let outcome = err.to_fail_outcome();
-        assert_eq!(
-            outcome.failure_category(),
-            Some(FailureCategory::TransientInfra)
-        );
-    }
-
     // --- E2E error pipeline tests ---
-
-    #[test]
-    fn e2e_llm_error_to_outcome_to_event_preserves_classification() {
-        use crate::event::Event;
-
-        // 1. Create SdkError → Error
-        let sdk_err = transient_error(ErrorKind::RateLimit, "too fast");
-        let arc_err = Error::from(sdk_err);
-        assert_eq!(arc_err.failure_category(), FailureCategory::TransientInfra);
-
-        // 2. Error → Outcome
-        let outcome = arc_err.to_fail_outcome();
-        assert_eq!(
-            outcome.failure_category(),
-            Some(FailureCategory::TransientInfra)
-        );
-
-        // 3. Outcome → StageFailed event
-        let failure = outcome.failure.clone().unwrap();
-        let event = Event::StageFailed {
-            node_id:        "code".into(),
-            name:           "code".into(),
-            index:          0,
-            failure:        failure.clone(),
-            will_retry:     false,
-            timing:         fabro_types::StageTiming::wall_only(0),
-            usage_by_model: Vec::new(),
-            usage:          None,
-            actor:          None,
-        };
-
-        // 4. Verify classification survived all the way through
-        match &event {
-            Event::StageFailed { failure, .. } => {
-                assert_eq!(failure.category, FailureCategory::TransientInfra);
-            }
-            _ => panic!("expected StageFailed"),
-        }
-    }
-
-    #[test]
-    fn e2e_handler_error_classified_at_edge() {
-        // handler smart constructor classifies eagerly
-        let err = Error::handler("connection refused");
-        assert_eq!(err.failure_category(), FailureCategory::TransientInfra);
-
-        // to_fail_outcome preserves
-        let outcome = err.to_fail_outcome();
-        assert_eq!(
-            outcome.failure_category(),
-            Some(FailureCategory::TransientInfra)
-        );
-
-        // event preserves
-        let failure = outcome.failure.unwrap();
-        assert_eq!(failure.category, FailureCategory::TransientInfra);
-    }
 
     #[test]
     fn e2e_handler_retryable_checks() {
@@ -2181,24 +2088,5 @@ mod tests {
         assert_eq!(failure.detail.causes, Vec::<String>::new());
         assert_eq!(failure.reason, FailureReason::WorkflowError);
         assert_eq!(failure.detail.category, FailureCategory::TransientInfra);
-    }
-
-    #[test]
-    fn e2e_failure_detail_in_outcome_serde_roundtrip() {
-        use crate::outcome::Outcome;
-
-        let outcome = Outcome::fail_classify("rate limit exceeded")
-            .with_signature(Some("api_transient|openai|rate_limited"));
-
-        let json = serde_json::to_string(&outcome).unwrap();
-        let deserialized: Outcome = serde_json::from_str(&json).unwrap();
-
-        let failure = deserialized.failure.unwrap();
-        assert_eq!(failure.message, "rate limit exceeded");
-        assert_eq!(failure.category, FailureCategory::TransientInfra);
-        assert_eq!(
-            failure.signature.as_deref(),
-            Some("api_transient|openai|rate_limited")
-        );
     }
 }

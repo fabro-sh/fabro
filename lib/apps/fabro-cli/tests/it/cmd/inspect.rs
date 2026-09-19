@@ -4,9 +4,8 @@ use insta::assert_snapshot;
 use serde_json::{Value, json};
 
 use super::support::{
-    compact_git_inspect, compact_inspect, remote_run_summary_json, run_success,
-    setup_seeded_completed_dry_run, setup_seeded_created_dry_run,
-    setup_seeded_git_backed_changed_run,
+    compact_inspect, remote_run_summary_json, run_success, setup_seeded_completed_dry_run,
+    setup_seeded_created_dry_run,
 };
 use crate::support::{run_projection_json, unique_run_id};
 
@@ -228,6 +227,12 @@ fn inspect_resolves_selector_via_server_endpoint() {
               "login": "test",
               "auth_method": "dev_token"
             }
+          },
+          "admission": {
+            "graph": {
+              "blob": "e6e4557838b761a195536fb5ca1f2c13a1a21b17260cf7376c494fcc4b8c6c57",
+              "digest": "sha256:test-admission"
+            }
           }
         },
         "start_record": null,
@@ -382,16 +387,12 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
         "conclusion": {
           "status": "succeeded",
           "timing": "[TIMING]",
-          "stage_count": 3
+          "stage_count": 4
         },
         "checkpoint": {
-          "current_node": "report",
-          "completed_nodes": [
-            "start",
-            "run_tests",
-            "report"
-          ],
-          "next_node_id": "exit"
+          "current_node": "exit",
+          "completed_nodes": null,
+          "next_node_id": null
         },
         "sandbox": {
           "provider": "local"
@@ -454,16 +455,12 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
         "conclusion": {
           "status": "succeeded",
           "timing": "[TIMING]",
-          "stage_count": 3
+          "stage_count": 4
         },
         "checkpoint": {
-          "current_node": "report",
-          "completed_nodes": [
-            "start",
-            "run_tests",
-            "report"
-          ],
-          "next_node_id": "exit"
+          "current_node": "exit",
+          "completed_nodes": null,
+          "next_node_id": null
         },
         "sandbox": {
           "provider": "local"
@@ -471,67 +468,4 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
       }
     ]
     "#);
-}
-
-#[test]
-fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
-    let context = test_context!();
-    let setup = setup_seeded_git_backed_changed_run(&context);
-    let output = run_success(&context, &["inspect", &setup.run.run_id]);
-
-    assert_snapshot!(
-        serde_json::to_string_pretty(&compact_git_inspect(&output)).unwrap(),
-        @r#"
-    [
-      {
-        "run_id": "[ULID]",
-        "status": {
-          "kind": "succeeded",
-          "reason": "completed"
-        },
-        "run_spec": {
-          "goal": {
-            "type": "inline",
-            "value": "Edit a tracked file"
-          },
-          "workflow_name": "Flow",
-          "workflow_slug": "flow",
-          "llm_provider": "openai",
-          "sandbox_provider": null,
-          "provenance": {
-            "server_version": "[VERSION]",
-            "client_name": "fabro-cli",
-            "client_version": "[VERSION]",
-            "subject_auth_method": "dev_token"
-          }
-        },
-        "start_record": {
-          "has_start_time": true,
-          "run_branch": "fabro/run/[ULID]",
-          "base_sha": "[SHA]"
-        },
-        "conclusion": {
-          "status": "succeeded",
-          "timing": "[TIMING]",
-          "final_git_commit_sha": "[SHA]",
-          "stage_count": 3
-        },
-        "checkpoint": {
-          "current_node": "step_two",
-          "completed_nodes": [
-            "start",
-            "step_one",
-            "step_two"
-          ],
-          "next_node_id": "exit",
-          "git_commit_sha": "[SHA]"
-        },
-        "sandbox": {
-          "provider": "local",
-          "working_directory": "[WORKTREE]"
-        }
-      }
-    ]
-    "#
-    );
 }

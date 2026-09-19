@@ -1,6 +1,7 @@
-use fabro_types::test_support;
+use fabro_types::{PetriAdmission, test_support};
 mod auth_harness;
 mod auth_tokens;
+mod mcp_client;
 
 use assert_cmd::Command;
 pub(crate) use auth_harness::{
@@ -8,13 +9,13 @@ pub(crate) use auth_harness::{
     no_redirect_browser_client, run_detached, saved_auth_entry, seed_dev_token_auth,
 };
 pub(crate) use auth_tokens::{TEST_SESSION_SECRET, issue_test_github_jwt, issue_test_worker_jwt};
-use fabro_store::EventEnvelope;
 use fabro_test::{EnvVars, TestContext, preserve_coverage_env};
-use fabro_types::{Graph, RunId, RunSpec, WorkflowSettings};
+use fabro_types::{Graph, RunId, RunSpec, RunStreamItem, WorkflowSettings};
+pub(crate) use mcp_client::McpStdioTestClient;
 
 pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)> {
     let mut filters = context.filters();
-    filters.push((r"\b\d+ms\b".to_string(), "[TIME]".to_string()));
+    filters.push((r"\b\d+(\.\d+)?(ms|s)\b".to_string(), "[TIME]".to_string()));
     filters.push((
         r"(?m)^(Graph: ).+$".to_string(),
         "${1}[GRAPH_PATH]".to_string(),
@@ -57,6 +58,7 @@ pub(crate) fn run_projection_json(run_id: &str, status: &serde_json::Value) -> s
         spec_blob: None,
         git: None,
         fork_source_ref: None,
+        admission: PetriAdmission::default(),
     };
 
     serde_json::json!({
@@ -76,15 +78,31 @@ pub(crate) fn run_projection_json(run_id: &str, status: &serde_json::Value) -> s
     })
 }
 
-pub(crate) fn parse_event_envelopes(response: &serde_json::Value) -> Vec<EventEnvelope> {
+/// Whether the item is the platform record that ends a run: a
+/// `run.lifecycle` record whose transition is terminal.
+pub(crate) fn is_terminal_lifecycle(item: &RunStreamItem) -> bool {
+    let record = item.item.get("record");
+    record
+        .and_then(|record| record.get("kind"))
+        .and_then(serde_json::Value::as_str)
+        == Some("run.lifecycle")
+        && matches!(
+            record
+                .and_then(|record| record.get("transition"))
+                .and_then(serde_json::Value::as_str),
+            Some("succeeded" | "failed" | "dead")
+        )
+}
+
+pub(crate) fn parse_stream_items(response: &serde_json::Value) -> Vec<RunStreamItem> {
     response["data"]
         .as_array()
-        .expect("event list response should contain a data array")
+        .expect("run stream page should contain a data array")
         .iter()
         .cloned()
         .map(serde_json::from_value)
         .collect::<Result<Vec<_>, _>>()
-        .expect("wire event envelope list should parse")
+        .expect("run stream items should parse")
 }
 
 pub(crate) struct LightweightCli {

@@ -17,7 +17,7 @@ Fabro only reads `settings.toml`. Older `server.toml`, `user.toml`, and `cli.tom
 
 | Scope | Examples |
 |---|---|
-| Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.sandbox]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
+| Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.sandbox]`, `[server.storage]`, `[server.artifacts]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
 | Shared run defaults (layered through `.fabro/project.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.environment]`, `[environments.<slug>]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
 
 The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
@@ -70,15 +70,6 @@ provider = "s3"
 prefix = "artifacts"
 
 [server.artifacts.s3]
-bucket = "my-fabro-data"
-region = "us-east-1"
-
-[server.slatedb]
-provider = "s3"
-prefix = "slatedb"
-disk_cache = true
-
-[server.slatedb.s3]
 bucket = "my-fabro-data"
 region = "us-east-1"
 
@@ -226,40 +217,19 @@ E2B_API_URL = "https://api.e2b.example"
 | `env` | Complete environment for the plugin, apart from `inherit_env` | `{}` |
 | `inherit_env` | Ambient variables forwarded from the server process | `[]` |
 
-### `[server.slatedb]` section
+### Removed: `[server.slatedb]`
 
-Configure the embedded SlateDB key-value store used for the remaining
-object-store-backed indexes and as the read-only source for temporary storage
-migrations. Run history and content-addressed blobs live in SQLite; artifacts
-use `[server.artifacts]`.
+Earlier releases kept an embedded SlateDB key-value store beside the
+artifact store. Run history and content-addressed blobs now live in SQLite,
+so the section has no store behind it. A `settings.toml` that still carries
+`[server.slatedb]` is rewritten once at startup: the section is removed, a
+backup is written beside the file, and a warning names both. Delete the
+section yourself to avoid the rewrite.
 
-| Key | Description | Default |
-|---|---|---|
-| `provider` | Object store backend: `local` or `s3` | `"local"` |
-| `prefix` | Key prefix within the object store | `""` |
-| `flush_interval` | How often to flush the write-ahead log | `"1ms"` |
-| `disk_cache` | Enable a local disk cache for object store reads | `false` |
-
-When `disk_cache = true`, Fabro creates a cache directory at `<storage_root>/cache/slatedb` and
-configures SlateDB to cache object store bytes on local disk (16 GB max, 4 MB parts). This
-significantly reduces read latency and costs for S3-backed deployments. A warning is emitted if
-enabled with `provider = "local"` since the disk cache adds overhead when the object store is
-already local.
-
-```toml title="settings.toml"
-[server.slatedb]
-provider = "s3"
-disk_cache = true
-
-[server.slatedb.s3]
-bucket = "fabro-production"
-region = "us-east-1"
-```
-
-The browser install wizard's `Object store` step manages both `[server.slatedb]` and
-`[server.artifacts]` together. `Local disk` uses the detected local object-store root, defaulting
-to `<storage_root>/objects`, with fixed prefixes `slatedb` and `artifacts`. `AWS S3` writes one
-shared bucket with the same fixed prefixes.
+The browser install wizard's `Object store` step manages `[server.artifacts]`.
+`Local disk` uses the detected local object-store root, defaulting to
+`<storage_root>/objects`, with the fixed prefix `artifacts`. `AWS S3` writes
+one bucket with the same fixed prefix.
 
 ```toml title="Local disk object store"
 [server.artifacts]
@@ -267,13 +237,6 @@ provider = "local"
 prefix = "artifacts"
 
 [server.artifacts.local]
-root = "/var/lib/fabro/objects"
-
-[server.slatedb]
-provider = "local"
-prefix = "slatedb"
-
-[server.slatedb.local]
 root = "/var/lib/fabro/objects"
 ```
 
@@ -284,16 +247,14 @@ The wizard only covers AWS S3 bucket/region plus one of:
 
 Advanced S3-compatible settings such as custom `endpoint` or `path_style` remain a manual
 configuration path. If you need MinIO, R2, or another S3-compatible backend, configure
-`[server.slatedb]` and `[server.artifacts]` directly in `settings.toml`. The runtime still
-honors those hand-edited values even though the browser wizard does not manage them.
+`[server.artifacts]` directly in `settings.toml`. The runtime still honors those hand-edited
+values even though the browser wizard does not manage them.
 
 ### SQLite state and migration backups
 
-Shared relational state, including run events and current run rows,
+Shared relational state, including run records and current run rows,
 content-addressed blobs, vault entries, server-managed definitions, and CLI
-auth sessions, lives at `<storage_root>/db/fabro.sqlite3`. The
-`[server.slatedb]` object store remains configured for compatibility imports
-and session-to-run reverse indexes during the storage transition.
+auth sessions, lives at `<storage_root>/db/fabro.sqlite3`.
 
 CLI auth sessions are stored as an `auth_sessions` row per signed-in CLI, with the rotating refresh tokens for that session in `refresh_tokens`. Pending browser-to-CLI handoffs live briefly in `oauth_authorization_codes`; the table contains a SHA-256 hash of each one-time code, never the raw bearer value. Revoking a session from **Settings → Sessions**, or with `DELETE /api/v1/auth/sessions/{id}`, deletes the session row and its tokens together.
 
@@ -476,7 +437,7 @@ Fabro resolves these from `process env -> server.env`.
 
 | Variable | Description |
 |---|---|
-| `AWS_ACCESS_KEY_ID` | Static AWS access key ID for S3-backed `[server.slatedb]` / `[server.artifacts]` |
+| `AWS_ACCESS_KEY_ID` | Static AWS access key ID for an S3-backed `[server.artifacts]` |
 | `AWS_SECRET_ACCESS_KEY` | Matching static AWS secret access key |
 | `AWS_SESSION_TOKEN` | Optional matching AWS session token for temporary static credentials |
 
@@ -484,8 +445,8 @@ The browser install wizard can write these into `server.env` for the AWS S3 manu
 path. It does not support manual STS/session-token input; use runtime credentials instead for ECS,
 EC2 instance profiles, IRSA, or web-identity flows.
 
-For the narrowest production policy, scope access to one bucket and the `slatedb/` and
-`artifacts/` prefixes with `s3:ListBucket` plus `s3:GetObject`, `s3:PutObject`, and
+For the narrowest production policy, scope access to one bucket and the `artifacts/` prefix
+with `s3:ListBucket` plus `s3:GetObject`, `s3:PutObject`, and
 `s3:DeleteObject`. Prefer a dedicated IAM user or role for Fabro instead of reusing broad AWS
 credentials.
 

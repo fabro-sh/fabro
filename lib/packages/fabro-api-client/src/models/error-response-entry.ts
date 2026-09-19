@@ -38,4 +38,8 @@ export interface ErrorResponseEntry {
      * Server-generated request identifier; matches the x-request-id response header.
      */
     'request_id'?: string;
+    /**
+     * Optional structured details specific to the error `code`, for clients that act on them. Each code documents the members it sets.
+     */
+    'meta'?: { [key: string]: any; };
 }

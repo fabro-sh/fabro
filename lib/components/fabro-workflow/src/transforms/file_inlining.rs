@@ -4,7 +4,7 @@ use std::sync::Arc;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_template::{TemplateContext, TemplateSource, TemplateStore};
 use fabro_types::ManifestPath;
-use fabro_validate::Diagnostic;
+use fabro_types::diagnostic::Diagnostic;
 
 use super::Transform;
 use super::importable_field::ImportableField;

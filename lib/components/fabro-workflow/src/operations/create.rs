@@ -6,125 +6,40 @@
     )
 )]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
-use fabro_llm::lithos_catalog::Catalog;
+use fabro_store::platform_records::{
+    PlatformRecord, RunCreatedRecord, RunLifecycleKind, RunLifecycleRecord,
+};
 use fabro_store::{BlobStore, Database};
 use fabro_template::TemplateContext;
 use fabro_types::{
-    AutomationRef, BlobHash, ForkSourceRef, GitContext, ManifestPath, RunId, RunProvenance,
-    RunTarget, WorkflowSettings, WorkflowVersionId,
+    AutomationRef, BlobHash, ForkSourceRef, GitContext, ManifestPath, PetriAdmission, RunId,
+    RunProvenance, RunStatus, RunTarget, WorkflowSettings, WorkflowVersionId,
 };
-use fabro_util::json::normalize_json_value;
-use lithos_llm::catalog::ProviderId;
 use tokio::task::spawn_blocking;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::error::Error;
-use crate::event::{self, Event, append_event};
 use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunSpec;
 use crate::run_materialization;
-use crate::transforms::{ModelResolutionTransform, RenderMode};
+use crate::transforms::RenderMode;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
-
-#[derive(Clone, Debug)]
-pub struct CreateRunInput {
-    pub workflow:             WorkflowInput,
-    pub settings:             WorkflowSettings,
-    /// Run-scoped variables (`{{ vars.* }}`) snapshotted from the server's
-    /// variable store at create time, threaded into the template render
-    /// context for prompts and goals. Empty for offline/CLI callers.
-    pub vars:                 HashMap<String, String>,
-    pub cwd:                  PathBuf,
-    pub workflow_slug:        Option<String>,
-    pub workflow_path:        Option<ManifestPath>,
-    pub workflow_bundle:      Option<WorkflowBundle>,
-    pub target:               Option<RunTarget>,
-    pub run_id:               Option<RunId>,
-    pub title:                Option<String>,
-    pub automation:           Option<AutomationRef>,
-    pub git:                  Option<GitContext>,
-    pub fork_source_ref:      Option<ForkSourceRef>,
-    pub parent_id:            Option<RunId>,
-    pub provenance:           RunProvenance,
-    pub configured_providers: Vec<ProviderId>,
-    /// Public URL where this run can be viewed in the web UI, when the server
-    /// has the web UI enabled. Recorded on the `run.created` event so attach
-    /// replays can surface the link.
-    pub web_url:              Option<String>,
-}
-
-impl CreateRunInput {
-    /// Split into the compile-stage input and the persistence metadata for
-    /// `run_id`, the two halves of the create pipeline.
-    fn into_stages(
-        self,
-        run_id: RunId,
-        storage_root: PathBuf,
-    ) -> (CreateRunCompileInput, CreateRunPersistenceMetadata) {
-        let Self {
-            workflow,
-            settings,
-            vars,
-            cwd,
-            workflow_slug,
-            workflow_path,
-            workflow_bundle,
-            target,
-            run_id: _,
-            title,
-            automation,
-            git,
-            fork_source_ref,
-            parent_id,
-            provenance,
-            configured_providers,
-            web_url,
-        } = self;
-        (
-            CreateRunCompileInput {
-                workflow,
-                settings,
-                vars,
-                cwd,
-                workflow_path,
-                workflow_bundle,
-                configured_providers,
-            },
-            CreateRunPersistenceMetadata {
-                run_id,
-                storage_root,
-                workflow_slug,
-                workflow_version_id: None,
-                target,
-                title,
-                automation,
-                git,
-                fork_source_ref,
-                parent_id,
-                provenance,
-                web_url,
-            },
-        )
-    }
-}
 
 /// Inputs needed to resolve and compile a workflow for run creation.
 #[derive(Debug)]
 pub struct CreateRunCompileInput {
-    pub workflow:             WorkflowInput,
-    pub settings:             WorkflowSettings,
-    pub vars:                 HashMap<String, String>,
-    pub cwd:                  PathBuf,
-    pub workflow_path:        Option<ManifestPath>,
-    pub workflow_bundle:      Option<WorkflowBundle>,
-    pub configured_providers: Vec<ProviderId>,
+    pub workflow:        WorkflowInput,
+    pub settings:        WorkflowSettings,
+    pub vars:            HashMap<String, String>,
+    pub cwd:             PathBuf,
+    pub workflow_path:   Option<ManifestPath>,
+    pub workflow_bundle: Option<WorkflowBundle>,
 }
 
 /// Durable metadata joined to a materialized workflow before persistence.
@@ -144,6 +59,8 @@ pub struct CreateRunPersistenceMetadata {
     pub parent_id:           Option<RunId>,
     pub provenance:          RunProvenance,
     pub web_url:             Option<String>,
+    /// What Petri admitted for the run.
+    pub admission:           PetriAdmission,
 }
 
 #[derive(Debug)]
@@ -158,15 +75,14 @@ pub struct CreatedRun {
 /// for run creation. Model selectors in the graph are resolved, while the run
 /// settings still reflect the compiled source and have not been materialized.
 pub struct CompiledRun {
-    validated:            Validated,
-    settings:             WorkflowSettings,
-    raw_source:           String,
-    workflow_slug:        Option<String>,
-    dot_path:             Option<PathBuf>,
-    definition:           Option<RunDefinition>,
-    source_directory:     String,
-    labels:               HashMap<String, String>,
-    configured_providers: Vec<ProviderId>,
+    validated:        Validated,
+    settings:         WorkflowSettings,
+    raw_source:       String,
+    workflow_slug:    Option<String>,
+    dot_path:         Option<PathBuf>,
+    definition:       Option<RunDefinition>,
+    source_directory: String,
+    labels:           HashMap<String, String>,
 }
 
 impl CompiledRun {
@@ -214,6 +130,7 @@ pub struct CreateRunPersistenceInput {
     parent_id:           Option<RunId>,
     provenance:          RunProvenance,
     web_url:             Option<String>,
+    admission:           PetriAdmission,
 }
 
 impl CreateRunPersistenceInput {
@@ -246,38 +163,13 @@ impl CreateRunPersistenceInput {
     }
 }
 
-/// Resolve workflow inputs, normalize settings using the caller-provided
-/// catalog, and persist a run directory.
-pub async fn create(
-    store: &Database,
-    request: CreateRunInput,
-    storage_root: PathBuf,
-    catalog: Arc<Catalog>,
-) -> Result<CreatedRun, Error> {
-    let run_id = request.run_id.unwrap_or_default();
-    let persistence_input = spawn_blocking(move || {
-        let (compile_input, metadata) = request.into_stages(run_id, storage_root);
-        let compiled = compile_create_run(compile_input, Arc::clone(&catalog))?;
-        let materialized = materialize_create_run(compiled, catalog.as_ref())?;
-        Ok::<_, Error>(assemble_create_run_persistence_input(
-            materialized,
-            metadata,
-        ))
-    })
-    .await
-    .map_err(|err| Error::engine_with_source("workflow create task failed", err))??;
-
-    Box::pin(persist_create_run(store, persistence_input)).await
-}
-
-/// Resolve, preprocess, validate, and promote a workflow for run creation.
-///
-/// This stage is synchronous and may read workflow files. Async callers must
-/// run it on a blocking thread.
-pub fn compile_create_run(
-    input: CreateRunCompileInput,
-    catalog: Arc<Catalog>,
-) -> Result<CompiledRun, Error> {
+/// Stage two for a run another engine admitted: the Fabro graph is parsed
+/// and transformed for the read side (the goal, the node count, labels), with
+/// no lint rule, no model resolution and no promotion of template
+/// diagnostics. The engine that admitted the run judged the workflow; a
+/// graph Fabro's own parser cannot read is still refused, since the read side
+/// needs one.
+pub fn compile_admitted_run(input: CreateRunCompileInput) -> Result<CompiledRun, Error> {
     let CreateRunCompileInput {
         workflow,
         settings,
@@ -285,7 +177,6 @@ pub fn compile_create_run(
         cwd,
         workflow_path,
         workflow_bundle,
-        configured_providers,
     } = input;
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow,
@@ -295,56 +186,30 @@ pub fn compile_create_run(
     .map_err(|err| Error::Parse(err.to_string()))?;
     let settings = resolved.settings;
     let labels = settings.combined_labels();
-    let source_name = resolved
-        .dot_path
-        .as_ref()
-        .map(|path| path.display().to_string());
     let definition = match (workflow_path, workflow_bundle) {
         (Some(workflow_path), Some(workflow_bundle)) => {
-            let bundled = workflow_bundle.workflow(&workflow_path).ok_or_else(|| {
-                Error::Parse("workflow path is missing from workflow bundle".to_string())
-            })?;
-            if bundled.source != resolved.raw_source {
-                return Err(Error::Parse(
-                    "resolved workflow does not match workflow bundle entrypoint".to_string(),
-                ));
-            }
             Some(RunDefinition::new(workflow_path, workflow_bundle))
         }
-        (None, None) => None,
-        _ => {
-            return Err(Error::Parse(
-                "workflow path and workflow bundle must be provided together".to_string(),
-            ));
-        }
+        _ => None,
     };
-    let mut validated = preprocess_and_validate(
-        &resolved.raw_source,
-        resolved.goal_override.as_deref(),
-        &TransformOptions {
-            current_dir: resolved.current_dir.clone(),
-            file_resolver: resolved.file_resolver.clone(),
-            template_context: template_context(Some(&settings), vars),
-            source_name,
-            render_mode: RenderMode::Structural,
-            custom_transforms: Vec::new(),
-            model_resolution: Some(
-                ModelResolutionTransform::for_eligible(
-                    catalog,
-                    configured_providers.iter().cloned().collect(),
-                )
-                .with_default_provider(configured_default_provider(&settings)),
-            ),
-        },
-    )?;
-
-    validated.promote_template_undefined_variables_to_errors();
-    if validated.has_errors() {
-        return Err(Error::ValidationFailed {
-            diagnostics: validated.diagnostics().to_vec(),
-        });
-    }
-
+    let mut parsed = pipeline::parse(&resolved.raw_source)?;
+    apply_goal_override(&mut parsed.graph, resolved.goal_override.as_deref());
+    let transformed = pipeline::transform(parsed, &TransformOptions {
+        current_dir:       resolved.current_dir.clone(),
+        file_resolver:     resolved.file_resolver.clone(),
+        template_context:  template_context(Some(&settings), vars),
+        source_name:       resolved
+            .dot_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        render_mode:       RenderMode::Structural,
+        custom_transforms: Vec::new(),
+    })?;
+    let validated = Validated::new(
+        transformed.graph,
+        transformed.source,
+        transformed.diagnostics,
+    );
     Ok(CompiledRun {
         validated,
         settings,
@@ -354,33 +219,28 @@ pub fn compile_create_run(
         definition,
         source_directory: resolved.working_directory.to_string_lossy().to_string(),
         labels,
-        configured_providers,
     })
 }
 
-/// Materialize run-level model settings from a compiled workflow.
-pub fn materialize_create_run(
-    compiled: CompiledRun,
-    catalog: &Catalog,
-) -> Result<MaterializedRun, Error> {
+/// Stage three for a run Petri admitted: no model pinning, since Petri
+/// pinned every route at its admission. The run's goal and pull request
+/// settings are materialized as they were for every run: the graph's goal
+/// becomes the inline `run.goal`, and a disabled pull request block is
+/// dropped.
+#[must_use]
+pub fn materialize_admitted_run(compiled: CompiledRun) -> MaterializedRun {
     let CompiledRun {
         validated,
-        settings,
+        mut settings,
         raw_source,
         workflow_slug,
         dot_path,
         definition,
         source_directory,
         labels,
-        configured_providers,
     } = compiled;
-    let settings = run_materialization::materialize_run(
-        settings,
-        validated.graph(),
-        catalog,
-        &configured_providers,
-    )?;
-    Ok(MaterializedRun {
+    run_materialization::materialize_goal_and_pull_request(&mut settings, validated.graph());
+    MaterializedRun {
         validated,
         settings,
         raw_source,
@@ -389,7 +249,7 @@ pub fn materialize_create_run(
         definition,
         source_directory,
         labels,
-    })
+    }
 }
 
 /// Assemble all inputs needed for persistence without I/O or recompilation.
@@ -410,6 +270,7 @@ pub fn assemble_create_run_persistence_input(
         parent_id,
         provenance,
         web_url,
+        admission,
     } = metadata;
     let run_dir = Storage::new(storage_root)
         .run_scratch(&run_id)
@@ -431,6 +292,7 @@ pub fn assemble_create_run_persistence_input(
         parent_id,
         provenance,
         web_url,
+        admission,
     }
 }
 
@@ -453,6 +315,7 @@ pub async fn persist_create_run(
         parent_id,
         provenance,
         web_url,
+        admission,
     } = input;
     let MaterializedRun {
         validated,
@@ -487,6 +350,7 @@ pub async fn persist_create_run(
             spec_blob: None,
             git,
             fork_source_ref,
+            admission,
         };
         pipeline::persist(validated, PersistOptions {
             run_dir: persisted_run_dir,
@@ -515,6 +379,8 @@ pub async fn persist_create_run(
     })
 }
 
+/// The run's first records: `run.created` with the spec Fabro built, and
+/// the `submitted` lifecycle transition. Both wake the run's projector.
 async fn persist_created_run(
     store: &Database,
     persisted: &Persisted,
@@ -536,49 +402,32 @@ async fn persist_created_run(
         write_optional_blob(&blob_store, definition_bytes.as_deref()),
         async { blob_store.write(&spec_bytes).await.map_err(store_error) },
     )?;
+    let _ = workflow_source;
 
     let title = explicit_title.unwrap_or_else(|| fabro_types::infer_run_title(record.graph.goal()));
-    let first_event = Event::RunCreated {
-        run_id: record.run_id,
+    let mut spec = record.clone();
+    spec.definition_blob = definition_blob;
+    spec.spec_blob = Some(spec_blob);
+    let created = PlatformRecord::RunCreated(RunCreatedRecord {
+        spec,
         title: Some(title),
-        settings: normalize_json_value(
-            serde_json::to_value(&record.settings).map_err(|err| Error::engine(err.to_string()))?,
-        ),
-        graph: normalize_json_value(
-            serde_json::to_value(&record.graph).map_err(|err| Error::engine(err.to_string()))?,
-        ),
-        workflow_source: (!workflow_source.is_empty()).then(|| workflow_source.to_string()),
-        labels: record
-            .labels
-            .clone()
-            .into_iter()
-            .collect::<BTreeMap<_, _>>(),
-        source_directory: record.source_directory.clone(),
-        workflow_slug: record.workflow_slug.clone(),
-        workflow_version_id: record.workflow_version_id,
-        target: record.target.clone(),
-        automation: record.automation.clone(),
-        provenance: record.provenance.clone(),
-        spec_blob: Some(spec_blob),
-        git: record.git.clone(),
-        fork_source_ref: record.fork_source_ref.clone(),
-        retried_from: None,
         parent_id,
+        retried_from: None,
         web_url,
-    };
-    let run_store = event::create_run(
-        store,
-        &record.run_id,
-        &first_event,
-        record.run_id.created_at(),
-    )
-    .await
-    .map_err(|err| Error::engine_with_source("failed to create run store", err))?;
-    append_event(&run_store, &record.run_id, &Event::RunSubmitted {
-        definition_blob,
-    })
-    .await
-    .map_err(store_error)
+    });
+    let submitted = PlatformRecord::RunLifecycle(
+        RunLifecycleRecord::new(RunLifecycleKind::Submitted).with_status(RunStatus::Submitted),
+    );
+    let summaries = store.run_summary_store();
+    let platform_records = summaries.platform_records();
+    for platform_record in [created, submitted] {
+        platform_records
+            .append(&record.run_id, &platform_record, None)
+            .await
+            .map_err(store_error)?;
+    }
+    summaries.notify_platform_record(record.run_id);
+    Ok(())
 }
 
 async fn write_optional_blob(
@@ -595,12 +444,8 @@ fn store_error(err: impl Into<anyhow::Error>) -> Error {
     Error::engine_with_source("run store operation failed", err)
 }
 
-/// Parse, transform, and validate `dot_source`.
-///
-/// `options.model_resolution` drives both halves of catalog awareness: it
-/// selects concrete models during TRANSFORM and enables the catalog-backed
-/// lint rules during VALIDATE. `None` leaves authored model and provider
-/// selectors untouched for offline structural validation.
+/// Parse and transform `dot_source`, and carry the transform diagnostics
+/// as the structural validation. Models and lint are Petri's at admission.
 pub(super) fn preprocess_and_validate(
     dot_source: &str,
     goal_override: Option<&str>,
@@ -610,22 +455,7 @@ pub(super) fn preprocess_and_validate(
     apply_goal_override(&mut parsed.graph, goal_override);
 
     let transformed = pipeline::transform(parsed, options)?;
-    let catalog = options
-        .model_resolution
-        .as_ref()
-        .map(ModelResolutionTransform::catalog);
-    Ok(pipeline::validate(transformed, catalog, &[]))
-}
-
-/// The workflow-level default provider, treating an empty setting as unset.
-pub(super) fn configured_default_provider(settings: &WorkflowSettings) -> Option<ProviderId> {
-    settings
-        .run
-        .model
-        .provider
-        .as_deref()
-        .filter(|provider| !provider.is_empty())
-        .map(ProviderId::new)
+    Ok(pipeline::validate(transformed))
 }
 
 pub(super) fn template_context(
@@ -661,7 +491,6 @@ pub fn make_run_dir(scratch_base: &Path, run_id: &RunId) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::Duration;
 
     use chrono::{Local, TimeZone, Utc};
     use fabro_config::{
@@ -670,28 +499,54 @@ mod tests {
     };
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::Database;
+    use fabro_store::platform_records::StoredPlatformRecord;
+    use fabro_types::diagnostic::Severity;
     use fabro_types::settings::InterpString;
     use fabro_types::settings::run::RunMode;
-    use fabro_types::{EventBody, WorkflowSettings, fixtures, test_support};
+    use fabro_types::{PetriAdmission, WorkflowSettings, fixtures, test_support};
     use fabro_util::error::collect_chain;
-    use fabro_validate::Severity;
-    use lithos_llm::catalog::builtin;
-    use object_store::local::LocalFileSystem;
-    use object_store::memory::InMemory;
 
     use super::*;
     use crate::file_resolver::FileResolver;
-    use crate::operations::{ValidateInput, validate, validate_with_catalog};
+    use crate::operations::{ValidateInput, validate};
     use crate::pipeline::types::{GOAL_SELF_REFERENCE_RULE, TEMPLATE_UNDEFINED_VARIABLE_RULE};
     use crate::transforms::Transform;
     use crate::workflow_bundle::BundledWorkflow;
+    /// The platform records the create operation appended for the run.
+    async fn platform_records(store: &Database, run_id: RunId) -> Vec<StoredPlatformRecord> {
+        store
+            .run_summary_store()
+            .platform_records()
+            .read(&run_id)
+            .await
+            .unwrap()
+    }
+
+    /// The `run.created` record of the run.
+    fn run_created(records: &[StoredPlatformRecord]) -> &RunCreatedRecord {
+        records
+            .iter()
+            .find_map(|stored| match &stored.record {
+                PlatformRecord::RunCreated(created) => Some(created),
+                _ => None,
+            })
+            .expect("run.created record should be persisted")
+    }
+
+    /// The status the run's last lifecycle transition leads to.
+    fn last_lifecycle_status(records: &[StoredPlatformRecord]) -> Option<RunStatus> {
+        records
+            .iter()
+            .rev()
+            .find_map(|stored| match &stored.record {
+                PlatformRecord::RunLifecycle(lifecycle) => Some(lifecycle.status),
+                _ => None,
+            })
+            .flatten()
+    }
+
     fn memory_store() -> Arc<Database> {
-        Arc::new(fabro_store::test_support::test_database(
-            Arc::new(InMemory::new()),
-            "",
-            Duration::from_millis(1),
-            None,
-        ))
+        Arc::new(fabro_store::test_support::test_database())
     }
 
     fn settings_from_run_layer(run: RunLayer) -> WorkflowSettings {
@@ -715,33 +570,95 @@ mod tests {
             .expect("default settings should resolve")
     }
 
-    fn test_catalog() -> Arc<Catalog> {
-        Arc::new(fabro_llm::test_support::test_catalog())
+    /// A run to create, as the server's compiler hands it to the staged
+    /// create pipeline: the tests drive the same stages in one call.
+    #[derive(Clone)]
+    struct CreateRunInput {
+        workflow:        WorkflowInput,
+        settings:        WorkflowSettings,
+        vars:            HashMap<String, String>,
+        cwd:             PathBuf,
+        workflow_slug:   Option<String>,
+        workflow_path:   Option<ManifestPath>,
+        workflow_bundle: Option<WorkflowBundle>,
+        target:          Option<RunTarget>,
+        run_id:          Option<RunId>,
+        title:           Option<String>,
+        automation:      Option<AutomationRef>,
+        git:             Option<GitContext>,
+        fork_source_ref: Option<ForkSourceRef>,
+        parent_id:       Option<RunId>,
+        provenance:      RunProvenance,
+        web_url:         Option<String>,
+        admission:       PetriAdmission,
     }
 
-    /// OpenAI and OpenRouter both offering GPT-5.6 Sol as their default, so a
-    /// portable selector resolves to whichever provider is ready.
-    fn portable_model_catalog() -> Arc<Catalog> {
-        Arc::new(fabro_llm::test_support::test_catalog_with_overlay(
-            r#"
-            [providers.openai]
-            priority = 90
-            default_model = "gpt-5.6-sol"
-            
-            [providers.openrouter]
-            priority = 25
-            default_model = "gpt-5.6-sol"
-            enabled = true
-            
-            "#,
-        ))
+    impl CreateRunInput {
+        fn into_stages(
+            self,
+            run_id: RunId,
+            storage_root: PathBuf,
+        ) -> (CreateRunCompileInput, CreateRunPersistenceMetadata) {
+            let Self {
+                workflow,
+                settings,
+                vars,
+                cwd,
+                workflow_slug,
+                workflow_path,
+                workflow_bundle,
+                target,
+                run_id: _,
+                title,
+                automation,
+                git,
+                fork_source_ref,
+                parent_id,
+                provenance,
+                web_url,
+                admission,
+            } = self;
+            (
+                CreateRunCompileInput {
+                    workflow,
+                    settings,
+                    vars,
+                    cwd,
+                    workflow_path,
+                    workflow_bundle,
+                },
+                CreateRunPersistenceMetadata {
+                    run_id,
+                    storage_root,
+                    workflow_slug,
+                    workflow_version_id: None,
+                    target,
+                    title,
+                    automation,
+                    git,
+                    fork_source_ref,
+                    parent_id,
+                    provenance,
+                    web_url,
+                    admission,
+                },
+            )
+        }
     }
 
-    fn test_provider_ids() -> Vec<ProviderId> {
-        fabro_llm::test_support::test_catalog()
-            .enabled_provider_ids()
-            .into_iter()
-            .collect()
+    /// Compile, materialize, assemble and persist `request`: the create
+    /// pipeline as the server drives it for a run Petri admitted.
+    async fn create(
+        store: &Database,
+        request: CreateRunInput,
+        storage_root: PathBuf,
+    ) -> Result<CreatedRun, Error> {
+        let run_id = request.run_id.unwrap_or_default();
+        let (compile_input, metadata) = request.into_stages(run_id, storage_root);
+        let compiled = compile_admitted_run(compile_input)?;
+        let materialized = materialize_admitted_run(compiled);
+        let input = assemble_create_run_persistence_input(materialized, metadata);
+        Box::pin(persist_create_run(store, input)).await
     }
 
     fn compile_input(request: &CreateRunInput) -> CreateRunCompileInput {
@@ -763,19 +680,16 @@ mod tests {
     }
 
     fn validate_dot(dot_source: &str, settings: WorkflowSettings) -> Validated {
-        validate_with_catalog(
-            ValidateInput {
-                workflow: WorkflowInput::DotSource {
-                    source:   dot_source.to_string(),
-                    base_dir: None,
-                },
-                settings,
-                vars: HashMap::new(),
-                cwd: PathBuf::from("."),
-                custom_transforms: Vec::new(),
+        validate(ValidateInput {
+            workflow: WorkflowInput::DotSource {
+                source:   dot_source.to_string(),
+                base_dir: None,
             },
-            test_catalog(),
-        )
+            settings,
+            vars: HashMap::new(),
+            cwd: PathBuf::from("."),
+            custom_transforms: Vec::new(),
+        })
         .unwrap()
     }
 
@@ -810,7 +724,6 @@ mod tests {
             source_name: Some("workflow.fabro".to_string()),
             render_mode,
             custom_transforms: Vec::new(),
-            model_resolution: Some(ModelResolutionTransform::new(test_catalog())),
         }
     }
 
@@ -1317,7 +1230,7 @@ mod tests {
 
         assert_eq!(
             validated.graph().nodes["work"].attrs.get("model"),
-            Some(&AttrValue::String("claude-sonnet-5".into()))
+            Some(&AttrValue::String("sonnet".into()))
         );
     }
 
@@ -1366,18 +1279,6 @@ mod tests {
             custom_transforms: Vec::new(),
         });
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn validate_returns_validation_diagnostics() {
-        let dot = r#"digraph Test {
-            graph [goal="Test"]
-            work [label="Work"]
-        }"#;
-        let validated = validate_dot(dot, WorkflowSettings::default());
-
-        assert!(validated.has_errors());
-        assert!(validated.raise_on_errors().is_err());
     }
 
     #[test]
@@ -1607,32 +1508,31 @@ mod tests {
             workflow_source: None,
         };
         let request = CreateRunInput {
-            workflow:             WorkflowInput::DotSource {
+            admission:       PetriAdmission::default(),
+            workflow:        WorkflowInput::DotSource {
                 source:   MINIMAL_DOT.to_string(),
                 base_dir: None,
             },
-            settings:             test_default_settings(),
-            vars:                 HashMap::new(),
-            cwd:                  dir.path().to_path_buf(),
-            workflow_slug:        Some("request-slug".to_string()),
-            workflow_path:        None,
-            workflow_bundle:      None,
-            target:               None,
-            run_id:               Some(fixtures::RUN_1),
-            title:                Some("Assembled run".to_string()),
-            automation:           Some(automation.clone()),
-            git:                  None,
-            fork_source_ref:      None,
-            parent_id:            Some(fixtures::RUN_2),
-            provenance:           test_support::test_run_provenance(),
-            configured_providers: test_provider_ids(),
-            web_url:              Some("https://fabro.test/runs/1".to_string()),
+            settings:        test_default_settings(),
+            vars:            HashMap::new(),
+            cwd:             dir.path().to_path_buf(),
+            workflow_slug:   Some("request-slug".to_string()),
+            workflow_path:   None,
+            workflow_bundle: None,
+            target:          None,
+            run_id:          Some(fixtures::RUN_1),
+            title:           Some("Assembled run".to_string()),
+            automation:      Some(automation.clone()),
+            git:             None,
+            fork_source_ref: None,
+            parent_id:       Some(fixtures::RUN_2),
+            provenance:      test_support::test_run_provenance(),
+            web_url:         Some("https://fabro.test/runs/1".to_string()),
         };
-        let catalog = test_catalog();
         let resolved_run_id = fixtures::RUN_64;
 
-        let compiled = compile_create_run(compile_input(&request), Arc::clone(&catalog)).unwrap();
-        let materialized = materialize_create_run(compiled, catalog.as_ref()).unwrap();
+        let compiled = compile_admitted_run(compile_input(&request)).unwrap();
+        let materialized = materialize_admitted_run(compiled);
         let metadata = persistence_metadata(&request, resolved_run_id, &storage_root);
         let input = assemble_create_run_persistence_input(materialized, metadata);
 
@@ -1645,48 +1545,16 @@ mod tests {
         );
         assert_eq!(input.workflow_slug(), Some("request-slug"));
         assert_eq!(input.automation(), Some(&automation));
+        // The settings keep the model they named (none here): Petri pins
+        // the resolved model in its admitted graph, not in the settings.
         assert_eq!(
             input.materialized().settings().run.model.name.as_deref(),
-            Some("claude-sonnet-5")
+            None
         );
     }
 
     #[test]
-    fn compile_create_run_rejects_mismatched_bundle_definition() {
-        let workflow_path = ManifestPath::from_wire("workflows/main.fabro").unwrap();
-        let compiled_workflow = BundledWorkflow {
-            path:   workflow_path.clone(),
-            source: MINIMAL_DOT.to_string(),
-            config: None,
-            files:  HashMap::new(),
-        };
-        let mismatched_bundle =
-            WorkflowBundle::new(HashMap::from([(workflow_path.clone(), BundledWorkflow {
-                source: MINIMAL_DOT.replace("Build feature", "Different goal"),
-                ..compiled_workflow.clone()
-            })]));
-
-        let Err(error) = compile_create_run(
-            CreateRunCompileInput {
-                workflow:             WorkflowInput::Bundled(compiled_workflow),
-                settings:             test_default_settings(),
-                vars:                 HashMap::new(),
-                cwd:                  PathBuf::from("/tmp/project"),
-                workflow_path:        Some(workflow_path),
-                workflow_bundle:      Some(mismatched_bundle),
-                configured_providers: test_provider_ids(),
-            },
-            test_catalog(),
-        ) else {
-            panic!("mismatched accepted definition should fail");
-        };
-
-        assert!(matches!(error, Error::Parse(message) if message ==
-            "resolved workflow does not match workflow bundle entrypoint"));
-    }
-
-    #[test]
-    fn compile_create_run_exposes_resolved_metadata_and_definition() {
+    fn compile_admitted_run_exposes_resolved_metadata_and_definition() {
         let workflow_path = ManifestPath::from_wire("workflows/main.fabro").unwrap();
         let bundled = BundledWorkflow {
             path:   workflow_path.clone(),
@@ -1695,24 +1563,20 @@ mod tests {
             files:  HashMap::new(),
         };
         let bundle = WorkflowBundle::new(HashMap::from([(workflow_path.clone(), bundled.clone())]));
-        let compiled = compile_create_run(
-            CreateRunCompileInput {
-                workflow:             WorkflowInput::Bundled(bundled),
-                settings:             test_default_settings(),
-                vars:                 HashMap::new(),
-                cwd:                  PathBuf::from("/tmp/project"),
-                workflow_path:        Some(workflow_path.clone()),
-                workflow_bundle:      Some(bundle),
-                configured_providers: test_provider_ids(),
-            },
-            test_catalog(),
-        )
+        let compiled = compile_admitted_run(CreateRunCompileInput {
+            workflow:        WorkflowInput::Bundled(bundled),
+            settings:        test_default_settings(),
+            vars:            HashMap::new(),
+            cwd:             PathBuf::from("/tmp/project"),
+            workflow_path:   Some(workflow_path.clone()),
+            workflow_bundle: Some(bundle),
+        })
         .unwrap();
 
         assert_eq!(compiled.raw_source, MINIMAL_DOT);
         assert_eq!(compiled.dot_path.as_deref(), Some(workflow_path.as_path()));
         assert_eq!(compiled.labels, compiled.settings().combined_labels());
-        let materialized = materialize_create_run(compiled, test_catalog().as_ref()).unwrap();
+        let materialized = materialize_admitted_run(compiled);
         let input =
             assemble_create_run_persistence_input(materialized, CreateRunPersistenceMetadata {
                 run_id:              fixtures::RUN_1,
@@ -1727,6 +1591,7 @@ mod tests {
                 parent_id:           None,
                 provenance:          test_support::test_run_provenance(),
                 web_url:             None,
+                admission:           PetriAdmission::default(),
             });
         let definition = input
             .definition()
@@ -1748,30 +1613,29 @@ mod tests {
             workflow_source: None,
         };
         let request = CreateRunInput {
-            workflow:             WorkflowInput::Path(dot_path.clone()),
-            settings:             test_default_settings(),
-            vars:                 HashMap::new(),
-            cwd:                  dir.path().to_path_buf(),
-            workflow_slug:        Some("compiled-slug".to_string()),
-            workflow_path:        None,
-            workflow_bundle:      None,
-            target:               None,
-            run_id:               Some(fixtures::RUN_2),
-            title:                Some("Compiled run".to_string()),
-            automation:           Some(automation.clone()),
-            git:                  None,
-            fork_source_ref:      None,
-            parent_id:            None,
-            provenance:           test_support::test_run_provenance(),
-            configured_providers: test_provider_ids(),
-            web_url:              None,
+            admission:       PetriAdmission::default(),
+            workflow:        WorkflowInput::Path(dot_path.clone()),
+            settings:        test_default_settings(),
+            vars:            HashMap::new(),
+            cwd:             dir.path().to_path_buf(),
+            workflow_slug:   Some("compiled-slug".to_string()),
+            workflow_path:   None,
+            workflow_bundle: None,
+            target:          None,
+            run_id:          Some(fixtures::RUN_2),
+            title:           Some("Compiled run".to_string()),
+            automation:      Some(automation.clone()),
+            git:             None,
+            fork_source_ref: None,
+            parent_id:       None,
+            provenance:      test_support::test_run_provenance(),
+            web_url:         None,
         };
-        let catalog = test_catalog();
-        let compiled = compile_create_run(compile_input(&request), Arc::clone(&catalog)).unwrap();
+        let compiled = compile_admitted_run(compile_input(&request)).unwrap();
 
         std::fs::write(&dot_path, "this is no longer a graph").unwrap();
 
-        let materialized = materialize_create_run(compiled, catalog.as_ref()).unwrap();
+        let materialized = materialize_admitted_run(compiled);
         let workflow_version_id = test_support::test_workflow_version_id();
         let mut metadata = persistence_metadata(&request, fixtures::RUN_2, &storage_root);
         metadata.workflow_version_id = Some(workflow_version_id);
@@ -1784,75 +1648,30 @@ mod tests {
         assert_eq!(created.persisted.graph().goal(), "Compiled goal");
         assert_eq!(created.persisted.source(), compiled_source);
 
-        let run_store = store.open_run_reader(&fixtures::RUN_2).await.unwrap();
-        let state = run_store.state().await.unwrap();
-        assert_eq!(state.spec.graph.goal(), "Compiled goal");
-        assert_eq!(state.spec.automation, Some(automation));
-        assert_eq!(state.spec.workflow_version_id, Some(workflow_version_id));
-        let events = run_store.list_events().await.unwrap();
+        let records = platform_records(&store, fixtures::RUN_2).await;
         assert_eq!(
-            events
+            records
                 .iter()
-                .map(|event| event.event.event_name())
+                .map(|stored| stored.record.kind().to_string())
                 .collect::<Vec<_>>(),
-            vec!["run.created", "run.submitted"]
+            vec!["run.created", "run.lifecycle"]
         );
-        let EventBody::RunCreated(created) = &events[0].event.body else {
-            panic!("first durable event should be run.created");
+        let PlatformRecord::RunCreated(created) = &records[0].record else {
+            panic!("first durable record should be run.created");
         };
+        assert_eq!(created.spec.graph.goal(), "Compiled goal");
+        assert_eq!(created.spec.automation, Some(automation));
+        assert_eq!(created.spec.workflow_version_id, Some(workflow_version_id));
         assert_eq!(
-            created.workflow_source.as_deref(),
+            created.spec.graph_source.as_deref(),
             Some(compiled_source.as_str())
         );
-        assert_eq!(created.workflow_version_id, Some(workflow_version_id));
-        assert!(created.spec_blob.is_some());
-    }
-
-    #[tokio::test]
-    async fn create_returns_validation_failed_with_diagnostics() {
-        let dot = r#"digraph Test {
-            graph [goal="Test"]
-            work [label="Work"]
-        }"#;
-        let dir = tempfile::tempdir().unwrap();
-        let storage_root = dir.path().join("storage");
-        let store = memory_store();
-        let err = create(
-            &store,
-            CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
-                    source:   dot.to_string(),
-                    base_dir: None,
-                },
-                settings:             test_default_settings(),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        None,
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               None,
-                run_id:               None,
-                title:                None,
-                automation:           None,
-                git:                  None,
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           test_support::test_run_provenance(),
-                configured_providers: test_provider_ids(),
-                web_url:              None,
-            },
-            storage_root,
-            test_catalog(),
-        )
-        .await
-        .unwrap_err();
-
-        match err {
-            Error::ValidationFailed { diagnostics } => {
-                assert!(!diagnostics.is_empty());
-            }
-            other => panic!("expected ValidationFailed, got {other:?}"),
-        }
+        assert!(created.spec.spec_blob.is_some());
+        let PlatformRecord::RunLifecycle(submitted) = &records[1].record else {
+            panic!("second durable record should be the submitted transition");
+        };
+        assert_eq!(submitted.transition, RunLifecycleKind::Submitted);
+        assert_eq!(submitted.status, Some(RunStatus::Submitted));
     }
 
     #[expect(
@@ -1867,11 +1686,12 @@ mod tests {
         let created = create(
             &store,
             CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
+                admission:       PetriAdmission::default(),
+                workflow:        WorkflowInput::DotSource {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings:             settings_from_run_layer({
+                settings:        settings_from_run_layer({
                     let mut metadata = HashMap::new();
                     metadata.insert("env".to_string(), "test".to_string());
                     RunLayer {
@@ -1892,29 +1712,27 @@ mod tests {
                         ..RunLayer::default()
                     }
                 }),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        Some("slug".to_string()),
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               None,
-                run_id:               Some(fixtures::RUN_1),
-                title:                None,
-                automation:           None,
-                git:                  Some(fabro_types::GitContext {
+                vars:            HashMap::new(),
+                cwd:             dir.path().to_path_buf(),
+                workflow_slug:   Some("slug".to_string()),
+                workflow_path:   None,
+                workflow_bundle: None,
+                target:          None,
+                run_id:          Some(fixtures::RUN_1),
+                title:           None,
+                automation:      None,
+                git:             Some(fabro_types::GitContext {
                     origin_url: String::new(),
                     branch:     "main".to_string(),
                     sha:        None,
                     dirty:      fabro_types::DirtyStatus::Clean,
                 }),
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           test_support::test_run_provenance(),
-                configured_providers: test_provider_ids(),
-                web_url:              None,
+                fork_source_ref: None,
+                parent_id:       None,
+                provenance:      test_support::test_run_provenance(),
+                web_url:         None,
             },
             storage_root.clone(),
-            test_catalog(),
         )
         .await
         .unwrap();
@@ -1930,7 +1748,7 @@ mod tests {
                 .model
                 .name
                 .as_deref(),
-            Some("claude-sonnet-5")
+            Some("sonnet")
         );
         assert_eq!(
             created
@@ -1941,7 +1759,7 @@ mod tests {
                 .model
                 .provider
                 .as_deref(),
-            Some("anthropic")
+            None
         );
         assert_eq!(
             match &created.persisted.run_spec().settings.run.goal {
@@ -1966,10 +1784,9 @@ mod tests {
             created.persisted.run_spec().workflow_slug.as_deref(),
             Some("slug")
         );
-        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         assert_eq!(
-            run_store.state().await.unwrap().status,
-            crate::run_status::RunStatus::Submitted
+            last_lifecycle_status(&platform_records(&store, fixtures::RUN_1).await),
+            Some(crate::run_status::RunStatus::Submitted)
         );
         assert_eq!(
             created.run_dir,
@@ -1982,126 +1799,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_materializes_portable_selectors_for_ready_provider_snapshot_and_pin() {
-        const MODEL_DOT: &str = r#"digraph Test {
-            graph [goal="Test"]
-            start [shape=Mdiamond]
-            work [prompt="Do work", model="MODEL_SELECTOR"]
-            exit [shape=Msquare]
-            start -> work -> exit
-        }"#;
-        let catalog = portable_model_catalog();
-        let cases = [
-            (vec![builtin::openai()], None, builtin::openai()),
-            (
-                vec![ProviderId::new("openrouter")],
-                None,
-                ProviderId::new("openrouter"),
-            ),
-            (
-                vec![builtin::openai(), ProviderId::new("openrouter")],
-                None,
-                builtin::openai(),
-            ),
-            (
-                vec![builtin::openai(), ProviderId::new("openrouter")],
-                Some("openrouter"),
-                ProviderId::new("openrouter"),
-            ),
-        ];
-
-        for selector in ["gpt-56-sol", "gpt-5.6"] {
-            for (ready, explicit_provider, expected_provider) in &cases {
-                let dir = tempfile::tempdir().unwrap();
-                let mut settings = test_default_settings();
-                settings.run.model.name = Some(selector.to_string());
-                settings.run.model.provider = explicit_provider.map(str::to_string);
-                let store = memory_store();
-                let created = create(
-                    store.as_ref(),
-                    CreateRunInput {
-                        workflow: WorkflowInput::DotSource {
-                            source:   MODEL_DOT.replace("MODEL_SELECTOR", selector),
-                            base_dir: None,
-                        },
-                        settings,
-                        vars: HashMap::new(),
-                        cwd: dir.path().to_path_buf(),
-                        workflow_slug: None,
-                        workflow_path: None,
-                        workflow_bundle: None,
-                        target: None,
-                        run_id: None,
-                        title: None,
-                        automation: None,
-                        git: None,
-                        fork_source_ref: None,
-                        parent_id: None,
-                        provenance: test_support::test_run_provenance(),
-                        configured_providers: ready.clone(),
-                        web_url: None,
-                    },
-                    dir.path().join("storage"),
-                    Arc::clone(&catalog),
-                )
-                .await
-                .unwrap();
-                let run_spec = created.persisted.run_spec();
-
-                assert_eq!(
-                    run_spec.settings.run.model.name.as_deref(),
-                    Some("gpt-5.6-sol"),
-                    "{selector}"
-                );
-                assert_eq!(
-                    run_spec.settings.run.model.provider.as_deref(),
-                    Some(expected_provider.as_str()),
-                    "{selector}"
-                );
-                assert_eq!(
-                    run_spec.graph.nodes["work"]
-                        .attrs
-                        .get("model")
-                        .and_then(AttrValue::as_str),
-                    Some("gpt-5.6-sol"),
-                    "{selector}"
-                );
-                assert_eq!(
-                    run_spec.graph.nodes["work"]
-                        .attrs
-                        .get("provider")
-                        .and_then(AttrValue::as_str),
-                    Some(expected_provider.as_str()),
-                    "{selector}"
-                );
-
-                let run_store = store.open_run(&created.run_id).await.unwrap();
-                let run_store = run_store.into();
-                let reloaded = Persisted::load_from_store(&run_store, &created.run_dir)
-                    .await
-                    .unwrap();
-                assert_eq!(
-                    reloaded.run_spec().settings.run.model.provider.as_deref(),
-                    Some(expected_provider.as_str()),
-                    "{selector}"
-                );
-                assert_eq!(
-                    reloaded.run_spec().graph.nodes["work"]
-                        .attrs
-                        .get("provider")
-                        .and_then(AttrValue::as_str),
-                    Some(expected_provider.as_str()),
-                    "{selector}"
-                );
-                assert!(
-                    reloaded.source().contains(selector),
-                    "persisted source should preserve the user's selector '{selector}'"
-                );
-            }
-        }
-    }
-
-    #[tokio::test]
     async fn create_persists_secret_tokens_in_run_created_settings_source_form() {
         let dir = tempfile::tempdir().unwrap();
         let storage_root = dir.path().join("storage");
@@ -2109,11 +1806,12 @@ mod tests {
         let created = create(
             &store,
             CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
+                admission:       PetriAdmission::default(),
+                workflow:        WorkflowInput::DotSource {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings:             settings_from_run_layer(RunLayer {
+                settings:        settings_from_run_layer(RunLayer {
                     prepare: Some(RunPrepareLayer {
                         steps:   vec![PrepareStep {
                             script:  None,
@@ -2134,38 +1832,29 @@ mod tests {
                     }),
                     ..RunLayer::default()
                 }),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        Some("secret-source".to_string()),
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               None,
-                run_id:               Some(fixtures::RUN_1),
-                title:                None,
-                automation:           None,
-                git:                  None,
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           test_support::test_run_provenance(),
-                configured_providers: test_provider_ids(),
-                web_url:              None,
+                vars:            HashMap::new(),
+                cwd:             dir.path().to_path_buf(),
+                workflow_slug:   Some("secret-source".to_string()),
+                workflow_path:   None,
+                workflow_bundle: None,
+                target:          None,
+                run_id:          Some(fixtures::RUN_1),
+                title:           None,
+                automation:      None,
+                git:             None,
+                fork_source_ref: None,
+                parent_id:       None,
+                provenance:      test_support::test_run_provenance(),
+                web_url:         None,
             },
             storage_root,
-            test_catalog(),
         )
         .await
         .unwrap();
 
-        let run_store = store.open_run(&created.run_id).await.unwrap();
-        let events = run_store.list_events().await.unwrap();
-        let run_created = events
-            .iter()
-            .find_map(|event| match &event.event.body {
-                EventBody::RunCreated(props) => Some(props),
-                _ => None,
-            })
-            .expect("run.created event should be persisted");
-        let step = run_created
+        let records = platform_records(&store, created.run_id).await;
+        let step = run_created(&records)
+            .spec
             .settings
             .run
             .prepare
@@ -2197,11 +1886,12 @@ mod tests {
         let created = create(
             &store,
             CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
+                admission:       PetriAdmission::default(),
+                workflow:        WorkflowInput::DotSource {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings:             settings_from_run_layer({
+                settings:        settings_from_run_layer({
                     RunLayer {
                         working_dir: Some("workspace".to_string()),
                         execution: Some(RunExecutionLayer {
@@ -2211,24 +1901,22 @@ mod tests {
                         ..RunLayer::default()
                     }
                 }),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        None,
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               None,
-                run_id:               Some(fixtures::RUN_2),
-                title:                None,
-                automation:           None,
-                git:                  None,
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           test_support::test_run_provenance(),
-                configured_providers: test_provider_ids(),
-                web_url:              None,
+                vars:            HashMap::new(),
+                cwd:             dir.path().to_path_buf(),
+                workflow_slug:   None,
+                workflow_path:   None,
+                workflow_bundle: None,
+                target:          None,
+                run_id:          Some(fixtures::RUN_2),
+                title:           None,
+                automation:      None,
+                git:             None,
+                fork_source_ref: None,
+                parent_id:       None,
+                provenance:      test_support::test_run_provenance(),
+                web_url:         None,
             },
             storage_root,
-            test_catalog(),
         )
         .await
         .unwrap();
@@ -2247,29 +1935,28 @@ mod tests {
         let created = create(
             &store,
             CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
+                admission:       PetriAdmission::default(),
+                workflow:        WorkflowInput::DotSource {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings:             test_default_settings(),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        None,
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               Some(RunTarget::None {}),
-                run_id:               Some(fixtures::RUN_2),
-                title:                None,
-                automation:           None,
-                git:                  None,
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           test_support::test_run_provenance(),
-                configured_providers: test_provider_ids(),
-                web_url:              None,
+                settings:        test_default_settings(),
+                vars:            HashMap::new(),
+                cwd:             dir.path().to_path_buf(),
+                workflow_slug:   None,
+                workflow_path:   None,
+                workflow_bundle: None,
+                target:          Some(RunTarget::None {}),
+                run_id:          Some(fixtures::RUN_2),
+                title:           None,
+                automation:      None,
+                git:             None,
+                fork_source_ref: None,
+                parent_id:       None,
+                provenance:      test_support::test_run_provenance(),
+                web_url:         None,
             },
             storage_root,
-            test_catalog(),
         )
         .await
         .unwrap();
@@ -2303,31 +1990,30 @@ mod tests {
         let created = create(
             &store,
             CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
+                admission:       PetriAdmission::default(),
+                workflow:        WorkflowInput::DotSource {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings:             test_default_settings(),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        None,
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               Some(RunTarget::Folder {
+                settings:        test_default_settings(),
+                vars:            HashMap::new(),
+                cwd:             dir.path().to_path_buf(),
+                workflow_slug:   None,
+                workflow_path:   None,
+                workflow_bundle: None,
+                target:          Some(RunTarget::Folder {
                     path: canonical.clone(),
                 }),
-                run_id:               Some(fixtures::RUN_2),
-                title:                None,
-                automation:           None,
-                git:                  Some(git.clone()),
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           test_support::test_run_provenance(),
-                configured_providers: test_provider_ids(),
-                web_url:              None,
+                run_id:          Some(fixtures::RUN_2),
+                title:           None,
+                automation:      None,
+                git:             Some(git.clone()),
+                fork_source_ref: None,
+                parent_id:       None,
+                provenance:      test_support::test_run_provenance(),
+                web_url:         None,
             },
             storage_root,
-            test_catalog(),
         )
         .await
         .unwrap();
@@ -2353,34 +2039,33 @@ mod tests {
         let created = create(
             &store,
             CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
+                admission:       PetriAdmission::default(),
+                workflow:        WorkflowInput::DotSource {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings:             dry_run_only_settings(),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        None,
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               None,
-                run_id:               Some(fixtures::RUN_2),
-                title:                None,
-                automation:           None,
-                git:                  Some(fabro_types::GitContext {
+                settings:        dry_run_only_settings(),
+                vars:            HashMap::new(),
+                cwd:             dir.path().to_path_buf(),
+                workflow_slug:   None,
+                workflow_path:   None,
+                workflow_bundle: None,
+                target:          None,
+                run_id:          Some(fixtures::RUN_2),
+                title:           None,
+                automation:      None,
+                git:             Some(fabro_types::GitContext {
                     origin_url: "https://github.com/acme/widgets".to_string(),
                     branch:     String::new(),
                     sha:        None,
                     dirty:      fabro_types::DirtyStatus::Clean,
                 }),
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           test_support::test_run_provenance(),
-                configured_providers: test_provider_ids(),
-                web_url:              None,
+                fork_source_ref: None,
+                parent_id:       None,
+                provenance:      test_support::test_run_provenance(),
+                web_url:         None,
             },
             storage_root,
-            test_catalog(),
         )
         .await
         .unwrap();
@@ -2416,14 +2101,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let storage_dir = dir.path().join("storage");
         std::fs::create_dir_all(storage_dir.join("store")).unwrap();
-        let object_store =
-            Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
-        let store = Arc::new(fabro_store::test_support::test_database(
-            object_store,
-            "",
-            Duration::from_millis(1),
-            None,
-        ));
+        let store = Arc::new(fabro_store::test_support::test_database());
         let automation = fabro_types::AutomationRef {
             id:              "nightly".to_string(),
             name:            Some("Nightly".to_string()),
@@ -2433,42 +2111,42 @@ mod tests {
         let created = create(
             store.as_ref(),
             CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
+                admission:       PetriAdmission::default(),
+                workflow:        WorkflowInput::DotSource {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings:             dry_run_with_storage(&storage_dir),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        Some("slug".to_string()),
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               None,
-                run_id:               Some(fixtures::RUN_3),
-                title:                None,
-                automation:           Some(automation.clone()),
-                git:                  None,
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           test_support::test_run_provenance(),
-                configured_providers: test_provider_ids(),
-                web_url:              None,
+                settings:        dry_run_with_storage(&storage_dir),
+                vars:            HashMap::new(),
+                cwd:             dir.path().to_path_buf(),
+                workflow_slug:   Some("slug".to_string()),
+                workflow_path:   None,
+                workflow_bundle: None,
+                target:          None,
+                run_id:          Some(fixtures::RUN_3),
+                title:           None,
+                automation:      Some(automation.clone()),
+                git:             None,
+                fork_source_ref: None,
+                parent_id:       None,
+                provenance:      test_support::test_run_provenance(),
+                web_url:         None,
             },
             storage_dir.clone(),
-            test_catalog(),
         )
         .await
         .unwrap();
-        let run_store = store.open_run_reader(&created.run_id).await.unwrap();
-        let events = run_store.list_events().await.unwrap();
-        let state = run_store.state().await.unwrap();
+        let records = platform_records(&store, created.run_id).await;
 
-        assert_eq!(events.first().unwrap().event.event_name(), "run.created");
+        assert_eq!(
+            records.first().unwrap().record.kind().to_string(),
+            "run.created"
+        );
         assert_eq!(
             created.persisted.run_spec().automation,
             Some(automation.clone())
         );
-        assert_eq!(state.spec.automation, Some(automation));
+        assert_eq!(run_created(&records).spec.automation, Some(automation));
     }
 
     #[tokio::test]
@@ -2476,35 +2154,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let storage_dir = dir.path().join("storage");
         std::fs::create_dir_all(storage_dir.join("store")).unwrap();
-        let object_store =
-            Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
-        let store = Arc::new(fabro_store::test_support::test_database(
-            object_store,
-            "",
-            Duration::from_millis(1),
-            None,
-        ));
+        let store = Arc::new(fabro_store::test_support::test_database());
         let created = create(
             store.as_ref(),
             CreateRunInput {
-                workflow:             WorkflowInput::DotSource {
+                admission:       PetriAdmission::default(),
+                workflow:        WorkflowInput::DotSource {
                     source:   MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings:             dry_run_with_storage(&storage_dir),
-                vars:                 HashMap::new(),
-                cwd:                  dir.path().to_path_buf(),
-                workflow_slug:        Some("slug".to_string()),
-                workflow_path:        None,
-                workflow_bundle:      None,
-                target:               None,
-                run_id:               Some(fixtures::RUN_64),
-                title:                None,
-                automation:           None,
-                git:                  None,
-                fork_source_ref:      None,
-                parent_id:            None,
-                provenance:           fabro_types::RunProvenance {
+                settings:        dry_run_with_storage(&storage_dir),
+                vars:            HashMap::new(),
+                cwd:             dir.path().to_path_buf(),
+                workflow_slug:   Some("slug".to_string()),
+                workflow_path:   None,
+                workflow_bundle: None,
+                target:          None,
+                run_id:          Some(fixtures::RUN_64),
+                title:           None,
+                automation:      None,
+                git:             None,
+                fork_source_ref: None,
+                parent_id:       None,
+                provenance:      fabro_types::RunProvenance {
                     server:  Some(fabro_types::RunServerProvenance {
                         version: "0.9.0".to_string(),
                     }),
@@ -2519,19 +2191,15 @@ mod tests {
                         fabro_types::AuthMethod::Github,
                     ),
                 },
-                configured_providers: test_provider_ids(),
-                web_url:              None,
+                web_url:         None,
             },
             storage_dir,
-            test_catalog(),
         )
         .await
         .unwrap();
 
-        let run_store = store.open_run_reader(&created.run_id).await.unwrap();
-        let state = run_store.state().await.unwrap();
-        let run = state.spec;
-        let provenance = run.provenance;
+        let records = platform_records(&store, created.run_id).await;
+        let provenance = run_created(&records).spec.provenance.clone();
 
         assert_eq!(provenance.server.unwrap().version, "0.9.0");
         assert_eq!(

@@ -1,11 +1,7 @@
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_auth::test_support;
 use fabro_static::EnvVars;
 use fabro_test::{TwinScenario, TwinScenarios, twin_openai};
-use fabro_types::RunId;
 use tokio::time::sleep;
 use tower::ServiceExt;
 
@@ -24,48 +20,24 @@ const PROJECT_SKILL_AGENT_DOT: &str = r#"digraph ProjectSkillAgent {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    work [shape=box, label="Work", prompt="Respond with done."]
+    work [shape=box, label="Work", prompt="Respond with done.", model="gpt-5.4"]
 
     start -> work -> exit
 }"#;
 
+/// A server whose agent stages reach the OpenAI twin through Petri's model
+/// client, executing runs in this process.
 fn test_app_with_openai_agent_backend(openai_base_url: String, api_key: String) -> axum::Router {
     let settings = test_settings();
     let llm_overlay =
         fabro_server::test_support::llm_overlay_with_provider_base_url("openai", openai_base_url);
-    let catalog = Arc::new(fabro_server::test_support::test_catalog_with_overlay(
-        &llm_overlay,
-    ));
-    let source_api_key = api_key.clone();
     let env_api_key = api_key.clone();
-    let llm_source: Arc<dyn fabro_llm::credentials::CredentialProvider> =
-        test_support::env_credential_source(move |name| match name {
-            "OPENAI_API_KEY" => Some(source_api_key.clone()),
-            _ => None,
-        });
     let state = fabro_server::test_support::TestAppStateBuilder::new()
         .runtime_settings(settings.server_settings, settings.manifest_run_defaults)
         .max_concurrent_runs(5)
         .llm_overlay(llm_overlay)
         .vault_entries([(EnvVars::OPENAI_API_KEY, api_key)])
-        .registry_factory(move |interviewer| {
-            let catalog = Arc::clone(&catalog);
-            let llm_source = Arc::clone(&llm_source);
-            let emitter = Arc::new(fabro_workflow::event::Emitter::new(RunId::new()));
-            let steering_hub = Arc::new(fabro_workflow::SteeringHub::new(emitter));
-            fabro_workflow::handler::default_registry(interviewer, move || {
-                Some(Box::new(
-                    fabro_workflow::handler::llm::PebbleBackend::new_with_catalog(
-                        OPENAI_AGENT_MODEL.to_string(),
-                        lithos_llm::catalog::builtin::openai(),
-                        fabro_workflow::model_fallback::ModelFallbackPolicy::default(),
-                        Arc::clone(&llm_source),
-                        Arc::clone(&steering_hub),
-                        Arc::clone(&catalog),
-                    ),
-                ))
-            })
-        })
+        .in_process_execution()
         .env_lookup(move |name| match name {
             "OPENAI_API_KEY" => Some(env_api_key.clone()),
             _ => None,
@@ -108,6 +80,9 @@ async fn agent_run_includes_project_skills_from_local_sandbox_working_directory(
     )
     .await
     .expect("project skill should write");
+    // The run's workspace is a clone of the project, so the skill has to be
+    // committed there.
+    commit_all(project.path());
 
     let twin = twin_openai().await;
     let namespace = format!("{}::{}", module_path!(), line!());
@@ -200,9 +175,11 @@ async fn attach_run_events_replays_terminal_event_after_completion() {
     let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
     assert_eq!(status, "succeeded");
 
+    // The stream replays from its first item and ends with the terminal
+    // lifecycle record Fabro wrote after Petri's own finish.
     let req = Request::builder()
         .method("GET")
-        .uri(api(&format!("/runs/{run_id}/attach?since_seq=1")))
+        .uri(api(&format!("/runs/{run_id}/attach?after=0")))
         .body(Body::empty())
         .unwrap();
 
@@ -210,22 +187,71 @@ async fn attach_run_events_replays_terminal_event_after_completion() {
     let body = response_text(
         response,
         StatusCode::OK,
-        format!("GET /api/v1/runs/{run_id}/attach?since_seq=1"),
+        format!("GET /api/v1/runs/{run_id}/attach?after=0"),
     )
     .await;
-    let event_names = body
+    let items = body
         .lines()
         .filter_map(|line| line.strip_prefix("data:"))
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
-        .filter_map(|event| event["event"].as_str().map(ToString::to_string))
         .collect::<Vec<_>>();
-
+    let names = items
+        .iter()
+        .map(|item| {
+            if item["kind"] == "platform" {
+                item["item"]["record"]["kind"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string()
+            } else {
+                item["item"]["record"]["body"]["event"]
+                    .as_str()
+                    .or_else(|| item["item"]["derived"]["event"].as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            }
+        })
+        .collect::<Vec<_>>();
     assert!(
-        event_names.iter().any(|event| event == "run.completed"),
-        "expected a replayed terminal event, got {event_names:?}"
+        names.iter().any(|name| name == "run.finished"),
+        "expected Petri's finish in the replay, got {names:?}"
     );
-    assert_eq!(
-        event_names.last().map(String::as_str),
-        Some("run.completed")
-    );
+    let last = items.last().expect("the replay has items");
+    assert_eq!(last["kind"], "platform", "{last}");
+    assert_eq!(last["item"]["record"]["kind"], "run.lifecycle", "{last}");
+    assert_eq!(last["item"]["record"]["transition"], "succeeded", "{last}");
+}
+
+/// Make `path` a git repository with every file committed, so a run whose
+/// target is the folder starts from a clone that holds them.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the fixture commits with the real git CLI, synchronously"
+)]
+fn commit_all(path: &std::path::Path) {
+    for args in [
+        vec!["init", "--quiet", "--initial-branch=main"],
+        vec!["add", "--all"],
+        vec![
+            "-c",
+            "user.name=Fabro Test",
+            "-c",
+            "user.email=test@fabro.sh",
+            "commit",
+            "--quiet",
+            "--message",
+            "project",
+        ],
+    ] {
+        let output = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(path)
+            .output()
+            .expect("git should run");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

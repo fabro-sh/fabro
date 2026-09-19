@@ -298,11 +298,6 @@ fn main() {
             &[],
         ),
         (
-            "ServerSlateDbSettings",
-            "fabro_types::settings::server::ServerSlateDbSettings",
-            &[],
-        ),
-        (
             "ObjectStoreSettings",
             "fabro_types::settings::server::ObjectStoreSettings",
             &[],
@@ -399,7 +394,7 @@ fn main() {
         ("PermissionLevel", "fabro_types::PermissionLevel", &[]),
         (
             "AgentSessionActivatedProps",
-            "fabro_types::run_event::AgentSessionActivatedProps",
+            "fabro_types::AgentSessionActivatedProps",
             &[],
         ),
         ("TodoListProjection", "fabro_types::TodoListProjection", &[]),
@@ -628,7 +623,6 @@ fn main() {
         ("ModelCosts", "fabro_types::ModelCosts", &[]),
         ("ModelTestMode", "fabro_types::ModelTestMode", &[]),
         ("RunProjection", "fabro_types::RunProjection", &[]),
-        ("RunEvent", "fabro_types::RunEvent", &[]),
         ("PairId", "fabro_types::PairId", &[]),
         ("PairMessageId", "fabro_types::PairMessageId", &[]),
         ("PairStatus", "fabro_types::PairStatus", &[]),
@@ -652,12 +646,11 @@ fn main() {
             "fabro_types::PairTranscriptEntry",
             &[],
         ),
-        (
-            "RunEventDetailResponse",
-            "fabro_types::RunEventDetailResponse",
-            &[],
-        ),
-        ("EventEnvelope", "fabro_types::EventEnvelope", &[]),
+        ("SessionEvent", "fabro_types::SessionEvent", &[]),
+        ("RunStreamItem", "fabro_types::RunStreamItem", &[]),
+        ("RunStreamItemKind", "fabro_types::RunStreamItemKind", &[]),
+        ("PetriAdmission", "fabro_types::PetriAdmission", &[]),
+        ("PetriGraphRef", "fabro_types::PetriGraphRef", &[]),
         ("PullRequest", "fabro_types::PullRequest", &[]),
         ("PullRequestLink", "fabro_types::PullRequestLink", &[]),
         (

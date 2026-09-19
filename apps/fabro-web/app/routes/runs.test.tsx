@@ -148,20 +148,16 @@ describe("runs route board mapping", () => {
     ]);
   });
 
-  test("refreshes for blocked status and interview events", () => {
-    expect(shouldRefreshBoardForEvent("run.pending")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.runnable")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.approved")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.denied")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.blocked")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.unblocked")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.cancel.requested")).toBe(true);
+  test("refreshes for the lifecycle, the blocking question and the answer", () => {
+    expect(shouldRefreshBoardForEvent("run.created")).toBe(true);
+    expect(shouldRefreshBoardForEvent("run.lifecycle")).toBe(true);
+    expect(shouldRefreshBoardForEvent("invocation.cancel.requested")).toBe(true);
     expect(shouldRefreshBoardForEvent("run.archived")).toBe(true);
     expect(shouldRefreshBoardForEvent("run.unarchived")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.title.updated")).toBe(true);
-    expect(shouldRefreshBoardForEvent("interview.started")).toBe(true);
-    expect(shouldRefreshBoardForEvent("interview.completed")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.created")).toBe(false);
+    expect(shouldRefreshBoardForEvent("run.title")).toBe(true);
+    expect(shouldRefreshBoardForEvent("wait.state.changed")).toBe(true);
+    expect(shouldRefreshBoardForEvent("interview.answered")).toBe(true);
+    expect(shouldRefreshBoardForEvent("step.progress.recorded")).toBe(false);
   });
 
   test("includes the configured server argument for GitHub-auth quick starts", () => {

@@ -93,10 +93,10 @@ impl SandboxSpec {
             LayoutSource::ProviderWorkingDirectory => sandbox.workspace_layout(),
         };
         RunSandboxInstance {
-            provider: self.kind.clone(),
-            image:    self.image(),
-            snapshot: sandbox.snapshot_info(),
-            runtime:  RunSandboxRuntime {
+            provider:          self.kind.clone(),
+            image:             self.image(),
+            snapshot:          sandbox.snapshot_info(),
+            runtime:           RunSandboxRuntime {
                 id,
                 working_directory,
                 repo_cloned,
@@ -113,6 +113,8 @@ impl SandboxSpec {
                     .as_ref()
                     .and_then(|layout| layout.primary_repo_link.clone()),
             },
+            ready_duration_ms: None,
+            retained:          None,
         }
     }
 

@@ -94,10 +94,7 @@ fn graph_allow_invalid_renders_after_diagnostics() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    error: Pipeline must have exactly one start node (shape=Mdiamond or id start/Start) (start_node)
-      fix: Add a node with shape=Mdiamond or id 'start'
-    error [node: exit]: Exit node 'exit' has 1 outgoing edge(s) but must have none (exit_no_outgoing)
-      fix: Remove outgoing edges from the exit node
+    error: [FIXTURES]/invalid.fabro:1:9: the workflow has no start node (`shape=Mdiamond`, `type=start`, or an id of `start`) (attractor.no_start)
     ");
 
     let svg = read_text(&output_path);
@@ -120,10 +117,7 @@ fn graph_invalid_workflow_fails_after_diagnostics() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Pipeline must have exactly one start node (shape=Mdiamond or id start/Start) (start_node)
-      fix: Add a node with shape=Mdiamond or id 'start'
-    error [node: exit]: Exit node 'exit' has 1 outgoing edge(s) but must have none (exit_no_outgoing)
-      fix: Remove outgoing edges from the exit node
+    error: [FIXTURES]/invalid.fabro:1:9: the workflow has no start node (`shape=Mdiamond`, `type=start`, or an id of `start`) (attractor.no_start)
       × Validation failed
     ");
 }

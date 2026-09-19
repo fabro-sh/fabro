@@ -40,3 +40,18 @@ tier = "gold"
         Some("gold")
     );
 }
+
+#[test]
+fn a_workflow_engine_key_is_unknown() {
+    // Every run executes on Petri; the workflow table names no engine.
+    let error = super::workflow_settings_from_toml(
+        r#"
+_version = 1
+
+[workflow]
+engine = "petri"
+"#,
+    )
+    .expect_err("an engine key is not a workflow setting");
+    assert!(error.to_string().contains("engine"), "{error}");
+}

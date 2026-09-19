@@ -1,23 +1,25 @@
 use std::collections::BTreeMap;
 
 use fabro_types::{
-    EventBody, EventEnvelope, RunId, RunSessionMetadata, SessionId, SessionStatus, SessionSummary,
+    RunSessionMetadata, SessionEvent, SessionEventBody, SessionId, SessionStatus, SessionSummary,
     SessionTurn,
 };
 
-/// Ask Fabro session metadata at the event-log position it was read at.
+/// Ask Fabro session metadata at the session's event position it was read
+/// at.
 ///
-/// The transcript is not projected from run events: pebble's session record
-/// holds the durable history, and the `run.session.*` events stream it live.
+/// The transcript is not projected from the events: pebble's session record
+/// holds the durable history, and the events stream it live.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectedRunSession {
     pub record:   RunSessionMetadata,
     pub last_seq: u32,
 }
 
-pub fn project_run_sessions(run_id: RunId, events: &[EventEnvelope]) -> Vec<SessionSummary> {
+/// Every session the events describe, in session id order.
+pub fn project_run_sessions(events: &[SessionEvent]) -> Vec<SessionSummary> {
     let mut projection = RunSessionProjection::default();
-    projection.apply(run_id, events);
+    projection.apply(events);
     projection
         .sessions
         .values()
@@ -25,13 +27,14 @@ pub fn project_run_sessions(run_id: RunId, events: &[EventEnvelope]) -> Vec<Sess
         .collect()
 }
 
+/// The session `session_id` as its events describe it, if the events hold
+/// its creation.
 pub fn project_run_session(
-    run_id: RunId,
     session_id: SessionId,
-    events: &[EventEnvelope],
+    events: &[SessionEvent],
 ) -> Option<ProjectedRunSession> {
     let mut projection = RunSessionProjection::default();
-    projection.apply(run_id, events);
+    projection.apply(events.iter().filter(|event| event.session_id == session_id));
     projection.sessions.remove(&session_id)
 }
 
@@ -41,51 +44,48 @@ struct RunSessionProjection {
 }
 
 impl RunSessionProjection {
-    fn apply(&mut self, run_id: RunId, events: &[EventEnvelope]) {
-        for envelope in events {
-            let Some(session_id) = event_session_id(envelope) else {
-                continue;
-            };
-            match &envelope.event.body {
-                EventBody::RunSessionCreated(props) => {
-                    let mut record = RunSessionMetadata::new(session_id, run_id, envelope.event.ts);
+    fn apply<'a>(&mut self, events: impl IntoIterator<Item = &'a SessionEvent>) {
+        for event in events {
+            let session_id = event.session_id;
+            match &event.body {
+                SessionEventBody::Created(props) => {
+                    let mut record = RunSessionMetadata::new(session_id, event.run_id, event.ts);
                     record.title.clone_from(&props.title);
                     record.model.clone_from(&props.model);
                     record.provider.clone_from(&props.provider);
                     self.sessions.insert(session_id, ProjectedRunSession {
                         record,
-                        last_seq: envelope.seq,
+                        last_seq: event.seq,
                     });
                 }
-                EventBody::RunSessionTurnStarted(props) => {
+                SessionEventBody::TurnStarted(props) => {
                     if let Some(session) = self.sessions.get_mut(&session_id) {
-                        session.last_seq = envelope.seq;
+                        session.last_seq = event.seq;
                         session.record.status = SessionStatus::Running;
                         session.record.active_turn = Some(SessionTurn {
                             id:         props.turn_id,
-                            started_at: envelope.event.ts,
+                            started_at: event.ts,
                             input:      props.input.clone(),
                         });
-                        session.record.updated_at = envelope.event.ts;
+                        session.record.updated_at = event.ts;
                     }
                 }
-                EventBody::RunSessionUserMessage(_)
-                | EventBody::RunSessionAssistantMessage(_)
-                | EventBody::RunSessionAssistantDelta(_)
-                | EventBody::RunSessionToolCallStarted(_)
-                | EventBody::RunSessionToolCallCompleted(_) => {
+                SessionEventBody::UserMessage(_)
+                | SessionEventBody::AssistantMessage(_)
+                | SessionEventBody::AssistantDelta(_)
+                | SessionEventBody::ToolCallStarted(_)
+                | SessionEventBody::ToolCallCompleted(_) => {
                     if let Some(session) = self.sessions.get_mut(&session_id) {
-                        session.last_seq = envelope.seq;
-                        session.record.updated_at = envelope.event.ts;
+                        session.last_seq = event.seq;
+                        session.record.updated_at = event.ts;
                     }
                 }
-                EventBody::RunSessionTurnFailed(_) => {
-                    self.finish_turn(session_id, true, envelope.event.ts, envelope.seq);
+                SessionEventBody::TurnFailed(_) => {
+                    self.finish_turn(session_id, true, event.ts, event.seq);
                 }
-                EventBody::RunSessionTurnSucceeded(_) | EventBody::RunSessionTurnInterrupted(_) => {
-                    self.finish_turn(session_id, false, envelope.event.ts, envelope.seq);
+                SessionEventBody::TurnSucceeded(_) | SessionEventBody::TurnInterrupted(_) => {
+                    self.finish_turn(session_id, false, event.ts, event.seq);
                 }
-                _ => {}
             }
         }
     }
@@ -110,23 +110,15 @@ impl RunSessionProjection {
     }
 }
 
-fn event_session_id(envelope: &EventEnvelope) -> Option<SessionId> {
-    envelope
-        .event
-        .session_id
-        .as_deref()
-        .and_then(|id| id.parse().ok())
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
-    use fabro_types::run_event::{
-        RunSessionAssistantMessageProps, RunSessionCreatedProps, RunSessionTurnFailedCode,
-        RunSessionTurnFailedProps, RunSessionTurnStartedProps, RunSessionTurnSucceededProps,
-        RunSessionUserMessageProps,
+    use fabro_types::session_event::{
+        SessionAssistantMessageProps, SessionCreatedProps, SessionTurnFailedCode,
+        SessionTurnFailedProps, SessionTurnStartedProps, SessionTurnSucceededProps,
+        SessionUserMessageProps,
     };
-    use fabro_types::{EventBody, EventEnvelope, RunEvent, TurnId, fixtures};
+    use fabro_types::{SessionEvent, SessionEventBody, TurnId, fixtures};
     use serde_json::json;
 
     use super::{project_run_session, project_run_sessions};
@@ -139,7 +131,7 @@ mod tests {
             event(
                 1,
                 session_id,
-                EventBody::RunSessionCreated(RunSessionCreatedProps {
+                SessionEventBody::Created(SessionCreatedProps {
                     title:    Some("Ask".to_string()),
                     model:    Some("test-model".to_string()),
                     provider: None,
@@ -148,7 +140,7 @@ mod tests {
             event(
                 2,
                 session_id,
-                EventBody::RunSessionTurnStarted(RunSessionTurnStartedProps {
+                SessionEventBody::TurnStarted(SessionTurnStartedProps {
                     turn_id,
                     input: "What happened?".to_string(),
                 }),
@@ -156,15 +148,15 @@ mod tests {
             event(
                 3,
                 session_id,
-                EventBody::RunSessionUserMessage(RunSessionUserMessageProps {
+                SessionEventBody::UserMessage(SessionUserMessageProps {
                     turn_id,
                     text: "What happened?".to_string(),
                 }),
             ),
         ];
 
-        let running = project_run_session(fixtures::RUN_1, session_id, &events)
-            .expect("session should project from run events");
+        let running = project_run_session(session_id, &events)
+            .expect("session should project from its events");
         assert_eq!(running.record.status, fabro_types::SessionStatus::Running);
         assert_eq!(
             running.record.active_turn.as_ref().map(|turn| turn.id),
@@ -176,7 +168,7 @@ mod tests {
         events.push(event(
             4,
             session_id,
-            EventBody::RunSessionAssistantMessage(RunSessionAssistantMessageProps {
+            SessionEventBody::AssistantMessage(SessionAssistantMessageProps {
                 turn_id,
                 text: "The run finished.".to_string(),
                 model: Some("test-model".to_string()),
@@ -186,13 +178,13 @@ mod tests {
         events.push(event(
             5,
             session_id,
-            EventBody::RunSessionTurnSucceeded(RunSessionTurnSucceededProps {
+            SessionEventBody::TurnSucceeded(SessionTurnSucceededProps {
                 turn_id,
                 output: Some("The run finished.".to_string()),
             }),
         ));
 
-        let idle = project_run_session(fixtures::RUN_1, session_id, &events).unwrap();
+        let idle = project_run_session(session_id, &events).unwrap();
         assert_eq!(idle.record.status, fabro_types::SessionStatus::Idle);
         assert!(idle.record.active_turn.is_none());
         assert_eq!(idle.record.model.as_deref(), Some("test-model"));
@@ -207,7 +199,7 @@ mod tests {
             event(
                 1,
                 session_id,
-                EventBody::RunSessionCreated(RunSessionCreatedProps {
+                SessionEventBody::Created(SessionCreatedProps {
                     title:    None,
                     model:    None,
                     provider: None,
@@ -216,7 +208,7 @@ mod tests {
             event(
                 2,
                 session_id,
-                EventBody::RunSessionTurnStarted(RunSessionTurnStartedProps {
+                SessionEventBody::TurnStarted(SessionTurnStartedProps {
                     turn_id,
                     input: "hi".to_string(),
                 }),
@@ -224,40 +216,70 @@ mod tests {
             event(
                 3,
                 session_id,
-                EventBody::RunSessionTurnFailed(RunSessionTurnFailedProps {
+                SessionEventBody::TurnFailed(SessionTurnFailedProps {
                     turn_id,
                     error: "boom".to_string(),
                     output: None,
-                    code: RunSessionTurnFailedCode::AgentError,
+                    code: SessionTurnFailedCode::AgentError,
                     retryable: false,
                 }),
             ),
         ];
 
-        let summaries = project_run_sessions(fixtures::RUN_1, &events);
+        let summaries = project_run_sessions(&events);
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].status, fabro_types::SessionStatus::Failed);
         assert!(summaries[0].active_turn.is_none());
     }
 
-    fn event(seq: u32, session_id: fabro_types::SessionId, body: EventBody) -> EventEnvelope {
-        EventEnvelope {
+    #[test]
+    fn a_session_projects_only_from_its_own_events() {
+        let first = fabro_types::SessionId::new();
+        let second = fabro_types::SessionId::new();
+        let events = vec![
+            event(
+                1,
+                first,
+                SessionEventBody::Created(SessionCreatedProps {
+                    title:    Some("First".to_string()),
+                    model:    None,
+                    provider: None,
+                }),
+            ),
+            event(
+                1,
+                second,
+                SessionEventBody::Created(SessionCreatedProps {
+                    title:    Some("Second".to_string()),
+                    model:    None,
+                    provider: None,
+                }),
+            ),
+            event(
+                2,
+                second,
+                SessionEventBody::TurnStarted(SessionTurnStartedProps {
+                    turn_id: TurnId::new(),
+                    input:   "hi".to_string(),
+                }),
+            ),
+        ];
+
+        let projected = project_run_session(first, &events).unwrap();
+        assert_eq!(projected.record.title.as_deref(), Some("First"));
+        assert_eq!(projected.record.status, fabro_types::SessionStatus::Idle);
+        assert_eq!(projected.last_seq, 1);
+        assert_eq!(project_run_sessions(&events).len(), 2);
+        assert!(project_run_session(fabro_types::SessionId::new(), &events).is_none());
+    }
+
+    fn event(seq: u32, session_id: fabro_types::SessionId, body: SessionEventBody) -> SessionEvent {
+        SessionEvent {
             seq,
-            event: RunEvent {
-                id: format!("evt-{seq}"),
-                ts: Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, seq).unwrap(),
-                run_id: fixtures::RUN_1,
-                node_id: None,
-                node_label: None,
-                stage_id: None,
-                parallel_group_id: None,
-                parallel_branch_id: None,
-                session_id: Some(session_id.to_string()),
-                parent_session_id: None,
-                tool_call_id: None,
-                actor: None,
-                body,
-            },
+            session_id,
+            run_id: fixtures::RUN_1,
+            ts: Utc.with_ymd_and_hms(2026, 5, 20, 12, 0, seq).unwrap(),
+            body,
         }
     }
 }

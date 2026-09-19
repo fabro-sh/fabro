@@ -23,8 +23,7 @@ export type LifecycleAction =
   | "approve"
   | "deny"
   | "archive"
-  | "unarchive"
-  | "retry";
+  | "unarchive";
 
 export interface LifecycleActionError {
   status: number;
@@ -118,10 +117,6 @@ export async function deleteRuns(
   }
 }
 
-export async function retryRun(id: string, request?: Request): Promise<Run> {
-  return runLifecycleAction(id, "retry", request);
-}
-
 export async function deleteRun(id: string, request?: Request): Promise<void> {
   try {
     await apiResponse(() => runsApi.deleteRun(id, undefined, requestSignalOptions(request)));
@@ -145,11 +140,6 @@ export function canArchive(status: string | null | undefined): boolean {
 
 export function canUnarchive(status: string | null | undefined): boolean {
   return status === "archived";
-}
-
-export function canRetry(run: Pick<Run, "lifecycle"> | null | undefined): boolean {
-  if (!run || run.lifecycle.archived) return false;
-  return isTerminalRunStatus(run.lifecycle.status.kind);
 }
 
 export function isTerminalRunStatus(
@@ -223,8 +213,6 @@ export function mapError(error: unknown, action: LifecycleAction): string {
           return "Only terminal runs can be archived.";
         case "unarchive":
           return "Active runs can't be unarchived.";
-        case "retry":
-          return "This run can no longer be retried.";
       }
     }
 
@@ -245,8 +233,6 @@ export function mapError(error: unknown, action: LifecycleAction): string {
       return "Couldn't archive the run right now. Try again.";
     case "unarchive":
       return "Couldn't unarchive the run right now. Try again.";
-    case "retry":
-      return "Couldn't retry the run right now. Try again.";
   }
 }
 
@@ -267,8 +253,6 @@ async function runLifecycleAction(
         return await apiData(() => runsApi.archiveRun(id, requestSignalOptions(request)));
       case "unarchive":
         return await apiData(() => runsApi.unarchiveRun(id, requestSignalOptions(request)));
-      case "retry":
-        return await apiData(() => runsApi.retryRun(id, requestSignalOptions(request)));
     }
   } catch (error) {
     throw lifecycleActionErrorFromError(error);

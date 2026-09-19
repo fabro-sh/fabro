@@ -52,7 +52,7 @@ async fn render_graph_from_manifest(
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
-    let validated = match run_manifest::validate_prepared_manifest(&prepared, state.catalog()) {
+    let validated = match run_manifest::validate_prepared_manifest_structural(&prepared) {
         Ok(validated) => validated,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };

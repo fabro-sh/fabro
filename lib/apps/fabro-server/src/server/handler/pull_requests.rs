@@ -2,12 +2,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::{HeaderValue, header};
+use fabro_store::platform_records::{
+    PlatformRecord, PullRequestLinkedRecord, PullRequestRequestedRecord,
+};
 
 use super::super::{
     ApiError, AppState, CloseRunPullRequestResponse, CreateRunPullRequestRequest, IntoResponse,
     Json, LinkRunPullRequestRequest, MergeRunPullRequestRequest, MergeRunPullRequestResponse,
-    PullRequestLink, RequireRunScoped, Response, Router, RunId, State, StatusCode, get, post, warn,
-    workflow_event,
+    PullRequestLink, RequireRunScoped, Response, Router, RunId, State, StatusCode, get, post,
+    run_records, warn,
 };
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
@@ -316,9 +319,6 @@ async fn create_run_pull_request(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateRunPullRequestRequest>,
 ) -> Response {
-    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
     let run_state = match state.load_run_projection(&id).await {
         Ok(run_state) => run_state,
         Err(err) => return err.into_response(),
@@ -354,26 +354,28 @@ async fn create_run_pull_request(
     };
     let _create_guard = state.pull_request_create_locks.lock(id).await;
     let creation_id = fabro_types::PullRequestCreationId::new();
-    let event = workflow_event::Event::PullRequestCreationRequested {
-        creation_id,
-        model,
-        force: body.force,
+    // Under the create lock, the projection is the latest word on whether a
+    // pull request exists or a creation is already pending.
+    let run_state = match state.load_run_projection(&id).await {
+        Ok(run_state) => run_state,
+        Err(err) => return err.into_response(),
     };
-    let appended = match workflow_event::append_event_if(&run_store, &id, &event, |projection| {
-        projection.pull_request.is_none()
-            && !projection
-                .pull_request_creation
-                .as_ref()
-                .is_some_and(fabro_types::PullRequestCreation::is_pending)
-    })
-    .await
-    {
-        Ok(appended) => appended,
-        Err(err) => {
+    let appended = run_state.pull_request.is_none()
+        && !run_state
+            .pull_request_creation
+            .as_ref()
+            .is_some_and(fabro_types::PullRequestCreation::is_pending);
+    if appended {
+        let record = PlatformRecord::PullRequestRequested(PullRequestRequestedRecord {
+            creation_id,
+            model,
+            force: body.force,
+        });
+        if let Err(err) = run_records::append(&state, id, record).await {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
         }
-    };
+    }
 
     let run_state = match state.load_run_projection(&id).await {
         Ok(run_state) => run_state,
@@ -455,13 +457,12 @@ async fn link_run_pull_request(
         Ok(record) => record,
         Err(err) => return err.into_response(),
     };
-    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
-    let event = workflow_event::Event::PullRequestLinked {
-        pull_request: pull_request.clone(),
-    };
-    if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
+    if let Err(err) = state.load_run_projection(&id).await {
+        return err.into_response();
+    }
+    let record =
+        PlatformRecord::PullRequestLinked(PullRequestLinkedRecord::from_link(&pull_request));
+    if let Err(err) = run_records::append(&state, id, record).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 
@@ -473,9 +474,6 @@ async fn unlink_run_pull_request(
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let _create_guard = state.pull_request_create_locks.lock(id).await;
-    let Ok(run_store) = state.stores.runs.open_run(&id).await else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
     let run_state = match state.load_run_projection(&id).await {
         Ok(run_state) => run_state,
         Err(err) => return err.into_response(),
@@ -488,10 +486,9 @@ async fn unlink_run_pull_request(
         )
         .into_response();
     };
-    let event = workflow_event::Event::PullRequestUnlinked {
-        pull_request: pull_request.clone(),
-    };
-    if let Err(err) = workflow_event::append_event(&run_store, &id, &event).await {
+    let record =
+        PlatformRecord::PullRequestUnlinked(PullRequestLinkedRecord::from_link(&pull_request));
+    if let Err(err) = run_records::append(&state, id, record).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
 

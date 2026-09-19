@@ -21,7 +21,7 @@ import type { SessionStatus } from './session-status';
 import type { SessionTurn } from './session-turn';
 
 /**
- * Session metadata plus the highest run event sequence the session\'s event stream has reached. The conversation itself is held by the server\'s durable session record and is not returned over the API.
+ * Session metadata plus the sequence number of the session\'s latest event. The conversation itself is held by the server\'s durable session record and is not returned over the API.
  */
 export interface SessionDetail {
     /**

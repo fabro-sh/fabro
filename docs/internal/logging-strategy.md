@@ -161,13 +161,6 @@ debug!(node = %id, handler = %handler_type, "Executing pipeline node");
 debug!(node = %id, duration_ms = elapsed, "Pipeline node complete");
 ```
 
-**fabro-mcp:**
-```rust
-info!(server = %name, tools = tool_count, "MCP server ready");
-debug!(server = %name, transport = %transport_type, "Connecting to MCP server");
-error!(server = %name, error = %err, "MCP server failed to start");
-```
-
 ## Cross-Package Guidelines
 
 Every crate that does meaningful work should emit tracing events. The `tracing` dependency is workspace-level — add it to any crate's `Cargo.toml` with:

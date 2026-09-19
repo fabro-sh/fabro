@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Mutex;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
 use anyhow::Context as _;
 use axum::body::{self, Body};
@@ -18,7 +17,6 @@ use chrono::Duration as ChronoDuration;
 use fabro_config::user::default_storage_dir;
 use fabro_config::{LlmLayer, RunLayer, ServerSettingsBuilder, Storage, envfile};
 use fabro_db::DbPool;
-use fabro_interview::Interviewer;
 use fabro_llm::lithos_catalog::Catalog;
 use fabro_sandbox::SandboxInventory;
 use fabro_static::EnvVars;
@@ -29,7 +27,6 @@ use fabro_types::{
     WorkflowVersionId,
 };
 use fabro_vault::{SecretType, Vault};
-use fabro_workflow::handler::HandlerRegistry;
 use lithos_llm::catalog::ProviderId;
 use object_store::memory::InMemory as MemoryObjectStore;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
@@ -43,8 +40,8 @@ use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 #[cfg(test)]
 use crate::principal_middleware::{AuthContextSlot, RequestAuthContext};
 use crate::server::{
-    self, AppState, AppStateConfig, EnvLookup, RegistryFactoryOverride, ResolvedAppStateSettings,
-    RouterOptions, build_app_state,
+    self, AppState, AppStateConfig, EnvLookup, ResolvedAppStateSettings, RouterOptions,
+    build_app_state,
 };
 use crate::server_secrets::ServerSecrets;
 #[cfg(test)]
@@ -93,7 +90,7 @@ pub struct TestAppStateBuilder {
     server_settings:              ServerSettings,
     manifest_run_defaults:        RunLayer,
     max_concurrent_runs:          usize,
-    registry_factory_override:    Option<Box<RegistryFactoryOverride>>,
+    execute_in_process:           bool,
     sandbox_inventory:            Option<SandboxInventory>,
     store_bundle:                 Option<(Arc<Database>, ArtifactStore)>,
     vault_path:                   Option<PathBuf>,
@@ -115,7 +112,7 @@ impl Default for TestAppStateBuilder {
             server_settings:              default_test_server_settings(),
             manifest_run_defaults:        RunLayer::default(),
             max_concurrent_runs:          5,
-            registry_factory_override:    None,
+            execute_in_process:           false,
             sandbox_inventory:            None,
             store_bundle:                 None,
             vault_path:                   None,
@@ -153,14 +150,10 @@ impl TestAppStateBuilder {
         self
     }
 
-    pub fn registry_factory(
-        mut self,
-        registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry
-        + Send
-        + Sync
-        + 'static,
-    ) -> Self {
-        self.registry_factory_override = Some(Box::new(registry_factory_override));
+    /// Execute runs in the server process instead of a worker, so a
+    /// scenario needs no worker binary.
+    pub fn in_process_execution(mut self) -> Self {
+        self.execute_in_process = true;
         self
     }
 
@@ -300,7 +293,7 @@ impl TestAppStateBuilder {
                 self.manifest_run_defaults,
                 self.llm_overlay,
             ),
-            registry_factory_override: self.registry_factory_override,
+            execute_in_process: self.execute_in_process,
             max_concurrent_runs: self.max_concurrent_runs,
             store,
             artifact_store,
@@ -387,35 +380,31 @@ pub fn test_app_state() -> Arc<AppState> {
     ready_test_app_state_builder().build()
 }
 
-pub fn test_app_state_with_registry_factory(
-    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
-) -> Arc<AppState> {
+pub fn test_app_state_in_process() -> Arc<AppState> {
     ready_test_app_state_builder()
-        .registry_factory(registry_factory_override)
+        .in_process_execution()
         .build()
 }
 
-pub fn test_app_state_with_settings_and_registry_factory(
+pub fn test_app_state_with_settings_in_process(
     server_settings: ServerSettings,
     manifest_run_defaults: RunLayer,
-    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     ready_test_app_state_builder()
         .runtime_settings(server_settings, manifest_run_defaults)
-        .registry_factory(registry_factory_override)
+        .in_process_execution()
         .build()
 }
 
-pub fn test_app_state_with_options_and_registry_factory(
+pub fn test_app_state_with_options_in_process(
     server_settings: ServerSettings,
     manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
-    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     ready_test_app_state_builder()
         .runtime_settings(server_settings, manifest_run_defaults)
         .max_concurrent_runs(max_concurrent_runs)
-        .registry_factory(registry_factory_override)
+        .in_process_execution()
         .build()
 }
 
@@ -446,27 +435,25 @@ pub(crate) fn resolved_runtime_settings_for_tests(
     }
 }
 
-pub fn test_app_state_with_runtime_settings_and_registry_factory(
+pub fn test_app_state_with_runtime_settings_in_process(
     server_settings: ServerSettings,
     manifest_run_defaults: RunLayer,
-    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     ready_test_app_state_builder()
         .runtime_settings(server_settings, manifest_run_defaults)
-        .registry_factory(registry_factory_override)
+        .in_process_execution()
         .build()
 }
 
-pub fn test_app_state_with_runtime_settings_and_options_and_registry_factory(
+pub fn test_app_state_with_runtime_settings_and_options_in_process(
     server_settings: ServerSettings,
     manifest_run_defaults: RunLayer,
     max_concurrent_runs: usize,
-    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     ready_test_app_state_builder()
         .runtime_settings(server_settings, manifest_run_defaults)
         .max_concurrent_runs(max_concurrent_runs)
-        .registry_factory(registry_factory_override)
+        .in_process_execution()
         .build()
 }
 
@@ -578,12 +565,7 @@ pub fn test_app_state_with_store(
 
 pub fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
     let object_store: Arc<dyn object_store::ObjectStore> = Arc::new(MemoryObjectStore::new());
-    let store = Arc::new(store_test_support::test_database(
-        Arc::clone(&object_store),
-        "",
-        Duration::from_millis(1),
-        None,
-    ));
+    let store = Arc::new(store_test_support::test_database());
     let artifact_store = ArtifactStore::new(object_store, "artifacts");
     (store, artifact_store)
 }
@@ -705,6 +687,13 @@ pub(crate) fn load_test_server_secrets(
         );
     }
     ServerSecrets::load(path, env).expect("test server secrets should load")
+}
+
+/// The database pool the app state's stores share, for a test that reads
+/// what a run wrote through another store over the same database.
+#[must_use]
+pub fn test_app_db_pool(state: &AppState) -> DbPool {
+    state.db_pool.clone()
 }
 
 pub fn test_secret_store_path() -> PathBuf {
@@ -884,10 +873,6 @@ mod tests {
         assert_eq!(
             local_store_root(&settings.server.artifacts.store),
             storage_root.join("objects/artifacts")
-        );
-        assert_eq!(
-            local_store_root(&settings.server.slatedb.store),
-            storage_root.join("objects/slatedb")
         );
     }
 

@@ -18,16 +18,16 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use fabro_client::{AuthEntry, AuthStore, DevTokenEntry, OAuthEntry, StoredSubject};
-use fabro_mcp::config::{McpServerSettings, McpTransport};
-use fabro_mcp::test_support::McpStdioTestClient as McpClient;
 use fabro_test::{fabro_json_snapshot, fabro_snapshot, test_context};
+use fabro_types::settings::run::{McpServerSettings, McpTransport};
 use fabro_types::{Graph, RunId, WorkflowSettings, test_support};
 use httpmock::Method::{GET, POST};
 use httpmock::MockServer;
 
 use super::support::{mock_resolved_run, remote_run_summary_json};
 use crate::support::{
-    RealAuthHarness, TEST_DEV_TOKEN, run_projection_json, seed_dev_token_auth, unique_run_id,
+    McpStdioTestClient as McpClient, RealAuthHarness, TEST_DEV_TOKEN, run_projection_json,
+    seed_dev_token_auth, unique_run_id,
 };
 
 const MCP_RUN_TOOL_NAMES: &[&str] = &[
@@ -1585,12 +1585,16 @@ async fn mcp_interact_actions_resolve_selector_and_call_expected_endpoints() {
         when.method(POST)
             .path(format!("/api/v1/runs/{run_id}/steer"))
             .json_body(serde_json::json!({ "text": "continue", "interrupt": true }));
-        then.status(202);
+        then.status(202)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({ "outcome": "delivered", "stage": "code@1" }));
     });
     let interrupt = server.mock(|when, then| {
         when.method(POST)
             .path(format!("/api/v1/runs/{run_id}/interrupt"));
-        then.status(202);
+        then.status(202)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({ "outcome": "delivered", "stage": "code@1" }));
     });
     let cancel = server.mock(|when, then| {
         when.method(POST)
@@ -2109,15 +2113,7 @@ async fn mcp_events_filters_find_matches_beyond_first_page() {
                     "goal": format!("ordinary event {sequence}")
                 })
             };
-            serde_json::json!({
-                "seq": sequence,
-                "id": format!("evt-{sequence}"),
-                "ts": "2026-04-05T12:00:00Z",
-                "run_id": run_id,
-                "event": event_name,
-                "properties": properties,
-                "actor": null
-            })
+            stream_item(&run_id, sequence, event_name, &properties)
         })
         .collect::<Vec<_>>();
     let first_event = events[0].clone();
@@ -2127,21 +2123,16 @@ async fn mcp_events_filters_find_matches_beyond_first_page() {
             .query_param("limit", "1");
         then.status(200)
             .header("Content-Type", "application/json")
-            .json_body(serde_json::json!({
-                "data": [first_event],
-                "meta": { "has_more": true }
-            }));
+            .json_body(stream_page(&[first_event], true));
     });
     let list_events = server.mock(|when, then| {
         when.method(GET)
             .path(format!("/api/v1/runs/{run_id}/events"))
+            .query_param("after", "0")
             .query_param_missing("limit");
         then.status(200)
             .header("Content-Type", "application/json")
-            .json_body(serde_json::json!({
-                "data": events,
-                "meta": { "has_more": false }
-            }));
+            .json_body(stream_page(&events, false));
     });
     let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
 
@@ -2203,31 +2194,36 @@ async fn mcp_events_decodes_run_created_with_model_keyed_fallbacks() {
             "speed": null
         }
     });
+    // The platform record of the run's creation, as the stream carries it.
     let event = serde_json::json!({
-        "seq": 1,
-        "id": "evt-created",
-        "ts": "2026-04-05T12:00:00Z",
         "run_id": run_id,
-        "event": "run.created",
-        "properties": {
-            "settings": settings,
-            "graph": Graph::new("Remote Workflow"),
-            "labels": {},
-            "source_directory": "/srv/repo",
-            "provenance": test_support::test_run_provenance()
-        },
-        "actor": null
+        "stream_seq": 1,
+        "kind": "platform",
+        "id": "1",
+        "recorded_at": 1_775_390_400_000_u64,
+        "item": {
+            "seq": 1,
+            "recorded_at": 1_775_390_400_000_u64,
+            "record": {
+                "kind": "run.created",
+                "spec": {
+                    "settings": settings,
+                    "graph": Graph::new("Remote Workflow"),
+                    "labels": {},
+                    "source_directory": "/srv/repo",
+                    "provenance": test_support::test_run_provenance()
+                }
+            }
+        }
     });
     let events = server.mock(|when, then| {
         when.method(GET)
             .path(format!("/api/v1/runs/{run_id}/events"))
+            .query_param("after", "0")
             .query_param_missing("limit");
         then.status(200)
             .header("Content-Type", "application/json")
-            .json_body(serde_json::json!({
-                "data": [event],
-                "meta": { "has_more": false }
-            }));
+            .json_body(stream_page(&[event], false));
     });
     let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
 
@@ -2244,8 +2240,8 @@ async fn mcp_events_decodes_run_created_with_model_keyed_fallbacks() {
     .await;
 
     assert_eq!(
-        result["events"][0]["event"]["properties"]["settings"]["run"]["model"]["fallbacks"]["gpt-5.6-sol"]
-            [0],
+        result["events"][0]["event"]["item"]["record"]["spec"]["settings"]["run"]["model"]["fallbacks"]
+            ["gpt-5.6-sol"][0],
         "gpt-5.6-terra"
     );
     resolve.assert();
@@ -2305,80 +2301,42 @@ async fn mcp_events_desc_after_offset_and_limit_page_over_requested_order() {
     let resolve = mock_resolved_run(&server, "nightly", &run_id);
     let events = (1..=5)
         .map(|sequence| {
-            serde_json::json!({
-                "seq": sequence,
-                "id": format!("evt-{sequence}"),
-                "ts": format!("2026-04-05T12:00:0{sequence}Z"),
-                "run_id": run_id,
-                "event": "run.started",
-                "properties": { "name": format!("event {sequence}") },
-                "actor": null
-            })
+            stream_item(
+                &run_id,
+                sequence,
+                "run.started",
+                &serde_json::json!({ "name": format!("event {sequence}") }),
+            )
         })
         .collect::<Vec<_>>();
     let first_event = events[0].clone();
+    let after_two = events[2..].to_vec();
     let limited_events = server.mock(|when, then| {
         when.method(GET)
             .path(format!("/api/v1/runs/{run_id}/events"))
             .query_param("limit", "1");
         then.status(200)
             .header("Content-Type", "application/json")
-            .json_body(serde_json::json!({
-                "data": [first_event],
-                "meta": { "has_more": true }
-            }));
+            .json_body(stream_page(&[first_event], true));
     });
     let full_events = server.mock(|when, then| {
         when.method(GET)
             .path(format!("/api/v1/runs/{run_id}/events"))
-            .query_param_missing("limit")
-            .query_param_missing("since_seq");
+            .query_param("after", "0")
+            .query_param_missing("limit");
         then.status(200)
             .header("Content-Type", "application/json")
-            .json_body(serde_json::json!({
-                "data": events,
-                "meta": { "has_more": false }
-            }));
+            .json_body(stream_page(&events, false));
     });
+    // `after` is exclusive: the page after item 2 starts at item 3.
     let after_events = server.mock(|when, then| {
         when.method(GET)
             .path(format!("/api/v1/runs/{run_id}/events"))
-            .query_param("since_seq", "2")
+            .query_param("after", "2")
             .query_param("limit", "3");
         then.status(200)
             .header("Content-Type", "application/json")
-            .json_body(serde_json::json!({
-                "data": [
-                    {
-                        "seq": 2,
-                        "id": "evt-2",
-                        "ts": "2026-04-05T12:00:02Z",
-                        "run_id": run_id,
-                        "event": "run.started",
-                        "properties": { "name": "event 2" },
-                        "actor": null
-                    },
-                    {
-                        "seq": 3,
-                        "id": "evt-3",
-                        "ts": "2026-04-05T12:00:03Z",
-                        "run_id": run_id,
-                        "event": "run.started",
-                        "properties": { "name": "event 3" },
-                        "actor": null
-                    },
-                    {
-                        "seq": 4,
-                        "id": "evt-4",
-                        "ts": "2026-04-05T12:00:04Z",
-                        "run_id": run_id,
-                        "event": "run.started",
-                        "properties": { "name": "event 4" },
-                        "actor": null
-                    }
-                ],
-                "meta": { "has_more": true }
-            }));
+            .json_body(stream_page(&after_two, false));
     });
     let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
 
@@ -2408,8 +2366,8 @@ async fn mcp_events_desc_after_offset_and_limit_page_over_requested_order() {
 
     assert_eq!(desc["events"][0]["event_id"], "evt-5");
     assert_eq!(desc["next_cursor"], 5);
-    assert_eq!(paged["events"][0]["event_id"], "evt-3");
-    assert_eq!(paged["events"][1]["event_id"], "evt-4");
+    assert_eq!(paged["events"][0]["event_id"], "evt-4");
+    assert_eq!(paged["events"][1]["event_id"], "evt-5");
     assert_eq!(paged["next_cursor"], 5);
     resolve.assert_calls(2);
     limited_events.assert_calls(0);
@@ -2432,28 +2390,22 @@ async fn mcp_events_desc_cursor_continues_to_older_events() {
     let resolve = mock_resolved_run(&server, "nightly", &run_id);
     let events = (1..=5)
         .map(|sequence| {
-            serde_json::json!({
-                "seq": sequence,
-                "id": format!("evt-{sequence}"),
-                "ts": format!("2026-04-05T12:00:0{sequence}Z"),
-                "run_id": run_id,
-                "event": "run.started",
-                "properties": { "name": format!("event {sequence}") },
-                "actor": null
-            })
+            stream_item(
+                &run_id,
+                sequence,
+                "run.started",
+                &serde_json::json!({ "name": format!("event {sequence}") }),
+            )
         })
         .collect::<Vec<_>>();
     let full_events = server.mock(|when, then| {
         when.method(GET)
             .path(format!("/api/v1/runs/{run_id}/events"))
-            .query_param_missing("limit")
-            .query_param_missing("since_seq");
+            .query_param("after", "0")
+            .query_param_missing("limit");
         then.status(200)
             .header("Content-Type", "application/json")
-            .json_body(serde_json::json!({
-                "data": events,
-                "meta": { "has_more": false }
-            }));
+            .json_body(stream_page(&events, false));
     });
     let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
 
@@ -2506,28 +2458,23 @@ async fn mcp_events_offset_beyond_fetch_cap_reaches_later_pages() {
     let resolve = mock_resolved_run(&server, "nightly", &run_id);
     let events = (1..=300)
         .map(|sequence| {
-            serde_json::json!({
-                "seq": sequence,
-                "id": format!("evt-{sequence}"),
-                "ts": "2026-04-05T12:00:00Z",
-                "run_id": run_id,
-                "event": "run.started",
-                "properties": { "name": format!("event {sequence}") },
-                "actor": null
-            })
+            stream_item(
+                &run_id,
+                sequence,
+                "run.started",
+                &serde_json::json!({ "name": format!("event {sequence}") }),
+            )
         })
         .collect::<Vec<_>>();
     let first_251_events = events.iter().take(251).cloned().collect::<Vec<_>>();
     let bounded_events = server.mock(|when, then| {
         when.method(GET)
             .path(format!("/api/v1/runs/{run_id}/events"))
+            .query_param("after", "0")
             .query_param("limit", "251");
         then.status(200)
             .header("Content-Type", "application/json")
-            .json_body(serde_json::json!({
-                "data": first_251_events,
-                "meta": { "has_more": true }
-            }));
+            .json_body(stream_page(&first_251_events, true));
     });
     let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
 
@@ -2544,7 +2491,7 @@ async fn mcp_events_offset_beyond_fetch_cap_reaches_later_pages() {
     .await;
 
     assert_eq!(paged["events"][0]["event_id"], "evt-251");
-    assert_eq!(paged["next_cursor"], 252);
+    assert_eq!(paged["next_cursor"], 251);
     resolve.assert();
     bounded_events.assert();
     client
@@ -2931,6 +2878,37 @@ fn run_id_with_timestamp(timestamp: &str, sequence: u128) -> String {
         .expect("test timestamp should parse")
         .with_timezone(&Utc);
     RunId::with_timestamp(timestamp, sequence).to_string()
+}
+
+/// One Petri item of a run's stream, as `GET /runs/{id}/events` pages it:
+/// the recorded body's `event` names it.
+fn stream_item(
+    run_id: &str,
+    stream_seq: u64,
+    event_name: &str,
+    properties: &serde_json::Value,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({ "event": event_name });
+    if let (Some(body), Some(properties)) = (body.as_object_mut(), properties.as_object()) {
+        body.extend(properties.clone());
+    }
+    serde_json::json!({
+        "run_id": run_id,
+        "stream_seq": stream_seq,
+        "kind": "petri",
+        "id": format!("evt-{stream_seq}"),
+        "recorded_at": 1_775_390_400_000_u64 + stream_seq,
+        "item": { "record": { "body": body } }
+    })
+}
+
+/// One page of a run's stream.
+fn stream_page(items: &[serde_json::Value], has_more: bool) -> serde_json::Value {
+    serde_json::json!({
+        "data": items,
+        "meta": { "has_more": has_more },
+        "event_contract_version": 3
+    })
 }
 
 fn mock_resolved_run_json<'a>(

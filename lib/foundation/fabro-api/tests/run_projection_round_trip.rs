@@ -24,10 +24,7 @@ fn run_projection_round_trips_populated_projection() {
                 "checkpoint": {
                 "timestamp": "2026-04-29T12:34:56Z",
                 "current_node": "build",
-                "completed_nodes": ["build"],
-                "node_retries": {},
-                "context_values": {},
-                "node_visits": { "build": 2 }
+                "git_commit_sha": "abc123"
                 },
                 "diff": {}
             }

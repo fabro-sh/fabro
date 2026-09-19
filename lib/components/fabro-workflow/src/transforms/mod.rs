@@ -11,17 +11,13 @@ pub trait Transform {
 mod file_inlining;
 mod import;
 mod importable_field;
-mod model_resolution;
 mod model_stylesheet_template;
-mod preamble;
 pub mod stylesheet;
 mod stylesheet_application;
 pub mod variable_expansion;
 
 pub use file_inlining::FileInliningTransform;
 pub use import::ImportTransform;
-pub use model_resolution::ModelResolutionTransform;
 pub(crate) use model_stylesheet_template::ModelStylesheetTemplateTransform;
-pub use preamble::PreambleTransform;
 pub use stylesheet_application::StylesheetApplicationTransform;
 pub use variable_expansion::{RenderMode, ScriptInterpolationTransform, TemplateTransform};

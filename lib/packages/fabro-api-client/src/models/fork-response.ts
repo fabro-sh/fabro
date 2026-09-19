@@ -15,10 +15,29 @@
 
 
 /**
- * Response returned after creating a forked run.
+ * Response returned after creating and starting a forked run.
  */
 export interface ForkResponse {
     'source_run_id': string;
     'new_run_id': string;
+    /**
+     * The checkpoint the fork was resolved to, as `@ordinal`.
+     */
     'target': string;
+    /**
+     * The commit the new run\'s workspace starts on.
+     */
+    'checkpoint_sha': string;
+    /**
+     * The Petri execution of the fork position.
+     */
+    'execution': number;
+    /**
+     * The Petri firing of the fork position.
+     */
+    'firing': number;
+    /**
+     * Whether the position\'s stage runs again in the new run.
+     */
+    'rerun_last': boolean;
 }

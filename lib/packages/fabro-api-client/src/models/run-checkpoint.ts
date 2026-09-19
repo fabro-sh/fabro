@@ -15,47 +15,19 @@
 
 
 /**
- * Serializable snapshot of execution state for crash recovery and resume.
+ * A checkpoint Fabro recorded for the run: when, at which node, and the commit the workspace was checkpointed at, when it was committed.
  */
 export interface RunCheckpoint {
     /**
-     * ISO 8601 timestamp when the checkpoint was created.
+     * When the checkpoint was recorded.
      */
     'timestamp': string;
     /**
-     * Identifier of the node being executed at checkpoint time.
+     * The node the checkpoint was recorded for.
      */
     'current_node': string;
-    /**
-     * Identifiers of nodes that have completed execution.
-     */
-    'completed_nodes': Array<string>;
-    /**
-     * Map of node identifier to retry count.
-     */
-    'node_retries': { [key: string]: number; };
-    /**
-     * Key-value context map accumulated during execution.
-     */
-    'context_values': { [key: string]: any; };
-    /**
-     * Map of node identifier to outcome data for goal gate checks after resume.
-     */
-    'node_outcomes'?: { [key: string]: any; };
-    /**
-     * The node to resume execution at after this checkpoint.
-     */
-    'next_node_id'?: string;
     /**
      * SHA of the git commit created at this checkpoint.
      */
     'git_commit_sha'?: string;
-    /**
-     * Failure signature counts within the main loop.
-     */
-    'loop_failure_signatures'?: { [key: string]: any; };
-    /**
-     * Failure signature counts across loop_restart edges.
-     */
-    'restart_failure_signatures'?: { [key: string]: any; };
 }

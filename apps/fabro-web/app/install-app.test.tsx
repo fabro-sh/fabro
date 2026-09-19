@@ -555,7 +555,7 @@ describe("InstallApp", () => {
         expect(text).toContain("fabro-data");
         expect(text).toContain("us-east-1");
         expect(text).toContain("Access key");
-        expect(text).toContain("slatedb/, artifacts/");
+        expect(text).toContain("artifacts/");
       });
 
       await act(async () => {

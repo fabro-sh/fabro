@@ -8,8 +8,8 @@ use fabro_types::settings::server::{
     ServerArtifactsSettings, ServerAuthGithubSettings, ServerAuthMethod, ServerAuthSettings,
     ServerIntegrationsSettings, ServerListenSettings, ServerLoggingSettings, ServerNamespace,
     ServerSandboxProviderSettings, ServerSandboxProvidersSettings, ServerSandboxSettings,
-    ServerSchedulerSettings, ServerSlateDbSettings, ServerStorageSettings, ServerWebSettings,
-    SlackIntegrationSettings, WebhookStrategy,
+    ServerSchedulerSettings, ServerStorageSettings, ServerWebSettings, SlackIntegrationSettings,
+    WebhookStrategy,
 };
 use fabro_util::Home;
 
@@ -21,8 +21,7 @@ use crate::user::default_storage_dir;
 use crate::{
     IntegrationWebhooksLayer, ObjectStoreLocalLayer, ObjectStoreS3Layer, ServerApiLayer,
     ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerLayer, ServerListenLayer,
-    ServerSandboxLayer, ServerSandboxProviderLayer, ServerSlateDbLayer, ServerStorageLayer,
-    ServerWebLayer,
+    ServerSandboxLayer, ServerSandboxProviderLayer, ServerStorageLayer, ServerWebLayer,
 };
 
 pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> ServerNamespace {
@@ -44,7 +43,6 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
         sandbox: resolve_sandbox(layer.sandbox.as_ref(), errors),
         storage: storage.clone(),
         artifacts: resolve_artifacts(layer.artifacts.as_ref(), &storage.root, errors),
-        slatedb: resolve_slatedb(layer.slatedb.as_ref(), &storage.root, errors),
         scheduler: ServerSchedulerSettings {
             max_concurrent_runs: layer
                 .scheduler
@@ -291,50 +289,6 @@ fn resolve_artifacts(
             "server.artifacts",
             errors,
         ),
-    }
-}
-
-fn resolve_slatedb(
-    layer: Option<&ServerSlateDbLayer>,
-    storage_root: &str,
-    errors: &mut Vec<ResolveError>,
-) -> ServerSlateDbSettings {
-    let provider = layer
-        .and_then(|slatedb| slatedb.provider)
-        .expect("defaults.toml should provide server.slatedb.provider");
-
-    let disk_cache = layer
-        .and_then(|slatedb| slatedb.disk_cache)
-        .expect("defaults.toml should provide server.slatedb.disk_cache");
-
-    if disk_cache && provider == ObjectStoreProvider::Local {
-        tracing::warn!(
-            "disk_cache enabled with local provider; \
-             disk cache is designed for S3-backed deployments \
-             and adds overhead on local filesystems"
-        );
-    }
-
-    let prefix = layer
-        .and_then(|slatedb| slatedb.prefix.clone())
-        .expect("defaults.toml should provide server.slatedb.prefix");
-    warn_if_demoted_template("server.slatedb.prefix", Some(prefix.as_str()));
-
-    ServerSlateDbSettings {
-        prefix,
-        store: resolve_object_store(
-            provider,
-            layer.and_then(|slatedb| slatedb.local.as_ref()),
-            layer.and_then(|slatedb| slatedb.s3.as_ref()),
-            &object_store_default_root(storage_root, "slatedb"),
-            "server.slatedb",
-            errors,
-        ),
-        flush_interval: layer
-            .and_then(|slatedb| slatedb.flush_interval)
-            .map(|duration| duration.as_std())
-            .expect("defaults.toml should provide server.slatedb.flush_interval"),
-        disk_cache,
     }
 }
 

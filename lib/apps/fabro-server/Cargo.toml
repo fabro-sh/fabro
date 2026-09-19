@@ -28,12 +28,10 @@ fabro-spa = { path = "../fabro-spa" }
 fabro-config = { path = "../../foundation/fabro-config" }
 fabro-environment.workspace = true
 fabro-graphviz = { path = "../../components/fabro-graphviz" }
-fabro-hooks = { path = "../../components/fabro-hooks" }
 fabro-interview = { path = "../../components/fabro-interview" }
 fabro-slack = { path = "../../components/fabro-slack" }
 fabro-workflow = { path = "../../components/fabro-workflow" }
 fabro-workflow-version = { path = "../../components/fabro-workflow-version" }
-fabro-validate = { path = "../../components/fabro-validate" }
 fabro-sandbox = { path = "../../components/fabro-sandbox" }
 sandbox-driver.workspace = true
 fabro-github = { path = "../../components/fabro-github" }
@@ -42,6 +40,7 @@ pebble-coding-agent.workspace = true
 fabro-llm = { path = "../../components/fabro-llm" }
 fabro-manifest = { path = "../../components/fabro-manifest" }
 fabro-mcp-store = { path = "../../components/fabro-mcp-store" }
+fabro-petri = { path = "../../components/fabro-petri" }
 fabro-proc = { path = "../../foundation/fabro-proc" }
 fabro-template = { path = "../../foundation/fabro-template" }
 fabro-tool = { path = "../../components/fabro-tool" }
@@ -115,6 +114,7 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 fabro-auth = { path = "../../foundation/fabro-auth", features = ["test-support"] }
+fabro-petri = { path = "../../components/fabro-petri", features = ["test-support"] }
 fabro-llm = { path = "../../components/fabro-llm", features = ["test-support"] }
 git2.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }

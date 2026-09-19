@@ -74,9 +74,9 @@ import type { RunIntent } from '../models';
 // @ts-ignore
 import type { RunManifest } from '../models';
 // @ts-ignore
-import type { StartRunRequest } from '../models';
+import type { RunTimelineResponse } from '../models';
 // @ts-ignore
-import type { TimelineEntryResponse } from '../models';
+import type { StartRunRequest } from '../models';
 // @ts-ignore
 import type { UpdateRunParentRequest } from '../models';
 // @ts-ignore
@@ -546,7 +546,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Creates a new run from a checkpoint of the source run. The source run is left untouched.
+         * Creates a new run from a checkpoint of the source run and starts it. The new run holds the source\'s records up to the checkpoint\'s position and continues from there in a fresh workspace restored to the checkpoint\'s commit. The source run is left untouched. A checkpoint inside a parallel branch cannot be forked at; fork at the parallel stage instead.
          * @summary Fork Run
          * @param {string} id Unique run identifier (ULID).
          * @param {ForkRequest} [forkRequest]
@@ -669,7 +669,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Returns checkpoint timeline entries from durable run-store checkpoints. Metadata branches are write-only archives and are not read by this endpoint.
+         * Returns the run\'s checkpoints in the order they were recorded, each at its Petri position with the commit it made and the stage it belongs to, and where the run was forked from when it is a fork.
          * @summary Get Run Timeline
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1164,7 +1164,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Creates a fresh run from the terminal source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active and archived runs are not retryable.
+         * Creates a new run from the terminal source run\'s last checkpoint and starts it. When the source failed on a stage, that stage runs again on the files of the stage before it; otherwise the new run continues from the last checkpoint as it stands. The new run records `retried_from` and `fork_source_ref`; the source run is left unchanged. Active and archived runs are not retryable.
          * @summary Retry Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1204,7 +1204,7 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
+         * Creates a new run from a checkpoint of a terminal source run and starts it, then archives the source run and records `run.superseded_by` on it. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
          * @param {RewindRequest} [rewindRequest]
@@ -1732,7 +1732,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a new run from a checkpoint of the source run. The source run is left untouched.
+         * Creates a new run from a checkpoint of the source run and starts it. The new run holds the source\'s records up to the checkpoint\'s position and continues from there in a fresh workspace restored to the checkpoint\'s commit. The source run is left untouched. A checkpoint inside a parallel branch cannot be forked at; fork at the parallel stage instead.
          * @summary Fork Run
          * @param {string} id Unique run identifier (ULID).
          * @param {ForkRequest} [forkRequest]
@@ -1772,13 +1772,13 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns checkpoint timeline entries from durable run-store checkpoints. Metadata branches are write-only archives and are not read by this endpoint.
+         * Returns the run\'s checkpoints in the order they were recorded, each at its Petri position with the commit it made and the stage it belongs to, and where the run was forked from when it is a fork.
          * @summary Get Run Timeline
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async getRunTimeline(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Array<TimelineEntryResponse>>> {
+        async getRunTimeline(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunTimelineResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.getRunTimeline(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.getRunTimeline']?.[localVarOperationServerIndex]?.url;
@@ -1925,7 +1925,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a fresh run from the terminal source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active and archived runs are not retryable.
+         * Creates a new run from the terminal source run\'s last checkpoint and starts it. When the source failed on a stage, that stage runs again on the files of the stage before it; otherwise the new run continues from the last checkpoint as it stands. The new run records `retried_from` and `fork_source_ref`; the source run is left unchanged. Active and archived runs are not retryable.
          * @summary Retry Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -1938,7 +1938,7 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
+         * Creates a new run from a checkpoint of a terminal source run and starts it, then archives the source run and records `run.superseded_by` on it. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
          * @param {RewindRequest} [rewindRequest]
@@ -2180,7 +2180,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.denyRun(id, denyRunRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a new run from a checkpoint of the source run. The source run is left untouched.
+         * Creates a new run from a checkpoint of the source run and starts it. The new run holds the source\'s records up to the checkpoint\'s position and continues from there in a fresh workspace restored to the checkpoint\'s commit. The source run is left untouched. A checkpoint inside a parallel branch cannot be forked at; fork at the parallel stage instead.
          * @summary Fork Run
          * @param {string} id Unique run identifier (ULID).
          * @param {ForkRequest} [forkRequest]
@@ -2211,13 +2211,13 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.getRunPullRequestCreation(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns checkpoint timeline entries from durable run-store checkpoints. Metadata branches are write-only archives and are not read by this endpoint.
+         * Returns the run\'s checkpoints in the order they were recorded, each at its Petri position with the commit it made and the stage it belongs to, and where the run was forked from when it is a fork.
          * @summary Get Run Timeline
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getRunTimeline(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Array<TimelineEntryResponse>> {
+        getRunTimeline(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunTimelineResponse> {
             return localVarFp.getRunTimeline(id, options).then((request) => request(axios, basePath));
         },
         /**
@@ -2331,7 +2331,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.retrieveRunGraphSource(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a fresh run from the terminal source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active and archived runs are not retryable.
+         * Creates a new run from the terminal source run\'s last checkpoint and starts it. When the source failed on a stage, that stage runs again on the files of the stage before it; otherwise the new run continues from the last checkpoint as it stands. The new run records `retried_from` and `fork_source_ref`; the source run is left unchanged. Active and archived runs are not retryable.
          * @summary Retry Run
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
@@ -2341,7 +2341,7 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.retryRun(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
+         * Creates a new run from a checkpoint of a terminal source run and starts it, then archives the source run and records `run.superseded_by` on it. Returns 207 when the new run was created but the source archive step failed.
          * @summary Rewind Run
          * @param {string} id Unique run identifier (ULID).
          * @param {RewindRequest} [rewindRequest]
@@ -2565,7 +2565,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Creates a new run from a checkpoint of the source run. The source run is left untouched.
+     * Creates a new run from a checkpoint of the source run and starts it. The new run holds the source\'s records up to the checkpoint\'s position and continues from there in a fresh workspace restored to the checkpoint\'s commit. The source run is left untouched. A checkpoint inside a parallel branch cannot be forked at; fork at the parallel stage instead.
      * @summary Fork Run
      * @param {string} id Unique run identifier (ULID).
      * @param {ForkRequest} [forkRequest]
@@ -2599,7 +2599,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Returns checkpoint timeline entries from durable run-store checkpoints. Metadata branches are write-only archives and are not read by this endpoint.
+     * Returns the run\'s checkpoints in the order they were recorded, each at its Petri position with the commit it made and the stage it belongs to, and where the run was forked from when it is a fork.
      * @summary Get Run Timeline
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
@@ -2730,7 +2730,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Creates a fresh run from the terminal source run\'s captured durable definition, records `retried_from` on the new run, and schedules it for execution. The source run is left unchanged. Active and archived runs are not retryable.
+     * Creates a new run from the terminal source run\'s last checkpoint and starts it. When the source failed on a stage, that stage runs again on the files of the stage before it; otherwise the new run continues from the last checkpoint as it stands. The new run records `retried_from` and `fork_source_ref`; the source run is left unchanged. Active and archived runs are not retryable.
      * @summary Retry Run
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
@@ -2741,7 +2741,7 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Creates a new run from an earlier checkpoint of a terminal source run, archives the source run, and records `run.superseded_by` on the source after archive succeeds. Returns 207 when the new run was created but the source archive step failed.
+     * Creates a new run from a checkpoint of a terminal source run and starts it, then archives the source run and records `run.superseded_by` on it. Returns 207 when the new run was created but the source archive step failed.
      * @summary Rewind Run
      * @param {string} id Unique run identifier (ULID).
      * @param {RewindRequest} [rewindRequest]

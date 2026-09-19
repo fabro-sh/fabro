@@ -1009,14 +1009,23 @@ mod tests {
 
 #[cfg(test)]
 mod retrieve_sandbox_tests {
+    use std::collections::BTreeMap;
+
+    use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
-    use fabro_sandbox::test_support::local_sandbox_id;
-    use fabro_types::{Graph, RunId, WorkflowSettings, test_support};
+    use fabro_types::{RunId, WorkflowPath, WorkflowVersion};
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
-    use crate::test_support::{build_test_router, test_app_state};
+    use crate::test_support::{build_test_router, test_app_state, test_register_workflow_version};
+
+    const MINIMAL_DOT: &str = r#"digraph Test {
+    graph [goal="Test"]
+    start [shape=Mdiamond]
+    exit  [shape=Msquare]
+    start -> exit
+}"#;
 
     fn req_get(uri: &str) -> Request<Body> {
         Request::builder()
@@ -1026,14 +1035,6 @@ mod retrieve_sandbox_tests {
             .expect("sandbox details GET request should build")
     }
 
-    fn req_post(uri: &str) -> Request<Body> {
-        Request::builder()
-            .method("POST")
-            .uri(uri)
-            .body(Body::empty())
-            .expect("sandbox POST request should build")
-    }
-
     async fn body_json(response: axum::response::Response) -> Value {
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1041,86 +1042,38 @@ mod retrieve_sandbox_tests {
         serde_json::from_slice(&bytes).expect("response body should be valid JSON")
     }
 
-    async fn append_run_created(run_store: &fabro_store::RunDatabase, run_id: &RunId) {
-        let payload = fabro_store::EventPayload::new(
-            json!({
-                "id": "evt-run-created",
-                "ts": "2026-05-09T11:59:00Z",
-                "run_id": run_id,
-                "event": "run.created",
-                "properties": {
-                    "settings": WorkflowSettings::default(),
-                    "graph": Graph::new("test"),
-                    "provenance": test_support::test_run_provenance(),
-                },
-            }),
-            run_id,
-        )
-        .expect("run.created payload should validate");
-        run_store.append_event(&payload).await.unwrap();
-    }
-
-    async fn append_sandbox_initialized(
-        run_store: &fabro_store::RunDatabase,
-        run_id: &RunId,
-        provider: &str,
-    ) {
-        append_sandbox_initialized_in(
-            run_store,
-            run_id,
-            provider,
-            &format!("{provider}:sandbox-id"),
-            "/workspace",
-        )
-        .await;
-    }
-
-    /// A local sandbox reconnects by the id the Host provider derives from
-    /// its working directory, so a test that reaches one records an
-    /// existing directory under the id fabro would have written for it.
-    async fn append_sandbox_initialized_in(
-        run_store: &fabro_store::RunDatabase,
-        run_id: &RunId,
-        provider: &str,
-        id: &str,
-        working_directory: &str,
-    ) {
-        let payload = fabro_store::EventPayload::new(
-            json!({
-                "id": "evt-sandbox-init",
-                "ts": "2026-05-09T12:00:00Z",
-                "run_id": run_id,
-                "event": "sandbox.initialized",
-                "properties": {
-                    "provider": provider,
-                    "id": id,
-                    "working_directory": working_directory,
-                },
-            }),
-            run_id,
-        )
-        .expect("sandbox.initialized payload should validate");
-        run_store.append_event(&payload).await.unwrap();
-    }
-
-    async fn append_sandbox_failed(run_store: &fabro_store::RunDatabase, run_id: &RunId) {
-        let payload = fabro_store::EventPayload::new(
-            json!({
-                "id": "evt-sandbox-failed",
-                "ts": "2026-05-09T12:00:00Z",
-                "run_id": run_id,
-                "event": "sandbox.failed",
-                "properties": {
-                    "provider": "docker",
-                    "error": "Docker daemon unavailable",
-                    "causes": ["connection refused"],
-                    "duration_ms": 42,
-                },
-            }),
-            run_id,
-        )
-        .expect("sandbox.failed payload should validate");
-        run_store.append_event(&payload).await.unwrap();
+    /// Create a run through the API. A run that has not started has a
+    /// planned sandbox and nothing else.
+    async fn create_run(app: &Router) -> RunId {
+        let entrypoint = WorkflowPath::new("workflow.fabro").expect("entrypoint should parse");
+        let files = BTreeMap::from([(entrypoint.clone(), MINIMAL_DOT.to_string())]);
+        let version = WorkflowVersion::new(entrypoint, files, BTreeMap::new())
+            .expect("workflow version should build");
+        let workflow_version_id = test_register_workflow_version(app, &version, None).await;
+        let intent = json!({
+            "workflow_version_id": workflow_version_id,
+            "target": { "kind": "none" },
+            "args": {}
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/runs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(intent.to_string()))
+                    .expect("run creation request should build"),
+            )
+            .await
+            .expect("run creation should route");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response).await;
+        body["id"]
+            .as_str()
+            .expect("run creation response should carry the run id")
+            .parse()
+            .expect("run id should parse")
     }
 
     async fn assert_sandbox_not_created_response(response: axum::response::Response) {
@@ -1156,15 +1109,8 @@ mod retrieve_sandbox_tests {
 
     #[tokio::test]
     async fn planned_sandbox_returns_404_from_details_endpoint() {
-        let state = test_app_state();
-        let app = build_test_router(state.clone());
-        let run_id = RunId::new();
-        let run_store = state
-            .store_ref()
-            .create_run(&run_id)
-            .await
-            .expect("test run should be creatable");
-        append_run_created(&run_store, &run_id).await;
+        let app = build_test_router(test_app_state());
+        let run_id = create_run(&app).await;
         let response = app
             .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
             .await
@@ -1174,15 +1120,8 @@ mod retrieve_sandbox_tests {
 
     #[tokio::test]
     async fn planned_sandbox_rejects_live_operations() {
-        let state = test_app_state();
-        let app = build_test_router(state.clone());
-        let run_id = RunId::new();
-        let run_store = state
-            .store_ref()
-            .create_run(&run_id)
-            .await
-            .expect("test run should be creatable");
-        append_run_created(&run_store, &run_id).await;
+        let app = build_test_router(test_app_state());
+        let run_id = create_run(&app).await;
 
         for uri in [
             format!("/api/v1/runs/{run_id}/sandbox/services"),
@@ -1192,119 +1131,5 @@ mod retrieve_sandbox_tests {
             let response = app.clone().oneshot(req_get(&uri)).await.unwrap();
             assert_sandbox_not_created_response(response).await;
         }
-    }
-
-    #[tokio::test]
-    async fn failed_sandbox_rejects_live_operations() {
-        let state = test_app_state();
-        let app = build_test_router(state.clone());
-        let run_id = RunId::new();
-        let run_store = state
-            .store_ref()
-            .create_run(&run_id)
-            .await
-            .expect("test run should be creatable");
-        append_run_created(&run_store, &run_id).await;
-        append_sandbox_failed(&run_store, &run_id).await;
-
-        for uri in [
-            format!("/api/v1/runs/{run_id}/sandbox/services"),
-            format!("/api/v1/runs/{run_id}/sandbox/files?path=/workspace"),
-            format!("/api/v1/runs/{run_id}/sandbox/file?path=/workspace/README.md"),
-        ] {
-            let response = app.clone().oneshot(req_get(&uri)).await.unwrap();
-            assert_sandbox_not_created_response(response).await;
-        }
-    }
-
-    #[tokio::test]
-    async fn local_sandbox_returns_provider_neutral_details() {
-        let state = test_app_state();
-        let app = build_test_router(state.clone());
-        let run_id = RunId::new();
-        let run_store = state
-            .store_ref()
-            .create_run(&run_id)
-            .await
-            .expect("test run should be creatable");
-        append_run_created(&run_store, &run_id).await;
-        let workspace = tempfile::tempdir().expect("scratch directory");
-        let working_directory = workspace.path().to_str().expect("utf-8").to_owned();
-        let id = local_sandbox_id(workspace.path()).await;
-        append_sandbox_initialized_in(&run_store, &run_id, "local", &id, &working_directory).await;
-
-        let response = app
-            .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = body_json(response).await;
-        assert_eq!(body["sandbox"]["provider"], "local");
-        assert_eq!(body["sandbox"]["runtime"]["id"], id);
-        assert_eq!(
-            body["sandbox"]["runtime"]["working_directory"],
-            working_directory
-        );
-        assert_eq!(body["status"]["state"], "running");
-        assert_eq!(body["status"]["workspace_ownership"], "designated");
-        assert!(
-            body["status"]["id"]
-                .as_str()
-                .is_some_and(|id| id.starts_with("host-dir-")),
-            "{}",
-            body["status"]["id"]
-        );
-        assert!(body.get("state").is_none(), "the status is not flattened");
-        assert!(body.get("identifier").is_none());
-    }
-
-    #[tokio::test]
-    async fn local_sandbox_vnc_returns_501() {
-        let state = test_app_state();
-        let app = build_test_router(state.clone());
-        let run_id = RunId::new();
-        let run_store = state
-            .store_ref()
-            .create_run(&run_id)
-            .await
-            .expect("test run should be creatable");
-        append_run_created(&run_store, &run_id).await;
-        let workspace = tempfile::tempdir().expect("scratch directory");
-        append_sandbox_initialized_in(
-            &run_store,
-            &run_id,
-            "local",
-            &local_sandbox_id(workspace.path()).await,
-            workspace.path().to_str().expect("utf-8"),
-        )
-        .await;
-
-        let response = app
-            .oneshot(req_post(&format!("/api/v1/runs/{run_id}/sandbox/vnc")))
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-    }
-
-    #[tokio::test]
-    async fn docker_sandbox_vnc_returns_501_without_reconnect() {
-        let state = test_app_state();
-        let app = build_test_router(state.clone());
-        let run_id = RunId::new();
-        let run_store = state
-            .store_ref()
-            .create_run(&run_id)
-            .await
-            .expect("test run should be creatable");
-        append_run_created(&run_store, &run_id).await;
-        append_sandbox_initialized(&run_store, &run_id, "docker").await;
-
-        let response = app
-            .oneshot(req_post(&format!("/api/v1/runs/{run_id}/sandbox/vnc")))
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     }
 }

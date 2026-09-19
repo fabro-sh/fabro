@@ -221,7 +221,7 @@ Fabro stores every one of these as an `agent.*` run event whose properties are t
 
 ### Tool middleware
 
-Implement pebble's `ToolMiddleware` to intercept tool calls for approval, logging, or transformation, and install it with the builder's `.tool_middleware(...)`. Fabro's `fabro_hooks::WorkflowToolHookCallback` is one: it runs the workflow's `pre_tool_use` hooks before each call and the `post_tool_use` hooks after.
+Implement pebble's `ToolMiddleware` to intercept tool calls for approval, logging, or transformation, and install it with the builder's `.tool_middleware(...)`. Petri's Attractor agent step installs one for Fabro's `pre_tool_use` and `post_tool_use` hooks.
 
 ```rust
 use async_trait::async_trait;

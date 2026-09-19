@@ -79,8 +79,8 @@ async fn write_run_dump(
     state: &RunProjection,
     output_dir: &Path,
 ) -> Result<usize> {
-    let events = client.list_run_events(run_id, None, None).await?;
-    let mut dump = RunDump::from_store_state_and_events(state, &events)?;
+    let items = client.list_run_stream(run_id, 0).await?;
+    let mut dump = RunDump::from_store_state_and_stream(state, &items)?;
 
     if let Some(log) = client.get_run_logs(run_id).await? {
         dump.add_file_bytes("run.log", log);

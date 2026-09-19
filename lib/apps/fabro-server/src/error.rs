@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Response};
 use fabro_api::types::ErrorResponseEntry;
 use fabro_vault::Error as VaultError;
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -59,6 +60,8 @@ struct ErrorEntry {
     detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     code:   Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta:   Option<Box<Map<String, Value>>>,
 }
 
 #[derive(Serialize)]
@@ -69,12 +72,15 @@ struct ErrorBody {
 /// Uniform API error response.
 ///
 /// Serializes to `{"errors": [{"status": "4xx", "title": "...", "detail":
-/// "..."}]}`.
+/// "..."}]}`, with `code` and `meta` when the error carries them.
 #[derive(Clone, Debug)]
 pub struct ApiError {
     status: StatusCode,
     detail: String,
     code:   Option<String>,
+    /// Structured details specific to `code`, for clients that act on them.
+    /// Boxed so the error stays small in every `Result` that carries it.
+    meta:   Option<Box<Map<String, Value>>>,
 }
 
 impl ApiError {
@@ -83,6 +89,7 @@ impl ApiError {
             status,
             detail: detail.into(),
             code: None,
+            meta: None,
         }
     }
 
@@ -95,6 +102,22 @@ impl ApiError {
             status,
             detail: detail.into(),
             code: Some(code.into()),
+            meta: None,
+        }
+    }
+
+    /// An error whose `code` documents the members of `meta`.
+    pub fn with_code_and_meta(
+        status: StatusCode,
+        detail: impl Into<String>,
+        code: impl Into<String>,
+        meta: Map<String, Value>,
+    ) -> Self {
+        Self {
+            status,
+            detail: detail.into(),
+            code: Some(code.into()),
+            meta: Some(Box::new(meta)),
         }
     }
 
@@ -148,6 +171,7 @@ impl ApiError {
                 .to_string(),
             detail:     self.detail,
             code:       self.code,
+            meta:       self.meta.map(|meta| *meta).unwrap_or_default(),
             request_id: None,
         }
     }
@@ -201,6 +225,7 @@ impl IntoResponse for ApiError {
                 title,
                 detail: self.detail,
                 code: self.code,
+                meta: self.meta,
             }],
         };
         (self.status, Json(body)).into_response()
@@ -239,6 +264,38 @@ mod tests {
                     "title": "Unauthorized",
                     "detail": "token expired",
                     "code": "access_token_expired"
+                }]
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn api_error_with_meta_serializes_the_members_beside_the_code() {
+        let mut meta = serde_json::Map::new();
+        meta.insert("owner".to_string(), json!("worker-1"));
+        let response = ApiError::with_code_and_meta(
+            StatusCode::CONFLICT,
+            "run is leased",
+            "petri_run_leased",
+            meta,
+        )
+        .into_response();
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should serialize");
+        let body: serde_json::Value =
+            serde_json::from_slice(&body).expect("response body should be valid json");
+
+        assert_eq!(
+            body,
+            json!({
+                "errors": [{
+                    "status": "409",
+                    "title": "Conflict",
+                    "detail": "run is leased",
+                    "code": "petri_run_leased",
+                    "meta": { "owner": "worker-1" }
                 }]
             })
         );

@@ -773,7 +773,7 @@ function ObjectStoreStep({
   return (
     <StepPanel
       title="Choose the shared object store"
-      description="This configures the shared backend for both SlateDB and run artifacts. Fabro still keeps its local storage root on disk."
+      description="This configures the backend for run artifacts. Fabro still keeps its local storage root on disk."
       error={saveError}
       submitting={submitting}
       submittingLabel={
@@ -969,7 +969,7 @@ function ObjectStoreStep({
         <div className="space-y-3">
           <Field
             label="Local directory"
-            hint="Shared root for SlateDB and run artifacts."
+            hint="Root for run artifacts."
           >
             <input
               ref={localRootInputRef}
@@ -989,7 +989,7 @@ function ObjectStoreStep({
             />
           </Field>
           <p className="rounded-lg bg-overlay px-4 py-3 text-sm/6 text-fg-3 outline-1 -outline-offset-1 outline-white/10">
-            Fabro will store SlateDB and run artifacts under this directory.
+            Fabro will store run artifacts under this directory.
           </p>
         </div>
       )}
@@ -1556,7 +1556,7 @@ function WelcomeScreen() {
           ["Server URL", "Confirm where operators will reach Fabro."],
           [
             "Object store",
-            "Choose local disk or AWS S3 for SlateDB and artifacts.",
+            "Choose local disk or AWS S3 for artifacts.",
           ],
           ["Sandbox", "Choose Docker or Daytona for workflow execution."],
           ["LLMs", "Validate API keys for Anthropic, OpenAI, or Gemini."],
@@ -1869,12 +1869,12 @@ const OBJECT_STORE_PROVIDER_OPTIONS: ReadonlyArray<CardOption<ObjectStoreProvide
   {
     id:    "local",
     title: "Local disk",
-    body:  "Uses the host filesystem for SlateDB and run artifacts.",
+    body:  "Uses the host filesystem for run artifacts.",
   },
   {
     id:    "s3",
     title: "AWS S3",
-    body:  "Uses one S3 bucket with fixed slatedb/ and artifacts/ prefixes.",
+    body:  "Uses one S3 bucket with the fixed artifacts/ prefix.",
   },
 ];
 
@@ -2394,7 +2394,7 @@ function ObjectStoreSummaryRows({
             : "Runtime credentials"
         }
       />
-      <SummaryRow label="Prefixes" value="slatedb/, artifacts/" mono />
+      <SummaryRow label="Prefix" value="artifacts/" mono />
     </>
   );
 }

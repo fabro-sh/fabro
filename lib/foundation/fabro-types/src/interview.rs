@@ -2,7 +2,16 @@ use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::run_event::InterviewOption;
+/// One choice a question offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct InterviewOption {
+    pub key:         String,
+    pub label:       String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview:     Option<String>,
+}
 
 const REVIEW_TARGET_LABEL_MAX_CHARS: usize = 200;
 const REVIEW_TARGET_URL_MAX_CHARS: usize = 2048;

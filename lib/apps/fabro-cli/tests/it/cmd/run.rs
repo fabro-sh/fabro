@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use super::support::{
     created_run_id, init_remote_fixture, mock_environment, mock_workflow_version_registrations,
-    output_stderr, remote_run_summary_json, run_state, wait_for_event_names, write_workflow,
+    output_stderr, remote_run_summary_json, run_state, wait_for_run_finished, write_workflow,
 };
 use crate::support::{LightweightCli, run_output_filters, run_projection_json, unique_run_id};
 
@@ -33,6 +33,8 @@ fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
 }
 
 fn remote_run_state_response(run_id: &str) -> serde_json::Value {
+    // A finished run whose `report` stage answered: the summary prints the
+    // last stage response as the run's output.
     let mut state = run_projection_json(
         run_id,
         &serde_json::json!({
@@ -40,49 +42,56 @@ fn remote_run_state_response(run_id: &str) -> serde_json::Value {
             "reason": "completed"
         }),
     );
-    state["checkpoints"] = serde_json::json!([{
-        "seq": 1,
-        "checkpoint": {
-            "timestamp": "2026-04-05T12:00:01Z",
-            "current_node": "exit",
-            "completed_nodes": ["report"],
-            "node_retries": {},
-            "context_values": {
-                "response.report": "Remote output"
-            },
-            "node_outcomes": {},
-            "next_node_id": null,
-            "git_commit_sha": null,
-            "loop_failure_signatures": {},
-            "restart_failure_signatures": {},
-            "node_visits": {}
-        }
-    }]);
+    let mut projection: fabro_types::RunProjection =
+        serde_json::from_value(state.clone()).expect("the projection fixture parses");
+    projection
+        .stage_entry("report", 1, fabro_types::first_event_seq(1))
+        .response = Some("Remote output".to_string());
+    state = serde_json::to_value(projection).expect("the projection serializes");
     state["conclusion"] = serde_json::json!({
-            "timestamp": "2026-04-05T12:00:01Z",
-            "status": "succeeded",
-            "timing": {"wall_time_ms": 12, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
-            "stages": [],
-            "usage": null,
-            "total_retries": 0,
-            "diff": {}
+        "timestamp": "2026-04-05T12:00:01Z",
+        "status": "succeeded",
+        "timing": {"wall_time_ms": 12, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
+        "stages": [],
+        "usage": null,
+        "total_retries": 0,
+        "diff": {}
     });
     state
 }
 
-fn run_completed_event(run_id: &str) -> serde_json::Value {
+/// The platform record that moves the run to `status`, as one item of the
+/// run's stream.
+fn lifecycle_item(
+    run_id: &str,
+    stream_seq: u64,
+    transition: &str,
+    status: &str,
+) -> serde_json::Value {
     serde_json::json!({
-        "seq": 1,
-        "event": "run.completed",
-        "id": "evt-run-completed",
         "run_id": run_id,
-        "ts": "2026-04-05T12:00:01Z",
-        "properties": {
-            "timing": {"wall_time_ms": 12, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
-            "artifact_count": 0,
-            "status": "succeeded",
-            "reason": "completed"
+        "stream_seq": stream_seq,
+        "kind": "platform",
+        "id": stream_seq.to_string(),
+        "recorded_at": 1_775_390_400_000_u64 + stream_seq,
+        "item": {
+            "seq": stream_seq,
+            "recorded_at": 1_775_390_400_000_u64 + stream_seq,
+            "record": {
+                "kind": "run.lifecycle",
+                "transition": transition,
+                "status": { "kind": status, "reason": "completed" }
+            }
         }
+    })
+}
+
+/// One page of a run's stream.
+fn stream_page(items: &[serde_json::Value], has_more: bool) -> serde_json::Value {
+    serde_json::json!({
+        "data": items,
+        "meta": { "has_more": has_more },
+        "event_contract_version": 3
     })
 }
 
@@ -97,17 +106,6 @@ fn seed_anthropic_vault(storage_dir: &std::path::Path) {
             None,
         )
         .expect("Anthropic credential should store in test vault");
-}
-
-fn run_running_event(run_id: &str, seq: u32) -> serde_json::Value {
-    serde_json::json!({
-        "seq": seq,
-        "event": "run.running",
-        "id": format!("evt-run-running-{seq}"),
-        "run_id": run_id,
-        "ts": "2026-04-05T12:00:00Z",
-        "properties": {}
-    })
 }
 
 #[test]
@@ -458,7 +456,7 @@ digraph VaultWorkerLlm {
     );
 
     llm_mock.assert();
-    wait_for_event_names(&context.single_run_dir(), &["run.completed"]);
+    wait_for_run_finished(&context.single_run_dir());
 }
 
 #[test]
@@ -580,28 +578,28 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
     let first_page = server.mock(|when, then| {
         when.method("GET")
             .path(format!("/api/v1/runs/{run_id}/events"))
-            .query_param_missing("since_seq");
+            .query_param("after", "0");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
-                serde_json::json!({
-                    "data": [run_running_event(run_id.as_str(), 1)],
-                    "meta": { "has_more": true }
-                })
+                stream_page(
+                    &[lifecycle_item(run_id.as_str(), 1, "running", "running")],
+                    true,
+                )
                 .to_string(),
             );
     });
     let second_page = server.mock(|when, then| {
         when.method("GET")
             .path(format!("/api/v1/runs/{run_id}/events"))
-            .query_param("since_seq", "2");
+            .query_param("after", "1");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
-                serde_json::json!({
-                    "data": [run_completed_event(run_id.as_str())],
-                    "meta": { "has_more": false }
-                })
+                stream_page(
+                    &[lifecycle_item(run_id.as_str(), 2, "succeeded", "succeeded")],
+                    false,
+                )
                 .to_string(),
             );
     });
@@ -835,8 +833,8 @@ fn dry_run_simple() {
     ----- stderr -----
         Run: [ULID]
         Web UI: http://localhost:3000/runs/[ULID]
-        Sandbox: local (ready in [TIME])
         ✓ Start  [TIME]
+        Base: [BASE]
         ✓ Run Tests  [TIME]
         ✓ Report  [TIME]
         ✓ Exit  [TIME]
@@ -847,7 +845,7 @@ fn dry_run_simple() {
     Duration:  [DURATION]
 
     === Output ===
-    [Simulated] Response for stage: report
+    [Simulated] report
     ");
 }
 
@@ -929,7 +927,7 @@ fn dry_run_persists_event_history_in_store() {
 
     let run_dir = context.single_run_dir();
     let run_id = run_state(&run_dir).spec.run_id.to_string();
-    wait_for_event_names(&run_dir, &["run.completed", "sandbox.stop.completed"]);
+    wait_for_run_finished(&run_dir);
     let output = context
         .command()
         .args(["events", &run_id])
@@ -952,25 +950,35 @@ fn dry_run_persists_event_history_in_store() {
         "store-backed event history should have at least one line"
     );
     assert_eq!(
-        progress.first().and_then(|event| event["event"].as_str()),
+        progress
+            .first()
+            .and_then(|item| item.pointer("/item/record/kind"))
+            .and_then(Value::as_str),
         Some("run.created")
     );
     assert_eq!(
         progress
             .first()
-            .and_then(|event| event.pointer("/properties/settings/run/execution/approval"))
+            .and_then(|item| item.pointer("/item/record/spec/settings/run/execution/approval"))
             .and_then(Value::as_str),
         Some("auto")
     );
     assert!(
-        progress
-            .iter()
-            .any(|event| event["event"].as_str() == Some("run.completed")),
-        "store-backed event history should include run.completed"
+        progress.iter().any(|item| item
+            .pointer("/item/record/body/event")
+            .and_then(Value::as_str)
+            == Some("run.finished")),
+        "store-backed event history should include the engine's run.finished"
+    );
+    let last = progress.last().expect("the history has a last item");
+    assert_eq!(
+        last.pointer("/item/record/kind").and_then(Value::as_str),
+        Some("run.lifecycle")
     );
     assert_eq!(
-        progress.last().and_then(|event| event["event"].as_str()),
-        Some("sandbox.stop.completed")
+        last.pointer("/item/record/transition")
+            .and_then(Value::as_str),
+        Some("succeeded")
     );
 
     let tail_output = context
@@ -990,39 +998,6 @@ fn dry_run_persists_event_history_in_store() {
         .find(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("tail events output should be JSON"))
         .expect("tail events should include the latest event");
-    fabro_json_snapshot!(context, &live_content, @r#"
-    {
-      "actor": {
-        "kind": "worker",
-        "run_id": "[ULID]"
-      },
-      "event": "sandbox.stop.completed",
-      "id": "[EVENT_ID]",
-      "properties": {
-        "action": "stop",
-        "correlation_id": "[ULID]",
-        "duration": {
-          "nanos": "[NANOS]",
-          "secs": 0
-        },
-        "id": {
-          "sequence": 5,
-          "source_id": "[HEX]"
-        },
-        "occurred_at": "[TIMESTAMP]",
-        "operation_id": "[HEX]",
-        "provider": "host",
-        "subject": {
-          "id": "host-dir-[HEX]",
-          "type": "sandbox"
-        },
-        "type": "operation_completed"
-      },
-      "run_id": "[ULID]",
-      "ts": "[TIMESTAMP]"
-    }
-    "#);
-
     assert_eq!(live_content, *progress.last().unwrap());
 }
 
@@ -1104,11 +1079,13 @@ fn json_run_requires_manual_input_for_human_gates_without_auto_approve() {
         .map(|line| serde_json::from_str(line).expect("run JSON output should be JSONL"))
         .collect();
 
+    // The gate's question: Petri records it as a parsed step progress.
     assert!(
         progress
             .iter()
-            .any(|event| event.get("event") == Some(&Value::String("interview.started".into()))),
-        "stdout should include the interview start event:\n{}",
+            .any(|item| item.pointer("/item/derived/parsed/kind")
+                == Some(&Value::String("question".into()))),
+        "stdout should include the gate's question:\n{}",
         serde_json::to_string_pretty(&progress).unwrap()
     );
 }

@@ -1,16 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { StageOutcome, StageState } from "@qltysh/fabro-api-client";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
 import TestRenderer, { act } from "react-test-renderer";
 import { MemoryRouter } from "react-router";
 
 import {
-  makeEventEnvelope,
   makeStage as baseMakeStage,
   setupReactTestEnv,
   textContent,
 } from "../../lib/test-utils";
 import type { Stage } from "../stage-sidebar";
+import type { ParallelBranchSummary, ParallelOverview } from "./helpers";
 import { ParallelChildren } from "./parallel-children";
 
 let teardown: () => void;
@@ -57,38 +56,21 @@ function branchStage(
   });
 }
 
-function event(partial: Partial<EventEnvelope>): EventEnvelope {
-  return makeEventEnvelope(partial.seq ?? 1, {
-    event: "parallel.completed",
-    stage_id: "fork@1",
-    ...partial,
-  });
-}
-
-function startedEvent(branchCount: number): EventEnvelope {
-  return event({
-    event: "parallel.started",
-    properties: { branch_count: branchCount },
-  });
-}
-
-function completedEvent(results: Array<{ id: string; status: StageOutcome }>): EventEnvelope {
-  const countOf = (status: StageOutcome) =>
-    results.filter((result) => result.status === status).length;
-  return event({
-    seq: 2,
-    event: "parallel.completed",
-    properties: {
-      duration_ms: 12000,
-      success_count: countOf(StageOutcome.SUCCEEDED),
-      failure_count: countOf(StageOutcome.FAILED),
-      results: results.map((result) => ({ ...result, context_updates: {} })),
-    },
-  });
+/** The fork's overview: the announced branch count and the results so far. */
+function overview(
+  branchCount: number | null,
+  results: Array<{ id: string; status: StageOutcome }> = [],
+): ParallelOverview {
+  return {
+    branchCount,
+    results: results.map(
+      (result): ParallelBranchSummary => ({ ...result, index: null, itemLabel: null }),
+    ),
+  };
 }
 
 function renderParallel(
-  events: EventEnvelope[],
+  forkOverview: ParallelOverview,
   allStages: Stage[],
   stage = parallelStage,
 ): TestRenderer.ReactTestRenderer {
@@ -98,7 +80,7 @@ function renderParallel(
       <MemoryRouter>
         <ParallelChildren
           stage={stage}
-          events={events}
+          overview={forkOverview}
           runId="run-1"
           allStages={allStages}
         />
@@ -123,7 +105,7 @@ function statValue(renderer: TestRenderer.ReactTestRenderer, label: string): str
 describe("ParallelChildren", () => {
   test("renders live branch names, statuses, counts, and stage links", () => {
     const renderer = renderParallel(
-      [startedEvent(2)],
+      overview(2),
       [
         branchStage("review_glm", 0, StageState.SUCCEEDED),
         branchStage("review_opus", 1, StageState.RUNNING),
@@ -146,7 +128,7 @@ describe("ParallelChildren", () => {
 
   test("shows the recorded stage duration when cancellation interrupts the fan-out", () => {
     const renderer = renderParallel(
-      [startedEvent(2)],
+      overview(2),
       [],
       makeStage({
         id: "fork@1",
@@ -165,7 +147,7 @@ describe("ParallelChildren", () => {
 
   test("keeps looped fork links scoped to the selected fork visit", () => {
     const renderer = renderParallel(
-      [startedEvent(1)],
+      overview(1),
       [
         branchStage("review_glm", 0, StageState.SUCCEEDED, "fork@1", 1),
         branchStage("review_glm", 0, StageState.RUNNING, "fork@2", 2),
@@ -179,7 +161,7 @@ describe("ParallelChildren", () => {
     // Branches queued behind `max_parallel` reserve no stage identity, so the
     // observed indexes are sparse. Sizing the list by entry count would drop
     // the only running branch.
-    const renderer = renderParallel([], [branchStage("review_opus", 2, StageState.RUNNING)]);
+    const renderer = renderParallel(overview(null), [branchStage("review_opus", 2, StageState.RUNNING)]);
 
     expect(branchRowText(renderer)).toEqual([
       "PendingBranch 1",
@@ -191,7 +173,7 @@ describe("ParallelChildren", () => {
   });
 
   test("renders branches with no stage or result yet as pending placeholders", () => {
-    const renderer = renderParallel([startedEvent(3)], [branchStage("review_glm", 0, StageState.RUNNING)]);
+    const renderer = renderParallel(overview(3), [branchStage("review_glm", 0, StageState.RUNNING)]);
 
     expect(branchRowText(renderer)).toEqual([
       "Runningreview_glm",
@@ -204,7 +186,7 @@ describe("ParallelChildren", () => {
 
   test("labels a re-entered branch with its visit, matching the sidebar", () => {
     const renderer = renderParallel(
-      [startedEvent(1)],
+      overview(1),
       [branchStage("review_glm", 0, StageState.RUNNING, "fork@2", 2)],
       makeStage({ id: "fork@2", name: "fork", handler: "parallel", visit: 2 }),
     );
@@ -215,13 +197,10 @@ describe("ParallelChildren", () => {
 
   test("keeps duplicate branch targets in index order and only links recorded stages", () => {
     const renderer = renderParallel(
-      [
-        startedEvent(2),
-        completedEvent([
+      overview(2, [
           { id: "review", status: StageOutcome.FAILED },
           { id: "review", status: StageOutcome.FAILED },
         ]),
-      ],
       [branchStage("review", 0, StageState.SUCCEEDED)],
     );
 
@@ -234,10 +213,7 @@ describe("ParallelChildren", () => {
 
   test("renders a completed result without a matching stage as an unlinked row", () => {
     const renderer = renderParallel(
-      [
-        startedEvent(1),
-        completedEvent([{ id: "legacy_branch", status: StageOutcome.SUCCEEDED }]),
-      ],
+      overview(1, [{ id: "legacy_branch", status: StageOutcome.SUCCEEDED }]),
       [],
     );
 
@@ -250,15 +226,12 @@ describe("ParallelChildren", () => {
       branchStage("partial", 0, StageState.PARTIALLY_SUCCEEDED),
       branchStage("skipped", 1, StageState.SKIPPED),
     ];
-    const running = renderParallel([startedEvent(2)], allStages);
+    const running = renderParallel(overview(2), allStages);
     const completed = renderParallel(
-      [
-        startedEvent(2),
-        completedEvent([
+      overview(2, [
           { id: "partial", status: StageOutcome.PARTIALLY_SUCCEEDED },
           { id: "skipped", status: StageOutcome.SKIPPED },
         ]),
-      ],
       allStages,
     );
 
@@ -279,31 +252,13 @@ describe("ParallelChildren", () => {
         <MemoryRouter>
           <ParallelChildren
             stage={parallelStage}
-            events={[
-              event({
-                properties: {
-                  duration_ms: 100,
-                  success_count: 2,
-                  failure_count: 0,
-                  results: [
-                    {
-                      id: "reviewer",
-                      index: 0,
-                      item_label: "auth",
-                      status: "succeeded",
-                      context_updates: {},
-                    },
-                    {
-                      id: "reviewer",
-                      index: 1,
-                      item_label: "api",
-                      status: "succeeded",
-                      context_updates: {},
-                    },
-                  ],
-                },
-              }),
-            ]}
+            overview={{
+              branchCount: 2,
+              results: [
+                { id: "reviewer", index: 0, itemLabel: "auth", status: StageOutcome.SUCCEEDED },
+                { id: "reviewer", index: 1, itemLabel: "api", status: StageOutcome.SUCCEEDED },
+              ],
+            }}
             runId="run-1"
             allStages={[
               {

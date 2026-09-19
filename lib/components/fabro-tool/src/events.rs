@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use fabro_types::EventEnvelope;
+use fabro_types::RunStreamItem;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -17,6 +17,9 @@ pub enum RunEventsAction {
     Search,
 }
 
+/// The `fabro_run_events` tool's parameters: which page of a run's stream
+/// to read (`after` is the last `stream_seq` seen, exclusive) and how to
+/// narrow it.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FabroRunEventsParams {
     pub action:             RunEventsAction,
@@ -27,7 +30,7 @@ pub struct FabroRunEventsParams {
     pub created_after:      Option<String>,
     pub created_before:     Option<String>,
     pub first:              Option<usize>,
-    pub after:              Option<u32>,
+    pub after:              Option<u64>,
     pub event_ids:          Option<Vec<String>>,
     pub offset:             Option<usize>,
     pub limit:              Option<usize>,
@@ -100,13 +103,15 @@ pub struct RunEventsResult {
     pub run_id:      String,
     pub action:      RunEventsAction,
     pub events:      Vec<RunEventResult>,
-    pub next_cursor: Option<u32>,
+    /// The `after` cursor for the next page: the last `stream_seq` returned.
+    pub next_cursor: Option<u64>,
 }
 
+/// One item of the run's stream, as the tool returns it.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RunEventResult {
     pub event_id:  String,
-    pub sequence:  u32,
+    pub sequence:  u64,
     pub event:     Value,
     pub truncated: bool,
 }
@@ -125,26 +130,26 @@ pub async fn run_events(
         .await
         .map_err(|err| ToolError::from_anyhow(&err))?
         .id;
-    let fetch_after = if descending { None } else { raw.after };
-    let mut events = if let Some(limit) = event_fetch_limit(&raw, first) {
-        backend
-            .list_run_events_until(&run_id, fetch_after, limit)
-            .await
+    let fetch_after = if descending {
+        0
     } else {
-        backend.list_run_events(&run_id, fetch_after, None).await
-    }
-    .map_err(|err| ToolError::from_anyhow(&err))?;
+        raw.after.unwrap_or(0)
+    };
+    let mut items = backend
+        .list_run_stream(&run_id, fetch_after, event_fetch_limit(&raw, first))
+        .await
+        .map_err(|err| ToolError::from_anyhow(&err))?;
     if descending {
         if let Some(after) = raw.after {
-            events.retain(|event| event.seq < after);
+            items.retain(|item| item.stream_seq < after);
         }
     }
-    filter_events(&mut events, &raw, created_after, created_before);
+    filter_items(&mut items, &raw, created_after, created_before);
     if descending {
-        events.reverse();
+        items.reverse();
     }
     let offset = raw.offset.unwrap_or(0);
-    let page = events
+    let page = items
         .into_iter()
         .skip(offset)
         .take(first)
@@ -152,15 +157,9 @@ pub async fn run_events(
     let max_content_length = raw.max_content_length.unwrap_or(20_000);
     let results = page
         .iter()
-        .map(|event| run_event_result(event, max_content_length))
+        .map(|item| run_event_result(item, max_content_length))
         .collect::<ToolResult<Vec<_>>>()?;
-    let next_cursor = page.last().map(|event| {
-        if descending {
-            event.seq
-        } else {
-            event.seq.saturating_add(1)
-        }
-    });
+    let next_cursor = page.last().map(|item| item.stream_seq);
 
     Ok(RunEventsResult {
         run_id: run_id.to_string(),
@@ -174,6 +173,9 @@ pub fn run_events_text(result: &RunEventsResult) -> String {
     format!("returned {} Fabro event(s)", result.events.len())
 }
 
+/// How many items to read from the server: the page plus its offset when
+/// the request is a plain ascending page, the whole stream when a filter,
+/// a search or descending order needs every item.
 fn event_fetch_limit(params: &FabroRunEventsParams, first: usize) -> Option<usize> {
     let needs_full_scan = params.event_ids.is_some()
         || params.event_types.is_some()
@@ -193,65 +195,68 @@ fn event_fetch_limit(params: &FabroRunEventsParams, first: usize) -> Option<usiz
     Some(requested.max(1))
 }
 
-fn filter_events(
-    events: &mut Vec<EventEnvelope>,
+fn filter_items(
+    items: &mut Vec<RunStreamItem>,
     params: &FabroRunEventsParams,
     created_after: Option<DateTime<Utc>>,
     created_before: Option<DateTime<Utc>>,
 ) {
     if let Some(event_ids) = params.event_ids.as_ref() {
-        events.retain(|event| event_ids.contains(&event.event.id));
+        items.retain(|item| event_ids.contains(&item.id));
     }
     if let Some(event_types) = params.event_types.as_ref() {
-        events.retain(|event| {
-            event_types
-                .iter()
-                .any(|event_type| event_type == event.event.event_name())
+        items.retain(|item| {
+            item.name()
+                .is_some_and(|name| event_types.iter().any(|event_type| event_type == name))
         });
     }
     if let Some(categories) = params.categories.as_ref() {
-        events.retain(|event| {
-            let category = event
-                .event
-                .event_name()
-                .split('.')
-                .next()
+        items.retain(|item| {
+            let category = item
+                .name()
+                .and_then(|name| name.split('.').next())
                 .unwrap_or_default();
             categories.iter().any(|candidate| candidate == category)
         });
     }
     if let Some(cutoff) = created_after {
-        events.retain(|event| event.event.ts >= cutoff);
+        items.retain(|item| recorded_at(item) >= cutoff);
     }
     if let Some(cutoff) = created_before {
-        events.retain(|event| event.event.ts <= cutoff);
+        items.retain(|item| recorded_at(item) <= cutoff);
     }
     if matches!(params.action, RunEventsAction::Search) {
         if let Some(query) = params.query.as_deref() {
-            events.retain(|event| {
-                serde_json::to_string(event).is_ok_and(|serialized| serialized.contains(query))
+            items.retain(|item| {
+                serde_json::to_string(item).is_ok_and(|serialized| serialized.contains(query))
             });
         }
     }
 }
 
-fn run_event_result(
-    event: &EventEnvelope,
-    max_content_length: usize,
-) -> ToolResult<RunEventResult> {
-    let mut serialized = serde_json::to_string(event)
+/// When the item's record was appended, from its epoch milliseconds; the
+/// epoch itself for a timestamp outside `DateTime`'s range.
+fn recorded_at(item: &RunStreamItem) -> DateTime<Utc> {
+    i64::try_from(item.recorded_at)
+        .ok()
+        .and_then(DateTime::from_timestamp_millis)
+        .unwrap_or_default()
+}
+
+fn run_event_result(item: &RunStreamItem, max_content_length: usize) -> ToolResult<RunEventResult> {
+    let mut serialized = serde_json::to_string(item)
         .map_err(|err| ToolError::message(format!("failed to serialize event: {err}")))?;
     let truncated = serialized.len() > max_content_length;
     let event_value = if truncated {
         serialized.truncate(floor_char_boundary(&serialized, max_content_length));
         Value::String(serialized)
     } else {
-        serde_json::to_value(event)
+        serde_json::to_value(item)
             .map_err(|err| ToolError::message(format!("failed to serialize event: {err}")))?
     };
     Ok(RunEventResult {
-        event_id: event.event.id.clone(),
-        sequence: event.seq,
+        event_id: item.id.clone(),
+        sequence: item.stream_seq,
         event: event_value,
         truncated,
     })
@@ -267,46 +272,85 @@ fn floor_char_boundary(value: &str, max_len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
-    use fabro_types::{EventBody, EventEnvelope, RunEvent, fixtures};
+    use fabro_types::{RunStreamItemKind, fixtures};
     use serde_json::{Value, json};
 
     use super::*;
 
+    fn item(stream_seq: u64, name: &str, recorded_at: u64) -> RunStreamItem {
+        RunStreamItem {
+            run_id: fixtures::RUN_1,
+            stream_seq,
+            kind: RunStreamItemKind::Petri,
+            id: format!("coordinator/{stream_seq}/0"),
+            recorded_at,
+            item: json!({
+                "record": { "body": { "event": name, "message": "éééé" } }
+            }),
+        }
+    }
+
     #[test]
     fn run_event_result_truncates_at_utf8_boundary() {
-        let event = EventEnvelope {
-            seq:   1,
-            event: RunEvent {
-                id:                 "evt_utf8".to_string(),
-                ts:                 Utc::now(),
-                run_id:             fixtures::RUN_1,
-                node_id:            None,
-                node_label:         None,
-                stage_id:           None,
-                parallel_group_id:  None,
-                parallel_branch_id: None,
-                session_id:         None,
-                parent_session_id:  None,
-                tool_call_id:       None,
-                actor:              None,
-                body:               EventBody::Unknown {
-                    name:       "test.utf8".to_string(),
-                    properties: json!({ "message": "éééé" }),
-                },
-            },
-        };
-        let serialized = serde_json::to_string(&event).unwrap();
+        let item = item(1, "test.utf8", 1_789_323_217_366);
+        let serialized = serde_json::to_string(&item).unwrap();
         let first_multibyte = serialized
             .find('é')
             .expect("serialized event should contain é");
 
-        let result = run_event_result(&event, first_multibyte + 1).unwrap();
+        let result = run_event_result(&item, first_multibyte + 1).unwrap();
 
         assert!(result.truncated);
         let Value::String(event_json) = result.event else {
             panic!("truncated events should return string payloads");
         };
         assert!(event_json.is_char_boundary(event_json.len()));
+    }
+
+    #[test]
+    fn filters_narrow_by_name_category_and_time() {
+        let params = FabroRunEventsParams {
+            action:             RunEventsAction::List,
+            run_id:             fixtures::RUN_1.to_string(),
+            event_types:        Some(vec!["stage.started".to_string()]),
+            categories:         None,
+            direction:          None,
+            created_after:      None,
+            created_before:     None,
+            first:              None,
+            after:              None,
+            event_ids:          None,
+            offset:             None,
+            limit:              None,
+            max_content_length: None,
+            query:              None,
+        };
+        let mut items = vec![
+            item(1, "run.started", 1_000),
+            item(2, "stage.started", 2_000),
+            item(3, "stage.finished", 3_000),
+        ];
+        filter_items(&mut items, &params, None, None);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].stream_seq, 2);
+
+        let params = FabroRunEventsParams {
+            event_types: None,
+            categories: Some(vec!["stage".to_string()]),
+            ..params
+        };
+        let mut items = vec![
+            item(1, "run.started", 1_000),
+            item(2, "stage.started", 2_000),
+            item(3, "stage.finished", 3_000),
+        ];
+        filter_items(
+            &mut items,
+            &params,
+            DateTime::from_timestamp_millis(2_500),
+            None,
+        );
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].stream_seq, 3);
     }
 }

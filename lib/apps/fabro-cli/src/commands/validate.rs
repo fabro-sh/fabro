@@ -3,6 +3,7 @@ use fabro_config::RunLayer;
 use fabro_config::user::active_settings_path;
 use fabro_manifest::{ManifestBuildInput, build_run_manifest};
 use fabro_server::manifest_validation;
+use fabro_types::diagnostic::Severity;
 use fabro_util::terminal::Styles;
 
 use crate::args::ValidateArgs;
@@ -31,13 +32,13 @@ pub(crate) fn run(
             "workflow_name": response.workflow.name,
             "nodes": response.workflow.nodes,
             "edges": response.workflow.edges,
-            "valid": !diagnostics.iter().any(|d| d.severity == fabro_validate::Severity::Error),
+            "valid": !diagnostics.iter().any(|d| d.severity == Severity::Error),
             "diagnostics": diagnostics,
         }))?;
 
         if diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+            .any(|diagnostic| diagnostic.severity == Severity::Error)
         {
             bail!("Validation failed");
         }
@@ -64,7 +65,7 @@ pub(crate) fn run(
 
     if diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
     {
         bail!("Validation failed");
     }

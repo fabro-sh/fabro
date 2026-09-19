@@ -24,6 +24,9 @@ import type { ForkSourceRef } from './fork-source-ref';
 import type { GitContext } from './git-context';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { PetriAdmission } from './petri-admission';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunProvenance } from './run-provenance';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -54,4 +57,8 @@ export interface RunSpec {
     'spec_blob'?: string | null;
     'git'?: GitContext | null;
     'fork_source_ref'?: ForkSourceRef | null;
+    /**
+     * What Petri admitted for the run at create time: the graphs it executes and resumes from.
+     */
+    'admission': PetriAdmission;
 }

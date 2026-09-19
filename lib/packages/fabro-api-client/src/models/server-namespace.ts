@@ -39,9 +39,6 @@ import type { ServerSandboxSettings } from './server-sandbox-settings';
 import type { ServerSchedulerSettings } from './server-scheduler-settings';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ServerSlateDbSettings } from './server-slate-db-settings';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { ServerStorageSettings } from './server-storage-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -55,7 +52,6 @@ export interface ServerNamespace {
     'sandbox': ServerSandboxSettings;
     'storage': ServerStorageSettings;
     'artifacts': ServerArtifactsSettings;
-    'slatedb': ServerSlateDbSettings;
     'scheduler': ServerSchedulerSettings;
     'logging': ServerLoggingSettings;
     'integrations': ServerIntegrationsSettings;

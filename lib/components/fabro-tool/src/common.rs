@@ -72,18 +72,14 @@ pub trait FabroToolBackend: Send + Sync {
     async fn link_run_parent(&self, child_id: &RunId, parent_id: &RunId) -> anyhow::Result<Run>;
     async fn unlink_run_parent(&self, child_id: &RunId) -> anyhow::Result<Run>;
     async fn get_run_state(&self, run_id: &RunId) -> anyhow::Result<fabro_types::RunProjection>;
-    async fn list_run_events(
+    /// The run's stream past `after` (the last `stream_seq` seen; `0` from
+    /// the start), at most `limit` items when a limit is given.
+    async fn list_run_stream(
         &self,
         run_id: &RunId,
-        after: Option<u32>,
+        after: u64,
         limit: Option<usize>,
-    ) -> anyhow::Result<Vec<fabro_types::EventEnvelope>>;
-    async fn list_run_events_until(
-        &self,
-        run_id: &RunId,
-        after: Option<u32>,
-        limit: usize,
-    ) -> anyhow::Result<Vec<fabro_types::EventEnvelope>>;
+    ) -> anyhow::Result<Vec<fabro_types::RunStreamItem>>;
     async fn list_run_questions(&self, run_id: &RunId) -> anyhow::Result<Vec<types::ApiQuestion>>;
     async fn submit_run_answer(
         &self,

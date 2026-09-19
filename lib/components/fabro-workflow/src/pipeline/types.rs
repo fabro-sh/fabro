@@ -1,40 +1,14 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_graphviz::graph::Graph;
-use fabro_interview::Interviewer;
-use fabro_llm::lithos_catalog::Catalog;
-use fabro_mcp::config::McpServerSettings;
-use fabro_sandbox::SandboxSpec;
 use fabro_template::TemplateContext;
-use fabro_types::settings::run::{
-    PullRequestSettings, ResolvedGithubIntegration, RunModelControls,
-};
-use fabro_types::settings::server::ServerSandboxProvidersSettings;
-use fabro_types::{ManifestPath, RunId, RunProjection};
-use fabro_validate::{Diagnostic, Severity};
-use fabro_vault::Vault;
-use lithos_llm::catalog::ProviderId;
-use tokio::sync::RwLock as AsyncRwLock;
+use fabro_types::diagnostic::{Diagnostic, Severity};
 
-use crate::artifact_upload::ArtifactSink;
-use crate::context::Context;
 use crate::error::Error;
-use crate::event::Emitter;
 use crate::file_resolver::FileResolver;
-use crate::handler::HandlerRegistry;
-use crate::model_fallback::ModelFallbackPolicy;
-use crate::outcome::Outcome;
-use crate::records::{Checkpoint, Conclusion, RunSpec};
-use crate::run_control::RunControlState;
-use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
-use crate::runtime_store::RunStoreHandle;
-use crate::services::{EngineServices, FabroRunToolServices, RunServices};
-use crate::stage_execution::StageExecutionSeed;
-use crate::steering_hub::SteeringHub;
-use crate::transforms::{ModelResolutionTransform, RenderMode, Transform};
-use crate::workflow_bundle::WorkflowBundle;
+use crate::records::RunSpec;
+use crate::transforms::{RenderMode, Transform};
 
 /// Output of the PARSE phase.
 #[non_exhaustive]
@@ -105,6 +79,12 @@ impl Validated {
 
     pub fn promote_template_undefined_variables_to_errors(&mut self) {
         self.promote_rule_to_error(TEMPLATE_UNDEFINED_VARIABLE_RULE);
+    }
+
+    /// Add diagnostics from another judge of the workflow (Petri's check),
+    /// after the transforms' own.
+    pub fn extend_diagnostics(&mut self, diagnostics: impl IntoIterator<Item = Diagnostic>) {
+        self.diagnostics.extend(diagnostics);
     }
 
     /// True if any diagnostic has Error severity.
@@ -228,168 +208,6 @@ impl Persisted {
             self.run_spec,
         )
     }
-
-    pub async fn load_from_store(
-        run_store: &RunStoreHandle,
-        run_dir: &Path,
-    ) -> Result<Self, Error> {
-        super::persist::load_from_store(run_store, run_dir).await
-    }
-}
-
-#[derive(Clone)]
-pub struct LlmSpec {
-    pub model:          String,
-    pub provider_id:    ProviderId,
-    pub fallbacks:      ModelFallbackPolicy,
-    pub mcp_servers:    Vec<McpServerSettings>,
-    pub model_controls: RunModelControls,
-    pub dry_run:        bool,
-}
-
-#[derive(Clone)]
-pub struct SandboxEnvSpec {
-    pub toml_env:           HashMap<String, String>,
-    /// The resolved GitHub integration request (interpolated permissions
-    /// plus declared additional repositories). `None` when the run requests
-    /// no `GITHUB_TOKEN`.
-    pub github_integration: Option<ResolvedGithubIntegration>,
-    pub origin_url:         Option<String>,
-}
-
-/// Opaque, internally consistent state needed to resume from the latest
-/// checkpoint in a run projection.
-pub struct ResumeState {
-    checkpoint:       Checkpoint,
-    stage_executions: StageExecutionSeed,
-}
-
-impl ResumeState {
-    /// Build resume state from a projection's latest checkpoint and complete
-    /// stage history.
-    #[must_use]
-    pub fn from_projection(projection: &RunProjection) -> Option<Self> {
-        let checkpoint_record = projection.checkpoints.last()?;
-        Some(Self {
-            checkpoint:       checkpoint_record.checkpoint.clone(),
-            stage_executions: StageExecutionSeed::from_projection(
-                projection,
-                checkpoint_record.seq,
-            ),
-        })
-    }
-
-    pub(crate) fn into_parts(self) -> (Checkpoint, StageExecutionSeed) {
-        (self.checkpoint, self.stage_executions)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(checkpoint: Checkpoint, stage_executions: StageExecutionSeed) -> Self {
-        Self {
-            checkpoint,
-            stage_executions,
-        }
-    }
-}
-
-pub struct InitOptions {
-    pub run_store:         RunStoreHandle,
-    pub dry_run:           bool,
-    pub emitter:           Arc<Emitter>,
-    pub sandbox:           SandboxSpec,
-    pub llm:               LlmSpec,
-    pub interviewer:       Arc<dyn Interviewer>,
-    pub steering_hub:      Arc<SteeringHub>,
-    pub catalog:           Arc<Catalog>,
-    pub lifecycle:         LifecycleOptions,
-    pub run_options:       RunOptions,
-    pub workflow_path:     Option<ManifestPath>,
-    pub workflow_bundle:   Option<Arc<WorkflowBundle>>,
-    pub hooks:             fabro_hooks::HookSettings,
-    pub sandbox_env:       SandboxEnvSpec,
-    pub vault:             Arc<AsyncRwLock<Vault>>,
-    /// The server's sandbox provider settings, for reattaching a run's
-    /// sandbox on resume.
-    pub sandbox_providers: ServerSandboxProvidersSettings,
-    pub git:               Option<GitCheckpointOptions>,
-    pub registry_override: Option<Arc<HandlerRegistry>>,
-    pub artifact_sink:     Option<ArtifactSink>,
-    pub run_control:       Option<Arc<RunControlState>>,
-    pub resume:            Option<ResumeState>,
-    pub seed_context:      Option<Context>,
-    pub fabro_run_tools:   Option<FabroRunToolServices>,
-}
-
-/// Output of the INITIALIZE phase.
-#[non_exhaustive]
-pub struct Initialized {
-    pub graph:               Graph,
-    pub source:              String,
-    pub run_options:         RunOptions,
-    pub(crate) checkpoint:   Option<Checkpoint>,
-    pub(crate) seed_context: Option<Context>,
-    pub on_node:             crate::OnNodeCallback,
-    pub artifact_sink:       Option<ArtifactSink>,
-    pub run_control:         Option<Arc<RunControlState>>,
-    pub engine:              Arc<EngineServices>,
-    pub model:               String,
-}
-
-/// Output of the EXECUTE phase.
-#[non_exhaustive]
-pub struct Executed {
-    pub graph:         Graph,
-    pub outcome:       Result<Outcome, Error>,
-    pub run_options:   RunOptions,
-    /// Run wall-clock time in milliseconds from EXECUTE start to outcome.
-    pub wall_time_ms:  u64,
-    pub final_context: Context,
-    pub engine:        Arc<EngineServices>,
-    pub model:         String,
-}
-
-/// Output of the CONCLUDE phase.
-#[non_exhaustive]
-pub struct Concluded {
-    pub outcome:        Result<Outcome, Error>,
-    pub conclusion:     Conclusion,
-    pub artifact_count: usize,
-    pub graph:          Graph,
-    pub run_options:    RunOptions,
-    pub services:       Arc<RunServices>,
-}
-
-/// What the PUBLISH phase actually accomplished.
-///
-/// Recorded separately from the phase's error so a branch that reached the
-/// remote is still reported when a later step, such as pull request creation,
-/// fails. An all-`None` value means publish had nothing to do.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PublishOutcome {
-    pub pushed_branch: Option<String>,
-    pub pr_url:        Option<String>,
-}
-
-/// Output of the PUBLISH phase.
-#[non_exhaustive]
-pub struct Published {
-    pub execution_outcome: Result<Outcome, Error>,
-    pub publish_outcome:   PublishOutcome,
-    pub publish_error:     Option<Error>,
-    pub conclusion:        Conclusion,
-    pub artifact_count:    usize,
-    pub run_options:       RunOptions,
-    pub services:          Arc<RunServices>,
-}
-
-/// Output of the FINALIZE phase.
-#[non_exhaustive]
-pub struct Finalized {
-    pub run_id:        RunId,
-    pub outcome:       Result<Outcome, Error>,
-    pub conclusion:    Conclusion,
-    pub pushed_branch: Option<String>,
-    pub pr_url:        Option<String>,
 }
 
 /// Options for the TRANSFORM phase.
@@ -400,25 +218,4 @@ pub struct TransformOptions {
     pub source_name:       Option<String>,
     pub render_mode:       RenderMode,
     pub custom_transforms: Vec<Box<dyn Transform>>,
-    /// Catalog-backed model resolution to perform. `None` preserves authored
-    /// model and provider selectors for catalog-free structural validation.
-    pub model_resolution:  Option<ModelResolutionTransform>,
-}
-
-/// Options for the FINALIZE phase.
-pub struct FinalizeOptions {
-    pub run_dir:          PathBuf,
-    pub run_id:           RunId,
-    pub workflow_name:    String,
-    pub preserve_sandbox: bool,
-    pub stop_on_terminal: bool,
-    pub last_git_sha:     Option<String>,
-}
-
-/// Options for the PUBLISH phase.
-pub struct PublishOptions {
-    pub pr_config:  Option<PullRequestSettings>,
-    pub github_app: Option<fabro_github::GitHubCredentials>,
-    pub origin_url: Option<String>,
-    pub model:      String,
 }

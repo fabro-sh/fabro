@@ -28,4 +28,12 @@ export interface RunSandboxInstance {
     'image'?: string | null;
     'snapshot'?: string | null;
     'runtime': RunSandboxRuntime;
+    /**
+     * How long the sandbox took to become ready, when recorded.
+     */
+    'ready_duration_ms'?: number | null;
+    /**
+     * Whether the sandbox still exists after the run released it (kept, stopped or running) or was removed. Absent until the release.
+     */
+    'retained'?: boolean | null;
 }

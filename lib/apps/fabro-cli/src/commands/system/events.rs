@@ -1,5 +1,6 @@
 use anyhow::Result;
 use fabro_client::sse;
+use fabro_types::RunStreamItem;
 use futures::StreamExt;
 
 use crate::args::SystemEventsArgs;
@@ -42,31 +43,22 @@ fn render_sse_payload(data: &str, json_output: bool) -> Result<()> {
         return Ok(());
     }
 
-    let value: serde_json::Value = serde_json::from_str(data)?;
-    let payload = value
-        .get("payload")
-        .and_then(serde_json::Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let ts = payload
-        .get("ts")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("-");
-    let run_id = payload
-        .get("run_id")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("-");
-    let event = payload
-        .get("event")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("-");
+    // Each frame is one `RunStreamItem`: the run, when its record was
+    // appended, and the event's name.
+    let item: RunStreamItem = serde_json::from_str(data)?;
+    let recorded_at = i64::try_from(item.recorded_at)
+        .ok()
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+        .map_or_else(|| "-".to_string(), |at| at.to_rfc3339());
+    let run_id = item.run_id.to_string();
+    let event = item.name().unwrap_or("-");
 
     #[allow(
         clippy::print_stdout,
         reason = "Rendered event lines belong on stdout for piping."
     )]
     {
-        println!("{ts} {} {event}", short_run_id(run_id));
+        println!("{recorded_at} {} {event}", short_run_id(&run_id));
     }
     Ok(())
 }

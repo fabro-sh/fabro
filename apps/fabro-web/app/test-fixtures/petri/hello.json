@@ -1,0 +1,5327 @@
+{
+  "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+  "projection": {
+    "title": "Say hello and demonstrate a basic Fabro workflow",
+    "spec": {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "settings": {
+        "project": {
+          "name": null,
+          "description": null,
+          "metadata": {}
+        },
+        "workflow": {
+          "name": null,
+          "description": null,
+          "graph": "workflow.fabro",
+          "metadata": {}
+        },
+        "run": {
+          "goal": {
+            "type": "inline",
+            "value": "Say hello and demonstrate a basic Fabro workflow"
+          },
+          "working_dir": null,
+          "metadata": {},
+          "inputs": {},
+          "model": {
+            "provider": null,
+            "name": "gpt-5.4",
+            "fallbacks": {},
+            "controls": {
+              "reasoning_effort": null,
+              "speed": null
+            }
+          },
+          "git": {
+            "author": null
+          },
+          "prepare": {
+            "steps": [],
+            "timeout_ms": 300000
+          },
+          "execution": {
+            "mode": "normal",
+            "approval": "prompt"
+          },
+          "checkpoint": {
+            "exclude_globs": [],
+            "skip_git_hooks": false,
+            "commit_timeout_ms": 30000
+          },
+          "clone": {
+            "enabled": true,
+            "depth": 100
+          },
+          "run_branch": {
+            "enabled": true,
+            "push": true
+          },
+          "environment": {
+            "id": "local",
+            "provider": "local",
+            "image": {
+              "docker": null,
+              "dockerfile": null
+            },
+            "resources": {
+              "cpu": null,
+              "memory": null,
+              "disk": null
+            },
+            "network": {
+              "mode": "allow_all",
+              "allow": []
+            },
+            "lifecycle": {
+              "preserve": false,
+              "stop_on_terminal": true,
+              "auto_stop": null
+            },
+            "labels": {},
+            "env": {}
+          },
+          "notifications": {},
+          "interviews": {
+            "provider": null,
+            "slack": null
+          },
+          "agent": {
+            "fabro_tools": false,
+            "mcps": {}
+          },
+          "hooks": [],
+          "scm": {
+            "provider": null,
+            "owner": null,
+            "repository": null,
+            "github": null
+          },
+          "pull_request": null,
+          "artifacts": {
+            "include": []
+          },
+          "integrations": {
+            "github": {
+              "permissions": {}
+            }
+          }
+        }
+      },
+      "graph": {
+        "name": "Hello",
+        "nodes": {
+          "greet": {
+            "id": "greet",
+            "attrs": {
+              "prompt": {
+                "String": "Add a haiku to the README"
+              },
+              "label": {
+                "String": "Greet"
+              }
+            }
+          },
+          "start": {
+            "id": "start",
+            "attrs": {
+              "shape": {
+                "String": "Mdiamond"
+              },
+              "label": {
+                "String": "Start"
+              }
+            }
+          },
+          "exit": {
+            "id": "exit",
+            "attrs": {
+              "label": {
+                "String": "Exit"
+              },
+              "shape": {
+                "String": "Msquare"
+              }
+            }
+          }
+        },
+        "edges": [
+          {
+            "from": "start",
+            "to": "greet",
+            "attrs": {}
+          },
+          {
+            "from": "greet",
+            "to": "exit",
+            "attrs": {}
+          }
+        ],
+        "attrs": {
+          "goal": {
+            "String": "Say hello and demonstrate a basic Fabro workflow"
+          },
+          "rankdir": {
+            "String": "LR"
+          }
+        }
+      },
+      "graph_source": "digraph Hello {\n    graph [goal=\"Say hello and demonstrate a basic Fabro workflow\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    greet [label=\"Greet\", prompt=\"Add a haiku to the README\"]\n\n    start -> greet -> exit\n}\n",
+      "workflow_slug": "workflow",
+      "workflow_version_id": "3aba4a48a86eda3c3043c582f780fa46adc7c531e015733569130d4aaa0fc48f",
+      "target": {
+        "kind": "folder",
+        "path": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpItGaRs"
+      },
+      "source_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpItGaRs",
+      "provenance": {
+        "server": {
+          "version": "0.357.0-nightly.0"
+        },
+        "subject": {
+          "kind": "user",
+          "identity": {
+            "issuer": "fabro:dev",
+            "subject": "dev"
+          },
+          "login": "dev",
+          "auth_method": "dev_token"
+        }
+      },
+      "definition_blob": "a1b423f152cfc1ebba2ccea4eacaa393a40a317d22c0a91fe816a148c1c63283",
+      "spec_blob": "b7080f38f52a5f4186f597552fe6fb51526d2508346f25f9de259ce61083f260",
+      "admission": {
+        "graph": {
+          "blob": "3d5fa6773611db781782ec6d3b6e9a79d1542c6ac2d5bcdeed010cc68c794a58",
+          "digest": "3d5fa6773611db781782ec6d3b6e9a79d1542c6ac2d5bcdeed010cc68c794a58"
+        }
+      }
+    },
+    "web_url": "http://localhost:3000/runs/01M2VPKCM0SYNCF8Q7A3QCG0P6",
+    "start": {
+      "start_time": "2026-09-19T02:05:52.792Z",
+      "run_branch": "fabro/run/01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "base_sha": "a12a305478d2f8eec932f61f3b9d7aa681c6986b"
+    },
+    "status": {
+      "kind": "succeeded",
+      "reason": "completed"
+    },
+    "status_updated_at": "2026-09-19T02:05:55.638Z",
+    "last_event_at": "2026-09-19T02:05:55.714Z",
+    "pending_control": null,
+    "checkpoints": [
+      {
+        "seq": 26,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:53.536Z",
+          "current_node": "start",
+          "git_commit_sha": "a12a305478d2f8eec932f61f3b9d7aa681c6986b"
+        },
+        "diff": {}
+      },
+      {
+        "seq": 53,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:54.962Z",
+          "current_node": "greet",
+          "git_commit_sha": "531cb7e8e33e491ed9d8bdc3bfb1820976a0f57e"
+        },
+        "diff": {
+          "summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      },
+      {
+        "seq": 65,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:55.466Z",
+          "current_node": "exit",
+          "git_commit_sha": "b1d707486ad86083f78cb6dc86cebbb4a37632e9"
+        },
+        "diff": {
+          "summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      }
+    ],
+    "conclusion": {
+      "timestamp": "2026-09-19T02:05:55.638Z",
+      "status": "succeeded",
+      "timing": {
+        "wall_time_ms": 2846,
+        "inference_time_ms": 3,
+        "tool_time_ms": 0,
+        "active_time_ms": 3
+      },
+      "final_git_commit_sha": "b1d707486ad86083f78cb6dc86cebbb4a37632e9",
+      "stages": [
+        {
+          "stage_id": "start",
+          "stage_label": "start",
+          "timing": {
+            "wall_time_ms": 0,
+            "inference_time_ms": 0,
+            "tool_time_ms": 0,
+            "active_time_ms": 0
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        },
+        {
+          "stage_id": "greet",
+          "stage_label": "greet",
+          "timing": {
+            "wall_time_ms": 480,
+            "inference_time_ms": 3,
+            "tool_time_ms": 0,
+            "active_time_ms": 3
+          },
+          "usage": {
+            "tokens": {
+              "input": 1,
+              "output": 5,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            },
+            "cost": {
+              "usd_micros": 77,
+              "source": "catalog"
+            }
+          },
+          "retries": 0
+        },
+        {
+          "stage_id": "exit",
+          "stage_label": "exit",
+          "timing": {
+            "wall_time_ms": 0,
+            "inference_time_ms": 0,
+            "tool_time_ms": 0,
+            "active_time_ms": 0
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        }
+      ],
+      "usage": {
+        "tokens": {
+          "input": 1,
+          "output": 5,
+          "reasoning": 0,
+          "cache_read": 0,
+          "cache_write": 0
+        },
+        "cost": {
+          "usd_micros": 77,
+          "source": "catalog"
+        }
+      },
+      "total_retries": 0,
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    "sandbox": {
+      "kind": "ready",
+      "plan": {
+        "provider": "local"
+      },
+      "instance": {
+        "provider": "local",
+        "runtime": {
+          "id": "host-g18d696a89b0378d8-445-0",
+          "working_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/fabro-test-01M2VPKCAY21HNVPD5Y50C6QQB/storage/scratch/20260918-01M2VPKCM0SYNCF8Q7A3QCG0P6/petri/scopes/invocation-0-scope-0/work"
+        },
+        "ready_duration_ms": 47,
+        "retained": true
+      }
+    },
+    "pull_request": null,
+    "superseded_by": null,
+    "git_identity": {
+      "name": "Fabro",
+      "email": "noreply@fabro.sh",
+      "source": "default"
+    },
+    "pending_interviews": {},
+    "stages": {
+      "greet@1": {
+        "first_event_seq": 898,
+        "prompt": null,
+        "response": "A haiku, added.",
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:54.749Z"
+        },
+        "provider_used": {
+          "mode": "agent",
+          "provider": "openai",
+          "model": "gpt-5.4"
+        },
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": "A haiku, added.\n",
+        "output_bytes": 16,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:53.537Z",
+        "handler": "agent",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 480,
+          "inference_time_ms": 3,
+          "tool_time_ms": 0,
+          "active_time_ms": 3
+        },
+        "usage": {
+          "tokens": {
+            "input": 1,
+            "output": 5,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          },
+          "cost": {
+            "usd_micros": 77,
+            "source": "catalog"
+          }
+        },
+        "model": {
+          "provider": "openai",
+          "model_id": "gpt-5.4"
+        },
+        "agent_tools": [
+          {
+            "name": "apply_patch",
+            "description": "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          },
+          {
+            "name": "close_agent",
+            "description": "Close a running or completed subagent that is no longer needed.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "subagent",
+            "invoked": false
+          },
+          {
+            "name": "glob",
+            "description": "Find files by search-root-relative path using a glob pattern. Use path to choose the search root. `*` stays within one path segment and `**` searches recursively. Patterns match files, so a trailing `/` is rejected. Prefer this over shell find or ls when locating repository files.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          },
+          {
+            "name": "grep",
+            "description": "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          },
+          {
+            "name": "read_file",
+            "description": "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          },
+          {
+            "name": "request_user_input",
+            "description": "Ask the human one or more questions and wait for their answers before continuing this stage.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          },
+          {
+            "name": "send_input",
+            "description": "Send a follow-up message to a subagent. A running agent receives it at a safe turn boundary. A completed agent starts another turn in the same session with its existing history.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "subagent",
+            "invoked": false
+          },
+          {
+            "name": "shell",
+            "description": "Execute Bash commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          },
+          {
+            "name": "spawn_agent",
+            "description": "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "subagent",
+            "invoked": false
+          },
+          {
+            "name": "update_plan",
+            "description": "Update the multi-step plan for the current task. Submit the entire plan; existing steps are reconciled by exact step text.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          },
+          {
+            "name": "wait",
+            "description": "Wait for a subagent to complete, then use the result to synthesize the outcome for the user. Omit agent_id to wait for every running subagent at once.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "subagent",
+            "invoked": false
+          },
+          {
+            "name": "web_fetch",
+            "description": "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          },
+          {
+            "name": "write_file",
+            "description": "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.",
+            "source": {
+              "kind": "native"
+            },
+            "category": "other",
+            "invoked": false
+          }
+        ],
+        "agent": {
+          "root_session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+          "route": {
+            "provider": "openai",
+            "model": "gpt-5.4"
+          },
+          "activity": "ended",
+          "usage": {
+            "tokens": {
+              "input": 1,
+              "output": 5,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            },
+            "cost": {
+              "usd_micros": 77,
+              "source": "catalog"
+            }
+          },
+          "messages": 1,
+          "descendants": {},
+          "context_window": {
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "context_window_tokens": 1050000,
+            "input_tokens": 1,
+            "usage_percent": 0.00009523809523809524,
+            "count_method": "response_usage_scaled_breakdown",
+            "staleness": "live",
+            "generated_at": "2026-09-19T02:05:54.013Z",
+            "breakdown": [
+              {
+                "category": "system_prompt",
+                "tokens": 0,
+                "usage_percent": 0.0
+              },
+              {
+                "category": "tools",
+                "tokens": 0,
+                "usage_percent": 0.0
+              },
+              {
+                "category": "conversation",
+                "tokens": 0,
+                "usage_percent": 0.0
+              },
+              {
+                "category": "other",
+                "tokens": 1,
+                "usage_percent": 0.00009523809523809524
+              }
+            ],
+            "warnings": []
+          },
+          "tools": {},
+          "retries": 0,
+          "mcp_servers": {},
+          "skills": {
+            "available": [],
+            "activated": []
+          },
+          "subagent_counts": {
+            "spawned": 0,
+            "turns_started": 0,
+            "completed": 0,
+            "failed": 0,
+            "closed": 0
+          },
+          "todos": {},
+          "subagents": [],
+          "compactions": [],
+          "failovers": [],
+          "files_touched": [],
+          "last_file_touched": null,
+          "prompts": 1,
+          "prompt": {
+            "completed": true,
+            "usage": {
+              "tokens": {
+                "input": 1,
+                "output": 5,
+                "reasoning": 0,
+                "cache_read": 0,
+                "cache_write": 0
+              },
+              "cost": {
+                "usd_micros": 77,
+                "source": "catalog"
+              }
+            },
+            "messages": 1,
+            "context_window": {
+              "provider": "openai",
+              "model": "gpt-5.4",
+              "context_window_tokens": 1050000,
+              "input_tokens": 1,
+              "usage_percent": 0.00009523809523809524,
+              "count_method": "response_usage_scaled_breakdown",
+              "staleness": "live",
+              "generated_at": "2026-09-19T02:05:54.013Z",
+              "breakdown": [
+                {
+                  "category": "system_prompt",
+                  "tokens": 0,
+                  "usage_percent": 0.0
+                },
+                {
+                  "category": "tools",
+                  "tokens": 0,
+                  "usage_percent": 0.0
+                },
+                {
+                  "category": "conversation",
+                  "tokens": 0,
+                  "usage_percent": 0.0
+                },
+                {
+                  "category": "other",
+                  "tokens": 1,
+                  "usage_percent": 0.00009523809523809524
+                }
+              ],
+              "warnings": []
+            },
+            "tool_calls": 0,
+            "retries": 0,
+            "failovers": 0,
+            "descendants": {},
+            "subagents": {
+              "spawned": 0,
+              "turns_started": 0,
+              "completed": 0,
+              "failed": 0,
+              "closed": 0
+            },
+            "compactions": [],
+            "files_touched": [],
+            "last_file_touched": null
+          }
+        },
+        "state": "succeeded"
+      },
+      "start@1": {
+        "first_event_seq": 173,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:53.501Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": "checkout: /private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpItGaRs is not a Git repository; the workspace starts empty\n",
+        "output_bytes": 130,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:52.812Z",
+        "handler": "start",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 39,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      },
+      "exit@1": {
+        "first_event_seq": 2324,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:55.340Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": null,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:54.963Z",
+        "handler": "exit",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      }
+    }
+  },
+  "stream": [
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 1,
+      "kind": "platform",
+      "id": "1",
+      "recorded_at": 1789783552667,
+      "item": {
+        "seq": 1,
+        "recorded_at": 1789783552667,
+        "record": {
+          "kind": "run.created",
+          "spec": {
+            "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+            "settings": {
+              "project": {
+                "name": null,
+                "description": null,
+                "metadata": {}
+              },
+              "workflow": {
+                "name": null,
+                "description": null,
+                "graph": "workflow.fabro",
+                "metadata": {}
+              },
+              "run": {
+                "goal": {
+                  "type": "inline",
+                  "value": "Say hello and demonstrate a basic Fabro workflow"
+                },
+                "working_dir": null,
+                "metadata": {},
+                "inputs": {},
+                "model": {
+                  "provider": null,
+                  "name": "gpt-5.4",
+                  "fallbacks": {},
+                  "controls": {
+                    "reasoning_effort": null,
+                    "speed": null
+                  }
+                },
+                "git": {
+                  "author": null
+                },
+                "prepare": {
+                  "steps": [],
+                  "timeout_ms": 300000
+                },
+                "execution": {
+                  "mode": "normal",
+                  "approval": "prompt"
+                },
+                "checkpoint": {
+                  "exclude_globs": [],
+                  "skip_git_hooks": false,
+                  "commit_timeout_ms": 30000
+                },
+                "clone": {
+                  "enabled": true,
+                  "depth": 100
+                },
+                "run_branch": {
+                  "enabled": true,
+                  "push": true
+                },
+                "environment": {
+                  "id": "local",
+                  "provider": "local",
+                  "image": {
+                    "docker": null,
+                    "dockerfile": null
+                  },
+                  "resources": {
+                    "cpu": null,
+                    "memory": null,
+                    "disk": null
+                  },
+                  "network": {
+                    "mode": "allow_all",
+                    "allow": []
+                  },
+                  "lifecycle": {
+                    "preserve": false,
+                    "stop_on_terminal": true,
+                    "auto_stop": null
+                  },
+                  "labels": {},
+                  "env": {}
+                },
+                "notifications": {},
+                "interviews": {
+                  "provider": null,
+                  "slack": null
+                },
+                "agent": {
+                  "fabro_tools": false,
+                  "mcps": {}
+                },
+                "hooks": [],
+                "scm": {
+                  "provider": null,
+                  "owner": null,
+                  "repository": null,
+                  "github": null
+                },
+                "pull_request": null,
+                "artifacts": {
+                  "include": []
+                },
+                "integrations": {
+                  "github": {
+                    "permissions": {}
+                  }
+                }
+              }
+            },
+            "graph": {
+              "name": "Hello",
+              "nodes": {
+                "start": {
+                  "id": "start",
+                  "attrs": {
+                    "label": {
+                      "String": "Start"
+                    },
+                    "shape": {
+                      "String": "Mdiamond"
+                    }
+                  }
+                },
+                "exit": {
+                  "id": "exit",
+                  "attrs": {
+                    "shape": {
+                      "String": "Msquare"
+                    },
+                    "label": {
+                      "String": "Exit"
+                    }
+                  }
+                },
+                "greet": {
+                  "id": "greet",
+                  "attrs": {
+                    "label": {
+                      "String": "Greet"
+                    },
+                    "prompt": {
+                      "String": "Add a haiku to the README"
+                    }
+                  }
+                }
+              },
+              "edges": [
+                {
+                  "from": "start",
+                  "to": "greet",
+                  "attrs": {}
+                },
+                {
+                  "from": "greet",
+                  "to": "exit",
+                  "attrs": {}
+                }
+              ],
+              "attrs": {
+                "rankdir": {
+                  "String": "LR"
+                },
+                "goal": {
+                  "String": "Say hello and demonstrate a basic Fabro workflow"
+                }
+              }
+            },
+            "graph_source": "digraph Hello {\n    graph [goal=\"Say hello and demonstrate a basic Fabro workflow\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    greet [label=\"Greet\", prompt=\"Add a haiku to the README\"]\n\n    start -> greet -> exit\n}\n",
+            "workflow_slug": "workflow",
+            "workflow_version_id": "3aba4a48a86eda3c3043c582f780fa46adc7c531e015733569130d4aaa0fc48f",
+            "target": {
+              "kind": "folder",
+              "path": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpItGaRs"
+            },
+            "source_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpItGaRs",
+            "provenance": {
+              "server": {
+                "version": "0.357.0-nightly.0"
+              },
+              "subject": {
+                "kind": "user",
+                "identity": {
+                  "issuer": "fabro:dev",
+                  "subject": "dev"
+                },
+                "login": "dev",
+                "auth_method": "dev_token"
+              }
+            },
+            "definition_blob": "a1b423f152cfc1ebba2ccea4eacaa393a40a317d22c0a91fe816a148c1c63283",
+            "spec_blob": "b7080f38f52a5f4186f597552fe6fb51526d2508346f25f9de259ce61083f260",
+            "admission": {
+              "graph": {
+                "blob": "3d5fa6773611db781782ec6d3b6e9a79d1542c6ac2d5bcdeed010cc68c794a58",
+                "digest": "3d5fa6773611db781782ec6d3b6e9a79d1542c6ac2d5bcdeed010cc68c794a58"
+              }
+            }
+          },
+          "title": "Say hello and demonstrate a basic Fabro workflow",
+          "web_url": "http://localhost:3000/runs/01M2VPKCM0SYNCF8Q7A3QCG0P6"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 2,
+      "kind": "platform",
+      "id": "2",
+      "recorded_at": 1789783552670,
+      "item": {
+        "seq": 2,
+        "recorded_at": 1789783552670,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "submitted",
+          "status": {
+            "kind": "submitted"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 3,
+      "kind": "platform",
+      "id": "3",
+      "recorded_at": 1789783552712,
+      "item": {
+        "seq": 3,
+        "recorded_at": 1789783552712,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "start_requested",
+          "source": "start"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 4,
+      "kind": "platform",
+      "id": "4",
+      "recorded_at": 1789783552719,
+      "item": {
+        "seq": 4,
+        "recorded_at": 1789783552719,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "runnable",
+          "status": {
+            "kind": "runnable"
+          },
+          "source": "start_requested"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 5,
+      "kind": "platform",
+      "id": "5",
+      "recorded_at": 1789783552736,
+      "item": {
+        "seq": 5,
+        "recorded_at": 1789783552736,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "starting",
+          "status": {
+            "kind": "starting"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 6,
+      "kind": "platform",
+      "id": "6",
+      "recorded_at": 1789783552749,
+      "item": {
+        "seq": 6,
+        "recorded_at": 1789783552749,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "running",
+          "status": {
+            "kind": "running"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 7,
+      "kind": "petri",
+      "id": "coordinator/0/0",
+      "recorded_at": 1789783552792,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 0,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783552792,
+        "record": {
+          "seq": 0,
+          "origin": "external",
+          "recorded_at": 1789783552792,
+          "body": {
+            "event": "run.started",
+            "format_version": 7,
+            "key": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+            "root": 0,
+            "middleware_chain": [
+              "circuit-breaker"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 8,
+      "kind": "petri",
+      "id": "coordinator/1/0",
+      "recorded_at": 1789783552802,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 1,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {},
+        "recorded_at": 1789783552802,
+        "record": {
+          "seq": 1,
+          "origin": "external",
+          "recorded_at": 1789783552802,
+          "body": {
+            "event": "graph.registered",
+            "digest": "3d5fa6773611db781782ec6d3b6e9a79d1542c6ac2d5bcdeed010cc68c794a58"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 9,
+      "kind": "petri",
+      "id": "coordinator/2/0",
+      "recorded_at": 1789783552805,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 2,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783552805,
+        "record": {
+          "seq": 2,
+          "origin": "external",
+          "recorded_at": 1789783552805,
+          "body": {
+            "event": "invocation.declared",
+            "invocation": 0,
+            "call": null,
+            "graph": "3d5fa6773611db781782ec6d3b6e9a79d1542c6ac2d5bcdeed010cc68c794a58",
+            "context": {},
+            "secret_bindings": "none",
+            "sandbox": "isolated"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 10,
+      "kind": "petri",
+      "id": "coordinator/3/0",
+      "recorded_at": 1789783552808,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 3,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552808,
+        "record": {
+          "seq": 3,
+          "origin": "external",
+          "recorded_at": 1789783552808,
+          "body": {
+            "event": "execution.declared",
+            "execution": 0,
+            "invocation": 0,
+            "predecessor": null,
+            "start": {
+              "entry": "graph_entries",
+              "context": {},
+              "prior_firings": {},
+              "execution_index": 0,
+              "max_executions": 32
+            },
+            "middleware_state": {
+              "circuit-breaker": [
+                1,
+                {
+                  "loop_signatures": {},
+                  "restart_signatures": {},
+                  "pending": {}
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 11,
+      "kind": "petri",
+      "id": "execution 0/0/0",
+      "recorded_at": 1789783552812,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 0,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552812,
+        "record": {
+          "seq": 0,
+          "origin": "external",
+          "recorded_at": 1789783552812,
+          "body": {
+            "event": "execution.started",
+            "entry": "graph_entries",
+            "context": {},
+            "prior_firings": {},
+            "execution_index": 0,
+            "max_executions": 32
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 12,
+      "kind": "petri",
+      "id": "execution 0/1/0",
+      "recorded_at": 1789783552812,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552812,
+        "record": {
+          "seq": 1,
+          "origin": "external",
+          "recorded_at": 1789783552812,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": "execution_start",
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 13,
+      "kind": "petri",
+      "id": "execution 0/1/1",
+      "recorded_at": 1789783552812,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552812,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 2,
+              "generation": 0,
+              "payload": null,
+              "from": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 14,
+      "kind": "petri",
+      "id": "execution 0/1/2",
+      "recorded_at": 1789783552812,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552812,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 15,
+      "kind": "petri",
+      "id": "execution 0/2/0",
+      "recorded_at": 1789783552812,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 2,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552812,
+        "record": {
+          "seq": 2,
+          "origin": "core",
+          "recorded_at": 1789783552812,
+          "body": {
+            "event": "token.emitted",
+            "edge": 2,
+            "generation": 0,
+            "payload": null,
+            "from": 0
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 16,
+      "kind": "petri",
+      "id": "execution 0/3/0",
+      "recorded_at": 1789783552812,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 3,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552812,
+        "record": {
+          "seq": 3,
+          "origin": "external",
+          "recorded_at": 1789783552812,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 17,
+      "kind": "petri",
+      "id": "execution 0/4/0",
+      "recorded_at": 1789783552859,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 4,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552859,
+        "record": {
+          "seq": 4,
+          "origin": "external",
+          "recorded_at": 1789783552859,
+          "body": {
+            "event": "scope.acquired",
+            "scope": 0,
+            "lease": 0,
+            "workspace": "invocation-0-scope-0",
+            "provider": "host",
+            "instance": "host-g18d696a89b0378d8-445-0",
+            "working_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/REDACTED/storage/scratch/20260918-01M2VPKCM0SYNCF8Q7A3QCG0P6/petri/scopes/invocation-0-scope-0/work",
+            "duration_ms": 47
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 18,
+      "kind": "petri",
+      "id": "execution 0/5/0",
+      "recorded_at": 1789783552859,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 5,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552859,
+        "record": {
+          "seq": 5,
+          "origin": "external",
+          "recorded_at": 1789783552859,
+          "body": {
+            "event": "step.started",
+            "firing": 1,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 19,
+      "kind": "petri",
+      "id": "execution 0/5/1",
+      "recorded_at": 1789783552859,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 5,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552859,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 20,
+      "kind": "petri",
+      "id": "execution 0/6/0",
+      "recorded_at": 1789783552899,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 6,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552899,
+        "record": {
+          "seq": 6,
+          "origin": "external",
+          "recorded_at": 1789783552899,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 1,
+            "ev": {
+              "log": {
+                "stream": "stderr",
+                "line": "checkout: /private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpItGaRs is not a Git repository; the workspace starts empty"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 21,
+      "kind": "petri",
+      "id": "execution 0/7/0",
+      "recorded_at": 1789783553501,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 7,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553501,
+        "record": {
+          "seq": 7,
+          "origin": "external",
+          "recorded_at": 1789783553501,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 1,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 1,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "a12a305478d2f8eec932f61f3b9d7aa681c6986b",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 1,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "a12a305478d2f8eec932f61f3b9d7aa681c6986b",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 22,
+      "kind": "petri",
+      "id": "execution 0/8/0",
+      "recorded_at": 1789783553501,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 8,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553501,
+        "record": {
+          "seq": 8,
+          "origin": "external",
+          "recorded_at": 1789783553501,
+          "body": {
+            "event": "step.finished",
+            "firing": 1,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 39
+              },
+              "context_updates": {
+                "failure_class": "",
+                "internal.run_id": "petri"
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 23,
+      "kind": "petri",
+      "id": "execution 0/8/1",
+      "recorded_at": 1789783553501,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 8,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553501,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 39
+            },
+            "context_updates": {
+              "failure_class": "",
+              "internal.run_id": "petri"
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 24,
+      "kind": "platform",
+      "id": "7",
+      "recorded_at": 1789783553497,
+      "item": {
+        "seq": 7,
+        "recorded_at": 1789783553497,
+        "record": {
+          "kind": "run.branch",
+          "run_branch": "fabro/run/01M2VPKCM0SYNCF8Q7A3QCG0P6",
+          "base_sha": "a12a305478d2f8eec932f61f3b9d7aa681c6986b",
+          "workspace": "invocation-0-scope-0"
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 25,
+      "kind": "platform",
+      "id": "8",
+      "recorded_at": 1789783553501,
+      "item": {
+        "seq": 8,
+        "recorded_at": 1789783553501,
+        "record": {
+          "kind": "git.identity",
+          "name": "Fabro",
+          "email": "noreply@fabro.sh",
+          "source": "default"
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 26,
+      "kind": "platform",
+      "id": "9",
+      "recorded_at": 1789783553536,
+      "item": {
+        "seq": 9,
+        "recorded_at": 1789783553536,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 1,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "a12a305478d2f8eec932f61f3b9d7aa681c6986b",
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 27,
+      "kind": "petri",
+      "id": "execution 0/9/0",
+      "recorded_at": 1789783553537,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553537,
+        "record": {
+          "seq": 9,
+          "origin": "external",
+          "recorded_at": 1789783553537,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "groups": [
+              {
+                "group": 0,
+                "draw": null,
+                "trace": [],
+                "decision": {
+                  "emit": 0
+                }
+              }
+            ]
+          }
+        },
+        "derived": {
+          "groups": [
+            {
+              "group": 0,
+              "target": {
+                "id": 2,
+                "name": "greet",
+                "kind": "attractor/agent",
+                "meta": {
+                  "label": "Greet",
+                  "shape": "box",
+                  "kind": "agent",
+                  "classes": [],
+                  "span": {
+                    "line": 8,
+                    "column": 5
+                  },
+                  "edges": {
+                    "1": {
+                      "to": "exit",
+                      "label": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 28,
+      "kind": "petri",
+      "id": "execution 0/9/1",
+      "recorded_at": 1789783553537,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553537,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 0,
+              "generation": 0,
+              "payload": {
+                "from": "start",
+                "fidelity": null,
+                "thread_id": null
+              },
+              "from": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 29,
+      "kind": "petri",
+      "id": "execution 0/9/2",
+      "recorded_at": 1789783553537,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553537,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 30,
+      "kind": "petri",
+      "id": "execution 0/10/0",
+      "recorded_at": 1789783553537,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 10,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553537,
+        "record": {
+          "seq": 10,
+          "origin": "core",
+          "recorded_at": 1789783553537,
+          "body": {
+            "event": "route.applied",
+            "kind": "edge",
+            "firing": 1,
+            "group": 0,
+            "edge": 0
+          }
+        },
+        "derived": {
+          "target": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "transition": "Continue",
+          "back": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 31,
+      "kind": "petri",
+      "id": "execution 0/11/0",
+      "recorded_at": 1789783553537,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 11,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "greet",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553537,
+        "record": {
+          "seq": 11,
+          "origin": "core",
+          "recorded_at": 1789783553537,
+          "body": {
+            "event": "token.emitted",
+            "edge": 0,
+            "generation": 0,
+            "payload": {
+              "from": "start",
+              "fidelity": null,
+              "thread_id": null
+            },
+            "from": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 32,
+      "kind": "petri",
+      "id": "execution 0/12/0",
+      "recorded_at": 1789783553537,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 12,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553537,
+        "record": {
+          "seq": 12,
+          "origin": "external",
+          "recorded_at": 1789783553537,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 33,
+      "kind": "petri",
+      "id": "execution 0/13/0",
+      "recorded_at": 1789783553537,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 13,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553537,
+        "record": {
+          "seq": 13,
+          "origin": "external",
+          "recorded_at": 1789783553537,
+          "body": {
+            "event": "step.started",
+            "firing": 2,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 34,
+      "kind": "petri",
+      "id": "execution 0/13/1",
+      "recorded_at": 1789783553537,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 13,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553537,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 35,
+      "kind": "petri",
+      "id": "execution 0/14/0",
+      "recorded_at": 1789783553540,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 14,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553540,
+        "record": {
+          "seq": 14,
+          "origin": "external",
+          "recorded_at": 1789783553540,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "attractor.thread",
+                "node": "greet",
+                "firing": 2,
+                "attempt": 1,
+                "fidelity": "compact",
+                "fidelity_source": "default",
+                "thread": "start",
+                "thread_source": "previous",
+                "reused": false,
+                "backend": "api"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 36,
+      "kind": "petri",
+      "id": "execution 0/15/0",
+      "recorded_at": 1789783553540,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 15,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553540,
+        "record": {
+          "seq": 15,
+          "origin": "external",
+          "recorded_at": 1789783553540,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "attractor.fallback.plan",
+                "node": "greet",
+                "firing": 2,
+                "attempt": 1,
+                "requested": {
+                  "provider": "openai",
+                  "model": "gpt-5.4"
+                },
+                "routes": [
+                  {
+                    "position": 0,
+                    "provider": "openai",
+                    "model": "gpt-5.4",
+                    "reasoning_effort": null,
+                    "speed": null
+                  }
+                ],
+                "notices": []
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 37,
+      "kind": "petri",
+      "id": "execution 0/16/0",
+      "recorded_at": 1789783553609,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 16,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553609,
+        "record": {
+          "seq": 16,
+          "origin": "external",
+          "recorded_at": 1789783553609,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 1,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": {
+                    "SessionStarted": {
+                      "provider": "openai",
+                      "model": "gpt-5.4"
+                    }
+                  },
+                  "timestamp": "2026-09-19T02:05:53.608Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 38,
+      "kind": "petri",
+      "id": "execution 0/17/0",
+      "recorded_at": 1789783553851,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 17,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553851,
+        "record": {
+          "seq": 17,
+          "origin": "external",
+          "recorded_at": 1789783553851,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 2,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": {
+                    "MemoryLoaded": {
+                      "profile": "openai",
+                      "files": [],
+                      "total_loaded_bytes": 0,
+                      "budget_bytes": 32768
+                    }
+                  },
+                  "timestamp": "2026-09-19T02:05:53.851Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 39,
+      "kind": "petri",
+      "id": "execution 0/18/0",
+      "recorded_at": 1789783553852,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 18,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553852,
+        "record": {
+          "seq": 18,
+          "origin": "external",
+          "recorded_at": 1789783553852,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 3,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": {
+                    "SkillsDiscovered": {
+                      "profile": "openai",
+                      "source_dirs": [
+                        "/Users/bhelmkamp/.fabro/skills",
+                        "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/REDACTED/storage/scratch/20260918-01M2VPKCM0SYNCF8Q7A3QCG0P6/petri/scopes/invocation-0-scope-0/work/.fabro/skills",
+                        "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/REDACTED/storage/scratch/20260918-01M2VPKCM0SYNCF8Q7A3QCG0P6/petri/scopes/invocation-0-scope-0/work/skills"
+                      ],
+                      "skills": [],
+                      "skipped": []
+                    }
+                  },
+                  "timestamp": "2026-09-19T02:05:53.851Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 40,
+      "kind": "petri",
+      "id": "execution 0/19/0",
+      "recorded_at": 1789783553853,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 19,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553853,
+        "record": {
+          "seq": 19,
+          "origin": "external",
+          "recorded_at": 1789783553853,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "attractor.skills",
+                "node": "greet",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "dirs": [
+                  {
+                    "path": "/Users/bhelmkamp/.fabro/skills",
+                    "source": "configured"
+                  },
+                  {
+                    "path": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/fabro-test-01M2VPKCAY21HNVPD5Y50C6QQB/storage/scratch/20260918-01M2VPKCM0SYNCF8Q7A3QCG0P6/petri/scopes/invocation-0-scope-0/work/.fabro/skills",
+                    "source": "project_fabro"
+                  },
+                  {
+                    "path": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/fabro-test-01M2VPKCAY21HNVPD5Y50C6QQB/storage/scratch/20260918-01M2VPKCM0SYNCF8Q7A3QCG0P6/petri/scopes/invocation-0-scope-0/work/skills",
+                    "source": "project"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 41,
+      "kind": "petri",
+      "id": "execution 0/20/0",
+      "recorded_at": 1789783554001,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 20,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554001,
+        "record": {
+          "seq": 20,
+          "origin": "external",
+          "recorded_at": 1789783554001,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "attractor.tools",
+                "node": "greet",
+                "firing": 2,
+                "attempt": 1,
+                "session": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                "tools": [
+                  {
+                    "name": "apply_patch",
+                    "description": "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "builtin"
+                  },
+                  {
+                    "name": "close_agent",
+                    "description": "Close a running or completed subagent that is no longer needed.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "subagent"
+                  },
+                  {
+                    "name": "glob",
+                    "description": "Find files by search-root-relative path using a glob pattern. Use path to choose the search root. `*` stays within one path segment and `**` searches recursively. Patterns match files, so a trailing `/` is rejected. Prefer this over shell find or ls when locating repository files.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "builtin"
+                  },
+                  {
+                    "name": "grep",
+                    "description": "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "builtin"
+                  },
+                  {
+                    "name": "read_file",
+                    "description": "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "builtin"
+                  },
+                  {
+                    "name": "request_user_input",
+                    "description": "Ask the human one or more questions and wait for their answers before continuing this stage.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "question"
+                  },
+                  {
+                    "name": "send_input",
+                    "description": "Send a follow-up message to a subagent. A running agent receives it at a safe turn boundary. A completed agent starts another turn in the same session with its existing history.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "subagent"
+                  },
+                  {
+                    "name": "shell",
+                    "description": "Execute Bash commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "builtin"
+                  },
+                  {
+                    "name": "spawn_agent",
+                    "description": "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "subagent"
+                  },
+                  {
+                    "name": "update_plan",
+                    "description": "Update the multi-step plan for the current task. Submit the entire plan; existing steps are reconciled by exact step text.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "builtin"
+                  },
+                  {
+                    "name": "wait",
+                    "description": "Wait for a subagent to complete, then use the result to synthesize the outcome for the user. Omit agent_id to wait for every running subagent at once.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "subagent"
+                  },
+                  {
+                    "name": "web_fetch",
+                    "description": "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "builtin"
+                  },
+                  {
+                    "name": "write_file",
+                    "description": "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.",
+                    "source": {
+                      "kind": "native"
+                    },
+                    "category": "builtin"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 42,
+      "kind": "petri",
+      "id": "execution 0/21/0",
+      "recorded_at": 1789783554007,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 21,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554007,
+        "record": {
+          "seq": 21,
+          "origin": "external",
+          "recorded_at": 1789783554007,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 4,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": {
+                    "UserInput": {
+                      "text": "Goal: Say hello and demonstrate a basic Fabro workflow\n\n\nAdd a haiku to the README"
+                    }
+                  },
+                  "timestamp": "2026-09-19T02:05:54.007Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 43,
+      "kind": "petri",
+      "id": "execution 0/22/0",
+      "recorded_at": 1789783554010,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 22,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554010,
+        "record": {
+          "seq": 22,
+          "origin": "external",
+          "recorded_at": 1789783554010,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 5,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": {
+                    "LlmRequestStarted": {
+                      "requested_model": "gpt-5.4"
+                    }
+                  },
+                  "timestamp": "2026-09-19T02:05:54.010Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 44,
+      "kind": "petri",
+      "id": "execution 0/23/0",
+      "recorded_at": 1789783554014,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 23,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554014,
+        "record": {
+          "seq": 23,
+          "origin": "external",
+          "recorded_at": 1789783554014,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 6,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": {
+                    "LlmFirstOutput": {
+                      "kind": "text"
+                    }
+                  },
+                  "timestamp": "2026-09-19T02:05:54.013Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 45,
+      "kind": "petri",
+      "id": "execution 0/24/0",
+      "recorded_at": 1789783554015,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 24,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554015,
+        "record": {
+          "seq": 24,
+          "origin": "external",
+          "recorded_at": 1789783554015,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 7,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": {
+                    "TextDelta": {
+                      "delta": "A haiku, added."
+                    }
+                  },
+                  "timestamp": "2026-09-19T02:05:54.013Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 46,
+      "kind": "petri",
+      "id": "execution 0/25/0",
+      "recorded_at": 1789783554016,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 25,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554016,
+        "record": {
+          "seq": 25,
+          "origin": "external",
+          "recorded_at": 1789783554016,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 8,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": {
+                    "AssistantMessage": {
+                      "text": "A haiku, added.",
+                      "model": "gpt-5.4",
+                      "usage": {
+                        "tokens": {
+                          "input": 1,
+                          "output": 5,
+                          "reasoning": 0,
+                          "cache_read": 0,
+                          "cache_write": 0
+                        },
+                        "cost": {
+                          "usd_micros": 77,
+                          "source": "catalog"
+                        }
+                      },
+                      "tool_call_count": 0,
+                      "context_window": {
+                        "provider": "openai",
+                        "model": "gpt-5.4",
+                        "context_window_tokens": 1050000,
+                        "input_tokens": 1,
+                        "usage_percent": 0.00009523809523809524,
+                        "count_method": "response_usage_scaled_breakdown",
+                        "staleness": "live",
+                        "generated_at": "2026-09-19T02:05:54.013Z",
+                        "breakdown": [
+                          {
+                            "category": "system_prompt",
+                            "tokens": 0,
+                            "usage_percent": 0.0
+                          },
+                          {
+                            "category": "tools",
+                            "tokens": 0,
+                            "usage_percent": 0.0
+                          },
+                          {
+                            "category": "conversation",
+                            "tokens": 0,
+                            "usage_percent": 0.0
+                          },
+                          {
+                            "category": "other",
+                            "tokens": 1,
+                            "usage_percent": 0.00009523809523809524
+                          }
+                        ],
+                        "warnings": []
+                      }
+                    }
+                  },
+                  "timestamp": "2026-09-19T02:05:54.013Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 47,
+      "kind": "petri",
+      "id": "execution 0/26/0",
+      "recorded_at": 1789783554017,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 26,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554017,
+        "record": {
+          "seq": 26,
+          "origin": "external",
+          "recorded_at": 1789783554017,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 9,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": "ProcessingEnd",
+                  "timestamp": "2026-09-19T02:05:54.017Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 48,
+      "kind": "petri",
+      "id": "execution 0/27/0",
+      "recorded_at": 1789783554018,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 27,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554018,
+        "record": {
+          "seq": 27,
+          "origin": "external",
+          "recorded_at": 1789783554018,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "log": {
+                "stream": "stdout",
+                "line": "A haiku, added."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 49,
+      "kind": "petri",
+      "id": "execution 0/28/0",
+      "recorded_at": 1789783554018,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 28,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554018,
+        "record": {
+          "seq": 28,
+          "origin": "external",
+          "recorded_at": 1789783554018,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "kind": "pebble",
+                "firing": 2,
+                "attempt": 1,
+                "scope": 0,
+                "node": "greet",
+                "event": {
+                  "seq": 10,
+                  "stream_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914",
+                  "event": "SessionEnded",
+                  "timestamp": "2026-09-19T02:05:54.018Z",
+                  "session_id": "ses_d37e5647-a4e1-4767-a254-3ab489064914"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 50,
+      "kind": "petri",
+      "id": "execution 0/29/0",
+      "recorded_at": 1789783554749,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 29,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554749,
+        "record": {
+          "seq": 29,
+          "origin": "external",
+          "recorded_at": 1789783554749,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 2,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "531cb7e8e33e491ed9d8bdc3bfb1820976a0f57e",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 2,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "531cb7e8e33e491ed9d8bdc3bfb1820976a0f57e",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 51,
+      "kind": "petri",
+      "id": "execution 0/30/0",
+      "recorded_at": 1789783554749,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 30,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554749,
+        "record": {
+          "seq": 30,
+          "origin": "external",
+          "recorded_at": 1789783554749,
+          "body": {
+            "event": "step.finished",
+            "firing": 2,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "text": "A haiku, added.",
+                "turns": 1,
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 480,
+                "custom": {
+                  "pebble.compaction_usage": {
+                    "tokens": {
+                      "input": 0,
+                      "output": 0,
+                      "reasoning": 0,
+                      "cache_read": 0,
+                      "cache_write": 0
+                    }
+                  },
+                  "pebble.compactions": 0,
+                  "pebble.inference_ms": 3,
+                  "pebble.prompts": 1,
+                  "pebble.subagents": {
+                    "spawned": 0,
+                    "turns_started": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "closed": 0,
+                    "usage": {
+                      "tokens": {
+                        "input": 0,
+                        "output": 0,
+                        "reasoning": 0,
+                        "cache_read": 0,
+                        "cache_write": 0
+                      }
+                    },
+                    "sessions": {}
+                  },
+                  "pebble.tool_ms": 0,
+                  "pebble.usage": {
+                    "tokens": {
+                      "input": 1,
+                      "output": 5,
+                      "reasoning": 0,
+                      "cache_read": 0,
+                      "cache_write": 0
+                    },
+                    "cost": {
+                      "usd_micros": 77,
+                      "source": "catalog"
+                    }
+                  }
+                }
+              },
+              "context_updates": {
+                "failure_class": "",
+                "last_response": "A haiku, added.",
+                "last_stage": "greet",
+                "response.greet": "A haiku, added."
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 52,
+      "kind": "petri",
+      "id": "execution 0/30/1",
+      "recorded_at": 1789783554749,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 30,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554749,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "text": "A haiku, added.",
+              "turns": 1,
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 480,
+              "custom": {
+                "pebble.compaction_usage": {
+                  "tokens": {
+                    "input": 0,
+                    "output": 0,
+                    "reasoning": 0,
+                    "cache_read": 0,
+                    "cache_write": 0
+                  }
+                },
+                "pebble.compactions": 0,
+                "pebble.inference_ms": 3,
+                "pebble.prompts": 1,
+                "pebble.subagents": {
+                  "spawned": 0,
+                  "turns_started": 0,
+                  "completed": 0,
+                  "failed": 0,
+                  "closed": 0,
+                  "usage": {
+                    "tokens": {
+                      "input": 0,
+                      "output": 0,
+                      "reasoning": 0,
+                      "cache_read": 0,
+                      "cache_write": 0
+                    }
+                  },
+                  "sessions": {}
+                },
+                "pebble.tool_ms": 0,
+                "pebble.usage": {
+                  "tokens": {
+                    "input": 1,
+                    "output": 5,
+                    "reasoning": 0,
+                    "cache_read": 0,
+                    "cache_write": 0
+                  },
+                  "cost": {
+                    "usd_micros": 77,
+                    "source": "catalog"
+                  }
+                }
+              }
+            },
+            "context_updates": {
+              "failure_class": "",
+              "last_response": "A haiku, added.",
+              "last_stage": "greet",
+              "response.greet": "A haiku, added."
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 53,
+      "kind": "platform",
+      "id": "10",
+      "recorded_at": 1789783554962,
+      "item": {
+        "seq": 10,
+        "recorded_at": 1789783554962,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 2,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "531cb7e8e33e491ed9d8bdc3bfb1820976a0f57e",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          },
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 2
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 54,
+      "kind": "petri",
+      "id": "execution 0/31/0",
+      "recorded_at": 1789783554963,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 31,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554963,
+        "record": {
+          "seq": 31,
+          "origin": "external",
+          "recorded_at": 1789783554963,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "groups": [
+              {
+                "group": 0,
+                "draw": null,
+                "trace": [],
+                "decision": {
+                  "emit": 1
+                }
+              }
+            ]
+          }
+        },
+        "derived": {
+          "groups": [
+            {
+              "group": 0,
+              "target": {
+                "id": 1,
+                "name": "exit",
+                "kind": "attractor/stage",
+                "meta": {
+                  "label": "Exit",
+                  "shape": "Msquare",
+                  "kind": "exit",
+                  "classes": [],
+                  "span": {
+                    "line": 6,
+                    "column": 5
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 55,
+      "kind": "petri",
+      "id": "execution 0/31/1",
+      "recorded_at": 1789783554963,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 31,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554963,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 1,
+              "generation": 0,
+              "payload": {
+                "text": "A haiku, added.",
+                "turns": 1,
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "from": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 56,
+      "kind": "petri",
+      "id": "execution 0/31/2",
+      "recorded_at": 1789783554963,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 31,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554963,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 57,
+      "kind": "petri",
+      "id": "execution 0/32/0",
+      "recorded_at": 1789783554963,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 32,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554963,
+        "record": {
+          "seq": 32,
+          "origin": "core",
+          "recorded_at": 1789783554963,
+          "body": {
+            "event": "route.applied",
+            "kind": "edge",
+            "firing": 2,
+            "group": 0,
+            "edge": 1
+          }
+        },
+        "derived": {
+          "target": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "transition": "Continue",
+          "back": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 58,
+      "kind": "petri",
+      "id": "execution 0/33/0",
+      "recorded_at": 1789783554963,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 33,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "greet",
+            "kind": "attractor/agent",
+            "meta": {
+              "label": "Greet",
+              "shape": "box",
+              "kind": "agent",
+              "classes": [],
+              "span": {
+                "line": 8,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554963,
+        "record": {
+          "seq": 33,
+          "origin": "core",
+          "recorded_at": 1789783554963,
+          "body": {
+            "event": "token.emitted",
+            "edge": 1,
+            "generation": 0,
+            "payload": {
+              "text": "A haiku, added.",
+              "turns": 1,
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "from": 2
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 59,
+      "kind": "petri",
+      "id": "execution 0/34/0",
+      "recorded_at": 1789783554963,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 34,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554963,
+        "record": {
+          "seq": 34,
+          "origin": "external",
+          "recorded_at": 1789783554963,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 60,
+      "kind": "petri",
+      "id": "execution 0/35/0",
+      "recorded_at": 1789783554963,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 35,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554963,
+        "record": {
+          "seq": 35,
+          "origin": "external",
+          "recorded_at": 1789783554963,
+          "body": {
+            "event": "step.started",
+            "firing": 3,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 61,
+      "kind": "petri",
+      "id": "execution 0/35/1",
+      "recorded_at": 1789783554963,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 35,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554963,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 62,
+      "kind": "petri",
+      "id": "execution 0/36/0",
+      "recorded_at": 1789783555340,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 36,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555340,
+        "record": {
+          "seq": 36,
+          "origin": "external",
+          "recorded_at": 1789783555340,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 3,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 3,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "b1d707486ad86083f78cb6dc86cebbb4a37632e9",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 3,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "b1d707486ad86083f78cb6dc86cebbb4a37632e9",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 63,
+      "kind": "petri",
+      "id": "execution 0/37/0",
+      "recorded_at": 1789783555340,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 37,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555340,
+        "record": {
+          "seq": 37,
+          "origin": "external",
+          "recorded_at": 1789783555340,
+          "body": {
+            "event": "step.finished",
+            "firing": 3,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 0
+              },
+              "context_updates": {
+                "failure_class": ""
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 64,
+      "kind": "petri",
+      "id": "execution 0/37/1",
+      "recorded_at": 1789783555340,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 37,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555340,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 0
+            },
+            "context_updates": {
+              "failure_class": ""
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 65,
+      "kind": "platform",
+      "id": "11",
+      "recorded_at": 1789783555466,
+      "item": {
+        "seq": 11,
+        "recorded_at": 1789783555466,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 3,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "b1d707486ad86083f78cb6dc86cebbb4a37632e9",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          },
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 3
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 66,
+      "kind": "petri",
+      "id": "execution 0/38/0",
+      "recorded_at": 1789783555466,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 38,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "Exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 6,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555466,
+        "record": {
+          "seq": 38,
+          "origin": "external",
+          "recorded_at": 1789783555466,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "groups": []
+          }
+        },
+        "derived": {
+          "groups": []
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 67,
+      "kind": "platform",
+      "id": "12",
+      "recorded_at": 1789783555537,
+      "item": {
+        "seq": 12,
+        "recorded_at": 1789783555537,
+        "record": {
+          "kind": "run.diff",
+          "base_sha": "a12a305478d2f8eec932f61f3b9d7aa681c6986b",
+          "head_sha": "b1d707486ad86083f78cb6dc86cebbb4a37632e9",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 68,
+      "kind": "petri",
+      "id": "coordinator/4/0",
+      "recorded_at": 1789783555538,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 4,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783555538,
+        "record": {
+          "seq": 4,
+          "origin": "external",
+          "recorded_at": 1789783555538,
+          "body": {
+            "event": "execution.finished",
+            "execution": 0,
+            "exit": {
+              "terminal": {
+                "status": "success"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 69,
+      "kind": "petri",
+      "id": "coordinator/5/0",
+      "recorded_at": 1789783555539,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 5,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783555539,
+        "record": {
+          "seq": 5,
+          "origin": "external",
+          "recorded_at": 1789783555539,
+          "body": {
+            "event": "invocation.finished",
+            "invocation": 0,
+            "result": {
+              "status": "success",
+              "failure": null,
+              "final_execution": 0,
+              "output": null,
+              "context": {
+                "failure_class": "",
+                "internal.run_id": "petri",
+                "last_response": "A haiku, added.",
+                "last_stage": "greet",
+                "response.greet": "A haiku, added."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 70,
+      "kind": "petri",
+      "id": "coordinator/6/0",
+      "recorded_at": 1789783555633,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 6,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783555633,
+        "record": {
+          "seq": 6,
+          "origin": "external",
+          "recorded_at": 1789783555633,
+          "body": {
+            "event": "scope.released",
+            "invocation": 0,
+            "lease": 0,
+            "scope": {
+              "declared": 0
+            },
+            "workspace": "invocation-0-scope-0",
+            "provider": "host",
+            "instance": "host-g18d696a89b0378d8-445-0",
+            "outcome": "succeeded",
+            "retained": true
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 71,
+      "kind": "petri",
+      "id": "coordinator/7/0",
+      "recorded_at": 1789783555638,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 7,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {},
+        "recorded_at": 1789783555638,
+        "record": {
+          "seq": 7,
+          "origin": "external",
+          "recorded_at": 1789783555638,
+          "body": {
+            "event": "run.finished",
+            "status": "success"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCM0SYNCF8Q7A3QCG0P6",
+      "stream_seq": 72,
+      "kind": "platform",
+      "id": "13",
+      "recorded_at": 1789783555714,
+      "item": {
+        "seq": 13,
+        "recorded_at": 1789783555714,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "succeeded",
+          "status": {
+            "kind": "succeeded",
+            "reason": "completed"
+          }
+        }
+      }
+    }
+  ]
+}

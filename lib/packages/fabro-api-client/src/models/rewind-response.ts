@@ -15,12 +15,18 @@
 
 
 /**
- * Response returned after rewind creates a new run.
+ * Response returned after rewind creates and starts a new run.
  */
 export interface RewindResponse {
     'source_run_id': string;
     'new_run_id': string;
+    /**
+     * The checkpoint the rewind was resolved to, as `@ordinal`.
+     */
     'target': string;
+    'checkpoint_sha': string;
+    'execution': number;
+    'firing': number;
     'archived': boolean;
     'archive_error'?: string | null;
 }

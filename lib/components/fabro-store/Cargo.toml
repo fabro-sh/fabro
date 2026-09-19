@@ -21,7 +21,6 @@ lithos-llm = { workspace = true, features = ["runtime"] }
 pebble-coding-agent.workspace = true
 fabro-util = { path = "../../foundation/fabro-util" }
 hex.workspace = true
-slatedb.workspace = true
 object_store.workspace = true
 percent-encoding.workspace = true
 async-trait.workspace = true

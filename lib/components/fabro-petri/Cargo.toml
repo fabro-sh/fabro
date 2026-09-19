@@ -1,0 +1,67 @@
+[package]
+name = "fabro-petri"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Fabro's adapters over Petri, the workflow engine: the one place Fabro touches it"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+# Petri's test kit, re-exported for Fabro crates that check a store
+# implementation against Petri's contract from their own tests. Never on in
+# a normal build.
+test-support = ["dep:petri_testkit"]
+
+[dependencies]
+fabro-api = { path = "../../foundation/fabro-api" }
+fabro-client = { path = "../../foundation/fabro-client" }
+fabro-db = { path = "../../foundation/fabro-db" }
+fabro-http.workspace = true
+fabro-interview = { path = "../fabro-interview" }
+fabro-store = { path = "../fabro-store" }
+fabro-types = { path = "../../foundation/fabro-types" }
+fabro-vault = { path = "../../foundation/fabro-vault" }
+fabro-workflow = { path = "../fabro-workflow" }
+fabro-checkpoint = { path = "../fabro-checkpoint" }
+fabro-util = { path = "../../foundation/fabro-util" }
+pebble-coding-agent.workspace = true
+petri_runtime.workspace = true
+petri_execution.workspace = true
+petri_store.workspace = true
+petri_attractor_steps.workspace = true
+petri_frontend_attractor.workspace = true
+petri_frontend_fabro.workspace = true
+lithos-llm = { workspace = true, features = ["runtime"] }
+petri_testkit = { workspace = true, optional = true }
+anyhow.workspace = true
+bytes.workspace = true
+async-trait.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+fabro-petri = { path = ".", features = ["test-support"] }
+fabro-tool = { path = "../fabro-tool" }
+httpmock = "0.8"
+pebble-coding-agent = { workspace = true, features = ["test-util"] }
+fabro-auth = { path = "../../foundation/fabro-auth", features = ["test-support"] }
+fabro-llm = { path = "../fabro-llm", features = ["test-support"] }
+fabro-store = { path = "../fabro-store", features = ["test-support"] }
+fabro-test.workspace = true
+fabro-types = { path = "../../foundation/fabro-types", features = ["test-support"] }
+petri_testkit.workspace = true
+tempfile = "3"
+lithos-llm = { workspace = true, features = ["runtime"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

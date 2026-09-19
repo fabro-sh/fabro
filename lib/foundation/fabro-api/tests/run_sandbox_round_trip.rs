@@ -26,10 +26,10 @@ fn run_sandbox_json_matches_openapi_shape() {
             snapshot: None,
         },
         RunSandboxInstance {
-            provider: SandboxProviderKind::DOCKER,
-            image:    None,
-            snapshot: None,
-            runtime:  RunSandboxRuntime {
+            provider:          SandboxProviderKind::DOCKER,
+            image:             None,
+            snapshot:          None,
+            runtime:           RunSandboxRuntime {
                 id:                "container-abc123".to_string(),
                 working_directory: "/workspace".to_string(),
                 repo_cloned:       Some(false),
@@ -40,6 +40,8 @@ fn run_sandbox_json_matches_openapi_shape() {
                 primary_repo_path: None,
                 primary_repo_link: None,
             },
+            ready_duration_ms: Some(1_250),
+            retained:          Some(true),
         },
     );
 
@@ -63,7 +65,9 @@ fn run_sandbox_json_matches_openapi_shape() {
                     "clone_branch": "main",
                     "workspace_root": "/workspace",
                     "repos_root": "/repos"
-                }
+                },
+                "ready_duration_ms": 1250,
+                "retained": true
             }
         })
     );

@@ -15,6 +15,12 @@ leak-timeout = "500ms"
     filter = "package(fabro-workflow)"
     slow-timeout = { period = "2s", terminate-after = 3 }
 
+    # fabro-petri's adapter tests run whole workflows on the host sandbox
+    # through the sandbox-driver plugin, and one of them calls the twin.
+    [[profile.default.overrides]]
+    filter = "package(fabro-petri)"
+    slow-timeout = { period = "5s", terminate-after = 4 }
+
     # Real descendant regressions include bounded reaping and process probes.
     # Leave room for their own watchdogs to run fail-safe fixture cleanup.
     [[profile.default.overrides]]
@@ -57,5 +63,9 @@ leak-timeout = "2s"
 
     [[profile.ci.overrides]]
     filter = "package(fabro-workflow)"
+    slow-timeout = { period = "30s", terminate-after = 4 }
+
+    [[profile.ci.overrides]]
+    filter = "package(fabro-petri)"
     slow-timeout = { period = "30s", terminate-after = 4 }
 

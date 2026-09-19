@@ -10,11 +10,12 @@
 use std::io::{self, IsTerminal, Write};
 
 use anyhow::{Context, Result, bail};
+use fabro_types::{RunId, parse_blob_ref};
 use tracing::{debug, info};
 
 use crate::args::DiffArgs;
 use crate::command_context::CommandContext;
-use crate::server_client::RunProjection;
+use crate::server_client::{Client, RunProjection};
 use crate::shared::print_json_pretty;
 
 pub(crate) async fn run(args: DiffArgs, base_ctx: &CommandContext) -> Result<()> {
@@ -25,6 +26,7 @@ pub(crate) async fn run(args: DiffArgs, base_ctx: &CommandContext) -> Result<()>
     let state = client.get_run_state(&run_id).await?;
 
     let patch = resolve_diff(&state, &args)?;
+    let patch = resolve_patch_text(client.as_ref(), &run_id, patch).await?;
 
     if ctx.json_output() {
         let value = serde_json::json!({
@@ -90,6 +92,19 @@ fn resolve_diff(state: &RunProjection, args: &DiffArgs) -> Result<String> {
     bail!(
         "Run is missing stored diff output since base commit {base_sha}; live sandbox diff is no longer supported"
     )
+}
+
+/// The patch as text: the projection holds a large patch as a
+/// `blob://sha256/<hex>` reference into the run's blob table.
+async fn resolve_patch_text(client: &Client, run_id: &RunId, patch: String) -> Result<String> {
+    let Some(blob_hash) = parse_blob_ref(patch.trim()) else {
+        return Ok(patch);
+    };
+    let bytes = client
+        .read_run_blob(run_id, &blob_hash)
+        .await?
+        .with_context(|| format!("the diff's patch blob {blob_hash} is missing from the store"))?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn colorize_diff_line(line: &str) -> String {

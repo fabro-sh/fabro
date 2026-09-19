@@ -191,7 +191,7 @@ describe("InterviewDock", () => {
     expect(buttons.Revise).toBeDefined();
   });
 
-  test("multiple choice renders option descriptions as display text", () => {
+  test("multiple choice renders option descriptions and previews as display text", () => {
     const question = makeQuestion({
       question_type: QuestionType.MULTIPLE_CHOICE,
       options: [
@@ -201,6 +201,7 @@ describe("InterviewDock", () => {
           description: "Deploy the current patch",
           preview: "<b>not rendered specially</b>",
         },
+        { key: "R", label: "[R] Revise" },
       ],
     });
     const tree = render(
@@ -209,7 +210,13 @@ describe("InterviewDock", () => {
     const text = textContent(tree.toJSON());
     expect(text).toContain("Approve");
     expect(text).toContain("Deploy the current patch");
-    expect(text).not.toContain("<b>not rendered specially</b>");
+    // The preview is shown as the text it is, never parsed as markup.
+    expect(text).toContain("<b>not rendered specially</b>");
+    const previews = tree.root.findAll(
+      (node) => node.props["data-testid"] === "interview-option-preview",
+    );
+    expect(previews).toHaveLength(1);
+    expect(shouldStackOptions(question.options ?? [])).toBe(true);
   });
 
   test("freeform question renders a textarea and disables send when empty", () => {

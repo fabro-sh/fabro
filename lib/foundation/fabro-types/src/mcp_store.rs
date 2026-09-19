@@ -6,7 +6,7 @@
 //! crate, which persists `id` and a content-hash `revision` alongside the
 //! normalized definition fields.
 //!
-//! Transport is the existing [`McpTransport`](crate::settings::McpTransport)
+//! Transport is the existing [`McpTransport`]
 //! reused verbatim, so a stored definition uses the same `stdio`/`http`/
 //! `sandbox` shape as inline MCP config.
 //!

@@ -1,224 +1,107 @@
-# Fabro Events Strategy
+# Fabro Run Stream Strategy
 
-Fabro emits structured **workflow run events** during execution for observability. Events are the durable audit trail for a run: they drive the run store, SSE streaming, CLI progress rendering, and optional JSONL sinks.
+A run's history is two logs, and its public event API is one ordered stream
+over both:
 
-Events are distinct from tracing logs. Tracing is developer diagnostics; events are product-facing state transitions and activity records that other systems consume.
+- **Petri's records.** The engine writes every fact about execution: the run
+  starting and finishing, each step's firing, progress, output and outcome, a
+  question asked and answered, a scope acquired. Fabro stores them unchanged
+  in `petri_records` through `fabro-petri`'s `SqliteRunStore`, and reads them
+  through Petri's event contract (`RunEvent`, with its `derived` view).
+- **Platform records.** Facts Fabro knows and Petri does not: the lifecycle
+  before and after the engine (`run.created`, `run.lifecycle`, `run.title`,
+  `run.parent`, `run.archived`, `run.superseded`, `run.notice`), who answered
+  a question (`interview.answered`), the branch and git identity a run works
+  under, a checkpoint commit with its diff, a collected artifact
+  (`artifact.collected`), the run's diff (`run.diff`), the pull request
+  requests and outcomes, a notification sent, a pairing. They are
+  `PlatformRecord` values in
+  `fabro-store::platform_records`, stored in `platform_records` with a
+  per-run `seq`.
 
-Detached runs rely on this distinction. If something needs to be visible after reattach, emit a `Event` rather than only logging to stderr or `detach.log`.
+The **projector** (`fabro-petri::projection`) folds both logs into the run's
+`RunProjection`, the view `GET /runs/{id}/state` serves, and assigns each
+record it consumes a `stream_seq` in `petri_stream`. That stream is what
+`GET /runs/{id}/events` and the attach stream serve, item by item, as
+`RunStreamItem`: `{run_id, stream_seq, kind: petri|platform, id, recorded_at,
+item}`. `stream_seq` is the cursor a client resumes from; `id` is the item's
+own identity (`<log>/<seq>/<index>` for a Petri event, the record's `seq` for
+a platform record) for deduplication.
 
-## Architecture
+Tracing logs are separate. Tracing is developer diagnostics; the stream is
+the product-facing record other systems consume. If something must be
+visible after a reattach, it has to be a record, not a log line.
 
-```text
-Engine/Handler -> Event -> Emitter::emit()
-                                             |- trace(raw event)
-                                             |- canonicalize -> RunEvent
-                                             `- on_event(&RunEvent)
-                                             |- run store
-                                             |- SSE
-                                             |- optional JSONL/debug sinks
-                                             `- CLI / tests / metrics listeners
-```
+## Recording a fact
 
-The canonical `RunEvent` is built exactly once in the `fabro-workflow::event` module.
+Petri's own facts need nothing from Fabro: the engine records them and the
+projector's fold reads them. Add Fabro code only for a fact Petri cannot
+know.
 
-- `Event` (in `fabro-workflow`) is the internal typed event emitted by engine and handlers.
-- `Emitter` owns an immutable `run_id` and converts `Event` into `RunEvent` via `to_run_event_at()`.
-- `RunEvent` (in `fabro-types`) holds envelope metadata plus a typed `body: EventBody`. It has no cached JSON fields; the wire format is produced only during serialization.
-- Every listener receives `&RunEvent`, not `&Event`.
-- Bypass paths that cannot go through the emitter must call `to_run_event()` once and reuse the same `RunEvent` for every sink.
+To record such a fact:
 
-## Canonical Envelope
+1. Add a variant to `PlatformRecord` and its kind to `PlatformRecordKind` in
+   `lib/components/fabro-store/src/platform_records.rs`. The kind is the
+   `kind` tag on the wire, lowercase dot notation (`pull_request.created`).
+   A record that belongs to a stage names its `execution` and `firing`.
+2. Append it through the server's `run_records` module (or the worker's
+   client), which commits the record and wakes the projector. Never write
+   `platform_records` from anywhere else.
+3. Fold it in `fabro-petri::projection` when the projection should show it.
+   A record nobody reads from the projection still reaches the stream.
+4. Update the readers that match on record kinds: the CLI's pretty stream
+   rendering (`petri_stream.rs`), the web app's stream handling, the Slack
+   service, and the tests or fixtures that name kinds.
 
-Each serialized `RunEvent` uses this canonical envelope:
+Do not add a platform record that restates a Petri record. The projection
+already carries what the engine knows; read it there.
 
-```json
-{
-  "id": "01960d0c-5d16-7d6e-8f61-9fd6f4a532b5",
-  "ts": "2026-03-30T12:00:01.000Z",
-  "run_id": "01JQ...",
-  "event": "agent.tool.started",
-  "session_id": "ses_child",
-  "parent_session_id": "ses_parent",
-  "node_id": "code",
-  "node_label": "Code",
-  "actor": {
-    "kind": "agent",
-    "session_id": "ses_child",
-    "parent_session_id": "ses_parent",
-    "model": "gpt-5.2"
-  },
-  "properties": {
-    "tool_name": "read_file",
-    "tool_call_id": "call_1",
-    "arguments": {"path": "src/main.rs"}
-  }
-}
-```
+## Reading the stream
 
-Always-present fields:
+Servers and workers hold the stream through the projector: `stream_after`
+for a page, `subscribe` for live items, `stream_head` for the cursor to
+start from. The server's `stream_follower` reads every run's stream once and
+fans it out to the in-memory run map and the global broadcast that `/attach`
+and the Slack service take their items from.
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | string | UUIDv7 event id |
-| `ts` | string | UTC timestamp with millisecond precision |
-| `run_id` | string | Workflow run id |
-| `event` | string | Lowercase dot-notation event name |
+Clients read `GET /runs/{id}/events?after=<stream_seq>` for a page and the
+attach stream for live items; `fabro-client` exposes `list_run_stream`,
+`list_run_stream_until` and `attach_run_stream`.
 
-Optional top-level fields:
+When matching items:
 
-| Field | When present |
-|---|---|
-| `session_id` | Agent/session events |
-| `parent_session_id` | Forwarded child-session events |
-| `node_id` | Events tied to a graph node or branch |
-| `node_label` | Display label for `node_id`; omitted when not applicable |
-| `actor` | The principal responsible for the event |
+- A Petri event's name is `item.record.body.event` (`run.started`,
+  `step.started`, `step.progress.recorded`, `step.finished`,
+  `run.finished`); its parsed meaning is under `item.derived` (a pending
+  question is `derived.parsed.kind == "question"`).
+- A platform record's kind is `item.record.kind`.
+- The run has ended when a platform `run.lifecycle` record's `transition`
+  is `succeeded`, `failed` or `dead`. Petri's `run.finished` precedes it and
+  carries the engine's own status.
 
-Everything else lives inside `properties`.
+Never rebuild an item downstream: pass the `RunStreamItem` through as read.
 
-Important rules:
+## Agent events
 
-- Optional envelope fields are omitted, not serialized as `null`.
-- Event-specific fields do not get flattened into the top level.
-- Actor identity normally lives only in top-level `actor: Principal`; do not duplicate it in
-  event-specific properties. The exception is `run.created`, whose
-  `properties.provenance.subject` is the durable run creator stored in `RunSpec`; its envelope
-  `actor` is derived from the same principal.
-- User actors must carry canonical IdP identity through `Principal::User { identity, login, auth_method }`, not a login-only string.
-- `EventPayload` validation requires `id`, `ts`, `run_id`, and `event`.
+Pebble's `CodingAgentEvent` stream is the agent event contract. Petri stores
+each event a coding agent publishes for a step as that step's progress, and
+the projector folds them into `StageProjection.agent` with pebble's
+`SessionProjection`. Read `StageProjection.agent`, or the stored progress
+record itself, instead of folding the stream again. Fabro adds nothing of
+its own to this stream.
 
-## Naming
+## Ask Fabro sessions
 
-The external event name is lowercase dot notation, for example:
+Ask Fabro sessions are not runs. Their events (`run.session.*`) live in
+their own log, `run_session_events`, through `RunSessionEventStore`, numbered
+per session and served by the sessions API. They never enter a run's stream.
 
-- `run.started`
-- `stage.completed`
-- `agent.tool.started`
-- `sandbox.ready`
-- `parallel.branch.completed`
+## Persistence guarantees
 
-`event_name()` in the `fabro-workflow::event` module is exhaustive. Do not use wildcard fallthroughs when adding new variants.
+A record is committed before it is visible: the projector reads only what
+the store has committed, and the stream's `stream_seq` is assigned in the
+same transaction as the projection that consumed the record. A client that
+resumes from its last `stream_seq` sees every item exactly once.
 
-## Node And Session Metadata
-
-`node_id` is the stable graph identifier. `node_label` is the human-facing display name. Stage events should surface both through the envelope when applicable.
-
-Agent events now use explicit session links:
-
-- `session_id` identifies the session that originally emitted the event.
-- `parent_session_id` identifies the immediate parent session for forwarded child events.
-- Nested sub-agents preserve immediate parentage across boundaries.
-
-`AgentEvent::SubAgentEvent` no longer exists. Child activity is forwarded as normal agent events with session linkage in the envelope.
-
-## Direct-Write Paths
-
-Most events flow through `Emitter::emit()`. The remaining direct-write paths must use:
-
-1. `to_run_event(run_id, event)`
-2. Serialize and redact once
-3. Reuse that exact `RunEvent` for every sink
-
-Never build the same `RunEvent` twice if multiple sinks receive it.
-
-## Adding A New Event
-
-### 1. Add the typed event
-
-Add a variant to `Event`, `AgentEvent`, or `SandboxLifecycle` as appropriate. Sandbox
-facts come from two places: the pipeline emits `Initializing`, `Ready`, and
-`InitializeFailed` around bringing the sandbox up, and the sandbox driver's own events
-(operations and their outcome, progress inside a create such as an image pull, snapshot
-builds, state observations, notices) are stored whole as `Event::SandboxDriver` by the
-`DriverEventRecorder` in the `fabro-workflow::event` module. Their names derive from the
-event (`fabro_types::sandbox_driver_event_name`): `<subject>.<action>.<phase>` such as
-`sandbox.stop.completed` or `snapshot.create.started`, `<subject>.state`, and
-`<subject>.notice`; their `properties` are the driver's event as the driver serializes
-it, so the driver's `Event` is part of fabro's stored format. Fabro-sandbox emits no
-events of its own.
-
-### 2. Add tracing
-
-Extend `Event::trace()` so the raw event is observable in tracing output.
-
-### 3. Add an external name
-
-Extend `event_name()` with the new lowercase dot-notation string.
-
-### 4. Add the `EventBody` variant
-
-Add a variant to `EventBody` in `fabro-types/src/run_event/mod.rs` with a corresponding props struct. Use `#[serde(rename = "dotted.name")]` matching the external name from step 3.
-
-### 5. Map envelope fields and construct `EventBody`
-
-Update `stored_event_fields()` and `event_body_from_event()` in the `fabro-workflow::event` module:
-
-- Move `node_id`, `node_label`, `session_id`, and `parent_session_id` into the envelope when appropriate.
-- Construct the `EventBody` variant directly from the `Event` fields.
-- For `Event::Agent` sub-variants, merge `visit` into the inner props and lift `stage` to `node_id`.
-- For `Event::Sandbox` sub-variants, unwrap and flatten into the corresponding `EventBody` variant.
-
-### 6. Emit it
-
-Prefer `Emitter::emit(&Event::...)`.
-
-Use `to_run_event()` only for true bypass paths.
-
-For cache-backed lifecycle work, emit slow-path start events only when the operation actually misses cache or waits on remote state. Completion events should represent a real ensure step (inspect, build, pull, or poll), not a configured no-op.
-
-### 7. Update consumers
-
-Check:
-
-- CLI progress parsing
-- `fabro events`
-- store validation
-- tests or fixtures that inspect event names or fields
-
-## Agent Events
-
-Pebble's `CodingAgentEvent` stream is the agent event contract. The worker's
-event sink stores every event the coding agent publishes for a stage, except
-streaming deltas, verbatim as `EventBody::Agent` under a name derived from
-its variant (`fabro_types::coding_event_name`), and the store folds those
-events into `StageProjection.agent` with pebble's `SessionProjection`. Do not
-add a fabro event that restates a pebble event, and do not add a second fold
-of the stream: read `StageProjection.agent`, or the stored pebble event
-itself, instead.
-
-Fabro emits an agent event of its own only for a fact pebble cannot know.
-Today those are `agent.session.activated`, `agent.session.deactivated`,
-`agent.tools.available`, `agent.pair.user_message`,
-`agent.pair.system_message`, `agent.interrupt.injected`,
-`agent.steer.buffered`, `agent.steer.dropped`, the `agent.acp.*` family, and
-`prompt.failover` for a one-shot prompt stage that walks its fallback plan
-without pebble. A new fabro agent event needs the same justification: name
-the fact pebble does not have.
-
-## Consumer Guidance
-
-When writing Rust consumers (listeners, store projections, CLI progress):
-
-- Match on `event.body` using `EventBody::*` variants. This gives you typed access to event-specific fields. For a pebble event, match `EventBody::Agent(props)` and then `props.coding_event()`.
-- For a stage's agent facts (usage, route, MCP servers, skills, todos, subagents, files, failovers, compactions), read `StageProjection.agent` rather than folding the events again.
-- Use `event.node_id`, `event.node_label`, `event.session_id`, and `event.parent_session_id` for envelope metadata.
-- Only use `event.event_name()` or `event.properties()` for generic/display purposes (logging, forwarding). These involve serialization and should not be used on hot paths.
-
-When writing external JSON consumers (SSE clients, JSONL parsers):
-
-- Match on the `"event"` field for the dot-notation event name.
-- Read event-specific data from `"properties"`.
-- Read stage/branch identity from `"node_id"` and `"node_label"`.
-- Read agent hierarchy from `"session_id"` and `"parent_session_id"`.
-
-Do not rebuild or mutate the `RunEvent` in downstream listeners.
-
-## Bypass And Persistence Guarantees
-
-Any JSONL sink, the run store, and SSE should reflect the same canonical envelope bytes after redaction.
-
-An active workflow treats any run-event sink write failure as fatal. It cancels execution and
-attempts to persist `run.failed` through the direct sink path. Persistence-error logs must include
-the full source chain so an HTTP status or transport failure remains visible.
-
-`status.json` remains the authoritative completion signal for detached runs. Terminal run status should only be written after all post-run work is finished.
+A worker cannot continue past a record it failed to append: the store's
+error reaches the engine and fails the run.

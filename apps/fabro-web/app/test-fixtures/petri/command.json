@@ -1,0 +1,3671 @@
+{
+  "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+  "projection": {
+    "title": "Run one command",
+    "spec": {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "settings": {
+        "project": {
+          "name": null,
+          "description": null,
+          "metadata": {}
+        },
+        "workflow": {
+          "name": null,
+          "description": null,
+          "graph": "workflow.fabro",
+          "metadata": {}
+        },
+        "run": {
+          "goal": {
+            "type": "inline",
+            "value": "Run one command"
+          },
+          "working_dir": null,
+          "metadata": {},
+          "inputs": {},
+          "model": {
+            "provider": null,
+            "name": null,
+            "fallbacks": {},
+            "controls": {
+              "reasoning_effort": null,
+              "speed": null
+            }
+          },
+          "git": {
+            "author": null
+          },
+          "prepare": {
+            "steps": [],
+            "timeout_ms": 300000
+          },
+          "execution": {
+            "mode": "normal",
+            "approval": "prompt"
+          },
+          "checkpoint": {
+            "exclude_globs": [],
+            "skip_git_hooks": false,
+            "commit_timeout_ms": 30000
+          },
+          "clone": {
+            "enabled": true,
+            "depth": 100
+          },
+          "run_branch": {
+            "enabled": true,
+            "push": true
+          },
+          "environment": {
+            "id": "local",
+            "provider": "local",
+            "image": {
+              "docker": null,
+              "dockerfile": null
+            },
+            "resources": {
+              "cpu": null,
+              "memory": null,
+              "disk": null
+            },
+            "network": {
+              "mode": "allow_all",
+              "allow": []
+            },
+            "lifecycle": {
+              "preserve": false,
+              "stop_on_terminal": true,
+              "auto_stop": null
+            },
+            "labels": {},
+            "env": {}
+          },
+          "notifications": {},
+          "interviews": {
+            "provider": null,
+            "slack": null
+          },
+          "agent": {
+            "fabro_tools": false,
+            "mcps": {}
+          },
+          "hooks": [],
+          "scm": {
+            "provider": null,
+            "owner": null,
+            "repository": null,
+            "github": null
+          },
+          "pull_request": null,
+          "artifacts": {
+            "include": []
+          },
+          "integrations": {
+            "github": {
+              "permissions": {}
+            }
+          }
+        }
+      },
+      "graph": {
+        "name": "Command",
+        "nodes": {
+          "exit": {
+            "id": "exit",
+            "attrs": {
+              "shape": {
+                "String": "Msquare"
+              }
+            }
+          },
+          "say": {
+            "id": "say",
+            "attrs": {
+              "shape": {
+                "String": "parallelogram"
+              },
+              "script": {
+                "String": "echo hello from petri"
+              }
+            }
+          },
+          "start": {
+            "id": "start",
+            "attrs": {
+              "shape": {
+                "String": "Mdiamond"
+              }
+            }
+          }
+        },
+        "edges": [
+          {
+            "from": "start",
+            "to": "say",
+            "attrs": {}
+          },
+          {
+            "from": "say",
+            "to": "exit",
+            "attrs": {}
+          }
+        ],
+        "attrs": {
+          "goal": {
+            "String": "Run one command"
+          }
+        }
+      },
+      "graph_source": "digraph Command {\n    graph [goal=\"Run one command\"]\n    start [shape=Mdiamond]\n    exit [shape=Msquare]\n    say [shape=parallelogram, script=\"echo hello from petri\"]\n    start -> say -> exit\n}",
+      "workflow_slug": "workflow",
+      "workflow_version_id": "a65150b821e21c843ede6b06fe0ed2bc6af498746a3c6883f1ee4328ef6d5c55",
+      "target": {
+        "kind": "folder",
+        "path": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpYIWEW2"
+      },
+      "source_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpYIWEW2",
+      "provenance": {
+        "server": {
+          "version": "0.357.0-nightly.0"
+        },
+        "subject": {
+          "kind": "user",
+          "identity": {
+            "issuer": "fabro:dev",
+            "subject": "dev"
+          },
+          "login": "dev",
+          "auth_method": "dev_token"
+        }
+      },
+      "definition_blob": "fff4c863e54b2c6f58114f6c1c3039484f599a6bf77caf4b3ad634dc979edc07",
+      "spec_blob": "fd9e919594704212a1b22f6ee8042c4583fc745461ffc0a2594e32f550e43d7c",
+      "admission": {
+        "graph": {
+          "blob": "b5e4170486a4d9c27e63be7cf8ff32f0bb1451e44b54de89c0988372278eb89f",
+          "digest": "b5e4170486a4d9c27e63be7cf8ff32f0bb1451e44b54de89c0988372278eb89f"
+        }
+      }
+    },
+    "web_url": "http://localhost:3000/runs/01M2VPKCKWSE3QXM9BACCRE4WH",
+    "start": {
+      "start_time": "2026-09-19T02:05:53.017Z",
+      "run_branch": "fabro/run/01M2VPKCKWSE3QXM9BACCRE4WH",
+      "base_sha": "e8610b1414cef15a0ab7889a651b2221fd80086e"
+    },
+    "status": {
+      "kind": "succeeded",
+      "reason": "completed"
+    },
+    "status_updated_at": "2026-09-19T02:05:55.521Z",
+    "last_event_at": "2026-09-19T02:05:55.530Z",
+    "pending_control": null,
+    "checkpoints": [
+      {
+        "seq": 26,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:53.896Z",
+          "current_node": "start",
+          "git_commit_sha": "e8610b1414cef15a0ab7889a651b2221fd80086e"
+        },
+        "diff": {}
+      },
+      {
+        "seq": 39,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:54.776Z",
+          "current_node": "say",
+          "git_commit_sha": "78a882a8aaa5801d29d6530a93bd5ae2174bd620"
+        },
+        "diff": {
+          "summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      },
+      {
+        "seq": 51,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:55.390Z",
+          "current_node": "exit",
+          "git_commit_sha": "0ef9095fa220a5cc176e543afc234f6a24b11878"
+        },
+        "diff": {
+          "summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      }
+    ],
+    "conclusion": {
+      "timestamp": "2026-09-19T02:05:55.521Z",
+      "status": "succeeded",
+      "timing": {
+        "wall_time_ms": 2504,
+        "inference_time_ms": 0,
+        "tool_time_ms": 55,
+        "active_time_ms": 55
+      },
+      "final_git_commit_sha": "0ef9095fa220a5cc176e543afc234f6a24b11878",
+      "stages": [
+        {
+          "stage_id": "start",
+          "stage_label": "start",
+          "timing": {
+            "wall_time_ms": 0,
+            "inference_time_ms": 0,
+            "tool_time_ms": 0,
+            "active_time_ms": 0
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        },
+        {
+          "stage_id": "say",
+          "stage_label": "say",
+          "timing": {
+            "wall_time_ms": 55,
+            "inference_time_ms": 0,
+            "tool_time_ms": 55,
+            "active_time_ms": 55
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        },
+        {
+          "stage_id": "exit",
+          "stage_label": "exit",
+          "timing": {
+            "wall_time_ms": 0,
+            "inference_time_ms": 0,
+            "tool_time_ms": 0,
+            "active_time_ms": 0
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        }
+      ],
+      "total_retries": 0,
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    "sandbox": {
+      "kind": "ready",
+      "plan": {
+        "provider": "local"
+      },
+      "instance": {
+        "provider": "local",
+        "runtime": {
+          "id": "host-g18d696a8a8a7c818-1384-0",
+          "working_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/fabro-test-01M2VPKCA7SYSXQZTCMFT1Z9SV/storage/scratch/20260918-01M2VPKCKWSE3QXM9BACCRE4WH/petri/scopes/invocation-0-scope-0/work"
+        },
+        "ready_duration_ms": 65,
+        "retained": true
+      }
+    },
+    "pull_request": null,
+    "superseded_by": null,
+    "git_identity": {
+      "name": "Fabro",
+      "email": "noreply@fabro.sh",
+      "source": "default"
+    },
+    "pending_interviews": {},
+    "stages": {
+      "say@1": {
+        "first_event_seq": 1262,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:54.618Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": "hello from petri\n",
+        "output_bytes": 17,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:53.897Z",
+        "handler": "command",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 55,
+          "inference_time_ms": 0,
+          "tool_time_ms": 55,
+          "active_time_ms": 55
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      },
+      "start@1": {
+        "first_event_seq": 389,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:53.867Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": "checkout: /private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpYIWEW2 is not a Git repository; the workspace starts empty\n",
+        "output_bytes": 130,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:53.024Z",
+        "handler": "start",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 80,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      },
+      "exit@1": {
+        "first_event_seq": 2142,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:55.285Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": null,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:54.777Z",
+        "handler": "exit",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      }
+    }
+  },
+  "stream": [
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 1,
+      "kind": "platform",
+      "id": "1",
+      "recorded_at": 1789783552863,
+      "item": {
+        "seq": 1,
+        "recorded_at": 1789783552863,
+        "record": {
+          "kind": "run.created",
+          "spec": {
+            "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+            "settings": {
+              "project": {
+                "name": null,
+                "description": null,
+                "metadata": {}
+              },
+              "workflow": {
+                "name": null,
+                "description": null,
+                "graph": "workflow.fabro",
+                "metadata": {}
+              },
+              "run": {
+                "goal": {
+                  "type": "inline",
+                  "value": "Run one command"
+                },
+                "working_dir": null,
+                "metadata": {},
+                "inputs": {},
+                "model": {
+                  "provider": null,
+                  "name": null,
+                  "fallbacks": {},
+                  "controls": {
+                    "reasoning_effort": null,
+                    "speed": null
+                  }
+                },
+                "git": {
+                  "author": null
+                },
+                "prepare": {
+                  "steps": [],
+                  "timeout_ms": 300000
+                },
+                "execution": {
+                  "mode": "normal",
+                  "approval": "prompt"
+                },
+                "checkpoint": {
+                  "exclude_globs": [],
+                  "skip_git_hooks": false,
+                  "commit_timeout_ms": 30000
+                },
+                "clone": {
+                  "enabled": true,
+                  "depth": 100
+                },
+                "run_branch": {
+                  "enabled": true,
+                  "push": true
+                },
+                "environment": {
+                  "id": "local",
+                  "provider": "local",
+                  "image": {
+                    "docker": null,
+                    "dockerfile": null
+                  },
+                  "resources": {
+                    "cpu": null,
+                    "memory": null,
+                    "disk": null
+                  },
+                  "network": {
+                    "mode": "allow_all",
+                    "allow": []
+                  },
+                  "lifecycle": {
+                    "preserve": false,
+                    "stop_on_terminal": true,
+                    "auto_stop": null
+                  },
+                  "labels": {},
+                  "env": {}
+                },
+                "notifications": {},
+                "interviews": {
+                  "provider": null,
+                  "slack": null
+                },
+                "agent": {
+                  "fabro_tools": false,
+                  "mcps": {}
+                },
+                "hooks": [],
+                "scm": {
+                  "provider": null,
+                  "owner": null,
+                  "repository": null,
+                  "github": null
+                },
+                "pull_request": null,
+                "artifacts": {
+                  "include": []
+                },
+                "integrations": {
+                  "github": {
+                    "permissions": {}
+                  }
+                }
+              }
+            },
+            "graph": {
+              "name": "Command",
+              "nodes": {
+                "say": {
+                  "id": "say",
+                  "attrs": {
+                    "script": {
+                      "String": "echo hello from petri"
+                    },
+                    "shape": {
+                      "String": "parallelogram"
+                    }
+                  }
+                },
+                "exit": {
+                  "id": "exit",
+                  "attrs": {
+                    "shape": {
+                      "String": "Msquare"
+                    }
+                  }
+                },
+                "start": {
+                  "id": "start",
+                  "attrs": {
+                    "shape": {
+                      "String": "Mdiamond"
+                    }
+                  }
+                }
+              },
+              "edges": [
+                {
+                  "from": "start",
+                  "to": "say",
+                  "attrs": {}
+                },
+                {
+                  "from": "say",
+                  "to": "exit",
+                  "attrs": {}
+                }
+              ],
+              "attrs": {
+                "goal": {
+                  "String": "Run one command"
+                }
+              }
+            },
+            "graph_source": "digraph Command {\n    graph [goal=\"Run one command\"]\n    start [shape=Mdiamond]\n    exit [shape=Msquare]\n    say [shape=parallelogram, script=\"echo hello from petri\"]\n    start -> say -> exit\n}",
+            "workflow_slug": "workflow",
+            "workflow_version_id": "a65150b821e21c843ede6b06fe0ed2bc6af498746a3c6883f1ee4328ef6d5c55",
+            "target": {
+              "kind": "folder",
+              "path": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpYIWEW2"
+            },
+            "source_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpYIWEW2",
+            "provenance": {
+              "server": {
+                "version": "0.357.0-nightly.0"
+              },
+              "subject": {
+                "kind": "user",
+                "identity": {
+                  "issuer": "fabro:dev",
+                  "subject": "dev"
+                },
+                "login": "dev",
+                "auth_method": "dev_token"
+              }
+            },
+            "definition_blob": "fff4c863e54b2c6f58114f6c1c3039484f599a6bf77caf4b3ad634dc979edc07",
+            "spec_blob": "fd9e919594704212a1b22f6ee8042c4583fc745461ffc0a2594e32f550e43d7c",
+            "admission": {
+              "graph": {
+                "blob": "b5e4170486a4d9c27e63be7cf8ff32f0bb1451e44b54de89c0988372278eb89f",
+                "digest": "b5e4170486a4d9c27e63be7cf8ff32f0bb1451e44b54de89c0988372278eb89f"
+              }
+            }
+          },
+          "title": "Run one command",
+          "web_url": "http://localhost:3000/runs/01M2VPKCKWSE3QXM9BACCRE4WH"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 2,
+      "kind": "platform",
+      "id": "2",
+      "recorded_at": 1789783552864,
+      "item": {
+        "seq": 2,
+        "recorded_at": 1789783552864,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "submitted",
+          "status": {
+            "kind": "submitted"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 3,
+      "kind": "platform",
+      "id": "3",
+      "recorded_at": 1789783552981,
+      "item": {
+        "seq": 3,
+        "recorded_at": 1789783552981,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "start_requested",
+          "source": "start"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 4,
+      "kind": "platform",
+      "id": "4",
+      "recorded_at": 1789783552993,
+      "item": {
+        "seq": 4,
+        "recorded_at": 1789783552993,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "runnable",
+          "status": {
+            "kind": "runnable"
+          },
+          "source": "start_requested"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 5,
+      "kind": "platform",
+      "id": "5",
+      "recorded_at": 1789783553002,
+      "item": {
+        "seq": 5,
+        "recorded_at": 1789783553002,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "starting",
+          "status": {
+            "kind": "starting"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 6,
+      "kind": "platform",
+      "id": "6",
+      "recorded_at": 1789783553008,
+      "item": {
+        "seq": 6,
+        "recorded_at": 1789783553008,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "running",
+          "status": {
+            "kind": "running"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 7,
+      "kind": "petri",
+      "id": "coordinator/0/0",
+      "recorded_at": 1789783553017,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 0,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783553017,
+        "record": {
+          "seq": 0,
+          "origin": "external",
+          "recorded_at": 1789783553017,
+          "body": {
+            "event": "run.started",
+            "format_version": 7,
+            "key": "01M2VPKCKWSE3QXM9BACCRE4WH",
+            "root": 0,
+            "middleware_chain": [
+              "circuit-breaker"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 8,
+      "kind": "petri",
+      "id": "coordinator/1/0",
+      "recorded_at": 1789783553019,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 1,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {},
+        "recorded_at": 1789783553019,
+        "record": {
+          "seq": 1,
+          "origin": "external",
+          "recorded_at": 1789783553019,
+          "body": {
+            "event": "graph.registered",
+            "digest": "b5e4170486a4d9c27e63be7cf8ff32f0bb1451e44b54de89c0988372278eb89f"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 9,
+      "kind": "petri",
+      "id": "coordinator/2/0",
+      "recorded_at": 1789783553021,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 2,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783553021,
+        "record": {
+          "seq": 2,
+          "origin": "external",
+          "recorded_at": 1789783553021,
+          "body": {
+            "event": "invocation.declared",
+            "invocation": 0,
+            "call": null,
+            "graph": "b5e4170486a4d9c27e63be7cf8ff32f0bb1451e44b54de89c0988372278eb89f",
+            "context": {},
+            "secret_bindings": "none",
+            "sandbox": "isolated"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 10,
+      "kind": "petri",
+      "id": "coordinator/3/0",
+      "recorded_at": 1789783553022,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 3,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783553022,
+        "record": {
+          "seq": 3,
+          "origin": "external",
+          "recorded_at": 1789783553022,
+          "body": {
+            "event": "execution.declared",
+            "execution": 0,
+            "invocation": 0,
+            "predecessor": null,
+            "start": {
+              "entry": "graph_entries",
+              "context": {},
+              "prior_firings": {},
+              "execution_index": 0,
+              "max_executions": 32
+            },
+            "middleware_state": {
+              "circuit-breaker": [
+                1,
+                {
+                  "loop_signatures": {},
+                  "restart_signatures": {},
+                  "pending": {}
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 11,
+      "kind": "petri",
+      "id": "execution 0/0/0",
+      "recorded_at": 1789783553024,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 0,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783553024,
+        "record": {
+          "seq": 0,
+          "origin": "external",
+          "recorded_at": 1789783553024,
+          "body": {
+            "event": "execution.started",
+            "entry": "graph_entries",
+            "context": {},
+            "prior_firings": {},
+            "execution_index": 0,
+            "max_executions": 32
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 12,
+      "kind": "petri",
+      "id": "execution 0/1/0",
+      "recorded_at": 1789783553024,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783553024,
+        "record": {
+          "seq": 1,
+          "origin": "external",
+          "recorded_at": 1789783553024,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": "execution_start",
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 13,
+      "kind": "petri",
+      "id": "execution 0/1/1",
+      "recorded_at": 1789783553024,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553024,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 2,
+              "generation": 0,
+              "payload": null,
+              "from": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 14,
+      "kind": "petri",
+      "id": "execution 0/1/2",
+      "recorded_at": 1789783553024,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553024,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 15,
+      "kind": "petri",
+      "id": "execution 0/2/0",
+      "recorded_at": 1789783553024,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 2,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783553024,
+        "record": {
+          "seq": 2,
+          "origin": "core",
+          "recorded_at": 1789783553024,
+          "body": {
+            "event": "token.emitted",
+            "edge": 2,
+            "generation": 0,
+            "payload": null,
+            "from": 0
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 16,
+      "kind": "petri",
+      "id": "execution 0/3/0",
+      "recorded_at": 1789783553024,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 3,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553024,
+        "record": {
+          "seq": 3,
+          "origin": "external",
+          "recorded_at": 1789783553024,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 17,
+      "kind": "petri",
+      "id": "execution 0/4/0",
+      "recorded_at": 1789783553090,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 4,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783553090,
+        "record": {
+          "seq": 4,
+          "origin": "external",
+          "recorded_at": 1789783553090,
+          "body": {
+            "event": "scope.acquired",
+            "scope": 0,
+            "lease": 0,
+            "workspace": "invocation-0-scope-0",
+            "provider": "host",
+            "instance": "host-g18d696a8a8a7c818-1384-0",
+            "working_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/REDACTED/storage/scratch/20260918-01M2VPKCKWSE3QXM9BACCRE4WH/petri/scopes/invocation-0-scope-0/work",
+            "duration_ms": 65
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 18,
+      "kind": "petri",
+      "id": "execution 0/5/0",
+      "recorded_at": 1789783553090,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 5,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553090,
+        "record": {
+          "seq": 5,
+          "origin": "external",
+          "recorded_at": 1789783553090,
+          "body": {
+            "event": "step.started",
+            "firing": 1,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 19,
+      "kind": "petri",
+      "id": "execution 0/5/1",
+      "recorded_at": 1789783553090,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 5,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553090,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 20,
+      "kind": "petri",
+      "id": "execution 0/6/0",
+      "recorded_at": 1789783553170,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 6,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553170,
+        "record": {
+          "seq": 6,
+          "origin": "external",
+          "recorded_at": 1789783553170,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 1,
+            "ev": {
+              "log": {
+                "stream": "stderr",
+                "line": "checkout: /private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpYIWEW2 is not a Git repository; the workspace starts empty"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 21,
+      "kind": "petri",
+      "id": "execution 0/7/0",
+      "recorded_at": 1789783553867,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 7,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553867,
+        "record": {
+          "seq": 7,
+          "origin": "external",
+          "recorded_at": 1789783553867,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 1,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 1,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "e8610b1414cef15a0ab7889a651b2221fd80086e",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 1,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "e8610b1414cef15a0ab7889a651b2221fd80086e",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 22,
+      "kind": "petri",
+      "id": "execution 0/8/0",
+      "recorded_at": 1789783553867,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 8,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553867,
+        "record": {
+          "seq": 8,
+          "origin": "external",
+          "recorded_at": 1789783553867,
+          "body": {
+            "event": "step.finished",
+            "firing": 1,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 80
+              },
+              "context_updates": {
+                "failure_class": "",
+                "internal.run_id": "petri"
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 23,
+      "kind": "petri",
+      "id": "execution 0/8/1",
+      "recorded_at": 1789783553867,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 8,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553867,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 80
+            },
+            "context_updates": {
+              "failure_class": "",
+              "internal.run_id": "petri"
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 24,
+      "kind": "platform",
+      "id": "7",
+      "recorded_at": 1789783553866,
+      "item": {
+        "seq": 7,
+        "recorded_at": 1789783553866,
+        "record": {
+          "kind": "run.branch",
+          "run_branch": "fabro/run/01M2VPKCKWSE3QXM9BACCRE4WH",
+          "base_sha": "e8610b1414cef15a0ab7889a651b2221fd80086e",
+          "workspace": "invocation-0-scope-0"
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 25,
+      "kind": "platform",
+      "id": "8",
+      "recorded_at": 1789783553867,
+      "item": {
+        "seq": 8,
+        "recorded_at": 1789783553867,
+        "record": {
+          "kind": "git.identity",
+          "name": "Fabro",
+          "email": "noreply@fabro.sh",
+          "source": "default"
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 26,
+      "kind": "platform",
+      "id": "9",
+      "recorded_at": 1789783553896,
+      "item": {
+        "seq": 9,
+        "recorded_at": 1789783553896,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 1,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "e8610b1414cef15a0ab7889a651b2221fd80086e",
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 27,
+      "kind": "petri",
+      "id": "execution 0/9/0",
+      "recorded_at": 1789783553897,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553897,
+        "record": {
+          "seq": 9,
+          "origin": "external",
+          "recorded_at": 1789783553897,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "groups": [
+              {
+                "group": 0,
+                "draw": null,
+                "trace": [],
+                "decision": {
+                  "emit": 0
+                }
+              }
+            ]
+          }
+        },
+        "derived": {
+          "groups": [
+            {
+              "group": 0,
+              "target": {
+                "id": 2,
+                "name": "say",
+                "kind": "attractor/command",
+                "meta": {
+                  "label": "say",
+                  "shape": "parallelogram",
+                  "kind": "command",
+                  "classes": [],
+                  "span": {
+                    "line": 5,
+                    "column": 5
+                  },
+                  "script": "echo hello from petri",
+                  "edges": {
+                    "1": {
+                      "to": "exit",
+                      "label": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 28,
+      "kind": "petri",
+      "id": "execution 0/9/1",
+      "recorded_at": 1789783553897,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553897,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 0,
+              "generation": 0,
+              "payload": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "from": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 29,
+      "kind": "petri",
+      "id": "execution 0/9/2",
+      "recorded_at": 1789783553897,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553897,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 30,
+      "kind": "petri",
+      "id": "execution 0/10/0",
+      "recorded_at": 1789783553897,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 10,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553897,
+        "record": {
+          "seq": 10,
+          "origin": "core",
+          "recorded_at": 1789783553897,
+          "body": {
+            "event": "route.applied",
+            "kind": "edge",
+            "firing": 1,
+            "group": 0,
+            "edge": 0
+          }
+        },
+        "derived": {
+          "target": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "transition": "Continue",
+          "back": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 31,
+      "kind": "petri",
+      "id": "execution 0/11/0",
+      "recorded_at": 1789783553897,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 11,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "say",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553897,
+        "record": {
+          "seq": 11,
+          "origin": "core",
+          "recorded_at": 1789783553897,
+          "body": {
+            "event": "token.emitted",
+            "edge": 0,
+            "generation": 0,
+            "payload": {
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "from": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 32,
+      "kind": "petri",
+      "id": "execution 0/12/0",
+      "recorded_at": 1789783553897,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 12,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553897,
+        "record": {
+          "seq": 12,
+          "origin": "external",
+          "recorded_at": 1789783553897,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 33,
+      "kind": "petri",
+      "id": "execution 0/13/0",
+      "recorded_at": 1789783553897,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 13,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553897,
+        "record": {
+          "seq": 13,
+          "origin": "external",
+          "recorded_at": 1789783553897,
+          "body": {
+            "event": "step.started",
+            "firing": 2,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 34,
+      "kind": "petri",
+      "id": "execution 0/13/1",
+      "recorded_at": 1789783553897,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 13,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553897,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 35,
+      "kind": "petri",
+      "id": "execution 0/14/0",
+      "recorded_at": 1789783553923,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 14,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553923,
+        "record": {
+          "seq": 14,
+          "origin": "external",
+          "recorded_at": 1789783553923,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "log": {
+                "stream": "stdout",
+                "line": "hello from petri"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 36,
+      "kind": "petri",
+      "id": "execution 0/15/0",
+      "recorded_at": 1789783554618,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 15,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554618,
+        "record": {
+          "seq": 15,
+          "origin": "external",
+          "recorded_at": 1789783554618,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 2,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "78a882a8aaa5801d29d6530a93bd5ae2174bd620",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 2,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "78a882a8aaa5801d29d6530a93bd5ae2174bd620",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 37,
+      "kind": "petri",
+      "id": "execution 0/16/0",
+      "recorded_at": 1789783554618,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 16,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554618,
+        "record": {
+          "seq": 16,
+          "origin": "external",
+          "recorded_at": 1789783554618,
+          "body": {
+            "event": "step.finished",
+            "firing": 2,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "exit_status": 0,
+                "stdout": "hello from petri\n",
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 55
+              },
+              "context_updates": {
+                "command.output": "hello from petri\n",
+                "failure_class": ""
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 38,
+      "kind": "petri",
+      "id": "execution 0/16/1",
+      "recorded_at": 1789783554618,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 16,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554618,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "exit_status": 0,
+              "stdout": "hello from petri\n",
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 55
+            },
+            "context_updates": {
+              "command.output": "hello from petri\n",
+              "failure_class": ""
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 39,
+      "kind": "platform",
+      "id": "10",
+      "recorded_at": 1789783554776,
+      "item": {
+        "seq": 10,
+        "recorded_at": 1789783554776,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 2,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "78a882a8aaa5801d29d6530a93bd5ae2174bd620",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          },
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 2
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 40,
+      "kind": "petri",
+      "id": "execution 0/17/0",
+      "recorded_at": 1789783554777,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 17,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554777,
+        "record": {
+          "seq": 17,
+          "origin": "external",
+          "recorded_at": 1789783554777,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "groups": [
+              {
+                "group": 0,
+                "draw": null,
+                "trace": [],
+                "decision": {
+                  "emit": 1
+                }
+              }
+            ]
+          }
+        },
+        "derived": {
+          "groups": [
+            {
+              "group": 0,
+              "target": {
+                "id": 1,
+                "name": "exit",
+                "kind": "attractor/stage",
+                "meta": {
+                  "label": "exit",
+                  "shape": "Msquare",
+                  "kind": "exit",
+                  "classes": [],
+                  "span": {
+                    "line": 4,
+                    "column": 5
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 41,
+      "kind": "petri",
+      "id": "execution 0/17/1",
+      "recorded_at": 1789783554777,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 17,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554777,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 1,
+              "generation": 0,
+              "payload": {
+                "exit_status": 0,
+                "stdout": "hello from petri\n",
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "from": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 42,
+      "kind": "petri",
+      "id": "execution 0/17/2",
+      "recorded_at": 1789783554777,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 17,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554777,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 43,
+      "kind": "petri",
+      "id": "execution 0/18/0",
+      "recorded_at": 1789783554777,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 18,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554777,
+        "record": {
+          "seq": 18,
+          "origin": "core",
+          "recorded_at": 1789783554777,
+          "body": {
+            "event": "route.applied",
+            "kind": "edge",
+            "firing": 2,
+            "group": 0,
+            "edge": 1
+          }
+        },
+        "derived": {
+          "target": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "transition": "Continue",
+          "back": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 44,
+      "kind": "petri",
+      "id": "execution 0/19/0",
+      "recorded_at": 1789783554777,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 19,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "say",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "say",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "script": "echo hello from petri",
+              "edges": {
+                "1": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554777,
+        "record": {
+          "seq": 19,
+          "origin": "core",
+          "recorded_at": 1789783554777,
+          "body": {
+            "event": "token.emitted",
+            "edge": 1,
+            "generation": 0,
+            "payload": {
+              "exit_status": 0,
+              "stdout": "hello from petri\n",
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "from": 2
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 45,
+      "kind": "petri",
+      "id": "execution 0/20/0",
+      "recorded_at": 1789783554777,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 20,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554777,
+        "record": {
+          "seq": 20,
+          "origin": "external",
+          "recorded_at": 1789783554777,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 46,
+      "kind": "petri",
+      "id": "execution 0/21/0",
+      "recorded_at": 1789783554777,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 21,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554777,
+        "record": {
+          "seq": 21,
+          "origin": "external",
+          "recorded_at": 1789783554777,
+          "body": {
+            "event": "step.started",
+            "firing": 3,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 47,
+      "kind": "petri",
+      "id": "execution 0/21/1",
+      "recorded_at": 1789783554777,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 21,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554777,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 48,
+      "kind": "petri",
+      "id": "execution 0/22/0",
+      "recorded_at": 1789783555284,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 22,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555284,
+        "record": {
+          "seq": 22,
+          "origin": "external",
+          "recorded_at": 1789783555284,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 3,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 3,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "0ef9095fa220a5cc176e543afc234f6a24b11878",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 3,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "0ef9095fa220a5cc176e543afc234f6a24b11878",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 49,
+      "kind": "petri",
+      "id": "execution 0/23/0",
+      "recorded_at": 1789783555285,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 23,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555285,
+        "record": {
+          "seq": 23,
+          "origin": "external",
+          "recorded_at": 1789783555285,
+          "body": {
+            "event": "step.finished",
+            "firing": 3,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 0
+              },
+              "context_updates": {
+                "failure_class": ""
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 50,
+      "kind": "petri",
+      "id": "execution 0/23/1",
+      "recorded_at": 1789783555285,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 23,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555285,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 0
+            },
+            "context_updates": {
+              "failure_class": ""
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 51,
+      "kind": "platform",
+      "id": "11",
+      "recorded_at": 1789783555390,
+      "item": {
+        "seq": 11,
+        "recorded_at": 1789783555390,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 3,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "0ef9095fa220a5cc176e543afc234f6a24b11878",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          },
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 3
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 52,
+      "kind": "petri",
+      "id": "execution 0/24/0",
+      "recorded_at": 1789783555390,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 24,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555390,
+        "record": {
+          "seq": 24,
+          "origin": "external",
+          "recorded_at": 1789783555390,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "groups": []
+          }
+        },
+        "derived": {
+          "groups": []
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 53,
+      "kind": "petri",
+      "id": "coordinator/4/0",
+      "recorded_at": 1789783555470,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 4,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783555470,
+        "record": {
+          "seq": 4,
+          "origin": "external",
+          "recorded_at": 1789783555470,
+          "body": {
+            "event": "execution.finished",
+            "execution": 0,
+            "exit": {
+              "terminal": {
+                "status": "success"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 54,
+      "kind": "platform",
+      "id": "12",
+      "recorded_at": 1789783555470,
+      "item": {
+        "seq": 12,
+        "recorded_at": 1789783555470,
+        "record": {
+          "kind": "run.diff",
+          "base_sha": "e8610b1414cef15a0ab7889a651b2221fd80086e",
+          "head_sha": "0ef9095fa220a5cc176e543afc234f6a24b11878",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 55,
+      "kind": "petri",
+      "id": "coordinator/5/0",
+      "recorded_at": 1789783555471,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 5,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783555471,
+        "record": {
+          "seq": 5,
+          "origin": "external",
+          "recorded_at": 1789783555471,
+          "body": {
+            "event": "invocation.finished",
+            "invocation": 0,
+            "result": {
+              "status": "success",
+              "failure": null,
+              "final_execution": 0,
+              "output": null,
+              "context": {
+                "command.output": "hello from petri\n",
+                "failure_class": "",
+                "internal.run_id": "petri"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 56,
+      "kind": "petri",
+      "id": "coordinator/6/0",
+      "recorded_at": 1789783555519,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 6,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783555519,
+        "record": {
+          "seq": 6,
+          "origin": "external",
+          "recorded_at": 1789783555519,
+          "body": {
+            "event": "scope.released",
+            "invocation": 0,
+            "lease": 0,
+            "scope": {
+              "declared": 0
+            },
+            "workspace": "invocation-0-scope-0",
+            "provider": "host",
+            "instance": "host-g18d696a8a8a7c818-1384-0",
+            "outcome": "succeeded",
+            "retained": true
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 57,
+      "kind": "petri",
+      "id": "coordinator/7/0",
+      "recorded_at": 1789783555521,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 7,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {},
+        "recorded_at": 1789783555521,
+        "record": {
+          "seq": 7,
+          "origin": "external",
+          "recorded_at": 1789783555521,
+          "body": {
+            "event": "run.finished",
+            "status": "success"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKWSE3QXM9BACCRE4WH",
+      "stream_seq": 58,
+      "kind": "platform",
+      "id": "13",
+      "recorded_at": 1789783555530,
+      "item": {
+        "seq": 13,
+        "recorded_at": 1789783555530,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "succeeded",
+          "status": {
+            "kind": "succeeded",
+            "reason": "completed"
+          }
+        }
+      }
+    }
+  ]
+}

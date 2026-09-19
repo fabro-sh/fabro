@@ -50,6 +50,39 @@ const WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
     EnvVars::AWS_CONTAINER_CREDENTIALS_FULL_URI,
     EnvVars::AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE,
+    // Petri's sandbox-driver plugins are resolved in the worker, where a
+    // Petri run executes: the plugin path, checksum and dev-mode overrides
+    // cross with `PATH`, so the worker finds the plugins the server would.
+    EnvVars::PETRI_SANDBOX_HOST_PLUGIN,
+    EnvVars::PETRI_SANDBOX_HOST_SHA256,
+    EnvVars::PETRI_SANDBOX_DOCKER_PLUGIN,
+    EnvVars::PETRI_SANDBOX_DOCKER_SHA256,
+    EnvVars::PETRI_SANDBOX_DAYTONA_PLUGIN,
+    EnvVars::PETRI_SANDBOX_DAYTONA_SHA256,
+    EnvVars::PETRI_SANDBOX_PLUGIN_DEV,
+    EnvVars::PETRI_SANDBOX_DOCKER_HOST_ADDRESS,
+    EnvVars::PETRI_SANDBOX_ACTION_HOST_IMAGE,
+    // The Docker daemon selection: the worker's Docker plugin reads these
+    // from its own process, so the worker's sandboxes go to the daemon the
+    // server uses (a remote or TLS daemon, a named context), not the
+    // default socket.
+    EnvVars::DOCKER_HOST,
+    EnvVars::DOCKER_TLS_VERIFY,
+    EnvVars::DOCKER_CERT_PATH,
+    EnvVars::DOCKER_API_VERSION,
+    EnvVars::DOCKER_CONFIG,
+    EnvVars::DOCKER_CONTEXT,
+    // Daytona's control-plane selection, the non-secret half: the plugin
+    // reads them from the worker. The API key comes from the vault, set on
+    // the command by the launch (`WorkerLaunchSpec::daytona_api_key`).
+    EnvVars::DAYTONA_API_URL,
+    EnvVars::DAYTONA_ORGANIZATION_ID,
+    // A test's checkpoint gates: the worker's hooks hold at a named point
+    // until the test releases them, so a crash can be placed there.
+    EnvVars::FABRO_TEST_CHECKPOINT_GATES,
+    // A test's mute on the worker's control acknowledgements, so the
+    // server's wait for one runs out.
+    EnvVars::FABRO_TEST_CONTROL_ACKS_MUTED,
 ];
 
 const RENDER_GRAPH_ENV_ALLOWLIST: &[&str] = &[EnvVars::PATH, EnvVars::HOME, EnvVars::TMPDIR];
@@ -144,6 +177,32 @@ mod tests {
             ("FABRO_DEV_TOKEN".to_string(), "garbage".to_string()),
             ("FABRO_WORKER_TOKEN".to_string(), "leak".to_string()),
             ("MY_API_KEY".to_string(), "blocked".to_string()),
+            (
+                "PETRI_SANDBOX_HOST_PLUGIN".to_string(),
+                "/opt/petri/sandbox-driver-host".to_string(),
+            ),
+            ("PETRI_SANDBOX_PLUGIN_DEV".to_string(), "1".to_string()),
+            (
+                "DOCKER_HOST".to_string(),
+                "tcp://build-daemon.internal:2376".to_string(),
+            ),
+            ("DOCKER_TLS_VERIFY".to_string(), "1".to_string()),
+            (
+                "DOCKER_CERT_PATH".to_string(),
+                "/etc/docker/certs".to_string(),
+            ),
+            ("DOCKER_API_VERSION".to_string(), "1.47".to_string()),
+            (
+                "DOCKER_CONFIG".to_string(),
+                "/etc/docker/client".to_string(),
+            ),
+            ("DOCKER_CONTEXT".to_string(), "build".to_string()),
+            (
+                "DAYTONA_API_URL".to_string(),
+                "https://daytona.internal/api".to_string(),
+            ),
+            ("DAYTONA_ORGANIZATION_ID".to_string(), "org-1".to_string()),
+            ("DAYTONA_API_KEY".to_string(), "leak".to_string()),
         ]);
         let mut cmd = env_command();
         apply_allowlist(&mut cmd, WORKER_ENV_ALLOWLIST, &|name| {
@@ -178,6 +237,53 @@ mod tests {
             Some("xterm-256color")
         );
         assert_eq!(actual.get("NO_COLOR").map(String::as_str), Some("1"));
+        // Petri's plugin overrides cross so the worker resolves the same
+        // sandbox-driver plugins the server would.
+        assert_eq!(
+            actual.get("PETRI_SANDBOX_HOST_PLUGIN").map(String::as_str),
+            Some("/opt/petri/sandbox-driver-host")
+        );
+        assert_eq!(
+            actual.get("PETRI_SANDBOX_PLUGIN_DEV").map(String::as_str),
+            Some("1")
+        );
+        // The Docker daemon selection crosses whole, so the worker's Docker
+        // plugin drives the daemon the server uses.
+        assert_eq!(
+            actual.get("DOCKER_HOST").map(String::as_str),
+            Some("tcp://build-daemon.internal:2376")
+        );
+        assert_eq!(
+            actual.get("DOCKER_TLS_VERIFY").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            actual.get("DOCKER_CERT_PATH").map(String::as_str),
+            Some("/etc/docker/certs")
+        );
+        assert_eq!(
+            actual.get("DOCKER_API_VERSION").map(String::as_str),
+            Some("1.47")
+        );
+        assert_eq!(
+            actual.get("DOCKER_CONFIG").map(String::as_str),
+            Some("/etc/docker/client")
+        );
+        assert_eq!(
+            actual.get("DOCKER_CONTEXT").map(String::as_str),
+            Some("build")
+        );
+        // Daytona's non-secret selectors cross; its key is the vault's,
+        // never the server's environment.
+        assert_eq!(
+            actual.get("DAYTONA_API_URL").map(String::as_str),
+            Some("https://daytona.internal/api")
+        );
+        assert_eq!(
+            actual.get("DAYTONA_ORGANIZATION_ID").map(String::as_str),
+            Some("org-1")
+        );
+        assert!(!actual.contains_key("DAYTONA_API_KEY"));
         assert_eq!(actual.get("CLICOLOR").map(String::as_str), Some("0"));
         assert_eq!(actual.get("CLICOLOR_FORCE").map(String::as_str), Some("1"));
         // Bedrock SigV4 chain inputs cross into the worker so it can re-resolve

@@ -19,14 +19,14 @@ use std::time::{Duration, Instant};
 use chrono::{Duration as ChronoDuration, Utc};
 use fabro_client::{AuthEntry, AuthStore, OAuthEntry, ServerTarget, StoredSubject};
 use fabro_config::{Storage, envfile};
-use fabro_store::EventEnvelope;
 use fabro_test::{apply_test_isolation, expect_reqwest_json, isolated_storage_dir, test_context};
+use fabro_types::RunStreamItem;
 use fabro_vault::{SecretType, Vault};
 
 use super::support::{created_run_id, find_run_dir, output_stderr};
 use crate::support::{
-    TEST_SESSION_SECRET, issue_test_github_jwt, issue_test_worker_jwt, parse_event_envelopes,
-    unique_run_id,
+    TEST_SESSION_SECRET, is_terminal_lifecycle, issue_test_github_jwt, issue_test_worker_jwt,
+    parse_stream_items, unique_run_id,
 };
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -249,9 +249,15 @@ async fn wait_for_http_ready(base_url: &str, child: &mut Child) {
     }
 }
 
-async fn run_events(api_base_url: &str, run_id: &str, access_token: &str) -> Vec<EventEnvelope> {
+async fn run_stream_items(
+    api_base_url: &str,
+    run_id: &str,
+    access_token: &str,
+) -> Vec<RunStreamItem> {
     let response = fabro_test::test_http_client()
-        .get(format!("{api_base_url}/api/v1/runs/{run_id}/events"))
+        .get(format!(
+            "{api_base_url}/api/v1/runs/{run_id}/events?after=0&limit=1000"
+        ))
         .bearer_auth(access_token)
         .send()
         .await
@@ -262,21 +268,18 @@ async fn run_events(api_base_url: &str, run_id: &str, access_token: &str) -> Vec
         format!("GET /api/v1/runs/{run_id}/events"),
     )
     .await;
-    parse_event_envelopes(&body)
+    parse_stream_items(&body)
 }
 
 async fn wait_for_completed_events(
     api_base_url: &str,
     run_id: &str,
     access_token: &str,
-) -> Vec<EventEnvelope> {
+) -> Vec<RunStreamItem> {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
-        let events = run_events(api_base_url, run_id, access_token).await;
-        if events
-            .iter()
-            .any(|event| event.event.event_name() == "run.completed")
-        {
+        let events = run_stream_items(api_base_url, run_id, access_token).await;
+        if events.iter().any(is_terminal_lifecycle) {
             return events;
         }
         assert!(
@@ -325,13 +328,14 @@ async fn github_only_server_dispatched_worker_succeeds_without_worker_auth_store
     let _run_dir = wait_for_run_dir(&server.storage_dir, &run_id);
     let events = wait_for_completed_events(&server.api_base_url, &run_id, &access_token).await;
 
-    assert!(events.iter().any(|event| {
-        matches!(
-            event.event.actor.as_ref(),
-            Some(fabro_api::types::Principal::Worker { run_id: actor_run_id })
-                if actor_run_id.to_string() == run_id
-        )
-    }));
+    // The worker wrote the run's Petri records over its own token: the
+    // stream holds them beside the platform records.
+    assert!(
+        events
+            .iter()
+            .any(|item| item.kind == fabro_types::RunStreamItemKind::Petri),
+        "the worker's records reached the store: {events:#?}"
+    );
     assert!(!server.worker_home.join("auth.json").exists());
     assert!(!server.worker_home.join("auth.lock").exists());
 

@@ -23,32 +23,35 @@ use fabro_interview::AnswerSubmission;
 use fabro_llm::Client as LlmClient;
 use fabro_manifest::RunOverrideInput;
 use fabro_static::EnvVars;
+use fabro_store::platform_records::{PlatformRecord, RunParentRecord, RunTitleRecord};
 use fabro_store::{
     RunSummaryListQuery, RunSummarySort, RunSummarySortDirection, RunSummaryVisibility,
 };
+use fabro_types::diagnostic::Severity;
+use fabro_types::settings::run::RunMode;
 use fabro_types::{
     AutomationRef, ContextWindowStaleness, ManifestPath, Principal, Run, RunClientProvenance,
     RunId, RunProvenance, RunServerProvenance, RunStatusKind, RunTarget, SandboxProviderKind,
     StageContextWindow, StageContextWindowUnavailableReason, StageHandler, StageModelUsage,
-    StageProjection, SystemActorKind, ValidatedRunTarget, json_scalar_to_toml_value,
-    parse_blob_ref,
+    StageProjection, ValidatedRunTarget, json_scalar_to_toml_value, parse_blob_ref,
 };
 use fabro_util::error as error_util;
 use fabro_util::version::FABRO_VERSION;
-use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
+use fabro_workflow::pipeline::Validated;
 use fabro_workflow::run_status::RunStatus;
 use fabro_workflow::{Error as WorkflowError, operations};
 use lithos_llm::catalog::ProviderId;
 use serde::de::IgnoredAny;
 use strum::VariantArray as _;
-use tokio::fs;
+use tokio::{fs, task};
 use tracing::info;
 
 use super::super::{
     AppState, DeleteRunOutcome, ListResponse, RunExecutionMode, VariableError, answer_from_request,
     api_question_from_pending_interview, clamp_page_limit, clamp_page_offset, default_page_limit,
     delete_run_internal, load_pending_interview, managed_run, parse_run_id_path,
-    parse_stage_id_path, reject_if_archived, submit_pending_interview_answer, workflow_event,
+    parse_stage_id_path, petri_runs, reject_if_archived, run_records,
+    submit_pending_interview_answer,
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
@@ -61,11 +64,11 @@ use crate::run_intent::{
     EnvironmentSelectionError, PreparedIntentTarget, RunIntentAdmissionError,
     lower_workflow_closure, pin_workflow_environment_authority, prepare_intent_target,
 };
-use crate::run_manifest;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::run_title_generation::{self, GenerateTitleInput, TitlePromptInput, WorkflowSummary};
 #[cfg(any(test, feature = "test-support"))]
 use crate::test_support as server_test_support;
+use crate::{petri_check, run_manifest};
 
 pub(super) fn manifest_routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -210,20 +213,12 @@ async fn link_run_parent(
             .into_response();
     }
 
-    let Ok(run_store) = state.stores.runs.open_run(&child_id).await else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
-    if let Err(err) = workflow_event::append_event(
-        &run_store,
-        &child_id,
-        &workflow_event::Event::RunParentLinked {
-            previous_parent_id: child.parent_id,
-            parent_id,
-            actor: Some(actor),
-        },
-    )
-    .await
-    {
+    let _ = actor;
+    let record = PlatformRecord::RunParent(RunParentRecord {
+        parent_id:          Some(parent_id),
+        previous_parent_id: child.parent_id,
+    });
+    if let Err(err) = run_records::append(&state, child_id, record).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
     updated_run_response(&state, &child_id).await
@@ -250,19 +245,12 @@ async fn unlink_run_parent(
             .into_response();
     };
 
-    let Ok(run_store) = state.stores.runs.open_run(&child_id).await else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
-    if let Err(err) = workflow_event::append_event(
-        &run_store,
-        &child_id,
-        &workflow_event::Event::RunParentUnlinked {
-            previous_parent_id,
-            actor: Some(actor),
-        },
-    )
-    .await
-    {
+    let _ = actor;
+    let record = PlatformRecord::RunParent(RunParentRecord {
+        parent_id:          None,
+        previous_parent_id: Some(previous_parent_id),
+    });
+    if let Err(err) = run_records::append(&state, child_id, record).await {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
     updated_run_response(&state, &child_id).await
@@ -488,19 +476,13 @@ async fn update_run(
             .into_response();
     }
 
-    let run_store = match state.stores.runs.open_run(&id).await {
-        Ok(run_store) => run_store,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    };
-    if let Err(err) =
-        workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunTitleUpdated {
-            title,
-            actor: Some(Principal::User(subject.0)),
-        })
-        .await
+    let _ = subject;
+    if let Err(err) = run_records::append(
+        &state,
+        id,
+        PlatformRecord::RunTitle(RunTitleRecord { title }),
+    )
+    .await
     {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
@@ -747,7 +729,6 @@ async fn finalize_created_run(
     explicit_title_supplied: bool,
     title_generation_target: ManifestPath,
 ) -> Response {
-    let catalog = state.catalog();
     // Resolve once: we need both the provider IDs (for the run create input
     // and ask-fabro-readiness) and the LLM client itself (for the spawned
     // title-generation task). `ready_llm_provider_ids` would otherwise call
@@ -758,7 +739,7 @@ async fn finalize_created_run(
         #[cfg(any(test, feature = "test-support"))]
         {
             server_test_support::test_run_materialization_provider_ids(
-                catalog.as_ref(),
+                state.catalog().as_ref(),
                 &ready_provider_ids,
             )
         }
@@ -767,13 +748,18 @@ async fn finalize_created_run(
             ready_provider_ids.clone()
         }
     };
-    let pinned =
-        match run_compiler::compile_and_pin(prepared, run_materialization_provider_ids, catalog)
-            .await
-        {
-            Ok(pinned) => pinned,
-            Err(error) => return run_intent_admission_error(error.into()),
-        };
+    // Petri compiles the run: the bundle goes to `Runtime::check`, its
+    // diagnostics come back in Fabro's shape, and the admitted graph is what
+    // the run executes. Fabro's own settings resolution ran above.
+    let pinned = match petri_runs::admit(&state, &prepared, &run_materialization_provider_ids).await
+    {
+        Ok(admission) => run_compiler::compile_admitted(prepared, admission).await,
+        Err(error) => Err(error),
+    };
+    let pinned = match pinned {
+        Ok(pinned) => pinned,
+        Err(error) => return run_intent_admission_error(error.into()),
+    };
     let persistence_input = run_compiler::assemble_run(pinned);
     let created = match Box::pin(operations::persist_create_run(
         state.stores.runs.as_ref(),
@@ -792,6 +778,9 @@ async fn finalize_created_run(
         }
     };
     let created_at = created.run_id.created_at();
+    // The run's summary row is the projector's: wait for the pass that
+    // folds the run's first records before reading the run back.
+    state.petri_projector.settle(created.run_id).await;
     let summary = match state
         .stores
         .run_summaries
@@ -947,9 +936,14 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
             ),
         },
         // Return the curated compiler detail; retain its source chain in the log.
+        // A validation failure names its diagnostics, since the message alone
+        // ("Validation failed") tells the caller nothing to fix.
         RunIntentAdmissionError::Compiler(error) => intent_error(
             StatusCode::UNPROCESSABLE_ENTITY,
-            format!("run intent could not be compiled: {error}"),
+            format!(
+                "run intent could not be compiled: {}",
+                compiler_error_detail(&error)
+            ),
             "run_compile_invalid",
         ),
         RunIntentAdmissionError::VariableSnapshot { .. } => intent_error(
@@ -967,6 +961,26 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
             "originating worker run not found",
             "worker_run_not_found",
         ),
+    }
+}
+
+/// The compiler error's text, with every error diagnostic of a validation
+/// failure listed as `rule: message`.
+fn compiler_error_detail(error: &run_compiler::RunCompilerError) -> String {
+    let run_compiler::RunCompilerError::Workflow(WorkflowError::ValidationFailed { diagnostics }) =
+        error
+    else {
+        return error.to_string();
+    };
+    let listed = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .map(|diagnostic| format!("{}: {}", diagnostic.rule, diagnostic.message))
+        .collect::<Vec<_>>();
+    if listed.is_empty() {
+        error.to_string()
+    } else {
+        format!("{error}: {}", listed.join("; "))
     }
 }
 
@@ -1106,28 +1120,29 @@ fn spawn_generated_title_task(task: GeneratedTitleTask) {
             return;
         }
 
-        let run_store = match task.state.stores.runs.open_run(&task.run_id).await {
-            Ok(store) => store,
+        // The generated title replaces the deterministic one only while the
+        // run still carries it: a title someone set meanwhile stays.
+        let current = match run_records::projection(&task.state, task.run_id).await {
+            Ok(Some(projection)) => projection.title().to_string(),
+            Ok(None) => return,
             Err(err) => {
-                tracing::warn!(run_id = %task.run_id, error = %err, "Failed to open run store for title update");
+                tracing::warn!(run_id = %task.run_id, error = %err, "Failed to load the run for its title update");
                 return;
             }
         };
-        let expected_title = task.deterministic_title;
-        if let Err(err) = workflow_event::append_event_if(
-            &run_store,
-            &task.run_id,
-            &workflow_event::Event::RunTitleUpdated {
+        if current != task.deterministic_title {
+            return;
+        }
+        if let Err(err) = run_records::append(
+            &task.state,
+            task.run_id,
+            PlatformRecord::RunTitle(RunTitleRecord {
                 title: generated_title,
-                actor: Some(Principal::System {
-                    system_kind: SystemActorKind::Engine,
-                }),
-            },
-            move |projection| projection.title().as_ref() == expected_title,
+            }),
         )
         .await
         {
-            tracing::warn!(run_id = %task.run_id, error = %err, "Failed to append generated run title event");
+            tracing::warn!(run_id = %task.run_id, error = %err, "Failed to record the generated run title");
         }
     });
 }
@@ -1199,18 +1214,14 @@ async fn run_preflight(
             .into_response();
     }
     let (llm_result, ready_providers) = state.resolve_llm_client_with_ready_ids().await;
-    let mut validated = match run_manifest::validate_prepared_manifest_for_preflight(
-        &prepared,
-        state.catalog(),
-        vars,
-        &ready_providers,
-    ) {
-        Ok(validated) => validated,
-        Err(WorkflowError::Parse(_)) => {
-            return ApiError::bad_request("Validation failed").into_response();
-        }
-        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
-    };
+    let mut validated =
+        match validate_manifest_on_petri(&state, &prepared, vars, &ready_providers).await {
+            Ok(validated) => validated,
+            Err(WorkflowError::Parse(_)) => {
+                return ApiError::bad_request("Validation failed").into_response();
+            }
+            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+        };
     validated.promote_template_undefined_variables_to_errors();
     let response =
         match run_manifest::run_preflight(&state, &prepared, &validated, llm_result).await {
@@ -1251,22 +1262,54 @@ async fn validate_run_manifest(
         return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
             .into_response();
     }
-    let validated = match run_manifest::validate_prepared_manifest_with_vars(
-        &prepared,
-        state.catalog(),
-        vars,
-    ) {
-        Ok(validated) => validated,
-        Err(WorkflowError::Parse(_)) => {
-            return ApiError::bad_request("Validation failed").into_response();
-        }
-        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
-    };
+    let (_, ready_providers) = state.resolve_llm_client_with_ready_ids().await;
+    let validated =
+        match validate_manifest_on_petri(&state, &prepared, vars, &ready_providers).await {
+            Ok(validated) => validated,
+            Err(WorkflowError::Parse(_)) => {
+                return ApiError::bad_request("Validation failed").into_response();
+            }
+            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+        };
     (
         StatusCode::OK,
         Json(run_manifest::validate_response(&prepared, &validated)),
     )
         .into_response()
+}
+
+/// Validate a prepared manifest as a run would be admitted: Fabro's
+/// structural pass, then Petri's check with the model client over the ready
+/// providers, on the blocking pool.
+async fn validate_manifest_on_petri(
+    state: &Arc<AppState>,
+    prepared: &run_manifest::PreparedManifest,
+    vars: HashMap<String, String>,
+    ready_providers: &[ProviderId],
+) -> Result<Validated, WorkflowError> {
+    let launch = petri_check::launch(
+        &state.catalog(),
+        &prepared.settings,
+        ready_providers,
+        None,
+        None,
+    );
+    let dry_run = prepared.settings.run.execution.mode == RunMode::DryRun;
+    let runtime = petri_runs::runtime_spec(state, ready_providers, dry_run);
+    let has_ready_provider = !ready_providers.is_empty();
+    let prepared = prepared.clone();
+    task::spawn_blocking(move || {
+        run_manifest::validate_prepared_manifest(
+            &prepared,
+            &vars,
+            launch,
+            runtime,
+            has_ready_provider,
+            false,
+        )
+    })
+    .await
+    .map_err(|source| WorkflowError::engine_with_source("manifest check task failed", source))?
 }
 
 async fn snapshot_run_variables(
@@ -1361,8 +1404,8 @@ async fn get_run_logs(
     RequireRunScoped(id): RequireRunScoped,
     State(state): State<Arc<AppState>>,
 ) -> Response {
-    if state.stores.runs.open_run_reader(&id).await.is_err() {
-        return ApiError::not_found("Run not found.").into_response();
+    if let Err(err) = state.load_run_projection(&id).await {
+        return err.into_response();
     }
 
     let path = Storage::new(state.server_storage_dir())
@@ -1467,40 +1510,19 @@ async fn get_run_stage_command_log(
     let live_streaming = node
         .live_streaming
         .unwrap_or_else(|| cas_ref.is_none() && node.completion.is_none());
-    let run_dir = Storage::new(state.server_storage_dir())
-        .run_scratch(&id)
-        .root()
-        .to_path_buf();
-    let scratch_path = command_log_path(&run_dir, &stage_id);
 
-    match read_log_slice(&scratch_path, query.offset, limit).await {
-        Ok((bytes, total_bytes)) => {
-            return build_command_log_response(
-                query.offset,
-                limit,
-                LogSource::Sliced { bytes, total_bytes },
-                cas_ref.is_some(),
-                cas_ref,
-                live_streaming,
-            );
-        }
-        Err(err) if err.kind() == ErrorKind::NotFound => {}
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
-    }
-
+    // A stage's output is on its record: inline, or in the blob table when
+    // Petri offloaded it. The blob holds the output value as JSON (a string
+    // for a command's output), so a string decodes and anything else is
+    // served as written.
     if let Some(cas_ref) = cas_ref {
-        let run_store = match state.stores.runs.open_run_reader(&id).await {
-            Ok(run_store) => run_store,
-            Err(err) => {
-                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                    .into_response();
-            }
+        let Some(hash) = parse_blob_ref(&cas_ref) else {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "invalid output blob ref")
+                .into_response();
         };
-        let text = match read_json_string_blob(&run_store.into(), &cas_ref).await {
-            Ok(Some(text)) => text,
+        let text = match state.store_ref().blobs().read(&hash).await {
+            Ok(Some(bytes)) => serde_json::from_slice::<String>(&bytes)
+                .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned()),
             Ok(None) => String::new(),
             Err(err) => {
                 return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
@@ -1510,7 +1532,7 @@ async fn get_run_stage_command_log(
         return build_command_log_response(
             query.offset,
             limit,
-            LogSource::Full(text.as_bytes()),
+            text.as_bytes(),
             true,
             Some(cas_ref),
             live_streaming,
@@ -1521,7 +1543,7 @@ async fn get_run_stage_command_log(
         return build_command_log_response(
             query.offset,
             limit,
-            LogSource::Full(inline_text.as_bytes()),
+            inline_text.as_bytes(),
             true,
             None,
             live_streaming,
@@ -1531,44 +1553,28 @@ async fn get_run_stage_command_log(
     build_command_log_response(
         query.offset,
         limit,
-        LogSource::Full(&[]),
+        &[],
         node.completion.is_some(),
         None,
         live_streaming,
     )
 }
 
-enum LogSource<'a> {
-    Sliced {
-        bytes:       Vec<u8>,
-        total_bytes: u64,
-    },
-    Full(&'a [u8]),
-}
-
 fn build_command_log_response(
     requested_offset: u64,
     limit: u64,
-    source: LogSource<'_>,
+    bytes: &[u8],
     eof: bool,
     cas_ref: Option<String>,
     live_streaming: bool,
 ) -> Response {
-    let (body_bytes, total_bytes, offset) = match source {
-        LogSource::Sliced { bytes, total_bytes } => {
-            let offset = requested_offset.min(total_bytes);
-            (bytes, total_bytes, offset)
-        }
-        LogSource::Full(bytes) => {
-            let total_bytes = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-            let offset = requested_offset.min(total_bytes);
-            let start = usize::try_from(offset).unwrap_or(bytes.len());
-            let end = start
-                .saturating_add(usize::try_from(limit).unwrap_or(usize::MAX))
-                .min(bytes.len());
-            (bytes[start..end].to_vec(), total_bytes, offset)
-        }
-    };
+    let total_bytes = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    let offset = requested_offset.min(total_bytes);
+    let start = usize::try_from(offset).unwrap_or(bytes.len());
+    let end = start
+        .saturating_add(usize::try_from(limit).unwrap_or(usize::MAX))
+        .min(bytes.len());
+    let body_bytes = bytes[start..end].to_vec();
     Json(CommandLogResponseBody {
         offset,
         next_offset: offset + u64::try_from(body_bytes.len()).unwrap_or(u64::MAX),

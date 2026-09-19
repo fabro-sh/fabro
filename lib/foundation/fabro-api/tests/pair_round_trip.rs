@@ -7,13 +7,12 @@ use fabro_api::types::{
     PairStatus as ApiPairStatus, PairTarget as ApiPairTarget,
     PairTranscriptEntry as ApiPairTranscriptEntry,
     PairTranscriptResponse as ApiPairTranscriptResponse,
-    RunEventDetailResponse as ApiRunEventDetailResponse,
     RunPairStatusResponse as ApiRunPairStatusResponse,
 };
 use fabro_types::{
     PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord, PairStartRequest,
-    PairStatus, PairTarget, PairTranscriptEntry, PairTranscriptResponse, RunEventDetailResponse,
-    RunPairStatusResponse, fixtures,
+    PairStatus, PairTarget, PairTranscriptEntry, PairTranscriptResponse, RunPairStatusResponse,
+    fixtures,
 };
 use serde_json::{Value, json};
 
@@ -30,7 +29,6 @@ fn pair_api_reuses_canonical_types() {
     assert_same_type::<ApiPairMessageRecord, PairMessageRecord>();
     assert_same_type::<ApiPairTranscriptEntry, PairTranscriptEntry>();
     assert_same_type::<ApiPairTranscriptResponse, PairTranscriptResponse>();
-    assert_same_type::<ApiRunEventDetailResponse, RunEventDetailResponse>();
 }
 
 #[test]
@@ -136,37 +134,6 @@ fn pair_transcript_response_round_trips_json() {
             "next_since_seq": 44,
             "has_more": false
         }
-    }));
-}
-
-#[test]
-fn run_event_detail_response_round_trips_json() {
-    assert_round_trip::<RunEventDetailResponse>(json!({
-        "event": {
-            "seq": 45,
-            "id": "evt_3",
-            "ts": "2026-05-18T12:01:20Z",
-            "run_id": fixtures::RUN_1,
-            "event": "agent.tool.completed",
-            "session_id": "ses_01",
-            "node_id": "code",
-            "node_label": "Code",
-            "stage_id": "code@1",
-            "tool_call_id": "call_7"
-        },
-        "properties": {
-            "tool_name": "shell",
-            "tool_call_id": "call_7",
-            "is_error": false,
-            "visit": 1
-        },
-        "content": {
-            "kind": "tool_output",
-            "value": "..."
-        },
-        "truncated": false,
-        "redacted": false,
-        "max_content_length": 20000
     }));
 }
 

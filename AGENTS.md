@@ -119,17 +119,139 @@ Before merging changes that add or move shared test helpers, verify:
 
 ## Architecture
 
-Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
+Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.). Petri, the workflow engine, admits a workflow at create and executes every run; `fabro-petri` is the only crate that imports it.
 
 ### Rust crates (`lib/apps/`, `lib/components/`, and `lib/foundation/`)
 - **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `install`, `ps`, `system prune`
-- **fabro-workflow** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, and human-in-the-loop interactions
+- **fabro-workflow** — Fabro's workflow definitions: parses Graphviz graphs and layers settings for the read side, creates and archives runs, and holds the run tools and the pull request pipeline. Execution is Petri's, through `fabro-petri`
+- **fabro-graphviz** — Graphviz DOT parser, the typed graph model, and SVG rendering
 - **fabro-sandbox** — Local, Docker, and Daytona sandbox providers. `RunSandbox` is also the `Environment` pebble's coding agent runs its tools through; agent stages, Ask Fabro, hook evaluators, and `fabro exec` all run on the `pebble-coding-agent` crate (pinned by rev in the workspace `Cargo.toml`). `RunSandbox` is also the `Environment` pebble's coding agent runs its tools through; agent stages, Ask Fabro, hook evaluators, and `fabro exec` all run on the `pebble-coding-agent` crate (pinned by rev in the workspace `Cargo.toml`). Docker is the default runtime provider and creates clone-based `/workspace` containers through the operator's Docker daemon; Daytona uses the same GitHub-only clone-source contract. Docker daemon access is host-root-equivalent and assumes trusted callers/payloads.
+- **fabro-petri** — Fabro's adapters over Petri, the workflow engine: the one crate that imports the Petri packages (pinned by rev in the workspace `Cargo.toml`), holding the run store over SQLite and the platform adapters
 - **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
 - **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming
 - **fabro-api** — Auto-generated Rust types and reqwest HTTP client from OpenAPI spec (build.rs + progenitor)
 - **fabro-github** — GitHub App auth (JWT signing, installation tokens, PR creation)
-- **fabro-mcp** — Model Context Protocol client/server
+- **fabro-mcp-server** — Fabro's own MCP server (`fabro mcp`): the run tools for external agents
+- **fabro-slack** — Slack integration (socket mode, blocks API)
+- **fabro-checkpoint** — Git checkpoint author identity and commit trailers
+- **fabro-telemetry** — CLI analytics (Segment) and crash reporting (Sentry), with anonymous IDs, command sanitization, and detached subprocess delivery
+- **fabro-util** — Shared utilities (redaction, terminal formatting)
+
+### TypeScript (fabro-web)
+- `cd apps/fabro-web && bun run dev` — rebuild web assets on change for the Rust server; refresh the browser manually
+- `cd apps/fabro-web && bun test` — run tests
+- `cd apps/fabro-web && bun run typecheck` — type check
+- `cd apps/fabro-web && bun run build` — production build (writes to `apps/fabro-web/dist/` only; does NOT update the bundled SPA that ships in the Rust binary)
+- `cargo dev build [-- <cargo args>]` — refreshes the embedded SPA assets from the production build, verifies SPA asset budgets, and then runs `cargo build` with forwarded args. The embedded assets are gitignored except for `.gitkeep`; use this when building a Rust binary that should include a populated SPA bundle. `bun run dev` for local development is unchanged because debug builds prefer `apps/fabro-web/dist/` on disk via the server fallback.
+
+### Docker image
+- `cargo dev docker-build` — builds the local Docker image from the current tree using the release pipeline's cargo-zigbuild approach. Honors `--arch amd64|arm64`, `--tag <name>` (default `fabro-sh/fabro`), `--compile-only` (stages `tmp/docker-context/<arch>/fabro` without `docker build`), and `--dry-run` (prints the Docker commands without running them). Prefer this over writing a throwaway Dockerfile; the release pipeline, `Dockerfile`, and this command share the same binary layout.
+
+### Docker sandbox provider
+- Docker is the default runtime sandbox provider from `defaults.toml`. The Fabro process must have a working Docker client environment (`DOCKER_HOST`, socket access, Docker Desktop behavior, TLS settings, groups/permissions, and any remote daemon policy are operator responsibilities).
+- The packaged compose service mounts `/var/run/docker.sock` so the server can create sibling run containers on the host daemon. This is host-root-equivalent under Docker's security model; only use it in the trusted, single-tenant deployment model described by the sandbox code/docs.
+- Docker and Daytona are clone-based providers. When a run manifest has a GitHub origin, they clone it into the provider workspace. Present non-GitHub origins fail unless the provider has `skip_clone = true`; absent origins or `skip_clone = true` create an empty workspace without repository files. For an exact commit, the submitted branch names the working branch and the syntactically valid SHA is requested directly. No layer proves branch/SHA ancestry: a fetchable commit is checked out, an unavailable commit fails setup, and branch HEAD is never substituted.
+- The sandbox layer also accepts an optional exact commit for future admitted
+  runs. An exact commit always requires a non-empty branch. The sandbox driver
+  performs the pin the same way on every provider: it initializes an empty
+  repository, fetches the SHA directly at the requested depth, and attaches
+  the admitted branch to it, so the workspace reports the admitted branch
+  name. Daytona's native toolbox clone serves plain branch clones only; its
+  commit pin checks the branch head out first, so the driver does not use
+  it. A successful clone has the pin checked out; the driver's
+  conformance suite verifies that on every provider, and fabro does not
+  re-verify HEAD. Never fall back to a newer branch HEAD, and do not wire
+  this capability directly from legacy `GitContext.sha`. The sandbox layer
+  does not verify that the commit is reachable from the branch; admission
+  owns that check. Current production callers remain branch-only until the
+  RunIntent admission cutover supplies a validated branch/SHA pair.
+
+### Release automation
+- `cargo dev release` — creates the next stable release tag. Use `cargo dev release --nightly` for a nightly prerelease. Use `--dry-run` to print planned commands without mutating git or running Cargo, `--skip-tests` only after running the release-mode smoke yourself, and `--release-date YYYY-MM-DD` or `FABRO_RELEASE_DATE` for deterministic version computation.
+
+### Marketing site (apps/marketing)
+- `cd apps/marketing && bun run dev` — start Astro dev server
+- `cd apps/marketing && bun run build` — production build
+- `cd apps/marketing && bunx vercel --prod` — deploy to Vercel (project: website, domain: fabro.sh)
+
+### Dev servers
+1. `fabro server start` — starts the Rust API server (demo mode is per-request via `X-Fabro-Demo: 1` header)
+2. `cd apps/fabro-web && bun run dev` — rebuilds web assets on change; refresh the browser manually
+3. Mintlify docs dev server (requires Docker — `mintlify dev` needs Node LTS which may not match the host):
+   ```
+   docker run --rm -d -p 3333:3333 -v $(pwd)/docs/public:/docs -w /docs --name mintlify-dev node:22-slim \
+     bash -c "npx mintlify dev --host 0.0.0.0 --port 3333"
+   ```
+   Then open http://localhost:3333. Stop with `docker stop mintlify-dev`.
+
+## API workflow
+
+The OpenAPI spec at `docs/public/api-reference/fabro-api.yaml` is the source of truth for the fabro-api HTTP interface.
+
+1. Edit `docs/public/api-reference/fabro-api.yaml`
+2. `cargo build -p fabro-api` — build.rs regenerates Rust types and client via progenitor
+3. Write/update handler in `lib/apps/fabro-server/src/server.rs`, add route to `build_router()`
+4. `cargo nextest run -p fabro-server` — conformance test catches spec/router drift
+5. `cd lib/packages/fabro-api-client && bun run generate` — regenerates TypeScript Axios client
+
+### API type ownership
+
+- Treat OpenAPI as the source of truth for the wire contract, not as the automatic owner of Rust types.
+- Before adding or keeping a generated schema type, search the workspace for an existing hand-written Rust type with the same product meaning.
+- If the schema and an existing Rust type have the same semantics and serde shape, reuse the existing type via `lib/foundation/fabro-api/build.rs` `with_replacement(...)` instead of generating a parallel API type.
+- If two types are close but not identical, prefer proposing changes that align them into one canonical type rather than accepting small drift. It is usually better to iterate the API now than to create permanently split Rust/API types.
+- Keep a separate API DTO only when the API is intentionally a projection, summary, or presentation-specific view of internal state. In that case, give it a distinct API-facing name instead of reusing the internal concept name.
+- Treat `ApiFoo` aliases and `foo_to_api` / `foo_from_api` adapters as a smell unless they represent a real semantic boundary. They should not exist only to bridge accidental duplicate types.
+- If a type is shared across crates and is part of the core product vocabulary, move it to a shared crate first, then make `fabro-api` reuse it.
+- For every new `with_replacement(...)`, add a `fabro-api` test that proves type identity and JSON parity with the OpenAPI schema.
+
+## Test support boundaries
+
+Test-only helpers, fixture constructors, fake credentials, in-memory stores, panic-heavy setup code, and test environment shims must not be exposed from production modules or linked into normal builds.
+
+Put shared test helpers in a dedicated `test_support` module gated behind tests or an explicit feature:
+
+```rust
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+```
+
+If another crate's tests need those helpers, enable the feature only through a dev-dependency using Cargo's dual-listing pattern:
+
+```toml
+[dependencies]
+fabro-server = { path = "../fabro-server" }
+
+[dev-dependencies]
+fabro-server = { path = "../fabro-server", features = ["test-support"] }
+```
+
+Do not enable `test-support` in default features, production dependencies, release builds, or binaries.
+
+Use names that make the boundary obvious: `test_app_state`, `test_store_bundle`, `test_auth_mode`, and similar. Avoid production-looking names such as `create_app_state` for test fixtures. `#[doc(hidden)]` is not a substitute for feature-gating; hidden public APIs still compile, link, and can be used accidentally.
+
+Before merging changes that add or move shared test helpers, verify:
+
+- `cargo build --workspace` succeeds without `test-support`
+- relevant tests compile and run with `test-support`
+- `rg -n "create_app_state|test-only-name"` does not show production call sites
+- release/debug artifacts do not contain fake secrets, fixture tokens, or test helper symbols when built without `test-support`
+
+## Architecture
+
+Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.). Petri, the workflow engine, admits a workflow at create and executes every run; `fabro-petri` is the only crate that imports it.
+
+### Rust crates (`lib/apps/`, `lib/components/`, and `lib/foundation/`)
+- **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `install`, `ps`, `system prune`
+- **fabro-workflow** — Fabro's workflow definitions: parses Graphviz graphs and layers settings for the read side, creates and archives runs, and holds the run tools and the pull request pipeline. Execution is Petri's, through `fabro-petri`
+- **fabro-graphviz** — Graphviz DOT parser, the typed graph model, and SVG rendering
+- **fabro-sandbox** — Local, Docker, and Daytona sandbox providers. `RunSandbox` is also the `Environment` pebble's coding agent runs its tools through; agent stages, Ask Fabro, hook evaluators, and `fabro exec` all run on the `pebble-coding-agent` crate (pinned by rev in the workspace `Cargo.toml`). `RunSandbox` is also the `Environment` pebble's coding agent runs its tools through; agent stages, Ask Fabro, hook evaluators, and `fabro exec` all run on the `pebble-coding-agent` crate (pinned by rev in the workspace `Cargo.toml`). Docker is the default runtime provider and creates clone-based `/workspace` containers through the operator's Docker daemon; Daytona uses the same GitHub-only clone-source contract. Docker daemon access is host-root-equivalent and assumes trusted callers/payloads.
+- **fabro-petri** — Fabro's adapters over Petri, the workflow engine: the one crate that imports the Petri packages (pinned by rev in the workspace `Cargo.toml`), holding the run store over SQLite and the platform adapters
+- **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
+- **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming
+- **fabro-api** — Auto-generated Rust types and reqwest HTTP client from OpenAPI spec (build.rs + progenitor)
+- **fabro-github** — GitHub App auth (JWT signing, installation tokens, PR creation)
+- **fabro-mcp-server** — Fabro's own MCP server (`fabro mcp`): the run tools for external agents
 - **fabro-slack** — Slack integration (socket mode, blocks API)
 - **fabro-checkpoint** — Git checkpoint author identity and commit trailers
 - **fabro-telemetry** — CLI analytics (Segment) and crash reporting (Sentry), with anonymous IDs, command sanitization, and detached subprocess delivery
@@ -151,7 +273,7 @@ When working in an area covered by a strategy doc, read the relevant document
 **before** making changes:
 
 - **`docs/internal/logging-strategy.md`** — read when adding `tracing` calls (`info!`, `debug!`, `warn!`, `error!`), working on error handling paths, or adding new operations that should be observable
-- **`docs/internal/events-strategy.md`** — read when adding or modifying `Event` variants, touching `Emitter`/`emit()`, changing `progress.jsonl` output, or adding new workflow stage types
+- **`docs/internal/events-strategy.md`** — read when adding a platform record kind, changing the projection fold or the run stream, or writing a consumer that matches on stream items
 - **`docs/internal/testing-strategy.md`** — read when adding or reorganizing tests, choosing between unit vs `tests/it`, deciding whether a test belongs in `cmd` vs `workflow` vs `scenario`, or deciding how to structure snapshots and fixtures
 - **`docs/internal/server-secrets-strategy.md`** — read when adding or changing server-level secrets, startup validation, install-time secret persistence, or subprocess env inheritance/scrubbing
 - **`docs/internal/migrations-strategy.md`** — read when adding or changing temporary compatibility migrations, startup/file rewrites, migration runners, backups, or removal deadlines

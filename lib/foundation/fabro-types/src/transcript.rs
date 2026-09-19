@@ -156,7 +156,7 @@ pub struct PairMessageRef {
 /// Canonical durable transcript message.
 ///
 /// Named `TranscriptMessage` rather than `Message` to avoid import ambiguity
-/// with pebble's `Message` and the lithos request [`Message`].
+/// with pebble's `Message` and the lithos request `Message`.
 ///
 /// `kind` captures provider/model-role semantics for replay; `source`
 /// captures audit/UI provenance. Both are required to faithfully reconstruct

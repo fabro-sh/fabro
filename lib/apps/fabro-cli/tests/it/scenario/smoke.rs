@@ -13,21 +13,34 @@ fn live_run_state_response(run_id: &str) -> serde_json::Value {
     )
 }
 
-fn run_sse_body(run_id: &str) -> String {
-    let completed = serde_json::json!({
-        "seq": 2,
-        "event": "run.completed",
-        "id": "evt-run-completed",
+/// The platform record that moves the run to `status` (`running`,
+/// `succeeded`, ...), as one item of the run's stream.
+fn lifecycle_item(
+    run_id: &str,
+    stream_seq: u64,
+    transition: &str,
+    status: &str,
+) -> serde_json::Value {
+    serde_json::json!({
         "run_id": run_id,
-        "ts": "2026-04-05T12:00:01Z",
-        "properties": {
-            "timing": {"wall_time_ms": 12, "inference_time_ms": 0, "tool_time_ms": 0, "active_time_ms": 0},
-            "artifact_count": 0,
-            "status": "succeeded",
-            "reason": "completed"
+        "stream_seq": stream_seq,
+        "kind": "platform",
+        "id": stream_seq.to_string(),
+        "recorded_at": 1_775_390_400_000_u64 + stream_seq,
+        "item": {
+            "seq": stream_seq,
+            "recorded_at": 1_775_390_400_000_u64 + stream_seq,
+            "record": {
+                "kind": "run.lifecycle",
+                "transition": transition,
+                "status": { "kind": status, "reason": "completed" }
+            }
         }
-    });
+    })
+}
 
+fn run_sse_body(run_id: &str) -> String {
+    let completed = lifecycle_item(run_id, 2, "succeeded", "succeeded");
     format!("data: {completed}\n\n")
 }
 
@@ -241,20 +254,15 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
     });
     success_server.mock(|when, then| {
         when.method("GET")
-            .path(format!("/api/v1/runs/{success_run_id}/events"));
+            .path(format!("/api/v1/runs/{success_run_id}/events"))
+            .query_param("after", "0");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "data": [{
-                        "seq": 1,
-                        "event": "run.running",
-                        "id": "evt-run-running",
-                        "run_id": success_run_id,
-                        "ts": "2026-04-05T12:00:00Z",
-                        "properties": {}
-                    }],
-                    "meta": { "has_more": false }
+                    "data": [lifecycle_item(&success_run_id, 1, "running", "running")],
+                    "meta": { "has_more": false },
+                    "event_contract_version": 3
                 })
                 .to_string(),
             );
@@ -278,7 +286,7 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
     let attach_mock = success_server.mock(|when, then| {
         when.method("GET")
             .path(format!("/api/v1/runs/{success_run_id}/attach"))
-            .query_param("since_seq", "2");
+            .query_param("after", "1");
         then.status(200)
             .header("Content-Type", "text/event-stream")
             .body(run_sse_body(success_run_id.as_str()));
@@ -301,92 +309,7 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
     attach_mock.assert();
     let success_stdout = String::from_utf8(success_output.stdout).expect("stdout should be UTF-8");
     assert!(
-        success_stdout.contains("\"event\":\"run.completed\""),
+        success_stdout.contains("\"transition\":\"succeeded\""),
         "{success_stdout}"
-    );
-
-    let eof_server = MockServer::start();
-    let eof_run_id = unique_run_id();
-
-    eof_server.mock(|when, then| {
-        when.method("GET")
-            .path("/api/v1/runs/resolve")
-            .query_param("selector", eof_run_id.as_str());
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                remote_run_summary_json(
-                    &eof_run_id,
-                    "Remote Workflow",
-                    "remote-workflow",
-                    "Remote output",
-                    &serde_json::json!({
-                        "kind": "running"
-                    }),
-                    "2026-04-05T12:00:00Z",
-                )
-                .to_string(),
-            );
-    });
-    eof_server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{eof_run_id}/events"));
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "data": [{
-                        "seq": 1,
-                        "event": "run.running",
-                        "id": "evt-run-running",
-                        "run_id": eof_run_id,
-                        "ts": "2026-04-05T12:00:00Z",
-                        "properties": {}
-                    }],
-                    "meta": { "has_more": false }
-                })
-                .to_string(),
-            );
-    });
-    eof_server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{eof_run_id}/state"));
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(live_run_state_response(eof_run_id.as_str()).to_string());
-    });
-    eof_server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{eof_run_id}/questions"))
-            .query_param("page[limit]", "100")
-            .query_param("page[offset]", "0");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(r#"{"data":[],"meta":{"has_more":false}}"#);
-    });
-    eof_server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{eof_run_id}/attach"))
-            .query_param("since_seq", "2");
-        then.status(200)
-            .header("Content-Type", "text/event-stream")
-            .body("");
-    });
-    context.set_http_target(&eof_server.base_url());
-
-    let eof_output = context
-        .command()
-        .args(["attach", &eof_run_id])
-        .output()
-        .expect("attach should execute");
-
-    assert!(
-        !eof_output.status.success(),
-        "attach should fail on premature EOF"
-    );
-    let eof_stderr = String::from_utf8(eof_output.stderr).expect("stderr should be UTF-8");
-    assert!(
-        eof_stderr.contains("terminal run event"),
-        "expected a protocol error, got:\n{eof_stderr}"
     );
 }

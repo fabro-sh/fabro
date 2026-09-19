@@ -1,0 +1,5098 @@
+{
+  "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+  "projection": {
+    "title": "Ask before running",
+    "spec": {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "settings": {
+        "project": {
+          "name": null,
+          "description": null,
+          "metadata": {}
+        },
+        "workflow": {
+          "name": null,
+          "description": null,
+          "graph": "workflow.fabro",
+          "metadata": {}
+        },
+        "run": {
+          "goal": {
+            "type": "inline",
+            "value": "Ask before running"
+          },
+          "working_dir": null,
+          "metadata": {},
+          "inputs": {},
+          "model": {
+            "provider": null,
+            "name": null,
+            "fallbacks": {},
+            "controls": {
+              "reasoning_effort": null,
+              "speed": null
+            }
+          },
+          "git": {
+            "author": null
+          },
+          "prepare": {
+            "steps": [],
+            "timeout_ms": 300000
+          },
+          "execution": {
+            "mode": "normal",
+            "approval": "prompt"
+          },
+          "checkpoint": {
+            "exclude_globs": [],
+            "skip_git_hooks": false,
+            "commit_timeout_ms": 30000
+          },
+          "clone": {
+            "enabled": true,
+            "depth": 100
+          },
+          "run_branch": {
+            "enabled": true,
+            "push": true
+          },
+          "environment": {
+            "id": "local",
+            "provider": "local",
+            "image": {
+              "docker": null,
+              "dockerfile": null
+            },
+            "resources": {
+              "cpu": null,
+              "memory": null,
+              "disk": null
+            },
+            "network": {
+              "mode": "allow_all",
+              "allow": []
+            },
+            "lifecycle": {
+              "preserve": false,
+              "stop_on_terminal": true,
+              "auto_stop": null
+            },
+            "labels": {},
+            "env": {}
+          },
+          "notifications": {},
+          "interviews": {
+            "provider": null,
+            "slack": null
+          },
+          "agent": {
+            "fabro_tools": false,
+            "mcps": {}
+          },
+          "hooks": [],
+          "scm": {
+            "provider": null,
+            "owner": null,
+            "repository": null,
+            "github": null
+          },
+          "pull_request": null,
+          "artifacts": {
+            "include": []
+          },
+          "integrations": {
+            "github": {
+              "permissions": {}
+            }
+          }
+        }
+      },
+      "graph": {
+        "name": "Gate",
+        "nodes": {
+          "yes": {
+            "id": "yes",
+            "attrs": {
+              "script": {
+                "String": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/yes"
+              },
+              "shape": {
+                "String": "parallelogram"
+              }
+            }
+          },
+          "exit": {
+            "id": "exit",
+            "attrs": {
+              "shape": {
+                "String": "Msquare"
+              }
+            }
+          },
+          "gate": {
+            "id": "gate",
+            "attrs": {
+              "shape": {
+                "String": "hexagon"
+              },
+              "label": {
+                "String": "Go?"
+              },
+              "question_type": {
+                "String": "yes_no"
+              }
+            }
+          },
+          "no": {
+            "id": "no",
+            "attrs": {
+              "script": {
+                "String": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no"
+              },
+              "shape": {
+                "String": "parallelogram"
+              }
+            }
+          },
+          "start": {
+            "id": "start",
+            "attrs": {
+              "shape": {
+                "String": "Mdiamond"
+              }
+            }
+          }
+        },
+        "edges": [
+          {
+            "from": "start",
+            "to": "gate",
+            "attrs": {}
+          },
+          {
+            "from": "gate",
+            "to": "yes",
+            "attrs": {
+              "label": {
+                "String": "[Y] Yes"
+              }
+            }
+          },
+          {
+            "from": "gate",
+            "to": "no",
+            "attrs": {
+              "label": {
+                "String": "[N] No"
+              }
+            }
+          },
+          {
+            "from": "yes",
+            "to": "exit",
+            "attrs": {}
+          },
+          {
+            "from": "no",
+            "to": "exit",
+            "attrs": {}
+          }
+        ],
+        "attrs": {
+          "goal": {
+            "String": "Ask before running"
+          }
+        }
+      },
+      "graph_source": "digraph Gate {\n    graph [goal=\"Ask before running\"]\n    start [shape=Mdiamond]\n    exit [shape=Msquare]\n    gate [shape=hexagon, label=\"Go?\", question_type=\"yes_no\"]\n    yes [shape=parallelogram, script=\"touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/yes\"]\n    no [shape=parallelogram, script=\"touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no\"]\n    start -> gate\n    gate -> yes [label=\"[Y] Yes\"]\n    gate -> no [label=\"[N] No\"]\n    yes -> exit\n    no -> exit\n}",
+      "workflow_slug": "workflow",
+      "workflow_version_id": "cbc42255519dd8d75cdc69446de1df9ffb66cbe05adce1915ba538af30be6769",
+      "target": {
+        "kind": "folder",
+        "path": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpbgdamH"
+      },
+      "source_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpbgdamH",
+      "provenance": {
+        "server": {
+          "version": "0.357.0-nightly.0"
+        },
+        "subject": {
+          "kind": "user",
+          "identity": {
+            "issuer": "fabro:dev",
+            "subject": "dev"
+          },
+          "login": "dev",
+          "auth_method": "dev_token"
+        }
+      },
+      "definition_blob": "7eaa47f89f68f8117a63b03232b5b2ccc385d84cbcf7373e761fc2b3c2553b9a",
+      "spec_blob": "4d18f978520d8bd02d53edf84bbb4bd8a76353b18a247f4747c19f612d3572dd",
+      "admission": {
+        "graph": {
+          "blob": "71e1d9f8ec3ac4b2c64344477132e279e8a18569342a50473c56238e00b608ad",
+          "digest": "71e1d9f8ec3ac4b2c64344477132e279e8a18569342a50473c56238e00b608ad"
+        }
+      }
+    },
+    "web_url": "http://localhost:3000/runs/01M2VPKCKJ26JE3FNEJRZJCZK0",
+    "start": {
+      "start_time": "2026-09-19T02:05:52.769Z",
+      "run_branch": "fabro/run/01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "base_sha": "965e6fd20fa20aba86e49ce17906e3867904b548"
+    },
+    "status": {
+      "kind": "succeeded",
+      "reason": "completed"
+    },
+    "status_updated_at": "2026-09-19T02:05:55.828Z",
+    "last_event_at": "2026-09-19T02:05:55.840Z",
+    "pending_control": null,
+    "checkpoints": [
+      {
+        "seq": 26,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:53.658Z",
+          "current_node": "start",
+          "git_commit_sha": "965e6fd20fa20aba86e49ce17906e3867904b548"
+        },
+        "diff": {}
+      },
+      {
+        "seq": 44,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:54.307Z",
+          "current_node": "gate",
+          "git_commit_sha": "510e5b2c8c16458b679d288f7eee6183f52d7707"
+        },
+        "diff": {
+          "summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      },
+      {
+        "seq": 56,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:55.119Z",
+          "current_node": "no",
+          "git_commit_sha": "66c55d2858904b2bb1eb2a42c6a60932920d7633"
+        },
+        "diff": {
+          "summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      },
+      {
+        "seq": 68,
+        "checkpoint": {
+          "timestamp": "2026-09-19T02:05:55.630Z",
+          "current_node": "exit",
+          "git_commit_sha": "3a5e4349b77394aba3ffef05e359a6ca192f9708"
+        },
+        "diff": {
+          "summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      }
+    ],
+    "conclusion": {
+      "timestamp": "2026-09-19T02:05:55.828Z",
+      "status": "succeeded",
+      "timing": {
+        "wall_time_ms": 3059,
+        "inference_time_ms": 0,
+        "tool_time_ms": 57,
+        "active_time_ms": 57
+      },
+      "final_git_commit_sha": "3a5e4349b77394aba3ffef05e359a6ca192f9708",
+      "stages": [
+        {
+          "stage_id": "start",
+          "stage_label": "start",
+          "timing": {
+            "wall_time_ms": 0,
+            "inference_time_ms": 0,
+            "tool_time_ms": 0,
+            "active_time_ms": 0
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        },
+        {
+          "stage_id": "gate",
+          "stage_label": "gate",
+          "timing": {
+            "wall_time_ms": 31,
+            "inference_time_ms": 0,
+            "tool_time_ms": 0,
+            "active_time_ms": 0
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        },
+        {
+          "stage_id": "no",
+          "stage_label": "no",
+          "timing": {
+            "wall_time_ms": 57,
+            "inference_time_ms": 0,
+            "tool_time_ms": 57,
+            "active_time_ms": 57
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        },
+        {
+          "stage_id": "exit",
+          "stage_label": "exit",
+          "timing": {
+            "wall_time_ms": 0,
+            "inference_time_ms": 0,
+            "tool_time_ms": 0,
+            "active_time_ms": 0
+          },
+          "usage": {
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache_read": 0,
+              "cache_write": 0
+            }
+          },
+          "retries": 0
+        }
+      ],
+      "total_retries": 0,
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    "sandbox": {
+      "kind": "ready",
+      "plan": {
+        "provider": "local"
+      },
+      "instance": {
+        "provider": "local",
+        "runtime": {
+          "id": "host-g18d696a89e0c30b0-691-0",
+          "working_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/fabro-test-01M2VPKCA7RX3BPKYAV61WX2FR/storage/scratch/20260918-01M2VPKCKJ26JE3FNEJRZJCZK0/petri/scopes/invocation-0-scope-0/work"
+        },
+        "ready_duration_ms": 95,
+        "retained": true
+      }
+    },
+    "pull_request": null,
+    "superseded_by": null,
+    "git_identity": {
+      "name": "Fabro",
+      "email": "noreply@fabro.sh",
+      "source": "default"
+    },
+    "pending_interviews": {},
+    "stages": {
+      "start@1": {
+        "first_event_seq": 179,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:53.598Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": "checkout: /private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpbgdamH is not a Git repository; the workspace starts empty\n",
+        "output_bytes": 130,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:52.804Z",
+        "handler": "start",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 80,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      },
+      "exit@1": {
+        "first_event_seq": 2496,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:55.485Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": null,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:55.121Z",
+        "handler": "exit",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      },
+      "no@1": {
+        "first_event_seq": 1683,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:55.020Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": "",
+        "output_bytes": 0,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:54.308Z",
+        "handler": "command",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 57,
+          "inference_time_ms": 0,
+          "tool_time_ms": 57,
+          "active_time_ms": 57
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      },
+      "gate@1": {
+        "first_event_seq": 1033,
+        "prompt": null,
+        "response": null,
+        "completion": {
+          "outcome": "succeeded",
+          "notes": null,
+          "failure_reason": null,
+          "timestamp": "2026-09-19T02:05:54.202Z"
+        },
+        "provider_used": null,
+        "diff": null,
+        "script_invocation": null,
+        "script_timing": null,
+        "parallel_results": null,
+        "output": "waiting for an answer: Go?\n",
+        "output_bytes": 27,
+        "live_streaming": false,
+        "termination": "exited",
+        "started_at": "2026-09-19T02:05:53.658Z",
+        "handler": "human",
+        "graph_visit": 1,
+        "timing": {
+          "wall_time_ms": 31,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "usage": {
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0
+          }
+        },
+        "state": "succeeded"
+      }
+    }
+  },
+  "stream": [
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 1,
+      "kind": "platform",
+      "id": "1",
+      "recorded_at": 1789783552668,
+      "item": {
+        "seq": 1,
+        "recorded_at": 1789783552668,
+        "record": {
+          "kind": "run.created",
+          "spec": {
+            "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+            "settings": {
+              "project": {
+                "name": null,
+                "description": null,
+                "metadata": {}
+              },
+              "workflow": {
+                "name": null,
+                "description": null,
+                "graph": "workflow.fabro",
+                "metadata": {}
+              },
+              "run": {
+                "goal": {
+                  "type": "inline",
+                  "value": "Ask before running"
+                },
+                "working_dir": null,
+                "metadata": {},
+                "inputs": {},
+                "model": {
+                  "provider": null,
+                  "name": null,
+                  "fallbacks": {},
+                  "controls": {
+                    "reasoning_effort": null,
+                    "speed": null
+                  }
+                },
+                "git": {
+                  "author": null
+                },
+                "prepare": {
+                  "steps": [],
+                  "timeout_ms": 300000
+                },
+                "execution": {
+                  "mode": "normal",
+                  "approval": "prompt"
+                },
+                "checkpoint": {
+                  "exclude_globs": [],
+                  "skip_git_hooks": false,
+                  "commit_timeout_ms": 30000
+                },
+                "clone": {
+                  "enabled": true,
+                  "depth": 100
+                },
+                "run_branch": {
+                  "enabled": true,
+                  "push": true
+                },
+                "environment": {
+                  "id": "local",
+                  "provider": "local",
+                  "image": {
+                    "docker": null,
+                    "dockerfile": null
+                  },
+                  "resources": {
+                    "cpu": null,
+                    "memory": null,
+                    "disk": null
+                  },
+                  "network": {
+                    "mode": "allow_all",
+                    "allow": []
+                  },
+                  "lifecycle": {
+                    "preserve": false,
+                    "stop_on_terminal": true,
+                    "auto_stop": null
+                  },
+                  "labels": {},
+                  "env": {}
+                },
+                "notifications": {},
+                "interviews": {
+                  "provider": null,
+                  "slack": null
+                },
+                "agent": {
+                  "fabro_tools": false,
+                  "mcps": {}
+                },
+                "hooks": [],
+                "scm": {
+                  "provider": null,
+                  "owner": null,
+                  "repository": null,
+                  "github": null
+                },
+                "pull_request": null,
+                "artifacts": {
+                  "include": []
+                },
+                "integrations": {
+                  "github": {
+                    "permissions": {}
+                  }
+                }
+              }
+            },
+            "graph": {
+              "name": "Gate",
+              "nodes": {
+                "exit": {
+                  "id": "exit",
+                  "attrs": {
+                    "shape": {
+                      "String": "Msquare"
+                    }
+                  }
+                },
+                "start": {
+                  "id": "start",
+                  "attrs": {
+                    "shape": {
+                      "String": "Mdiamond"
+                    }
+                  }
+                },
+                "no": {
+                  "id": "no",
+                  "attrs": {
+                    "shape": {
+                      "String": "parallelogram"
+                    },
+                    "script": {
+                      "String": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no"
+                    }
+                  }
+                },
+                "gate": {
+                  "id": "gate",
+                  "attrs": {
+                    "question_type": {
+                      "String": "yes_no"
+                    },
+                    "label": {
+                      "String": "Go?"
+                    },
+                    "shape": {
+                      "String": "hexagon"
+                    }
+                  }
+                },
+                "yes": {
+                  "id": "yes",
+                  "attrs": {
+                    "script": {
+                      "String": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/yes"
+                    },
+                    "shape": {
+                      "String": "parallelogram"
+                    }
+                  }
+                }
+              },
+              "edges": [
+                {
+                  "from": "start",
+                  "to": "gate",
+                  "attrs": {}
+                },
+                {
+                  "from": "gate",
+                  "to": "yes",
+                  "attrs": {
+                    "label": {
+                      "String": "[Y] Yes"
+                    }
+                  }
+                },
+                {
+                  "from": "gate",
+                  "to": "no",
+                  "attrs": {
+                    "label": {
+                      "String": "[N] No"
+                    }
+                  }
+                },
+                {
+                  "from": "yes",
+                  "to": "exit",
+                  "attrs": {}
+                },
+                {
+                  "from": "no",
+                  "to": "exit",
+                  "attrs": {}
+                }
+              ],
+              "attrs": {
+                "goal": {
+                  "String": "Ask before running"
+                }
+              }
+            },
+            "graph_source": "digraph Gate {\n    graph [goal=\"Ask before running\"]\n    start [shape=Mdiamond]\n    exit [shape=Msquare]\n    gate [shape=hexagon, label=\"Go?\", question_type=\"yes_no\"]\n    yes [shape=parallelogram, script=\"touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/yes\"]\n    no [shape=parallelogram, script=\"touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no\"]\n    start -> gate\n    gate -> yes [label=\"[Y] Yes\"]\n    gate -> no [label=\"[N] No\"]\n    yes -> exit\n    no -> exit\n}",
+            "workflow_slug": "workflow",
+            "workflow_version_id": "cbc42255519dd8d75cdc69446de1df9ffb66cbe05adce1915ba538af30be6769",
+            "target": {
+              "kind": "folder",
+              "path": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpbgdamH"
+            },
+            "source_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpbgdamH",
+            "provenance": {
+              "server": {
+                "version": "0.357.0-nightly.0"
+              },
+              "subject": {
+                "kind": "user",
+                "identity": {
+                  "issuer": "fabro:dev",
+                  "subject": "dev"
+                },
+                "login": "dev",
+                "auth_method": "dev_token"
+              }
+            },
+            "definition_blob": "7eaa47f89f68f8117a63b03232b5b2ccc385d84cbcf7373e761fc2b3c2553b9a",
+            "spec_blob": "4d18f978520d8bd02d53edf84bbb4bd8a76353b18a247f4747c19f612d3572dd",
+            "admission": {
+              "graph": {
+                "blob": "71e1d9f8ec3ac4b2c64344477132e279e8a18569342a50473c56238e00b608ad",
+                "digest": "71e1d9f8ec3ac4b2c64344477132e279e8a18569342a50473c56238e00b608ad"
+              }
+            }
+          },
+          "title": "Ask before running",
+          "web_url": "http://localhost:3000/runs/01M2VPKCKJ26JE3FNEJRZJCZK0"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 2,
+      "kind": "platform",
+      "id": "2",
+      "recorded_at": 1789783552670,
+      "item": {
+        "seq": 2,
+        "recorded_at": 1789783552670,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "submitted",
+          "status": {
+            "kind": "submitted"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 3,
+      "kind": "platform",
+      "id": "3",
+      "recorded_at": 1789783552712,
+      "item": {
+        "seq": 3,
+        "recorded_at": 1789783552712,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "start_requested",
+          "source": "start"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 4,
+      "kind": "platform",
+      "id": "4",
+      "recorded_at": 1789783552720,
+      "item": {
+        "seq": 4,
+        "recorded_at": 1789783552720,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "runnable",
+          "status": {
+            "kind": "runnable"
+          },
+          "source": "start_requested"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 5,
+      "kind": "platform",
+      "id": "5",
+      "recorded_at": 1789783552735,
+      "item": {
+        "seq": 5,
+        "recorded_at": 1789783552735,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "starting",
+          "status": {
+            "kind": "starting"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 6,
+      "kind": "platform",
+      "id": "6",
+      "recorded_at": 1789783552749,
+      "item": {
+        "seq": 6,
+        "recorded_at": 1789783552749,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "running",
+          "status": {
+            "kind": "running"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 7,
+      "kind": "petri",
+      "id": "coordinator/0/0",
+      "recorded_at": 1789783552769,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 0,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783552769,
+        "record": {
+          "seq": 0,
+          "origin": "external",
+          "recorded_at": 1789783552769,
+          "body": {
+            "event": "run.started",
+            "format_version": 7,
+            "key": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+            "root": 0,
+            "middleware_chain": [
+              "circuit-breaker"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 8,
+      "kind": "petri",
+      "id": "coordinator/1/0",
+      "recorded_at": 1789783552782,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 1,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {},
+        "recorded_at": 1789783552782,
+        "record": {
+          "seq": 1,
+          "origin": "external",
+          "recorded_at": 1789783552782,
+          "body": {
+            "event": "graph.registered",
+            "digest": "71e1d9f8ec3ac4b2c64344477132e279e8a18569342a50473c56238e00b608ad"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 9,
+      "kind": "petri",
+      "id": "coordinator/2/0",
+      "recorded_at": 1789783552783,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 2,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783552783,
+        "record": {
+          "seq": 2,
+          "origin": "external",
+          "recorded_at": 1789783552783,
+          "body": {
+            "event": "invocation.declared",
+            "invocation": 0,
+            "call": null,
+            "graph": "71e1d9f8ec3ac4b2c64344477132e279e8a18569342a50473c56238e00b608ad",
+            "context": {},
+            "secret_bindings": "none",
+            "sandbox": "isolated"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 10,
+      "kind": "petri",
+      "id": "coordinator/3/0",
+      "recorded_at": 1789783552788,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 3,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552788,
+        "record": {
+          "seq": 3,
+          "origin": "external",
+          "recorded_at": 1789783552788,
+          "body": {
+            "event": "execution.declared",
+            "execution": 0,
+            "invocation": 0,
+            "predecessor": null,
+            "start": {
+              "entry": "graph_entries",
+              "context": {},
+              "prior_firings": {},
+              "execution_index": 0,
+              "max_executions": 32
+            },
+            "middleware_state": {
+              "circuit-breaker": [
+                1,
+                {
+                  "loop_signatures": {},
+                  "restart_signatures": {},
+                  "pending": {}
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 11,
+      "kind": "petri",
+      "id": "execution 0/0/0",
+      "recorded_at": 1789783552802,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 0,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552802,
+        "record": {
+          "seq": 0,
+          "origin": "external",
+          "recorded_at": 1789783552802,
+          "body": {
+            "event": "execution.started",
+            "entry": "graph_entries",
+            "context": {},
+            "prior_firings": {},
+            "execution_index": 0,
+            "max_executions": 32
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 12,
+      "kind": "petri",
+      "id": "execution 0/1/0",
+      "recorded_at": 1789783552804,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552804,
+        "record": {
+          "seq": 1,
+          "origin": "external",
+          "recorded_at": 1789783552804,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": "execution_start",
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 13,
+      "kind": "petri",
+      "id": "execution 0/1/1",
+      "recorded_at": 1789783552804,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552804,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 5,
+              "generation": 0,
+              "payload": null,
+              "from": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 14,
+      "kind": "petri",
+      "id": "execution 0/1/2",
+      "recorded_at": 1789783552804,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 1,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552804,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 15,
+      "kind": "petri",
+      "id": "execution 0/2/0",
+      "recorded_at": 1789783552804,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 2,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552804,
+        "record": {
+          "seq": 2,
+          "origin": "core",
+          "recorded_at": 1789783552804,
+          "body": {
+            "event": "token.emitted",
+            "edge": 5,
+            "generation": 0,
+            "payload": null,
+            "from": 0
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 16,
+      "kind": "petri",
+      "id": "execution 0/3/0",
+      "recorded_at": 1789783552804,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 3,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552804,
+        "record": {
+          "seq": 3,
+          "origin": "external",
+          "recorded_at": 1789783552804,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 17,
+      "kind": "petri",
+      "id": "execution 0/4/0",
+      "recorded_at": 1789783552900,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 4,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783552900,
+        "record": {
+          "seq": 4,
+          "origin": "external",
+          "recorded_at": 1789783552900,
+          "body": {
+            "event": "scope.acquired",
+            "scope": 0,
+            "lease": 0,
+            "workspace": "invocation-0-scope-0",
+            "provider": "host",
+            "instance": "host-g18d696a89e0c30b0-691-0",
+            "working_directory": "/private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/REDACTED/storage/scratch/20260918-01M2VPKCKJ26JE3FNEJRZJCZK0/petri/scopes/invocation-0-scope-0/work",
+            "duration_ms": 95
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 18,
+      "kind": "petri",
+      "id": "execution 0/5/0",
+      "recorded_at": 1789783552900,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 5,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552900,
+        "record": {
+          "seq": 5,
+          "origin": "external",
+          "recorded_at": 1789783552900,
+          "body": {
+            "event": "step.started",
+            "firing": 1,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 19,
+      "kind": "petri",
+      "id": "execution 0/5/1",
+      "recorded_at": 1789783552900,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 5,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552900,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 20,
+      "kind": "petri",
+      "id": "execution 0/6/0",
+      "recorded_at": 1789783552981,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 6,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783552981,
+        "record": {
+          "seq": 6,
+          "origin": "external",
+          "recorded_at": 1789783552981,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 1,
+            "ev": {
+              "log": {
+                "stream": "stderr",
+                "line": "checkout: /private/var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpbgdamH is not a Git repository; the workspace starts empty"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 21,
+      "kind": "petri",
+      "id": "execution 0/7/0",
+      "recorded_at": 1789783553598,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 7,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553598,
+        "record": {
+          "seq": 7,
+          "origin": "external",
+          "recorded_at": 1789783553598,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 1,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 1,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "965e6fd20fa20aba86e49ce17906e3867904b548",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 1,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "965e6fd20fa20aba86e49ce17906e3867904b548",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 22,
+      "kind": "petri",
+      "id": "execution 0/8/0",
+      "recorded_at": 1789783553598,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 8,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553598,
+        "record": {
+          "seq": 8,
+          "origin": "external",
+          "recorded_at": 1789783553598,
+          "body": {
+            "event": "step.finished",
+            "firing": 1,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 80
+              },
+              "context_updates": {
+                "failure_class": "",
+                "internal.run_id": "petri"
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 23,
+      "kind": "petri",
+      "id": "execution 0/8/1",
+      "recorded_at": 1789783553598,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 8,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553598,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 80
+            },
+            "context_updates": {
+              "failure_class": "",
+              "internal.run_id": "petri"
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 24,
+      "kind": "platform",
+      "id": "7",
+      "recorded_at": 1789783553597,
+      "item": {
+        "seq": 7,
+        "recorded_at": 1789783553597,
+        "record": {
+          "kind": "run.branch",
+          "run_branch": "fabro/run/01M2VPKCKJ26JE3FNEJRZJCZK0",
+          "base_sha": "965e6fd20fa20aba86e49ce17906e3867904b548",
+          "workspace": "invocation-0-scope-0"
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 25,
+      "kind": "platform",
+      "id": "8",
+      "recorded_at": 1789783553597,
+      "item": {
+        "seq": 8,
+        "recorded_at": 1789783553597,
+        "record": {
+          "kind": "git.identity",
+          "name": "Fabro",
+          "email": "noreply@fabro.sh",
+          "source": "default"
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 26,
+      "kind": "platform",
+      "id": "9",
+      "recorded_at": 1789783553658,
+      "item": {
+        "seq": 9,
+        "recorded_at": 1789783553658,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 1,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "965e6fd20fa20aba86e49ce17906e3867904b548",
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 27,
+      "kind": "petri",
+      "id": "execution 0/9/0",
+      "recorded_at": 1789783553658,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553658,
+        "record": {
+          "seq": 9,
+          "origin": "external",
+          "recorded_at": 1789783553658,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 1,
+                "attempt": 1
+              }
+            },
+            "groups": [
+              {
+                "group": 0,
+                "draw": null,
+                "trace": [],
+                "decision": {
+                  "emit": 0
+                }
+              }
+            ]
+          }
+        },
+        "derived": {
+          "groups": [
+            {
+              "group": 0,
+              "target": {
+                "id": 2,
+                "name": "gate",
+                "kind": "attractor/human",
+                "meta": {
+                  "label": "Go?",
+                  "shape": "hexagon",
+                  "kind": "human",
+                  "classes": [],
+                  "span": {
+                    "line": 5,
+                    "column": 5
+                  },
+                  "edges": {
+                    "1": {
+                      "to": "yes",
+                      "label": "[Y] Yes"
+                    },
+                    "2": {
+                      "to": "no",
+                      "label": "[N] No"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 28,
+      "kind": "petri",
+      "id": "execution 0/9/1",
+      "recorded_at": 1789783553658,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553658,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 0,
+              "generation": 0,
+              "payload": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "from": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 29,
+      "kind": "petri",
+      "id": "execution 0/9/2",
+      "recorded_at": 1789783553658,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 9,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553658,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 30,
+      "kind": "petri",
+      "id": "execution 0/10/0",
+      "recorded_at": 1789783553658,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 10,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553658,
+        "record": {
+          "seq": 10,
+          "origin": "core",
+          "recorded_at": 1789783553658,
+          "body": {
+            "event": "route.applied",
+            "kind": "edge",
+            "firing": 1,
+            "group": 0,
+            "edge": 0
+          }
+        },
+        "derived": {
+          "target": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "transition": "Continue",
+          "back": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 31,
+      "kind": "petri",
+      "id": "execution 0/11/0",
+      "recorded_at": 1789783553658,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 11,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 0,
+            "name": "start",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "start",
+              "shape": "Mdiamond",
+              "kind": "start",
+              "classes": [],
+              "span": {
+                "line": 3,
+                "column": 5
+              },
+              "admission_hooks": "step",
+              "edges": {
+                "0": {
+                  "to": "gate",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 1,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553658,
+        "record": {
+          "seq": 11,
+          "origin": "core",
+          "recorded_at": 1789783553658,
+          "body": {
+            "event": "token.emitted",
+            "edge": 0,
+            "generation": 0,
+            "payload": {
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "from": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 32,
+      "kind": "petri",
+      "id": "execution 0/12/0",
+      "recorded_at": 1789783553658,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 12,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553658,
+        "record": {
+          "seq": 12,
+          "origin": "external",
+          "recorded_at": 1789783553658,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 33,
+      "kind": "petri",
+      "id": "execution 0/13/0",
+      "recorded_at": 1789783553658,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 13,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553658,
+        "record": {
+          "seq": 13,
+          "origin": "external",
+          "recorded_at": 1789783553658,
+          "body": {
+            "event": "step.started",
+            "firing": 2,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 34,
+      "kind": "petri",
+      "id": "execution 0/13/1",
+      "recorded_at": 1789783553658,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 13,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553658,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 35,
+      "kind": "petri",
+      "id": "execution 0/14/0",
+      "recorded_at": 1789783553659,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 14,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553659,
+        "record": {
+          "seq": 14,
+          "origin": "external",
+          "recorded_at": 1789783553659,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "$question": {
+                  "id": "gate#2",
+                  "text": "Go?",
+                  "options": [
+                    {
+                      "key": "Y",
+                      "label": "[Y] Yes"
+                    },
+                    {
+                      "key": "N",
+                      "label": "[N] No"
+                    }
+                  ],
+                  "default": "Y",
+                  "freeform": false,
+                  "sensitive": false,
+                  "kind": "yes_no"
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "question",
+            "question": {
+              "id": "gate#2",
+              "text": "Go?",
+              "options": [
+                {
+                  "key": "Y",
+                  "label": "[Y] Yes"
+                },
+                {
+                  "key": "N",
+                  "label": "[N] No"
+                }
+              ],
+              "default": "Y",
+              "freeform": false,
+              "sensitive": false,
+              "kind": "yes_no"
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 36,
+      "kind": "petri",
+      "id": "execution 0/14/1",
+      "recorded_at": 1789783553659,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 14,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553659,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_answer"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 37,
+      "kind": "petri",
+      "id": "execution 0/15/0",
+      "recorded_at": 1789783553660,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 15,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553660,
+        "record": {
+          "seq": 15,
+          "origin": "external",
+          "recorded_at": 1789783553660,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "log": {
+                "stream": "stdout",
+                "line": "waiting for an answer: Go?"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 38,
+      "kind": "petri",
+      "id": "execution 0/16/0",
+      "recorded_at": 1789783553689,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 16,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553689,
+        "record": {
+          "seq": 16,
+          "origin": "external",
+          "recorded_at": 1789783553689,
+          "body": {
+            "event": "control.requested",
+            "firing": 2,
+            "ctl": {
+              "deliver": {
+                "$answer": {
+                  "question": "gate#2",
+                  "choice": "N"
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "deliverable": true,
+          "answer": {
+            "question": "gate#2",
+            "choice": "N"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 39,
+      "kind": "petri",
+      "id": "execution 0/16/1",
+      "recorded_at": 1789783553689,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 16,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783553689,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 40,
+      "kind": "platform",
+      "id": "10",
+      "recorded_at": 1789783553689,
+      "item": {
+        "seq": 10,
+        "recorded_at": 1789783553689,
+        "record": {
+          "kind": "interview.answered",
+          "question": "gate#2",
+          "principal": {
+            "kind": "user",
+            "identity": {
+              "issuer": "fabro:dev",
+              "subject": "dev"
+            },
+            "login": "dev",
+            "auth_method": "dev_token"
+          },
+          "answer": "no"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 41,
+      "kind": "petri",
+      "id": "execution 0/17/0",
+      "recorded_at": 1789783554201,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 17,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554201,
+        "record": {
+          "seq": 17,
+          "origin": "external",
+          "recorded_at": 1789783554201,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 2,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 2,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "510e5b2c8c16458b679d288f7eee6183f52d7707",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 2,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "510e5b2c8c16458b679d288f7eee6183f52d7707",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 42,
+      "kind": "petri",
+      "id": "execution 0/18/0",
+      "recorded_at": 1789783554202,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 18,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554202,
+        "record": {
+          "seq": 18,
+          "origin": "external",
+          "recorded_at": 1789783554202,
+          "body": {
+            "event": "step.finished",
+            "firing": 2,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "preferred_label": "No",
+                "suggested_next_ids": [
+                  "no"
+                ],
+                "choice": "N",
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 31
+              },
+              "context_updates": {
+                "failure_class": "",
+                "human.gate.gate.answer": "no",
+                "human.gate.gate.label": "[N] No",
+                "human.gate.gate.question": "Go?",
+                "human.gate.label": "[N] No",
+                "human.gate.selected": "N"
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 43,
+      "kind": "petri",
+      "id": "execution 0/18/1",
+      "recorded_at": 1789783554202,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 18,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554202,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "preferred_label": "No",
+              "suggested_next_ids": [
+                "no"
+              ],
+              "choice": "N",
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 31
+            },
+            "context_updates": {
+              "failure_class": "",
+              "human.gate.gate.answer": "no",
+              "human.gate.gate.label": "[N] No",
+              "human.gate.gate.question": "Go?",
+              "human.gate.label": "[N] No",
+              "human.gate.selected": "N"
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 44,
+      "kind": "platform",
+      "id": "11",
+      "recorded_at": 1789783554307,
+      "item": {
+        "seq": 11,
+        "recorded_at": 1789783554307,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 2,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "510e5b2c8c16458b679d288f7eee6183f52d7707",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          },
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 2
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 45,
+      "kind": "petri",
+      "id": "execution 0/19/0",
+      "recorded_at": 1789783554308,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 19,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554308,
+        "record": {
+          "seq": 19,
+          "origin": "external",
+          "recorded_at": 1789783554308,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 2,
+                "attempt": 1
+              }
+            },
+            "groups": [
+              {
+                "group": 0,
+                "draw": null,
+                "trace": [],
+                "decision": {
+                  "emit": 2
+                }
+              }
+            ]
+          }
+        },
+        "derived": {
+          "groups": [
+            {
+              "group": 0,
+              "target": {
+                "id": 4,
+                "name": "no",
+                "kind": "attractor/command",
+                "meta": {
+                  "label": "no",
+                  "shape": "parallelogram",
+                  "kind": "command",
+                  "classes": [],
+                  "span": {
+                    "line": 7,
+                    "column": 5
+                  },
+                  "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+                  "edges": {
+                    "4": {
+                      "to": "exit",
+                      "label": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 46,
+      "kind": "petri",
+      "id": "execution 0/19/1",
+      "recorded_at": 1789783554308,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 19,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554308,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 2,
+              "generation": 0,
+              "payload": {
+                "preferred_label": "No",
+                "suggested_next_ids": [
+                  "no"
+                ],
+                "choice": "N",
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "from": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 47,
+      "kind": "petri",
+      "id": "execution 0/19/2",
+      "recorded_at": 1789783554308,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 19,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554308,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 48,
+      "kind": "petri",
+      "id": "execution 0/20/0",
+      "recorded_at": 1789783554308,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 20,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554308,
+        "record": {
+          "seq": 20,
+          "origin": "core",
+          "recorded_at": 1789783554308,
+          "body": {
+            "event": "route.applied",
+            "kind": "edge",
+            "firing": 2,
+            "group": 0,
+            "edge": 2
+          }
+        },
+        "derived": {
+          "target": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "transition": "Continue",
+          "back": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 49,
+      "kind": "petri",
+      "id": "execution 0/21/0",
+      "recorded_at": 1789783554308,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 21,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 2,
+            "name": "gate",
+            "kind": "attractor/human",
+            "meta": {
+              "label": "Go?",
+              "shape": "hexagon",
+              "kind": "human",
+              "classes": [],
+              "span": {
+                "line": 5,
+                "column": 5
+              },
+              "edges": {
+                "1": {
+                  "to": "yes",
+                  "label": "[Y] Yes"
+                },
+                "2": {
+                  "to": "no",
+                  "label": "[N] No"
+                }
+              }
+            }
+          },
+          "firing": 2,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554308,
+        "record": {
+          "seq": 21,
+          "origin": "core",
+          "recorded_at": 1789783554308,
+          "body": {
+            "event": "token.emitted",
+            "edge": 2,
+            "generation": 0,
+            "payload": {
+              "preferred_label": "No",
+              "suggested_next_ids": [
+                "no"
+              ],
+              "choice": "N",
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "from": 2
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 50,
+      "kind": "petri",
+      "id": "execution 0/22/0",
+      "recorded_at": 1789783554308,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 22,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554308,
+        "record": {
+          "seq": 22,
+          "origin": "external",
+          "recorded_at": 1789783554308,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 51,
+      "kind": "petri",
+      "id": "execution 0/23/0",
+      "recorded_at": 1789783554308,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 23,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554308,
+        "record": {
+          "seq": 23,
+          "origin": "external",
+          "recorded_at": 1789783554308,
+          "body": {
+            "event": "step.started",
+            "firing": 3,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 52,
+      "kind": "petri",
+      "id": "execution 0/23/1",
+      "recorded_at": 1789783554308,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 23,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783554308,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 53,
+      "kind": "petri",
+      "id": "execution 0/24/0",
+      "recorded_at": 1789783555020,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 24,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555020,
+        "record": {
+          "seq": 24,
+          "origin": "external",
+          "recorded_at": 1789783555020,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 3,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 3,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "66c55d2858904b2bb1eb2a42c6a60932920d7633",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 3,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "66c55d2858904b2bb1eb2a42c6a60932920d7633",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 54,
+      "kind": "petri",
+      "id": "execution 0/25/0",
+      "recorded_at": 1789783555020,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 25,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555020,
+        "record": {
+          "seq": 25,
+          "origin": "external",
+          "recorded_at": 1789783555020,
+          "body": {
+            "event": "step.finished",
+            "firing": 3,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "exit_status": 0,
+                "stdout": "",
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 57
+              },
+              "context_updates": {
+                "command.output": "",
+                "failure_class": ""
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 55,
+      "kind": "petri",
+      "id": "execution 0/25/1",
+      "recorded_at": 1789783555020,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 25,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555020,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "exit_status": 0,
+              "stdout": "",
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 57
+            },
+            "context_updates": {
+              "command.output": "",
+              "failure_class": ""
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 56,
+      "kind": "platform",
+      "id": "12",
+      "recorded_at": 1789783555119,
+      "item": {
+        "seq": 12,
+        "recorded_at": 1789783555119,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 3,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "66c55d2858904b2bb1eb2a42c6a60932920d7633",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          },
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 3
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 57,
+      "kind": "petri",
+      "id": "execution 0/26/0",
+      "recorded_at": 1789783555121,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 26,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555121,
+        "record": {
+          "seq": 26,
+          "origin": "external",
+          "recorded_at": 1789783555121,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 3,
+                "attempt": 1
+              }
+            },
+            "groups": [
+              {
+                "group": 0,
+                "draw": null,
+                "trace": [],
+                "decision": {
+                  "emit": 4
+                }
+              }
+            ]
+          }
+        },
+        "derived": {
+          "groups": [
+            {
+              "group": 0,
+              "target": {
+                "id": 1,
+                "name": "exit",
+                "kind": "attractor/stage",
+                "meta": {
+                  "label": "exit",
+                  "shape": "Msquare",
+                  "kind": "exit",
+                  "classes": [],
+                  "span": {
+                    "line": 4,
+                    "column": 5
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 58,
+      "kind": "petri",
+      "id": "execution 0/26/1",
+      "recorded_at": 1789783555121,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 26,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555121,
+        "derived": {
+          "event": "visit.started",
+          "inputs": [
+            {
+              "edge": 4,
+              "generation": 0,
+              "payload": {
+                "exit_status": 0,
+                "stdout": "",
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "from": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 59,
+      "kind": "petri",
+      "id": "execution 0/26/2",
+      "recorded_at": 1789783555121,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 26,
+          "index": 2
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555121,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "awaiting_admission"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 60,
+      "kind": "petri",
+      "id": "execution 0/27/0",
+      "recorded_at": 1789783555121,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 27,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555121,
+        "record": {
+          "seq": 27,
+          "origin": "core",
+          "recorded_at": 1789783555121,
+          "body": {
+            "event": "route.applied",
+            "kind": "edge",
+            "firing": 3,
+            "group": 0,
+            "edge": 4
+          }
+        },
+        "derived": {
+          "target": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "transition": "Continue",
+          "back": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 61,
+      "kind": "petri",
+      "id": "execution 0/28/0",
+      "recorded_at": 1789783555121,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 28,
+          "index": 0
+        },
+        "origin": "core",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 4,
+            "name": "no",
+            "kind": "attractor/command",
+            "meta": {
+              "label": "no",
+              "shape": "parallelogram",
+              "kind": "command",
+              "classes": [],
+              "span": {
+                "line": 7,
+                "column": 5
+              },
+              "script": "touch /var/folders/nm/bd2dwzy52t1ckn3tklsfmy1c0000gn/T/.tmpWwhqJ5/no",
+              "edges": {
+                "4": {
+                  "to": "exit",
+                  "label": null
+                }
+              }
+            }
+          },
+          "firing": 3,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555121,
+        "record": {
+          "seq": 28,
+          "origin": "core",
+          "recorded_at": 1789783555121,
+          "body": {
+            "event": "token.emitted",
+            "edge": 4,
+            "generation": 0,
+            "payload": {
+              "exit_status": 0,
+              "stdout": "",
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "from": 3
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 62,
+      "kind": "petri",
+      "id": "execution 0/29/0",
+      "recorded_at": 1789783555121,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 29,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555121,
+        "record": {
+          "seq": 29,
+          "origin": "external",
+          "recorded_at": 1789783555121,
+          "body": {
+            "event": "admission.decided",
+            "decision_id": {
+              "attempt_start": {
+                "firing": 4,
+                "attempt": 1
+              }
+            },
+            "decision": "admit",
+            "trace": []
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 63,
+      "kind": "petri",
+      "id": "execution 0/30/0",
+      "recorded_at": 1789783555121,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 30,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555121,
+        "record": {
+          "seq": 30,
+          "origin": "external",
+          "recorded_at": 1789783555121,
+          "body": {
+            "event": "step.started",
+            "firing": 4,
+            "attempt": 1
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 64,
+      "kind": "petri",
+      "id": "execution 0/30/1",
+      "recorded_at": 1789783555121,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 30,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555121,
+        "derived": {
+          "event": "wait.state.changed",
+          "state": "running"
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 65,
+      "kind": "petri",
+      "id": "execution 0/31/0",
+      "recorded_at": 1789783555485,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 31,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555485,
+        "record": {
+          "seq": 31,
+          "origin": "external",
+          "recorded_at": 1789783555485,
+          "body": {
+            "event": "step.progress.recorded",
+            "firing": 4,
+            "ev": {
+              "custom": {
+                "$note": {
+                  "kind": "fabro.checkpoint",
+                  "payload": {
+                    "execution": 0,
+                    "firing": 4,
+                    "attempt": 1,
+                    "workspace": "invocation-0-scope-0",
+                    "git_commit_sha": "3a5e4349b77394aba3ffef05e359a6ca192f9708",
+                    "reused": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "derived": {
+          "parsed": {
+            "kind": "note",
+            "note": {
+              "kind": "fabro.checkpoint",
+              "payload": {
+                "execution": 0,
+                "firing": 4,
+                "attempt": 1,
+                "workspace": "invocation-0-scope-0",
+                "git_commit_sha": "3a5e4349b77394aba3ffef05e359a6ca192f9708",
+                "reused": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 66,
+      "kind": "petri",
+      "id": "execution 0/32/0",
+      "recorded_at": 1789783555485,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 32,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555485,
+        "record": {
+          "seq": 32,
+          "origin": "external",
+          "recorded_at": 1789783555485,
+          "body": {
+            "event": "step.finished",
+            "firing": 4,
+            "attempt": 1,
+            "outcome": {
+              "status": "success",
+              "output": {
+                "outcome": "succeeded",
+                "failure_class": ""
+              },
+              "metrics": {
+                "duration_ms": 0
+              },
+              "context_updates": {
+                "failure_class": ""
+              }
+            }
+          }
+        },
+        "derived": {
+          "final": true,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 67,
+      "kind": "petri",
+      "id": "execution 0/32/1",
+      "recorded_at": 1789783555485,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 32,
+          "index": 1
+        },
+        "origin": "derived",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555485,
+        "derived": {
+          "event": "visit.completed",
+          "outcome": {
+            "status": "success",
+            "output": {
+              "outcome": "succeeded",
+              "failure_class": ""
+            },
+            "metrics": {
+              "duration_ms": 0
+            },
+            "context_updates": {
+              "failure_class": ""
+            }
+          },
+          "executed": true,
+          "attempts": 1
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 68,
+      "kind": "platform",
+      "id": "13",
+      "recorded_at": 1789783555630,
+      "item": {
+        "seq": 13,
+        "recorded_at": 1789783555630,
+        "record": {
+          "kind": "checkpoint",
+          "execution": 0,
+          "firing": 4,
+          "attempt": 1,
+          "workspace": "invocation-0-scope-0",
+          "git_commit_sha": "3a5e4349b77394aba3ffef05e359a6ca192f9708",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          },
+          "operation": {
+            "execution": 0,
+            "decision": {
+              "attempt_start": {
+                "firing": 4,
+                "attempt": 1
+              }
+            },
+            "effect": "checkpoint"
+          }
+        },
+        "position": {
+          "execution": 0,
+          "firing": 4
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 69,
+      "kind": "petri",
+      "id": "execution 0/33/0",
+      "recorded_at": 1789783555633,
+      "item": {
+        "id": {
+          "log": "execution",
+          "execution": 0,
+          "seq": 33,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "subject": {
+          "node": {
+            "id": 1,
+            "name": "exit",
+            "kind": "attractor/stage",
+            "meta": {
+              "label": "exit",
+              "shape": "Msquare",
+              "kind": "exit",
+              "classes": [],
+              "span": {
+                "line": 4,
+                "column": 5
+              }
+            }
+          },
+          "firing": 4,
+          "visit": 1,
+          "attempt": 1,
+          "generation": 0,
+          "branch": {
+            "role": "none"
+          }
+        },
+        "recorded_at": 1789783555633,
+        "record": {
+          "seq": 33,
+          "origin": "external",
+          "recorded_at": 1789783555633,
+          "body": {
+            "event": "routing.resolved",
+            "decision_id": {
+              "route": {
+                "firing": 4,
+                "attempt": 1
+              }
+            },
+            "groups": []
+          }
+        },
+        "derived": {
+          "groups": []
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 70,
+      "kind": "platform",
+      "id": "14",
+      "recorded_at": 1789783555740,
+      "item": {
+        "seq": 14,
+        "recorded_at": 1789783555740,
+        "record": {
+          "kind": "run.diff",
+          "base_sha": "965e6fd20fa20aba86e49ce17906e3867904b548",
+          "head_sha": "3a5e4349b77394aba3ffef05e359a6ca192f9708",
+          "diff_summary": {
+            "files_changed": 0,
+            "additions": 0,
+            "deletions": 0
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 71,
+      "kind": "petri",
+      "id": "coordinator/4/0",
+      "recorded_at": 1789783555741,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 4,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783555741,
+        "record": {
+          "seq": 4,
+          "origin": "external",
+          "recorded_at": 1789783555741,
+          "body": {
+            "event": "execution.finished",
+            "execution": 0,
+            "exit": {
+              "terminal": {
+                "status": "success"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 72,
+      "kind": "petri",
+      "id": "coordinator/5/0",
+      "recorded_at": 1789783555741,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 5,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0,
+          "execution": 0
+        },
+        "recorded_at": 1789783555741,
+        "record": {
+          "seq": 5,
+          "origin": "external",
+          "recorded_at": 1789783555741,
+          "body": {
+            "event": "invocation.finished",
+            "invocation": 0,
+            "result": {
+              "status": "success",
+              "failure": null,
+              "final_execution": 0,
+              "output": null,
+              "context": {
+                "command.output": "",
+                "failure_class": "",
+                "human.gate.gate.answer": "no",
+                "human.gate.gate.label": "[N] No",
+                "human.gate.gate.question": "Go?",
+                "human.gate.label": "[N] No",
+                "human.gate.selected": "N",
+                "internal.run_id": "petri"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 73,
+      "kind": "petri",
+      "id": "coordinator/6/0",
+      "recorded_at": 1789783555827,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 6,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {
+          "invocation": 0
+        },
+        "recorded_at": 1789783555827,
+        "record": {
+          "seq": 6,
+          "origin": "external",
+          "recorded_at": 1789783555827,
+          "body": {
+            "event": "scope.released",
+            "invocation": 0,
+            "lease": 0,
+            "scope": {
+              "declared": 0
+            },
+            "workspace": "invocation-0-scope-0",
+            "provider": "host",
+            "instance": "host-g18d696a89e0c30b0-691-0",
+            "outcome": "succeeded",
+            "retained": true
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 74,
+      "kind": "petri",
+      "id": "coordinator/7/0",
+      "recorded_at": 1789783555828,
+      "item": {
+        "id": {
+          "log": "coordinator",
+          "seq": 7,
+          "index": 0
+        },
+        "origin": "external",
+        "context": {},
+        "recorded_at": 1789783555828,
+        "record": {
+          "seq": 7,
+          "origin": "external",
+          "recorded_at": 1789783555828,
+          "body": {
+            "event": "run.finished",
+            "status": "success"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "01M2VPKCKJ26JE3FNEJRZJCZK0",
+      "stream_seq": 75,
+      "kind": "platform",
+      "id": "15",
+      "recorded_at": 1789783555840,
+      "item": {
+        "seq": 15,
+        "recorded_at": 1789783555840,
+        "record": {
+          "kind": "run.lifecycle",
+          "transition": "succeeded",
+          "status": {
+            "kind": "succeeded",
+            "reason": "completed"
+          }
+        }
+      }
+    }
+  ]
+}

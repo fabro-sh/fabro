@@ -7,7 +7,7 @@ use fabro_client::{
     AuthEntry, AuthStore, Credential, OAuthSession, ServerTarget, TransportConnector,
     apply_bearer_token_auth,
 };
-pub(crate) use fabro_client::{Client, RunEventStream};
+pub(crate) use fabro_client::{Client, RunStreamItemStream};
 use fabro_config::Storage;
 use fabro_config::bind::Bind;
 pub(crate) use fabro_types::RunProjection;
@@ -550,7 +550,7 @@ mod tests {
                     "os": "darwin",
                     "arch": "arm64",
                     "storage_dir": "/tmp/fabro-worker-auth",
-                    "storage_engine": "slatedb",
+                    "storage_engine": "sqlite",
                     "runs": { "total": 0, "active": 0 },
                     "uptime_secs": 42
                 }));

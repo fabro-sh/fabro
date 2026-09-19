@@ -1,8 +1,9 @@
-//! Fabro's [`Sandbox`] over a sandbox-driver handle.
+//! Fabro's [`RunSandbox`] over a sandbox-driver handle.
 //!
 //! Every operation goes to a public driver facet: files through
-//! [`Filesystem`], content and tree search through [`Search`], commands
-//! through fabro's [`SandboxExec`] policy over the [`Exec`] facet, lifecycle
+//! [`sandbox_driver::Filesystem`], content and tree search through
+//! [`sandbox_driver::Search`], commands through fabro's [`SandboxExec`]
+//! policy over the [`sandbox_driver::Exec`] facet, lifecycle
 //! through the handle itself. Nothing here knows which provider is behind
 //! the handle or whether it runs in-process or over the plugin wire.
 //!

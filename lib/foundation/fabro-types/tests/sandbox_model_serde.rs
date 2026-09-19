@@ -14,10 +14,10 @@ fn run_sandbox_serializes_canonical_identity_without_identifier() {
             snapshot: None,
         },
         RunSandboxInstance {
-            provider: SandboxProviderKind::DOCKER,
-            image:    None,
-            snapshot: None,
-            runtime:  RunSandboxRuntime {
+            provider:          SandboxProviderKind::DOCKER,
+            image:             None,
+            snapshot:          None,
+            runtime:           RunSandboxRuntime {
                 id:                "container-abc123".to_string(),
                 working_directory: "/workspace".to_string(),
                 repo_cloned:       Some(true),
@@ -28,6 +28,8 @@ fn run_sandbox_serializes_canonical_identity_without_identifier() {
                 primary_repo_path: Some("/repos/fabro-sh/fabro".to_string()),
                 primary_repo_link: Some("/workspace/fabro".to_string()),
             },
+            ready_duration_ms: None,
+            retained:          None,
         },
     );
 
@@ -83,10 +85,10 @@ fn sandbox_details_keep_the_record_beside_the_status() {
     );
     let details = SandboxDetails {
         sandbox: RunSandboxInstance {
-            provider: SandboxProviderKind::DAYTONA,
-            image:    Some("ubuntu:24.04".to_string()),
-            snapshot: None,
-            runtime:  RunSandboxRuntime {
+            provider:          SandboxProviderKind::DAYTONA,
+            image:             Some("ubuntu:24.04".to_string()),
+            snapshot:          None,
+            runtime:           RunSandboxRuntime {
                 id:                "daytona-sandbox-name".to_string(),
                 working_directory: "/workspace".to_string(),
                 repo_cloned:       None,
@@ -97,6 +99,8 @@ fn sandbox_details_keep_the_record_beside_the_status() {
                 primary_repo_path: None,
                 primary_repo_link: None,
             },
+            ready_duration_ms: None,
+            retained:          None,
         },
         status,
     };

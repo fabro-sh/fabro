@@ -1,25 +1,25 @@
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
-
 import type { Stage } from "../stage-sidebar";
 import {
-  debugCategory,
   debugCategoryLabel,
   debugCategoryTone,
   type DebugCategory,
 } from "../event-debug-helpers";
 import { StageMetaBar } from "./meta-bar";
 
-interface CategoryCount {
+export interface CategoryCount {
   category: DebugCategory;
   count: number;
 }
 
-function summarizeEventCategories(events: EventEnvelope[]): CategoryCount[] {
+/** What the summary counts: a stream row with its category. */
+export interface CategorizedEvent {
+  category: DebugCategory;
+}
+
+export function summarizeEventCategories(events: CategorizedEvent[]): CategoryCount[] {
   const counts = new Map<DebugCategory, number>();
   for (const event of events) {
-    if (!event.event) continue;
-    const cat = debugCategory(event.event);
-    counts.set(cat, (counts.get(cat) ?? 0) + 1);
+    counts.set(event.category, (counts.get(event.category) ?? 0) + 1);
   }
   return Array.from(counts.entries())
     .map(([category, count]) => ({ category, count }))
@@ -31,7 +31,7 @@ export function StageSummary({
   events,
 }: {
   stage: Stage;
-  events: EventEnvelope[];
+  events: CategorizedEvent[];
 }) {
   const categories = summarizeEventCategories(events);
 

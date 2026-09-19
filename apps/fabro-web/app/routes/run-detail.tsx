@@ -28,7 +28,6 @@ import {
   useDenyRun,
   useInterruptRun,
   usePreviewRun,
-  useRetryRun,
   useUnarchiveRun,
   type LifecycleMutationResult,
 } from "../lib/mutations";
@@ -37,7 +36,6 @@ import { useRunToasts } from "../hooks/use-run-toasts";
 import { useRun, useRunQuestions, useRunState } from "../lib/queries";
 import {
   canApprove,
-  canRetry,
   deleteErrorMessage,
   deleteRun,
   isCancellationPending,
@@ -113,7 +111,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const denyMutation = useDenyRun(params.id);
   const archiveMutation = useArchiveRun(params.id);
   const unarchiveMutation = useUnarchiveRun(params.id);
-  const retryMutation = useRetryRun(params.id);
   const interruptMutation = useInterruptRun(params.id);
   const navigate = useNavigate();
   const { mutate } = useSWRConfig();
@@ -160,10 +157,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         result,
         lifecycleToastStateRef,
         { push, dismiss },
-        intent === "retry" ? navigate : undefined,
       );
     },
-    [dismiss, navigate, push],
+    [dismiss, push],
   );
   const triggerLifecycleAction = useCallback(
     async (intent: LifecycleAction, trigger: LifecycleTrigger) => {
@@ -205,7 +201,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const denyPending = denyMutation.isMutating;
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
-  const retryPending = retryMutation.isMutating;
   const handlePreview = async () => {
     const previewWindow = window.open("about:blank", "_blank");
     try {
@@ -284,15 +279,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       },
     ],
     lifecycle: [
-      ...(!demoMode && canRetry(summary)
-        ? [{
-          key:          "retry",
-          label:        "Retry",
-          pendingLabel: "Retrying…",
-          pending:      retryPending,
-          onSelect:     () => void triggerLifecycleAction("retry", retryMutation.trigger),
-        }]
-        : []),
       ...(visibility.showArchive
         ? [{
           key:          "archive",

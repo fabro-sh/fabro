@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_api::types;
 use fabro_types::{
-    EventEnvelope, PairId, PairMessageRecord, PairMessageRequest, PairRecord,
-    PairTranscriptResponse, Run, RunId, RunIntent, RunPairStatusResponse, RunProjection, StageId,
+    PairId, PairMessageRecord, PairMessageRequest, PairRecord, PairTranscriptResponse, Run, RunId,
+    RunIntent, RunPairStatusResponse, RunProjection, RunStreamItem, StageId,
 };
 
 use crate::{FabroToolBackend, common};
@@ -129,12 +129,14 @@ impl FabroToolBackend for ClientBackend {
 
     async fn interrupt_run(&self, run_id: &RunId) -> anyhow::Result<()> {
         self.ensure_run_scope(run_id)?;
-        self.client.interrupt_run(run_id).await
+        self.client.interrupt_run(run_id, None, None).await?;
+        Ok(())
     }
 
     async fn steer_run(&self, run_id: &RunId, text: String, interrupt: bool) -> anyhow::Result<()> {
         self.ensure_run_scope(run_id)?;
-        self.client.steer_run(run_id, text, interrupt).await
+        self.client.steer_run(run_id, text, interrupt, None).await?;
+        Ok(())
     }
 
     async fn archive_run(&self, run_id: &RunId) -> anyhow::Result<Run> {
@@ -174,26 +176,21 @@ impl FabroToolBackend for ClientBackend {
         self.client.get_run_state(run_id).await
     }
 
-    async fn list_run_events(
+    async fn list_run_stream(
         &self,
         run_id: &RunId,
-        after: Option<u32>,
+        after: u64,
         limit: Option<usize>,
-    ) -> anyhow::Result<Vec<EventEnvelope>> {
+    ) -> anyhow::Result<Vec<RunStreamItem>> {
         self.ensure_run_scope(run_id)?;
-        self.client.list_run_events(run_id, after, limit).await
-    }
-
-    async fn list_run_events_until(
-        &self,
-        run_id: &RunId,
-        after: Option<u32>,
-        limit: usize,
-    ) -> anyhow::Result<Vec<EventEnvelope>> {
-        self.ensure_run_scope(run_id)?;
-        self.client
-            .list_run_events_until(run_id, after, limit)
-            .await
+        match limit {
+            Some(limit) => {
+                self.client
+                    .list_run_stream_until(run_id, after, limit)
+                    .await
+            }
+            None => self.client.list_run_stream(run_id, after).await,
+        }
     }
 
     async fn list_run_questions(&self, run_id: &RunId) -> anyhow::Result<Vec<types::ApiQuestion>> {

@@ -8,12 +8,12 @@ use fabro_template::{
     TemplateContext, TemplateError, TemplateRenderMode, TemplateSource, TemplateSourceOrigin,
     TemplateStore, validate_static_reference,
 };
+use fabro_types::diagnostic::{Diagnostic, Severity};
 use fabro_types::graph::{AttributeScope, ReferenceKind, reference_kind_for_attribute};
 use fabro_types::settings::interp::Namespace;
 use fabro_types::settings::{InterpString, ResolveCtx, ResolveError, ResolveErrorKind};
 use fabro_util::error::collect_chain;
 use fabro_util::shell;
-use fabro_validate::{Diagnostic, Severity};
 
 use super::Transform;
 use crate::error::Error;

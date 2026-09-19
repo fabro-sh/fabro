@@ -43,7 +43,7 @@ import type { SystemResourcesResponse } from '../models';
 export const SystemApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Opens a server-sent event stream for live run events across the server.
+         * Opens a server-sent event stream of every run\'s stream across the server: each `data:` frame is one `RunStreamItem`, as it is committed.
          * @summary Attach Global Events
          * @param {string} [runId] Optional comma-separated list of run IDs to include.
          * @param {*} [options] Override http request option.
@@ -319,7 +319,7 @@ export const SystemApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = SystemApiAxiosParamCreator(configuration)
     return {
         /**
-         * Opens a server-sent event stream for live run events across the server.
+         * Opens a server-sent event stream of every run\'s stream across the server: each `data:` frame is one `RunStreamItem`, as it is committed.
          * @summary Attach Global Events
          * @param {string} [runId] Optional comma-separated list of run IDs to include.
          * @param {*} [options] Override http request option.
@@ -415,7 +415,7 @@ export const SystemApiFactory = function (configuration?: Configuration, basePat
     const localVarFp = SystemApiFp(configuration)
     return {
         /**
-         * Opens a server-sent event stream for live run events across the server.
+         * Opens a server-sent event stream of every run\'s stream across the server: each `data:` frame is one `RunStreamItem`, as it is committed.
          * @summary Attach Global Events
          * @param {string} [runId] Optional comma-separated list of run IDs to include.
          * @param {*} [options] Override http request option.
@@ -488,7 +488,7 @@ export const SystemApiFactory = function (configuration?: Configuration, basePat
  */
 export class SystemApi extends BaseAPI {
     /**
-     * Opens a server-sent event stream for live run events across the server.
+     * Opens a server-sent event stream of every run\'s stream across the server: each `data:` frame is one `RunStreamItem`, as it is committed.
      * @summary Attach Global Events
      * @param {string} [runId] Optional comma-separated list of run IDs to include.
      * @param {*} [options] Override http request option.

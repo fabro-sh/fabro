@@ -16,8 +16,6 @@ pub type DbPool = sqlx::SqlitePool;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
-const SESSION_OWNER_INDEX_MIGRATION_VERSION: i64 = 2_026_083_101;
-
 /// The blob-table migration, exposed so fixtures in other crates can install
 /// the production blob schema without a filesystem path into this crate.
 pub const BLOBS_MIGRATION_SQL: &str = include_str!("../migrations/2026081301_blobs.sql");
@@ -26,14 +24,11 @@ pub const BLOBS_MIGRATION_SQL: &str = include_str!("../migrations/2026081301_blo
 /// the production schema without a filesystem path into this crate.
 pub const RUNS_MIGRATION_SQL: &str = include_str!("../migrations/2026071104_runs.sql");
 
-/// The run-event migration, exposed so fixtures in other crates can install
-/// the production schema without a filesystem path into this crate.
-pub const RUN_EVENTS_MIGRATION_SQL: &str = include_str!("../migrations/2026082701_run_events.sql");
-
-/// The run-session owner index migration, exposed so fixtures in other crates
-/// can install the production run-history indexes.
-pub const RUN_EVENT_SESSION_OWNER_MIGRATION_SQL: &str =
-    include_str!("../migrations/2026083101_run_event_session_owner.sql");
+/// The migration that drops the legacy run event log and narrows the `runs`
+/// row to its final shape, exposed so fixtures that install
+/// [`RUNS_MIGRATION_SQL`] can apply it next and get the production schema.
+pub const DROP_RUN_EVENTS_MIGRATION_SQL: &str =
+    include_str!("../migrations/2026091803_drop_run_events.sql");
 
 /// The Ask Fabro session record migration, exposed so fixtures in other
 /// crates can install the production schema without a filesystem path into
@@ -41,10 +36,23 @@ pub const RUN_EVENT_SESSION_OWNER_MIGRATION_SQL: &str =
 pub const RUN_SESSION_RECORDS_MIGRATION_SQL: &str =
     include_str!("../migrations/2026091101_run_session_records.sql");
 
-/// The temporary run-history activation migration, exposed so fixtures in
-/// other crates can install the production compatibility schema.
-pub const RUN_HISTORY_ACTIVATION_MIGRATION_SQL: &str =
-    include_str!("../migrations/2026082802_run_history_activation.sql");
+/// The Ask Fabro session events migration (`run_session_events`), exposed so
+/// fixtures in other crates can install the production schema without a
+/// filesystem path into this crate.
+pub const RUN_SESSION_EVENTS_MIGRATION_SQL: &str =
+    include_str!("../migrations/2026091802_run_session_events.sql");
+
+/// The Petri run record migration (`petri_runs`, `petri_records`), exposed
+/// so fixtures in other crates can install the production schema without a
+/// filesystem path into this crate.
+pub const PETRI_RECORDS_MIGRATION_SQL: &str =
+    include_str!("../migrations/2026091701_petri_records.sql");
+
+/// The Petri projection migration (`platform_records`, `petri_projection`,
+/// `petri_stream`), exposed so fixtures in other crates can install the
+/// production schema without a filesystem path into this crate.
+pub const PETRI_PROJECTION_MIGRATION_SQL: &str =
+    include_str!("../migrations/2026091801_petri_projection.sql");
 
 #[derive(Clone)]
 pub struct Database {
@@ -80,9 +88,6 @@ impl Database {
 
     pub async fn migrate(&self) -> anyhow::Result<()> {
         let applied = applied_migration_versions(&self.pool).await?;
-        self.preflight_session_owner_index(&applied)
-            .await
-            .context("checking session ownership before SQLite migrations")?;
         self.snapshot_before_new_migrations(&applied)
             .await
             .context("snapshotting SQLite database before migrations")?;
@@ -90,53 +95,6 @@ impl Database {
             .run(&self.pool)
             .await
             .context("running SQLite migrations")
-    }
-
-    /// Refuse the unique owner index when old event history contains
-    /// collisions. The diagnostic is deliberately count-only because session
-    /// identifiers and event contents are not safe startup-log fields.
-    ///
-    /// Temporary compatibility guard: once every supported database has
-    /// applied the session-owner index migration the version check below
-    /// always short-circuits, and this preflight can be deleted along with
-    /// the run-history compatibility window.
-    async fn preflight_session_owner_index(&self, applied: &HashSet<i64>) -> anyhow::Result<()> {
-        if applied.contains(&SESSION_OWNER_INDEX_MIGRATION_VERSION) {
-            return Ok(());
-        }
-
-        let run_events_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_events')",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .context("checking for the run event table")?;
-        if !run_events_exists {
-            return Ok(());
-        }
-
-        let collision_groups: i64 = sqlx::query_scalar(
-            r"
-SELECT COUNT(*)
-FROM (
-    SELECT session_id
-    FROM run_events
-    WHERE session_id IS NOT NULL
-      AND event_name = 'run.session.created'
-    GROUP BY session_id
-    HAVING COUNT(*) > 1
-)
-",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .context("counting duplicate session ownership groups")?;
-        if collision_groups > 0 {
-            anyhow::bail!(
-                "cannot create the unique session owner index: found {collision_groups} duplicate session ownership groups"
-            );
-        }
-        Ok(())
     }
 
     /// Copy the database aside before applying migrations it has not seen.

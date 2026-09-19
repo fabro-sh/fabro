@@ -3,12 +3,11 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    POLL_ATTEMPTS, POLL_INTERVAL, api, checked_response, checked_response_in,
-    create_and_start_run_from_intent, minimal_intent_json_with_dry_run, response_json,
+    api, checked_response, create_and_start_run_from_intent, minimal_intent_json_with_dry_run,
     test_app_state_with_options, test_app_with_scheduler, test_settings,
     wait_for_run_status_not_in,
 };
@@ -20,34 +19,6 @@ const SIMPLE_DOT: &str = r#"digraph SSETest {
     exit  [shape=Msquare]
     start -> work -> exit
 }"#;
-
-async fn wait_for_checkpoint(app: &axum::Router, run_id: &str) -> serde_json::Value {
-    for _ in 0..POLL_ATTEMPTS {
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}/checkpoint")))
-            .body(Body::empty())
-            .expect("checkpoint request should build");
-        let response = app.clone().oneshot(req).await.unwrap();
-        let status = response.status();
-        if status == StatusCode::OK {
-            return response_json(
-                response,
-                StatusCode::OK,
-                format!("GET /api/v1/runs/{run_id}/checkpoint"),
-            )
-            .await;
-        }
-        checked_response_in(
-            response,
-            &[StatusCode::OK, StatusCode::NOT_FOUND],
-            format!("GET /api/v1/runs/{run_id}/checkpoint"),
-        )
-        .await;
-        sleep(POLL_INTERVAL).await;
-    }
-    panic!("checkpoint did not become available for {run_id}");
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sse_stream_contains_expected_event_types() {
@@ -67,13 +38,13 @@ async fn sse_stream_contains_expected_event_types() {
     // the run advances before the attach request is handled.
     let req = Request::builder()
         .method("GET")
-        .uri(api(&format!("/runs/{run_id}/attach?since_seq=1")))
+        .uri(api(&format!("/runs/{run_id}/attach?after=0")))
         .body(Body::empty())
         .unwrap();
     let response = checked_response(
         app.clone().oneshot(req).await.unwrap(),
         StatusCode::OK,
-        format!("GET /api/v1/runs/{run_id}/attach?since_seq=1"),
+        format!("GET /api/v1/runs/{run_id}/attach?after=0"),
     )
     .await;
 
@@ -94,34 +65,24 @@ async fn sse_stream_contains_expected_event_types() {
         }
     }
 
-    // Parse SSE data lines and extract event types
+    // Every frame is one stream item: Petri's events name the stage they
+    // belong to, so the run's stages show up as `visit.started`.
     let mut event_types: Vec<String> = Vec::new();
     for line in sse_data.lines() {
         if let Some(json_str) = line.strip_prefix("data:") {
-            let json_str = json_str.trim();
-            if let Ok(event) = serde_json::from_str::<serde_json::Value>(json_str) {
-                if let Some(event_name) = event["event"].as_str() {
-                    event_types.push(event_name.to_string());
+            if let Ok(item) = serde_json::from_str::<serde_json::Value>(json_str.trim()) {
+                let name = item["item"]["record"]["body"]["event"]
+                    .as_str()
+                    .or_else(|| item["item"]["derived"]["event"].as_str());
+                if let Some(name) = name {
+                    event_types.push(name.to_string());
                 }
             }
         }
     }
 
     assert!(
-        event_types
-            .iter()
-            .any(|t| t == "stage.started" || t == "stage.completed"),
+        event_types.iter().any(|t| t == "visit.started"),
         "should contain stage events, got: {event_types:?}"
     );
-
-    // Pipeline is complete (SSE stream ended), verify checkpoint
-    let cp_body = wait_for_checkpoint(&app, &run_id).await;
-    // If run completed, checkpoint should have completed_nodes
-    if !cp_body.is_null() {
-        let completed = cp_body["completed_nodes"].as_array();
-        if let Some(nodes) = completed {
-            let names: Vec<&str> = nodes.iter().filter_map(|v| v.as_str()).collect();
-            assert!(names.contains(&"work"), "work should be in completed_nodes");
-        }
-    }
 }

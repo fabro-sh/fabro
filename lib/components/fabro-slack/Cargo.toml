@@ -15,7 +15,6 @@ workspace = true
 [dependencies]
 fabro-interview = { path = "../fabro-interview" }
 fabro-types = { path = "../../foundation/fabro-types" }
-fabro-workflow = { path = "../fabro-workflow" }
 fabro-http.workspace = true
 fabro-static.workspace = true
 futures-util.workspace = true

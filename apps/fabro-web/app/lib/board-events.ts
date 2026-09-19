@@ -6,6 +6,7 @@ import {
   type CrossTabSseCoordinator,
 } from "./cross-tab-sse";
 import { runListCacheMatchers } from "./board-cache";
+import { isStreamItemPayload, streamItemName } from "./petri-stream";
 import { queryKeys } from "./query-keys";
 import {
   createBrowserEventSource,
@@ -21,35 +22,31 @@ interface BoardEventOptions {
   coordinator?: CrossTabSseCoordinator;
 }
 
+// The stream items that change what the board shows of a run: its status
+// (Fabro's `run.lifecycle` records before and after Petri runs it, Petri's
+// own run events while it does), its title, its archive state, its parent,
+// its pull request, and the questions that block it (`wait.state.changed`
+// turns the status to blocked, `control.requested` delivers the answer).
+// Named as `streamItemName` names them: a platform record by its `kind`, a
+// Petri event by its `<subject>.<verb>`.
 const BOARD_STATUS_EVENTS = new Set([
-  "run.submitted",
-  "run.start_requested",
-  "run.pending",
-  "run.approved",
-  "run.denied",
-  "run.runnable",
-  "run.starting",
-  "run.running",
-  "run.removing",
-  "run.paused",
-  "run.unpaused",
-  "run.blocked",
-  "run.unblocked",
-  "run.cancel.requested",
-  "run.pause.requested",
-  "run.unpause.requested",
-  "run.completed",
-  "run.failed",
+  "run.created",
+  "run.lifecycle",
+  "run.title",
+  "run.parent",
   "run.archived",
   "run.unarchived",
-  "run.title.updated",
-  "interview.started",
-  "interview.completed",
-  "interview.timeout",
-  "interview.interrupted",
+  "run.superseded",
   "pull_request.created",
-  "pull_request.linked",
-  "pull_request.unlinked",
+  "interview.answered",
+  "run.started",
+  "run.finished",
+  "run.paused",
+  "run.unpaused",
+  "run.stalled",
+  "invocation.cancel.requested",
+  "wait.state.changed",
+  "control.requested",
 ]);
 
 const subscriptions = new Map<string, SharedEventSubscription>();
@@ -86,9 +83,10 @@ export function subscribeToBoardEvents(
 
 function boardInvalidation(payload: EventPayload) {
   return {
-    keys: payload.event && shouldRefreshBoardForEvent(payload.event)
-      ? boardRunKeys()
-      : [],
+    keys:
+      isStreamItemPayload(payload) && shouldRefreshBoardForEvent(streamItemName(payload))
+        ? boardRunKeys()
+        : [],
   };
 }
 

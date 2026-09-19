@@ -55,13 +55,6 @@ impl ProgressRenderer {
         }
     }
 
-    pub(super) fn insert_before(&self, before: &ProgressBar) -> ProgressBar {
-        match &self.inner {
-            RendererInner::Tty { multi } => multi.insert_before(before, ProgressBar::new_spinner()),
-            RendererInner::Plain { .. } => ProgressBar::hidden(),
-        }
-    }
-
     pub(super) fn print_line(&self, indent: usize, message: &str) {
         if let RendererInner::Plain { out } = &self.inner {
             let mut out = out.lock().expect("plain renderer lock poisoned");

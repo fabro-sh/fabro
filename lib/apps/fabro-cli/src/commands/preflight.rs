@@ -1,6 +1,7 @@
 use anyhow::bail;
 use fabro_config::user::active_settings_path;
 use fabro_manifest::{ManifestBuildInput, build_run_manifest};
+use fabro_types::diagnostic::Severity;
 use fabro_util::terminal::Styles;
 
 use crate::args::PreflightArgs;
@@ -57,7 +58,7 @@ pub(crate) async fn execute(
         );
         if diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+            .any(|diagnostic| diagnostic.severity == Severity::Error)
         {
             bail!("Validation failed");
         }
@@ -75,7 +76,7 @@ pub(crate) async fn execute(
 
     if diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
     {
         bail!("Validation failed");
     }

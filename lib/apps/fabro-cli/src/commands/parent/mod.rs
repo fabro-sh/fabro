@@ -9,7 +9,9 @@ use crate::command_context::CommandContext;
 
 pub(crate) async fn dispatch(ns: ParentNamespace, base_ctx: &CommandContext) -> Result<()> {
     match ns.command {
-        ParentCommand::Link(args) => link::link_command(args, base_ctx).await,
+        // The link command's future carries several client calls and sits
+        // past clippy's stack budget; box it once at the call.
+        ParentCommand::Link(args) => Box::pin(link::link_command(args, base_ctx)).await,
         ParentCommand::Unlink(args) => unlink::unlink_command(args, base_ctx).await,
     }
 }

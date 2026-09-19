@@ -29,17 +29,15 @@ pebble-coding-agent.workspace = true
 pebble-cli-core.workspace = true
 sandbox-driver.workspace = true
 fabro-dump = { path = "../../components/fabro-dump" }
-fabro-hooks = { path = "../../components/fabro-hooks" }
 fabro-install = { path = "../../components/fabro-install" }
 fabro-interview = { path = "../../components/fabro-interview" }
-fabro-mcp = { path = "../../components/fabro-mcp" }
 fabro-mcp-server = { path = "../fabro-mcp-server" }
+fabro-petri = { path = "../../components/fabro-petri" }
 fabro-manifest = { path = "../../components/fabro-manifest" }
 fabro-proc = { path = "../../foundation/fabro-proc" }
 fabro-sandbox = { path = "../../components/fabro-sandbox" }
 fabro-checkpoint = { path = "../../components/fabro-checkpoint" }
 fabro-graphviz = { path = "../../components/fabro-graphviz" }
-fabro-validate = { path = "../../components/fabro-validate" }
 fabro-workflow = { path = "../../components/fabro-workflow" }
 fabro-server = { path = "../fabro-server" }
 fabro-client = { path = "../../foundation/fabro-client" }
@@ -117,12 +115,13 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = "2"
+fabro-db = { path = "../../foundation/fabro-db" }
 walkdir.workspace = true
-fabro-acp = { path = "../../components/fabro-acp", features = ["test-support"] }
-fabro-mcp = { path = "../../components/fabro-mcp", features = ["test-support"] }
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 fabro-build-support = { path = "../../foundation/build-support" }
 fabro-sandbox = { path = "../../components/fabro-sandbox", features = ["test-support"] }
 fabro-server = { path = "../fabro-server", features = ["test-support"] }
+fabro-petri = { path = "../../components/fabro-petri", features = ["test-support"] }
 fabro-workflow = { path = "../../components/fabro-workflow", features = ["test-support"] }
 fabro-types = { path = "../../foundation/fabro-types", features = ["clap", "test-support"] }
 insta = { workspace = true, features = ["filters"] }

@@ -87,10 +87,6 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transform
     .apply_with_diagnostics(graph)?;
     diagnostics.extend(transform_diagnostics);
     let graph = StylesheetApplicationTransform.apply(graph)?;
-    let graph = match &options.model_resolution {
-        Some(model_resolution) => model_resolution.apply(graph)?,
-        None => graph,
-    };
 
     // Custom transforms
     let graph = options
@@ -113,23 +109,17 @@ mod tests {
     use std::sync::Arc;
 
     use fabro_graphviz::graph::AttrValue;
-    use fabro_llm::lithos_catalog::Catalog;
 
     use super::*;
     use crate::file_resolver::FilesystemFileResolver;
     use crate::pipeline::parse::parse;
     use crate::pipeline::types::{GOAL_SELF_REFERENCE_RULE, TEMPLATE_UNDEFINED_VARIABLE_RULE};
-    use crate::transforms::ModelResolutionTransform;
 
     fn write_file(path: &Path, contents: &str) {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(path, contents).unwrap();
-    }
-
-    fn test_catalog() -> Arc<Catalog> {
-        Arc::new(fabro_llm::test_support::test_catalog())
     }
 
     fn transform_options() -> TransformOptions {
@@ -140,7 +130,6 @@ mod tests {
             source_name:       None,
             render_mode:       crate::operations::RenderMode::Strict,
             custom_transforms: vec![],
-            model_resolution:  Some(ModelResolutionTransform::new(test_catalog())),
         }
     }
 
@@ -176,7 +165,7 @@ mod tests {
         let transformed = transform(parsed, &transform_options()).unwrap();
         assert_eq!(
             transformed.graph.nodes["work"].attrs.get("model"),
-            Some(&AttrValue::String("claude-sonnet-5".into()))
+            Some(&AttrValue::String("sonnet".into()))
         );
     }
 
@@ -231,7 +220,7 @@ mod tests {
                 .attrs
                 .get("model")
                 .and_then(AttrValue::as_str),
-            Some("claude-sonnet-5")
+            Some("sonnet")
         );
         assert_eq!(
             transformed.graph.nodes["explicit"]
@@ -279,7 +268,7 @@ mod tests {
                 .attrs
                 .get("model")
                 .and_then(AttrValue::as_str),
-            Some("claude-sonnet-5")
+            Some("sonnet")
         );
     }
 
@@ -295,7 +284,6 @@ mod tests {
         let parsed = parse(dot).unwrap();
         let transformed = transform(parsed, &TransformOptions {
             render_mode: crate::operations::RenderMode::Structural,
-            model_resolution: None,
             ..transform_options()
         })
         .unwrap();
@@ -395,7 +383,7 @@ mod tests {
         );
         assert_eq!(
             lint.attrs.get("model"),
-            Some(&AttrValue::String("claude-sonnet-5".into()))
+            Some(&AttrValue::String("sonnet".into()))
         );
     }
 
@@ -589,7 +577,6 @@ mod tests {
         }"#;
         let parsed = parse(dot).unwrap();
         let transformed = transform(parsed, &TransformOptions {
-            model_resolution: None,
             ..transform_options()
         })
         .unwrap();

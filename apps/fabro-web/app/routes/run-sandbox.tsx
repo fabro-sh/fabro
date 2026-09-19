@@ -9,6 +9,7 @@ import {
   formatAbsoluteTs,
   formatBytesAsMemory,
   formatCpuCores,
+  formatDurationMs,
 } from "../lib/format";
 import { useRun, useRunSandboxDetails, useRunState } from "../lib/queries";
 import {
@@ -55,6 +56,17 @@ function nullable(value: string | null | undefined): string {
 
 function nullableTimestamp(value: string | null | undefined): string {
   return value ? formatAbsoluteTs(value) : EMPTY_VALUE;
+}
+
+function nullableDuration(ms: number | null | undefined): string {
+  return ms == null ? EMPTY_VALUE : formatDurationMs(ms);
+}
+
+/// The release outcome: "Yes" when the sandbox still exists after the run
+/// released it, "No" when it was removed, and empty before the release.
+function nullableRetained(retained: boolean | null | undefined): string {
+  if (retained == null) return EMPTY_VALUE;
+  return retained ? "Yes" : "No";
 }
 
 function nullableMegabytes(megabytes: number | null | undefined): string {
@@ -203,6 +215,8 @@ function OverviewPanel({ details }: { details: SandboxDetails }) {
         value={nullable(status.image ?? status.snapshot ?? sandbox.image ?? sandbox.snapshot)}
       />
       {status.sandbox_kind && <Row label="Kind" value={status.sandbox_kind} />}
+      <Row label="Ready in" value={nullableDuration(sandbox.ready_duration_ms)} />
+      <Row label="Retained" value={nullableRetained(sandbox.retained)} />
       {status.web_url && (
         <LinkRow
           label="Provider"

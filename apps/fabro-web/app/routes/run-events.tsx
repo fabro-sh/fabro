@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
-import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 import {
   DebugEventDetailsPanel,
@@ -8,27 +7,44 @@ import {
   EventSearchInput,
   MultiSelectFilter,
 } from "../components/event-debug";
-import {
-  debugCategory,
-  debugCategoryLabel,
-} from "../components/event-debug-helpers";
+import { debugCategoryLabel } from "../components/event-debug-helpers";
 import { RunWaterfall } from "../components/run-waterfall";
+import type { RunPhase } from "../lib/run-phases";
 import { StageSidebar } from "../components/stage-sidebar";
 import { EmptyState, ErrorState, LoadingState } from "../components/state";
-import { useRun, useRunEventsList, useRunStages } from "../lib/queries";
+import {
+  debugRowSearchText,
+  debugRowsFromStream,
+  deriveRunPhasesFromStream,
+  type DebugRow,
+} from "../lib/petri-stream";
+import { useRun, useRunStages, useRunStream } from "../lib/queries";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 
 export const handle = { wide: true, fullHeight: true };
 
 type ViewMode = "waterfall" | "events";
 
-const EMPTY_EVENTS: EventEnvelope[] = [];
+const EMPTY_ROWS: DebugRow[] = [];
 
 export default function RunEvents() {
   const { id } = useParams();
   const runQuery = useRun(id);
   const stagesQuery = useRunStages(id);
-  const eventsQuery = useRunEventsList(id);
+  // The run's events are its stream: Petri's events and the platform
+  // records, which the waterfall's phases and the events list derive from.
+  const streamQuery = useRunStream(id);
+  const streamPhases = useMemo(
+    () =>
+      streamQuery.data && runQuery.data
+        ? deriveRunPhasesFromStream(streamQuery.data, runQuery.data.timestamps.created_at)
+        : undefined,
+    [streamQuery.data, runQuery.data],
+  );
+  const streamRows = useMemo(
+    () => (streamQuery.data ? debugRowsFromStream(streamQuery.data) : undefined),
+    [streamQuery.data],
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const view: ViewMode = searchParams.get("view") === "events" ? "events" : "waterfall";
   const setView = (next: ViewMode) => {
@@ -63,24 +79,24 @@ export default function RunEvents() {
       {view === "waterfall" ? (
         <WaterfallPane
           runId={id!}
-          events={eventsQuery.data}
-          eventsError={eventsQuery.error}
+          phases={streamPhases}
+          eventsError={streamQuery.error}
           stagesData={stagesQuery.data}
           stagesError={stagesQuery.error}
           createdAt={runQuery.data?.timestamps.created_at}
           completedAt={runQuery.data?.timestamps.completed_at ?? null}
           onRetry={() => {
-            void eventsQuery.mutate();
+            void streamQuery.mutate();
             void stagesQuery.mutate();
           }}
           view={view}
           onChangeView={setView}
         />
       ) : (
-        <EventsView
-          events={eventsQuery.data}
-          error={eventsQuery.error}
-          onRetry={() => void eventsQuery.mutate()}
+        <StreamEventsView
+          rows={streamRows}
+          error={streamQuery.error}
+          onRetry={() => void streamQuery.mutate()}
           runStart={
             runQuery.data?.timestamps.started_at ??
             runQuery.data?.timestamps.created_at
@@ -130,7 +146,7 @@ function ViewToggle({
 
 function WaterfallPane({
   runId,
-  events,
+  phases,
   eventsError,
   stagesData,
   stagesError,
@@ -141,7 +157,8 @@ function WaterfallPane({
   onChangeView,
 }: {
   runId: string;
-  events: EventEnvelope[] | undefined;
+  /** The run's phases once its stream has loaded. */
+  phases: RunPhase[] | undefined;
   eventsError: unknown;
   stagesData: ReturnType<typeof useRunStages>["data"];
   stagesError: unknown;
@@ -153,7 +170,7 @@ function WaterfallPane({
 }) {
   const error = eventsError ?? stagesError;
   const ready =
-    events !== undefined && stagesData !== undefined && createdAt !== undefined;
+    phases !== undefined && stagesData !== undefined && createdAt !== undefined;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-3">
@@ -177,7 +194,7 @@ function WaterfallPane({
       ) : (
         <RunWaterfall
           runId={runId}
-          events={events!}
+          phases={phases!}
           stages={stagesData!.data ?? []}
           createdAtIso={createdAt!}
           completedAtIso={completedAt}
@@ -187,15 +204,20 @@ function WaterfallPane({
   );
 }
 
-function EventsView({
-  events,
+/**
+ * The events list of a run: one row per stream item, named by the
+ * Petri event (`<subject>.<verb>`) or the platform record kind, with the
+ * raw item in the details panel.
+ */
+export function StreamEventsView({
+  rows,
   error,
   onRetry,
   runStart,
   view,
   onChangeView,
 }: {
-  events: EventEnvelope[] | undefined;
+  rows: DebugRow[] | undefined;
   error: unknown;
   onRetry: () => void;
   runStart: string | undefined;
@@ -206,34 +228,42 @@ function EventsView({
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [search, setSearch] = useState("");
 
-  const all = events ?? EMPTY_EVENTS;
+  const all = rows ?? EMPTY_ROWS;
 
   const availableCategories = useMemo<string[]>(() => {
     const set = new Set<string>();
-    for (const event of all) {
-      if (event.event) set.add(debugCategory(event.event));
-    }
+    for (const row of all) set.add(row.category);
     return Array.from(set).sort();
   }, [all]);
 
-  const filtered = useMemo<EventEnvelope[]>(() => {
+  const filtered = useMemo<DebugRow[]>(() => {
     const useCategoryFilter = selectedCategories.length > 0;
     const cats = new Set(selectedCategories);
     const needle = search.toLowerCase();
-    return all.filter((event) => {
-      const name = event.event ?? "";
-      if (useCategoryFilter && !cats.has(debugCategory(name))) return false;
-      if (needle) {
-        const blob = `${name} ${JSON.stringify(event.properties ?? {})}`.toLowerCase();
-        if (!blob.includes(needle)) return false;
-      }
+    return all.filter((row) => {
+      if (useCategoryFilter && !cats.has(row.category)) return false;
+      if (needle && !debugRowSearchText(row).includes(needle)) return false;
       return true;
     });
   }, [all, selectedCategories, search]);
 
-  const openEvent = useMemo<EventEnvelope | null>(
-    () => (openSeq != null ? all.find((e) => e.seq === openSeq) ?? null : null),
+  const openRow = useMemo<DebugRow | null>(
+    () => (openSeq != null ? all.find((row) => row.seq === openSeq) ?? null : null),
     [all, openSeq],
+  );
+  const openPayload = useMemo(
+    () =>
+      openRow
+        ? {
+            event: openRow.event,
+            stream_seq: openRow.seq,
+            kind: openRow.item.kind,
+            stage: openRow.stageLabel,
+            recorded_at: openRow.ts,
+            item: openRow.item.item,
+          }
+        : null,
+    [openRow],
   );
 
   const allCategoriesSelected =
@@ -257,7 +287,7 @@ function EventsView({
       </div>
     );
   }
-  if (events === undefined) {
+  if (rows === undefined) {
     return (
       <div className="min-w-0 flex-1 pt-3">
         <LoadingState label="Loading events…" />
@@ -294,8 +324,8 @@ function EventsView({
               {all.length > 0 && (
                 <span className="text-xs tabular-nums text-fg-muted">
                   {isFiltering
-                    ? `${filtered.length.toLocaleString()} of ${all.length.toLocaleString()} events`
-                    : `${all.length.toLocaleString()} events`}
+                    ? `${filtered.length.toLocaleString()} of ${all.length.toLocaleString()} items`
+                    : `${all.length.toLocaleString()} items`}
                 </span>
               )}
             </div>
@@ -314,21 +344,53 @@ function EventsView({
               No events match these filters.
             </div>
           ) : (
-            filtered.map((event) => (
-              <DebugEventRow
-                key={`event-${event.seq}`}
-                event={event}
+            filtered.map((row) => (
+              <StreamEventRow
+                key={`stream-${row.seq}`}
+                row={row}
                 runStart={runStart}
-                selected={openSeq === event.seq}
-                onSelect={() => setOpenSeq(event.seq)}
+                selected={openSeq === row.seq}
+                onSelect={() => setOpenSeq(row.seq)}
               />
             ))
           )}
         </div>
       </div>
 
-      <DebugEventDetailsPanel event={openEvent} onClose={() => setOpenSeq(null)} />
+      <DebugEventDetailsPanel event={openPayload} onClose={() => setOpenSeq(null)} />
     </>
+  );
+}
+
+/** A debug row with the stage the item belongs to beside its name. */
+function StreamEventRow({
+  row,
+  runStart,
+  selected,
+  onSelect,
+}: {
+  row: DebugRow;
+  runStart: string | undefined;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div className="grid grid-cols-[1fr_auto] items-center">
+      <DebugEventRow
+        event={row}
+        runStart={runStart}
+        selected={selected}
+        onSelect={onSelect}
+      />
+      {row.stageLabel && (
+        <span
+          data-stage={row.stageLabel}
+          className="pr-5 font-mono text-[11px] text-fg-muted"
+        >
+          {row.stageLabel}
+        </span>
+      )}
+    </div>
   );
 }
 

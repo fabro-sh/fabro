@@ -13,7 +13,7 @@ fn is_bidi_control(ch: char) -> bool {
 ///
 /// Strips ANSI escape sequences, then removes control and bidi-reordering
 /// characters, trims surrounding whitespace, and elides anything past
-/// [`MAX_DISPLAY_LABEL`]. Any terminal-facing identifier built from runtime
+/// `MAX_DISPLAY_LABEL`. Any terminal-facing identifier built from runtime
 /// data should go through this — without it a label can move the cursor,
 /// inject color, or reverse the text around it.
 ///

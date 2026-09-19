@@ -452,8 +452,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_api::types::Usage;
     use fabro_types::{
-        EventEnvelope, FailureReason, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunProjection,
-        RunStatus, RunTimestamps, WorkflowRef, test_support,
+        FailureReason, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunProjection, RunStatus,
+        RunTimestamps, WorkflowRef, test_support,
     };
     use serde_json::json;
 
@@ -825,21 +825,12 @@ mod tests {
             unreachable!()
         }
 
-        async fn list_run_events(
+        async fn list_run_stream(
             &self,
             _run_id: &RunId,
-            _after: Option<u32>,
+            _after: u64,
             _limit: Option<usize>,
-        ) -> anyhow::Result<Vec<EventEnvelope>> {
-            unreachable!()
-        }
-
-        async fn list_run_events_until(
-            &self,
-            _run_id: &RunId,
-            _after: Option<u32>,
-            _limit: usize,
-        ) -> anyhow::Result<Vec<EventEnvelope>> {
+        ) -> anyhow::Result<Vec<fabro_types::RunStreamItem>> {
             unreachable!()
         }
 

@@ -4,6 +4,7 @@ import {
   shouldRefreshBoardForEvent,
   subscribeToBoardEvents,
 } from "./board-events";
+import { makePlatformItem } from "./test-utils";
 import {
   createCrossTabSseCoordinator,
   type BroadcastChannelLike,
@@ -35,12 +36,20 @@ class FakeBroadcastChannel implements BroadcastChannelLike {
 }
 
 describe("shouldRefreshBoardForEvent", () => {
-  test("refreshes board for run and interview status changes only", () => {
-    expect(shouldRefreshBoardForEvent("run.running")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.blocked")).toBe(true);
-    expect(shouldRefreshBoardForEvent("run.cancel.requested")).toBe(true);
-    expect(shouldRefreshBoardForEvent("interview.completed")).toBe(true);
-    expect(shouldRefreshBoardForEvent("checkpoint.completed")).toBe(false);
+  test("refreshes the board for the stream items that change a run's row", () => {
+    // Fabro's lifecycle records, before and after Petri runs the run.
+    expect(shouldRefreshBoardForEvent("run.lifecycle")).toBe(true);
+    expect(shouldRefreshBoardForEvent("run.title")).toBe(true);
+    expect(shouldRefreshBoardForEvent("run.archived")).toBe(true);
+    expect(shouldRefreshBoardForEvent("pull_request.created")).toBe(true);
+    // Petri's run events while it does, and the question that blocks it.
+    expect(shouldRefreshBoardForEvent("run.started")).toBe(true);
+    expect(shouldRefreshBoardForEvent("run.finished")).toBe(true);
+    expect(shouldRefreshBoardForEvent("wait.state.changed")).toBe(true);
+    expect(shouldRefreshBoardForEvent("control.requested")).toBe(true);
+    // A stage's own progress changes no row.
+    expect(shouldRefreshBoardForEvent("step.finished")).toBe(false);
+    expect(shouldRefreshBoardForEvent("checkpoint")).toBe(false);
   });
 });
 
@@ -68,7 +77,7 @@ describe("subscribeToBoardEvents", () => {
     await waitFor(() => created.length === 1);
     keys.length = 0;
 
-    source.emit({ event: "run.running" });
+    source.emit(makePlatformItem(1, { kind: "run.lifecycle", transition: "running" }));
 
     expect(created).toEqual(["/api/v1/attach"]);
     expect(keys).toHaveLength(1);
@@ -104,7 +113,7 @@ describe("subscribeToBoardEvents", () => {
       throw new Error("source should be reused");
     }, { debounceMs: 0, coordinator });
 
-    source.emit({ event: "run.running" });
+    source.emit(makePlatformItem(1, { kind: "run.lifecycle", transition: "running" }));
 
     expect(created).toEqual(["/api/v1/attach"]);
     expect(keys).toHaveLength(1);

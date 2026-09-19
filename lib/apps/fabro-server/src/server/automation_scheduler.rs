@@ -664,8 +664,10 @@ mod tests {
         assert_eq!(automation_ref.name.as_deref(), Some("Nightly"));
         assert_eq!(automation_ref.trigger_id.as_deref(), Some("schedule"));
         let run_id = runs[0].id;
-        let run_store = state.stores.runs.open_run_reader(&run_id).await.unwrap();
-        let projection = run_store.state().await.unwrap();
+        let projection = super::super::run_records::projection(&state, run_id)
+            .await
+            .unwrap()
+            .expect("the run projects");
         assert!(projection.spec.workflow_version_id.is_some());
         assert_eq!(
             projection.spec.target,
@@ -676,16 +678,24 @@ mod tests {
                 sha:    Some("0123456789abcdef0123456789abcdef01234567".to_string()),
             }))
         );
-        assert_eq!(
-            run_store
-                .list_events()
-                .await
-                .unwrap()
-                .iter()
-                .filter(|event| event.event.event_name() == "run.start_requested")
-                .count(),
-            1
-        );
+        let start_requests = state
+            .stores
+            .run_summaries
+            .platform_records()
+            .read(&run_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|stored| {
+                matches!(
+                    &stored.record,
+                    fabro_store::platform_records::PlatformRecord::RunLifecycle(record)
+                        if record.transition
+                            == fabro_store::platform_records::RunLifecycleKind::StartRequested
+                )
+            })
+            .count();
+        assert_eq!(start_requests, 1);
         assert!(matches!(
             state
                 .runs

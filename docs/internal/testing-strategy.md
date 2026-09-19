@@ -122,7 +122,7 @@ Disallowed setup in `fabro-cli/tests/it`:
 
 - writing `run.json` directly
 - writing `status.json` directly
-- writing `progress.jsonl` directly
+- writing Petri records or platform records directly
 - writing `conclusion.json` directly
 - writing runtime interview files directly
 - writing cached workflow files into run dirs directly
@@ -175,7 +175,7 @@ Good structured snapshot targets:
 - `status.json`
 - `inspect` output
 - `live.json`
-- compacted `progress.jsonl` event sequences
+- compacted run stream item sequences
 - workflow conclusions and checkpoint summaries
 
 ### Keep direct assertions for relational invariants
@@ -343,7 +343,7 @@ Before merging a test change, check:
 Avoid these patterns in CLI integration tests:
 
 - manually creating fake run directories
-- writing `progress.jsonl` lines by hand
+- writing run stream items or records by hand
 - writing runtime interview files by hand
 - writing asset manifests by hand
 - scattering the same workflow setup across many files instead of using fixtures

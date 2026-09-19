@@ -116,8 +116,8 @@ fn branching() {
     ----- stderr -----
     Workflow: Branch (6 nodes, 6 edges)
     Graph: [FIXTURES]/branching.fabro
-    warning [node: implement]: Node 'implement' has goal_gate=true but no retry_target or fallback_retry_target (goal_gate_has_retry)
-      fix: Add retry_target or fallback_retry_target attribute
+    warning: [FIXTURES]/branching.fabro:9:5: goal gate `implement` has no retry target that exists; when it fails the run ends failed (attractor.goal_gate_without_target)
+    warning: [FIXTURES]/branching.fabro:7:5: `exit` is in a loop with no `max_visits`; Fabro's unlimited visits lower to the hard maximum of 500 firings (info.budget.default)
     Validation: OK
     ");
 }
@@ -134,6 +134,8 @@ fn conditions() {
     ----- stderr -----
     Workflow: Conditions (5 nodes, 5 edges)
     Graph: [FIXTURES]/conditions.fabro
+    warning: [FIXTURES]/conditions.fabro:8:5: agent node `path_a` has no `prompt`; its label is the prompt (attractor.prompt_missing)
+    warning: [FIXTURES]/conditions.fabro:9:5: agent node `path_b` has no `prompt`; its label is the prompt (attractor.prompt_missing)
     Validation: OK
     ");
 }
@@ -150,6 +152,9 @@ fn parallel() {
     ----- stderr -----
     Workflow: Parallel (7 nodes, 7 edges)
     Graph: [FIXTURES]/parallel.fabro
+    warning: [FIXTURES]/parallel.fabro:8:5: agent node `branch1` has no `prompt`; its label is the prompt (attractor.prompt_missing)
+    warning: [FIXTURES]/parallel.fabro:9:5: agent node `branch2` has no `prompt`; its label is the prompt (attractor.prompt_missing)
+    warning: [FIXTURES]/parallel.fabro:11:5: agent node `review` has no `prompt`; its label is the prompt (attractor.prompt_missing)
     Validation: OK
     ");
 }
@@ -166,6 +171,9 @@ fn styled() {
     ----- stderr -----
     Workflow: Styled (5 nodes, 4 edges)
     Graph: [FIXTURES]/styled.fabro
+    warning: [FIXTURES]/styled.fabro:14:5: agent node `plan` has no `prompt`; its label is the prompt (attractor.prompt_missing)
+    warning: [FIXTURES]/styled.fabro:15:5: agent node `implement` has no `prompt`; its label is the prompt (attractor.prompt_missing)
+    warning: [FIXTURES]/styled.fabro:16:5: agent node `critical_review` has no `prompt`; its label is the prompt (attractor.prompt_missing)
     Validation: OK
     ");
 }
@@ -202,6 +210,8 @@ fn bare_fabro_with_unbound_inputs_validates_structurally_with_warning() {
       fix: bind `app_dir` via `[run.inputs]` in workflow.toml, or pass `--input app_dir=<value>`
     warning: [FIXTURES]/templated_unbound.fabro:7:44: undefined template variable `inputs.app_dir` in node `work` attribute `prompt` [node: work] (template_undefined_variable)
       fix: bind `app_dir` via `[run.inputs]` in workflow.toml, or pass `--input app_dir=<value>`
+    warning: [FIXTURES]/templated_unbound.fabro:2:12: the graph `goal` reads `{{ inputs.app_dir }}`, which no input binds; it is left unrendered because no inputs were given. Pass `--input app_dir=VALUE` to render it (attractor.unbound_input)
+    warning: [FIXTURES]/templated_unbound.fabro:7:25: node `work` `prompt` reads `{{ inputs.app_dir }}`, which no input binds; it is left unrendered because no inputs were given. Pass `--input app_dir=VALUE` to render it (attractor.unbound_input)
     Validation: OK
     ");
 }
@@ -220,6 +230,7 @@ fn unbound_model_stylesheet_input_warns_without_css_error() {
     Graph: [FIXTURES]/model_stylesheet_unbound.fabro
     warning: [FIXTURES]/model_stylesheet_unbound.fabro:4:38: undefined template variable `inputs.effort` in graph attribute `model_stylesheet` (template_undefined_variable)
       fix: bind `effort` via `[run.inputs]` in workflow.toml, or pass `--input effort=<value>`
+    warning: [FIXTURES]/model_stylesheet_unbound.fabro:3:9: the `model_stylesheet` reads `{{ inputs.effort }}`, which no input binds; it is left unrendered because no inputs were given. Pass `--input effort=VALUE` to render it (attractor.unbound_input)
     Validation: OK
     ");
 }
@@ -243,6 +254,7 @@ fn bare_fabro_with_unbound_inputs_in_imported_prompt_validates_structurally_with
     Graph: [FIXTURES]/templated_unbound_imported/workflow.fabro
     warning: [FIXTURES]/templated_unbound_imported/work.md:1:12: undefined template variable `inputs.app_dir` in node `work` attribute `prompt` [node: work] (template_undefined_variable)
       fix: bind `app_dir` via `[run.inputs]` in workflow.toml, or pass `--input app_dir=<value>`
+    warning: [FIXTURES]/templated_unbound_imported/workflow.fabro:5:25: node `work` `prompt` reads `{{ inputs.app_dir }}`, which no input binds; it is left unrendered because no inputs were given. Pass `--input app_dir=VALUE` to render it (attractor.unbound_input)
     Validation: OK
     ");
 }
@@ -256,17 +268,18 @@ fn bare_fabro_with_unbound_inputs_in_template_partial_validates_structurally_wit
     let context = test_context!();
     let mut cmd = context.validate();
     cmd.arg(fixture("templated_unbound_partial/workflow.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
+    fabro_snapshot!(context.filters(), cmd, @r#"
+    success: false
+    exit_code: 1
     ----- stdout -----
     ----- stderr -----
     Workflow: TemplatedUnboundPartial (3 nodes, 2 edges)
     Graph: [FIXTURES]/templated_unbound_partial/workflow.fabro
     warning: [FIXTURES]/templated_unbound_partial/test-include.partial.md:1:4: undefined template variable `inputs.hello` in node `test_imported_include` attribute `prompt` [node: test_imported_include] (template_undefined_variable)
       fix: bind `hello` via `[run.inputs]` in workflow.toml, or pass `--input hello=<value>`
-    Validation: OK
-    ");
+    error: [FIXTURES]/templated_unbound_partial/workflow.fabro:3:42: node `test_imported_include` `prompt`: template render: could not render include: error in "../../../../../../../..[FIXTURES]/templated_unbound_partial/test-include.partial.md" (in ../../../../../../../..[FIXTURES]/templated_unbound_partial/__petri_root__:1) (attractor.template)
+      × Validation failed
+    "#);
 }
 
 #[test]
@@ -351,8 +364,7 @@ fn edge_only_node() {
     ----- stderr -----
     Workflow: EdgeOnlyNode (2 nodes, 2 edges)
     Graph: [FIXTURES]/edge_only_node.fabro
-    error [node: misspelled_node]: Node 'misspelled_node' is referenced by edge 'start -> misspelled_node' but has no node declaration (edge_target_exists)
-      fix: Declare node 'misspelled_node' or correct the edge endpoint
+    error: [FIXTURES]/edge_only_node.fabro:8:14: `misspelled_node` is named by an edge but never declared (attractor.undeclared_node)
       × Validation failed
     ");
 }
@@ -369,10 +381,7 @@ fn invalid() {
     ----- stderr -----
     Workflow: Invalid (2 nodes, 1 edges)
     Graph: [FIXTURES]/invalid.fabro
-    error: Pipeline must have exactly one start node (shape=Mdiamond or id start/Start) (start_node)
-      fix: Add a node with shape=Mdiamond or id 'start'
-    error [node: exit]: Exit node 'exit' has 1 outgoing edge(s) but must have none (exit_no_outgoing)
-      fix: Remove outgoing edges from the exit node
+    error: [FIXTURES]/invalid.fabro:1:9: the workflow has no start node (`shape=Mdiamond`, `type=start`, or an id of `start`) (attractor.no_start)
       × Validation failed
     ");
 }
@@ -389,8 +398,7 @@ fn invalid_node_on_failure_is_a_validation_failure() {
     ----- stderr -----
     Workflow: InvalidNodeOnFailure (3 nodes, 2 edges)
     Graph: [FIXTURES]/on_failure_node_invalid.fabro
-    error [node: work]: Node 'work' has invalid on_failure value 'stop' (on_failure_valid)
-      fix: Use one of: route, exit, succeed
+    error: [FIXTURES]/on_failure_node_invalid.fabro:4:32: `on_failure` must be `route`, `exit`, `succeed` or `partially_succeed`, not `stop` (attractor.bad_on_failure)
       × Validation failed
     ");
 }
@@ -400,17 +408,16 @@ fn deprecated_auto_status_warns_with_succeed_policy_replacement() {
     let context = test_context!();
     let mut cmd = context.validate();
     cmd.arg(fixture("auto_status_deprecated.fabro"));
-    fabro_snapshot!(context.filters(), cmd, @"
+    fabro_snapshot!(context.filters(), cmd, @r#"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: DeprecatedAutoStatus (3 nodes, 2 edges)
     Graph: [FIXTURES]/auto_status_deprecated.fabro
-    warning [node: scan]: Node 'scan' sets deprecated 'auto_status=true' (auto_status_deprecated)
-      fix: Use on_failure=\"succeed\" instead
+    warning: [FIXTURES]/auto_status_deprecated.fabro:4:34: `auto_status=true` on node `scan` is the deprecated spelling of `on_failure="succeed"`; use `on_failure="succeed"` (deprecated.auto_status)
     Validation: OK
-    ");
+    "#);
 }
 
 #[test]
@@ -425,8 +432,7 @@ fn invalid_on_failure_is_a_validation_failure() {
     ----- stderr -----
     Workflow: InvalidOnFailure (2 nodes, 1 edges)
     Graph: [FIXTURES]/on_failure_invalid.fabro
-    error: Graph has invalid on_failure value 'stop' (on_failure_valid)
-      fix: Use one of: route, exit, succeed
+    error: [FIXTURES]/on_failure_invalid.fabro:2:12: `on_failure` must be `route`, `exit`, `succeed` or `partially_succeed`, not `stop` (attractor.bad_on_failure)
       × Validation failed
     ");
 }

@@ -2,20 +2,22 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import TestRenderer, { act } from "react-test-renderer";
 import { MemoryRouter, Route, Routes } from "react-router";
 
-import type { LiveEventPayload } from "../lib/live-events";
+import type { RunStreamItem } from "@qltysh/fabro-api-client";
 
-let capturedOnEvent: ((payload: LiveEventPayload) => void) | null = null;
+import { makePetriItem, makePlatformItem } from "../lib/test-utils";
+
+let capturedOnEvent: ((payload: RunStreamItem) => void) | null = null;
 
 mock.module("../lib/live-events", () => ({
   subscribeToLiveEvents: (
-    onEvent: (payload: LiveEventPayload) => void,
+    onEvent: (payload: RunStreamItem) => void,
   ) => {
     capturedOnEvent = onEvent;
     return () => {
       if (capturedOnEvent === onEvent) capturedOnEvent = null;
     };
   },
-  useLiveEventsSubscription: (onEvent: (payload: LiveEventPayload) => void) => {
+  useLiveEventsSubscription: (onEvent: (payload: RunStreamItem) => void) => {
     capturedOnEvent = onEvent;
   },
 }));
@@ -43,7 +45,7 @@ function renderSettingsLiveEvents() {
   return renderer!;
 }
 
-function pushEvent(payload: LiveEventPayload) {
+function pushEvent(payload: RunStreamItem) {
   act(() => {
     capturedOnEvent?.(payload);
   });
@@ -63,46 +65,30 @@ function rowsByEventName(renderer: TestRenderer.ReactTestRenderer): string[] {
 }
 
 describe("appendLiveEvent", () => {
-  test("prepends new events newest-first", () => {
-    const a: LiveEventPayload = { id: "a", event: "x" };
-    const b: LiveEventPayload = { id: "b", event: "y" };
-    const result = appendLiveEvent(appendLiveEvent([], a), b);
-    expect(result.map((e) => e.id)).toEqual(["b", "a"]);
+  const lifecycle = (seq: number, runId = "run-1") =>
+    makePlatformItem(seq, { kind: "run.lifecycle", transition: "running" }, { run_id: runId });
+
+  test("prepends new items newest-first", () => {
+    const result = appendLiveEvent(appendLiveEvent([], lifecycle(1)), lifecycle(2));
+    expect(result.map((item) => item.stream_seq)).toEqual([2, 1]);
   });
 
-  test("dedupes by id when present", () => {
-    const a: LiveEventPayload = { id: "a", event: "x" };
-    const result = appendLiveEvent([a], { id: "a", event: "x" });
+  test("dedupes an item by its run and delivery sequence", () => {
+    const result = appendLiveEvent([lifecycle(7)], lifecycle(7));
     expect(result).toHaveLength(1);
   });
 
-  test("dedupes by run_id:seq:event when id is missing", () => {
-    const a: LiveEventPayload = { run_id: "run-1", seq: 7, event: "x" };
-    const result = appendLiveEvent([a], { run_id: "run-1", seq: 7, event: "x" });
-    expect(result).toHaveLength(1);
-  });
-
-  test("keeps different event names with the same run_id and seq", () => {
-    const a: LiveEventPayload = { run_id: "run-1", seq: 7, event: "x" };
-    const result = appendLiveEvent([a], { run_id: "run-1", seq: 7, event: "y" });
-    expect(result).toHaveLength(2);
-  });
-
-  test("treats events with neither id nor seq as distinct", () => {
-    const a: LiveEventPayload = { event: "x" };
-    const result = appendLiveEvent([a], { event: "x" });
+  test("keeps the same delivery sequence of two runs apart", () => {
+    const result = appendLiveEvent([lifecycle(7, "run-1")], lifecycle(7, "run-2"));
     expect(result).toHaveLength(2);
   });
 
   test("caps the buffer at MAX_EVENTS", () => {
-    const seed = Array.from({ length: MAX_EVENTS }, (_, i) => ({
-      id: `seed-${i}`,
-      event: "x",
-    }));
-    const result = appendLiveEvent(seed, { id: "fresh", event: "x" });
+    const seed = Array.from({ length: MAX_EVENTS }, (_, i) => lifecycle(i + 1));
+    const result = appendLiveEvent(seed, lifecycle(MAX_EVENTS + 1));
     expect(result).toHaveLength(MAX_EVENTS);
-    expect(result[0]?.id).toBe("fresh");
-    expect(result[result.length - 1]?.id).toBe(`seed-${MAX_EVENTS - 2}`);
+    expect(result[0]?.stream_seq).toBe(MAX_EVENTS + 1);
+    expect(result[result.length - 1]?.stream_seq).toBe(MAX_EVENTS - 1);
   });
 });
 
@@ -124,49 +110,57 @@ describe("SettingsLiveEvents route", () => {
     expect(text).toContain("only shows events that arrive after it's opened");
   });
 
-  test("appends incoming events newest first", () => {
-    const renderer = renderSettingsLiveEvents();
-    pushEvent({ id: "a", event: "stage.started", run_id: "run-1", ts: "2026-05-10T10:00:00Z" });
-    pushEvent({ id: "b", event: "agent.message", run_id: "run-2", ts: "2026-05-10T10:00:01Z" });
+  const stage = { name: "code" };
+  const started = (seq: number, runId: string) =>
+    makePetriItem(seq, { event: "step.started", firing: 1 }, { stage, run_id: runId });
+  const finished = (seq: number, runId: string) =>
+    makePetriItem(seq, { event: "step.finished", firing: 1 }, { stage, run_id: runId });
 
-    expect(rowsByEventName(renderer)).toEqual(["agent.message", "stage.started"]);
+  test("appends incoming items newest first", () => {
+    const renderer = renderSettingsLiveEvents();
+    pushEvent(started(1, "run-1"));
+    pushEvent(finished(1, "run-2"));
+
+    expect(rowsByEventName(renderer)).toEqual(["step.finished", "step.started"]);
   });
 
-  test("ignores duplicate event ids", () => {
+  test("ignores an item delivered twice", () => {
     const renderer = renderSettingsLiveEvents();
-    pushEvent({ id: "a", event: "stage.started", run_id: "run-1", ts: "2026-05-10T10:00:00Z" });
-    pushEvent({ id: "a", event: "stage.started", run_id: "run-1", ts: "2026-05-10T10:00:00Z" });
+    pushEvent(started(1, "run-1"));
+    pushEvent(started(1, "run-1"));
 
-    expect(rowsByEventName(renderer)).toEqual(["stage.started"]);
+    expect(rowsByEventName(renderer)).toEqual(["step.started"]);
   });
 
-  test("links the run_id cell to the run detail page", () => {
+  test("links the run cell to the run detail page", () => {
     const renderer = renderSettingsLiveEvents();
-    pushEvent({ id: "a", event: "stage.started", run_id: "run-1", ts: "2026-05-10T10:00:00Z" });
+    pushEvent(started(1, "run-1"));
 
     const links = renderer.root.findAllByProps({ to: "/runs/run-1" });
     expect(links.length).toBeGreaterThan(0);
   });
 
-  test("filters events by category and search", () => {
+  test("names a platform record by its kind and filters items by search", () => {
     const renderer = renderSettingsLiveEvents();
-    pushEvent({ id: "1", event: "stage.started", run_id: "run-1", ts: "2026-05-10T10:00:00Z" });
-    pushEvent({ id: "2", event: "agent.message", run_id: "run-2", ts: "2026-05-10T10:00:01Z" });
-    pushEvent({ id: "3", event: "command.started", run_id: "run-3", ts: "2026-05-10T10:00:02Z" });
+    pushEvent(started(1, "run-1"));
+    pushEvent(finished(2, "run-2"));
+    pushEvent(
+      makePlatformItem(3, { kind: "run.lifecycle", transition: "succeeded" }, { run_id: "run-3" }),
+    );
 
     expect(rowsByEventName(renderer)).toEqual([
-      "command.started",
-      "agent.message",
-      "stage.started",
+      "run.lifecycle",
+      "step.finished",
+      "step.started",
     ]);
 
     const searchInput = renderer.root.findByProps({ name: "event-search" });
     act(() => {
       (searchInput.props.onChange as (e: { target: { value: string } }) => void)({
-        target: { value: "agent" },
+        target: { value: "finished" },
       });
     });
 
-    expect(rowsByEventName(renderer)).toEqual(["agent.message"]);
+    expect(rowsByEventName(renderer)).toEqual(["step.finished"]);
   });
 });

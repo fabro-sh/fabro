@@ -8,6 +8,8 @@ import {
   type CrossTabSseCoordinator,
   type CrossTabSseMessage,
 } from "./cross-tab-sse";
+import { isStreamItemPayload, platformRecordKind } from "./petri-stream";
+import { makePlatformItem } from "./test-utils";
 import type { EventPayload, MutateFn } from "./sse";
 
 type MessageHandler = ((event: { data: string }) => void) | null;
@@ -190,7 +192,7 @@ describe("subscribeToCrossTabSse", () => {
       subscriptionKey: "board",
       keys: boardKeys,
       resolveInvalidation: (payload) => ({
-        keys: payload.event === "run.running" ? ["board"] : [],
+        keys: isLifecycleItem(payload) ? ["board"] : [],
       }),
       resyncKeys: () => ["board-resync"],
     });
@@ -198,7 +200,7 @@ describe("subscribeToCrossTabSse", () => {
       subscriptionKey: "run:run-1",
       keys: runKeys,
       resolveInvalidation: (payload) => ({
-        keys: payload.event === "run.running" && payload.run_id === "run-1" ? ["run"] : [],
+        keys: isLifecycleItem(payload) && payload.run_id === "run-1" ? ["run"] : [],
       }),
       resyncKeys: () => ["run-resync"],
     });
@@ -634,7 +636,7 @@ function subscribeForRunEvent(coordinator: CrossTabSseCoordinator, keys: string[
     subscriptionKey: "run-feed",
     keys,
     resolveInvalidation: (payload) => ({
-      keys: payload.event === "run.running" ? ["event"] : [],
+      keys: isLifecycleItem(payload) ? ["event"] : [],
     }),
     resyncKeys: () => ["resync"],
   });
@@ -698,6 +700,7 @@ function candidateGenerations(coordinator: CrossTabSseCoordinator): number[] {
   return [...inspectable.candidates.values()].map((candidate) => candidate.candidateGeneration);
 }
 
+/** A run's `run.lifecycle` stream item: `seq` is its delivery sequence. */
 function runEvent({
   id,
   runId,
@@ -707,13 +710,15 @@ function runEvent({
   runId: string;
   seq: number;
 }) {
-  return {
-    id,
+  return makePlatformItem(
     seq,
-    run_id: runId,
-    event: "run.running",
-    ts: "2026-05-04T12:00:00.000Z",
-  };
+    { kind: "run.lifecycle", transition: "running" },
+    { run_id: runId, id },
+  );
+}
+
+function isLifecycleItem(payload: EventPayload): boolean {
+  return isStreamItemPayload(payload) && platformRecordKind(payload) === "run.lifecycle";
 }
 
 async function waitFor(condition: () => boolean, timeoutMs = 500) {

@@ -38,8 +38,7 @@ pub use server::{
     ServerApiLayer, ServerArtifactsLayer, ServerAuthGithubLayer, ServerAuthLayer,
     ServerIntegrationsLayer, ServerLayer, ServerListenLayer, ServerLoggingLayer,
     ServerSandboxLayer, ServerSandboxProviderLayer, ServerSandboxProvidersLayer,
-    ServerSchedulerLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer,
-    SlackIntegrationLayer,
+    ServerSchedulerLayer, ServerStorageLayer, ServerWebLayer, SlackIntegrationLayer,
 };
 pub use settings::SettingsLayer;
 pub use workflow::WorkflowLayer;

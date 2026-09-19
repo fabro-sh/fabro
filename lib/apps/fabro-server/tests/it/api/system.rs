@@ -422,7 +422,7 @@ async fn test_app_state_with_options_respects_max_concurrent_runs() {
     start_run(&app, &second_run).await;
 
     let question = wait_for_question(&app, &first_run).await;
-    assert_eq!(question["stage"], "gate");
+    assert_eq!(question["stage"], "gate@1");
 
     tokio::time::sleep(POLL_INTERVAL * 5).await;
 

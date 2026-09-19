@@ -21,6 +21,9 @@ import type { CheckpointRecord } from './checkpoint-record';
 import type { Conclusion } from './conclusion';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { ForkOrigin } from './fork-origin';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { GitIdentity } from './git-identity';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -86,6 +89,7 @@ export interface RunProjection {
      * Source run ID when this run was created by manual retry.
      */
     'retried_from'?: string | null;
+    'forked_from'?: ForkOrigin | null;
     'git_identity'?: GitIdentity | null;
     'pending_interviews': { [key: string]: PendingInterviewRecord; };
     /**

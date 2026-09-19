@@ -14,9 +14,9 @@ use std::time::Duration;
 use anyhow::Context as _;
 use cli_table::Color;
 use fabro_types::RunStatus;
+use fabro_types::diagnostic::{Diagnostic, Severity};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-use fabro_validate::{Diagnostic, Severity};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
 

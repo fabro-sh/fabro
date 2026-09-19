@@ -57,34 +57,6 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
         );
     }
 
-    let req = Request::builder()
-        .method("POST")
-        .uri(api(&format!("/runs/{run_id}/events")))
-        .header("content-type", "application/json")
-        .body(Body::from(
-            serde_json::to_string(&serde_json::json!({
-                "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-                "ts": "2026-04-19T12:00:00.000Z",
-                "run_id": run_id,
-                "event": "agent.message",
-                "properties": {}
-            }))
-            .unwrap(),
-        ))
-        .unwrap();
-    let response = app.clone().oneshot(req).await.unwrap();
-    let body = response_json(
-        response,
-        StatusCode::CONFLICT,
-        format!("POST /api/v1/runs/{run_id}/events"),
-    )
-    .await;
-    let detail = body["errors"][0]["detail"].as_str().unwrap_or_default();
-    assert!(
-        detail.contains("is archived") && detail.contains("fabro unarchive"),
-        "expected archived-rejection body on /events, got: {body}"
-    );
-
     // The archive guard runs before each endpoint's state-specific lookups, so
     // synthetic stage/question/filename values are enough to drive these
     // write surfaces into the guard.
@@ -148,50 +120,6 @@ async fn archived_runs_reject_mutations_with_actionable_body() {
     )
     .await;
     assert_eq!(body["lifecycle"]["status"]["kind"], "succeeded");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn appending_run_archived_event_directly_is_rejected() {
-    let workspace = tempfile::tempdir().unwrap();
-    // Regression: archive/unarchive events must not be injectable via
-    // `append_run_event` — clients must use the operation endpoints.
-    let state = test_app_state_with_options(test_settings(), 5);
-    let app = test_app_with_scheduler(state);
-
-    let run_id = create_and_start_run_from_intent(
-        &app,
-        minimal_intent_json_with_dry_run(&app, MINIMAL_DOT, workspace.path()).await,
-    )
-    .await;
-    wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
-
-    let req = Request::builder()
-        .method("POST")
-        .uri(api(&format!("/runs/{run_id}/events")))
-        .header("content-type", "application/json")
-        .body(Body::from(
-            serde_json::to_string(&serde_json::json!({
-                "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-                "ts": "2026-04-19T12:00:00.000Z",
-                "run_id": run_id,
-                "event": "run.archived",
-                "properties": {}
-            }))
-            .unwrap(),
-        ))
-        .unwrap();
-    let response = app.clone().oneshot(req).await.unwrap();
-    let body = crate::helpers::response_json(
-        response,
-        StatusCode::BAD_REQUEST,
-        format!("{}:{}", file!(), line!()),
-    )
-    .await;
-    let detail = body["errors"][0]["detail"].as_str().unwrap_or_default();
-    assert!(
-        detail.contains("run.archived must be performed through its dedicated operation endpoint"),
-        "expected dedicated-operation rejection, got: {body}"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

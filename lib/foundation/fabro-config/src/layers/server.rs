@@ -3,11 +3,11 @@
 use std::collections::BTreeMap;
 
 use fabro_types::SandboxProviderKind;
+use fabro_types::settings::InterpString;
 use fabro_types::settings::server::{
     GithubIntegrationStrategy, LogDestination, ObjectStoreProvider, ServerAuthMethod,
     WebhookStrategy,
 };
-use fabro_types::settings::{Duration, InterpString};
 use serde::{Deserialize, Serialize};
 
 use super::LogFilter;
@@ -30,8 +30,6 @@ pub struct ServerLayer {
     pub storage:      Option<ServerStorageLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts:    Option<ServerArtifactsLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slatedb:      Option<ServerSlateDbLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduler:    Option<ServerSchedulerLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,24 +163,6 @@ pub struct ServerArtifactsLayer {
     pub local:    Option<ObjectStoreLocalLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3:       Option<ObjectStoreS3Layer>,
-}
-
-/// `[server.slatedb]` — SlateDB bottomless storage plus tunables.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, fabro_macros::Combine)]
-#[serde(deny_unknown_fields)]
-pub struct ServerSlateDbLayer {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider:       Option<ObjectStoreProvider>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix:         Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub flush_interval: Option<Duration>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local:          Option<ObjectStoreLocalLayer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub s3:             Option<ObjectStoreS3Layer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disk_cache:     Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

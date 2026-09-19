@@ -7,3 +7,6 @@ t = "test -- --format terse"
 # pays ~900ms of system-proxy lookup overhead per process, which pushes tests
 # past the 3s nextest kill threshold under parallel load.
 FABRO_HTTP_PROXY_POLICY = "disabled"
+
+[net]
+git-fetch-with-cli = true

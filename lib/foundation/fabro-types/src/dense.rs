@@ -18,7 +18,6 @@ impl ServerSettings {
     pub fn with_storage_override(mut self, path: &Path) -> Self {
         self.server.storage.root = path.display().to_string();
         override_local_object_store_root(&mut self.server.artifacts.store, path, "artifacts");
-        override_local_object_store_root(&mut self.server.slatedb.store, path, "slatedb");
         self
     }
 }

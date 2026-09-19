@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
+import type { RunStreamItem } from "@qltysh/fabro-api-client";
 
 import {
   DebugEventDetailsPanel,
@@ -8,7 +9,6 @@ import {
 } from "../components/event-debug";
 import {
   DEBUG_CATEGORIES,
-  debugCategory,
   debugCategoryLabel,
   debugCategoryTone,
   type DebugCategory,
@@ -17,10 +17,12 @@ import { EmptyState } from "../components/state";
 import { Tooltip } from "../components/ui";
 import { eventDedupeKey } from "../lib/cross-tab-sse";
 import { formatAbsoluteTs } from "../lib/format";
+import { useLiveEventsSubscription } from "../lib/live-events";
 import {
-  useLiveEventsSubscription,
-  type LiveEventPayload,
-} from "../lib/live-events";
+  debugRowSearchText,
+  debugRowsFromStream,
+  type DebugRow,
+} from "../lib/petri-stream";
 
 export function meta() {
   return [{ title: "Live Events — Fabro" }];
@@ -31,46 +33,62 @@ export const handle = { wide: true, fullHeight: true };
 export const MAX_EVENTS = 1000;
 
 export function appendLiveEvent(
-  buffer: LiveEventPayload[],
-  payload: LiveEventPayload,
-): LiveEventPayload[] {
-  const key = eventDedupeKey(payload);
-  if (key != null && buffer.some((event) => eventDedupeKey(event) === key)) {
+  buffer: RunStreamItem[],
+  item: RunStreamItem,
+): RunStreamItem[] {
+  const key = rowKey(item);
+  if (buffer.some((event) => rowKey(event) === key)) {
     return buffer;
   }
-  const next = [payload, ...buffer];
+  const next = [item, ...buffer];
   if (next.length > MAX_EVENTS) next.length = MAX_EVENTS;
   return next;
 }
 
 export default function SettingsLiveEvents() {
-  const [events, setEvents] = useState<LiveEventPayload[]>([]);
+  const [events, setEvents] = useState<RunStreamItem[]>([]);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<DebugCategory[]>([]);
   const [search, setSearch] = useState("");
 
-  useLiveEventsSubscription((payload) => {
-    setEvents((prev) => appendLiveEvent(prev, payload));
+  useLiveEventsSubscription((item) => {
+    setEvents((prev) => appendLiveEvent(prev, item));
   });
 
-  const filtered = useMemo<LiveEventPayload[]>(() => {
+  const rows = useMemo(() => debugRowsFromStream(events), [events]);
+
+  const filtered = useMemo<DebugRow[]>(() => {
     const useCategoryFilter = selectedCategories.length > 0;
     const cats = new Set<DebugCategory>(selectedCategories);
     const needle = search.toLowerCase();
-    return events.filter((event) => {
-      const name = event.event ?? "";
-      if (useCategoryFilter && !cats.has(debugCategory(name))) return false;
+    return rows.filter((row) => {
+      if (useCategoryFilter && !cats.has(row.category)) return false;
       if (needle) {
-        const blob = `${name} ${event.run_id ?? ""} ${event.stage_id ?? ""} ${event.node_id ?? ""} ${JSON.stringify(event.properties ?? {})}`.toLowerCase();
+        const blob = `${debugRowSearchText(row)} ${row.item.run_id.toLowerCase()}`;
         if (!blob.includes(needle)) return false;
       }
       return true;
     });
-  }, [events, selectedCategories, search]);
+  }, [rows, selectedCategories, search]);
 
-  const openEvent = useMemo<LiveEventPayload | null>(
-    () => (openKey != null ? events.find((e) => rowKey(e) === openKey) ?? null : null),
-    [events, openKey],
+  const openRow = useMemo<DebugRow | null>(
+    () => (openKey != null ? rows.find((row) => rowKey(row.item) === openKey) ?? null : null),
+    [rows, openKey],
+  );
+  const openPayload = useMemo(
+    () =>
+      openRow
+        ? {
+            event: openRow.event,
+            run_id: openRow.item.run_id,
+            stream_seq: openRow.seq,
+            kind: openRow.item.kind,
+            stage: openRow.stageLabel,
+            recorded_at: openRow.ts,
+            item: openRow.item.item,
+          }
+        : null,
+    [openRow],
   );
 
   const isFiltering = selectedCategories.length > 0 || search.length > 0;
@@ -131,42 +149,41 @@ export default function SettingsLiveEvents() {
               No events match these filters.
             </div>
           ) : (
-            filtered.map((event) => (
+            filtered.map((row) => (
               <LiveEventRow
-                key={rowKey(event)}
-                event={event}
-                selected={openKey === rowKey(event)}
-                onSelect={() => setOpenKey(rowKey(event))}
+                key={rowKey(row.item)}
+                row={row}
+                selected={openKey === rowKey(row.item)}
+                onSelect={() => setOpenKey(rowKey(row.item))}
               />
             ))
           )}
         </div>
       </div>
 
-      <DebugEventDetailsPanel event={openEvent} onClose={() => setOpenKey(null)} />
+      <DebugEventDetailsPanel event={openPayload} onClose={() => setOpenKey(null)} />
     </div>
   );
 }
 
-function rowKey(event: LiveEventPayload): string {
-  return (
-    eventDedupeKey(event) ??
-    `${event.run_id ?? "?"}:${event.event ?? ""}:${event.ts ?? ""}`
-  );
+/** The run and the delivery sequence identify an item across every run. */
+function rowKey(item: RunStreamItem): string {
+  return eventDedupeKey(item) ?? `${item.run_id}:stream:${item.stream_seq}`;
 }
 
 function LiveEventRow({
-  event,
+  row,
   selected,
   onSelect,
 }: {
-  event: LiveEventPayload;
+  row: DebugRow;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const eventName = event.event ?? "";
-  const category = debugCategory(eventName);
-  const stage = event.stage_id ?? event.node_id ?? null;
+  const eventName = row.event;
+  const { category } = row;
+  const runId = row.item.run_id;
+  const stage = row.stageLabel;
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.key === "Enter" || e.key === " ") {
@@ -196,30 +213,22 @@ function LiveEventRow({
         {eventName}
       </span>
       <span className="min-w-0 truncate font-mono text-xs">
-        {event.run_id ? (
-          <Link
-            to={`/runs/${event.run_id}`}
-            onClick={(e) => e.stopPropagation()}
-            className="text-fg-3 hover:text-fg hover:underline"
-          >
-            {event.run_id}
-          </Link>
-        ) : (
-          <span className="text-fg-muted">No run</span>
-        )}
+        <Link
+          to={`/runs/${runId}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-fg-3 hover:text-fg hover:underline"
+        >
+          {runId}
+        </Link>
       </span>
       <span className="min-w-0 truncate font-mono text-xs text-fg-muted">
         {stage ?? ""}
       </span>
-      {event.ts ? (
-        <Tooltip label={formatAbsoluteTs(event.ts)}>
-          <span className="font-mono text-xs tabular-nums text-fg-muted">
-            {formatAbsoluteTs(event.ts)}
-          </span>
-        </Tooltip>
-      ) : (
-        <span className="font-mono text-xs text-fg-muted">No time</span>
-      )}
+      <Tooltip label={formatAbsoluteTs(row.ts)}>
+        <span className="font-mono text-xs tabular-nums text-fg-muted">
+          {formatAbsoluteTs(row.ts)}
+        </span>
+      </Tooltip>
     </div>
   );
 }
