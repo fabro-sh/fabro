@@ -14,18 +14,27 @@ The canonical bundle is schema version 4.
   tiers (every tier above `low`) it also carries a `rules` block: the
   compiled rule layers, the rule configuration SHA-256, the built-in rule
   manifest SHA-256, the repository rule revision, and pack/check counts for
-  both layers.
+  both layers. An incremental PR re-review adds an `incremental` record:
+  whether it was requested and enabled, the last reviewed head the delta
+  started from (`from`, with the commit count), and any declared
+  history-fetch degradation.
 - `candidate-ledger.jsonl` contains every unique candidate after
   deduplication, plus every sweep candidate. Each record has one disposition:
-  `reportable`, `refuted`, `verification-incomplete`, `deferred-by-cap`, or
-  `duplicate` (folded into the finding named by `duplicate_of`), and
-  carries the candidate's applicable `rule_ids` (empty outside the
-  rule-mapped tiers).
+  `reportable`, `refuted`, `verification-incomplete`, `deferred-by-cap`,
+  `duplicate` (folded into the finding named by `duplicate_of`), or
+  `duplicate-of-posted` (judged the same defect as a finding already
+  posted on the reviewed PR; `duplicate_of_posted` names the covering
+  comment), and carries the candidate's applicable `rule_ids` (empty
+  outside the rule-mapped tiers).
 - `findings.json` contains only the reportable subset. It is the authoritative
   finding list. Each reported finding carries its orthogonal `issue_type`, an
   engine-derived `location` with the exact original code and start/end lines,
   a highlighted `code` excerpt, and its `rule_ids`. A verified replacement is
-  stored as optional `suggestion.replacement_code`.
+  stored as optional `suggestion.replacement_code`. A finding the verifier
+  judged already posted on the reviewed PR stays in the list (the bundle
+  never drops a finding) with an optional `duplicate_of_posted` record
+  naming the covering comment; the PR publisher skips it instead of
+  re-posting.
 - `coverage.json` records what the review dispatched, what returned, what was
   rejected for failing the finding contract, and what a cap dropped. At the
   rule-mapped tiers it also records the authoritative target-file list, the
