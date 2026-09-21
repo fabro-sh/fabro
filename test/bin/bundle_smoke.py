@@ -75,6 +75,7 @@ def workflow(fabro, root, expect_tampered=False, after_first_run=None):
                         if response.status == 200:
                             break
                 except OSError:
+                    # Startup connection failures are expected; retry until the deadline.
                     pass
                 if server.poll() is not None or time.monotonic() >= deadline:
                     raise RuntimeError("server did not start:\n" + log_path.read_text())
@@ -100,6 +101,7 @@ def workflow(fabro, root, expect_tampered=False, after_first_run=None):
             try:
                 os.killpg(server.pid, signal.SIGTERM)
             except ProcessLookupError:
+                # The server's process group may already have exited during teardown.
                 pass
             try:
                 server.wait(timeout=15)
