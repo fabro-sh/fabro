@@ -26,6 +26,8 @@ enum Command {
     DockerBuild(commands::DockerBuildArgs),
     /// Manage generated reference documentation.
     Docs(commands::DocsArgs),
+    /// Build pinned sandbox plugins for a release target.
+    Plugins(commands::PluginsArgs),
     /// Run Fabro release automation.
     Release(commands::ReleaseArgs),
     /// Manage embedded Fabro web SPA assets.
@@ -39,6 +41,7 @@ impl Command {
             Self::Build(args) => commands::build(args),
             Self::DockerBuild(args) => commands::docker_build(args),
             Self::Docs(args) => commands::docs(args),
+            Self::Plugins(args) => commands::plugins(&args),
             Self::Release(args) => commands::release(args),
             Self::Spa(args) => commands::spa(args),
         }

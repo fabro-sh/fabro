@@ -5,6 +5,7 @@
 # Binaries are supplied pre-built via the release workflow:
 #   tmp/docker-context/amd64/fabro  (x86_64-unknown-linux-musl)
 #   tmp/docker-context/arm64/fabro  (aarch64-unknown-linux-musl)
+# Each directory also contains the three matching sandbox-driver-* plugins.
 #
 # The image serves the HTTP API (with embedded web UI) on $PORT (default
 # 32276), persists state to /storage, and runs as the unprivileged `fabro`
@@ -26,7 +27,7 @@ RUN apk add --no-cache \
  && adduser -S -u 1000 -G fabro -h /var/fabro -s /sbin/nologin fabro \
  && install -d -o fabro -g fabro -m 0755 /var/fabro /storage
 
-COPY --chmod=0755 tmp/docker-context/${TARGETARCH}/fabro /usr/local/bin/fabro
+COPY --chmod=0755 tmp/docker-context/${TARGETARCH}/fabro tmp/docker-context/${TARGETARCH}/sandbox-driver-* /usr/local/bin/
 
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/fabro-entrypoint
 

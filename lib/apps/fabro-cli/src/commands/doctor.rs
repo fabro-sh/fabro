@@ -254,11 +254,14 @@ pub(crate) async fn run_doctor(
 
     let settings_config_path = active_settings_path(None);
 
-    let local_checks = vec![check_config(
+    let mut local_checks = vec![check_config(
         settings_config_path
             .exists()
             .then_some(settings_config_path),
     )];
+    if let Some(check) = super::upgrade::incomplete_bundle_check() {
+        local_checks.push(check);
+    }
 
     let mut report = CheckReport {
         title:    "Fabro Doctor".to_string(),

@@ -23,6 +23,7 @@ use tokio::process::Command as TokioCommand;
 use tokio::task::spawn_blocking;
 use tokio::time;
 
+use crate::commands::upgrade;
 use crate::local_server;
 
 const SERVER_START_HEALTH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
@@ -43,6 +44,13 @@ pub(crate) async fn execute(
     printer: Printer,
 ) -> Result<()> {
     serve_args.bind = Some(bind.to_string());
+
+    if let Some(check) = upgrade::incomplete_bundle_check() {
+        fabro_util::printerr!(printer, "Warning: {}.", check.summary);
+        if let Some(remediation) = check.remediation {
+            fabro_util::printerr!(printer, "{remediation}");
+        }
+    }
 
     if foreground {
         Box::pin(execute_foreground(

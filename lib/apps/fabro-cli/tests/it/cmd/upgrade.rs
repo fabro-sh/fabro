@@ -11,7 +11,7 @@ fn hard_link_or_copy(src: &std::path::Path, dest: &std::path::Path) {
         return;
     }
 
-    std::fs::copy(src, dest).expect("copy test binary into fake Cellar");
+    std::fs::copy(src, dest).expect("copy test binary into installation fixture");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -32,14 +32,29 @@ fn brew_command(context: &TestContext, formula: &str, version: &str) -> Command 
         .join(formula)
         .join(version)
         .join("bin");
-    std::fs::create_dir_all(&bin_dir).expect("create fake Cellar bin dir");
-    let brew_fabro = bin_dir.join("fabro");
+    installed_command(context, &bin_dir)
+}
+
+fn complete_bundle_command(context: &TestContext) -> Command {
+    let bin_dir = context.temp_dir.join("install");
+    let command = installed_command(context, &bin_dir);
+    // These tests inspect upgrade selection only; they never execute a sandbox.
+    for kind in ["host", "docker", "daytona"] {
+        std::fs::write(bin_dir.join(format!("sandbox-driver-{kind}")), b"fixture")
+            .expect("write sandbox executable fixture");
+    }
+    command
+}
+
+fn installed_command(context: &TestContext, bin_dir: &std::path::Path) -> Command {
+    std::fs::create_dir_all(bin_dir).expect("create installation fixture bin dir");
+    let installed_fabro = bin_dir.join("fabro");
     hard_link_or_copy(
         std::path::Path::new(env!("CARGO_BIN_EXE_fabro")),
-        &brew_fabro,
+        &installed_fabro,
     );
 
-    let mut cmd = Command::new(&brew_fabro);
+    let mut cmd = Command::new(&installed_fabro);
     cmd.current_dir(&context.temp_dir);
     for (key, _) in std::env::vars_os() {
         if let Some(s) = key.to_str() {
@@ -116,7 +131,7 @@ fn upgrade_already_on_current_version_short_circuits() {
         regex::escape(env!("CARGO_PKG_VERSION")),
         "[VERSION]".to_string(),
     ));
-    let mut cmd = context.command();
+    let mut cmd = complete_bundle_command(&context);
     cmd.args(["upgrade", "--version", env!("CARGO_PKG_VERSION")]);
 
     fabro_snapshot!(filters, cmd, @"
@@ -188,7 +203,7 @@ esac
         fake_bin.display(),
         std::env::var(EnvVars::PATH).unwrap()
     );
-    let mut cmd = context.command();
+    let mut cmd = complete_bundle_command(&context);
     cmd.env(EnvVars::PATH, path).args(["upgrade", "--dry-run"]);
 
     fabro_snapshot!(filters, cmd, @"

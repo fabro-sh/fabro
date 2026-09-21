@@ -4,6 +4,7 @@ mod docker_build;
 mod docs;
 mod docs_cli_reference;
 mod docs_options_reference;
+mod plugins;
 mod release;
 mod spa;
 mod spa_check;
@@ -18,6 +19,7 @@ pub(crate) use build::{BuildArgs, build};
 pub(crate) use docker_build::{DockerBuildArgs, docker_build};
 pub(crate) use docs::{DocsArgs, docs};
 use fabro_util::shell::shell_quote;
+pub(crate) use plugins::{PluginsArgs, plugins};
 pub(crate) use release::{ReleaseArgs, release};
 pub(crate) use spa::{SpaArgs, spa};
 

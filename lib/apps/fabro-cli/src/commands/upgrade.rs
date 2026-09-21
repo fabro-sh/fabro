@@ -15,12 +15,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fabro_types::settings::CliNamespace;
 use fabro_types::settings::cli::OutputFormat;
+use fabro_util::check_report::{CheckDetail, CheckResult, CheckStatus};
 use fabro_util::printer::Printer;
 use semver::Version;
 use sha2::{Digest, Sha256};
 use tokio::process::Command as TokioCommand;
 use tokio::task::JoinHandle;
 use tracing::debug;
+
+mod bundle;
+pub(crate) use bundle::enter_managed_bundle;
 
 use crate::args::UpgradeArgs;
 use crate::command_context::CommandContext;
@@ -29,6 +33,54 @@ use crate::shared::print_json_pretty;
 // ── Download backend abstraction ───────────────────────────────────────────
 
 const GITHUB_REPO: &str = "fabro-sh/fabro";
+
+/// Packaged builds can arrive without their companions through an old updater.
+/// Keep this diagnostic separate from execution: explicit plugin configurations
+/// still work, and release checksum enforcement remains Petri's responsibility.
+pub(crate) fn incomplete_bundle_check() -> Option<CheckResult> {
+    option_env!("PETRI_SANDBOX_PLUGIN_DIR")?;
+    let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
+    incomplete_bundle_check_at(&executable)
+}
+
+fn incomplete_bundle_check_at(executable: &Path) -> Option<CheckResult> {
+    let missing = missing_bundle_executables(executable);
+    if missing.is_empty() {
+        return None;
+    }
+    let remediation = match detect_install_source(executable) {
+        InstallSource::Tarball => "fabro upgrade".to_owned(),
+        InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        } => "brew reinstall fabro".to_owned(),
+        InstallSource::Brew {
+            channel: BrewChannel::Nightly,
+        } => "brew reinstall fabro-nightly".to_owned(),
+    };
+    Some(CheckResult {
+        name:        "Installation bundle".to_owned(),
+        status:      CheckStatus::Warning,
+        summary:     "bundled sandbox executables are missing".to_owned(),
+        details:     vec![CheckDetail::new(format!(
+            "Missing: {}. Older updaters copy only the Fabro executable.",
+            missing.join(", ")
+        ))],
+        remediation: Some(format!(
+            "Finish installing the matching bundle with `{remediation}`, then restart the server."
+        )),
+    })
+}
+
+fn missing_bundle_executables(executable: &Path) -> Vec<&'static str> {
+    let Some(directory) = executable.parent() else {
+        return Vec::new();
+    };
+    bundle::EXECUTABLES
+        .iter()
+        .copied()
+        .filter(|name| *name != "fabro" && !directory.join(name).is_file())
+        .collect()
+}
 
 enum Backend {
     Gh,
@@ -458,12 +510,20 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
 
     let current =
         Version::parse(env!("CARGO_PKG_VERSION")).context("failed to parse current version")?;
+    // Only packaged builds promise companions. A bare `cargo build` is not a
+    // damaged installation, and runtime plugin overrides do not change whether
+    // the installed release bundle itself is complete.
+    let incomplete_bundle = option_env!("PETRI_SANDBOX_PLUGIN_DIR").is_some()
+        && !missing_bundle_executables(&current_exe).is_empty();
 
-    // Determine target version
+    // Repair an incomplete install before looking for newer releases. In
+    // particular, a nightly must not accidentally switch to the stable channel.
     let (target, tag) = if let Some(ref v) = args.version {
         let version = parse_version_from_tag(v)?;
         let tag = format!("v{version}");
         (version, tag)
+    } else if incomplete_bundle && !args.prerelease {
+        (current.clone(), format!("v{current}"))
     } else {
         let tag = if args.prerelease {
             match pick_latest_tag(&backend.fetch_releases().await?) {
@@ -499,7 +559,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
                 bail!("downgrade requires interactive confirmation (stdin is not a tty)");
             }
         }
-        std::cmp::Ordering::Equal if !args.force => {
+        std::cmp::Ordering::Equal if !args.force && !incomplete_bundle => {
             if cli.output.format == OutputFormat::Json {
                 print_json_pretty(&serde_json::json!({
                     "previous_version": current.to_string(),
@@ -513,6 +573,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
         _ => {}
     }
 
+    let repairing = incomplete_bundle && target == current;
     if args.dry_run {
         if cli.output.format == OutputFormat::Json {
             print_json_pretty(&serde_json::json!({
@@ -521,7 +582,14 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
                 "dry_run": true,
             }))?;
         } else {
-            fabro_util::printerr!(printer, "Would upgrade fabro from {current} to {target}");
+            if repairing {
+                fabro_util::printerr!(
+                    printer,
+                    "Would repair the fabro {current} installation (missing sandbox executables)"
+                );
+            } else {
+                fabro_util::printerr!(printer, "Would upgrade fabro from {current} to {target}");
+            }
             fabro_util::printerr!(printer, "  tag: {tag}");
             fabro_util::printerr!(printer, "  target: {}", detect_target()?);
         }
@@ -532,7 +600,8 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
     let tarball_name = format!("fabro-{triple}.tar.gz");
     let checksum_name = format!("{tarball_name}.sha256");
 
-    let exe_dir = current_exe
+    let launcher = bundle::launcher(&current_exe)?;
+    let exe_dir = launcher
         .parent()
         .context("could not determine executable directory")?;
 
@@ -541,6 +610,12 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
         .context("failed to create temp directory")?;
 
     // Download tarball and checksum in parallel
+    if repairing {
+        fabro_util::printerr!(
+            printer,
+            "Repairing the fabro {current} installation (missing sandbox executables)..."
+        );
+    }
     fabro_util::printerr!(printer, "Downloading fabro {target}...");
     let (tarball_path, checksum_path) = tokio::try_join!(
         backend.download_release(&tag, &tarball_name, tmp_dir.path()),
@@ -568,33 +643,20 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
         bail!("tar extraction failed");
     }
 
-    // Atomic binary replacement
-    let extracted_binary = tmp_dir.path().join(format!("fabro-{triple}")).join("fabro");
-    let backup = exe_dir.join(".fabro-upgrade-backup");
-    fs::rename(&current_exe, &backup).context("failed to move current binary to backup")?;
-    if let Err(e) = fs::rename(&extracted_binary, &current_exe) {
-        // Restore from backup
-        if let Err(restore_err) = fs::rename(&backup, &current_exe) {
-            bail!(
-                "failed to install new binary ({e}) and failed to restore backup ({restore_err})"
-            );
-        }
-        bail!("failed to install new binary: {e}");
-    }
-    let _ = fs::remove_file(&backup);
-
-    // Set permissions
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
-    }
+    let extracted_bundle = tmp_dir.path().join(format!("fabro-{triple}"));
+    bundle::install(&extracted_bundle, &launcher)?;
+    fabro_util::printerr!(
+        printer,
+        "Restart the Fabro server to use the new bundle. Previous bundles are retained for running processes."
+    );
 
     if cli.output.format == OutputFormat::Json {
         print_json_pretty(&serde_json::json!({
             "previous_version": current.to_string(),
             "installed_version": target.to_string(),
         }))?;
+    } else if repairing {
+        fabro_util::printerr!(printer, "Repaired fabro {target}");
     } else {
         fabro_util::printerr!(printer, "Upgraded fabro to {target}");
     }
@@ -1224,5 +1286,40 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("Homebrew"));
+    }
+
+    #[test]
+    fn incomplete_bundle_reports_plain_upgrade_for_repair() {
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("fabro");
+        let check = incomplete_bundle_check_at(&executable).unwrap();
+        assert_eq!(check.status, CheckStatus::Warning);
+        assert_eq!(
+            check.remediation.as_deref(),
+            Some(
+                "Finish installing the matching bundle with `fabro upgrade`, then restart the server."
+            )
+        );
+        for kind in ["host", "docker", "daytona"] {
+            fs::write(
+                root.path().join(format!("sandbox-driver-{kind}")),
+                b"plugin",
+            )
+            .unwrap();
+        }
+        assert!(incomplete_bundle_check_at(&executable).is_none());
+    }
+
+    #[test]
+    fn incomplete_homebrew_bundle_uses_homebrew_for_repair() {
+        let check =
+            incomplete_bundle_check_at(Path::new("/test/Cellar/fabro-nightly/1.0/bin/fabro"))
+                .unwrap();
+        assert_eq!(
+            check.remediation.as_deref(),
+            Some(
+                "Finish installing the matching bundle with `brew reinstall fabro-nightly`, then restart the server."
+            )
+        );
     }
 }

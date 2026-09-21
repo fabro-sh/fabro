@@ -40,3 +40,36 @@ Replace `<version>` with the release version (e.g. `0.207.0`) or use `latest` / 
 ## Homebrew installs
 
 The `fabro-sh/tap` Homebrew formula verifies a SHA-256 checksum against each tarball Homebrew downloads, so there is no separate attestation step to run at install time. If you want provenance verification for a Homebrew-installed release, download the matching tarball from the [releases page](https://github.com/fabro-sh/fabro/releases) and run `gh attestation verify` against it.
+
+## Sandbox plugin checksums
+
+Release archives contain `fabro`, `sandbox-driver-host`, `sandbox-driver-docker`,
+and `sandbox-driver-daytona`. These are Fabro's required sandbox executables,
+built from the pinned sandbox-driver crates. The release build embeds the SHA-256 hashes of
+those exact plugin binaries in Fabro. Workflow execution checks a plugin's
+bytes before launching it and rejects a checksum mismatch.
+
+Keep the four files from one release together. The shell installer, Homebrew,
+Docker image, and bundle-aware `fabro upgrade` install the matching files.
+Shell and self-upgrade installations retain previous bundles so running servers
+can keep using their original plugins; restart the server after upgrading to
+use the new bundle.
+
+Older self-updaters copy only `fabro`. After upgrading from one of those
+versions, finish the transition with the new updater:
+
+```bash
+fabro upgrade
+```
+
+When sandbox executables are missing, this downloads and verifies the complete
+bundle for the installed version, including its nightly version if applicable.
+It does not change versions during repair. Use `fabro upgrade --dry-run` to
+preview the repair. Explicit `--version` and `--prerelease` requests still select
+their requested release. Subsequent upgrades replace the complete bundle.
+Server startup and `fabro doctor` show the repair command when
+bundled sandbox executables are missing. Homebrew users should use the corresponding
+`brew reinstall` command shown by that diagnostic.
+
+For a checksum mismatch, install a complete matching release bundle. Do not
+enable plugin development mode to work around a damaged or mixed installation.

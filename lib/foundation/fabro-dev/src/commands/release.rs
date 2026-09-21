@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{Local, NaiveDate};
 use clap::Args;
 
-use super::{PlannedCommand, capture_command, run_command, spa_refresh, workspace_root};
+use super::{PlannedCommand, capture_command, plugins, run_command, spa_refresh, workspace_root};
 
 const RELEASE_EPOCH: &str = "2026-01-01";
 const RELEASE_TEST_SEGMENT_WRITE_KEY: &str = "fake-for-local-smoke";
@@ -538,7 +538,19 @@ impl ReleasePlan {
         }
 
         println!("Running release-mode test smoke (SEGMENT_WRITE_KEY baked in)...");
-        run_command(&self.root, &Self::release_tests_command())
+        let directory = plugins::prepare(&self.root, None, false)?;
+        // CLI diagnostics inspect the installed bundle beside the executable,
+        // even when workflow tests use explicit plugin paths.
+        let target_root = directory
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .context("plugin staging directory has no Cargo target root")?;
+        plugins::stage(&directory, &target_root.join("release"))?;
+        run_command(
+            &self.root,
+            &plugins::configure(Self::release_tests_command(), &directory),
+        )
     }
 
     #[expect(
@@ -552,7 +564,10 @@ impl ReleasePlan {
         if self.skip_tests {
             println!("--skip-tests set, would skip release-mode test smoke");
         } else {
-            println!("DRY RUN: would run release-mode test smoke:");
+            println!("cargo --locked dev plugins");
+            println!(
+                "DRY RUN: would run release-mode test smoke with embedded plugin pins and explicit plugin paths:"
+            );
             println!("{}", Self::release_tests_command().to_shell_line());
         }
 

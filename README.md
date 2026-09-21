@@ -58,7 +58,7 @@ Then run `fabro server start` to finish setup in your browser. The server opens 
 | 🌲  | Git checkpointing              | Every stage commits code changes and execution metadata to Git branches. Resume, revert, or trace any change |
 | 📊  | Run observability              | Durable events, checkpoints, conclusions, and stage outputs make every run inspectable and exportable |
 | ⚡  | Comprehensive API              | REST API with SSE event streaming and a React web UI. Run workflows programmatically or as a service  |
-| 🦀  | Single binary, no runtime      | One compiled Rust executable with zero dependencies. No Python, no Node, no Docker required           |
+| 🦀  | Native Rust executables       | Fabro and its matching sandbox executables ship together. No Python or Node runtime required          |
 | ⚖️  | Open source (MIT)              | Full source code, no vendor lock-in. Self-host, fork, or extend to fit your workflow                  |
 
 ---

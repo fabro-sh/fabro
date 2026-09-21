@@ -40,8 +40,17 @@ use tracing::debug;
 use crate::command_context::CommandContext;
 
 #[expect(clippy::print_stderr, reason = "fatal error reporting before exit")]
+fn main() {
+    if let Err(error) = commands::upgrade::enter_managed_bundle() {
+        eprintln!("Could not enter the installed Fabro bundle: {error}");
+        std::process::exit(1);
+    }
+    run_cli();
+}
+
+#[expect(clippy::print_stderr, reason = "fatal error reporting before exit")]
 #[tokio::main]
-async fn main() {
+async fn run_cli() {
     let raw_args: Vec<String> = std::env::args().collect();
     let subcommand = raw_args.get(1).map(String::as_str);
     let subcommand_arg = raw_args.get(2).map(String::as_str);

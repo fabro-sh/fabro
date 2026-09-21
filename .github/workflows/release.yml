@@ -85,6 +85,24 @@ jobs:
 
       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
 
+      - name: Build and pin sandbox plugins
+        env:
+          PLUGIN_TARGET: ${{ matrix.target }}
+          USE_ZIG: ${{ matrix.musl && 'true' || 'false' }}
+        run: |
+          args=(--target "$PLUGIN_TARGET")
+          if [[ "$USE_ZIG" == true ]]; then args+=(--zigbuild); fi
+          cargo --locked dev plugins "${args[@]}"
+          plugin_dir="$GITHUB_WORKSPACE/target/$PLUGIN_TARGET/plugins/bin"
+          mkdir -p "target/$PLUGIN_TARGET/release"
+          cp "$plugin_dir/"sandbox-driver-* "target/$PLUGIN_TARGET/release/"
+          echo "PETRI_SANDBOX_PLUGIN_DIR=$plugin_dir" >> "$GITHUB_ENV"
+          echo "PETRI_SANDBOX_HOST_PLUGIN=$plugin_dir/sandbox-driver-host" >> "$GITHUB_ENV"
+          echo "PETRI_SANDBOX_DOCKER_PLUGIN=$plugin_dir/sandbox-driver-docker" >> "$GITHUB_ENV"
+          echo "PETRI_SANDBOX_DAYTONA_PLUGIN=$plugin_dir/sandbox-driver-daytona" >> "$GITHUB_ENV"
+          echo "PETRI_SANDBOX_PLUGIN_DEV=0" >> "$GITHUB_ENV"
+          echo "FABRO_REQUIRE_SANDBOX_PLUGINS=1" >> "$GITHUB_ENV"
+
       - name: Refresh embedded SPA
         run: cargo --locked dev spa refresh
 
@@ -120,8 +138,12 @@ jobs:
         run: |
           mkdir fabro-${{ matrix.target }}
           cp target/${{ matrix.target }}/release/fabro fabro-${{ matrix.target }}/
+          cp target/${{ matrix.target }}/plugins/bin/sandbox-driver-* fabro-${{ matrix.target }}/
           tar czf fabro-${{ matrix.target }}.tar.gz fabro-${{ matrix.target }}
           shasum -a 256 fabro-${{ matrix.target }}.tar.gz > fabro-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Smoke-test packaged workflow and checksum enforcement
+        run: python3 test/bin/bundle_smoke.py fabro-${{ matrix.target }}/fabro ${{ matrix.target }}
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
@@ -192,7 +214,7 @@ jobs:
             esac
             mkdir -p "tmp/docker-context/$arch"
             tar -xzf "target/distrib/fabro-${target}.tar.gz" -C target/distrib
-            cp "target/distrib/fabro-${target}/fabro" "tmp/docker-context/$arch/fabro"
+            cp "target/distrib/fabro-${target}/fabro" "target/distrib/fabro-${target}/"sandbox-driver-* "tmp/docker-context/$arch/"
           done
 
       - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
@@ -224,7 +246,11 @@ jobs:
           tags: fabro-smoke:amd64
 
       - name: Smoke-test amd64 image
-        run: docker run --rm --platform linux/amd64 fabro-smoke:amd64 fabro version
+        run: |
+          docker run --rm --platform linux/amd64 fabro-smoke:amd64 sh -ec '
+            fabro version
+            for kind in host docker daytona; do test -x "/usr/local/bin/sandbox-driver-$kind"; done
+          '
 
       - name: Build arm64 image for smoke test
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
@@ -236,7 +262,11 @@ jobs:
           tags: fabro-smoke:arm64
 
       - name: Smoke-test arm64 image
-        run: docker run --rm --platform linux/arm64 fabro-smoke:arm64 fabro version
+        run: |
+          docker run --rm --platform linux/arm64 fabro-smoke:arm64 sh -ec '
+            fabro version
+            for kind in host docker daytona; do test -x "/usr/local/bin/sandbox-driver-$kind"; done
+          '
 
       - id: build
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0

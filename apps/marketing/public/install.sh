@@ -67,8 +67,10 @@ case "$OS" in
 esac
 
 ASSET="fabro-${TARGET}.tar.gz"
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+download_dir="$(mktemp -d)"
+bundle_dir=""
+activation_dir=""
+trap 'rm -rf "$download_dir"; [ -z "$activation_dir" ] || rm -rf "$activation_dir"' EXIT
 
 TAG="$(gh api "repos/${REPO}/releases/latest" --jq '.tag_name')"
 if [ -z "$TAG" ]; then
@@ -76,23 +78,56 @@ if [ -z "$TAG" ]; then
 fi
 
 dim "Downloading fabro for ${TARGET}..."
-gh release download "$TAG" --repo "$REPO" --pattern "$ASSET" --dir "$TMPDIR" --clobber
+gh release download "$TAG" --repo "$REPO" --pattern "$ASSET" --dir "$download_dir" --clobber
 
 dim "Extracting..."
-tar xzf "${TMPDIR}/${ASSET}" -C "$TMPDIR"
+tar xzf "${download_dir}/${ASSET}" -C "$download_dir"
 
-# --- Install binary ---
+# --- Stage a complete, immutable installation ---
 INSTALL_DIR="${FABRO_INSTALL_DIR:-$HOME/.fabro/bin}"
 mkdir -p "$INSTALL_DIR"
-mv "${TMPDIR}/fabro-${TARGET}/fabro" "${INSTALL_DIR}/fabro"
-
-chmod +x "${INSTALL_DIR}/fabro"
-
-# --- Verify ---
-VERSION="$("${INSTALL_DIR}/fabro" --version 2>/dev/null || true)"
-if [ -z "$VERSION" ]; then
-  error "Installation failed: could not run fabro --version"
+INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
+source_dir="${download_dir}/fabro-${TARGET}"
+[ -f "$source_dir/fabro" ] && [ ! -L "$source_dir/fabro" ] || error "Release is missing the fabro executable"
+# Older stable archives contain only fabro. Accept those, but never a
+# partially delivered plugin bundle.
+plugin_count=0
+for kind in host docker daytona; do
+  if [ -e "$source_dir/sandbox-driver-$kind" ] || [ -L "$source_dir/sandbox-driver-$kind" ]; then
+    plugin_count=$((plugin_count + 1))
+  fi
+done
+[ "$plugin_count" -eq 0 ] || [ "$plugin_count" -eq 3 ] || error "Release has an incomplete sandbox plugin bundle"
+if [ "$plugin_count" -eq 3 ]; then
+  for kind in host docker daytona; do
+    plugin="$source_dir/sandbox-driver-$kind"
+    [ -f "$plugin" ] && [ ! -L "$plugin" ] && [ -x "$plugin" ] || error "Invalid sandbox plugin: $kind"
+  done
 fi
+mkdir -p "$INSTALL_DIR/.fabro-versions"
+bundle_dir="$(mktemp -d "$INSTALL_DIR/.fabro-versions/bundle-XXXXXXXX")"
+cp "$source_dir/fabro" "$bundle_dir/fabro"
+chmod +x "$bundle_dir/fabro"
+if [ "$plugin_count" -eq 3 ]; then
+  for kind in host docker daytona; do
+    cp "$source_dir/sandbox-driver-$kind" "$bundle_dir/"
+  done
+fi
+# mktemp creates a private directory; shared install locations must remain
+# traversable by the users who could execute the previous installation.
+chmod 755 "$bundle_dir"
+VERSION="$("$bundle_dir/fabro" --version 2>/dev/null)" || error "Installation failed: could not run fabro --version"
+[ -n "$VERSION" ] || error "Installation failed: could not run fabro --version"
+# Keep the old bundle for servers still using it. A flat old executable is
+# retained too; do not modify existing sibling plugins.
+if [ -f "$INSTALL_DIR/fabro" ] && [ ! -L "$INSTALL_DIR/fabro" ]; then
+  previous_dir="$(mktemp -d "$INSTALL_DIR/.fabro-versions/previous-XXXXXXXX")"
+  ln "$INSTALL_DIR/fabro" "$previous_dir/fabro"
+fi
+activation_dir="$(mktemp -d "$INSTALL_DIR/.fabro-activate-XXXXXXXX")"
+ln -s ".fabro-versions/$(basename "$bundle_dir")/fabro" "$activation_dir/fabro"
+# -f replaces the launcher itself; an existing bundle remains immutable.
+mv -f "$activation_dir/fabro" "$INSTALL_DIR/fabro"
 
 tildify() {
   if [ "${1#"$HOME"/}" != "$1" ]; then

@@ -25,7 +25,7 @@ class FabroNightly < Formula
   end
 
   def install
-    bin.install "fabro"
+    bin.install "fabro", "sandbox-driver-host", "sandbox-driver-docker", "sandbox-driver-daytona"
   end
 
   test do
