@@ -2251,6 +2251,7 @@ dependencies = [
  "csv",
  "fabro-config",
  "fabro-options-metadata",
+ "fabro-static",
  "fabro-util",
  "quick-xml 0.36.2",
  "serde",

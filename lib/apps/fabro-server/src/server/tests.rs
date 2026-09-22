@@ -8885,8 +8885,7 @@ async fn render_graph_bytes_returns_bad_request_for_render_error_protocol() {
         "#!/bin/sh\ncat >/dev/null\nprintf 'RENDER_ERROR:failed to parse DOT source'\nexit 0\n",
     );
 
-    let response =
-        render_graph_bytes_with_exe_override("not valid dot {{{", Some(&script_path)).await;
+    let response = render_graph_bytes("not valid dot {{{", Some(&script_path)).await;
 
     assert_status!(response, StatusCode::BAD_REQUEST).await;
 }
@@ -8903,7 +8902,7 @@ fn write_test_executable(script: &str) -> (tempfile::TempDir, PathBuf) {
 
 #[cfg(unix)]
 async fn render_graph_with_override(dot_source: &str, exe_path: &Path) -> Response {
-    render_graph_bytes_with_exe_override(dot_source, Some(exe_path)).await
+    render_graph_bytes(dot_source, Some(exe_path)).await
 }
 
 #[cfg(unix)]

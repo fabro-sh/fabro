@@ -68,7 +68,6 @@ esac
 
 ASSET="fabro-${TARGET}.tar.gz"
 download_dir="$(mktemp -d)"
-bundle_dir=""
 activation_dir=""
 trap 'rm -rf "$download_dir"; [ -z "$activation_dir" ] || rm -rf "$activation_dir"' EXIT
 
@@ -90,20 +89,16 @@ INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
 source_dir="${download_dir}/fabro-${TARGET}"
 [ -f "$source_dir/fabro" ] && [ ! -L "$source_dir/fabro" ] || error "Release is missing the fabro executable"
 # Older stable archives contain only fabro. Accept those, but never a
-# partially delivered plugin bundle.
+# partially delivered plugin bundle. Every delivered plugin must be a
+# regular executable file.
 plugin_count=0
 for kind in host docker daytona; do
-  if [ -e "$source_dir/sandbox-driver-$kind" ] || [ -L "$source_dir/sandbox-driver-$kind" ]; then
-    plugin_count=$((plugin_count + 1))
-  fi
+  plugin="$source_dir/sandbox-driver-$kind"
+  [ -e "$plugin" ] || [ -L "$plugin" ] || continue
+  [ -f "$plugin" ] && [ ! -L "$plugin" ] && [ -x "$plugin" ] || error "Invalid sandbox plugin: $kind"
+  plugin_count=$((plugin_count + 1))
 done
 [ "$plugin_count" -eq 0 ] || [ "$plugin_count" -eq 3 ] || error "Release has an incomplete sandbox plugin bundle"
-if [ "$plugin_count" -eq 3 ]; then
-  for kind in host docker daytona; do
-    plugin="$source_dir/sandbox-driver-$kind"
-    [ -f "$plugin" ] && [ ! -L "$plugin" ] && [ -x "$plugin" ] || error "Invalid sandbox plugin: $kind"
-  done
-fi
 mkdir -p "$INSTALL_DIR/.fabro-versions"
 bundle_dir="$(mktemp -d "$INSTALL_DIR/.fabro-versions/bundle-XXXXXXXX")"
 cp "$source_dir/fabro" "$bundle_dir/fabro"
@@ -116,7 +111,7 @@ fi
 # mktemp creates a private directory; shared install locations must remain
 # traversable by the users who could execute the previous installation.
 chmod 755 "$bundle_dir"
-VERSION="$("$bundle_dir/fabro" --version 2>/dev/null)" || error "Installation failed: could not run fabro --version"
+VERSION="$("$bundle_dir/fabro" --version 2>/dev/null || true)"
 [ -n "$VERSION" ] || error "Installation failed: could not run fabro --version"
 # Keep the old bundle for servers still using it. A flat old executable is
 # retained too; do not modify existing sibling plugins.

@@ -13,6 +13,7 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use fabro_static::{PLUGIN_PINS_EMBEDDED, SANDBOX_PLUGIN_BINARIES};
 use fabro_types::settings::CliNamespace;
 use fabro_types::settings::cli::OutputFormat;
 use fabro_util::check_report::{CheckDetail, CheckResult, CheckStatus};
@@ -38,7 +39,9 @@ const GITHUB_REPO: &str = "fabro-sh/fabro";
 /// Keep this diagnostic separate from execution: explicit plugin configurations
 /// still work, and release checksum enforcement remains Petri's responsibility.
 pub(crate) fn incomplete_bundle_check() -> Option<CheckResult> {
-    option_env!("PETRI_SANDBOX_PLUGIN_DIR")?;
+    if !PLUGIN_PINS_EMBEDDED {
+        return None;
+    }
     let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
     incomplete_bundle_check_at(&executable)
 }
@@ -50,12 +53,7 @@ fn incomplete_bundle_check_at(executable: &Path) -> Option<CheckResult> {
     }
     let remediation = match detect_install_source(executable) {
         InstallSource::Tarball => "fabro upgrade".to_owned(),
-        InstallSource::Brew {
-            channel: BrewChannel::Stable,
-        } => "brew reinstall fabro".to_owned(),
-        InstallSource::Brew {
-            channel: BrewChannel::Nightly,
-        } => "brew reinstall fabro-nightly".to_owned(),
+        InstallSource::Brew { channel } => format!("brew reinstall {}", channel.formula()),
     };
     Some(CheckResult {
         name:        "Installation bundle".to_owned(),
@@ -75,10 +73,9 @@ fn missing_bundle_executables(executable: &Path) -> Vec<&'static str> {
     let Some(directory) = executable.parent() else {
         return Vec::new();
     };
-    bundle::EXECUTABLES
-        .iter()
-        .copied()
-        .filter(|name| *name != "fabro" && !directory.join(name).is_file())
+    SANDBOX_PLUGIN_BINARIES
+        .into_iter()
+        .filter(|name| !directory.join(name).is_file())
         .collect()
 }
 
@@ -106,6 +103,15 @@ enum InstallSource {
 enum BrewChannel {
     Stable,
     Nightly,
+}
+
+impl BrewChannel {
+    fn formula(self) -> &'static str {
+        match self {
+            Self::Stable => "fabro",
+            Self::Nightly => "fabro-nightly",
+        }
+    }
 }
 
 impl InstallSource {
@@ -513,8 +519,8 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
     // Only packaged builds promise companions. A bare `cargo build` is not a
     // damaged installation, and runtime plugin overrides do not change whether
     // the installed release bundle itself is complete.
-    let incomplete_bundle = option_env!("PETRI_SANDBOX_PLUGIN_DIR").is_some()
-        && !missing_bundle_executables(&current_exe).is_empty();
+    let incomplete_bundle =
+        PLUGIN_PINS_EMBEDDED && !missing_bundle_executables(&current_exe).is_empty();
 
     // Repair an incomplete install before looking for newer releases. In
     // particular, a nightly must not accidentally switch to the stable channel.
@@ -613,10 +619,11 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
     if repairing {
         fabro_util::printerr!(
             printer,
-            "Repairing the fabro {current} installation (missing sandbox executables)..."
+            "Repairing fabro {current} (missing sandbox executables): downloading the complete bundle..."
         );
+    } else {
+        fabro_util::printerr!(printer, "Downloading fabro {target}...");
     }
-    fabro_util::printerr!(printer, "Downloading fabro {target}...");
     let (tarball_path, checksum_path) = tokio::try_join!(
         backend.download_release(&tag, &tarball_name, tmp_dir.path()),
         backend.download_release(&tag, &checksum_name, tmp_dir.path()),
@@ -671,10 +678,7 @@ fn run_upgrade_brew(
     printer: Printer,
     channel: BrewChannel,
 ) -> Result<()> {
-    let formula = match channel {
-        BrewChannel::Stable => "fabro",
-        BrewChannel::Nightly => "fabro-nightly",
-    };
+    let formula = channel.formula();
     let cmd = format!("brew upgrade {formula}");
 
     if args.version.is_some() || args.prerelease || args.force {
@@ -1300,12 +1304,8 @@ mod tests {
                 "Finish installing the matching bundle with `fabro upgrade`, then restart the server."
             )
         );
-        for kind in ["host", "docker", "daytona"] {
-            fs::write(
-                root.path().join(format!("sandbox-driver-{kind}")),
-                b"plugin",
-            )
-            .unwrap();
+        for name in SANDBOX_PLUGIN_BINARIES {
+            fs::write(root.path().join(name), b"plugin").unwrap();
         }
         assert!(incomplete_bundle_check_at(&executable).is_none());
     }

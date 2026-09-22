@@ -209,7 +209,7 @@ pub(in crate::server) async fn render_dot_subprocess(
     )))
 }
 
-async fn render_graph_response(
+pub(crate) async fn render_graph_bytes(
     dot_source: &str,
     exe_override: Option<&std::path::Path>,
 ) -> Response {
@@ -227,21 +227,6 @@ async fn render_graph_response(
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
     }
-}
-
-pub(crate) async fn render_graph_bytes(
-    dot_source: &str,
-    executable: Option<&std::path::Path>,
-) -> Response {
-    render_graph_response(dot_source, executable).await
-}
-
-#[cfg(test)]
-pub(in crate::server) async fn render_graph_bytes_with_exe_override(
-    dot_source: &str,
-    exe_override: Option<&std::path::Path>,
-) -> Response {
-    render_graph_response(dot_source, exe_override).await
 }
 
 #[derive(serde::Deserialize)]

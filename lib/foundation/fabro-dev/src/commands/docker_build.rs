@@ -187,7 +187,7 @@ impl DockerBuildPlan {
 
     fn extract_command(&self) -> PlannedCommand {
         let arch = self.arch.to_string();
-        PlannedCommand::new("docker")
+        let mut command = PlannedCommand::new("docker")
             .arg("run")
             .arg("--rm")
             .arg("--platform")
@@ -198,20 +198,14 @@ impl DockerBuildPlan {
             .arg(format!("{}:/out", self.context_dir().display()))
             .arg("rust:1-bookworm")
             .arg("cp")
-            .arg(format!("/target/{}/release/fabro", self.arch.target()))
-            .arg(format!(
-                "/target/{}/plugins/bin/sandbox-driver-host",
+            .arg(format!("/target/{}/release/fabro", self.arch.target()));
+        for binary in fabro_static::SANDBOX_PLUGIN_BINARIES {
+            command = command.arg(format!(
+                "/target/{}/plugins/bin/{binary}",
                 self.arch.target()
-            ))
-            .arg(format!(
-                "/target/{}/plugins/bin/sandbox-driver-docker",
-                self.arch.target()
-            ))
-            .arg(format!(
-                "/target/{}/plugins/bin/sandbox-driver-daytona",
-                self.arch.target()
-            ))
-            .arg("/out/")
+            ));
+        }
+        command.arg("/out/")
     }
 
     fn image_build_command(&self) -> PlannedCommand {

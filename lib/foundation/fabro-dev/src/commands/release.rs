@@ -538,18 +538,16 @@ impl ReleasePlan {
         }
 
         println!("Running release-mode test smoke (SEGMENT_WRITE_KEY baked in)...");
-        let directory = plugins::prepare(&self.root, None, false)?;
+        let prepared = plugins::prepare(&self.root, None, false)?;
         // CLI diagnostics inspect the installed bundle beside the executable,
         // even when workflow tests use explicit plugin paths.
-        let target_root = directory
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::parent)
-            .context("plugin staging directory has no Cargo target root")?;
-        plugins::stage(&directory, &target_root.join("release"))?;
+        plugins::stage(
+            &prepared.directory,
+            &prepared.target_directory.join("release"),
+        )?;
         run_command(
             &self.root,
-            &plugins::configure(Self::release_tests_command(), &directory),
+            &plugins::configure(Self::release_tests_command(), &prepared.directory),
         )
     }
 

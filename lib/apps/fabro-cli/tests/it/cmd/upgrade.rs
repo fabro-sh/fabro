@@ -39,9 +39,8 @@ fn complete_bundle_command(context: &TestContext) -> Command {
     let bin_dir = context.temp_dir.join("install");
     let command = installed_command(context, &bin_dir);
     // These tests inspect upgrade selection only; they never execute a sandbox.
-    for kind in ["host", "docker", "daytona"] {
-        std::fs::write(bin_dir.join(format!("sandbox-driver-{kind}")), b"fixture")
-            .expect("write sandbox executable fixture");
+    for name in fabro_static::SANDBOX_PLUGIN_BINARIES {
+        std::fs::write(bin_dir.join(name), b"fixture").expect("write sandbox executable fixture");
     }
     command
 }

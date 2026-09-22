@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Args;
 
 use super::{PlannedCommand, plugins, spa_refresh};
@@ -22,16 +20,10 @@ pub(crate) fn build(args: BuildArgs) -> Result<()> {
 
     let target =
         argument(&args.cargo_args, "--target").or_else(|| std::env::var("CARGO_BUILD_TARGET").ok());
-    let directory = plugins::prepare(&root, target.as_deref(), false)?;
+    let prepared = plugins::prepare(&root, target.as_deref(), false)?;
     let output_profile = output_profile(&args.cargo_args);
-    let default_root = directory
-        .parent()
-        .and_then(std::path::Path::parent)
-        .and_then(std::path::Path::parent)
-        .context("plugin staging directory has no Cargo target root")?;
     let mut output_root = argument(&args.cargo_args, "--target-dir")
-        .map(PathBuf::from)
-        .map_or_else(|| default_root.to_path_buf(), |path| root.join(path));
+        .map_or(prepared.target_directory, |path| root.join(path));
     if let Some(target) = &target {
         output_root.push(target);
     }
@@ -41,8 +33,8 @@ pub(crate) fn build(args: BuildArgs) -> Result<()> {
         command = command.arg(arg);
     }
 
-    super::run_command(&root, &plugins::configure(command, &directory))?;
-    plugins::stage(&directory, &output)
+    super::run_command(&root, &plugins::configure(command, &prepared.directory))?;
+    plugins::stage(&prepared.directory, &output)
 }
 
 fn argument(args: &[String], name: &str) -> Option<String> {

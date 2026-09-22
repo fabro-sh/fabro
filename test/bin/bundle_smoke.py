@@ -15,6 +15,12 @@ import tarfile
 import time
 import urllib.request
 
+BUNDLE = ("fabro", "sandbox-driver-host", "sandbox-driver-docker", "sandbox-driver-daytona")
+
+
+def output(result):
+    return output(result)
+
 
 def workflow(fabro, root, expect_tampered=False, after_first_run=None):
     root.mkdir()
@@ -60,6 +66,9 @@ def workflow(fabro, root, expect_tampered=False, after_first_run=None):
             capture_output=True, text=True, timeout=120,
         )
 
+    def run_workflow():
+        return run("run", str(root / "workflow.toml"), "--environment", "local", "--auto-approve")
+
     log_path = root / "server.log"
     with log_path.open("w") as log:
         server = subprocess.Popen(
@@ -84,9 +93,9 @@ def workflow(fabro, root, expect_tampered=False, after_first_run=None):
 
             login = run("auth", "login", "--dev-token", token)
             if login.returncode:
-                raise RuntimeError(login.stdout + login.stderr)
-            result = run("run", str(root / "workflow.toml"), "--environment", "local", "--auto-approve")
-            transcript = result.stdout + result.stderr
+                raise RuntimeError(output(login))
+            result = run_workflow()
+            transcript = output(result)
             if expect_tampered:
                 if result.returncode == 0 or "checksum" not in transcript.lower():
                     raise RuntimeError("tampered plugin was not rejected for its checksum:\n" + transcript)
@@ -94,12 +103,12 @@ def workflow(fabro, root, expect_tampered=False, after_first_run=None):
                 raise RuntimeError("packaged workflow failed:\n" + transcript + log_path.read_text())
             if after_first_run:
                 after_first_run()
-                result = run("run", str(root / "workflow.toml"), "--environment", "local", "--auto-approve")
+                result = run_workflow()
                 if result.returncode:
-                    raise RuntimeError("running server lost its original plugin bundle after an upgrade:\n" + result.stdout + result.stderr)
+                    raise RuntimeError("running server lost its original plugin bundle after an upgrade:\n" + output(result))
                 graph_result = run("graph", str(root / "workflow.toml"))
                 if graph_result.returncode or "<svg" not in graph_result.stdout:
-                    raise RuntimeError("running server lost its graph renderer after an upgrade:\n" + graph_result.stdout + graph_result.stderr)
+                    raise RuntimeError("running server lost its graph renderer after an upgrade:\n" + output(graph_result))
         finally:
             # Terminate only the process group created for this isolated server.
             try:
@@ -193,7 +202,7 @@ esac
         }, capture_output=True, text=True, timeout=120,
     )
     if result.returncode or not (clean_install / "fabro").is_symlink():
-        raise RuntimeError("clean bundle installation failed:\n" + result.stdout + result.stderr)
+        raise RuntimeError("clean bundle installation failed:\n" + output(result))
     workflow(clean_install / "fabro", root / "installed")
 
     doctor = subprocess.run(
@@ -213,7 +222,7 @@ esac
     # installed release, including a nightly, without consulting another channel.
     result = upgrade("--dry-run")
     if result.returncode or f"Would repair the fabro {version}" not in result.stderr:
-        raise RuntimeError("repair preview did not stay on the installed version:\n" + result.stdout + result.stderr)
+        raise RuntimeError("repair preview did not stay on the installed version:\n" + output(result))
     if launcher.is_symlink() or list(install.iterdir()) != [launcher]:
         raise RuntimeError("dry-run changed the incomplete installation")
 
@@ -229,17 +238,17 @@ esac
         if result.returncode or json.loads(result.stdout) != {
             "previous_version": version, "installed_version": expected, "dry_run": True,
         }:
-            raise RuntimeError("upgrade selected the wrong release:\n" + result.stdout + result.stderr)
+            raise RuntimeError("upgrade selected the wrong release:\n" + output(result))
 
     previous = None
     for attempt in range(2):
         result = upgrade()
         if result.returncode:
-            raise RuntimeError("bundle upgrade failed:\n" + result.stdout + result.stderr)
+            raise RuntimeError("bundle upgrade failed:\n" + output(result))
         current = launcher.resolve()
         if not launcher.is_symlink() or current == previous:
             raise RuntimeError("upgrade did not activate a new complete bundle")
-        for name in ("fabro", "sandbox-driver-host", "sandbox-driver-docker", "sandbox-driver-daytona"):
+        for name in BUNDLE:
             if (current.parent / name).read_bytes() != (source / name).read_bytes():
                 raise RuntimeError(f"upgrade did not preserve {name}")
             if previous:
@@ -254,7 +263,7 @@ esac
         # the default release lookup. No force is needed for either repair.
         result = upgrade(extra_env={"FAKE_LATEST_STABLE": f"v{version}"})
         if result.returncode or f"Already on version {version}" not in result.stderr or launcher.resolve() != current:
-            raise RuntimeError("complete same-version install was not a no-op:\n" + result.stdout + result.stderr)
+            raise RuntimeError("complete same-version install was not a no-op:\n" + output(result))
         if attempt == 0:
             # Also cover partial bundles left in managed version directories.
             (current.parent / "sandbox-driver-daytona").unlink()
@@ -267,18 +276,18 @@ esac
     checksum.write_text("0" * 64 + "\n")
     result = upgrade()
     if result.returncode == 0 or "sha256 mismatch" not in result.stderr.lower():
-        raise RuntimeError("updater accepted an invalid archive checksum:\n" + result.stdout + result.stderr)
+        raise RuntimeError("updater accepted an invalid archive checksum:\n" + output(result))
     if launcher.resolve() != previous:
         raise RuntimeError("failed upgrade changed the active bundle")
     checksum.write_text(f"{digest.hexdigest()}  {archive.name}\n")
     result = upgrade("--version", version)
     if result.returncode or not (launcher.resolve().parent / missing.name).is_file():
-        raise RuntimeError("explicit same-version repair failed:\n" + result.stdout + result.stderr)
+        raise RuntimeError("explicit same-version repair failed:\n" + output(result))
 
     def upgrade_and_tamper_new_bundle(executable=launcher):
         result = upgrade("--force", "--version", version, executable=executable)
         if result.returncode:
-            raise RuntimeError(result.stdout + result.stderr)
+            raise RuntimeError(output(result))
         with (executable.resolve().parent / "sandbox-driver-host").open("ab") as plugin:
             plugin.write(b"\nchecksum smoke test\n")
 
@@ -302,7 +311,7 @@ def main():
         root = Path(directory)
         bundle = root / "bundle"
         bundle.mkdir()
-        for name in ("fabro", "sandbox-driver-host", "sandbox-driver-docker", "sandbox-driver-daytona"):
+        for name in BUNDLE:
             shutil.copy2(source / name, bundle / name)
         workflow(bundle / "fabro", root / "valid")
         launcher, upgrade_and_tamper = upgrade_bundle(bundle, root, sys.argv[2])

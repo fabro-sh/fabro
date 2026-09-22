@@ -4,15 +4,19 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
+use fabro_static::{EnvVars, SANDBOX_PLUGIN_BINARIES, SANDBOX_PLUGINS};
 use serde::Deserialize;
 
 use super::PlannedCommand;
 
-pub(crate) const BINARIES: [&str; 3] = [
-    "sandbox-driver-host",
-    "sandbox-driver-docker",
-    "sandbox-driver-daytona",
-];
+/// Where `prepare` left the pinned plugin executables.
+pub(crate) struct PreparedPlugins {
+    /// Cargo's target directory for this workspace.
+    pub(crate) target_directory: PathBuf,
+    /// The staged plugin executables:
+    /// `<target_directory>/<target>/plugins/bin`.
+    pub(crate) directory:        PathBuf,
+}
 
 #[derive(Debug, Args)]
 pub(crate) struct PluginsArgs {
@@ -41,20 +45,38 @@ struct Package {
     reason = "dev command prints the completed plugin directory"
 )]
 pub(crate) fn plugins(args: &PluginsArgs) -> Result<()> {
-    let directory = prepare(
+    let prepared = prepare(
         &super::workspace_root(),
         args.target.as_deref(),
         args.zigbuild,
     )?;
-    println!("Verified-plugin build inputs: {}", directory.display());
+    println!(
+        "Verified-plugin build inputs: {}",
+        prepared.directory.display()
+    );
     Ok(())
 }
 
 /// Build first, then copy the exact bytes to an explicit input directory.
 /// The caller passes this directory to Cargo and keeps it unchanged until
-/// the compiled Fabro and its bundle have both been produced.
-pub(crate) fn prepare(root: &Path, target: Option<&str>, zigbuild: bool) -> Result<PathBuf> {
-    let target = target.map(str::to_owned).map_or_else(host_target, Ok)?;
+/// the compiled Fabro and its bundle have both been produced. Without an
+/// explicit target, `CARGO_BUILD_TARGET` and then the host toolchain decide,
+/// as they do for the Fabro build itself.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "dev tooling reads Cargo's configured target"
+)]
+pub(crate) fn prepare(
+    root: &Path,
+    target: Option<&str>,
+    zigbuild: bool,
+) -> Result<PreparedPlugins> {
+    let target = match target {
+        Some(target) => target.to_owned(),
+        None => std::env::var("CARGO_BUILD_TARGET")
+            .ok()
+            .map_or_else(host_target, Ok)?,
+    };
     let output = super::capture_command(
         root,
         &PlannedCommand::new("cargo")
@@ -87,41 +109,35 @@ pub(crate) fn prepare(root: &Path, target: Option<&str>, zigbuild: bool) -> Resu
         // plugins, before Petri's build script needs their completed bytes.
         .arg("-p")
         .arg("fabro-cli");
-    for binary in BINARIES {
+    for binary in SANDBOX_PLUGIN_BINARIES {
         build = build.arg("-p").arg(binary).arg("--bin").arg(binary);
     }
     super::run_command(root, &build)?;
     stage(&build_dir.join(&target).join("release"), &directory)?;
-    Ok(directory)
+    Ok(PreparedPlugins {
+        target_directory: metadata.target_directory,
+        directory,
+    })
 }
 
 fn validate_pins(metadata: &Metadata) -> Result<()> {
-    let mut packages = Vec::new();
-    for binary in BINARIES {
-        let matches: Vec<_> = metadata
+    let mut pinned: Option<&str> = None;
+    for binary in SANDBOX_PLUGIN_BINARIES {
+        let mut matches = metadata
             .packages
             .iter()
-            .filter(|package| package.name == binary)
-            .collect();
-        if matches.len() != 1 {
-            bail!(
-                "expected exactly one pinned {binary} package, found {}",
-                matches.len()
-            );
+            .filter(|package| package.name == binary);
+        let (Some(package), None) = (matches.next(), matches.next()) else {
+            bail!("expected exactly one pinned {binary} package");
+        };
+        let source = package
+            .source
+            .as_deref()
+            .filter(|source| source.starts_with("git+") && source.contains("?rev="))
+            .with_context(|| format!("{binary} must come from a Git dependency pinned by rev"))?;
+        if *pinned.get_or_insert(source) != source {
+            bail!("sandbox plugins must all use the same pinned Git revision");
         }
-        packages.push(matches[0]);
-    }
-    let source = packages[0]
-        .source
-        .as_deref()
-        .context("sandbox plugins must come from the pinned Git dependency")?;
-    if !source.starts_with("git+")
-        || !source.contains("?rev=")
-        || packages
-            .iter()
-            .any(|package| package.source.as_deref() != Some(source))
-    {
-        bail!("sandbox plugins must all use the same pinned Git revision");
     }
     Ok(())
 }
@@ -141,19 +157,17 @@ pub(crate) fn host_target() -> Result<String> {
 /// Do not use runtime SHA overrides: the release tests exercise embedded pins.
 pub(crate) fn configure(mut command: PlannedCommand, directory: &Path) -> PlannedCommand {
     command = command
-        .env("PETRI_SANDBOX_PLUGIN_DIR", directory.to_string_lossy())
-        .env("PETRI_SANDBOX_PLUGIN_DEV", "0")
-        .env("FABRO_REQUIRE_SANDBOX_PLUGINS", "1");
-    for kind in ["host", "docker", "daytona"] {
-        let upper = kind.to_ascii_uppercase();
-        command = command
-            .env_remove(format!("PETRI_SANDBOX_{upper}_SHA256"))
-            .env(
-                format!("PETRI_SANDBOX_{upper}_PLUGIN"),
-                directory
-                    .join(format!("sandbox-driver-{kind}"))
-                    .to_string_lossy(),
-            );
+        .env(
+            EnvVars::PETRI_SANDBOX_PLUGIN_DIR,
+            directory.to_string_lossy(),
+        )
+        .env(EnvVars::PETRI_SANDBOX_PLUGIN_DEV, "0")
+        .env(EnvVars::FABRO_REQUIRE_SANDBOX_PLUGINS, "1");
+    for plugin in SANDBOX_PLUGINS {
+        command = command.env_remove(plugin.sha256_var).env(
+            plugin.path_var,
+            directory.join(plugin.binary).to_string_lossy(),
+        );
     }
     command
 }
@@ -164,7 +178,7 @@ pub(crate) fn configure(mut command: PlannedCommand, directory: &Path) -> Planne
 )]
 pub(crate) fn stage(source: &Path, destination: &Path) -> Result<()> {
     // Validate the entire input before modifying the destination.
-    for binary in BINARIES {
+    for binary in SANDBOX_PLUGIN_BINARIES {
         let path = source.join(binary);
         if !path.is_file() {
             bail!("missing sandbox plugin {}", path.display());
@@ -172,7 +186,7 @@ pub(crate) fn stage(source: &Path, destination: &Path) -> Result<()> {
     }
     std::fs::create_dir_all(destination)
         .with_context(|| format!("creating {}", destination.display()))?;
-    for binary in BINARIES {
+    for binary in SANDBOX_PLUGIN_BINARIES {
         std::fs::copy(source.join(binary), destination.join(binary))
             .with_context(|| format!("staging {binary} in {}", destination.display()))?;
     }
@@ -191,7 +205,7 @@ mod tests {
     fn mixed_plugin_revisions_are_rejected() {
         let mut metadata = Metadata {
             target_directory: PathBuf::from("target"),
-            packages:         BINARIES
+            packages:         SANDBOX_PLUGIN_BINARIES
                 .iter()
                 .map(|name| Package {
                     name:   (*name).to_owned(),
@@ -211,11 +225,11 @@ mod tests {
         let destination = root.path().join("bundle");
         std::fs::create_dir_all(&source).unwrap();
         std::fs::create_dir_all(&destination).unwrap();
-        std::fs::write(source.join(BINARIES[0]), "new").unwrap();
-        std::fs::write(destination.join(BINARIES[0]), "old").unwrap();
+        std::fs::write(source.join(SANDBOX_PLUGIN_BINARIES[0]), "new").unwrap();
+        std::fs::write(destination.join(SANDBOX_PLUGIN_BINARIES[0]), "old").unwrap();
         assert!(stage(&source, &destination).is_err());
         assert_eq!(
-            std::fs::read(destination.join(BINARIES[0])).unwrap(),
+            std::fs::read(destination.join(SANDBOX_PLUGIN_BINARIES[0])).unwrap(),
             b"old"
         );
     }

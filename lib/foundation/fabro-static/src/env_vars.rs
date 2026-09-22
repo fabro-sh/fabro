@@ -45,6 +45,9 @@ impl EnvVars {
     /// so a test sees the server's wait for an answer run out; unset
     /// outside tests.
     pub const FABRO_TEST_CONTROL_ACKS_MUTED: &'static str = "FABRO_TEST_CONTROL_ACKS_MUTED";
+    /// Tests that would skip without sandbox plugins fail instead when set;
+    /// release builds set it so the pinned plugins are exercised.
+    pub const FABRO_REQUIRE_SANDBOX_PLUGINS: &'static str = "FABRO_REQUIRE_SANDBOX_PLUGINS";
     pub const FABRO_VERBOSE: &'static str = "FABRO_VERBOSE";
     pub const FABRO_WEB_URL: &'static str = "FABRO_WEB_URL";
     pub const FABRO_WORKER_TOKEN: &'static str = "FABRO_WORKER_TOKEN";
@@ -60,6 +63,9 @@ impl EnvVars {
     pub const PETRI_SANDBOX_DAYTONA_PLUGIN: &'static str = "PETRI_SANDBOX_DAYTONA_PLUGIN";
     pub const PETRI_SANDBOX_DAYTONA_SHA256: &'static str = "PETRI_SANDBOX_DAYTONA_SHA256";
     pub const PETRI_SANDBOX_PLUGIN_DEV: &'static str = "PETRI_SANDBOX_PLUGIN_DEV";
+    /// Build-time only: the directory of plugin executables whose SHA-256
+    /// Petri embeds. Read through `option_env!`, never at runtime.
+    pub const PETRI_SANDBOX_PLUGIN_DIR: &'static str = "PETRI_SANDBOX_PLUGIN_DIR";
     pub const PETRI_SANDBOX_DOCKER_HOST_ADDRESS: &'static str = "PETRI_SANDBOX_DOCKER_HOST_ADDRESS";
     pub const PETRI_SANDBOX_ACTION_HOST_IMAGE: &'static str = "PETRI_SANDBOX_ACTION_HOST_IMAGE";
 

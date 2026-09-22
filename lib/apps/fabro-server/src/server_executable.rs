@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use fabro_static::{PLUGIN_PINS_EMBEDDED, SANDBOX_PLUGIN_BINARIES, managed_install_root};
 use tempfile::TempDir;
 
 #[derive(Debug)]
@@ -19,7 +20,7 @@ impl ServerExecutable {
             .context("resolving the server executable")?
             .canonicalize()
             .context("resolving the server executable bundle")?;
-        if option_env!("PETRI_SANDBOX_PLUGIN_DIR").is_none() {
+        if !PLUGIN_PINS_EMBEDDED {
             return Ok(Self {
                 path:    executable,
                 _bundle: None,
@@ -36,11 +37,7 @@ impl ServerExecutable {
         let source = executable
             .parent()
             .context("server executable has no directory")?;
-        if source.parent().is_some_and(|parent| {
-            parent
-                .file_name()
-                .is_some_and(|name| name == ".fabro-versions")
-        }) {
+        if managed_install_root(executable).is_some() {
             // Managed bundles are already immutable and retained by the updater.
             return Ok(Self {
                 path:    executable.to_owned(),
@@ -57,12 +54,11 @@ impl ServerExecutable {
             .context("retaining the server executable bundle")?;
         fs::copy(executable, bundle.path().join("fabro"))
             .context("retaining the server executable")?;
-        for kind in ["host", "docker", "daytona"] {
-            let name = format!("sandbox-driver-{kind}");
-            let plugin = source.join(&name);
+        for name in SANDBOX_PLUGIN_BINARIES {
+            let plugin = source.join(name);
             // Incomplete installations can still use explicit plugin paths or PATH.
             // Preserve those fallbacks instead of making startup require companions.
-            match fs::copy(&plugin, bundle.path().join(&name)) {
+            match fs::copy(&plugin, bundle.path().join(name)) {
                 Ok(_) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error).with_context(|| format!("retaining {name}")),
@@ -98,13 +94,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let install = root.path().join("install");
         fs::create_dir(&install).unwrap();
-        let names = [
-            "fabro",
-            "sandbox-driver-host",
-            "sandbox-driver-docker",
-            "sandbox-driver-daytona",
-        ];
-        for name in names {
+        let names = std::iter::once("fabro").chain(SANDBOX_PLUGIN_BINARIES);
+        for name in names.clone() {
             fs::write(install.join(name), format!("old {name}")).unwrap();
         }
         let retained = ServerExecutable::retain(&install.join("fabro"), root.path()).unwrap();
@@ -123,7 +114,10 @@ mod tests {
     #[test]
     fn managed_bundle_is_reused_without_writing_to_storage() {
         let root = tempfile::tempdir().unwrap();
-        let executable = root.path().join(".fabro-versions/bundle-first/fabro");
+        let executable = root
+            .path()
+            .join(fabro_static::MANAGED_VERSIONS_DIR)
+            .join("bundle-first/fabro");
         fs::create_dir_all(executable.parent().unwrap()).unwrap();
         fs::write(&executable, b"old").unwrap();
         let retained = ServerExecutable::retain(&executable, &root.path().join("absent")).unwrap();

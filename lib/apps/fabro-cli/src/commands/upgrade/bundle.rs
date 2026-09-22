@@ -10,14 +10,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use fabro_static::{MANAGED_VERSIONS_DIR, SANDBOX_PLUGIN_BINARIES, managed_install_root};
 
-const VERSIONS_DIR: &str = ".fabro-versions";
-pub(super) const EXECUTABLES: [&str; 4] = [
-    "fabro",
-    "sandbox-driver-host",
-    "sandbox-driver-docker",
-    "sandbox-driver-daytona",
-];
+/// Every executable in a complete bundle: `fabro` first, then its plugins.
+fn executables() -> impl Iterator<Item = &'static str> {
+    std::iter::once("fabro").chain(SANDBOX_PLUGIN_BINARIES)
+}
 
 /// macOS can report the launcher symlink from `current_exe`. Enter its actual
 /// bundle before starting threads, so this process and all later workers keep
@@ -29,11 +27,7 @@ pub(crate) fn enter_managed_bundle() -> std::io::Result<()> {
 
     let executable = std::env::current_exe()?;
     let canonical = executable.canonicalize()?;
-    let managed = canonical
-        .parent()
-        .and_then(Path::parent)
-        .is_some_and(|parent| parent.file_name().is_some_and(|name| name == VERSIONS_DIR));
-    if managed && canonical != executable {
+    if managed_install_root(&canonical).is_some() && canonical != executable {
         return Err(Command::new(canonical)
             .args(std::env::args_os().skip(1))
             .exec());
@@ -48,38 +42,28 @@ pub(crate) fn enter_managed_bundle() -> std::io::Result<()> {
 
 /// Locate the public launcher from either a managed bundle or a flat install.
 pub(super) fn launcher(current_exe: &Path) -> Result<PathBuf> {
-    let parent = current_exe
-        .parent()
-        .context("Fabro executable has no parent directory")?;
-    if let Some(versions) = parent
-        .parent()
-        .filter(|path| path.file_name().is_some_and(|name| name == VERSIONS_DIR))
+    let Some(root) = managed_install_root(current_exe) else {
+        return Ok(current_exe.to_path_buf());
+    };
+    let launcher = root.join("fabro");
+    if launcher
+        .canonicalize()
+        .context("resolving the active Fabro bundle")?
+        != current_exe
     {
-        let directory = versions
-            .parent()
-            .context("bundle directory has no installation root")?;
-        let launcher = directory.join("fabro");
-        if launcher
-            .canonicalize()
-            .context("resolving the active Fabro bundle")?
-            != current_exe
-        {
-            bail!(
-                "this Fabro bundle is no longer active; retry upgrade using {}",
-                launcher.display()
-            );
-        }
-        Ok(launcher)
-    } else {
-        Ok(current_exe.to_path_buf())
+        bail!(
+            "this Fabro bundle is no longer active; retry upgrade using {}",
+            launcher.display()
+        );
     }
+    Ok(launcher)
 }
 
 #[cfg(unix)]
 pub(super) fn install(source: &Path, launcher: &Path) -> Result<()> {
     use std::os::unix::fs::{self as unix_fs, PermissionsExt};
 
-    for name in EXECUTABLES {
+    for name in executables() {
         let path = source.join(name);
         let metadata = fs::symlink_metadata(&path)
             .with_context(|| format!("release bundle is missing {name}; install a release containing the complete sandbox plugin bundle"))?;
@@ -93,13 +77,13 @@ pub(super) fn install(source: &Path, launcher: &Path) -> Result<()> {
     let directory = launcher
         .parent()
         .context("Fabro launcher has no parent directory")?;
-    let versions = directory.join(VERSIONS_DIR);
+    let versions = directory.join(MANAGED_VERSIONS_DIR);
     fs::create_dir_all(&versions).with_context(|| format!("creating {}", versions.display()))?;
     let staged = tempfile::Builder::new()
         .prefix("bundle-")
         .tempdir_in(&versions)
         .context("staging the new Fabro bundle")?;
-    for name in EXECUTABLES {
+    for name in executables() {
         fs::copy(source.join(name), staged.path().join(name))
             .with_context(|| format!("staging {name}"))?;
     }
@@ -109,6 +93,7 @@ pub(super) fn install(source: &Path, launcher: &Path) -> Result<()> {
         .context("setting bundle directory permissions")?;
     // A flat installation has no retained version yet. Preserve its old
     // executable before activation; existing plugin siblings remain untouched.
+    // The TempDir only mints a unique name: it is kept, never cleaned up.
     if fs::symlink_metadata(launcher).is_ok_and(|metadata| metadata.file_type().is_file()) {
         let previous = tempfile::Builder::new()
             .prefix("previous-")
@@ -123,7 +108,7 @@ pub(super) fn install(source: &Path, launcher: &Path) -> Result<()> {
         .tempdir_in(directory)
         .context("staging the Fabro launcher")?;
     let link = link_directory.path().join("fabro");
-    let relative = Path::new(VERSIONS_DIR)
+    let relative = Path::new(MANAGED_VERSIONS_DIR)
         .join(
             staged
                 .path()
@@ -156,7 +141,7 @@ mod tests {
 
     fn fixture(path: &Path, content: &[u8]) {
         fs::create_dir_all(path).expect("create bundle fixture directory");
-        for name in EXECUTABLES {
+        for name in executables() {
             fs::write(path.join(name), content).expect("write bundle fixture executable");
             fs::set_permissions(path.join(name), fs::Permissions::from_mode(0o755))
                 .expect("make bundle fixture executable");
@@ -187,7 +172,7 @@ mod tests {
         install(&source, &entry).unwrap();
         let second_exe = entry.canonicalize().unwrap();
         assert_ne!(first_exe, second_exe);
-        for name in EXECUTABLES {
+        for name in executables() {
             assert_eq!(
                 fs::read(first_exe.parent().unwrap().join(name)).unwrap(),
                 b"first"
@@ -213,10 +198,10 @@ mod tests {
         assert!(install(&source, &destination.join("fabro")).is_err());
         unix_fs::symlink(source.join("fabro"), plugin).unwrap();
         assert!(install(&source, &destination.join("fabro")).is_err());
-        for name in EXECUTABLES {
+        for name in executables() {
             assert_eq!(fs::read(destination.join(name)).unwrap(), b"old");
         }
-        assert!(!destination.join(VERSIONS_DIR).exists());
+        assert!(!destination.join(MANAGED_VERSIONS_DIR).exists());
     }
 
     #[test]

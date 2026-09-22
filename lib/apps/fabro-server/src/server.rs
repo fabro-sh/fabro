@@ -175,9 +175,7 @@ pub(crate) mod stream_follower;
 pub(crate) use automation_scheduler::spawn_automation_scheduler;
 pub(crate) use handler::graph::render_graph_bytes;
 #[cfg(test)]
-pub(in crate::server) use handler::graph::{
-    RenderSubprocessError, render_dot_subprocess, render_graph_bytes_with_exe_override,
-};
+pub(in crate::server) use handler::graph::{RenderSubprocessError, render_dot_subprocess};
 #[cfg(test)]
 pub(in crate::server) use handler::system::validate_github_slug;
 pub(crate) use pull_request_supervisor::spawn_pull_request_creation_supervisor;
