@@ -55,6 +55,12 @@ Shell and self-upgrade installations retain previous bundles so running servers
 can keep using their original plugins; restart the server after upgrading to
 use the new bundle.
 
+When started from a manually extracted release, the server retains a private
+copy of that flat bundle in its storage directory for its worker and graph
+rendering subprocesses. This keeps those subprocesses on the server's version
+through the first upgrade, too. The copy is removed after a graceful server
+shutdown.
+
 Older self-updaters copy only `fabro`. After upgrading from one of those
 versions, finish the transition with the new updater:
 

@@ -289,6 +289,7 @@ impl TestAppStateBuilder {
             ))
         });
         build_app_state(AppStateConfig {
+            subprocess_executable: None,
             resolved_settings: resolved_runtime_settings_for_tests(
                 self.server_settings,
                 self.manifest_run_defaults,

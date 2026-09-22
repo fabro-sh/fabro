@@ -48,6 +48,7 @@ mod sandbox_access;
 pub mod security_headers;
 pub mod serve;
 pub mod server;
+mod server_executable;
 mod server_secrets;
 mod spawn_env;
 mod startup;

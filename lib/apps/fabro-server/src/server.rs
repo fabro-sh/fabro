@@ -1096,6 +1096,7 @@ fn resolve_slack_lifecycle_route_channel(
 
 /// Shared application state for the server.
 pub struct AppState {
+    subprocess_executable: Option<PathBuf>,
     runs: Mutex<HashMap<RunId, ManagedRun>>,
     aggregate_usage: Mutex<UsageAccumulator>,
     pub(crate) stores: AppStores,
@@ -1322,6 +1323,7 @@ impl AskFabroReadiness {
 }
 
 pub(crate) struct AppStateConfig {
+    pub(crate) subprocess_executable: Option<PathBuf>,
     pub(crate) resolved_settings: ResolvedAppStateSettings,
     /// Execute runs in this process instead of a worker (tests only).
     pub(crate) execute_in_process: bool,
@@ -1379,6 +1381,10 @@ fn accumulate_usage_rollup(accumulator: &mut UsageAccumulator, rollup: &Projecti
 }
 
 impl AppState {
+    pub(crate) fn subprocess_executable(&self) -> Option<&std::path::Path> {
+        self.subprocess_executable.as_deref()
+    }
+
     pub(crate) fn manifest_run_defaults(&self) -> Arc<RunLayer> {
         Arc::clone(
             &self
@@ -2459,6 +2465,7 @@ where
 
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
+        subprocess_executable,
         resolved_settings,
         execute_in_process,
         max_concurrent_runs,
@@ -2620,6 +2627,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         }
     };
     Ok(Arc::new(AppState {
+        subprocess_executable,
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(UsageAccumulator::default()),
         stores: AppStores {
@@ -3775,7 +3783,10 @@ fn worker_launch_spec(
     github_app_private_key: Option<String>,
     daytona_api_key: Option<String>,
 ) -> anyhow::Result<WorkerLaunchSpec> {
-    let current_exe = std::env::current_exe().context("reading current executable path")?;
+    let current_exe = match state.subprocess_executable() {
+        Some(executable) => executable.to_owned(),
+        None => std::env::current_exe().context("reading current executable path")?,
+    };
     let executable =
         std::env::var_os(EnvVars::CARGO_BIN_EXE_FABRO).map_or(current_exe, PathBuf::from);
     let storage_dir = state.server_storage_dir();

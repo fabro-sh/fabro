@@ -2027,6 +2027,7 @@ fn slack_app_state_with_settings_and_secret_sources(
         vault.set(name, value, *secret_type, None).unwrap();
     }
     build_app_state(AppStateConfig {
+        subprocess_executable: None,
         resolved_settings: resolved_runtime_settings_for_tests(
             settings,
             RunLayer::default(),
@@ -5086,6 +5087,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
     let preloaded_vault = crate::test_support::test_secret_snapshot(db_pool.clone())
         .expect("test secret snapshot should build");
     let config = AppStateConfig {
+        subprocess_executable: None,
         resolved_settings: resolved_runtime_settings_for_tests(
             github_token_settings(),
             RunLayer::default(),
@@ -10792,6 +10794,7 @@ methods = ["dev-token"]
     let preloaded_vault = crate::test_support::test_secret_snapshot(db_pool.clone())
         .expect("test secret snapshot should build");
     let Err(err) = build_app_state(AppStateConfig {
+        subprocess_executable: None,
         resolved_settings: resolved_runtime_settings_for_tests(
             server_settings,
             RunLayer::default(),
@@ -10847,6 +10850,7 @@ fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
         .unwrap();
 
     let state = build_app_state(AppStateConfig {
+        subprocess_executable: None,
         resolved_settings: resolved_runtime_settings_for_tests(
             settings,
             RunLayer::default(),

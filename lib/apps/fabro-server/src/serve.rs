@@ -25,7 +25,7 @@ use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use object_store::{ClientOptions, ObjectStore, RetryConfig};
 use tokio::net::{TcpListener, UnixListener};
-use tokio::task::JoinHandle;
+use tokio::task::{self, JoinHandle};
 use tokio::time::{interval, sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -38,6 +38,7 @@ use crate::server::{
     build_router_with_options, reconcile_incomplete_runs_on_startup, shutdown_active_workers,
     spawn_automation_scheduler, spawn_pull_request_creation_supervisor, spawn_scheduler,
 };
+use crate::server_executable::ServerExecutable;
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::startup::{resolve_startup, validate_startup_configuration};
 use crate::static_files;
@@ -727,7 +728,13 @@ where
     let env_lookup: EnvLookup = Arc::new(process_env_var);
     resolve_canonical_origin(&resolved_server_settings, &env_lookup).map_err(anyhow::Error::msg)?;
     let shutdown = CancellationToken::new();
+    let executable_storage = data_dir.clone();
+    let subprocess_executable =
+        task::spawn_blocking(move || ServerExecutable::current(&executable_storage))
+            .await
+            .context("retaining the server executable task failed")??;
     let state = build_app_state(AppStateConfig {
+        subprocess_executable: Some(subprocess_executable.path().to_owned()),
         resolved_settings: resolved_app_settings,
         execute_in_process: false,
         max_concurrent_runs,

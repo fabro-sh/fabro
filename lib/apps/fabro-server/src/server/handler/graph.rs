@@ -80,7 +80,7 @@ async fn render_graph_from_manifest(
         RenderWorkflowGraphDirection::Tb => "TB",
     });
     let dot_source = run_manifest::graph_source(&prepared, direction);
-    render_graph_bytes(&dot_source).await
+    render_graph_bytes(&dot_source, state.subprocess_executable()).await
 }
 
 #[expect(
@@ -229,8 +229,11 @@ async fn render_graph_response(
     }
 }
 
-pub(crate) async fn render_graph_bytes(dot_source: &str) -> Response {
-    render_graph_response(dot_source, None).await
+pub(crate) async fn render_graph_bytes(
+    dot_source: &str,
+    executable: Option<&std::path::Path>,
+) -> Response {
+    render_graph_response(dot_source, executable).await
 }
 
 #[cfg(test)]
@@ -294,7 +297,7 @@ async fn get_graph(
         _ => dot,
     };
 
-    render_graph_bytes(&dot).await
+    render_graph_bytes(&dot, state.subprocess_executable()).await
 }
 
 async fn get_graph_source(

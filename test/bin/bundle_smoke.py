@@ -31,6 +31,7 @@ def workflow(fabro, root, expect_tampered=False, after_first_run=None):
     )
     (root / "workflow.toml").write_text(
         '_version = 1\n[workflow]\ngraph = "workflow.fabro"\n'
+        '[run.environment]\nid = "local"\n'
     )
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -96,6 +97,9 @@ def workflow(fabro, root, expect_tampered=False, after_first_run=None):
                 result = run("run", str(root / "workflow.toml"), "--environment", "local", "--auto-approve")
                 if result.returncode:
                     raise RuntimeError("running server lost its original plugin bundle after an upgrade:\n" + result.stdout + result.stderr)
+                graph_result = run("graph", str(root / "workflow.toml"))
+                if graph_result.returncode or "<svg" not in graph_result.stdout:
+                    raise RuntimeError("running server lost its graph renderer after an upgrade:\n" + graph_result.stdout + graph_result.stderr)
         finally:
             # Terminate only the process group created for this isolated server.
             try:
@@ -108,6 +112,9 @@ def workflow(fabro, root, expect_tampered=False, after_first_run=None):
             except subprocess.TimeoutExpired:
                 os.killpg(server.pid, signal.SIGKILL)
                 server.wait(timeout=15)
+
+    if list((root / "storage").glob(".server-bundle-*")):
+        raise RuntimeError("server left its private executable bundle behind after shutdown")
 
 
 def upgrade_bundle(source, root, target):
@@ -196,9 +203,9 @@ esac
     if "`fabro upgrade`" not in doctor.stdout or "--force" in doctor.stdout:
         raise RuntimeError("incomplete installation did not explain how to finish the upgrade:\n" + doctor.stdout + doctor.stderr)
 
-    def upgrade(*args, extra_env=None):
+    def upgrade(*args, extra_env=None, executable=launcher):
         return subprocess.run(
-            [str(launcher), "upgrade", *args],
+            [str(executable), "upgrade", *args],
             env={**env, **(extra_env or {})}, capture_output=True, text=True, timeout=120,
         )
 
@@ -268,12 +275,23 @@ esac
     if result.returncode or not (launcher.resolve().parent / missing.name).is_file():
         raise RuntimeError("explicit same-version repair failed:\n" + result.stdout + result.stderr)
 
-    def upgrade_and_tamper_new_bundle():
-        result = upgrade("--force", "--version", version)
+    def upgrade_and_tamper_new_bundle(executable=launcher):
+        result = upgrade("--force", "--version", version, executable=executable)
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
-        with (launcher.resolve().parent / "sandbox-driver-host").open("ab") as plugin:
+        with (executable.resolve().parent / "sandbox-driver-host").open("ab") as plugin:
             plugin.write(b"\nchecksum smoke test\n")
+
+    # The first upgrade from a manually extracted, flat release must preserve
+    # worker identity too, before the server has ever entered a managed bundle.
+    flat_install = root / "flat-install"
+    shutil.copytree(source, flat_install)
+    flat_launcher = flat_install / "fabro"
+    workflow(
+        flat_launcher, root / "flat-upgraded",
+        after_first_run=lambda: upgrade_and_tamper_new_bundle(flat_launcher),
+    )
+    workflow(flat_launcher, root / "flat-tampered", expect_tampered=True)
 
     return launcher, upgrade_and_tamper_new_bundle
 

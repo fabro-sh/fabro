@@ -532,10 +532,10 @@ const DEMO_GRAPH_DOT: &str = "digraph demo {\n  graph [goal=\"Demo\"]\n  rankdir
 
 pub(crate) async fn get_run_graph(
     _auth: RequiredUser,
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
-    crate::server::render_graph_bytes(DEMO_GRAPH_DOT).await
+    crate::server::render_graph_bytes(DEMO_GRAPH_DOT, state.subprocess_executable()).await
 }
 
 pub(crate) async fn get_run_graph_source(
