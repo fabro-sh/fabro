@@ -1,6 +1,7 @@
 extern crate self as fabro_types;
 
 pub mod agent_props;
+mod artifact_source;
 pub mod auth;
 pub mod blob_hash;
 pub mod blob_ref;
@@ -69,6 +70,7 @@ pub use agent_props::{
     AgentEventProps, AgentSessionActivatedProps, AgentToolsAvailableProps, CODING_EVENT_NAMES,
     SessionCapability, StagePromptProps, coding_event_name, is_coding_event_name,
 };
+pub use artifact_source::{ARTIFACT_MAX_FILE_BYTES, ArtifactSource};
 pub use auth::{IdpIdentity, IdpIdentityError};
 pub use blob_hash::BlobHash;
 pub use blob_ref::{

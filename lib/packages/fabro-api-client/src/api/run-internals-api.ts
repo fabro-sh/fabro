@@ -1020,6 +1020,55 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
+         * Stores captured file bytes in the configured artifact backend for this run. Requires a worker token belonging to the run. The body is limited to 10 MiB and must match the SHA-256 digest. Repeating the same upload is safe. Uploading content alone does not create an artifact listing entry.
+         * @summary Write Captured Artifact Content
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} digest
+         * @param {File} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        writeRunArtifactContent: async (id: string, digest: string, body: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('writeRunArtifactContent', 'id', id)
+            // verify required parameter 'digest' is not null or undefined
+            assertParamExists('writeRunArtifactContent', 'digest', digest)
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('writeRunArtifactContent', 'body', body)
+            const localVarPath = `/api/v1/runs/{id}/artifacts/content/{digest}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"digest"}}`, encodeURIComponent(String(digest)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/octet-stream';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Writes an opaque binary blob and returns its content-addressed blob hash.
          * @summary Write Run Blob
          * @param {string} id Unique run identifier (ULID).
@@ -1371,6 +1420,21 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Stores captured file bytes in the configured artifact backend for this run. Requires a worker token belonging to the run. The body is limited to 10 MiB and must match the SHA-256 digest. Repeating the same upload is safe. Uploading content alone does not create an artifact listing entry.
+         * @summary Write Captured Artifact Content
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} digest
+         * @param {File} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async writeRunArtifactContent(id: string, digest: string, body: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.writeRunArtifactContent(id, digest, body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.writeRunArtifactContent']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Writes an opaque binary blob and returns its content-addressed blob hash.
          * @summary Write Run Blob
          * @param {string} id Unique run identifier (ULID).
@@ -1626,6 +1690,18 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          */
         writePetriBlob(id: string, owner: string, body: File, options?: RawAxiosRequestConfig): AxiosPromise<WriteBlobResponse> {
             return localVarFp.writePetriBlob(id, owner, body, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Stores captured file bytes in the configured artifact backend for this run. Requires a worker token belonging to the run. The body is limited to 10 MiB and must match the SHA-256 digest. Repeating the same upload is safe. Uploading content alone does not create an artifact listing entry.
+         * @summary Write Captured Artifact Content
+         * @param {string} id Unique run identifier (ULID).
+         * @param {string} digest
+         * @param {File} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        writeRunArtifactContent(id: string, digest: string, body: File, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.writeRunArtifactContent(id, digest, body, options).then((request) => request(axios, basePath));
         },
         /**
          * Writes an opaque binary blob and returns its content-addressed blob hash.
@@ -1898,6 +1974,19 @@ export class RunInternalsApi extends BaseAPI {
      */
     public writePetriBlob(id: string, owner: string, body: File, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).writePetriBlob(id, owner, body, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Stores captured file bytes in the configured artifact backend for this run. Requires a worker token belonging to the run. The body is limited to 10 MiB and must match the SHA-256 digest. Repeating the same upload is safe. Uploading content alone does not create an artifact listing entry.
+     * @summary Write Captured Artifact Content
+     * @param {string} id Unique run identifier (ULID).
+     * @param {string} digest
+     * @param {File} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public writeRunArtifactContent(id: string, digest: string, body: File, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).writeRunArtifactContent(id, digest, body, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

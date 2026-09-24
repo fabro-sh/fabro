@@ -3085,6 +3085,76 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/artifacts/content/{digest}:
+    put:
+      operationId: writeRunArtifactContent
+      tags: [Run Internals]
+      summary: Write Captured Artifact Content
+      description: >
+        Stores captured file bytes in the configured artifact backend for this run.
+        Requires a worker token belonging to the run. The body is limited to
+        10 MiB and must match the SHA-256 digest. Repeating the same upload is
+        safe. Uploading content alone does not create an artifact listing entry.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: digest
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/BlobHash"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: Complete content stored
+        "400":
+          description: Invalid digest or digest does not match the body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: A worker token belonging to this run is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run is archived
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Content exceeds 10 MiB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Artifact storage failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/blobs:
     post:
       operationId: writeRunBlob
@@ -12898,6 +12968,43 @@ components:
         diff:
           $ref: "#/components/schemas/RunDiff"
 
+    ArtifactSource:
+      description: Exactly one payload source; object content is owned by the containing run.
+      type: object
+      properties:
+        blob:
+          $ref: "#/components/schemas/BlobHash"
+        object:
+          $ref: "#/components/schemas/BlobHash"
+      oneOf:
+        - required: [blob]
+        - required: [object]
+
+    RunArtifact:
+      description: A captured workspace file with its durable payload source.
+      type: object
+      oneOf:
+        - required: [blob]
+        - required: [object]
+      required: [stage_id, retry, relative_path, size]
+      properties:
+        blob:
+          $ref: "#/components/schemas/BlobHash"
+        object:
+          $ref: "#/components/schemas/BlobHash"
+        stage_id:
+          $ref: "#/components/schemas/StageId"
+        retry:
+          type: integer
+          format: uint32
+          minimum: 1
+        relative_path:
+          type: string
+        size:
+          type: integer
+          format: uint64
+          minimum: 0
+
     RunProjection:
       description: Raw internal run projection derived from the event log.
       type: object
@@ -12940,6 +13047,11 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RunControlAction"
             - type: "null"
+        artifacts:
+          type: array
+          description: Captured files; older projections may omit this field.
+          items:
+            $ref: "#/components/schemas/RunArtifact"
         checkpoints:
           type: array
           description: Sequence-tagged checkpoint history entries.

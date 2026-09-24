@@ -623,6 +623,8 @@ fn main() {
         ("ModelCosts", "fabro_types::ModelCosts", &[]),
         ("ModelTestMode", "fabro_types::ModelTestMode", &[]),
         ("RunProjection", "fabro_types::RunProjection", &[]),
+        ("ArtifactSource", "fabro_types::ArtifactSource", &[]),
+        ("RunArtifact", "fabro_types::RunArtifact", &[]),
         ("PairId", "fabro_types::PairId", &[]),
         ("PairMessageId", "fabro_types::PairMessageId", &[]),
         ("PairStatus", "fabro_types::PairStatus", &[]),

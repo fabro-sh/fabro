@@ -57,6 +57,7 @@ models/api-question.ts
 models/approval-mode.ts
 models/artifact-entry.ts
 models/artifact-list-response.ts
+models/artifact-source.ts
 models/artifacts-settings.ts
 models/ask-fabro.ts
 models/auth-config-response.ts
@@ -375,6 +376,7 @@ models/run-approval-state.ts
 models/run-approval.ts
 models/run-artifact-entry.ts
 models/run-artifact-list-response.ts
+models/run-artifact.ts
 models/run-branch-settings.ts
 models/run-checkpoint-settings.ts
 models/run-checkpoint.ts

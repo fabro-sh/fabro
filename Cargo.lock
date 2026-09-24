@@ -2539,6 +2539,7 @@ dependencies = [
  "fabro-workflow",
  "httpmock",
  "lithos-llm",
+ "object_store",
  "pebble-coding-agent",
  "petri-attractor-steps",
  "petri-execution",

@@ -71,6 +71,7 @@ use fabro_auth::VaultCredentialSource;
 use fabro_client::{Client, ServerTarget};
 use fabro_interview::{ControlInterviewer, WorkerControlMessage, WorkerControlOutcome};
 use fabro_llm::credentials::{CredentialProvider, readiness};
+use fabro_petri::artifacts::ClientArtifactWriter;
 use fabro_petri::blobs::ClientBlobs;
 use fabro_petri::controls::{RunControls, SteerError};
 use fabro_petri::engine::{self, Conclusion, Execution, RunRequest};
@@ -219,6 +220,10 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
         observers,
         secrets: Some(Arc::new(secrets)),
         blobs: Some(Arc::new(ClientBlobs::new(
+            worker.client.clone_for_reuse(),
+            run_id,
+        ))),
+        artifact_writer: Some(Arc::new(ClientArtifactWriter::new(
             worker.client.clone_for_reuse(),
             run_id,
         ))),

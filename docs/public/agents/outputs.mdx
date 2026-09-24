@@ -254,9 +254,11 @@ When `[run.artifacts]` contains include patterns, Fabro scans the sandbox after 
 
 1. Fabro compiles and validates the configured workspace-relative globs.
 2. The sandbox provider enumerates regular files and their sizes without recursing through symlinks below the workspace root.
-3. Fabro applies the globs to normalized relative paths, enforces its collection limits, and downloads the selected files.
+3. Fabro applies the globs to normalized relative paths, enforces its collection limits, and copies selected files to the local directory or S3 bucket configured by `server.artifacts`. Originals remain in the sandbox.
 
-Each scan represents the post-stage workspace state; Fabro does not depend on filesystem modification timestamps. The same path and content hash is recorded only once per run, even when it still matches after later stages. Individual files over 10 MB are skipped, and each collection is limited to 100 files and 50 MB total.
+Each scan represents the post-stage workspace state; Fabro does not depend on filesystem modification timestamps. The same path and content hash is recorded only once per run, even when it still matches after later stages. Individual files over 10 MiB (10,485,760 bytes) are skipped, and each collection is limited to 100 files and 50 MiB total. A file exactly 10 MiB can be captured.
+
+New artifact bytes use the configured artifact backend, with stage and filename metadata in SQLite. Existing captures stored as SQLite blobs remain readable without moving their bytes. Generic offloaded context values and checkpoint patches continue to use SQLite blobs.
 
 ### What gets captured
 

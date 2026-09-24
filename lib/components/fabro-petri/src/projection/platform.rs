@@ -121,7 +121,7 @@ impl RunView {
                     retry: record.attempt,
                     relative_path: record.path.clone(),
                     size: record.bytes,
-                    blob: record.blob,
+                    source: record.source,
                 });
             }
             PlatformRecord::RunDiff(record) => {

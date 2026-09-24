@@ -4958,8 +4958,7 @@ fn named_workflow_dot(name: &str, goal: &str) -> String {
     )
 }
 
-/// Write one artifact for a stage the way the hooks do: straight into the
-/// artifact store.
+/// Seed a historical stage-keyed object for artifact reader tests.
 async fn seed_stage_artifact(
     state: &AppState,
     run_id: &str,
@@ -10974,3 +10973,5 @@ fn an_unsettled_run_takes_the_stores_status_or_a_termination_at_worker_exit() {
         RunStatus::Running
     );
 }
+
+mod artifact_storage;

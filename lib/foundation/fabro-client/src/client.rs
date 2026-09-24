@@ -1842,6 +1842,26 @@ impl Client {
         Ok(())
     }
 
+    /// Upload complete captured file content using this run's worker token.
+    pub async fn write_run_artifact_content(
+        &self,
+        run_id: &RunId,
+        digest: &BlobHash,
+        data: &[u8],
+    ) -> Result<()> {
+        self.send_api(|client| async move {
+            client
+                .write_run_artifact_content()
+                .id(run_id.to_string())
+                .digest(*digest)
+                .body(data.to_vec())
+                .send()
+                .await
+        })
+        .await?;
+        Ok(())
+    }
+
     pub async fn write_run_blob(&self, run_id: &RunId, data: &[u8]) -> Result<BlobHash> {
         let response = self
             .send_api(|client| async move {

@@ -62,6 +62,7 @@
 //! under `petri_*` keys.
 
 pub mod admission;
+pub mod artifacts;
 pub mod blobs;
 pub mod check;
 pub mod checkpoint;

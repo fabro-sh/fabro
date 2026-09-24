@@ -27,8 +27,9 @@
 use std::sync::Arc;
 
 use fabro_types::{
-    BlobHash, DiffSummary, GitIdentity, PairId, PairTarget, Principal, PullRequestCreationId,
-    PullRequestLink, RunControlAction, RunId, RunNoticeLevel, RunSpec, RunStatus,
+    ArtifactSource, BlobHash, DiffSummary, GitIdentity, PairId, PairTarget, Principal,
+    PullRequestCreationId, PullRequestLink, RunControlAction, RunId, RunNoticeLevel, RunSpec,
+    RunStatus,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnection, SqliteRow};
@@ -190,7 +191,7 @@ pub enum PlatformRecord {
     #[serde(rename = "checkpoint")]
     Checkpoint(CheckpointRecord),
     /// A file a stage's attempt left in its workspace, collected under
-    /// `[run.artifacts] include` into the blob table.
+    /// `[run.artifacts] include` into configured artifact storage.
     #[serde(rename = "artifact.collected")]
     ArtifactCollected(ArtifactCollectedRecord),
     /// The run's whole diff, its run branch against its base commit, written
@@ -449,6 +450,7 @@ pub struct CheckpointRecord {
 
 /// One file collected from a stage's workspace after its attempt finished.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ArtifactCollectedWire")]
 pub struct ArtifactCollectedRecord {
     pub execution: u64,
     pub firing:    u64,
@@ -456,14 +458,50 @@ pub struct ArtifactCollectedRecord {
     pub attempt:   u32,
     /// The file's path relative to the workspace root.
     pub path:      String,
-    /// The blob that holds the file's bytes.
-    pub blob:      BlobHash,
+    /// Where the file's bytes are stored.
+    #[serde(flatten)]
+    pub source:    ArtifactSource,
     pub bytes:     u64,
     /// The SHA-256 of the bytes as lowercase hex: with `path`, the identity
     /// a later capture of the same unchanged file is matched by.
     pub digest:    String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<OperationKey>,
+}
+
+/// Private decoding boundary for validating the redundant legacy checksum.
+#[derive(Deserialize)]
+struct ArtifactCollectedWire {
+    execution: u64,
+    firing:    u64,
+    attempt:   u32,
+    path:      String,
+    #[serde(flatten)]
+    source:    ArtifactSource,
+    bytes:     u64,
+    digest:    String,
+    #[serde(default)]
+    operation: Option<OperationKey>,
+}
+
+impl TryFrom<ArtifactCollectedWire> for ArtifactCollectedRecord {
+    type Error = &'static str;
+
+    fn try_from(wire: ArtifactCollectedWire) -> std::result::Result<Self, Self::Error> {
+        if wire.digest != wire.source.hash().to_string() {
+            return Err("artifact checksum does not match its payload source");
+        }
+        Ok(Self {
+            execution: wire.execution,
+            firing:    wire.firing,
+            attempt:   wire.attempt,
+            path:      wire.path,
+            source:    wire.source,
+            bytes:     wire.bytes,
+            digest:    wire.digest,
+            operation: wire.operation,
+        })
+    }
 }
 
 /// The run's diff: its run branch's head against its base commit.
@@ -744,6 +782,27 @@ mod tests {
         ]))
     }
 
+    #[test]
+    fn artifact_records_preserve_old_json_and_validate_sources_and_checksums() {
+        let hash = BlobHash::new(b"report");
+        for source in ["blob", "object"] {
+            let mut wire = json!({
+                "kind":"artifact.collected", "execution":0, "firing":3,
+                "attempt":1, "path":"assets/report.txt", "bytes":6,
+                "digest":hash.to_string()
+            });
+            wire[source] = json!(hash);
+            let record: PlatformRecord = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&record).unwrap(), wire);
+            wire["digest"] = json!(BlobHash::new(b"different").to_string());
+            assert!(serde_json::from_value::<PlatformRecord>(wire.clone()).is_err());
+            wire["digest"] = json!(hash.to_string());
+            wire["blob"] = json!(hash);
+            wire["object"] = json!(hash);
+            assert!(serde_json::from_value::<PlatformRecord>(wire).is_err());
+        }
+    }
+
     fn sample(kind: PlatformRecordKind) -> PlatformRecord {
         match kind {
             PlatformRecordKind::RunCreated => PlatformRecord::RunCreated(RunCreatedRecord {
@@ -826,7 +885,7 @@ mod tests {
                     firing:    3,
                     attempt:   1,
                     path:      "assets/report.txt".to_string(),
-                    blob:      BlobHash::new(b"report"),
+                    source:    ArtifactSource::SqliteBlob(BlobHash::new(b"report")),
                     bytes:     6,
                     digest:    BlobHash::new(b"report").to_string(),
                     operation: Some(OperationKey {

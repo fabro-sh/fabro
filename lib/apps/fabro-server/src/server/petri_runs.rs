@@ -40,6 +40,7 @@ use fabro_config::{
     EnvironmentImageLayer, EnvironmentLayer, Home, MergeMap, SettingsLayer, Storage,
 };
 use fabro_interview::ControlInterviewer;
+use fabro_petri::artifacts::StoreArtifactWriter;
 use fabro_petri::controls::RunControls;
 use fabro_petri::engine::{self, Conclusion, Execution, RunRequest};
 use fabro_petri::hooks::HooksSpec;
@@ -479,6 +480,10 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
         observers,
         secrets: Some(Arc::new(VaultSecrets::from_vault(&vault))),
         blobs: Some(state.store_ref().blobs()),
+        artifact_writer: Some(Arc::new(StoreArtifactWriter::new(
+            state.artifact_store.clone(),
+            run_id,
+        ))),
         hooks: Some(hooks),
     };
     let result = Box::pin(engine::run(request)).await;
