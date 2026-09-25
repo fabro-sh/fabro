@@ -36,6 +36,9 @@ import type { PullRequestCreation } from './pull-request-creation';
 import type { PullRequestLink } from './pull-request-link';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunArtifact } from './run-artifact';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunControlAction } from './run-control-action';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -76,6 +79,10 @@ export interface RunProjection {
     'status_updated_at': string;
     'last_event_at': string;
     'pending_control'?: RunControlAction | null;
+    /**
+     * Captured files; older projections may omit this field.
+     */
+    'artifacts'?: Array<RunArtifact>;
     /**
      * Sequence-tagged checkpoint history entries.
      */

@@ -148,7 +148,7 @@ stages live in the child invocation and list under the fork (see Parallel).
 | notes | `StageCompletion.notes` | `step.finished` `outcome` notes; `parsed.note {result_prepared, transition}` | attempt |
 | files touched | `stage.completed` `files_touched` | Pebble's fold of envelope `ToolCallCompleted` (see Agent activity) | session |
 | stage diff | `StageProjection.diff` | platform record `checkpoint {execution, firing, patch_blob}` | stage |
-| artifacts | `RunArtifactEntry {stage_id, node_slug, retry, relative_path, size}`, the stage artifact endpoints | platform record `artifact.collected {execution, firing, attempt, path, blob, bytes, digest}` from the `transition` hook, the bytes in the blob table; a file unchanged since an earlier capture is not recorded again | attempt |
+| artifacts | `RunArtifactEntry {stage_id, node_slug, retry, relative_path, size}`, the stage artifact endpoints | platform record `artifact.collected {execution, firing, attempt, path, object (or historical blob), bytes, digest}` from the `transition` hook, new bytes in configured artifact storage, historical blob sources in SQLite; a file unchanged since an earlier capture is not recorded again | attempt |
 | checkout | `setup.*` lines, `attractor.checkout` | the root `start` stage's `custom attractor.checkout {repository, commit, depth, files}` and its log lines; `[run.prepare]` commands are `run_prepare_N` stages | stage |
 | hook decisions | none today | `parsed.note {kind: hook}` (`HookReport`), `custom attractor.hook` (a point a step asks itself), `parsed.hook_activity`; `run.note.recorded` for run-level points | attempt |
 | budget pause | none today | `parsed.budget {state, attempt, remaining_ms, pending_questions}` | attempt |

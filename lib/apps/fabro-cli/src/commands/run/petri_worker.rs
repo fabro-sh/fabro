@@ -71,6 +71,7 @@ use fabro_auth::VaultCredentialSource;
 use fabro_client::{Client, ServerTarget};
 use fabro_interview::{ControlInterviewer, WorkerControlMessage, WorkerControlOutcome};
 use fabro_llm::credentials::{CredentialProvider, readiness};
+use fabro_petri::artifacts::ClientArtifactWriter;
 use fabro_petri::blobs::ClientBlobs;
 use fabro_petri::controls::{RunControls, SteerError};
 use fabro_petri::engine::{self, Conclusion, Execution, RunRequest};
@@ -197,8 +198,15 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
     }
     runner::set_worker_title(&run_id, WorkerTitlePhase::Running);
 
-    let hooks = HooksSpec::for_run(Arc::clone(&records), &worker.run_state.spec.settings.run)
-        .with_test_gates(test_checkpoint_gates());
+    let hooks = HooksSpec::for_run(
+        Arc::clone(&records),
+        &worker.run_state.spec.settings.run,
+        Arc::new(ClientArtifactWriter::new(
+            worker.client.clone_for_reuse(),
+            run_id,
+        )),
+    )
+    .with_test_gates(test_checkpoint_gates());
     let request = RunRequest {
         run_id: run_id.to_string(),
         run_dir: worker.run_dir.join("petri"),

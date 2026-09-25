@@ -105,8 +105,9 @@ the stream places them with its finish), `checkpoint` after every route with the
 stage's diff from its parent commit (`diff_summary`, and the patch as a
 text blob under `patch_blob`), `artifact.collected` for every file under
 `[run.artifacts] include` a stage left in its workspace (the bytes go to
-the blob table; a file unchanged since an earlier capture is not recorded
-again), and `run.diff` at the run's end (the run branch's last checkpoint
+the configured local/S3 artifact store through a run-bound writer; a file
+unchanged since an earlier capture is not recorded again), and `run.diff`
+at the run's end (the run branch's last checkpoint
 against the base, summary and patch blob). The projection folds them into
 `start`, `git_identity`, `checkpoints[].diff`, `StageProjection.diff`,
 `artifacts` and `Conclusion.diff`; a patch is carried as its
@@ -188,8 +189,9 @@ Integration tests live under `tests/`:
   interoperation with Fabro's `BlobStore`.
 - `hooks.rs` runs command-only bundles through the engine assembly with
   Fabro's hooks over the memory store, in-memory platform records and an
-  in-memory blob table: every finish is committed and recorded, a failed
-  stage's route sees its files, a failed checkpoint ends the run, the run
+  in-memory blob table and separate local artifact store: every finish is
+  committed and recorded, a failed stage's route sees its files, a failed
+  checkpoint ends the run, the run
   branch, identity, artifacts, per-checkpoint diffs and the run diff are
   recorded, and the Docker and Daytona variants commit inside their
   sandboxes.

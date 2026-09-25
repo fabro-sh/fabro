@@ -2262,8 +2262,7 @@ async fn write_artifact_store_metadata(
     settings: &ServerSettings,
     storage_dir: &Path,
 ) -> anyhow::Result<()> {
-    let mut settings = settings.clone();
-    settings.server.storage.root = storage_dir.display().to_string();
+    let settings = settings.clone().with_storage_override(storage_dir);
     let (object_store, prefix) = serve::build_artifact_object_store(&settings.server)?;
     let artifact_store = ArtifactStore::new(object_store, prefix);
     artifact_store.write_metadata(FABRO_VERSION).await?;
@@ -2596,8 +2595,12 @@ methods = ["dev-token"]
             .await
             .unwrap();
 
-        let mut overridden = settings.clone();
-        overridden.server.storage.root = dir.path().display().to_string();
+        assert!(
+            dir.path()
+                .join("objects/artifacts/store-metadata.json")
+                .is_file()
+        );
+        let overridden = settings.clone().with_storage_override(dir.path());
         let (object_store, prefix) =
             crate::serve::build_artifact_object_store(&overridden.server).unwrap();
         let marker = if prefix.is_empty() {

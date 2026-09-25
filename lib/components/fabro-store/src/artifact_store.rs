@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::Utc;
-use fabro_types::RunId;
+use fabro_types::{BlobHash, RunId};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use object_store::ObjectStore;
@@ -74,11 +74,45 @@ impl ArtifactStore {
     }
 
     pub async fn put(&self, run_id: &RunId, key: &ArtifactKey, data: &[u8]) -> Result<()> {
-        let path = self.artifact_path(run_id, key)?;
+        self.put_at(&self.artifact_path(run_id, key)?, data).await
+    }
+
+    /// Publish a complete captured file under its content digest within the
+    /// run. `hash` must be `BlobHash::new(data)`; callers verify or compute
+    /// it. Repeating a put of the same content is safe; metadata is recorded
+    /// separately only after this operation succeeds.
+    pub async fn put_capture(&self, run_id: &RunId, hash: &BlobHash, data: &[u8]) -> Result<()> {
+        debug_assert_eq!(*hash, BlobHash::new(data));
+        self.put_at(&self.capture_path(run_id, hash)?, data).await
+    }
+
+    /// Read run-owned content named by a capture record, without consulting
+    /// historical stage keys or the SQLite blob table.
+    pub async fn get_capture(&self, run_id: &RunId, hash: &BlobHash) -> Result<Option<Bytes>> {
+        self.get_at(&self.capture_path(run_id, hash)?).await
+    }
+
+    fn capture_prefix(&self, run_id: &RunId) -> Result<ObjectPath> {
+        Ok(self.run_prefix(run_id)?.child("captures").child("sha256"))
+    }
+
+    fn capture_path(&self, run_id: &RunId, hash: &BlobHash) -> Result<ObjectPath> {
+        Ok(self.capture_prefix(run_id)?.child(hash.to_string()))
+    }
+
+    async fn put_at(&self, path: &ObjectPath, data: &[u8]) -> Result<()> {
         self.object_store
-            .put(&path, Bytes::copy_from_slice(data).into())
+            .put(path, Bytes::copy_from_slice(data).into())
             .await?;
         Ok(())
+    }
+
+    async fn get_at(&self, path: &ObjectPath) -> Result<Option<Bytes>> {
+        match self.object_store.get(path).await {
+            Ok(result) => Ok(Some(result.bytes().await?)),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
     }
 
     pub fn writer(&self, run_id: &RunId, key: &ArtifactKey) -> Result<BufWriter> {
@@ -115,12 +149,7 @@ impl ArtifactStore {
     }
 
     pub async fn get(&self, run_id: &RunId, key: &ArtifactKey) -> Result<Option<Bytes>> {
-        let path = self.artifact_path(run_id, key)?;
-        match self.object_store.get(&path).await {
-            Ok(result) => Ok(Some(result.bytes().await?)),
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
+        self.get_at(&self.artifact_path(run_id, key)?).await
     }
 
     pub async fn get_stream(
@@ -152,9 +181,15 @@ impl ArtifactStore {
 
     pub async fn list_for_run(&self, run_id: &RunId) -> Result<Vec<NodeArtifact>> {
         let prefix = self.run_prefix(run_id)?;
+        let captures = self.capture_prefix(run_id)?;
         let mut stream = self.object_store.list(Some(&prefix));
         let mut artifacts = Vec::new();
         while let Some(meta) = stream.next().await.transpose()? {
+            // Capture metadata lives in platform records. Content objects
+            // must not be decoded as historical stage/retry/path entries.
+            if meta.location.prefix_match(&captures).is_some() {
+                continue;
+            }
             artifacts.push(decode_artifact_location(
                 &prefix,
                 &meta.location,
@@ -425,6 +460,66 @@ mod tests {
     fn test_store() -> ArtifactStore {
         let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         ArtifactStore::new(object_store, "artifacts")
+    }
+
+    #[tokio::test]
+    async fn captures_are_run_owned_hidden_from_legacy_listing_and_deleted_with_the_run() {
+        let objects: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let store = ArtifactStore::new(objects.clone(), "artifacts");
+        let run = RunId::new();
+        let other = RunId::new();
+        let bytes = b"binary\0capture";
+        let hash = fabro_types::BlobHash::new(bytes);
+        let legacy = ArtifactKey::new(StageId::new("captures", 1), 1, "sha256/report.bin");
+        store.write_metadata("test").await.unwrap();
+        store.put(&run, &legacy, b"legacy").await.unwrap();
+        for id in [&run, &run, &other] {
+            store.put_capture(id, &hash, bytes).await.unwrap();
+        }
+        let location = ObjectPath::from(format!("artifacts/{run}/captures/sha256/{hash}"));
+        assert_eq!(
+            objects.get(&location).await.unwrap().bytes().await.unwrap(),
+            bytes.as_slice()
+        );
+        assert_eq!(
+            store.get_capture(&run, &hash).await.unwrap().unwrap(),
+            bytes.as_slice()
+        );
+        assert_eq!(store.list_for_run(&run).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .list_for_node(&run, &legacy.stage_id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        store.delete_for_run(&run).await.unwrap();
+        assert!(store.get_capture(&run, &hash).await.unwrap().is_none());
+        assert!(store.get(&run, &legacy).await.unwrap().is_none());
+        assert_eq!(
+            store.get_capture(&other, &hash).await.unwrap().unwrap(),
+            bytes.as_slice()
+        );
+        assert!(
+            objects
+                .head(&ObjectPath::from("artifacts/store-metadata.json"))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_namespace_does_not_hide_malformed_legacy_objects() {
+        let objects: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let store = ArtifactStore::new(objects.clone(), "artifacts");
+        let run = RunId::new();
+        let location = ObjectPath::from(format!("artifacts/{run}/captures/elsewhere/bad"));
+        objects
+            .put(&location, Bytes::from_static(b"bad").into())
+            .await
+            .unwrap();
+        assert!(store.list_for_run(&run).await.is_err());
     }
 
     #[tokio::test]

@@ -1,14 +1,138 @@
 //! `fabro artifact list` and `fabro artifact cp` over a run whose artifacts
 //! the engine's hooks collected: every file under `[run.artifacts] include`
-//! in a stage's workspace, once per content, into the blob table.
+//! in a stage's workspace, once per content, into configured artifact storage.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::petri::{RunningServer, host_plugin, run_detached, wait_for_success};
+use super::petri::{RunningServer, host_plugin, run_detached, run_json, wait_for_success};
 use crate::cmd::support::{read_text, text_tree};
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_worker_captures_large_files_in_the_configured_local_store() {
+    if host_plugin().is_none() {
+        return;
+    }
+    let context = test_context!();
+    let objects = context.temp_dir.join("selected-artifact-root");
+    let settings = format!(
+        "\n[server.artifacts]\nprovider = \"local\"\nprefix = \"selected-prefix\"\n[server.artifacts.local]\nroot = {:?}\n",
+        objects.to_str().unwrap()
+    );
+    // RunningServer also passes --storage-dir. The explicit artifact directory
+    // must still receive the captures, independently of the database root.
+    let server = RunningServer::start_with(&settings, &[]).await;
+    let workspace = artifact_workspace(&context);
+    tokio::fs::write(workspace.join("workflow.fabro"), r#"digraph Capture {
+        graph [goal="Capture binary files", default_max_retries=0]
+        start [shape=Mdiamond]
+        write [shape=parallelogram, script="mkdir -p assets && dd if=/dev/zero of=assets/medium.bin bs=1048576 count=3 && cp assets/medium.bin assets/same.bin && dd if=/dev/zero of=assets/limit.bin bs=1048576 count=10 && cp assets/limit.bin assets/skipped.bin && printf x >> assets/skipped.bin"]
+        keep [shape=parallelogram, script="test -f assets/skipped.bin"]
+        exit [shape=Msquare]
+        start -> write -> keep -> exit
+    }"#).await.unwrap();
+    let run_id = run_detached(&context, &server, &workspace);
+    wait_for_success(&server, &run_id).await;
+    let projection = run_json(&server, &format!("runs/{run_id}/state")).await;
+    let artifacts = projection["artifacts"].as_array().unwrap();
+    assert_eq!(
+        artifacts.len(),
+        3,
+        "unchanged files are captured once; oversize is skipped"
+    );
+    let database =
+        fabro_db::Database::connect(fabro_config::Storage::new(&server.storage_dir).sqlite_path())
+            .await
+            .unwrap();
+    let blobs = fabro_store::BlobStore::new(database.clone_pool());
+    let (rebuilt, _, _) = fabro_petri::test_support::rebuild(
+        database.pool(),
+        database.pool(),
+        run_id.parse().unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(rebuilt.unwrap().artifacts).unwrap(),
+        projection["artifacts"]
+    );
+    assert!(
+        !server
+            .storage_dir
+            .join(format!("objects/artifacts/selected-prefix/{run_id}"))
+            .exists(),
+        "captures must not be redirected to the default artifact directory"
+    );
+
+    for (path, size) in [
+        ("medium.bin", 3 * 1024 * 1024),
+        ("same.bin", 3 * 1024 * 1024),
+        ("limit.bin", 10 * 1024 * 1024),
+    ] {
+        let bytes = vec![0; size];
+        let hash = fabro_types::BlobHash::new(&bytes);
+        let capture = artifacts
+            .iter()
+            .find(|entry| entry["relative_path"] == format!("assets/{path}"))
+            .unwrap();
+        assert_eq!(capture["object"], hash.to_string());
+        assert!(capture.get("blob").is_none());
+        assert_eq!(
+            tokio::fs::read(
+                objects.join(format!("selected-prefix/{run_id}/captures/sha256/{hash}"))
+            )
+            .await
+            .unwrap(),
+            bytes
+        );
+        assert!(blobs.read(&hash).await.unwrap().is_none());
+        let destination = context.temp_dir.join(format!("download-{path}"));
+        let output = context
+            .command()
+            .args([
+                "artifact",
+                "cp",
+                &format!("{run_id}:assets/{path}"),
+                destination.to_str().unwrap(),
+                "--server",
+                &server.target(),
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "artifact download failed");
+        assert_eq!(
+            tokio::fs::read(destination.join(path)).await.unwrap(),
+            bytes
+        );
+    }
+    let mut scopes = tokio::fs::read_dir(server.petri_run_dir(&run_id).join("scopes"))
+        .await
+        .unwrap();
+    let original = scopes
+        .next_entry()
+        .await
+        .unwrap()
+        .unwrap()
+        .path()
+        .join("work/assets");
+    assert_eq!(
+        tokio::fs::metadata(original.join("limit.bin"))
+            .await
+            .unwrap()
+            .len(),
+        10 * 1024 * 1024
+    );
+    assert_eq!(
+        tokio::fs::metadata(original.join("skipped.bin"))
+            .await
+            .unwrap()
+            .len(),
+        10 * 1024 * 1024 + 1
+    );
+    server.shutdown();
+}
 
 /// Three command stages that leave files under `assets/`. The second and
 /// third write different contents to the same path, so the path names an

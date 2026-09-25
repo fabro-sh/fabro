@@ -1151,7 +1151,7 @@ fn server_bind_title(bind: &Bind) -> String {
 )]
 mod tests {
     use std::io;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::Poll;
@@ -1345,6 +1345,56 @@ mod tests {
             panic!("artifacts store should stay local");
         };
         assert_eq!(root, "/srv/fabro-storage/objects/artifacts");
+    }
+
+    #[test]
+    fn runtime_server_settings_preserve_custom_artifact_root() {
+        let settings = server_settings(
+            r#"
+_version = 1
+[server.storage]
+root = "/srv/from-disk"
+[server.artifacts]
+prefix = "selected-prefix"
+[server.artifacts.local]
+root = "/mnt/artifact-files"
+"#,
+        );
+        for storage_root in ["/srv/from-disk", "/srv/from-runtime"] {
+            let resolved = settings
+                .clone()
+                .with_storage_override(Path::new(storage_root));
+            assert_eq!(resolved.server.storage.root, storage_root);
+            assert_eq!(resolved.server.artifacts, settings.server.artifacts);
+            // Startup and config reload can apply the same override again.
+            assert_eq!(
+                resolved
+                    .clone()
+                    .with_storage_override(Path::new(storage_root)),
+                resolved
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_server_settings_preserve_s3_artifact_configuration() {
+        let settings = server_settings(
+            r#"
+_version = 1
+[server.artifacts]
+provider = "s3"
+prefix = "selected-prefix"
+[server.artifacts.s3]
+bucket = "artifact-bucket"
+region = "us-east-1"
+endpoint = "https://objects.example.test"
+path_style = true
+"#,
+        );
+        let resolved = settings
+            .clone()
+            .with_storage_override(Path::new("/srv/from-runtime"));
+        assert_eq!(resolved.server.artifacts, settings.server.artifacts);
     }
 
     #[test]

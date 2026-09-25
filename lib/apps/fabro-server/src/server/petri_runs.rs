@@ -40,6 +40,7 @@ use fabro_config::{
     EnvironmentImageLayer, EnvironmentLayer, Home, MergeMap, SettingsLayer, Storage,
 };
 use fabro_interview::ControlInterviewer;
+use fabro_petri::artifacts::StoreArtifactWriter;
 use fabro_petri::controls::RunControls;
 use fabro_petri::engine::{self, Conclusion, Execution, RunRequest};
 use fabro_petri::hooks::HooksSpec;
@@ -455,6 +456,10 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
             &state.stores.run_summaries,
         ))),
         &run_state.spec.settings.run,
+        Arc::new(StoreArtifactWriter::new(
+            state.artifact_store.clone(),
+            run_id,
+        )),
     );
     let request = RunRequest {
         run_id: run_id.to_string(),

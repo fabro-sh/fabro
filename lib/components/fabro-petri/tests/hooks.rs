@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use fabro_checkpoint::author::GitAuthor;
 use fabro_petri::admission::AdmittedGraphs;
+use fabro_petri::artifacts::StoreArtifactWriter;
 use fabro_petri::blobs::Blobs;
 use fabro_petri::check::{self, Bundle, CheckRequest, Launch};
 use fabro_petri::checkpoint::{
@@ -34,9 +35,10 @@ use fabro_petri::platform_records::PlatformRecords;
 use fabro_petri::recovery::{self, Recovery, RecoveryRequest};
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_petri::test_support::{MemoryBlobs, MemoryPlatformRecords};
-use fabro_store::{PlatformRecord, PlatformRecordKind};
+use fabro_store::{ArtifactStore, PlatformRecord, PlatformRecordKind};
 use fabro_types::settings::run::RunCheckpointSettings;
 use fabro_types::{GitIdentitySource, RunId, SandboxProviderKind};
+use object_store::local::LocalFileSystem;
 use petri_execution::inspect::{self, RunInspection};
 use petri_store::{Access, MemoryRunStore, RunKey, RunStore as _};
 use tokio::fs;
@@ -142,39 +144,54 @@ fn docker_plugin() -> Option<PathBuf> {
 
 /// One run's pieces: the store, its platform records, where it ran.
 struct Harness {
-    run_id:    RunId,
-    run_dir:   PathBuf,
-    store:     Arc<MemoryRunStore>,
-    records:   Arc<MemoryPlatformRecords>,
-    blobs:     Arc<MemoryBlobs>,
+    run_id:         RunId,
+    run_dir:        PathBuf,
+    store:          Arc<MemoryRunStore>,
+    records:        Arc<MemoryPlatformRecords>,
+    blobs:          Arc<MemoryBlobs>,
     /// The `[run.artifacts] include` patterns the hooks collect under.
-    artifacts: Vec<String>,
-    _root:     tempfile::TempDir,
+    artifacts:      Vec<String>,
+    artifact_store: ArtifactStore,
+    _root:          tempfile::TempDir,
 }
 
 impl Harness {
     fn new() -> Self {
         let root = tempfile::tempdir().expect("a temp dir");
+        let artifact_root = root.path().join("artifacts");
+        std::fs::create_dir(&artifact_root).expect("the isolated artifact directory creates");
+        let artifact_store = ArtifactStore::new(
+            Arc::new(
+                LocalFileSystem::new_with_prefix(artifact_root)
+                    .expect("the local artifact backend builds"),
+            ),
+            "captures-test",
+        );
         Self {
-            run_id:    RunId::new(),
-            run_dir:   root.path().join("run"),
-            store:     Arc::new(MemoryRunStore::new()),
-            records:   Arc::new(MemoryPlatformRecords::new()),
-            blobs:     Arc::new(MemoryBlobs::new()),
+            artifact_store,
+            run_id: RunId::new(),
+            run_dir: root.path().join("run"),
+            store: Arc::new(MemoryRunStore::new()),
+            records: Arc::new(MemoryPlatformRecords::new()),
+            blobs: Arc::new(MemoryBlobs::new()),
             artifacts: Vec::new(),
-            _root:     root,
+            _root: root,
         }
     }
 
     fn hooks(&self, provider: &SandboxProviderKind) -> HooksSpec {
         HooksSpec {
-            records:    Arc::clone(&self.records) as Arc<dyn PlatformRecords>,
-            git:        RunGitSettings {
+            records:         Arc::clone(&self.records) as Arc<dyn PlatformRecords>,
+            git:             RunGitSettings {
                 host_workspaces: *provider == SandboxProviderKind::LOCAL,
                 ..RunGitSettings::default()
             },
-            artifacts:  self.artifacts.clone(),
-            test_gates: None,
+            artifacts:       self.artifacts.clone(),
+            test_gates:      None,
+            artifact_writer: Arc::new(StoreArtifactWriter::new(
+                self.artifact_store.clone(),
+                self.run_id,
+            )),
         }
     }
 
@@ -430,10 +447,10 @@ async fn every_finish_is_committed_and_recorded() {
 }
 
 /// The files under `[run.artifacts] include` are collected once per
-/// content into the blob table, the run branch and the author identity are
-/// recorded when the branch is created, every checkpoint after the first
-/// carries its diff from its parent, and the run's diff is recorded at the
-/// end.
+/// content into configured artifact storage, the run branch and the author
+/// identity are recorded when the branch is created, every checkpoint after the
+/// first carries its diff from its parent, and the run's diff is recorded at
+/// the end.
 #[tokio::test]
 async fn artifacts_the_branch_and_the_diffs_are_recorded() {
     if host_plugin().is_none() {
@@ -467,14 +484,27 @@ async fn artifacts_the_branch_and_the_diffs_are_recorded() {
         "{artifacts:?}"
     );
     assert_eq!(artifacts[0].bytes, 3);
-    assert_eq!(artifacts[0].digest, artifacts[0].blob.to_string());
+    assert_eq!(artifacts[0].digest, artifacts[0].source.hash().to_string());
     assert_ne!(artifacts[0].digest, artifacts[1].digest);
+    assert!(
+        artifacts
+            .iter()
+            .all(|artifact| matches!(artifact.source, fabro_types::ArtifactSource::ObjectStore(_)))
+    );
+    assert!(
+        harness
+            .blobs
+            .read(&artifacts[1].source.hash())
+            .await
+            .unwrap()
+            .is_none()
+    );
     let bytes = harness
-        .blobs
-        .read(&artifacts[1].blob)
+        .artifact_store
+        .get_capture(&harness.run_id, &artifacts[1].source.hash())
         .await
-        .expect("the blob reads")
-        .expect("the blob exists");
+        .expect("the object reads")
+        .expect("the object exists");
     assert_eq!(bytes.as_ref(), b"two");
     // The first capture belongs to `write`, the second to `change`; `keep`
     // saw the file unchanged and recorded nothing.

@@ -55,6 +55,7 @@ tracing.workspace = true
 fabro-petri = { path = ".", features = ["test-support"] }
 fabro-tool = { path = "../fabro-tool" }
 httpmock = "0.8"
+object_store.workspace = true
 pebble-coding-agent = { workspace = true, features = ["test-util"] }
 fabro-auth = { path = "../../foundation/fabro-auth", features = ["test-support"] }
 fabro-llm = { path = "../fabro-llm", features = ["test-support"] }

@@ -5,9 +5,12 @@ use std::sync::Arc;
 use async_zip::base::write::ZipFileWriter;
 use async_zip::error::ZipError;
 use async_zip::{Compression, ZipEntryBuilder};
+use axum::extract::DefaultBodyLimit;
+use axum::extract::rejection::BytesRejection;
 use axum::http::HeaderValue;
+use axum::routing::put;
 use fabro_store::{ArtifactStore, BlobStore, Error as StoreError};
-use fabro_types::{BlobHash, RunProjection};
+use fabro_types::{ARTIFACT_MAX_FILE_BYTES, ArtifactSource, BlobHash, RunProjection};
 use fabro_util::error::collect_chain;
 use futures_util::SinkExt as _;
 use futures_util::io::AsyncWriteExt as _;
@@ -23,12 +26,17 @@ use super::super::{
     Bytes, HashMap, IntoResponse, Json, NodeArtifact, Path, Query, RequireRunBlob,
     RequireRunScoped, RequiredUser, Response, Router, RunArtifactEntry, RunArtifactListResponse,
     RunId, StageArtifactEntry, State, StatusCode, WriteBlobResponse, get, header,
-    octet_stream_response, parse_run_id_path, parse_stage_id_path, post, reject_if_archived,
-    required_query_param, validate_relative_artifact_path,
+    octet_stream_response, parse_blob_hash_path, parse_run_id_path, parse_stage_id_path, post,
+    reject_if_archived, required_query_param, validate_relative_artifact_path,
 };
+use crate::principal_middleware::RequireWorkerRunSegment;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
+        .route(
+            "/runs/{id}/artifacts/content/{digest}",
+            put(write_run_artifact_content).layer(DefaultBodyLimit::max(ARTIFACT_MAX_FILE_BYTES)),
+        )
         .route("/runs/{id}/blobs", post(write_run_blob))
         .route("/runs/{id}/blobs/{blobHash}", get(read_run_blob))
         .route("/runs/{id}/artifacts", get(list_run_artifacts))
@@ -41,6 +49,55 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
             "/runs/{id}/stages/{stageId}/artifacts/download",
             get(get_stage_artifact),
         )
+}
+
+async fn write_run_artifact_content(
+    RequireWorkerRunSegment(id, digest): RequireWorkerRunSegment,
+    State(state): State<Arc<AppState>>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let expected = match parse_blob_hash_path(&digest) {
+        Ok(expected) => expected,
+        Err(response) => return response,
+    };
+    let body = match body {
+        Ok(body) => body,
+        Err(error) => {
+            return ApiError::new(
+                error.status(),
+                format!(
+                    "Artifact request body could not be read within the {} MiB limit.",
+                    ARTIFACT_MAX_FILE_BYTES / (1024 * 1024)
+                ),
+            )
+            .into_response();
+        }
+    };
+    if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
+        return response;
+    }
+    if let Err(error) = state.load_run_projection(&id).await {
+        return error.into_response();
+    }
+    if BlobHash::new(&body) != expected {
+        return ApiError::bad_request("Artifact content does not match its digest.")
+            .into_response();
+    }
+    match state
+        .artifact_store
+        .put_capture(&id, &expected, &body)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => {
+            warn!(run_id = %id, error = %collect_chain(&error).join(": "), "Artifact upload failed");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Artifact storage failed.",
+            )
+            .into_response()
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -86,18 +143,16 @@ async fn read_run_blob(
     }
 }
 
-/// Where an artifact's bytes are: the blob table, for one the run's
-/// hooks collected, or the artifact store, for one written there directly.
+/// Recorded capture sources and historical stage-keyed objects.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ArtifactBytes {
-    Blob(BlobHash),
+    Captured(ArtifactSource),
     Store,
 }
 
 /// Every artifact of the run, each once: the ones the run's projection
-/// records, with their bytes in the blob table, and the ones written to
-/// the artifact store. A path in the store for a stage and retry the
-/// projection also collected is the projection's.
+/// records, and historical stage-keyed objects. A path in the store for a stage
+/// and retry the projection also collected is the projection's.
 async fn run_artifacts(
     state: &AppState,
     run_id: &RunId,
@@ -117,7 +172,7 @@ async fn run_artifacts(
                 filename: artifact.relative_path.clone(),
                 size:     artifact.size,
             },
-            ArtifactBytes::Blob(artifact.blob),
+            ArtifactBytes::Captured(artifact.source),
         ));
     }
     let uploaded = state
@@ -255,7 +310,10 @@ async fn read_artifact(
     bytes: ArtifactBytes,
 ) -> Result<Option<Bytes>, StoreError> {
     match bytes {
-        ArtifactBytes::Blob(hash) => blobs.read(&hash).await,
+        ArtifactBytes::Captured(ArtifactSource::SqliteBlob(hash)) => blobs.read(&hash).await,
+        ArtifactBytes::Captured(ArtifactSource::ObjectStore(hash)) => {
+            artifact_store.get_capture(run_id, &hash).await
+        }
         ArtifactBytes::Store => artifact_store.get(run_id, key).await,
     }
 }
@@ -484,7 +542,7 @@ async fn get_stage_artifact(
                 && artifact.relative_path == key.relative_path
         })
         .map_or(ArtifactBytes::Store, |artifact| {
-            ArtifactBytes::Blob(artifact.blob)
+            ArtifactBytes::Captured(artifact.source)
         });
     match read_artifact(
         &state.artifact_store,
@@ -500,5 +558,108 @@ async fn get_stage_artifact(
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_zip::base::read::mem::ZipFileReader;
+    use fabro_types::{RunArtifact, StageId, test_support};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn artifact_mixed_sources_keep_precedence_and_zip_contents_without_fallback() {
+        let state = crate::test_support::test_app_state();
+        let run = RunId::new();
+        let stage = StageId::new("write", 1);
+        let mut projection = RunProjection::new(
+            "capture".to_string(),
+            test_support::test_run_spec(),
+            chrono::Utc::now(),
+        );
+        let blobs = state.store_ref().blobs();
+        let old = blobs.write(b"old SQLite").await.unwrap();
+        let new = BlobHash::new(b"new object");
+        state
+            .artifact_store
+            .put_capture(&run, &new, b"new object")
+            .await
+            .unwrap();
+        for (path, size, source) in [
+            ("old.bin", 10, ArtifactSource::SqliteBlob(old)),
+            ("new.bin", 10, ArtifactSource::ObjectStore(new)),
+        ] {
+            projection.artifacts.push(RunArtifact {
+                stage_id: stage.clone(),
+                retry: 1,
+                relative_path: path.to_string(),
+                size,
+                source,
+            });
+        }
+        // A historical object at the same logical path loses to the recorded capture.
+        for (path, bytes) in [
+            ("new.bin", b"shadow".as_slice()),
+            ("legacy.bin", b"legacy".as_slice()),
+        ] {
+            state
+                .artifact_store
+                .put(&run, &ArtifactKey::new(stage.clone(), 1, path), bytes)
+                .await
+                .unwrap();
+        }
+        // Unrecorded content is never a file-list entry.
+        state
+            .artifact_store
+            .put_capture(&run, &BlobHash::new(b"orphan"), b"orphan")
+            .await
+            .unwrap();
+        let entries = run_artifacts(&state, &run, &projection).await.unwrap();
+        assert_eq!(entries.len(), 3);
+        let archive = artifact_archive_body(
+            state.artifact_store.clone(),
+            blobs.clone(),
+            run,
+            latest_run_artifacts(entries, &projection),
+        );
+        let bytes = axum::body::to_bytes(archive, 1024 * 1024).await.unwrap();
+        let zip = ZipFileReader::new(bytes.to_vec()).await.unwrap();
+        let mut contents = BTreeMap::new();
+        for (index, entry) in zip.file().entries().iter().enumerate() {
+            let mut bytes = Vec::new();
+            zip.reader_with_entry(index)
+                .await
+                .unwrap()
+                .read_to_end_checked(&mut bytes)
+                .await
+                .unwrap();
+            contents.insert(entry.filename().as_str().unwrap().to_string(), bytes);
+        }
+        assert_eq!(
+            contents,
+            BTreeMap::from([
+                ("legacy.bin".to_string(), b"legacy".to_vec()),
+                ("new.bin".to_string(), b"new object".to_vec()),
+                ("old.bin".to_string(), b"old SQLite".to_vec()),
+            ])
+        );
+        let missing = blobs
+            .write(b"SQLite is not the selected source")
+            .await
+            .unwrap();
+        let key = ArtifactKey::new(stage, 1, "new.bin");
+        assert!(
+            read_artifact(
+                &state.artifact_store,
+                &blobs,
+                &run,
+                &key,
+                ArtifactBytes::Captured(ArtifactSource::ObjectStore(missing))
+            )
+            .await
+            .unwrap()
+            .is_none()
+        );
     }
 }

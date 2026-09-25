@@ -37,5 +37,15 @@ These names are still real, but they are no longer live scratch files by default
 
 ## Notes
 
-- Artifact binaries are no longer stored in the SlateDB keyspace. They live in `ArtifactStore`; the run scratch tree only contains local cached copies when a workflow stage writes them to disk.
+- New captured artifact binaries live in `ArtifactStore`, with originals retained in the sandbox. Historical SQLite captures remain in the blob table.
 - Final diffs for checkpointed runs are projected from the run store; they are no longer written as scratch files.
+
+## Captured artifact content
+
+New automatic captures use `<artifact prefix>/<run ID>/captures/sha256/<digest>`
+in the configured artifact store. Platform records and the run projection hold
+the stage, retry, relative path and content source (`object` for this layout,
+`blob` for historical SQLite captures). Content objects alone are not listing
+entries. Historical stage-keyed objects remain readable. Run deletion removes
+both object layouts; generic blobs and checkpoint patches keep their SQLite
+storage contract.

@@ -285,7 +285,7 @@ fn resolve_artifacts(
             provider,
             layer.and_then(|artifacts| artifacts.local.as_ref()),
             layer.and_then(|artifacts| artifacts.s3.as_ref()),
-            &object_store_default_root(storage_root, "artifacts"),
+            &ServerArtifactsSettings::default_local_root(Path::new(storage_root)),
             "server.artifacts",
             errors,
         ),
@@ -328,14 +328,6 @@ fn resolve_object_store(
             }
         }
     }
-}
-
-fn object_store_default_root(storage_root: &str, domain: &str) -> String {
-    Path::new(storage_root)
-        .join("objects")
-        .join(domain)
-        .to_string_lossy()
-        .into_owned()
 }
 
 fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegrationsSettings {
