@@ -16,14 +16,14 @@ async fn artifact_worker_captures_large_files_in_the_configured_local_store() {
         return;
     }
     let context = test_context!();
-    let server = RunningServer::start_with(
-        "\n[server.artifacts]\nprovider = \"local\"\nprefix = \"selected-prefix\"\n",
-        &[],
-    )
-    .await;
-    // RunningServer explicitly selects --storage-dir, which also selects the
-    // local artifact root. Inspect that resolved backend, outside the sandbox.
-    let objects = server.storage_dir.join("objects/artifacts");
+    let objects = context.temp_dir.join("selected-artifact-root");
+    let settings = format!(
+        "\n[server.artifacts]\nprovider = \"local\"\nprefix = \"selected-prefix\"\n[server.artifacts.local]\nroot = {:?}\n",
+        objects.to_str().unwrap()
+    );
+    // RunningServer also passes --storage-dir. The explicit artifact directory
+    // must still receive the captures, independently of the database root.
+    let server = RunningServer::start_with(&settings, &[]).await;
     let workspace = artifact_workspace(&context);
     tokio::fs::write(workspace.join("workflow.fabro"), r#"digraph Capture {
         graph [goal="Capture binary files", default_max_retries=0]
@@ -57,6 +57,13 @@ async fn artifact_worker_captures_large_files_in_the_configured_local_store() {
     assert_eq!(
         serde_json::to_value(rebuilt.unwrap().artifacts).unwrap(),
         projection["artifacts"]
+    );
+    assert!(
+        !server
+            .storage_dir
+            .join(format!("objects/artifacts/selected-prefix/{run_id}"))
+            .exists(),
+        "captures must not be redirected to the default artifact directory"
     );
 
     for (path, size) in [

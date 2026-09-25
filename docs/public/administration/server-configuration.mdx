@@ -247,6 +247,10 @@ prefix = "artifacts"
 root = "/var/lib/fabro/objects"
 ```
 
+A custom local artifact root is preserved at startup and when `--storage-dir`
+changes the server's storage directory. When `local.root` is omitted, the
+default `<storage_root>/objects/artifacts` location follows that override.
+
 The wizard only covers AWS S3 bucket/region plus one of:
 
 - runtime credentials already supplied by the deployment environment
