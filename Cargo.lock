@@ -1820,7 +1820,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1934,7 +1934,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3311,11 +3311,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "139ef39800118c7683f2fd3c98c1b23c09ae076556b435f8e9064ae108aaeeec"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi",
  "rand_core 0.10.1",
  "wasip2",
  "wasip3",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3768,7 +3770,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -4282,7 +4284,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 [[package]]
 name = "lithos-llm"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/lithos-llm?branch=main#43a42ac28e9d9bcf40a91abc02be4f12ca274ebb"
+source = "git+https://github.com/lithoscomputer/lithos-llm?branch=main#f40391aa8b3c3871bbac3dced2f4e26ddc46a743"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -4578,7 +4580,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5072,7 +5074,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 [[package]]
 name = "pebble-agent"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/pebble?branch=main#72a51ea2652be619f214e331f1fde87e9acb2267"
+source = "git+https://github.com/lithoscomputer/pebble?branch=main#ba2928d7407a536de817667d5cea02d8595d4167"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -5089,7 +5091,7 @@ dependencies = [
 [[package]]
 name = "pebble-cli-core"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/pebble?branch=main#72a51ea2652be619f214e331f1fde87e9acb2267"
+source = "git+https://github.com/lithoscomputer/pebble?branch=main#ba2928d7407a536de817667d5cea02d8595d4167"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5118,7 +5120,7 @@ dependencies = [
 [[package]]
 name = "pebble-coding-agent"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/pebble?branch=main#72a51ea2652be619f214e331f1fde87e9acb2267"
+source = "git+https://github.com/lithoscomputer/pebble?branch=main#ba2928d7407a536de817667d5cea02d8595d4167"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -5160,7 +5162,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "petri-attractor-steps"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "globset",
@@ -5191,7 +5193,7 @@ dependencies = [
 [[package]]
 name = "petri-driver"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "getrandom 0.3.4",
@@ -5211,7 +5213,7 @@ dependencies = [
 [[package]]
 name = "petri-engine"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "petri-ir",
  "serde",
@@ -5223,7 +5225,7 @@ dependencies = [
 [[package]]
 name = "petri-execution"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -5247,7 +5249,7 @@ dependencies = [
 [[package]]
 name = "petri-executor"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "libc",
@@ -5262,7 +5264,7 @@ dependencies = [
 [[package]]
 name = "petri-executor-sandbox"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "petri-executor",
@@ -5284,7 +5286,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "marked-yaml",
  "petri-ir",
@@ -5298,7 +5300,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-attractor"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "minijinja",
  "petri-frontend",
@@ -5315,7 +5317,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-fabro"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "petri-frontend",
  "petri-frontend-attractor",
@@ -5331,7 +5333,7 @@ dependencies = [
 [[package]]
 name = "petri-frontend-native"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "petri-frontend",
  "petri-ir",
@@ -5342,7 +5344,7 @@ dependencies = [
 [[package]]
 name = "petri-ir"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "regex",
  "serde",
@@ -5355,7 +5357,7 @@ dependencies = [
 [[package]]
 name = "petri-runtime"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -5376,7 +5378,7 @@ dependencies = [
 [[package]]
 name = "petri-steps"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "petri-executor",
@@ -5392,7 +5394,7 @@ dependencies = [
 [[package]]
 name = "petri-store"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "getrandom 0.3.4",
@@ -5407,7 +5409,7 @@ dependencies = [
 [[package]]
 name = "petri-testkit"
 version = "0.1.0"
-source = "git+https://github.com/lithoscomputer/petri.git?branch=main#153d586871824b8023a5691e49a1e99421bae282"
+source = "git+https://github.com/lithoscomputer/petri.git?branch=main#62483bad9fbaaa8b6261fc54f6a67b7df57a3212"
 dependencies = [
  "async-trait",
  "petri-driver",
@@ -5713,15 +5715,16 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.14"
+version = "0.11.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
+checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
 dependencies = [
  "aws-lc-rs",
  "bytes",
- "getrandom 0.3.4",
+ "getrandom 0.4.1",
  "lru-slab",
- "rand 0.9.4",
+ "rand 0.10.1",
+ "rand_pcg",
  "ring",
  "rustc-hash",
  "rustls",
@@ -5744,7 +5747,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5837,6 +5840,15 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
+name = "rand_pcg"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
+dependencies = [
+ "rand_core 0.10.1",
+]
 
 [[package]]
 name = "redox_syscall"
@@ -6183,7 +6195,7 @@ dependencies = [
  "errno 0.3.14",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6242,7 +6254,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6890,7 +6902,7 @@ version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
- "errno 0.2.8",
+ "errno 0.3.14",
  "libc",
 ]
 
@@ -7368,7 +7380,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7403,7 +7415,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8450,7 +8462,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
