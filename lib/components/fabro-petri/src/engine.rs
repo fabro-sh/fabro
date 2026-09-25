@@ -63,7 +63,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::admission::AdmittedGraphs;
-use crate::artifacts::ArtifactWriter;
 use crate::blobs::{Blobs, RunBlobs};
 use crate::controls::RunControls;
 use crate::hooks::{FabroHooks, HooksSpec};
@@ -85,38 +84,36 @@ pub enum Execution {
 pub struct RunRequest {
     /// The Fabro run id, which becomes Petri's run key: the run's identity
     /// in the store and the label on every sandbox of the run.
-    pub run_id:          String,
+    pub run_id:      String,
     /// Where the run's workspaces, step output and blobs live.
-    pub run_dir:         PathBuf,
-    pub execution:       Execution,
+    pub run_dir:     PathBuf,
+    pub execution:   Execution,
     /// The run's durable record: the worker's HTTP store, or the server's
     /// SQLite store under the test override.
-    pub store:           Arc<dyn RunStore>,
-    pub runtime:         RuntimeSpec,
+    pub store:       Arc<dyn RunStore>,
+    pub runtime:     RuntimeSpec,
     /// The sandbox provider Fabro resolved for the run's environment.
-    pub provider:        SandboxProviderKind,
+    pub provider:    SandboxProviderKind,
     /// Fires to cancel the run.
-    pub cancel:          CancellationToken,
+    pub cancel:      CancellationToken,
     /// The run's pause, unpause and steer controls, which the caller keeps
     /// a clone of to drive them while the run is live.
-    pub controls:        RunControls,
+    pub controls:    RunControls,
     /// Where the run's questions go.
-    pub interviewer:     Arc<dyn Interviewer>,
+    pub interviewer: Arc<dyn Interviewer>,
     /// The caller's observers of every record, registered ahead of the
     /// interview dispatcher: the interviewer's own expiry observer among
     /// them.
-    pub observers:       Vec<Arc<dyn ExecutionObserver>>,
+    pub observers:   Vec<Arc<dyn ExecutionObserver>>,
     /// Where `{{ secrets.NAME }}` references resolve from; `None` leaves
     /// every secret unknown.
-    pub secrets:         Option<Arc<dyn SecretProvider>>,
+    pub secrets:     Option<Arc<dyn SecretProvider>>,
     /// Where offloaded stage values go; `None` keeps Petri's local store
     /// under the run directory.
-    pub blobs:           Option<Arc<dyn Blobs>>,
-    /// Where captured workspace files go. Required when capture writes files.
-    pub artifact_writer: Option<Arc<dyn ArtifactWriter>>,
+    pub blobs:       Option<Arc<dyn Blobs>>,
     /// Fabro's hooks: the checkpoint commit and its record. `None` runs
     /// with Petri's local hook service alone.
-    pub hooks:           Option<HooksSpec>,
+    pub hooks:       Option<HooksSpec>,
 }
 
 /// The recorded status of a finished run.
@@ -213,7 +210,6 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
             Arc::clone(&request.store),
             resumed,
             request.blobs.clone(),
-            request.artifact_writer.clone(),
         ))
     });
     if let Some(hooks) = &fabro_hooks {

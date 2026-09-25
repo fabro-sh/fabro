@@ -216,6 +216,18 @@ pub struct ServerArtifactsSettings {
     pub store:  ObjectStoreSettings,
 }
 
+impl ServerArtifactsSettings {
+    /// The local artifact root a storage root gives when none is configured.
+    #[must_use]
+    pub fn default_local_root(storage_root: &std::path::Path) -> String {
+        storage_root
+            .join("objects")
+            .join("artifacts")
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ObjectStoreSettings {

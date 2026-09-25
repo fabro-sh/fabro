@@ -4,8 +4,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::settings::{
-    CliNamespace, ObjectStoreSettings, ProjectNamespace, RunNamespace, ServerNamespace,
-    WorkflowNamespace,
+    CliNamespace, ObjectStoreSettings, ProjectNamespace, RunNamespace, ServerArtifactsSettings,
+    ServerNamespace, WorkflowNamespace,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,10 +18,11 @@ impl ServerSettings {
     pub fn with_storage_override(mut self, path: &Path) -> Self {
         // Only the derived default follows the storage directory. A custom
         // artifact location is independent of the database and runtime root.
-        let default_artifact_root = Path::new(&self.server.storage.root).join("objects/artifacts");
+        let default_artifact_root =
+            ServerArtifactsSettings::default_local_root(Path::new(&self.server.storage.root));
         if let ObjectStoreSettings::Local { root } = &mut self.server.artifacts.store {
-            if Path::new(root) == default_artifact_root {
-                *root = path.join("objects/artifacts").display().to_string();
+            if *root == default_artifact_root {
+                *root = ServerArtifactsSettings::default_local_root(path);
             }
         }
         self.server.storage.root = path.display().to_string();

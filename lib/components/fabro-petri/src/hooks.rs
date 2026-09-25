@@ -185,8 +185,6 @@ pub enum HookError {
     },
     #[error("invalid run.artifacts.include pattern")]
     Globs(#[source] Arc<WorkspaceGlobError>),
-    #[error("the run has no configured artifact writer")]
-    NoArtifactWriter,
     #[error("the captured artifact could not be stored")]
     Artifact(#[source] ArtifactWriteError),
     #[error("the workspace could not be listed below `{root}`")]
@@ -215,26 +213,33 @@ impl HookError {
 /// What Fabro's hooks need beside the run: where the platform records go,
 /// the run's Git settings, and which files are the run's artifacts.
 pub struct HooksSpec {
-    pub records:    Arc<dyn PlatformRecords>,
-    pub git:        RunGitSettings,
+    pub records:         Arc<dyn PlatformRecords>,
+    pub git:             RunGitSettings,
     /// The `[run.artifacts] include` patterns: which files of a stage's
     /// workspace are collected after the stage.
-    pub artifacts:  Vec<String>,
+    pub artifacts:       Vec<String>,
     /// A test's gate directory: a checkpoint point named by a `.hold` file
     /// there waits for its `.release` file. `None` outside tests.
-    pub test_gates: Option<PathBuf>,
+    pub test_gates:      Option<PathBuf>,
+    /// Where captured workspace files go.
+    pub artifact_writer: Arc<dyn ArtifactWriter>,
 }
 
 impl HooksSpec {
     /// The spec a run's settings give: its Git settings and its artifact
-    /// patterns.
+    /// patterns, captured through `artifact_writer`.
     #[must_use]
-    pub fn for_run(records: Arc<dyn PlatformRecords>, settings: &RunNamespace) -> Self {
+    pub fn for_run(
+        records: Arc<dyn PlatformRecords>,
+        settings: &RunNamespace,
+        artifact_writer: Arc<dyn ArtifactWriter>,
+    ) -> Self {
         Self {
             records,
             git: RunGitSettings::from(settings),
             artifacts: settings.artifacts.include.clone(),
             test_gates: None,
+            artifact_writer,
         }
     }
 
@@ -372,7 +377,7 @@ pub struct FabroHooks {
     records:         Arc<dyn PlatformRecords>,
     /// Where diff patches go; `None` records summaries alone.
     blobs:           Option<Arc<dyn Blobs>>,
-    artifact_writer: Option<Arc<dyn ArtifactWriter>>,
+    artifact_writer: Arc<dyn ArtifactWriter>,
     workspaces:      RunWorkspaces,
     lookup:          WorkspaceLookup,
     identity:        GitIdentity,
@@ -399,8 +404,7 @@ impl FabroHooks {
     /// run whose records are in `store` under `run_key`, with its
     /// workspaces under `run_dir`. `resumed` says the run continues from
     /// its records, so a sandbox workspace is brought to its snapshot at
-    /// its scope's first acquisition. `blobs` holds diff patches;
-    /// `artifact_writer` holds captured workspace files.
+    /// its scope's first acquisition. `blobs` holds diff patches.
     #[must_use]
     pub fn new(
         spec: HooksSpec,
@@ -411,7 +415,6 @@ impl FabroHooks {
         store: Arc<dyn RunStore>,
         resumed: bool,
         blobs: Option<Arc<dyn Blobs>>,
-        artifact_writer: Option<Arc<dyn ArtifactWriter>>,
     ) -> Self {
         let identity = GitIdentity {
             name:   spec.git.author.name.clone(),
@@ -429,7 +432,7 @@ impl FabroHooks {
             run_id,
             records: spec.records,
             blobs,
-            artifact_writer,
+            artifact_writer: spec.artifact_writer,
             workspaces,
             lookup: WorkspaceLookup::new(Arc::clone(&store), run_key),
             identity,
@@ -949,14 +952,16 @@ impl FabroHooks {
             return Ok(0);
         };
         let candidates = list_artifacts(env.as_ref(), globs).await?;
-        let limit = usize::try_from(ARTIFACT_MAX_FILE_BYTES).unwrap_or(usize::MAX);
         let mut collected = 0;
         let mut total_bytes = 0_u64;
         for (path, size) in select_artifacts(candidates) {
             if total_bytes.saturating_add(size) > ARTIFACT_MAX_TOTAL_BYTES {
                 break;
             }
-            let bytes = match env.read_file_limited(Path::new(&path), limit).await {
+            let bytes = match env
+                .read_file_limited(Path::new(&path), fabro_types::ARTIFACT_MAX_FILE_BYTES)
+                .await
+            {
                 Ok(Some(bytes)) => bytes,
                 Ok(None) => continue,
                 Err(error) => {
@@ -964,7 +969,7 @@ impl FabroHooks {
                     continue;
                 }
             };
-            if !self.store_artifact(key, path, &bytes).await? {
+            if !self.store_artifact(key, &path, &bytes).await? {
                 continue;
             }
             total_bytes = total_bytes.saturating_add(size);
@@ -978,32 +983,25 @@ impl FabroHooks {
     async fn store_artifact(
         &self,
         key: CheckpointKey,
-        path: String,
+        path: &str,
         bytes: &[u8],
     ) -> Result<bool, HookError> {
         let already = self.collected_artifacts().await?;
         let digest = BlobHash::new(bytes);
-        let identity = (path.clone(), digest.to_string());
+        let identity = (path.to_owned(), digest.to_string());
         if sync::lock(already).contains(&identity) {
             return Ok(false);
         }
-        let writer = self
-            .artifact_writer
-            .as_ref()
-            .ok_or(HookError::NoArtifactWriter)?;
-        let stored = writer.write(bytes).await.map_err(HookError::Artifact)?;
-        if stored != digest {
-            return Err(HookError::Artifact(ArtifactWriteError::Integrity {
-                expected: digest,
-                actual:   stored,
-            }));
-        }
+        self.artifact_writer
+            .write(&digest, bytes)
+            .await
+            .map_err(HookError::Artifact)?;
         let record = PlatformRecord::ArtifactCollected(ArtifactCollectedRecord {
             execution: key.execution,
             firing:    key.firing,
             attempt:   key.attempt,
-            path:      path.clone(),
-            source:    ArtifactSource::ObjectStore(stored),
+            path:      path.to_owned(),
+            source:    ArtifactSource::ObjectStore(digest),
             bytes:     u64::try_from(bytes.len()).unwrap_or(u64::MAX),
             digest:    digest.to_string(),
             operation: Some(key.operation_for(ARTIFACT_EFFECT)),
@@ -1420,13 +1418,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ArtifactWriter for FlakyWriter {
-        async fn write(&self, bytes: &[u8]) -> Result<BlobHash, ArtifactWriteError> {
+        async fn write(&self, digest: &BlobHash, bytes: &[u8]) -> Result<(), ArtifactWriteError> {
             if self.fail.swap(false, Ordering::SeqCst) {
                 return Err(ArtifactWriteError::Store(fabro_store::Error::Io(
                     std::io::Error::other("test store unavailable"),
                 )));
             }
-            self.writer.write(bytes).await
+            self.writer.write(digest, bytes).await
         }
     }
 
@@ -1434,7 +1432,7 @@ mod tests {
         root: &Path,
         run_id: RunId,
         records: Arc<dyn PlatformRecords>,
-        writer: Option<Arc<dyn ArtifactWriter>>,
+        artifact_writer: Arc<dyn ArtifactWriter>,
     ) -> FabroHooks {
         FabroHooks::new(
             HooksSpec {
@@ -1442,6 +1440,7 @@ mod tests {
                 git: RunGitSettings::default(),
                 artifacts: vec!["assets/**".to_string()],
                 test_gates: None,
+                artifact_writer,
             },
             Arc::new(NoHooks),
             run_id,
@@ -1450,7 +1449,6 @@ mod tests {
             Arc::new(petri_store::MemoryRunStore::new()),
             false,
             None,
-            writer,
         )
     }
 
@@ -1468,7 +1466,7 @@ mod tests {
                 writer: StoreArtifactWriter::new(store.clone(), run),
                 fail:   AtomicBool::new(fail_upload),
             });
-            let hooks = artifact_hooks(root.path(), run, records.clone(), Some(writer.clone()));
+            let hooks = artifact_hooks(root.path(), run, records.clone(), writer.clone());
             let key = CheckpointKey {
                 execution: 0,
                 firing:    1,
@@ -1477,10 +1475,7 @@ mod tests {
             let path = "assets/report.bin".to_string();
             let bytes = b"binary\0payload";
             let hash = BlobHash::new(bytes);
-            let error = hooks
-                .store_artifact(key, path.clone(), bytes)
-                .await
-                .unwrap_err();
+            let error = hooks.store_artifact(key, &path, bytes).await.unwrap_err();
             assert!(error.render().contains(if fail_upload {
                 "test store unavailable"
             } else {
@@ -1493,26 +1488,16 @@ mod tests {
                 !fail_upload
             );
             assert!(store.list_for_run(&run).await.unwrap().is_empty());
+            assert!(hooks.store_artifact(key, &path, bytes).await.unwrap());
+            assert!(!hooks.store_artifact(key, &path, bytes).await.unwrap());
+            let resumed = artifact_hooks(root.path(), run, records.clone(), writer);
+            assert!(!resumed.store_artifact(key, &path, bytes).await.unwrap());
             assert!(
-                hooks
-                    .store_artifact(key, path.clone(), bytes)
+                resumed
+                    .store_artifact(key, &path, b"changed")
                     .await
                     .unwrap()
             );
-            assert!(
-                !hooks
-                    .store_artifact(key, path.clone(), bytes)
-                    .await
-                    .unwrap()
-            );
-            let resumed = artifact_hooks(root.path(), run, records.clone(), Some(writer));
-            assert!(
-                !resumed
-                    .store_artifact(key, path.clone(), bytes)
-                    .await
-                    .unwrap()
-            );
-            assert!(resumed.store_artifact(key, path, b"changed").await.unwrap());
             assert_eq!(records.records.records(&run).len(), 2);
         }
     }
@@ -1552,18 +1537,13 @@ mod tests {
             root.path(),
             run,
             records.clone(),
-            Some(Arc::new(StoreArtifactWriter::new(store.clone(), run))),
+            Arc::new(StoreArtifactWriter::new(store.clone(), run)),
         );
-        assert!(
-            !resumed
-                .store_artifact(key, path.clone(), bytes)
-                .await
-                .unwrap()
-        );
+        assert!(!resumed.store_artifact(key, &path, bytes).await.unwrap());
         assert!(store.get_capture(&run, &hash).await.unwrap().is_none());
         assert!(
             resumed
-                .store_artifact(key, path.clone(), b"changed")
+                .store_artifact(key, &path, b"changed")
                 .await
                 .unwrap()
         );
@@ -1576,35 +1556,15 @@ mod tests {
             root.path(),
             fork,
             records.clone(),
-            Some(Arc::new(StoreArtifactWriter::new(store.clone(), fork))),
+            Arc::new(StoreArtifactWriter::new(store.clone(), fork)),
         );
-        assert!(fork_hooks.store_artifact(key, path, bytes).await.unwrap());
+        assert!(fork_hooks.store_artifact(key, &path, bytes).await.unwrap());
         assert_eq!(
             store.get_capture(&fork, &hash).await.unwrap().unwrap(),
             bytes.as_slice()
         );
         assert!(store.get_capture(&run, &hash).await.unwrap().is_none());
         assert_eq!(records.records(&fork).len(), 1);
-    }
-
-    #[tokio::test]
-    async fn artifact_capture_requires_its_writer_without_falling_back_to_blobs() {
-        let root = tempfile::tempdir().unwrap();
-        let run = RunId::new();
-        let records = Arc::new(MemoryPlatformRecords::new());
-        let hooks = artifact_hooks(root.path(), run, records.clone(), None);
-        let key = CheckpointKey {
-            execution: 0,
-            firing:    1,
-            attempt:   1,
-        };
-        assert!(matches!(
-            hooks
-                .store_artifact(key, "assets/file".to_string(), b"payload")
-                .await,
-            Err(HookError::NoArtifactWriter)
-        ));
-        assert!(records.records(&run).is_empty());
     }
 
     #[test]

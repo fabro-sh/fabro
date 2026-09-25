@@ -181,13 +181,17 @@ impl Harness {
 
     fn hooks(&self, provider: &SandboxProviderKind) -> HooksSpec {
         HooksSpec {
-            records:    Arc::clone(&self.records) as Arc<dyn PlatformRecords>,
-            git:        RunGitSettings {
+            records:         Arc::clone(&self.records) as Arc<dyn PlatformRecords>,
+            git:             RunGitSettings {
                 host_workspaces: *provider == SandboxProviderKind::LOCAL,
                 ..RunGitSettings::default()
             },
-            artifacts:  self.artifacts.clone(),
-            test_gates: None,
+            artifacts:       self.artifacts.clone(),
+            test_gates:      None,
+            artifact_writer: Arc::new(StoreArtifactWriter::new(
+                self.artifact_store.clone(),
+                self.run_id,
+            )),
         }
     }
 
@@ -220,10 +224,6 @@ impl Harness {
             observers,
             secrets: None,
             blobs: Some(Arc::clone(&self.blobs) as Arc<dyn Blobs>),
-            artifact_writer: Some(Arc::new(StoreArtifactWriter::new(
-                self.artifact_store.clone(),
-                self.run_id,
-            ))),
             hooks: Some(hooks),
         };
         engine::run(request).await.expect("the run executes")
@@ -851,7 +851,6 @@ async fn a_run_hook_blocks_a_tool_effect_through_the_forwarded_service() {
         observers,
         secrets: None,
         blobs: None,
-        artifact_writer: None,
         hooks: Some(harness.hooks(&SandboxProviderKind::LOCAL)),
     };
     let outcome = engine::run(request).await.expect("the run executes");

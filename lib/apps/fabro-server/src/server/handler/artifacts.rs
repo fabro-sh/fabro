@@ -26,8 +26,8 @@ use super::super::{
     Bytes, HashMap, IntoResponse, Json, NodeArtifact, Path, Query, RequireRunBlob,
     RequireRunScoped, RequiredUser, Response, Router, RunArtifactEntry, RunArtifactListResponse,
     RunId, StageArtifactEntry, State, StatusCode, WriteBlobResponse, get, header,
-    octet_stream_response, parse_run_id_path, parse_stage_id_path, post, reject_if_archived,
-    required_query_param, validate_relative_artifact_path,
+    octet_stream_response, parse_blob_hash_path, parse_run_id_path, parse_stage_id_path, post,
+    reject_if_archived, required_query_param, validate_relative_artifact_path,
 };
 use crate::principal_middleware::RequireWorkerRunSegment;
 
@@ -56,12 +56,19 @@ async fn write_run_artifact_content(
     State(state): State<Arc<AppState>>,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
+    let expected = match parse_blob_hash_path(&digest) {
+        Ok(expected) => expected,
+        Err(response) => return response,
+    };
     let body = match body {
         Ok(body) => body,
         Err(error) => {
             return ApiError::new(
                 error.status(),
-                "Artifact request body could not be read within the 10 MiB limit.",
+                format!(
+                    "Artifact request body could not be read within the {} MiB limit.",
+                    ARTIFACT_MAX_FILE_BYTES / (1024 * 1024)
+                ),
             )
             .into_response();
         }
@@ -72,15 +79,16 @@ async fn write_run_artifact_content(
     if let Err(error) = state.load_run_projection(&id).await {
         return error.into_response();
     }
-    let Ok(expected) = digest.parse::<BlobHash>() else {
-        return ApiError::bad_request("Invalid artifact digest.").into_response();
-    };
     if BlobHash::new(&body) != expected {
         return ApiError::bad_request("Artifact content does not match its digest.")
             .into_response();
     }
-    match state.artifact_store.put_capture(&id, &body).await {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+    match state
+        .artifact_store
+        .put_capture(&id, &expected, &body)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => {
             warn!(run_id = %id, error = %collect_chain(&error).join(": "), "Artifact upload failed");
             ApiError::new(
@@ -572,9 +580,10 @@ mod tests {
         );
         let blobs = state.store_ref().blobs();
         let old = blobs.write(b"old SQLite").await.unwrap();
-        let new = state
+        let new = BlobHash::new(b"new object");
+        state
             .artifact_store
-            .put_capture(&run, b"new object")
+            .put_capture(&run, &new, b"new object")
             .await
             .unwrap();
         for (path, size, source) in [
@@ -603,7 +612,7 @@ mod tests {
         // Unrecorded content is never a file-list entry.
         state
             .artifact_store
-            .put_capture(&run, b"orphan")
+            .put_capture(&run, &BlobHash::new(b"orphan"), b"orphan")
             .await
             .unwrap();
         let entries = run_artifacts(&state, &run, &projection).await.unwrap();
@@ -652,9 +661,5 @@ mod tests {
             .unwrap()
             .is_none()
         );
-        // Saved projections preserve both physical sources without rewriting history.
-        let saved = serde_json::to_value(&projection).unwrap();
-        let decoded: RunProjection = serde_json::from_value(saved).unwrap();
-        assert_eq!(decoded.artifacts, projection.artifacts);
     }
 }

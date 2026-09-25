@@ -456,6 +456,10 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
             &state.stores.run_summaries,
         ))),
         &run_state.spec.settings.run,
+        Arc::new(StoreArtifactWriter::new(
+            state.artifact_store.clone(),
+            run_id,
+        )),
     );
     let request = RunRequest {
         run_id: run_id.to_string(),
@@ -480,10 +484,6 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
         observers,
         secrets: Some(Arc::new(VaultSecrets::from_vault(&vault))),
         blobs: Some(state.store_ref().blobs()),
-        artifact_writer: Some(Arc::new(StoreArtifactWriter::new(
-            state.artifact_store.clone(),
-            run_id,
-        ))),
         hooks: Some(hooks),
     };
     let result = Box::pin(engine::run(request)).await;

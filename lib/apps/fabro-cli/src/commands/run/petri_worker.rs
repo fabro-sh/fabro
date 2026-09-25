@@ -198,8 +198,15 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
     }
     runner::set_worker_title(&run_id, WorkerTitlePhase::Running);
 
-    let hooks = HooksSpec::for_run(Arc::clone(&records), &worker.run_state.spec.settings.run)
-        .with_test_gates(test_checkpoint_gates());
+    let hooks = HooksSpec::for_run(
+        Arc::clone(&records),
+        &worker.run_state.spec.settings.run,
+        Arc::new(ClientArtifactWriter::new(
+            worker.client.clone_for_reuse(),
+            run_id,
+        )),
+    )
+    .with_test_gates(test_checkpoint_gates());
     let request = RunRequest {
         run_id: run_id.to_string(),
         run_dir: worker.run_dir.join("petri"),
@@ -220,10 +227,6 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
         observers,
         secrets: Some(Arc::new(secrets)),
         blobs: Some(Arc::new(ClientBlobs::new(
-            worker.client.clone_for_reuse(),
-            run_id,
-        ))),
-        artifact_writer: Some(Arc::new(ClientArtifactWriter::new(
             worker.client.clone_for_reuse(),
             run_id,
         ))),
