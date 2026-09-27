@@ -12,7 +12,6 @@ import type { EdgeSelection } from "./helpers";
 const REASON_LABEL: Record<string, string> = {
   condition: "Matched condition",
   unconditional: "Default edge",
-  jump: "Jumped",
   preferred_label: "Preferred label",
 };
 
@@ -108,12 +107,6 @@ export function ConditionalDecision({
                 <dd className="rounded bg-overlay-strong px-2 py-1 font-mono text-fg-3">
                   {edge.condition}
                 </dd>
-              </>
-            )}
-            {edge.isJump && (
-              <>
-                <dt className="text-fg-muted">Edge type</dt>
-                <dd className="text-fg-2">Jump</dd>
               </>
             )}
           </dl>
