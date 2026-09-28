@@ -9,9 +9,10 @@
 //!
 //! The run's record is [`HttpRunStore`] over the worker's client, leased
 //! for this launch: the worker mints one owner id at start, logs it, and
-//! every lease the run takes over the API names it. `--mode start` loads
-//! the admitted graphs through the client's blob read and runs them;
-//! `--mode resume` continues the run from its records. Either way the
+//! every lease the run takes over the API names it. Both modes load the
+//! admitted graphs through the client's blob read: `--mode start` runs them;
+//! `--mode resume` continues the run from its records, and starts it again
+//! from the graphs when a crash cut its creation short. Either way the
 //! worker records the lifecycle transitions Fabro's read side needs
 //! (`starting`, `running`, then `succeeded` or `failed`) as platform
 //! records through the client.
@@ -172,21 +173,19 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
         run_tools,
     )
     .await?;
+    let client = worker.client.clone_for_reuse();
+    let graphs = admission::load_with(
+        |blob| {
+            let client = client.clone_for_reuse();
+            async move { client.read_run_blob(&run_id, &blob).await }
+        },
+        &admission,
+    )
+    .await
+    .context("loading the admitted graphs")?;
     let execution = match worker.mode {
-        RunWorkerMode::Start => {
-            let client = worker.client.clone_for_reuse();
-            let graphs = admission::load_with(
-                |blob| {
-                    let client = client.clone_for_reuse();
-                    async move { client.read_run_blob(&run_id, &blob).await }
-                },
-                &admission,
-            )
-            .await
-            .context("loading the admitted graphs")?;
-            Execution::Start(graphs)
-        }
-        RunWorkerMode::Resume => Execution::Resume,
+        RunWorkerMode::Start => Execution::Start(graphs),
+        RunWorkerMode::Resume => Execution::Resume(graphs),
     };
 
     let started = Instant::now();

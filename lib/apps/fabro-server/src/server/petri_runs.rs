@@ -386,18 +386,19 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
     {
         return;
     }
-    let execution = match mode {
-        RunExecutionMode::Start => {
-            match admission::load(&state.store_ref().blobs(), &admission).await {
-                Ok(graphs) => Execution::Start(graphs),
-                Err(err) => {
-                    let message = error_util::collect_chain(&err).join(": ");
-                    fail_before_execution(&state, run_id, &message).await;
-                    return;
-                }
-            }
+    // A resume loads the graphs too: they start the run again when a crash
+    // cut its creation short.
+    let graphs = match admission::load(&state.store_ref().blobs(), &admission).await {
+        Ok(graphs) => graphs,
+        Err(err) => {
+            let message = error_util::collect_chain(&err).join(": ");
+            fail_before_execution(&state, run_id, &message).await;
+            return;
         }
-        RunExecutionMode::Resume => Execution::Resume,
+    };
+    let execution = match mode {
+        RunExecutionMode::Start => Execution::Start(graphs),
+        RunExecutionMode::Resume => Execution::Resume(graphs),
     };
     // The run's secrets: a snapshot of the server's vault, as a worker
     // takes one at launch.
