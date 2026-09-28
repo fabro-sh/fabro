@@ -8,9 +8,10 @@ use lithos_llm::catalog::{Catalog, ProviderId};
 use lithos_llm::client::{Client, ClientBuildError, ClientBuilder, ProviderBuildIssue};
 use lithos_llm::credentials::{CredentialError, CredentialProvider};
 use lithos_llm::middleware::{
-    Call, InlineLocalFiles, Middleware, Observer, RetryMiddleware, RetryPolicy, RetryStage,
+    Call, InlineLocalFiles, Middleware, Observer, RetryEvent, RetryMiddleware, RetryPolicy,
+    RetryStage,
 };
-use lithos_llm::types::{Error, ErrorData};
+use lithos_llm::types::ErrorData;
 
 /// The application name lithos reports to providers that ask, such as the
 /// `originator` header on the OpenAI Codex deployment.
@@ -64,20 +65,13 @@ impl RetryListener {
 struct RetryNotifier;
 
 impl Observer for RetryNotifier {
-    fn on_retry(
-        &self,
-        call: &Call,
-        error: &Error,
-        attempt: u32,
-        delay: Duration,
-        stage: RetryStage,
-    ) {
+    fn on_retry(&self, call: &Call, retry: RetryEvent<'_>) {
         if let Some(listener) = call.context().extensions().get::<RetryListener>() {
             listener.notify(RetryNotice {
-                error: ErrorData::from(error),
-                attempt,
-                delay,
-                stage,
+                error:   ErrorData::from(retry.error),
+                attempt: retry.attempt,
+                delay:   retry.delay,
+                stage:   retry.stage,
             });
         }
     }
