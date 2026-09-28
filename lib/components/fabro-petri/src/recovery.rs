@@ -178,7 +178,7 @@ pub async fn plan(
     };
     // A record with no root invocation (the worker died between creating
     // the run and declaring it) has nothing to reconcile; the worker's
-    // resume reports it as such.
+    // resume starts it again from its admitted graphs.
     let coordinator = petri_execution::read_coordinator_log(&*logs)
         .await
         .map_err(RecoveryError::Log)?;

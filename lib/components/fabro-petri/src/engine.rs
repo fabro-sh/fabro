@@ -18,6 +18,13 @@
 //! `inspect_run` over a read handle of the same store, so what the caller
 //! reports is what the durable record says.
 //!
+//! A failed write to the run's store ends the run's lifetime, not the run:
+//! Petri records nothing after it and returns `CoordinatorError::StoreFailed`,
+//! and no firing fails for it. [`run`] returns [`RunError::StoreFailed`]
+//! without reading the record back, and [`conclusion`] says
+//! [`Conclusion::Interrupted`]: the caller records no end for the run, and
+//! the run resumes from its records, as after a crash.
+//!
 //! What the caller supplies beyond the runtime: the interviewer its
 //! questions go to ([`interview`](crate::interview) in the worker and the
 //! server), the secret provider over the vault ([`secrets`](crate::secrets))
@@ -55,8 +62,8 @@ use fabro_util::sync;
 use petri_execution::host::{self, HostError, HostRun};
 use petri_execution::inspect::{self, InspectError, RunInspection};
 use petri_execution::{
-    Access, CancelReason, ExecutionObserver, InterviewDispatcher, Interviewer, RECEIPT_FILE,
-    RunKey, RunStore,
+    Access, CancelReason, CoordinatorError, ExecutionObserver, InterviewDispatcher, Interviewer,
+    RECEIPT_FILE, RunKey, RunStore,
 };
 use petri_runtime::driver::ExecutionReport;
 use petri_runtime::driver::lifecycle::ExecutionHooks;
@@ -156,6 +163,11 @@ pub enum RunError {
     Inspect(#[source] InspectError),
     #[error("the run ended without recording a status; the record says: {}", .0.join("; "))]
     Unfinished(Vec<String>),
+    /// A write to the run's store failed. The lifetime ended there, with
+    /// nothing recorded after the failure; the run did not end, and resumes
+    /// from its records.
+    #[error("the run's store failed: {0}")]
+    StoreFailed(String),
 }
 
 /// How Fabro reports the run: what its read side records as the run's
@@ -170,6 +182,10 @@ pub enum Conclusion {
         reason:  FailureReason,
         message: String,
     },
+    /// The run's store failed, which ended this lifetime of the run and not
+    /// the run: the caller records no terminal event, and the run resumes
+    /// from its records, as after a crash.
+    Interrupted { message: String },
 }
 
 /// Execute the run to its end and report what the record says.
@@ -290,6 +306,11 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
         Ok(report) => debug!(status = %report.status, "Petri run ended"),
         Err(error) => warn!(error = %error, "Petri run ended with a host error"),
     }
+    // The store holds what it held at the failure, and the run is not over:
+    // there is no outcome to read back.
+    if let Err(HostError::Coordinator(CoordinatorError::StoreFailed(message))) = result {
+        return Err(RunError::StoreFailed(message));
+    }
     let inspection = inspect(request.store.as_ref(), &key).await?;
     let mut outcome = outcome(inspection, result.err())?;
     // A failed checkpoint cancelled the run; what Fabro reports is the
@@ -346,9 +367,9 @@ pub async fn outcome_of(store: &dyn RunStore, run_id: &str) -> Result<RunOutcome
 }
 
 /// How Fabro reports what [`run`] returned. A cancelled run is a failure
-/// with the cancelled reason, as the legacy executor reports one; every
-/// other shortfall is a workflow error whose message says what the record,
-/// or the host, said.
+/// with the cancelled reason, as the legacy executor reports one; a failed
+/// store interrupted the run; every other shortfall is a workflow error
+/// whose message says what the record, or the host, said.
 #[must_use]
 pub fn conclusion(result: &Result<RunOutcome, RunError>) -> Conclusion {
     match result {
@@ -367,6 +388,9 @@ pub fn conclusion(result: &Result<RunOutcome, RunError>) -> Conclusion {
                 message: failure_message(outcome),
             }
         }
+        Err(error @ RunError::StoreFailed(_)) => Conclusion::Interrupted {
+            message: error.to_string(),
+        },
         Err(error) => Conclusion::Failed {
             reason:  FailureReason::WorkflowError,
             message: error_chain(error),
@@ -554,6 +578,13 @@ mod tests {
             reason:  FailureReason::WorkflowError,
             message: "the run ended without recording a status; the record says: no status"
                 .to_string(),
+        });
+    }
+    #[test]
+    fn a_failed_store_concludes_interrupted() {
+        let error = RunError::StoreFailed("could not append: the disk is full".to_string());
+        assert_eq!(conclusion(&Err(error)), Conclusion::Interrupted {
+            message: "the run's store failed: could not append: the disk is full".to_string(),
         });
     }
 }
