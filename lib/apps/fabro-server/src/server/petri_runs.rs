@@ -38,7 +38,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use fabro_config::{
     EnvironmentImageLayer, EnvironmentLayer, Home, MergeMap, SettingsLayer, Storage,
@@ -700,8 +700,9 @@ enum Relaunch {
 /// Ready a run whose lifetime ended short of its end for a new worker, as a
 /// crash is recovered.
 ///
-/// The lease the previous worker held is released from outside, which
-/// fences that worker should it still be alive. Then the recovery protocol
+/// The previous worker is stopped should it still be running
+/// ([`stop_previous_worker`]), and only then is the lease it held released
+/// from outside. Then the recovery protocol
 /// reads the run's durable execution state: a run with a failed checkpoint
 /// cannot continue; otherwise every live workspace on this host is verified
 /// against, reset to, or restored from the snapshot its last durable finish
@@ -717,6 +718,7 @@ async fn relaunch(
     run_id: RunId,
     run_state: &fabro_store::RunProjection,
 ) -> anyhow::Result<Relaunch> {
+    stop_previous_worker(state, run_id).await?;
     let held = match state.petri_runs.release_for_restart(run_id).await {
         Ok(()) => true,
         Err(StoreError::NotFound { .. }) => false,
@@ -758,6 +760,44 @@ async fn relaunch(
         run_records::lifecycle(state, run_id, record).await?;
     }
     Ok(Relaunch::Worker(mode))
+}
+
+/// How long the server waits for a worker it killed to be gone.
+const WORKER_STOP_PATIENCE: Duration = Duration::from_secs(10);
+
+/// Make sure no worker of the run is still running, before its lease is
+/// ended from outside. A worker whose lease was released keeps running
+/// until its next write, beside any successor; and a worker outlives a
+/// server crash, since it leads a process group of its own. So a worker
+/// that still holds the run's worker lock is killed, with its process
+/// group, and the lock is waited on until the kernel frees it at the
+/// worker's exit. `Err` when it is still held after
+/// [`WORKER_STOP_PATIENCE`].
+pub(crate) async fn stop_previous_worker(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        let path = Storage::new(state.server_storage_dir())
+            .run_scratch(&run_id)
+            .worker_lock_path();
+        let holder = fabro_proc::stop_lock_holder(&path, WORKER_STOP_PATIENCE)
+            .await
+            .map_err(|err| {
+                anyhow::Error::new(err).context(format!(
+                    "stopping the run's previous worker ({})",
+                    path.display()
+                ))
+            })?;
+        if let fabro_proc::LockHolder::Stopped { pid } = holder {
+            warn!(
+                run_id = %run_id,
+                pid,
+                "the run's previous worker was still running; stopped it before ending its lease"
+            );
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (state, run_id);
+    Ok(())
 }
 
 /// The run's scratch root: its worker's run directory.

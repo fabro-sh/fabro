@@ -2788,8 +2788,12 @@ async fn delete_run_internal(
 
     // Whatever Petri run handles the run's worker held open over the API
     // drop here, before its sandboxes are pruned through the lease ledger:
-    // the worker is gone or was told to stop above, and a lease it still
-    // held would refuse the prune.
+    // a lease the worker still held would refuse the prune. The worker was
+    // told to stop above; a worker that is still running, or one that
+    // outlived a server crash, is stopped first.
+    petri_runs::stop_previous_worker(state, id)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{err:#}")))?;
     state.petri_runs.worker_exited(id);
     let delete_outcome = delete_run_sandbox_resource(state, id, force).await?;
 

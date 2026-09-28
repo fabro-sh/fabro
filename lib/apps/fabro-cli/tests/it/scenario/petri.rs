@@ -779,6 +779,77 @@ async fn a_petri_run_resumes_in_a_new_worker_after_the_server_restarts() {
     server.shutdown();
 }
 
+/// A worker outlives a server crash: it leads a process group of its own.
+/// The restarted server stops it before it ends the worker's lease and
+/// launches the resume, so no two workers of the run ever run side by side.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_worker_that_outlives_the_server_is_stopped_before_its_run_resumes() {
+    let context = test_context!();
+    let mut server = RunningServer::start().await;
+    let gate = context.temp_dir.join("survivor.gate");
+    let script = format!("while [ ! -f {} ]; do sleep 0.05; done", gate.display());
+    let workspace = write_petri_workspace(&context, &script);
+    let run_id = run_detached(&context, &server, &workspace);
+
+    wait_for_status(&server, &run_id, &["running"]).await;
+    let worker = wait_for_worker(&run_id);
+    eprintln!("worker {worker} launched");
+    wait_until_gate_is_polled(&gate);
+
+    // The server alone dies: its worker keeps running.
+    server.kill();
+    assert!(
+        fabro_proc::process_running_strict(worker),
+        "the worker outlived the server"
+    );
+
+    server.launch().await;
+    eprintln!("server restarted");
+    let resumed = wait_for_worker_other_than(&run_id, worker);
+    eprintln!("worker {resumed} launched for the resume");
+    assert!(
+        !fabro_proc::process_running_strict(worker),
+        "the surviving worker {worker} was stopped before the resume's worker launched"
+    );
+    std::fs::write(&gate, "go").expect("the gate opens");
+
+    let status = wait_for_status(&server, &run_id, &["succeeded", "failed"]).await;
+    let names = stream_names(&settled_stream(&server, &run_id).await);
+    assert_eq!(
+        status,
+        "succeeded",
+        "stream: {names:?}\nserver stderr:\n{}",
+        server.stderr_text()
+    );
+    assert_eq!(count_of(&names, "lifecycle:succeeded"), 1, "{names:?}");
+    assert_eq!(count_of(&names, "run.finished"), 1, "{names:?}");
+    server.shutdown();
+}
+
+/// Wait for a worker of the run other than `previous`.
+fn wait_for_worker_other_than(run_id: &str, previous: u32) -> u32 {
+    let short_id: String = run_id.chars().take(12).collect();
+    let deadline = Instant::now() + RUN_TIMEOUT;
+    loop {
+        let output = Command::new("pgrep")
+            .args(["-f", &format!("^fabro {short_id} ")])
+            .output()
+            .expect("pgrep runs");
+        if let Some(pid) = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.trim().parse::<u32>().ok())
+            .find(|pid| *pid != previous)
+        {
+            return pid;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no new worker process appeared for run {run_id}"
+        );
+        std::thread::sleep(POLL);
+    }
+}
+
 /// The run's status while the server may be down: `None` when it is.
 async fn run_status_offline(server: &RunningServer) -> Option<String> {
     fabro_test::test_http_client()
