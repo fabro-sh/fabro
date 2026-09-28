@@ -8,7 +8,10 @@
 //! should last: until the worker releases it, or until the server observes
 //! the worker exit. That is the integration plan's rule for a lease: it ends
 //! when the handle drops, when the server observes the worker exit, or by
-//! operator release, never by timeout.
+//! operator release, never by timeout. A release from outside comes only
+//! once the worker is gone: a worker whose lease was released keeps running
+//! until its next write, so the server first stops a worker that still
+//! holds the run's worker lock (a worker outlives a server crash).
 //!
 //! The Petri run key of a Fabro run is the run id's text, as the plan sets
 //! `RunOptions::run_key`.
@@ -119,10 +122,12 @@ impl PetriRuns {
     }
 
     /// End whatever lease the run's previous worker held, from outside:
-    /// what the server does for a run it finds in flight at startup, before
-    /// it launches a new worker for it. The previous worker, should it still
-    /// be alive, finds its handles stale on its next write. `NotFound` when
-    /// the store never held the run.
+    /// what the server does before it launches a new worker for a run whose
+    /// lifetime ended short of its end. The caller first makes sure the
+    /// previous worker is gone (`server::petri_runs::stop_previous_worker`):
+    /// a live worker whose lease is released keeps running until its next
+    /// write finds its handles stale. `NotFound` when the store never held
+    /// the run.
     pub(crate) async fn release_for_restart(&self, run_id: RunId) -> Result<(), StoreError> {
         self.worker_exited(run_id);
         self.store.release_lease(&Self::key(&run_id)).await
