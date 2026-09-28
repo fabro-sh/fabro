@@ -33,10 +33,13 @@ Every adapter the integration plan describes lands here.
 - `engine`: a run executed by Petri, started from its admitted graphs or
   resumed from its records, with the outcome read from the run's record
   through `inspect_run` and mapped to the conclusion Fabro's read side
-  records. The run's worker process runs it over `HttpRunStore`; the server
-  runs it in its own process only under its test override, over
-  `SqliteRunStore`. The caller supplies the interviewer, and the secret
-  provider and blob table when it has them.
+  records. A resume of a run whose creation a crash cut short starts it
+  again from its admitted graphs. A failed store write ends the run's
+  lifetime, not the run: the conclusion is `Interrupted`, and the run
+  resumes from its records. The run's worker process runs it over
+  `HttpRunStore`; the server runs it in its own process only under its
+  test override, over `SqliteRunStore`. The caller supplies the
+  interviewer, and the secret provider and blob table when it has them.
 - `interview`: Petri's `Interviewer` over Fabro's questions API and the
   worker's control channel. A question has one id in Fabro, Petri's own
   (`gate#2`): the projection lists it pending from the `question` record,
@@ -165,6 +168,13 @@ Every run executes on Petri. The server side is `fabro-server`'s
 a server restart, a run left in flight goes back to a worker in `--mode
 resume`: the run continues from its records, as Petri's own resume does,
 on workspaces the recovery protocol brought to their durable snapshots.
+A run whose store failed under it takes the same way back: its worker
+records no end and exits with `EX_TEMPFAIL` (75), and the server resumes
+the run, at most three times. A worker holds a lock on `worker.lock` in the
+run's scratch directory for its whole life; before the server ends a
+lease from outside (at that relaunch, or at a delete), it kills whatever
+process still holds the lock and waits until it is gone, since a worker
+outlives a server crash and keeps acting until its next write.
 
 ## How it is tested
 
@@ -175,6 +185,10 @@ Integration tests live under `tests/`:
   command-only workflow on the host sandbox through the real step registry.
   Both acquire real Host scopes through the built-in in-process provider;
   no plugin executable or checksum is required.
+- `resume.rs` resumes a run whose creation a crash cut short, which starts
+  it again, and runs a command workflow over a store whose first lease
+  write fails: the run is interrupted with no finish recorded, and a
+  resume finishes it.
 - `check.rs` admits the `hello` bundle and round-trips its graph through
   the blob store, binds the launch, admits a version whose `workflow.toml`
   names `engine = "petri"`, reads the project settings from the map, and
@@ -237,8 +251,10 @@ the scheduler, in the server process under its test override, with
 `GET /runs/{id}/state`
 serving the projection over Petri's records; a human gate is answered
 through the questions API; and Petri's diagnostics refuse a run at create.
-The server's `petri_runs` unit tests cover the lease ending at worker exit
-and the restart reconcile that relaunches a worker in resume mode.
+The server's `petri_runs` unit tests cover the lease ending at worker exit,
+the restart reconcile that relaunches a worker in resume mode, and a worker
+its store interrupted: relaunched in resume mode, and failed after the
+bound.
 `lib/apps/fabro-server/tests/it/scenario/petri_stream.rs` covers the stream:
 a client attached to a two-branch parallel run disconnects once both
 branches started, a platform notice is recorded while both branch scripts
@@ -255,6 +271,8 @@ executes in the worker a foreground server launched, its records reach
 `petri_records` over the HTTP store and its lease ends with the worker; and
 a run whose server and worker are both killed mid-stage resumes in a new
 worker after the server restarts, with one terminal lifecycle record; a
+worker that outlives its server is stopped before the resume's worker
+launches; a
 human gate in the worker is answered through the questions API over the
 control channel; two parallel gates each bind their own answer; and an
 unanswered gate expires with its default. The same file reads a finished
