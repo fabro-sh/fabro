@@ -11,6 +11,8 @@
 mod flock;
 #[cfg(unix)]
 mod pre_exec;
+#[cfg(unix)]
+mod process_lock;
 mod signal;
 mod title;
 
@@ -22,6 +24,8 @@ pub use pre_exec::pre_exec_pdeathsig;
 pub use pre_exec::pre_exec_setpgid;
 #[cfg(unix)]
 pub use pre_exec::pre_exec_setsid;
+#[cfg(unix)]
+pub use process_lock::{LockHolder, ProcessLock, stop_lock_holder};
 pub use signal::{process_exists, process_group_alive, process_running, process_running_strict};
 #[cfg(unix)]
 pub use signal::{

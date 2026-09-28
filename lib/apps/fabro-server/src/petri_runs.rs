@@ -8,7 +8,10 @@
 //! should last: until the worker releases it, or until the server observes
 //! the worker exit. That is the integration plan's rule for a lease: it ends
 //! when the handle drops, when the server observes the worker exit, or by
-//! operator release, never by timeout.
+//! operator release, never by timeout. A release from outside comes only
+//! once the worker is gone: a worker whose lease was released keeps running
+//! until its next write, so the server first stops a worker that still
+//! holds the run's worker lock (a worker outlives a server crash).
 //!
 //! The Petri run key of a Fabro run is the run id's text, as the plan sets
 //! `RunOptions::run_key`.
@@ -119,10 +122,12 @@ impl PetriRuns {
     }
 
     /// End whatever lease the run's previous worker held, from outside:
-    /// what the server does for a run it finds in flight at startup, before
-    /// it launches a new worker for it. The previous worker, should it still
-    /// be alive, finds its handles stale on its next write. `NotFound` when
-    /// the store never held the run.
+    /// what the server does before it launches a new worker for a run whose
+    /// lifetime ended short of its end. The caller first makes sure the
+    /// previous worker is gone (`server::petri_runs::stop_previous_worker`):
+    /// a live worker whose lease is released keeps running until its next
+    /// write finds its handles stale. `NotFound` when the store never held
+    /// the run.
     pub(crate) async fn release_for_restart(&self, run_id: RunId) -> Result<(), StoreError> {
         self.worker_exited(run_id);
         self.store.release_lease(&Self::key(&run_id)).await
@@ -174,6 +179,7 @@ mod tests {
     use fabro_types::{
         FailureReason, RunId, RunStatus, SuccessReason, WorkflowPath, WorkflowVersion,
     };
+    use fabro_util::exit::ExitClass;
     use serde_json::json;
     use tokio::io::AsyncRead;
     use tokio::sync::Notify;
@@ -181,6 +187,7 @@ mod tests {
     use tower::ServiceExt as _;
 
     use super::*;
+    use crate::server::petri_runs::MAX_STORE_INTERRUPTIONS;
     use crate::server::{
         AppState, reconcile_incomplete_runs_on_startup, run_records, spawn_scheduler,
     };
@@ -209,6 +216,8 @@ mod tests {
         started: Notify,
         running: AtomicBool,
         exit:    Arc<Notify>,
+        /// The exit code the worker ends with; `None` for a signal.
+        code:    Arc<Mutex<Option<i32>>>,
         mode:    Mutex<Option<&'static str>>,
     }
 
@@ -220,6 +229,11 @@ mod tests {
         }
 
         fn end_worker(&self) {
+            self.end_worker_with(None);
+        }
+
+        fn end_worker_with(&self, code: Option<i32>) {
+            *sync::lock(&self.code) = code;
             self.running.store(false, Ordering::SeqCst);
             self.exit.notify_one();
         }
@@ -235,15 +249,18 @@ mod tests {
             *sync::lock(&self.mode) = Some(spec.mode);
             self.running.store(true, Ordering::SeqCst);
             let exit = Arc::clone(&self.exit);
+            let code = Arc::clone(&self.code);
             let stderr: Pin<Box<dyn AsyncRead + Send + 'static>> = Box::pin(tokio::io::empty());
             let started = StartedWorker {
                 worker_ref: WorkerRef::Local { pid: u32::MAX },
                 stderr,
                 wait: Box::pin(async move {
                     exit.notified().await;
+                    let code = *sync::lock(&code);
                     Ok(WorkerExit {
-                        success: false,
-                        detail:  "test worker ended without a terminal event".to_string(),
+                        success: code == Some(0),
+                        code,
+                        detail: "test worker ended without a terminal event".to_string(),
                     })
                 }),
             };
@@ -803,5 +820,125 @@ mod tests {
             .expect("the run state loads")
             .expect("the run projects");
         assert_eq!(run_state.status, succeeded);
+    }
+
+    /// Wait until the run's stored status is terminal, and return it with
+    /// the failure's message.
+    async fn terminal_status(state: &Arc<AppState>, run_id: RunId) -> (RunStatus, Option<String>) {
+        for _ in 0..1000 {
+            let run_state = run_records::projection(state, run_id)
+                .await
+                .expect("the run state loads")
+                .expect("the run projects");
+            if run_state.status.is_terminal() {
+                let message = run_state
+                    .conclusion
+                    .as_ref()
+                    .and_then(|conclusion| conclusion.failure.as_ref())
+                    .map(|failure| failure.detail.message.clone());
+                return (run_state.status, message);
+            }
+            time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the run never ended");
+    }
+
+    /// A worker whose run's store failed exits with `EX_TEMPFAIL`: the run
+    /// is not over, and goes back to a worker in resume mode, as after a
+    /// crash. The previous worker's lease is released first.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_run_its_store_interrupted_goes_back_to_a_worker_in_resume_mode() {
+        let runtime = Arc::new(HeldWorkerRuntime::default());
+        let (state, app, run_id, token) = held_worker_run(&runtime).await;
+        run_to_running_as_worker(&app, run_id, &token).await;
+        assert_eq!(runtime.launched_mode(), Some("start"));
+
+        runtime.end_worker_with(Some(ExitClass::Interrupted.code()));
+        runtime.wait_for_start().await;
+
+        assert_eq!(runtime.launched_mode(), Some("resume"));
+        assert_eq!(
+            state
+                .petri_runs
+                .store()
+                .owner(&PetriRuns::key(&run_id))
+                .await
+                .expect("reads the lease"),
+            None,
+            "the interrupted worker's lease is released"
+        );
+        let transitions = state
+            .stores
+            .run_summaries
+            .platform_records()
+            .read(&run_id)
+            .await
+            .expect("the records list")
+            .into_iter()
+            .filter_map(|stored| match stored.record {
+                PlatformRecord::RunLifecycle(record) => Some(record.transition),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            &transitions[transitions.len() - 4..],
+            [
+                RunLifecycleKind::Starting,
+                RunLifecycleKind::Running,
+                RunLifecycleKind::StartRequested,
+                RunLifecycleKind::Runnable
+            ],
+            "the run was asked to start again as a resume, and did not end: {transitions:?}"
+        );
+        runtime.end_worker();
+    }
+
+    /// A store that keeps failing is not a glitch a resume gets past: the
+    /// run resumes after each of its first interruptions, and the next one
+    /// fails it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_run_its_store_keeps_interrupting_fails() {
+        let runtime = Arc::new(HeldWorkerRuntime::default());
+        let (state, app, run_id, token) = held_worker_run(&runtime).await;
+        run_to_running_as_worker(&app, run_id, &token).await;
+
+        for _ in 0..MAX_STORE_INTERRUPTIONS {
+            runtime.end_worker_with(Some(ExitClass::Interrupted.code()));
+            runtime.wait_for_start().await;
+            assert_eq!(runtime.launched_mode(), Some("resume"));
+        }
+        runtime.end_worker_with(Some(ExitClass::Interrupted.code()));
+
+        let (status, message) = terminal_status(&state, run_id).await;
+        assert_eq!(status, RunStatus::Failed {
+            reason: FailureReason::Terminated,
+        });
+        let message = message.expect("the failure has a message");
+        assert!(
+            message.contains(&format!(
+                "The run's store failed {} times",
+                MAX_STORE_INTERRUPTIONS + 1
+            )),
+            "{message}"
+        );
+    }
+
+    /// Any other failed worker exit fails the run, as before.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_worker_that_fails_otherwise_fails_the_run() {
+        let runtime = Arc::new(HeldWorkerRuntime::default());
+        let (state, app, run_id, token) = held_worker_run(&runtime).await;
+        run_to_running_as_worker(&app, run_id, &token).await;
+
+        runtime.end_worker_with(Some(1));
+
+        let (status, message) = terminal_status(&state, run_id).await;
+        assert_eq!(status, RunStatus::Failed {
+            reason: FailureReason::Terminated,
+        });
+        assert!(
+            message.is_some_and(|message| message.contains("Worker exited before emitting")),
+            "the failure names the worker's exit"
+        );
     }
 }

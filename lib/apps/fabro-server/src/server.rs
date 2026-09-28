@@ -156,9 +156,7 @@ use crate::worker_control::{
     LocalWorkerControlBus, WORKER_CONTROL_ACK_WAIT, WorkerControlAcks, WorkerControlBus,
     WorkerControlBusError,
 };
-use crate::worker_runtime::{
-    LocalWorkerRuntime, WorkerExit, WorkerLaunchSpec, WorkerRef, WorkerRuntime,
-};
+use crate::worker_runtime::{LocalWorkerRuntime, WorkerLaunchSpec, WorkerRef, WorkerRuntime};
 use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
 use crate::{
     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
@@ -277,6 +275,10 @@ struct ManagedRun {
     cancel_escalation_worker: Option<WorkerRef>,
     run_dir: Option<std::path::PathBuf>,
     execution_mode: RunExecutionMode,
+    /// How many times the run's store has interrupted it in this server's
+    /// life. Each time, the run resumes, up to
+    /// `petri_runs::MAX_STORE_INTERRUPTIONS`.
+    store_interruptions: u32,
 }
 
 impl ManagedRun {
@@ -2786,8 +2788,12 @@ async fn delete_run_internal(
 
     // Whatever Petri run handles the run's worker held open over the API
     // drop here, before its sandboxes are pruned through the lease ledger:
-    // the worker is gone or was told to stop above, and a lease it still
-    // held would refuse the prune.
+    // a lease the worker still held would refuse the prune. The worker was
+    // told to stop above; a worker that is still running, or one that
+    // outlived a server crash, is stopped first.
+    petri_runs::stop_previous_worker(state, id)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{err:#}")))?;
     state.petri_runs.worker_exited(id);
     let delete_outcome = delete_run_sandbox_resource(state, id, force).await?;
 
@@ -3535,6 +3541,7 @@ fn managed_run(
         cancel_escalation_worker: None,
         run_dir: Some(run_dir),
         execution_mode,
+        store_interruptions: 0,
     }
 }
 
@@ -3784,8 +3791,9 @@ async fn fail_worker_launch(state: &Arc<AppState>, run_id: RunId, err: anyhow::E
     state.scheduler_notify.notify_one();
 }
 
-/// A worker that exited without recording the run's end left it failed.
-async fn append_worker_exit_failure(state: &AppState, run_id: RunId, worker_exit: &WorkerExit) {
+/// A worker that exited without recording the run's end left it failed,
+/// with `failure` as the reason unless a cancel was pending.
+async fn append_worker_exit_failure(state: &AppState, run_id: RunId, failure: String) {
     let run_state = match run_records::projection(state, run_id).await {
         Ok(Some(run_state)) => run_state,
         Ok(None) => return,
@@ -3798,13 +3806,7 @@ async fn append_worker_exit_failure(state: &AppState, run_id: RunId, worker_exit
         return;
     }
 
-    let (error, reason) = failure_for_incomplete_run(
-        run_state.pending_control,
-        format!(
-            "Worker exited before emitting a terminal run event: {}",
-            worker_exit.detail
-        ),
-    );
+    let (error, reason) = failure_for_incomplete_run(run_state.pending_control, failure);
     if let Err(err) = run_records::lifecycle(
         state,
         run_id,
@@ -4288,7 +4290,20 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     // API drop here, so its lease never outlives it.
     state.petri_runs.worker_exited(run_id);
     state.petri_projector.signal(run_id);
-    append_worker_exit_failure(&state, run_id, &worker_exit).await;
+    // A worker whose run's store failed ended the run's lifetime, not the
+    // run: the run resumes in a new worker, as after a crash.
+    let failure = if worker_exit.interrupted() {
+        match petri_runs::resume_after_interruption(&state, run_id, &worker_exit.detail).await {
+            Ok(()) => return,
+            Err(failure) => failure,
+        }
+    } else {
+        format!(
+            "Worker exited before emitting a terminal run event: {}",
+            worker_exit.detail
+        )
+    };
+    append_worker_exit_failure(&state, run_id, failure).await;
 
     let final_state = match run_records::projection(&state, run_id).await {
         Ok(Some(final_state)) => final_state,

@@ -5,6 +5,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use fabro_client::ServerTarget;
+#[cfg(unix)]
+use fabro_config::RunScratch;
 use fabro_config::Storage;
 use fabro_interview::{
     AnswerSubmission, ControlInterviewer, WORKER_CONTROL_INVALID_CURSOR_REASON,
@@ -22,6 +24,8 @@ use futures::{SinkExt, StreamExt};
 use jsonwebtoken::dangerous::insecure_decode;
 #[cfg(unix)]
 use nix::unistd;
+#[cfg(unix)]
+use tokio::fs;
 #[cfg(test)]
 use tokio::io::DuplexStream;
 use tokio::net::TcpStream;
@@ -65,6 +69,10 @@ pub(crate) async fn execute(
 ) -> Result<()> {
     let _ = fabro_proc::title_init();
     set_worker_title(&run_id, initial_worker_title_phase(mode));
+    // Held until this process exits: while it is, the server ends no lease
+    // of this run from outside.
+    #[cfg(unix)]
+    let _running = hold_worker_lock(&run_dir, &run_id).await?;
 
     let target = server.parse::<ServerTarget>()?;
     let client = server_client::connect_server_target_with_bearer(&target, worker_token).await?;
@@ -91,6 +99,29 @@ pub(crate) async fn execute(
         worker_token,
     }))
     .await
+}
+
+/// Take the run's worker lock for this process's whole life, before
+/// anything else. The server ends a worker's lease from outside only once
+/// the lock is free, which the kernel makes it only when the process that
+/// held it is gone: a worker that outlived a server crash is stopped
+/// before its run resumes. Another process holding the lock is a worker of
+/// the same run still running, and this one does not start beside it.
+#[cfg(unix)]
+async fn hold_worker_lock(run_dir: &Path, run_id: &RunId) -> Result<fabro_proc::ProcessLock> {
+    fs::create_dir_all(run_dir)
+        .await
+        .with_context(|| format!("creating the run directory {}", run_dir.display()))?;
+    let path = RunScratch::new(run_dir).worker_lock_path();
+    fabro_proc::ProcessLock::try_hold(&path)
+        .await
+        .with_context(|| format!("taking the worker lock {}", path.display()))?
+        .ok_or_else(|| {
+            anyhow!(
+                "another worker of run {run_id} is still running: it holds {}",
+                path.display()
+            )
+        })
 }
 
 const WORKER_TOKEN_SCOPE: &str = "run:worker";
