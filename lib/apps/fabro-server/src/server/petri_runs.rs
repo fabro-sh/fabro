@@ -33,6 +33,7 @@
 //! failed when it cannot.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -259,11 +260,13 @@ pub(crate) async fn admit(
     state: &AppState,
     prepared: &PreparedRun,
     eligible: &[ProviderId],
+    git_repository: Option<PathBuf>,
 ) -> Result<AdmittedRun, RunCompilerError> {
     let settings = prepared.settings();
     let repository = match prepared.target() {
         Some(RunTarget::Folder { path }) => Some(path.into()),
-        Some(RunTarget::Git(_) | RunTarget::None {}) | None => None,
+        Some(RunTarget::Git(_)) => git_repository,
+        Some(RunTarget::None {}) | None => None,
     };
     let launch = petri_check::launch(
         &state.catalog(),

@@ -4,6 +4,10 @@ slow-timeout = { period = "1s", terminate-after = 3 }
 leak-timeout = "500ms"
 
     [[profile.default.overrides]]
+    filter = "package(fabro-cli) & test(=scenario::petri_docker::a_git_target_reaches_docker_at_its_pinned_revision_and_checkpoints_edits)"
+    slow-timeout = { period = "30s", terminate-after = 3 }
+
+    [[profile.default.overrides]]
     filter = "package(fabro-cli)"
     slow-timeout = { period = "6s", terminate-after = 4 }
 
@@ -80,4 +84,3 @@ leak-timeout = "2s"
     [[profile.ci.overrides]]
     filter = "package(fabro-petri)"
     slow-timeout = { period = "30s", terminate-after = 4 }
-

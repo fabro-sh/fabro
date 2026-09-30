@@ -20,6 +20,10 @@ const GIT_REV_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Error returned while preparing a checkout from a git source.
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum GitCheckoutError {
+    #[error("failed to initialize the run's source repository")]
+    Initialize(#[source] GitCommandError),
+    #[error("failed to check out the run's selected revision")]
+    Checkout(#[source] GitCommandError),
     #[error("failed to create Git cache directory {path}")]
     CacheDirectory {
         path:   PathBuf,
@@ -59,6 +63,58 @@ pub(crate) enum GitCheckoutError {
         #[source]
         source: GitCommandError,
     },
+}
+
+/// Materialize an independent source repository for Petri's checkout step.
+/// It lives with the run, so later cache fetches cannot move its HEAD and a
+/// delayed start needs neither credentials nor a still-existing remote ref.
+/// Authentication is process-local and never written into the repository.
+pub(crate) async fn prepare_run_repository(
+    target: &GitRunTarget,
+    clone_url: &str,
+    auth: Option<&GitAuthConfig>,
+    depth: i32,
+    directory: &Path,
+) -> Result<String, GitCheckoutError> {
+    for args in [vec!["init", "--quiet"], vec![
+        "remote", "add", "origin", clone_url,
+    ]] {
+        run_git_plan(GitCommandPlan::new(args, GIT_REV_PARSE_TIMEOUT).current_dir(directory))
+            .await
+            .map_err(GitCheckoutError::Initialize)?;
+    }
+    let selector = GitCheckoutSelector::from(target);
+    let mut args = vec!["fetch".to_string(), "--no-tags".to_string()];
+    if depth > 0 {
+        args.push(format!("--depth={depth}"));
+    }
+    // Qualify branches, since a branch and a tag may have the same name.
+    let revision = match selector {
+        GitCheckoutSelector::Branch(branch) => format!("refs/heads/{branch}"),
+        _ => selector.selector().into_owned(),
+    };
+    args.extend(["origin".to_string(), "--".to_string(), revision]);
+    run_git_plan(
+        GitCommandPlan::new(args, GIT_FETCH_TIMEOUT)
+            .current_dir(directory)
+            .with_auth(clone_url, auth),
+    )
+    .await
+    .map_err(|source| selector.checkout_error(source))?;
+    let sha = run_git_plan(build_rev_parse_fetch_head_plan(directory))
+        .await
+        .map_err(|source| GitCheckoutError::ResolveCommit { source })?;
+    let sha = String::from_utf8_lossy(&sha).trim().to_owned();
+    run_git_plan(
+        GitCommandPlan::new(
+            ["checkout", "--quiet", "-B", &target.branch, &sha],
+            GIT_WORKTREE_ADD_TIMEOUT,
+        )
+        .current_dir(directory),
+    )
+    .await
+    .map_err(GitCheckoutError::Checkout)?;
+    Ok(sha)
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -950,6 +1006,97 @@ mod tests {
         }
         files.sort();
         files
+    }
+
+    #[tokio::test]
+    async fn run_repository_pins_the_selected_revision_and_preserves_history_depth() {
+        let temp = TempDir::new().unwrap();
+        let upstream = temp.path().join("upstream.git");
+        let first = seed_upstream(&upstream);
+        let seed = temp.path().join("seed");
+        let git = |directory: &Path, args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(directory)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        fs::write(seed.join("README.md"), "moved\n").unwrap();
+        git(&seed, &["commit", "-am", "move main"]);
+        let head = git(&seed, &["rev-parse", "HEAD"]);
+        git(&seed, &["push", upstream.to_str().unwrap(), "main"]);
+        let url = format!("file://{}", upstream.display());
+        for (sha, tag, depth, expected, count) in [
+            (
+                Some(first.clone()),
+                Some("missing".to_string()),
+                1,
+                &first,
+                "1",
+            ),
+            (None, Some("v1".to_string()), 1, &first, "1"),
+            (None, None, 1, &head, "1"),
+            (None, None, 0, &head, "2"),
+        ] {
+            let directory = TempDir::new().unwrap();
+            let target = GitRunTarget {
+                repo: "acme/repo".to_owned(),
+                branch: "main".to_owned(),
+                tag,
+                sha,
+            };
+            let actual = prepare_run_repository(&target, &url, None, depth, directory.path())
+                .await
+                .unwrap();
+            assert_eq!(&actual, expected);
+            assert_eq!(git(directory.path(), &["rev-parse", "HEAD"]), actual);
+            assert_eq!(
+                git(directory.path(), &["symbolic-ref", "--short", "HEAD"]),
+                "main"
+            );
+            assert_eq!(
+                git(directory.path(), &["rev-list", "--count", "HEAD"]),
+                count
+            );
+            assert_eq!(git(directory.path(), &["remote", "get-url", "origin"]), url);
+            assert!(
+                !fs::read_to_string(directory.path().join(".git/config"))
+                    .unwrap()
+                    .contains("extraheader")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn run_repository_refuses_an_unavailable_revision_with_its_cause() {
+        let temp = TempDir::new().unwrap();
+        let upstream = temp.path().join("upstream.git");
+        seed_upstream(&upstream);
+        let directory = TempDir::new().unwrap();
+        let target = GitRunTarget {
+            repo:   "acme/repo".to_owned(),
+            branch: "missing".to_owned(),
+            tag:    None,
+            sha:    None,
+        };
+        let error = prepare_run_repository(
+            &target,
+            &format!("file://{}", upstream.display()),
+            None,
+            1,
+            directory.path(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, GitCheckoutError::FetchBranch { .. }));
+        assert!(Error::source(&error).unwrap().is::<GitCommandError>());
+        assert!(!directory.path().join("README.md").exists());
     }
 
     #[tokio::test]

@@ -65,6 +65,7 @@ use crate::run_intent::{
 use crate::run_manifest;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 use crate::run_title_generation::{self, GenerateTitleInput, TitlePromptInput, WorkflowSummary};
+use crate::server::run_checkout;
 #[cfg(any(test, feature = "test-support"))]
 use crate::test_support as server_test_support;
 
@@ -727,6 +728,12 @@ async fn finalize_created_run(
     explicit_title_supplied: bool,
     title_generation_target: ManifestPath,
 ) -> Response {
+    let (prepared, run_id) = prepared.resolve_run_id();
+    let (prepared, source_repository) =
+        match Box::pin(run_checkout::prepare(&state, prepared, run_id)).await {
+            Ok(result) => result,
+            Err(error) => return run_intent_admission_error(error.into()),
+        };
     // Resolve once: we need both the provider IDs (for the run create input
     // and ask-fabro-readiness) and the LLM client itself (for the spawned
     // title-generation task). `ready_llm_provider_ids` would otherwise call
@@ -749,7 +756,15 @@ async fn finalize_created_run(
     // Petri compiles the run: the bundle goes to `Runtime::check`, its
     // diagnostics come back in Fabro's shape, and the admitted graph is what
     // the run executes. Fabro's own settings resolution ran above.
-    let pinned = match petri_runs::admit(&state, &prepared, &run_materialization_provider_ids).await
+    let pinned = match petri_runs::admit(
+        &state,
+        &prepared,
+        &run_materialization_provider_ids,
+        source_repository
+            .as_ref()
+            .map(|directory| directory.path().to_path_buf()),
+    )
+    .await
     {
         Ok(admitted) => run_compiler::materialize_admitted(prepared, admitted).await,
         Err(error) => Err(error),
@@ -776,6 +791,9 @@ async fn finalize_created_run(
         }
     };
     let created_at = created.run_id.created_at();
+    if let Some(directory) = source_repository {
+        let _ = directory.keep();
+    }
     // The run's summary row is the projector's: wait for the pass that
     // folds the run's first records before reading the run back.
     state.petri_projector.settle(created.run_id).await;
@@ -851,6 +869,11 @@ fn intent_error(status: StatusCode, detail: impl Into<String>, code: &'static st
 
 fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
     match &error {
+        RunIntentAdmissionError::Checkout(_) => {
+            // The curated message identifies the target without printing Git's
+            // raw output or credential-provider error bodies.
+            tracing::warn!(error = %error, "Run target checkout failed");
+        }
         RunIntentAdmissionError::VersionStore { .. }
         | RunIntentAdmissionError::VariableSnapshot { .. }
         | RunIntentAdmissionError::WorkerRun { .. }
@@ -877,6 +900,11 @@ fn run_intent_admission_error(error: RunIntentAdmissionError) -> Response {
     }
 
     match error {
+        RunIntentAdmissionError::Checkout(error) => intent_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.to_string(),
+            "target_checkout_failed",
+        ),
         RunIntentAdmissionError::VersionStore { .. } => intent_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "workflow version store operation failed",

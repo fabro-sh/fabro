@@ -3402,7 +3402,7 @@ async fn post_runs_run_intent_derives_workflow_slug_from_immutable_entrypoint() 
 }
 
 #[tokio::test]
-async fn post_runs_run_intent_persists_tagged_exact_git_target_without_starting() {
+async fn post_runs_dry_run_persists_tagged_exact_git_target_without_starting() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let workflow_version_id = store_workflow_version(
@@ -3440,6 +3440,7 @@ file = "goal.md"
                 "sha": submitted_sha
             },
             "args": {
+                "dry_run": true,
                 "inputs": { "ship": true },
                 "labels": { "team": "platform" }
             },
@@ -5033,6 +5034,33 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         automation_materializer_override: None,
     };
     build_app_state(config).expect("test app state should build")
+}
+
+#[tokio::test]
+async fn post_runs_git_target_requires_configured_checkout_credentials() {
+    let state = create_github_token_app_state(None, None);
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let version = store_workflow_version(&state, MINIMAL_DOT, None).await;
+    let response = post_run_intent_response(
+        &app,
+        json!({
+            "workflow_version_id": version,
+            "target": {"kind": "git", "repo": "acme/private", "branch": "main"},
+            "args": {},
+        }),
+    )
+    .await;
+    let body = fabro_test::expect_axum_json(
+        response,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "create Git target without configured token",
+    )
+    .await;
+    assert_eq!(body["errors"][0]["code"], "target_checkout_failed");
+    assert_eq!(
+        body["errors"][0]["detail"],
+        "could not resolve GitHub checkout credentials; check the server's GitHub integration"
+    );
 }
 
 #[tokio::test]

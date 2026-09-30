@@ -216,7 +216,10 @@ transfer it to a remote server.
 
 `--target-branch` requires `--target-repo` and accepts a working branch name, not a
 tag or SHA. Without it, Fabro resolves the repository's default branch. The CLI
-only looks up target metadata; the execution sandbox clones the target.
+only looks up target metadata. At run creation the server fetches and retains
+the selected revision using its GitHub credentials; a failed checkout rejects
+creation. The engine populates the execution workspace from that retained
+repository before the first command or agent stage.
 The shorthand `--target acme/app@release/v2` selects the working branch
 `release/v2`; omit `@BRANCH` to use the remote default branch. Target suffixes
 accept working branches, while workflow suffixes accept branches, tags, or SHAs.

@@ -169,6 +169,7 @@ mod handler;
 pub(crate) mod petri_runs;
 mod pull_request_supervisor;
 pub(crate) mod resource_sampler;
+pub(crate) mod run_checkout;
 pub(crate) mod run_records;
 mod session_runtime;
 pub(crate) mod stream_follower;

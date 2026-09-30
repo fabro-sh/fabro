@@ -17,6 +17,7 @@ use thiserror::Error;
 use tokio::{fs, task};
 
 use crate::run_compiler::{RunCompilerError, settings_layer_with_resolved_dockerfiles};
+use crate::server::run_checkout::RunCheckoutError;
 
 #[derive(Debug, Error)]
 pub(crate) enum RunIntentAdmissionError {
@@ -35,6 +36,8 @@ pub(crate) enum RunIntentAdmissionError {
     Environment(#[from] EnvironmentSelectionError),
     #[error(transparent)]
     Compiler(#[from] RunCompilerError),
+    #[error(transparent)]
+    Checkout(#[from] RunCheckoutError),
     #[error("run variables could not be loaded")]
     VariableSnapshot {
         #[source]

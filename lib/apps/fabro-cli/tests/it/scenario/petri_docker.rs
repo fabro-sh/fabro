@@ -18,6 +18,7 @@
     reason = "these scenarios inspect backend availability and drive the Docker daemon with its CLI"
 )]
 
+use std::collections::BTreeMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -27,6 +28,7 @@ use fabro_static::EnvVars;
 use fabro_test::{
     TwinScenario, TwinScenarios, TwinToolCall, expect_reqwest_json, test_context, twin_openai,
 };
+use fabro_types::{WorkflowPath, WorkflowVersion};
 use serde_json::json;
 
 use super::petri::{
@@ -48,7 +50,15 @@ async fn docker_server() -> RunningServer {
 /// `docker_server`, with `settings` appended to the server's settings and
 /// `secrets` in its vault.
 async fn docker_server_with(settings: &str, secrets: &[(&str, &str)]) -> RunningServer {
-    let server = RunningServer::start_with(settings, secrets).await;
+    docker_server_with_env(settings, secrets, &[]).await
+}
+
+async fn docker_server_with_env(
+    settings: &str,
+    secrets: &[(&str, &str)],
+    env: &[(&str, &str)],
+) -> RunningServer {
+    let server = RunningServer::start_with_env(settings, secrets, env).await;
     let body = json!({
         "id": ENVIRONMENT,
         "provider": "docker",
@@ -73,6 +83,198 @@ async fn docker_server_with(settings: &str, secrets: &[(&str, &str)]) -> Running
     )
     .await;
     server
+}
+
+async fn checkout_version(server: &RunningServer, script: &str, settings: &str) -> String {
+    let path = |name| WorkflowPath::new(name).expect("the workflow path is valid");
+    let dot = format!(
+        "digraph Checkout {{ start [shape=Mdiamond]; verify [shape=parallelogram, goal_gate=true, script={}]; exit [shape=Msquare]; start -> verify -> exit; }}",
+        serde_json::to_string(script).expect("the script serializes"),
+    );
+    let version = WorkflowVersion::new(
+        path("workflow.fabro"),
+        BTreeMap::from([
+            (path("workflow.fabro"), dot),
+            (
+                path("workflow.toml"),
+                format!("_version = 1\n[workflow]\ngraph = \"workflow.fabro\"\n{settings}"),
+            ),
+        ]),
+        BTreeMap::new(),
+    )
+    .expect("the checkout workflow version is valid");
+    let response = fabro_test::test_http_client()
+        .post(format!("{}/api/v1/workflow-versions", server.api_base_url))
+        .bearer_auth(TEST_DEV_TOKEN)
+        .json(&version)
+        .send()
+        .await
+        .expect("the checkout request sends");
+    expect_reqwest_json(
+        response,
+        fabro_http::StatusCode::CREATED,
+        "register checkout workflow",
+    )
+    .await["workflow_version_id"]
+        .as_str()
+        .expect("the response names its workflow version")
+        .to_owned()
+}
+
+async fn create_checkout_run(
+    server: &RunningServer,
+    version: &str,
+    target: serde_json::Value,
+) -> fabro_http::Response {
+    fabro_test::test_http_client()
+        .post(format!("{}/api/v1/runs", server.api_base_url))
+        .bearer_auth(TEST_DEV_TOKEN)
+        .json(&json!({"workflow_version_id": version, "environment_id": ENVIRONMENT, "target": target, "args": {"auto_approve": true}}))
+        .send().await.expect("the run creation request sends")
+}
+
+async fn start_checkout_run(server: &RunningServer, id: &str) {
+    let response = fabro_test::test_http_client()
+        .post(format!("{}/api/v1/runs/{id}/start", server.api_base_url))
+        .bearer_auth(TEST_DEV_TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("the checkout request sends");
+    fabro_test::expect_reqwest_status(response, fabro_http::StatusCode::OK, "start checkout run")
+        .await;
+}
+
+/// The public create/start path must deliver the requested Git revision before
+/// stage one. Redirect only this server's Git transport to a local fixture;
+/// the run still names a GitHub target and exercises production acquisition.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_git_target_reaches_docker_at_its_pinned_revision_and_checkpoints_edits() {
+    if !fabro_test::docker_available() {
+        return;
+    }
+    let context = test_context!();
+    let upstream = context.temp_dir.join("upstream");
+    std::fs::create_dir(&upstream).unwrap();
+    git(&upstream, &["init", "--initial-branch=main"]);
+    git(&upstream, &["config", "user.name", "Checkout Test"]);
+    git(&upstream, &["config", "user.email", "checkout@example.com"]);
+    git(&upstream, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(upstream.join("README.md"), "existing repository bytes\n").unwrap();
+    git(&upstream, &["add", "."]);
+    git(&upstream, &["commit", "-m", "original"]);
+    let pin = git(&upstream, &["rev-parse", "HEAD"]);
+    let blob = git(&upstream, &["hash-object", "README.md"]);
+    std::fs::write(upstream.join("README.md"), "new branch tip\n").unwrap();
+    git(&upstream, &["commit", "-am", "move main"]);
+    let config = context.temp_dir.join("checkout.gitconfig");
+    let remote = "https://github.com/checkout-fixture/source.git";
+    std::fs::write(
+        &config,
+        format!(
+            "[url \"file://{}\"]\n\tinsteadOf = {remote}\n",
+            upstream.display()
+        ),
+    )
+    .unwrap();
+    let mut server = docker_server_with_env(
+        "",
+        &[(EnvVars::GITHUB_TOKEN, "ghu_checkout_fixture")],
+        &[("GIT_CONFIG_GLOBAL", config.to_str().unwrap())],
+    )
+    .await;
+    let version = checkout_version(&server, &format!(
+        "set -eu; test $(git hash-object README.md) = {blob}; git merge-base --is-ancestor {pin} HEAD; test $(git remote get-url origin) = {remote}; printf 'edited existing file\\n' >> README.md"
+    ), "").await;
+    let response = create_checkout_run(
+        &server,
+        &version,
+        json!({"kind": "git", "repo": "checkout-fixture/source", "branch": "main", "sha": pin}),
+    )
+    .await;
+    let created = expect_reqwest_json(
+        response,
+        fabro_http::StatusCode::CREATED,
+        "create Git target run",
+    )
+    .await;
+    let id = created["id"].as_str().unwrap();
+    let state = super::petri::run_json(&server, &format!("runs/{id}/state")).await;
+    assert_eq!(state["spec"]["target"]["sha"], pin);
+    // Neither a moving remote nor a process restart may change the admitted
+    // source; starting the run must need only the retained source repository.
+    server.kill();
+    std::fs::remove_dir_all(upstream).unwrap();
+    server.launch().await;
+    start_checkout_run(&server, id).await;
+    wait_for_success(&server, id).await;
+    let repository = snapshot_repository(&server, id);
+    let commits = snapshot_commits(&repository);
+    let edit = commits
+        .iter()
+        .find(|(_, subject, _)| subject.ends_with(": verify (success)"))
+        .unwrap();
+    assert_eq!(
+        git(&repository, &["show", &format!("{}:README.md", edit.0)]),
+        "existing repository bytes\nedited existing file"
+    );
+    assert!(commits.iter().any(|(sha, _, _)| sha == &pin));
+    cleanup(id);
+
+    let empty = checkout_version(&server, "test -z \"$(git ls-files)\"", "").await;
+    let response = create_checkout_run(&server, &empty, json!({"kind": "none"})).await;
+    let created = expect_reqwest_json(
+        response,
+        fabro_http::StatusCode::CREATED,
+        "create empty target run",
+    )
+    .await;
+    let id = created["id"].as_str().unwrap();
+    start_checkout_run(&server, id).await;
+    wait_for_success(&server, id).await;
+    cleanup(id);
+
+    let disabled = checkout_version(
+        &server,
+        "test -z \"$(git ls-files)\"",
+        "[run.clone]\nenabled = false\n",
+    )
+    .await;
+    let response = create_checkout_run(
+        &server,
+        &disabled,
+        json!({"kind": "git", "repo": "checkout-fixture/source", "branch": "main"}),
+    )
+    .await;
+    let rejected = expect_reqwest_json(
+        response,
+        fabro_http::StatusCode::UNPROCESSABLE_ENTITY,
+        "reject Git target with checkout disabled",
+    )
+    .await;
+    assert_eq!(
+        rejected["errors"][0]["code"],
+        "target_environment_unsupported"
+    );
+
+    let response = create_checkout_run(
+        &server,
+        &version,
+        json!({"kind": "git", "repo": "checkout-fixture/source", "branch": "main"}),
+    )
+    .await;
+    let rejected = expect_reqwest_json(
+        response,
+        fabro_http::StatusCode::UNPROCESSABLE_ENTITY,
+        "reject unavailable Git target",
+    )
+    .await;
+    assert_eq!(rejected["errors"][0]["code"], "target_checkout_failed");
+    assert_eq!(
+        rejected["errors"][0]["detail"],
+        "could not check out checkout-fixture/source; check repository access and the requested revision"
+    );
+    server.shutdown();
 }
 
 /// The run's container on the daemon, by Petri's run label: the one the

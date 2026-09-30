@@ -15,10 +15,11 @@
 //! below every file layer, `petri.launch_environment` as the environment
 //! the run selected over every file layer, `petri.launch_goal` as the goal
 //! the run resolved over every file layer and the graph's own, and
-//! `petri.repository` as the repository the root `start` stage checks out. A
-//! caller with no local repository binds `null`, and the run starts from an
-//! empty workspace. The server's run variables (`{{ vars.NAME }}`) are bound as
-//! compile variables beside them.
+//! `petri.repository` as the repository the root `start` stage checks out.
+//! Git targets bind the server's pinned source repository; folder targets bind
+//! their local path. A caller requesting no checkout binds `null`, and the run
+//! starts from an empty workspace. The server's run variables (`{{ vars.NAME
+//! }}`) are bound as compile variables beside them.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
