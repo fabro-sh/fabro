@@ -140,8 +140,9 @@ fn settings_layer_toml(state: &AppState) -> Option<String> {
 /// under `daytona`, and `env`. The rest is the platform's (`cwd`,
 /// `network`, `lifecycle`, `labels`, `image.dockerfile`, resources the host
 /// and Docker providers run without, an image the host runs without) and
-/// stays with the server's own resolution; handing it to Petri would only
-/// warn `ignored.workflow_toml.environments.<id>.<key>` on every admit.
+/// stays with the server's own resolution. The resolved network policy is
+/// passed through `RunRequest` at execution; handing it to the frontend would
+/// only warn `ignored.workflow_toml.environments.<id>.<key>` on every admit.
 fn petri_environments(catalog: &MergeMap<EnvironmentLayer>) -> MergeMap<EnvironmentLayer> {
     MergeMap(
         catalog
@@ -497,6 +498,7 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
         runtime,
         provider: run_state.spec.settings.run.environment.provider.clone(),
         resources: run_state.spec.settings.run.environment.resources.clone(),
+        network: run_state.spec.settings.run.environment.network.clone(),
         cancel,
         // The in-process test path drives no pause: the server's transport
         // for it names the worker. A steer or an interrupt is answered in

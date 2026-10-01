@@ -57,6 +57,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+fabro-macros = { path = "../../foundation/fabro-macros" }
 fabro-petri = { path = ".", features = ["test-support"] }
 fabro-tool = { path = "../fabro-tool" }
 httpmock = "0.8"

@@ -47,7 +47,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fabro_types::settings::run::EnvironmentResourcesSettings;
+use fabro_types::settings::run::{
+    EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentResourcesSettings,
+};
 use fabro_types::settings::size::Size;
 use fabro_types::{FailureReason, RunId, SandboxProviderKind};
 use petri_execution::host::{self, HostError, HostRun};
@@ -60,6 +62,7 @@ use petri_runtime::driver::lifecycle::ExecutionHooks;
 pub use petri_runtime::executor::Retention;
 use petri_runtime::executor::SecretProvider;
 use petri_runtime::{DaytonaResources, LostSandbox, RunOptions, SandboxBackend};
+use sandbox_driver::NetworkPolicy;
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -98,6 +101,8 @@ pub struct RunRequest {
     pub provider:    SandboxProviderKind,
     /// Resolved environment resources for the Daytona runner snapshot.
     pub resources:   EnvironmentResourcesSettings,
+    /// Resolved run policy, applied to every sandbox at execution.
+    pub network:     EnvironmentNetworkSettings,
     /// Fires to cancel the run.
     pub cancel:      CancellationToken,
     /// The run's pause, unpause and steer controls, which the caller keeps
@@ -176,6 +181,16 @@ pub enum Conclusion {
     },
 }
 
+fn network_policy(settings: &EnvironmentNetworkSettings) -> NetworkPolicy {
+    match settings.mode {
+        EnvironmentNetworkMode::AllowAll => NetworkPolicy::AllowAll,
+        EnvironmentNetworkMode::Block => NetworkPolicy::Block,
+        EnvironmentNetworkMode::CidrAllowList => NetworkPolicy::CidrAllowList {
+            cidrs: settings.allow.clone(),
+        },
+    }
+}
+
 /// Execute the run to its end and report what the record says.
 pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
     let backend = if request.runtime.dry_run {
@@ -192,6 +207,9 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
     options.run_key = Some(key.clone());
     options.retention = RETENTION;
     options.sandbox.backend = backend;
+    if !request.runtime.dry_run {
+        options.sandbox.network = network_policy(&request.network);
+    }
     if backend == SandboxBackend::Daytona {
         options.sandbox.daytona_resources = daytona_resources(&request.resources)?;
     }
