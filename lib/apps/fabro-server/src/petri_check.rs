@@ -12,6 +12,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
+use fabro_config::RunModelLayer;
 use fabro_llm::lithos_catalog::Catalog;
 use fabro_llm::selection;
 use fabro_petri::check::{self, Admitted, Bundle, CheckError, CheckRequest, Diagnostic, Launch};
@@ -54,6 +55,7 @@ pub(crate) fn launch(
         environment: environment.map(str::to_owned),
         goal: launch_goal(settings),
         repository,
+        ..Launch::default()
     }
 }
 
@@ -81,12 +83,26 @@ fn launch_goal(settings: &WorkflowSettings) -> Option<String> {
 /// name, for a check away from the server.
 pub(crate) fn launch_without_catalog(settings: &WorkflowSettings) -> Launch {
     Launch {
-        model:       settings.run.model.name.clone(),
-        provider:    settings.run.model.provider.clone(),
+        model: settings.run.model.name.clone(),
+        provider: settings.run.model.provider.clone(),
         environment: None,
-        goal:        launch_goal(settings),
-        repository:  None,
+        goal: launch_goal(settings),
+        repository: None,
+        ..Launch::default()
     }
+}
+
+/// Preserve explicit model flags separately from defaults resolved from the
+/// workflow and server, so they can outrank file layers during admission.
+pub(crate) fn with_model_overrides(
+    mut launch: Launch,
+    overrides: Option<&RunModelLayer>,
+) -> Launch {
+    if let Some(overrides) = overrides {
+        launch.model_override.clone_from(&overrides.name);
+        launch.provider_override.clone_from(&overrides.provider);
+    }
+    launch
 }
 
 /// The check request for `bundle`'s `entrypoint`: every file of every

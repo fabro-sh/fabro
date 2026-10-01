@@ -44,6 +44,7 @@ mod repo_init;
 mod resume;
 mod rm;
 mod run;
+mod run_model;
 mod runner;
 mod sandbox_cp;
 mod sandbox_preview;

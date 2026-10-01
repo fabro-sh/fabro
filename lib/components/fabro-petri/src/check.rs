@@ -12,7 +12,9 @@
 //!
 //! The launch binds the compile variables the Fabro frontend reads:
 //! `petri.launch_model` and `petri.launch_provider` as the model default
-//! below every file layer, `petri.launch_environment` as the environment
+//! below every file layer, `petri.model_override` and `petri.provider_override`
+//! as explicit selections above file and graph defaults but below node and
+//! stylesheet choices, `petri.launch_environment` as the environment
 //! the run selected over every file layer, `petri.launch_goal` as the goal
 //! the run resolved over every file layer and the graph's own, and
 //! `petri.repository` as the repository the root `start` stage checks out. A
@@ -27,7 +29,8 @@ use petri_frontend_attractor::kinds::{AGENT_KIND, PROMPT_KIND};
 use petri_runtime::LoadError;
 use petri_runtime::frontend::{
     self, CompileInputs, LAUNCH_ENVIRONMENT_VAR, LAUNCH_GOAL_VAR, LAUNCH_MODEL_VAR,
-    LAUNCH_PROVIDER_VAR, MapFiles, REPOSITORY_VAR, Severity,
+    LAUNCH_PROVIDER_VAR, MODEL_OVERRIDE_VAR, MapFiles, PROVIDER_OVERRIDE_VAR, REPOSITORY_VAR,
+    Severity,
 };
 use petri_runtime::ir::Graph;
 use serde::{Deserialize, Serialize};
@@ -69,21 +72,25 @@ impl Bundle {
 /// them, the environment selection above them, and the repository.
 #[derive(Clone, Debug, Default)]
 pub struct Launch {
-    pub model:       Option<String>,
-    pub provider:    Option<String>,
+    pub model:             Option<String>,
+    pub provider:          Option<String>,
+    /// Explicit run overrides, above workflow and graph defaults but below
+    /// node attributes and stylesheets. Kept separate from catalog defaults.
+    pub model_override:    Option<String>,
+    pub provider_override: Option<String>,
     /// The environment the run selected, by its id in the server's
     /// catalog, over every layer's `[run.environment]`, as the intent's
     /// selection overrides the bundle in Fabro's own resolution; `None`
     /// leaves the layers to select.
-    pub environment: Option<String>,
+    pub environment:       Option<String>,
     /// The goal the run resolved (the intent's override, else the settings'
     /// `[run] goal` from any layer), over the bundle's `[run] goal` and the
     /// graph's own `goal`, so the stages execute with the goal the run
     /// shows; `None` leaves the bundle's layers and the graph to state it.
-    pub goal:        Option<String>,
+    pub goal:              Option<String>,
     /// The local repository the root `start` stage checks out into the
     /// workspace; `None` starts the run from an empty workspace.
-    pub repository:  Option<PathBuf>,
+    pub repository:        Option<PathBuf>,
 }
 
 /// One check: the bundle, the run's inputs and variables, the launch and
@@ -219,6 +226,13 @@ fn compile_inputs(
     compile
         .vars
         .insert(LAUNCH_PROVIDER_VAR.into(), text(&launch.provider));
+    compile
+        .vars
+        .insert(MODEL_OVERRIDE_VAR.into(), text(&launch.model_override));
+    compile.vars.insert(
+        PROVIDER_OVERRIDE_VAR.into(),
+        text(&launch.provider_override),
+    );
     if let Some(environment) = &launch.environment {
         compile.vars.insert(
             LAUNCH_ENVIRONMENT_VAR.into(),

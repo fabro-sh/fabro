@@ -140,11 +140,12 @@ async fn a_launch_binds_the_repository_and_the_model_default() {
         inputs:             BTreeMap::new(),
         vars:               BTreeMap::new(),
         launch:             Launch {
-            model:       Some("gpt-5.4".to_string()),
-            provider:    None,
+            model: Some("gpt-5.4".to_string()),
+            provider: None,
             environment: None,
-            goal:        None,
-            repository:  Some(repository.path().to_path_buf()),
+            goal: None,
+            repository: Some(repository.path().to_path_buf()),
+            ..Launch::default()
         },
         runtime:            RuntimeSpec::default(),
         unbound_is_warning: false,
