@@ -35,8 +35,8 @@ use fabro_api::types::{
     RunFilesMetaToSha,
 };
 use fabro_redact::SecretRedactor;
-use fabro_types::RunId;
-use fabro_util::shell;
+use fabro_types::{RunId, blob_ref};
+use fabro_util::{error, shell};
 use fabro_workflow::sandbox_git::{
     DiffError, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange, list_changed_files_raw,
     list_diff_numstat, stream_blob_metadata, stream_blobs,
@@ -250,9 +250,9 @@ where
 /// 4. On garbage-collected base commits for aggregate scopes, fall through to a
 ///    degraded response built from the terminal conclusion diff.
 ///
-/// All logging emits a single `tracing::info!` with an allowlisted field
-/// set enforced by [`RunFilesMetrics::emit`] — no paths, contents, or raw
-/// git stderr.
+/// Success metrics emit a single `tracing::info!` with an allowlisted field
+/// set enforced by [`RunFilesMetrics::emit`]. Logs exclude paths, contents,
+/// and raw git stderr.
 pub async fn list_run_files(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -538,20 +538,29 @@ async fn materialize_sandbox_path(
     let sandbox = match reconnect_run_sandbox(state, run_id, &projection).await {
         Ok(sandbox) => sandbox,
         Err(err) if sandbox_read_error_should_fallback(&err) => {
-            return Ok(build_fallback_response(
+            return load_fallback_response(
+                state,
                 &projection,
                 RunFilesMetaDegradedReason::SandboxGone,
                 run_id,
                 start,
-            ));
+            )
+            .await;
         }
         Err(err) => return Err(err),
     };
 
     let materialized = match scope {
         ListRunFilesScope::Committed => {
-            materialize_committed_sandbox_path(&sandbox, &projection, &base_sha, run_id, start)
-                .await
+            materialize_committed_sandbox_path(
+                state,
+                &sandbox,
+                &projection,
+                &base_sha,
+                run_id,
+                start,
+            )
+            .await
         }
         ListRunFilesScope::Uncommitted => {
             materialize_working_tree_sandbox_path(
@@ -577,12 +586,16 @@ async fn materialize_sandbox_path(
 
     match materialized {
         Ok(body) => Ok(body),
-        Err(err) if sandbox_read_error_should_fallback(&err) => Ok(build_fallback_response(
-            &projection,
-            RunFilesMetaDegradedReason::SandboxGone,
-            run_id,
-            start,
-        )),
+        Err(err) if sandbox_read_error_should_fallback(&err) => {
+            load_fallback_response(
+                state,
+                &projection,
+                RunFilesMetaDegradedReason::SandboxGone,
+                run_id,
+                start,
+            )
+            .await
+        }
         Err(err) => Err(err),
     }
 }
@@ -595,6 +608,7 @@ fn sandbox_read_error_should_fallback(err: &ApiError) -> bool {
 }
 
 async fn materialize_committed_sandbox_path(
+    state: &AppState,
     sandbox: &SandboxCheckout,
     projection: &fabro_store::RunProjection,
     base_sha: &str,
@@ -605,7 +619,7 @@ async fn materialize_committed_sandbox_path(
     let (to_sha, to_sha_committed_at) = resolve_head_sha_and_time(sandbox).await?;
     materialize_committed_range_sandbox_path(
         sandbox,
-        Some(projection),
+        Some((state, projection)),
         base_sha,
         &to_sha,
         to_sha_committed_at,
@@ -618,7 +632,7 @@ async fn materialize_committed_sandbox_path(
 
 async fn materialize_committed_range_sandbox_path(
     sandbox: &SandboxCheckout,
-    fallback_projection: Option<&fabro_store::RunProjection>,
+    fallback: Option<(&AppState, &fabro_store::RunProjection)>,
     base_sha: &str,
     to_sha: &str,
     to_sha_committed_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -649,13 +663,15 @@ async fn materialize_committed_range_sandbox_path(
     let raw_entries = match raw_res {
         Ok(v) => v,
         Err(DiffError::Permanent { .. }) => {
-            if let Some(projection) = fallback_projection {
-                return Ok(build_fallback_response(
+            if let Some((state, projection)) = fallback {
+                return load_fallback_response(
+                    state,
                     projection,
                     RunFilesMetaDegradedReason::SandboxGone,
                     run_id,
                     start,
-                ));
+                )
+                .await;
             }
             return Err(ApiError::bad_request("Invalid git diff range."));
         }
@@ -800,24 +816,76 @@ fn sandbox_git_error(op: &str, error: &sandbox_driver::Error) -> ApiError {
     transient_503(op, &display_for_log(error, &SecretRedactor))
 }
 
-/// Build the degraded response from the stored terminal diff patch.
-/// When `conclusion.diff.patch` is `None`, returns the empty envelope (UI maps
-/// this to R4(c)). Keeps the same `FileDiff[]` shape as live responses, but
-/// leaves contents unavailable because the server only has a unified patch.
-fn build_fallback_response(
+/// Resolve the terminal patch before parsing it: Petri's projection carries
+/// a blob reference, while older projections may carry inline patch text.
+async fn load_fallback_response(
+    state: &AppState,
     projection: &fabro_store::RunProjection,
     reason: RunFilesMetaDegradedReason,
     run_id: &RunId,
     start: Instant,
-) -> PaginatedRunFileList {
+) -> ListRunFilesResult {
     let Some(patch) = projection
         .conclusion
         .as_ref()
         .and_then(|conclusion| conclusion.diff.patch.as_deref())
     else {
-        return empty_envelope(RunFilesMetaSource::FinalPatch, RunFilesMetaScope::Committed);
+        return Ok(empty_envelope(
+            RunFilesMetaSource::FinalPatch,
+            RunFilesMetaScope::Committed,
+        ));
     };
 
+    let bytes;
+    let patch = if let Some(hash) = blob_ref::parse_blob_ref(patch) {
+        bytes = state
+            .store_ref()
+            .blobs()
+            .read(&hash)
+            .await
+            .map_err(|error| {
+                tracing::error!(
+                    %run_id,
+                    error = %error::collect_chain(&error).join(": "),
+                    "Failed to read final patch blob"
+                );
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "The saved final patch could not be read.",
+                )
+            })?
+            .ok_or_else(|| {
+                tracing::error!(%run_id, "Final patch blob is missing");
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "The saved final patch is missing.",
+                )
+            })?;
+        std::str::from_utf8(&bytes).map_err(|error| {
+            tracing::error!(%run_id, %error, "Final patch blob is not UTF-8");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "The saved final patch is not valid UTF-8.",
+            )
+        })?
+    } else {
+        patch
+    };
+
+    Ok(build_fallback_response(
+        projection, patch, reason, run_id, start,
+    ))
+}
+
+/// Build the degraded response from resolved patch text. Full file contents
+/// remain unavailable because the server only has a unified patch.
+fn build_fallback_response(
+    projection: &fabro_store::RunProjection,
+    patch: &str,
+    reason: RunFilesMetaDegradedReason,
+    run_id: &RunId,
+    start: Instant,
+) -> PaginatedRunFileList {
     let entries: Vec<String> = split_patch_sections(patch)
         .into_iter()
         .map(|section| section.text.to_string())
@@ -2382,11 +2450,64 @@ index 1111111..2222222 160000
     fn fallback_response_json(patch: &str) -> serde_json::Value {
         serde_json::to_value(build_fallback_response(
             &fallback_projection(patch),
+            patch,
             RunFilesMetaDegradedReason::SandboxGone,
             &RunId::new(),
             Instant::now(),
         ))
         .expect("fallback response should serialize")
+    }
+
+    #[tokio::test]
+    async fn fallback_loader_preserves_inline_and_absent_patches() {
+        let state = crate::test_support::test_app_state();
+        let patch = simple_patch("README.md");
+        let mut projection = fallback_projection(&patch);
+        let response = load_fallback_response(
+            &state,
+            &projection,
+            RunFilesMetaDegradedReason::SandboxGone,
+            &projection.spec.run_id,
+            Instant::now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.data.len(), 1);
+        assert_eq!(
+            response.data[0].unified_patch.as_deref(),
+            Some(patch.as_str())
+        );
+
+        projection.conclusion.as_mut().unwrap().diff.patch = None;
+        let response = load_fallback_response(
+            &state,
+            &projection,
+            RunFilesMetaDegradedReason::SandboxGone,
+            &projection.spec.run_id,
+            Instant::now(),
+        )
+        .await
+        .unwrap();
+        assert!(response.data.is_empty());
+        assert_eq!(response.meta.total_changed, 0);
+    }
+
+    #[tokio::test]
+    async fn fallback_loader_rejects_non_utf8_patch_bytes() {
+        let state = crate::test_support::test_app_state();
+        let hash = state.store_ref().blobs().write(&[0xff]).await.unwrap();
+        let projection = fallback_projection(&blob_ref::format_blob_ref(&hash));
+        let error = load_fallback_response(
+            &state,
+            &projection,
+            RunFilesMetaDegradedReason::SandboxGone,
+            &projection.spec.run_id,
+            Instant::now(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.detail(), "The saved final patch is not valid UTF-8.");
     }
 
     fn sandbox_patch_response_json(entries: &[String]) -> serde_json::Value {

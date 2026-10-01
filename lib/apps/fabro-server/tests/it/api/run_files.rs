@@ -1,18 +1,21 @@
 //! HTTP-level integration tests for `GET /api/v1/runs/{id}/files`.
 //!
-//! These tests exercise the handler's request-plumbing branches —
-//! authentication extractor, route matching, query validation, demo-mode
-//! branching, and the empty-envelope / not-found responses — without
-//! requiring a reconnected sandbox. The sandbox happy path is covered by
-//! unit tests on the sandbox-git helpers and by `stitch_file_diff` tests
-//! in `run_files.rs`.
+//! Request plumbing, empty/not-found responses, and recovery from a durable
+//! final patch after deleting an isolated local run's sandbox. Sandbox-git
+//! helpers and file assembly also have unit coverage in `run_files.rs`.
+
+use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use fabro_server::test_support::{TestAppStateBuilder, test_store_bundle};
+use fabro_store::{BlobStore, test_support as store_test_support};
+use fabro_types::blob_ref;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, api, minimal_intent_json, response_json, response_status, test_app_state,
+    MINIMAL_DOT, api, create_and_start_run_from_intent, minimal_intent_json, response_json,
+    response_status, run_json, test_app_state, test_app_with_scheduler, wait_for_run_status,
 };
 
 fn files_url(run_id: &str) -> String {
@@ -25,6 +28,155 @@ fn commits_url(run_id: &str) -> String {
 
 fn files_url_with_scope(run_id: &str, scope: &str) -> String {
     format!("{}?scope={scope}", files_url(run_id))
+}
+
+async fn get_json(app: &axum::Router, url: &str, status: StatusCode) -> serde_json::Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(url)
+                .body(Body::empty())
+                .expect("GET request should build"),
+        )
+        .await
+        .expect("test router should respond");
+    response_json(response, status, format!("GET {url}")).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn final_patch_survives_sandbox_removal_and_reports_unreadable_blobs() {
+    // Execute a real command-only run in an isolated local checkout. Keeping
+    // the blob pool lets us simulate storage damage after verifying recovery.
+    let workspace = tempfile::tempdir().unwrap();
+    tokio::fs::write(workspace.path().join("README.md"), "original\n")
+        .await
+        .unwrap();
+    {
+        let repo = git2::Repository::init(workspace.path()).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("README.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("Fabro Test", "fabro@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+    }
+    let pool = store_test_support::in_memory_pool_with(&[fabro_db::BLOBS_MIGRATION_SQL]);
+    let blobs = Arc::new(BlobStore::new(pool.clone()));
+    let store = Arc::new(store_test_support::test_database_with_blobs(Arc::clone(
+        &blobs,
+    )));
+    let (_, artifacts) = test_store_bundle();
+    let state = TestAppStateBuilder::new()
+        .in_process_execution()
+        .store_bundle(store, artifacts)
+        .build();
+    let app = test_app_with_scheduler(Arc::clone(&state));
+    let workflow = r#"digraph Changes {
+        start [shape=Mdiamond]
+        edit [shape=parallelogram, script="printf 'updated\\n' >> README.md; mkdir -p artifacts; printf 'saved\\n' > artifacts/report.txt; printf '\\000\\001' > artifacts/data.bin"]
+        exit [shape=Msquare]
+        start -> edit -> exit
+    }"#;
+    let mut intent = minimal_intent_json(&app, workflow, workspace.path()).await;
+    intent["title"] = serde_json::json!("Saved final patch");
+    let run_id = create_and_start_run_from_intent(&app, intent).await;
+    let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
+    assert_eq!(status, "succeeded", "{}", run_json(&app, &run_id).await);
+    state
+        .test_petri_projector()
+        .settle(run_id.parse().unwrap())
+        .await;
+    let projection = get_json(&app, &api(&format!("/runs/{run_id}/state")), StatusCode::OK).await;
+    let reference = projection["conclusion"]["diff"]["patch"].as_str().unwrap();
+    let hash = blob_ref::parse_blob_ref(reference).expect("the final patch is blob-backed");
+    let patch = blobs
+        .read(&hash)
+        .await
+        .unwrap()
+        .expect("durable patch bytes");
+    let live = get_json(&app, &files_url(&run_id), StatusCode::OK).await;
+    assert_eq!(live["meta"]["source"], "sandbox");
+    assert_eq!(live["meta"]["total_changed"], 3);
+
+    let sandbox_dir = projection["sandbox"]["instance"]["runtime"]["working_directory"]
+        .as_str()
+        .unwrap();
+    assert_ne!(std::path::Path::new(sandbox_dir), workspace.path());
+    tokio::fs::remove_dir_all(sandbox_dir).await.unwrap();
+    assert!(!tokio::fs::try_exists(sandbox_dir).await.unwrap());
+
+    let saved = get_json(&app, &files_url(&run_id), StatusCode::OK).await;
+    assert_eq!(saved["meta"]["source"], "final_patch");
+    assert_eq!(saved["meta"]["degraded"], true);
+    assert_eq!(saved["meta"]["degraded_reason"], "sandbox_gone");
+    assert_eq!(saved["meta"]["scope"], "committed");
+    assert_eq!(saved["meta"]["total_changed"], 3);
+    assert_eq!(
+        saved["meta"]["stats"],
+        serde_json::json!({"additions": 2, "deletions": 0})
+    );
+    let files = saved["data"].as_array().unwrap();
+    assert_eq!(files.len(), 3);
+    let file = |name: &str| {
+        files
+            .iter()
+            .find(|f| f["new_file"]["name"] == name)
+            .unwrap()
+    };
+    let readme = file("README.md");
+    assert_eq!(readme["change_kind"], "modified");
+    assert!(readme["old_file"]["contents"].is_null());
+    assert!(readme["new_file"]["contents"].is_null());
+    let readme_patch = readme["unified_patch"].as_str().unwrap();
+    assert!(readme_patch.contains(" original\n+updated\n"));
+    let report = file("artifacts/report.txt");
+    assert_eq!(report["change_kind"], "added");
+    assert!(
+        report["unified_patch"]
+            .as_str()
+            .unwrap()
+            .contains("+saved\n")
+    );
+    assert_eq!(file("artifacts/data.bin")["binary"], true);
+    assert!(file("artifacts/data.bin")["unified_patch"].is_null());
+    assert_eq!(blobs.read(&hash).await.unwrap().unwrap(), patch);
+
+    // A saved reference whose bytes are gone must not look like an empty diff.
+    sqlx::query("DELETE FROM blobs WHERE hash = ?")
+        .bind(hash.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let missing = get_json(&app, &files_url(&run_id), StatusCode::INTERNAL_SERVER_ERROR).await;
+    assert_eq!(
+        missing["errors"][0]["detail"],
+        "The saved final patch is missing."
+    );
+    sqlx::query("INSERT INTO blobs (hash, data) VALUES (?, ?)")
+        .bind(hash.to_string())
+        .bind(b"corrupt patch".as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let corrupt = get_json(&app, &files_url(&run_id), StatusCode::INTERNAL_SERVER_ERROR).await;
+    assert_eq!(
+        corrupt["errors"][0]["detail"],
+        "The saved final patch could not be read."
+    );
+    // Repair is visible on the next request; failed materializations aren't cached.
+    sqlx::query("UPDATE blobs SET data = ? WHERE hash = ?")
+        .bind(patch.as_ref())
+        .bind(hash.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_json(&app, &files_url(&run_id), StatusCode::OK).await,
+        saved
+    );
 }
 
 #[tokio::test]
