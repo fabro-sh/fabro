@@ -67,7 +67,7 @@ async fn a_model_call_authenticates_through_the_vault_and_skills_read_the_home()
     let graphs = support::admit(
         &[("workflow.fabro", &workflow), ("workflow.toml", &settings)],
         Launch {
-            model: Some(OPENAI_MODEL.to_string()),
+            default_model: Some(OPENAI_MODEL.to_string()),
             ..Launch::default()
         },
         &runtime,

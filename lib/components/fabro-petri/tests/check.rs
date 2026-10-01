@@ -140,8 +140,8 @@ async fn a_launch_binds_the_repository_and_the_model_default() {
         inputs:             BTreeMap::new(),
         vars:               BTreeMap::new(),
         launch:             Launch {
-            model: Some("gpt-5.4".to_string()),
-            provider: None,
+            default_model: Some("gpt-5.4".to_string()),
+            default_provider: None,
             environment: None,
             goal: None,
             repository: Some(repository.path().to_path_buf()),
@@ -154,7 +154,11 @@ async fn a_launch_binds_the_repository_and_the_model_default() {
     let admitted = check::check(&request).expect("the command bundle is admitted");
 
     let launch = &admitted.graph.params["fabro.launch"];
-    assert_eq!(launch["model"], "gpt-5.4");
+    assert_eq!(launch["default_model"], "gpt-5.4");
+    assert!(
+        launch["model"].is_null(),
+        "the default is not a launch flag: {launch}"
+    );
     assert_eq!(
         launch["clone"]["repository"],
         repository.path().to_string_lossy().as_ref()

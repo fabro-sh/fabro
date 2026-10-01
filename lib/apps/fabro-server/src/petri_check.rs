@@ -28,11 +28,12 @@ use lithos_llm::catalog::ProviderId;
 pub(crate) const NO_READY_PROVIDER_RULE: &str = "fabro.model.no_ready_provider";
 
 /// The launch Fabro binds around the settings: the run's model and provider
-/// below them, and the environment the run selected and the goal the run
-/// resolved above them. When the settings name neither model nor provider, the
-/// default offering of the eligible providers is bound as the launch model
-/// alone: a node that names no model runs on it, and a node that names a model
-/// the catalog lacks stays unqualified, so Petri's admission refuses it.
+/// as the default below them, and the environment the run selected and the
+/// goal the run resolved above them. When the settings name neither model nor
+/// provider, the default offering of the eligible providers is bound as the
+/// default model alone: a node that names no model runs on it, and a node that
+/// names a model the catalog lacks stays unqualified, so Petri's admission
+/// refuses it.
 pub(crate) fn launch(
     catalog: &Catalog,
     settings: &WorkflowSettings,
@@ -50,8 +51,8 @@ pub(crate) fn launch(
             .map(|offering| offering.model.id().to_string())
     });
     Launch {
-        model,
-        provider: settings.run.model.provider.clone(),
+        default_model: model,
+        default_provider: settings.run.model.provider.clone(),
         environment: environment.map(str::to_owned),
         goal: launch_goal(settings),
         repository,
@@ -83,8 +84,8 @@ fn launch_goal(settings: &WorkflowSettings) -> Option<String> {
 /// name, for a check away from the server.
 pub(crate) fn launch_without_catalog(settings: &WorkflowSettings) -> Launch {
     Launch {
-        model: settings.run.model.name.clone(),
-        provider: settings.run.model.provider.clone(),
+        default_model: settings.run.model.name.clone(),
+        default_provider: settings.run.model.provider.clone(),
         environment: None,
         goal: launch_goal(settings),
         repository: None,
@@ -92,15 +93,16 @@ pub(crate) fn launch_without_catalog(settings: &WorkflowSettings) -> Launch {
     }
 }
 
-/// Preserve explicit model flags separately from defaults resolved from the
-/// workflow and server, so they can outrank file layers during admission.
+/// The run's explicit model flags (`--model`, `--provider`), kept apart from
+/// the default the settings resolved, so they outrank the file layers and
+/// the graph's defaults during admission.
 pub(crate) fn with_model_overrides(
     mut launch: Launch,
     overrides: Option<&RunModelLayer>,
 ) -> Launch {
     if let Some(overrides) = overrides {
-        launch.model_override.clone_from(&overrides.name);
-        launch.provider_override.clone_from(&overrides.provider);
+        launch.model.clone_from(&overrides.name);
+        launch.provider.clone_from(&overrides.provider);
     }
     launch
 }
