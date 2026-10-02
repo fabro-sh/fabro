@@ -74,7 +74,7 @@ impl PetriRuns {
 
     /// The writer handle `owner` holds on the run: the one kept from its
     /// open, or a reopen when the store's lease row still names the owner
-    /// (the server restarted, or the open's reply was lost). An owner the
+    /// (the open's reply was lost). An owner the
     /// lease no longer names gets `StaleOwner`.
     pub(crate) async fn writer(
         &self,
@@ -515,6 +515,201 @@ mod tests {
         drop(before);
     }
 
+    /// A crash leaves the old worker alive, but only the replacement may
+    /// publish to the restarted server. Exercise the HTTP boundary before
+    /// the replacement starts, while it runs, and after it has settled.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn restarted_server_fences_stale_completion_and_keeps_resumed_result() {
+        for terminal in [
+            RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
+            RunStatus::Failed {
+                reason: FailureReason::WorkflowError,
+            },
+        ] {
+            let (store, artifacts) = test_store_bundle();
+            let vault_path = test_secret_store_path();
+            let before = TestAppStateBuilder::new()
+                .store_bundle(Arc::clone(&store), artifacts.clone())
+                .vault_path(vault_path.clone())
+                .vault_entries([(EnvVars::OPENAI_API_KEY, "test-openai-api-key")])
+                .build();
+            let app = build_test_router(Arc::clone(&before));
+            let run_id = create_and_start_petri_run(&app).await;
+            let old_token = before.test_issue_worker_token(&run_id);
+            run_to_running_as_worker(&app, run_id, &old_token).await;
+            let old_handle = before
+                .petri_runs
+                .open(run_id, Access::Create {
+                    owner: OwnerId::new("old-worker"),
+                })
+                .await
+                .expect("the old worker holds the lease");
+
+            let runtime = Arc::new(HeldWorkerRuntime::default());
+            let after = TestAppStateBuilder::new()
+                .store_bundle(store, artifacts)
+                .vault_path(vault_path)
+                .vault_entries([(EnvVars::OPENAI_API_KEY, "test-openai-api-key")])
+                .worker_runtime(Arc::clone(&runtime) as Arc<dyn WorkerRuntime>)
+                .build();
+            let app = build_test_router(Arc::clone(&after));
+            assert_eq!(
+                reconcile_incomplete_runs_on_startup(&after).await.unwrap(),
+                1
+            );
+            assert_stale_completion_rejected(&after, &app, run_id, &old_token).await;
+
+            write_test_server_record(&after);
+            spawn_scheduler(Arc::clone(&after));
+            runtime.wait_for_start().await;
+            assert_eq!(runtime.launched_mode(), Some("resume"));
+            let token = after.test_issue_worker_token(&run_id);
+            let resumed = after
+                .petri_runs
+                .open(run_id, Access::Write {
+                    owner: OwnerId::new("worker-1"),
+                })
+                .await
+                .expect("the replacement takes the lease");
+            run_to_running_as_worker(&app, run_id, &token).await;
+            assert_stale_completion_rejected(&after, &app, run_id, &old_token).await;
+
+            let transition = if matches!(terminal, RunStatus::Succeeded { .. }) {
+                record_finish_as_worker(&app, run_id, &token).await;
+                RunLifecycleKind::Succeeded
+            } else {
+                // A current worker's failure before an engine finish must
+                // still be able to end the run.
+                RunLifecycleKind::Failed
+            };
+            record_lifecycle_as_worker(&app, run_id, &token, transition, terminal).await;
+            assert_stale_completion_rejected(&after, &app, run_id, &old_token).await;
+
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/runs/{run_id}/state"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let view: serde_json::Value = fabro_test::expect_axum_json(
+                response,
+                StatusCode::OK,
+                "GET /api/v1/runs/{id}/state after resumed completion",
+            )
+            .await;
+            assert_eq!(view["status"], serde_json::to_value(terminal).unwrap());
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/v1/runs/{run_id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let summary = fabro_test::expect_axum_json(
+                response,
+                StatusCode::OK,
+                "GET /api/v1/runs/{id} after resumed completion",
+            )
+            .await;
+            assert_eq!(summary["lifecycle"]["status"], view["status"]);
+            assert_eq!(after.test_managed_run_status(&run_id), Some(terminal));
+
+            runtime.end_worker();
+            drop(resumed);
+            drop(old_handle);
+            drop(before);
+        }
+    }
+
+    async fn assert_stale_completion_rejected(
+        state: &AppState,
+        app: &axum::Router,
+        run_id: RunId,
+        token: &str,
+    ) {
+        let view = run_records::projection(state, run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let managed = state.test_managed_run_status(&run_id);
+        let records = state
+            .stores
+            .run_summaries
+            .platform_records()
+            .read(&run_id)
+            .await
+            .unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/runs/{run_id}/petri/open"))
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "access": "write", "owner": "old-worker" }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        fabro_test::assert_axum_status(
+            response,
+            StatusCode::UNAUTHORIZED,
+            "superseded worker cannot reacquire the lease",
+        )
+        .await;
+        for (transition, status) in [
+            (RunLifecycleKind::Failed, RunStatus::Failed {
+                reason: FailureReason::WorkflowError,
+            }),
+            (RunLifecycleKind::Succeeded, RunStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            }),
+        ] {
+            let response = append_lifecycle_as_worker(app, run_id, token, transition, status).await;
+            fabro_test::assert_axum_status(
+                response,
+                StatusCode::UNAUTHORIZED,
+                "superseded worker terminal write",
+            )
+            .await;
+        }
+        let after = run_records::projection(state, run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.status, view.status,
+            "stale completions leave the public result unchanged"
+        );
+        assert_eq!(state.test_managed_run_status(&run_id), managed);
+        assert_eq!(
+            serde_json::to_value(
+                state
+                    .stores
+                    .run_summaries
+                    .platform_records()
+                    .read(&run_id)
+                    .await
+                    .unwrap()
+            )
+            .unwrap(),
+            serde_json::to_value(records).unwrap(),
+            "rejected records never enter the durable log"
+        );
+    }
+
     /// A server whose one worker is held open by the test, with a run the
     /// worker has taken over the API: the run's id and the worker's token.
     async fn held_worker_run(
@@ -558,13 +753,23 @@ mod tests {
         transition: RunLifecycleKind,
         status: RunStatus,
     ) {
+        let response = append_lifecycle_as_worker(app, run_id, token, transition, status).await;
+        fabro_test::assert_axum_status(response, StatusCode::OK, "worker lifecycle append").await;
+    }
+
+    async fn append_lifecycle_as_worker(
+        app: &axum::Router,
+        run_id: RunId,
+        token: &str,
+        transition: RunLifecycleKind,
+        status: RunStatus,
+    ) -> axum::response::Response {
         let record =
             PlatformRecord::RunLifecycle(RunLifecycleRecord::new(transition).with_status(status));
         let body = json!({
             "record": serde_json::to_value(&record).expect("the record encodes"),
         });
-        let response = app
-            .clone()
+        app.clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -575,8 +780,7 @@ mod tests {
                     .expect("the append request builds"),
             )
             .await
-            .expect("the append request completes");
-        assert_eq!(response.status(), StatusCode::OK);
+            .expect("the append request completes")
     }
 
     /// Petri's own finish of the run, stored the way its worker stores it:

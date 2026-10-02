@@ -41,6 +41,8 @@ use crate::server::{
 use crate::server_secrets::{ServerSecrets, process_env_snapshot};
 use crate::startup::{resolve_startup, validate_startup_configuration};
 use crate::static_files;
+#[cfg(any(test, feature = "test-support"))]
+use crate::test_support;
 
 pub const DEFAULT_TCP_PORT: u16 = 32276;
 type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -749,6 +751,8 @@ where
         #[cfg(any(test, feature = "test-support"))]
         automation_materializer_override: None,
     })?;
+    #[cfg(any(test, feature = "test-support"))]
+    test_support::write_test_worker_audience(&state).await?;
     let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;
     if reconciled > 0 {
         info!(
