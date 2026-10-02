@@ -275,13 +275,13 @@ pub(crate) async fn admit(
         repository,
     );
     let dry_run = settings.run.execution.mode == RunMode::DryRun;
-    let launch = petri_check::with_model_overrides(launch, prepared.model_overrides());
     let request = petri_check::check_request(
         prepared.workflow_bundle(),
         prepared.entrypoint(),
         settings,
         prepared.vars(),
         launch,
+        prepared.model_overrides(),
         runtime_spec(
             state,
             eligible,

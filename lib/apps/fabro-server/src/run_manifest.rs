@@ -211,7 +211,8 @@ pub(crate) fn validate_prepared_manifest(
         &prepared.target_path,
         &prepared.settings,
         vars,
-        petri_check::with_model_overrides(launch, prepared.model_overrides.as_ref()),
+        launch,
+        prepared.model_overrides.as_ref(),
         runtime,
         unbound_is_warning,
     )?;

@@ -103,10 +103,8 @@ pub fn validate_collected_workflow(
         &lowered.entrypoint,
         &settings,
         &HashMap::new(),
-        petri_check::with_model_overrides(
-            petri_check::launch_without_catalog(&settings),
-            run_overrides.and_then(|run| run.model.as_ref()),
-        ),
+        petri_check::launch_without_catalog(&settings),
+        run_overrides.and_then(|run| run.model.as_ref()),
         offline_runtime(run_overrides),
         false,
     )

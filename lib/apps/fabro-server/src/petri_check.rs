@@ -93,34 +93,30 @@ pub(crate) fn launch_without_catalog(settings: &WorkflowSettings) -> Launch {
     }
 }
 
-/// The run's explicit model flags (`--model`, `--provider`), kept apart from
-/// the default the settings resolved, so they outrank the file layers and
-/// the graph's defaults during admission.
-pub(crate) fn with_model_overrides(
-    mut launch: Launch,
-    overrides: Option<&RunModelLayer>,
-) -> Launch {
-    if let Some(overrides) = overrides {
-        launch.model.clone_from(&overrides.name);
-        launch.provider.clone_from(&overrides.provider);
-    }
-    launch
-}
-
 /// The check request for `bundle`'s `entrypoint`: every file of every
 /// workflow in the bundle at its bundle-relative path, the run's inputs and
-/// variables, the launch and the runtime. `unbound_is_warning` makes a
-/// template that reads an input nothing binds a warning, for a validation
-/// before the run's inputs exist; a run's admission never sets it.
+/// variables, the launch and the runtime. `model_overrides` are the run's
+/// explicit model flags (`--model`, `--provider`), bound as the launch's
+/// model apart from the default the settings resolved, so they outrank the
+/// file layers and the graph's defaults during admission. Every check binds
+/// them here, so the create, validate and preflight paths judge the same
+/// model. `unbound_is_warning` makes a template that reads an input nothing
+/// binds a warning, for a validation before the run's inputs exist; a run's
+/// admission never sets it.
 pub(crate) fn check_request(
     bundle: &WorkflowBundle,
     entrypoint: &ManifestPath,
     settings: &WorkflowSettings,
     vars: &HashMap<String, String>,
-    launch: Launch,
+    mut launch: Launch,
+    model_overrides: Option<&RunModelLayer>,
     runtime: RuntimeSpec,
     unbound_is_warning: bool,
 ) -> Result<CheckRequest, WorkflowError> {
+    if let Some(overrides) = model_overrides {
+        launch.model.clone_from(&overrides.name);
+        launch.provider.clone_from(&overrides.provider);
+    }
     let mut files = BTreeMap::new();
     for workflow in bundle.workflows().values() {
         for (path, text) in &workflow.files {
@@ -235,5 +231,73 @@ fn fabro_diagnostic(diagnostic: &Diagnostic) -> FabroDiagnostic {
         line: diagnostic.line,
         column: diagnostic.column,
         ..FabroDiagnostic::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(launch: Launch, overrides: Option<&RunModelLayer>) -> CheckRequest {
+        check_request(
+            &WorkflowBundle::default(),
+            &ManifestPath::from_wire("workflow.fabro").expect("the path is valid"),
+            &WorkflowSettings::default(),
+            &HashMap::new(),
+            launch,
+            overrides,
+            RuntimeSpec::default(),
+            false,
+        )
+        .expect("the request builds")
+    }
+
+    fn settings_default() -> Launch {
+        Launch {
+            default_model: Some("settings-model".to_string()),
+            default_provider: Some("settings-provider".to_string()),
+            ..Launch::default()
+        }
+    }
+
+    #[test]
+    fn model_flags_bind_as_the_launch_model_beside_the_default() {
+        let overrides = RunModelLayer {
+            name: Some("flag-model".to_string()),
+            provider: Some("flag-provider".to_string()),
+            ..RunModelLayer::default()
+        };
+
+        let launch = request(settings_default(), Some(&overrides)).launch;
+
+        assert_eq!(launch.model.as_deref(), Some("flag-model"));
+        assert_eq!(launch.provider.as_deref(), Some("flag-provider"));
+        assert_eq!(launch.default_model.as_deref(), Some("settings-model"));
+        assert_eq!(
+            launch.default_provider.as_deref(),
+            Some("settings-provider")
+        );
+    }
+
+    #[test]
+    fn a_provider_flag_alone_leaves_the_launch_model_unset() {
+        let overrides = RunModelLayer {
+            provider: Some("flag-provider".to_string()),
+            ..RunModelLayer::default()
+        };
+
+        let launch = request(settings_default(), Some(&overrides)).launch;
+
+        assert_eq!(launch.model, None);
+        assert_eq!(launch.provider.as_deref(), Some("flag-provider"));
+    }
+
+    #[test]
+    fn no_model_flags_bind_only_the_default() {
+        let launch = request(settings_default(), None).launch;
+
+        assert_eq!(launch.model, None);
+        assert_eq!(launch.provider, None);
+        assert_eq!(launch.default_model.as_deref(), Some("settings-model"));
     }
 }
