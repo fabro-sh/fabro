@@ -56,13 +56,14 @@ fn offline_runtime(run: Option<&RunLayer>) -> RuntimeSpec {
         ..SettingsLayer::default()
     };
     RuntimeSpec {
-        sandbox:          SandboxProviderConfig::default(),
-        settings_toml:    toml::to_string(&layer).ok(),
-        mcp_catalog_toml: None,
-        model_client:     None,
-        dry_run:          false,
-        fabro_home:       None,
-        run_tools:        None,
+        stage_credentials: None,
+        sandbox:           SandboxProviderConfig::default(),
+        settings_toml:     toml::to_string(&layer).ok(),
+        mcp_catalog_toml:  None,
+        model_client:      None,
+        dry_run:           false,
+        fabro_home:        None,
+        run_tools:         None,
     }
 }
 

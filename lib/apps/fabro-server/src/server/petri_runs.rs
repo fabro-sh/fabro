@@ -99,6 +99,7 @@ pub(crate) fn runtime_spec(
         }
     };
     RuntimeSpec {
+        stage_credentials: None,
         sandbox,
         settings_toml,
         mcp_catalog_toml,

@@ -19,6 +19,8 @@ workspace = true
 test-support = ["dep:petri_testkit"]
 
 [dependencies]
+fabro-github = { path = "../fabro-github" }
+percent-encoding.workspace = true
 fabro-api = { path = "../../foundation/fabro-api" }
 fabro-client = { path = "../../foundation/fabro-client" }
 fabro-db = { path = "../../foundation/fabro-db" }
@@ -57,6 +59,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+fabro-github = { path = "../fabro-github", features = ["test-support"] }
 fabro-macros = { path = "../../foundation/fabro-macros" }
 fabro-petri = { path = ".", features = ["test-support"] }
 fabro-tool = { path = "../fabro-tool" }
