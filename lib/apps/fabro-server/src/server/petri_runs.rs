@@ -140,9 +140,9 @@ fn settings_layer_toml(state: &AppState) -> Option<String> {
 /// under `daytona`, and `env`. The rest is the platform's (`cwd`,
 /// `network`, `lifecycle`, `labels`, `image.dockerfile`, resources the host
 /// and Docker providers run without, an image the host runs without) and
-/// stays with the server's own resolution. The resolved network policy is
-/// passed through `RunRequest` at execution; handing it to the frontend would
+/// stays with the server's own resolution; handing it to Petri here would
 /// only warn `ignored.workflow_toml.environments.<id>.<key>` on every admit.
+/// The resolved network policy reaches Petri through `RunRequest` instead.
 fn petri_environments(catalog: &MergeMap<EnvironmentLayer>) -> MergeMap<EnvironmentLayer> {
     MergeMap(
         catalog

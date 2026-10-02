@@ -207,7 +207,9 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
     options.run_key = Some(key.clone());
     options.retention = RETENTION;
     options.sandbox.backend = backend;
-    if !request.runtime.dry_run {
+    // The host provider manages no networking and refuses any policy but its
+    // default, so only container backends receive the run's policy.
+    if backend != SandboxBackend::Host {
         options.sandbox.network = network_policy(&request.network);
     }
     if backend == SandboxBackend::Daytona {

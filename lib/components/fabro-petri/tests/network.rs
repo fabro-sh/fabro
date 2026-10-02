@@ -3,18 +3,20 @@
 mod support;
 
 use std::env;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use fabro_petri::check::Launch;
-use fabro_petri::engine::{self, RunStatus};
-use fabro_petri::providers::SandboxProviderConfig;
+use fabro_petri::engine::{self, RunRequest, RunStatus};
+use fabro_petri::providers::{self, DaytonaCredentials, SandboxProviderConfig};
 use fabro_petri::prune::{self, PruneRequest};
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_types::settings::run::{EnvironmentNetworkMode, EnvironmentNetworkSettings};
 use fabro_types::{RunId, SandboxProviderKind};
 use petri_store::MemoryRunStore;
+use sandbox_driver::{NetworkPolicy, SandboxFilter, SandboxState, SnapshotFilter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::process::Command;
@@ -39,49 +41,24 @@ async fn docker_block_prevents_canary_access_while_allow_all_preserves_it() {
     }));
     for (mode, network_mode, expected_hits) in [
         (EnvironmentNetworkMode::AllowAll, "bridge", 1),
-        (EnvironmentNetworkMode::Block, "none", 1),
+        (EnvironmentNetworkMode::Block, "none", 0),
     ] {
         let root = tempfile::tempdir().unwrap();
         let run_id = RunId::new().to_string();
         let store = Arc::new(MemoryRunStore::new());
-        let runtime = RuntimeSpec::default();
         let curl = format!(
             "curl --noproxy '*' --fail --silent --max-time 2 http://host.docker.internal:{port}/canary"
         );
-        let script = if mode == EnvironmentNetworkMode::Block {
-            format!("if {curl}; then exit 19; fi")
-        } else {
-            format!("test $({curl}) = network-canary")
-        };
-        let workflow = format!(
-            r#"digraph Network {{
-            start [shape=Mdiamond]
-            probe [shape=parallelogram, script="{script}"]
-            exit [shape=Msquare]
-            start -> probe -> exit
-        }}"#
-        );
-        let graphs = support::admit(
-            &[
-                ("workflow.toml", support::SETTINGS),
-                ("workflow.fabro", &workflow),
-            ],
-            Launch::default(),
-            &runtime,
-        );
-        let mut request = support::run_request(
+        let request = probe_request(
             &run_id,
             root.path(),
-            graphs,
-            store.clone(),
-            runtime,
-            support::no_questions(Arc::new(support::Silent)),
-        );
-        request.provider = SandboxProviderKind::DOCKER;
-        request.network = EnvironmentNetworkSettings {
+            &store,
+            RuntimeSpec::default(),
+            SandboxProviderKind::DOCKER,
             mode,
-            allow: Vec::new(),
-        };
+            &format!("test $({curl}) = network-canary"),
+            &curl,
+        );
         let outcome = engine::run(request).await;
         // Inspect Docker independently of Fabro's settings and driver status.
         let containers = Command::new("docker")
@@ -122,7 +99,7 @@ async fn docker_block_prevents_canary_access_while_allow_all_preserves_it() {
             String::from_utf8(inspected.stdout).unwrap().trim(),
             network_mode
         );
-        assert_eq!(hits.load(Ordering::SeqCst), expected_hits, "{mode}");
+        assert_eq!(hits.swap(0, Ordering::SeqCst), expected_hits, "{mode}");
     }
 }
 
@@ -130,9 +107,6 @@ async fn docker_block_prevents_canary_access_while_allow_all_preserves_it() {
 /// runner snapshot and deletes both task-owned sandboxes through Petri.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("FABRO_TEST_DAYTONA_RUNNER_SNAPSHOT"))]
 async fn daytona_block_prevents_outbound_https_while_allow_all_preserves_it() {
-    use fabro_petri::providers::{self, DaytonaCredentials};
-    use sandbox_driver::{NetworkPolicy, SandboxFilter, SandboxState, SnapshotFilter};
-
     let credentials = DaytonaCredentials::from_api_key(
         fabro_test::require_env("DAYTONA_API_KEY").expect("guard checked the credential"),
         provider_env,
@@ -158,46 +132,21 @@ async fn daytona_block_prevents_outbound_https_while_allow_all_preserves_it() {
         let root = tempfile::tempdir().unwrap();
         let run_id = RunId::new().to_string();
         let store = Arc::new(MemoryRunStore::new());
-        let runtime = RuntimeSpec {
-            sandbox: config.clone(),
-            ..Default::default()
-        };
         let curl =
             "curl --noproxy '*' --fail --silent --max-time 5 https://example.com/ -o /dev/null";
-        let script = if mode == EnvironmentNetworkMode::Block {
-            format!("if {curl}; then exit 19; fi")
-        } else {
-            curl.to_string()
-        };
-        let workflow = format!(
-            r#"digraph Network {{
-            start [shape=Mdiamond]
-            probe [shape=parallelogram, script="{script}"]
-            exit [shape=Msquare]
-            start -> probe -> exit
-        }}"#
-        );
-        let graphs = support::admit(
-            &[
-                ("workflow.toml", support::SETTINGS),
-                ("workflow.fabro", &workflow),
-            ],
-            Launch::default(),
-            &runtime,
-        );
-        let mut request = support::run_request(
+        let request = probe_request(
             &run_id,
             root.path(),
-            graphs,
-            store.clone(),
-            runtime,
-            support::no_questions(Arc::new(support::Silent)),
-        );
-        request.provider = SandboxProviderKind::DAYTONA;
-        request.network = EnvironmentNetworkSettings {
+            &store,
+            RuntimeSpec {
+                sandbox: config.clone(),
+                ..Default::default()
+            },
+            SandboxProviderKind::DAYTONA,
             mode,
-            allow: Vec::new(),
-        };
+            curl,
+            curl,
+        );
         let outcome = engine::run(request).await;
         let mut filter = SandboxFilter::default();
         filter
@@ -235,6 +184,59 @@ async fn daytona_block_prevents_outbound_https_while_allow_all_preserves_it() {
             time::sleep(Duration::from_millis(500)).await;
         }
     }
+}
+
+/// A one-stage run whose probe script must succeed under `AllowAll`, and
+/// whose `reach` command must fail under `Block`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each live test varies every input"
+)]
+fn probe_request(
+    run_id: &str,
+    root: &Path,
+    store: &Arc<MemoryRunStore>,
+    runtime: RuntimeSpec,
+    provider: SandboxProviderKind,
+    mode: EnvironmentNetworkMode,
+    allowed_probe: &str,
+    reach: &str,
+) -> RunRequest {
+    let script = if mode == EnvironmentNetworkMode::Block {
+        format!("if {reach}; then exit 19; fi")
+    } else {
+        allowed_probe.to_string()
+    };
+    let workflow = format!(
+        r#"digraph Network {{
+            start [shape=Mdiamond]
+            probe [shape=parallelogram, script="{script}"]
+            exit [shape=Msquare]
+            start -> probe -> exit
+        }}"#
+    );
+    let graphs = support::admit(
+        &[
+            ("workflow.toml", support::SETTINGS),
+            ("workflow.fabro", &workflow),
+        ],
+        Launch::default(),
+        &runtime,
+    );
+    let mut request = support::run_request(
+        run_id,
+        root,
+        graphs,
+        store.clone(),
+        runtime,
+        support::no_questions(Arc::new(support::Silent)),
+    );
+    request.provider = provider;
+    request.network = EnvironmentNetworkSettings {
+        mode,
+        allow: Vec::new(),
+    };
+    request
 }
 
 #[expect(

@@ -33,6 +33,7 @@ use fabro_server::test_support::{
 use fabro_static::EnvVars;
 use fabro_store::platform_records::{PlatformRecord, PlatformRecordKind, PlatformRecordStore};
 use fabro_test::{TwinScenario, TwinScenarios, twin_openai};
+use fabro_types::settings::run::EnvironmentNetworkMode;
 use fabro_types::{RunId, WorkflowPath, WorkflowVersion};
 use tower::ServiceExt;
 
@@ -1018,7 +1019,13 @@ async fn the_server_attaches_to_the_container_petri_created() {
         .vault_entries([(EnvVars::OPENAI_API_KEY, namespace.clone())])
         .build();
     let app = test_app_with_scheduler(Arc::clone(&state));
-    create_docker_environment(&app, "docker", CATALOG_IMAGE).await;
+    create_docker_environment(
+        &app,
+        "docker",
+        CATALOG_IMAGE,
+        EnvironmentNetworkMode::AllowAll,
+    )
+    .await;
 
     let version_id = register_version(&app, &[
         ("workflow.fabro", COMMAND_DOT),
@@ -1228,15 +1235,11 @@ fn get(path: &str) -> Request<Body> {
 const CATALOG_IMAGE: &str = "ghcr.io/lithoscomputer/ubuntu-22.04:slim";
 
 /// A Docker environment in the server's catalog, with the image it runs.
-async fn create_docker_environment(app: &axum::Router, id: &str, image: &str) {
-    create_docker_environment_with_network(app, id, image, "allow_all").await;
-}
-
-async fn create_docker_environment_with_network(
+async fn create_docker_environment(
     app: &axum::Router,
     id: &str,
     image: &str,
-    mode: &str,
+    mode: EnvironmentNetworkMode,
 ) {
     let environment = serde_json::json!({
         "id": id,
@@ -1340,21 +1343,22 @@ async fn admitted_root_graph(app: &axum::Router, run_id: &str) -> serde_json::Va
 /// a Docker daemon, the run's container runs that image.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bundle_naming_a_catalog_environment_runs_on_docker_with_its_image() {
-    assert_catalog_environment_runs("allow_all", "bridge").await;
+    assert_catalog_environment_runs(EnvironmentNetworkMode::AllowAll, "bridge").await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker; creates and deletes a container"]
 async fn a_catalog_network_block_reaches_the_created_docker_container() {
+    // The shared body returns early without Docker; an explicit run must not.
     assert!(fabro_test::docker_available());
-    assert_catalog_environment_runs("block", "none").await;
+    assert_catalog_environment_runs(EnvironmentNetworkMode::Block, "none").await;
 }
 
-async fn assert_catalog_environment_runs(mode: &str, network_mode: &str) {
+async fn assert_catalog_environment_runs(mode: EnvironmentNetworkMode, network_mode: &str) {
     let settings = settings_from_toml("_version = 1\n\n[run.environment]\nid = \"local\"\n");
     let state = test_app_state_with_options(settings, 5);
     let app = test_app_with_scheduler(Arc::clone(&state));
-    create_docker_environment_with_network(&app, "docker-small", CATALOG_IMAGE, mode).await;
+    create_docker_environment(&app, "docker-small", CATALOG_IMAGE, mode).await;
 
     let version_id = register_version(&app, &[
         ("workflow.fabro", COMMAND_DOT),
@@ -1433,7 +1437,9 @@ async fn assert_catalog_environment_runs(mode: &str, network_mode: &str) {
     }
     assert!(inspection.status.success(), "{inspection:?}");
     assert_eq!(
-        String::from_utf8(inspection.stdout).unwrap().trim(),
+        String::from_utf8(inspection.stdout)
+            .expect("Docker inspect prints UTF-8")
+            .trim(),
         network_mode
     );
 }
@@ -1445,7 +1451,13 @@ async fn a_bundles_own_environment_table_overrides_the_servers() {
     let settings = settings_from_toml("_version = 1\n\n[run.environment]\nid = \"local\"\n");
     let state = test_app_state_with_options(settings, 5);
     let app = test_app_with_scheduler(Arc::clone(&state));
-    create_docker_environment(&app, "docker-small", CATALOG_IMAGE).await;
+    create_docker_environment(
+        &app,
+        "docker-small",
+        CATALOG_IMAGE,
+        EnvironmentNetworkMode::AllowAll,
+    )
+    .await;
 
     let version_id = register_version(&app, &[
         ("workflow.fabro", COMMAND_DOT),
