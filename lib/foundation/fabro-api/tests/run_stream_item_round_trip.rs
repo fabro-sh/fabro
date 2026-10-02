@@ -31,9 +31,13 @@ fn a_petri_item_round_trips_with_its_event_unchanged() {
             },
             "record": {
                 "seq": 23, "origin": "core", "recorded_at": 1_789_323_217_459_u64,
-                "body": { "event": "route.applied", "kind": "jump", "firing": 3, "target": 7 }
+                "body": { "event": "route.applied", "kind": "edge", "firing": 3, "group": 0, "edge": 9 }
             },
-            "derived": { "target": { "id": 7, "name": "finalize", "kind": "attractor/command", "meta": { "kind": "command" } } }
+            "derived": {
+                "target": { "id": 7, "name": "finalize", "kind": "attractor/command", "meta": { "kind": "command" } },
+                "transition": "Continue",
+                "back": false
+            }
         }
     });
     let item: RunStreamItem = serde_json::from_value(value.clone()).unwrap();

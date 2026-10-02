@@ -85,7 +85,6 @@ export interface EdgeSelection {
   toNode: string;
   reason: string;
   condition: string | null;
-  isJump: boolean;
 }
 
 // Re-export helper used by renderers that need to read nested properties.

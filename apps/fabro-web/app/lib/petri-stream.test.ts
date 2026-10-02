@@ -198,7 +198,6 @@ describe("stage renderers", () => {
       toNode: "no",
       reason: "condition",
       condition: null,
-      isJump: false,
     });
     expect(findPetriEdgeForStage(gate.stream, "exit@1")).toBeNull();
   });
@@ -268,7 +267,6 @@ describe("stage renderers", () => {
       toNode: "ok",
       reason: "condition",
       condition: "outcome=succeeded",
-      isJump: false,
     });
   });
 
