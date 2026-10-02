@@ -11,8 +11,11 @@
 //! path the map holds the file under.
 //!
 //! The launch binds the compile variables the Fabro frontend reads:
-//! `petri.launch_model` and `petri.launch_provider` as the model default
-//! below every file layer, `petri.launch_environment` as the environment
+//! `petri.launch_model` and `petri.launch_provider` as the model the run's
+//! flags ask for, over every file layer and the graph's defaults but below a
+//! model a node names itself, `petri.default_model` and
+//! `petri.default_provider` as the run's default model below every file
+//! layer, `petri.launch_environment` as the environment
 //! the run selected over every file layer, `petri.launch_goal` as the goal
 //! the run resolved over every file layer and the graph's own, and
 //! `petri.repository` as the repository the root `start` stage checks out. A
@@ -26,8 +29,8 @@ use std::path::PathBuf;
 use petri_frontend_attractor::kinds::{AGENT_KIND, PROMPT_KIND};
 use petri_runtime::LoadError;
 use petri_runtime::frontend::{
-    self, CompileInputs, LAUNCH_ENVIRONMENT_VAR, LAUNCH_GOAL_VAR, LAUNCH_MODEL_VAR,
-    LAUNCH_PROVIDER_VAR, MapFiles, REPOSITORY_VAR, Severity,
+    self, CompileInputs, DEFAULT_MODEL_VAR, DEFAULT_PROVIDER_VAR, LAUNCH_ENVIRONMENT_VAR,
+    LAUNCH_GOAL_VAR, LAUNCH_MODEL_VAR, LAUNCH_PROVIDER_VAR, MapFiles, REPOSITORY_VAR, Severity,
 };
 use petri_runtime::ir::Graph;
 use serde::{Deserialize, Serialize};
@@ -65,25 +68,34 @@ impl Bundle {
     }
 }
 
-/// What the launch binds around the file layers: the model default below
-/// them, the environment selection above them, and the repository.
+/// What the launch binds around the file layers: the model the run's flags
+/// ask for and the environment selection above them, the run's default model
+/// below them, and the repository.
 #[derive(Clone, Debug, Default)]
 pub struct Launch {
-    pub model:       Option<String>,
-    pub provider:    Option<String>,
+    /// The model and provider the run's flags ask for (`--model`,
+    /// `--provider`), over every file layer and the graph's defaults but
+    /// below a model a node names itself.
+    pub model:            Option<String>,
+    pub provider:         Option<String>,
+    /// The run's default model and provider (the settings', else the
+    /// catalog's default), below every file layer: they fill what nothing
+    /// else names.
+    pub default_model:    Option<String>,
+    pub default_provider: Option<String>,
     /// The environment the run selected, by its id in the server's
     /// catalog, over every layer's `[run.environment]`, as the intent's
     /// selection overrides the bundle in Fabro's own resolution; `None`
     /// leaves the layers to select.
-    pub environment: Option<String>,
+    pub environment:      Option<String>,
     /// The goal the run resolved (the intent's override, else the settings'
     /// `[run] goal` from any layer), over the bundle's `[run] goal` and the
     /// graph's own `goal`, so the stages execute with the goal the run
     /// shows; `None` leaves the bundle's layers and the graph to state it.
-    pub goal:        Option<String>,
+    pub goal:             Option<String>,
     /// The local repository the root `start` stage checks out into the
     /// workspace; `None` starts the run from an empty workspace.
-    pub repository:  Option<PathBuf>,
+    pub repository:       Option<PathBuf>,
 }
 
 /// One check: the bundle, the run's inputs and variables, the launch and
@@ -219,6 +231,12 @@ fn compile_inputs(
     compile
         .vars
         .insert(LAUNCH_PROVIDER_VAR.into(), text(&launch.provider));
+    compile
+        .vars
+        .insert(DEFAULT_MODEL_VAR.into(), text(&launch.default_model));
+    compile
+        .vars
+        .insert(DEFAULT_PROVIDER_VAR.into(), text(&launch.default_provider));
     if let Some(environment) = &launch.environment {
         compile.vars.insert(
             LAUNCH_ENVIRONMENT_VAR.into(),

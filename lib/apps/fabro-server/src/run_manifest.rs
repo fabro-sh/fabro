@@ -9,7 +9,7 @@ use fabro_api::types;
 use fabro_config::parse::SettingsSource;
 use fabro_config::run::resolve_run_goal_from_namespace;
 use fabro_config::{
-    CliLayer, CliOutputLayer, EnvironmentLayer, MergeMap, RunLayer, SettingsLayer,
+    CliLayer, CliOutputLayer, EnvironmentLayer, MergeMap, RunLayer, RunModelLayer, SettingsLayer,
     WorkflowSettingsBuilder, parse_input_overrides, parse_labels, project,
 };
 use fabro_dot::WorkflowGraph;
@@ -53,6 +53,7 @@ pub(crate) struct PreparedManifest {
     /// The entrypoint's DOT as written: what the render endpoint draws.
     pub root_source:      String,
     pub settings:         WorkflowSettings,
+    pub model_overrides:  Option<RunModelLayer>,
     pub target_path:      ManifestPath,
     pub workflow_bundle:  WorkflowBundle,
     pub source_directory: PathBuf,
@@ -92,6 +93,10 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
 
     let args_overrides =
         manifest_args_overrides(manifest.args.as_ref()).context("failed to parse manifest args")?;
+    let model_overrides = args_overrides
+        .run
+        .as_ref()
+        .and_then(|run| run.model.clone());
     let mut workflow_settings_builder = WorkflowSettingsBuilder::new()
         .server_manifest_defaults(
             manifest_run_defaults.clone(),
@@ -166,6 +171,7 @@ pub(crate) fn prepare_manifest_with_environment_defaults(
         git: manifest.git.clone(),
         root_source,
         settings,
+        model_overrides,
         target_path,
         workflow_bundle,
         source_directory,
@@ -206,6 +212,7 @@ pub(crate) fn validate_prepared_manifest(
         &prepared.settings,
         vars,
         launch,
+        prepared.model_overrides.as_ref(),
         runtime,
         unbound_is_warning,
     )?;

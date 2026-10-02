@@ -281,6 +281,7 @@ pub(crate) async fn admit(
         settings,
         prepared.vars(),
         launch,
+        prepared.model_overrides(),
         runtime_spec(
             state,
             eligible,
