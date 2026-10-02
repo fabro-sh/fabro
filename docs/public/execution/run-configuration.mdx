@@ -233,7 +233,7 @@ Fabro substitutes `{{ vars.* }}` when the server creates the run, then resolves 
 
 ### `[run.clone]`
 
-Configure whether clone-based sandboxes clone the run's GitHub origin before execution.
+Configure whether the run's repository is cloned into its workspace before execution: the GitHub origin for Docker and Daytona, or the target folder's repository for Local.
 
 ```toml title="run.toml"
 [run.clone]
@@ -241,12 +241,12 @@ enabled = true
 depth = 100
 ```
 
-Set `enabled = false` to start Docker and Daytona runs with an empty provider workspace. Use [prepare steps](#runprepare) to clone or create any files the workflow needs.
+Set `enabled = false` to start runs with an empty workspace. Use [prepare steps](#runprepare) to clone or create any files the workflow needs.
 
 | Field | Description |
 |---|---|
 | `enabled` | When `false`, Fabro skips the repository clone. Defaults to `true`. |
-| `depth` | Git history depth for Docker and Daytona. Defaults to `100`. Set it to `0` to clone full history. |
+| `depth` | Git history depth. Defaults to `100`. Set it to `0` to clone full history. |
 
 ### `[run.run_branch]`
 
@@ -318,9 +318,9 @@ memory = "8GB"
 | `labels` | Provider labels. Merge by key across layers. |
 | `env` | Environment variables passed to command and agent execution. Merge by key across layers. |
 
-When `provider = "local"`, Fabro runs directly in the resolved working
-directory. If you want local isolation, create or enter a separate clone or Git
-worktree yourself.
+When `provider = "local"`, Fabro works in a clone of the target folder's
+committed `HEAD`, not in the folder itself, so uncommitted changes are not
+included.
 
 Environment variable values can combine literal text with server variables and token secrets:
 
