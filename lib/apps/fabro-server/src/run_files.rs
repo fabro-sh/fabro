@@ -35,8 +35,8 @@ use fabro_api::types::{
     RunFilesMetaToSha,
 };
 use fabro_redact::SecretRedactor;
-use fabro_types::{RunId, blob_ref};
-use fabro_util::{error, shell};
+use fabro_types::RunId;
+use fabro_util::shell;
 use fabro_workflow::sandbox_git::{
     DiffError, DiffNumstat, RawDiffEntry, SubmoduleChange, SymlinkChange, list_changed_files_raw,
     list_diff_numstat, stream_blob_metadata, stream_blobs,
@@ -53,8 +53,8 @@ use tokio::sync::{Mutex, watch};
 use crate::error::ApiError;
 use crate::principal_middleware::RequiredUser;
 use crate::run_files_security::{RunFilesMetrics, is_sensitive};
-use crate::sandbox_access;
 use crate::server::{AppState, parse_run_id_path};
+use crate::{final_patch, sandbox_access};
 
 /// Per-file cap: 256 KiB OR 20k lines (whichever comes first).
 pub(crate) const PER_FILE_BYTES_CAP: u64 = 256 * 1024;
@@ -816,8 +816,8 @@ fn sandbox_git_error(op: &str, error: &sandbox_driver::Error) -> ApiError {
     transient_503(op, &display_for_log(error, &SecretRedactor))
 }
 
-/// Resolve the terminal patch before parsing it: Petri's projection carries
-/// a blob reference, while older projections may carry inline patch text.
+/// The degraded response from the run's final patch, resolved through
+/// [`final_patch::load`] so a blob reference is read, not parsed as a patch.
 async fn load_fallback_response(
     state: &AppState,
     projection: &fabro_store::RunProjection,
@@ -825,55 +825,14 @@ async fn load_fallback_response(
     run_id: &RunId,
     start: Instant,
 ) -> ListRunFilesResult {
-    let Some(patch) = projection
-        .conclusion
-        .as_ref()
-        .and_then(|conclusion| conclusion.diff.patch.as_deref())
-    else {
+    let Some(patch) = final_patch::load(state, projection).await? else {
         return Ok(empty_envelope(
             RunFilesMetaSource::FinalPatch,
             RunFilesMetaScope::Committed,
         ));
     };
-
-    let bytes;
-    let patch = if let Some(hash) = blob_ref::parse_blob_ref(patch) {
-        bytes = state
-            .store_ref()
-            .blobs()
-            .read(&hash)
-            .await
-            .map_err(|error| {
-                tracing::error!(
-                    %run_id,
-                    error = %error::collect_chain(&error).join(": "),
-                    "Failed to read final patch blob"
-                );
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "The saved final patch could not be read.",
-                )
-            })?
-            .ok_or_else(|| {
-                tracing::error!(%run_id, "Final patch blob is missing");
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "The saved final patch is missing.",
-                )
-            })?;
-        std::str::from_utf8(&bytes).map_err(|error| {
-            tracing::error!(%run_id, %error, "Final patch blob is not UTF-8");
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "The saved final patch is not valid UTF-8.",
-            )
-        })?
-    } else {
-        patch
-    };
-
     Ok(build_fallback_response(
-        projection, patch, reason, run_id, start,
+        projection, &patch, reason, run_id, start,
     ))
 }
 
@@ -1805,12 +1764,13 @@ fn count_flags(data: &[FileDiff]) -> (u64, u64, u64, u64) {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use fabro_types::{PetriAdmission, RunId, test_support};
+    use fabro_types::RunId;
     use pebble_coding_agent::sandbox_driver::test_support::{MockSandbox, exec_result};
     use sandbox_driver::ExecResult;
     use tokio::time::{Duration, sleep};
 
     use super::*;
+    use crate::test_support::{test_app_state, test_concluded_run_projection};
 
     /// The mock as the Run Files endpoints hold a sandbox.
     fn checkout(mock: &MockSandbox) -> SandboxCheckout {
@@ -2407,49 +2367,9 @@ index 1111111..2222222 160000
         }
     }
 
-    fn fallback_projection(patch: &str) -> fabro_store::RunProjection {
-        let mut projection = fabro_store::RunProjection::new(
-            "Test run".to_string(),
-            fabro_types::RunSpec {
-                run_id:              fabro_types::fixtures::RUN_1,
-                settings:            fabro_types::WorkflowSettings::default(),
-                graph:               fabro_types::RunGraph::new("test"),
-                graph_source:        None,
-                workflow_slug:       None,
-                workflow_version_id: None,
-                target:              None,
-                automation:          None,
-                source_directory:    None,
-                labels:              HashMap::default(),
-                provenance:          test_support::test_run_provenance(),
-                definition_blob:     None,
-                spec_blob:           None,
-                git:                 None,
-                fork_source_ref:     None,
-                admission:           PetriAdmission::default(),
-            },
-            chrono::Utc::now(),
-        );
-        projection.conclusion = Some(fabro_types::Conclusion {
-            timestamp:            chrono::Utc::now(),
-            status:               fabro_types::StageOutcome::Succeeded,
-            timing:               fabro_types::RunTiming::wall_only(1),
-            failure:              None,
-            final_git_commit_sha: None,
-            stages:               Vec::new(),
-            usage:                None,
-            total_retries:        0,
-            diff:                 fabro_types::RunDiff {
-                patch:   Some(patch.to_string()),
-                summary: None,
-            },
-        });
-        projection
-    }
-
     fn fallback_response_json(patch: &str) -> serde_json::Value {
         serde_json::to_value(build_fallback_response(
-            &fallback_projection(patch),
+            &test_concluded_run_projection(Some(patch)),
             patch,
             RunFilesMetaDegradedReason::SandboxGone,
             &RunId::new(),
@@ -2460,9 +2380,9 @@ index 1111111..2222222 160000
 
     #[tokio::test]
     async fn fallback_loader_preserves_inline_and_absent_patches() {
-        let state = crate::test_support::test_app_state();
+        let state = test_app_state();
         let patch = simple_patch("README.md");
-        let mut projection = fallback_projection(&patch);
+        let mut projection = test_concluded_run_projection(Some(&patch));
         let response = load_fallback_response(
             &state,
             &projection,
@@ -2490,24 +2410,6 @@ index 1111111..2222222 160000
         .unwrap();
         assert!(response.data.is_empty());
         assert_eq!(response.meta.total_changed, 0);
-    }
-
-    #[tokio::test]
-    async fn fallback_loader_rejects_non_utf8_patch_bytes() {
-        let state = crate::test_support::test_app_state();
-        let hash = state.store_ref().blobs().write(&[0xff]).await.unwrap();
-        let projection = fallback_projection(&blob_ref::format_blob_ref(&hash));
-        let error = load_fallback_response(
-            &state,
-            &projection,
-            RunFilesMetaDegradedReason::SandboxGone,
-            &projection.spec.run_id,
-            Instant::now(),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(error.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(error.detail(), "The saved final patch is not valid UTF-8.");
     }
 
     fn sandbox_patch_response_json(entries: &[String]) -> serde_json::Value {
