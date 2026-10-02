@@ -1,0 +1,331 @@
+name: Internal dependencies
+
+# Every internal Git dependency names `branch = "main"`, and Cargo.lock picks
+# the commit CI builds and Fabro ships. Each night this job moves the lock to
+# the current main of each internal library with `cargo update -p`, then runs
+# the Linux test suite from rust.yml against it, so drift is noticed without
+# anyone asking. A passing lock goes to one pull request from
+# `bot/internal-deps`, opened or updated here and never merged here. A failure
+# opens one tracking issue labeled `internal-deps`, or comments on the open
+# one; the next passing run closes it. Nothing is pushed to main.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+# Never cancel a run midway: the report and pull request jobs must see how
+# the check ended.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: "10"
+
+jobs:
+  check:
+    name: Test (Linux)
+    runs-on: ubuntu-24.04-x86-32-cores
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.update.outputs.changed }}
+      summary: ${{ steps.update.outputs.summary }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
+      # One package per internal repository: updating one package from a Git
+      # repository moves every package from that repository. daytona-sdk comes
+      # through sandbox-driver, but its repository is separate, so it moves on
+      # its own. The summary names each repository whose locked commit moved,
+      # for the job summary, the pull request, and the tracking issue.
+      - name: Update internal dependencies
+        id: update
+        env:
+          INTERNAL_CRATES: sandbox-driver pebble-agent petri-runtime lithos-llm twin-openai daytona-sdk
+        run: |
+          set -euo pipefail
+          cp Cargo.lock "$RUNNER_TEMP/Cargo.lock.before"
+          args=()
+          for crate in $INTERNAL_CRATES; do
+            args+=(-p "$crate")
+          done
+          cargo update "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/cargo-update.log"
+
+          python3 - "$RUNNER_TEMP/Cargo.lock.before" Cargo.lock > "$RUNNER_TEMP/summary.md" <<'PY'
+          import re
+          import sys
+          import tomllib
+
+          SOURCE = re.compile(r"git\+https://github\.com/([^?#]+?)(?:\.git)?\?[^#]*#([0-9a-f]+)$")
+
+          def commits(path):
+              found = {}
+              with open(path, "rb") as lock:
+                  for package in tomllib.load(lock).get("package", []):
+                      match = SOURCE.match(package.get("source", ""))
+                      if match:
+                          found.setdefault(match[1], set()).add(match[2])
+              return found
+
+          before, after = commits(sys.argv[1]), commits(sys.argv[2])
+          rows = []
+          for repo in sorted(set(before) | set(after)):
+              old, new = sorted(before.get(repo, ())), sorted(after.get(repo, ()))
+              if old == new:
+                  continue
+              if len(old) == 1 and len(new) == 1:
+                  moved = f"[`{old[0][:7]}...{new[0][:7]}`](https://github.com/{repo}/compare/{old[0]}...{new[0]})"
+              else:
+                  moved = " ".join(f"`{c[:7]}`" for c in old) + " -> " + " ".join(f"`{c[:7]}`" for c in new)
+              rows.append(f"| `{repo}` | {moved} |")
+          if rows:
+              print("| Repository | Commits |\n|---|---|")
+              print("\n".join(rows))
+          else:
+              print("No internal commit moved.")
+          PY
+          {
+            echo
+            echo "<details><summary>cargo update output</summary>"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/cargo-update.log"
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$RUNNER_TEMP/summary.md"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+          # Only a moved internal commit counts: `cargo update` can also
+          # rewrite unrelated entries of a lock that `--locked` accepts.
+          if grep -q '^| `' "$RUNNER_TEMP/summary.md"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            git checkout -- Cargo.lock
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Cargo.lock already locks every internal main; nothing to do."
+          fi
+          delimiter="SUMMARY_$(openssl rand -hex 16)"
+          {
+            echo "summary<<$delimiter"
+            cat "$RUNNER_TEMP/summary.md"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
+      # The rest is rust.yml's Test (Linux) job on the updated lock.
+      # Every Petri run takes its scope through a sandbox-driver plugin
+      # executable that Petri finds on PATH: `sandbox-driver-host` for the
+      # `local` provider, `sandbox-driver-docker` for `docker`. Installed
+      # at the commit the updated Cargo.lock resolves sandbox-driver to, so
+      # the plugins and the in-process driver are one build.
+      - name: Read the sandbox-driver commit Cargo.lock resolves
+        if: steps.update.outputs.changed == 'true'
+        id: sandbox-driver
+        run: |
+          rev="$(cargo metadata --locked --format-version 1 | jq -r '.packages[] | select(.name == "sandbox-driver") | .source' | sed 's/.*#//' | sort -u)"
+          [[ "$rev" =~ ^[0-9a-f]{40}$ ]]
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+      - name: Restore the sandbox-driver plugin executables
+        if: steps.update.outputs.changed == 'true'
+        id: sandbox-driver-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/sandbox-driver-host
+            ~/.cargo/bin/sandbox-driver-docker
+          key: sandbox-driver-plugins-${{ runner.os }}-${{ steps.sandbox-driver.outputs.rev }}
+      - name: Install the sandbox-driver plugin executables
+        if: steps.update.outputs.changed == 'true' && steps.sandbox-driver-cache.outputs.cache-hit != 'true'
+        env:
+          SANDBOX_DRIVER_REV: ${{ steps.sandbox-driver.outputs.rev }}
+        run: cargo install --locked --git https://github.com/lithoscomputer/sandbox-driver --rev "$SANDBOX_DRIVER_REV" sandbox-driver-host sandbox-driver-docker
+      # The images the suite's Docker tests run; see rust.yml.
+      - name: Pull the images the Docker tests run
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          backend="$(dirname "$(cargo metadata --locked --format-version 1 | jq -r '.packages[] | select(.name == "petri-executor-sandbox") | .manifest_path')")/src/backend.rs"
+          pin="$(sed -n 's/^const RUNNER_PIN: &str = "\([0-9a-f]*\)";$/\1/p' "$backend")"
+          test -n "$pin"
+          docker pull "ghcr.io/lithoscomputer/ubuntu-24.04:slim-$pin"
+          docker pull ghcr.io/lithoscomputer/ubuntu-22.04:slim
+      - name: Test
+        if: steps.update.outputs.changed == 'true'
+        run: cargo nextest run --locked --workspace --status-level slow --profile ci
+      # The pull request job commits exactly the lock that passed.
+      - name: Keep the tested lock
+        if: steps.update.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: internal-deps-lock
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  pull-request:
+    name: Open the update pull request
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The release App's credentials live in this environment. A pull request
+    # opened with the App's token, unlike one opened with GITHUB_TOKEN,
+    # triggers rust.yml on it.
+    environment: nightly
+    permissions:
+      contents: read # check out the tested commit; writes go through the App token
+    steps:
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          client-id: ${{ vars.FABRO_RELEASES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FABRO_RELEASES_APP_PRIVATE_KEY }}
+          # Narrowed to what this job does: push the branch, open the PR.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0 # the branch merges the tested commit into its history
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: internal-deps-lock
+          path: ${{ runner.temp }}/internal-deps-lock
+
+      # The branch is only ever added to, never rewritten: an open pull
+      # request's branch merges the tested commit and takes the tested lock;
+      # with no open pull request, a leftover branch is deleted and a new one
+      # starts from the tested commit. The push names the branch explicitly,
+      # so it can never reach main.
+      - name: Push the lock and open or update the pull request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: bot/internal-deps
+          SUMMARY: ${{ needs.check.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          lock="$RUNNER_TEMP/internal-deps-lock/Cargo.lock"
+          repo_api="repos/$GITHUB_REPOSITORY"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git config user.name "fabro-releases[bot]"
+          git config user.email "fabro-releases[bot]@users.noreply.github.com"
+
+          pr="$(gh api "$repo_api/pulls?head=$GITHUB_REPOSITORY_OWNER:$BRANCH&base=main&state=open" --jq '.[0].number // empty')"
+          if [ -n "$pr" ]; then
+            git fetch --no-tags "$remote" "refs/heads/$BRANCH"
+            git checkout -B "$BRANCH" FETCH_HEAD
+            # Cargo.lock is the only file the branch changes, so it is the
+            # only possible conflict, and the tested lock resolves it.
+            git merge --no-ff --no-commit "$GITHUB_SHA" || true
+            cp "$lock" Cargo.lock
+            git add Cargo.lock
+            if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+              echo "::error::$BRANCH conflicts with main outside Cargo.lock; close its pull request and rerun."
+              exit 1
+            fi
+          else
+            if git ls-remote --exit-code --heads "$remote" "$BRANCH" > /dev/null; then
+              git push "$remote" --delete "$BRANCH"
+            fi
+            git checkout -B "$BRANCH" "$GITHUB_SHA"
+            cp "$lock" Cargo.lock
+            git add Cargo.lock
+          fi
+          if git rev-parse -q --verify MERGE_HEAD > /dev/null || ! git diff --cached --quiet; then
+            git commit -m "Update internal dependencies to their current main"
+            git push "$remote" "HEAD:refs/heads/$BRANCH"
+          else
+            echo "$BRANCH already carries this lock."
+          fi
+
+          body="$RUNNER_TEMP/body.md"
+          {
+            echo "Moves Cargo.lock to the current main of each internal library with \`cargo update -p\`. The Linux test suite passed on this lock: $RUN_URL"
+            echo
+            echo "${SUMMARY:-No summary was recorded.}"
+            echo
+            echo "Opened by the Internal dependencies workflow (\`.github/workflows/internal-deps.yml\`), which updates this branch each night the update passes. Merge it when CI is green."
+          } > "$body"
+          if [ -n "$pr" ]; then
+            gh api -X PATCH "$repo_api/pulls/$pr" -F body=@"$body" --jq '"Updated \(.html_url)"'
+          else
+            gh api "$repo_api/pulls" -f title="Update internal dependencies" -f head="$BRANCH" -f base=main \
+              -F body=@"$body" --jq '"Opened \(.html_url)"'
+          fi
+
+  report:
+    name: report
+    needs: check
+    if: always() && (needs.check.result == 'success' || needs.check.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: write # open, comment on, and close the tracking issue; create its label
+    steps:
+      - name: Update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.check.result }}
+          CHANGED: ${{ needs.check.outputs.changed }}
+          SUMMARY: ${{ needs.check.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          label=internal-deps
+          repo_api="repos/$GITHUB_REPOSITORY"
+          issue="$(gh api "$repo_api/issues?labels=$label&state=open&per_page=100" \
+            --jq '[.[] | select(.pull_request == null)] | sort_by(.number) | .[0].number // empty')"
+          body="$RUNNER_TEMP/body.md"
+
+          if [ "$RESULT" = "success" ]; then
+            if [ "$CHANGED" = "true" ]; then
+              echo "The updated lock passed the Linux test suite; the pull request job carries it." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if [ -n "$issue" ]; then
+              {
+                echo "The nightly internal dependency update passed again: $RUN_URL"
+                echo
+                echo "${SUMMARY:-No summary was recorded.}"
+              } > "$body"
+              gh api "$repo_api/issues/$issue/comments" -F body=@"$body" --silent
+              gh api -X PATCH "$repo_api/issues/$issue" -f state=closed -f state_reason=completed --silent
+              echo "Closed #$issue."
+            fi
+            exit 0
+          fi
+
+          {
+            echo "The nightly internal dependency update failed: $RUN_URL"
+            echo
+            echo "It moved Cargo.lock to the current main of each internal library with \`cargo update -p\` and ran the Linux test suite against it. Whoever broke an API this repository uses fixes it here promptly."
+            echo
+            echo "${SUMMARY:-No summary was recorded: the run failed before \`cargo update\` finished.}"
+          } > "$body"
+          if [ -n "$issue" ]; then
+            gh api "$repo_api/issues/$issue/comments" -F body=@"$body" --silent
+            echo "Commented on #$issue."
+          else
+            if ! gh api "$repo_api/labels/$label" --silent 2>/dev/null; then
+              gh api "$repo_api/labels" -f name="$label" -f color=d93f0b \
+                -f description="Nightly internal dependency update" --silent
+            fi
+            gh api "$repo_api/issues" -f title="Nightly internal dependency update failed" \
+              -F body=@"$body" -f "labels[]=$label" --jq '"Opened #\(.number)."'
+          fi
