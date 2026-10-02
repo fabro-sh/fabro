@@ -25,6 +25,7 @@ pub mod csp;
 mod demo;
 pub mod diagnostics;
 pub mod error;
+mod final_patch;
 mod git_checkout;
 pub mod github_webhooks;
 pub mod install;

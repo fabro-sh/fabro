@@ -326,6 +326,25 @@ describe("RunFiles rendering", () => {
     expect(lastCall.mountId).not.toBe(firstMountId);
   });
 
+  test("renders the saved final patch after the sandbox is gone", () => {
+    const patch = "diff --git a/docs/live.md b/docs/live.md\n--- a/docs/live.md\n+++ b/docs/live.md\n@@ -1 +1,2 @@\n original\n+saved change\n";
+    currentFilesPayload = makePatchPayload(patch);
+    currentFilesPayload.meta = {
+      ...currentFilesPayload.meta,
+      source: "final_patch",
+      degraded: true,
+      degraded_reason: "sandbox_gone",
+    };
+
+    const renderer = renderRunFiles();
+
+    expect(renderer.root.findAllByProps({ "data-run-file-row": "true" })).toHaveLength(1);
+    expect(patchDiffCalls).toHaveLength(1);
+    expect(patchDiffCalls[0].patch).toBe(patch);
+    expect(multiFileDiffCalls).toHaveLength(0);
+    expect(treeText(renderer.toJSON())).not.toContain("Diff unavailable");
+  });
+
   test("refreshing from a populated diff to an empty diff shows a no-changes toast", async () => {
     currentFilesPayload = makePayload(1);
     const renderer = renderRunFiles("/runs/run_1/files?scope=all");
