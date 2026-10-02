@@ -10,7 +10,9 @@ use fabro_petri::engine::{self, RunStatus};
 use fabro_petri::providers::{DaytonaCredentials, SandboxProviderConfig};
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_types::SandboxProviderKind;
-use fabro_types::settings::run::EnvironmentResourcesSettings;
+use fabro_types::settings::run::{
+    EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentResourcesSettings,
+};
 use httpmock::prelude::*;
 use petri_store::MemoryRunStore;
 use serde_json::json;
@@ -70,30 +72,7 @@ async fn assert_snapshot_request(
     memory: u64,
     disk: Option<u64>,
 ) {
-    let server = MockServer::start_async().await;
-    server
-        .mock_async(|when, then| {
-            when.method(GET).path("/api-keys/current");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(json!({
-                    "name": "test-key",
-                    "organizationId": "test-org",
-                    "permissions": [
-                        "write:snapshots", "delete:snapshots",
-                        "write:sandboxes", "delete:sandboxes"
-                    ]
-                }));
-        })
-        .await;
-    server
-        .mock_async(|when, then| {
-            when.method(GET).path("/sandbox");
-            then.status(200)
-                .header("content-type", "application/json")
-                .json_body(json!({"items": [], "nextCursor": null}));
-        })
-        .await;
+    let server = provider_server().await;
     server
         .mock_async(|when, then| {
             when.method(GET).path_matches(r"^/snapshots/[^/]+$");
@@ -126,6 +105,45 @@ async fn assert_snapshot_request(
                 .json_body(json!({"message": "snapshot creation stopped by test"}));
         })
         .await;
+    let outcome = run_daytona(&server, resources, EnvironmentNetworkSettings::default()).await;
+
+    assert_eq!(create.calls_async().await, 1, "{outcome:?}");
+    assert_eq!(outcome.status, RunStatus::Failed);
+}
+
+async fn provider_server() -> MockServer {
+    let server = MockServer::start_async().await;
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/api-keys/current");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({
+                    "name": "test-key",
+                    "organizationId": "test-org",
+                    "permissions": [
+                        "write:snapshots", "delete:snapshots",
+                        "write:sandboxes", "delete:sandboxes"
+                    ]
+                }));
+        })
+        .await;
+    server
+        .mock_async(|when, then| {
+            when.method(GET).path("/sandbox");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(json!({"items": [], "nextCursor": null}));
+        })
+        .await;
+    server
+}
+
+async fn run_daytona(
+    server: &MockServer,
+    resources: EnvironmentResourcesSettings,
+    network: EnvironmentNetworkSettings,
+) -> engine::RunOutcome {
     let credentials = DaytonaCredentials::new("test-key".to_string())
         .with_api_url(Some(server.base_url()))
         .with_http_client(Some(fabro_test::test_http_client()));
@@ -160,11 +178,60 @@ async fn assert_snapshot_request(
     );
     request.provider = SandboxProviderKind::DAYTONA;
     request.resources = resources;
+    request.network = network;
 
-    let outcome = engine::run(request)
+    engine::run(request)
         .await
-        .expect("the run records its failure");
+        .expect("the run records its failure")
+}
 
-    assert_eq!(create.calls_async().await, 1, "{outcome:?}");
-    assert_eq!(outcome.status, RunStatus::Failed);
+#[tokio::test]
+async fn daytona_create_requests_enforce_block_and_preserve_allow_all() {
+    for mode in [
+        EnvironmentNetworkMode::Block,
+        EnvironmentNetworkMode::AllowAll,
+    ] {
+        let server = provider_server().await;
+        server
+            .mock_async(|when, then| {
+                when.method(GET).path_matches(r"^/snapshots/[^/]+$");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "id": "runner", "name": "runner", "general": false,
+                        "state": "active", "sandboxClass": "container",
+                        "cpu": 2, "gpu": 0, "mem": 4, "disk": 3,
+                        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+                        "size": null, "entrypoint": null, "errorReason": null,
+                        "lastUsedAt": null, "sourceSandboxId": null
+                    }));
+            })
+            .await;
+        let create = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/sandbox").json_body_includes(
+                    json!({
+                        "networkBlockAll": mode == EnvironmentNetworkMode::Block
+                    })
+                    .to_string(),
+                );
+                // Observe the real SDK request, then refuse creation. No cloud
+                // sandbox or simulated shell is needed to prove this contract.
+                then.status(400)
+                    .header("content-type", "application/json")
+                    .json_body(json!({"message": "creation stopped by test"}));
+            })
+            .await;
+        let outcome = run_daytona(
+            &server,
+            EnvironmentResourcesSettings::default(),
+            EnvironmentNetworkSettings {
+                mode,
+                allow: Vec::new(),
+            },
+        )
+        .await;
+        assert_eq!(create.calls_async().await, 1, "{mode}: {outcome:?}");
+        assert_eq!(outcome.status, RunStatus::Failed);
+    }
 }

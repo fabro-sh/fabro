@@ -38,7 +38,7 @@ use fabro_petri::source::{RunSource, SourceRevision};
 use fabro_petri::test_support::{MemoryBlobs, MemoryPlatformRecords};
 use fabro_store::{ArtifactStore, PlatformRecord, PlatformRecordKind};
 use fabro_types::settings::run::{
-    EnvironmentResourcesSettings, RunCheckpointSettings, RunNamespace,
+    EnvironmentNetworkSettings, EnvironmentResourcesSettings, RunCheckpointSettings, RunNamespace,
 };
 use fabro_types::{GitIdentitySource, RunId, SandboxProviderKind};
 use object_store::local::LocalFileSystem;
@@ -202,6 +202,7 @@ impl Harness {
             },
             provider,
             resources: EnvironmentResourcesSettings::default(),
+            network: EnvironmentNetworkSettings::default(),
             cancel: CancellationToken::new(),
             controls: RunControls::new(),
             interviewer,
@@ -848,6 +849,7 @@ async fn a_run_hook_blocks_a_tool_effect_through_the_forwarded_service() {
         },
         provider: SandboxProviderKind::LOCAL,
         resources: EnvironmentResourcesSettings::default(),
+        network: EnvironmentNetworkSettings::default(),
         cancel: CancellationToken::new(),
         controls: RunControls::new(),
         interviewer,

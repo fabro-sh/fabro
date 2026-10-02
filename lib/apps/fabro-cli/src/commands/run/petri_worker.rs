@@ -241,28 +241,16 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
     .with_source(source)
     .with_publisher(publisher)
     .with_test_gates(test_checkpoint_gates());
+    let environment = &worker.run_state.spec.settings.run.environment;
     let request = RunRequest {
         run_id: run_id.to_string(),
         run_dir: worker.run_dir.join("petri"),
         execution,
         store,
         runtime,
-        provider: worker
-            .run_state
-            .spec
-            .settings
-            .run
-            .environment
-            .provider
-            .clone(),
-        resources: worker
-            .run_state
-            .spec
-            .settings
-            .run
-            .environment
-            .resources
-            .clone(),
+        provider: environment.provider.clone(),
+        resources: environment.resources.clone(),
+        network: environment.network.clone(),
         cancel: cancel_token.clone(),
         controls: controls.clone(),
         interviewer: Arc::new(petri_interviewer),

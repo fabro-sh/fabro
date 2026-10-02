@@ -19,7 +19,7 @@ use fabro_petri::engine::{Execution, RunRequest};
 use fabro_petri::interview::{Approval, FabroInterviewer, QuestionNotice, QuestionSink};
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_types::SandboxProviderKind;
-use fabro_types::settings::run::EnvironmentResourcesSettings;
+use fabro_types::settings::run::{EnvironmentNetworkSettings, EnvironmentResourcesSettings};
 use petri_execution::inspect;
 use petri_store::{Access, LogId, RunKey, RunStore};
 use tokio::time::sleep;
@@ -86,6 +86,7 @@ pub(crate) fn run_request(
         runtime,
         provider: SandboxProviderKind::LOCAL,
         resources: EnvironmentResourcesSettings::default(),
+        network: EnvironmentNetworkSettings::default(),
         cancel: CancellationToken::new(),
         controls: RunControls::new(),
         observers: vec![interviewer.observer()],
