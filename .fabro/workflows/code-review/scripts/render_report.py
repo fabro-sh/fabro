@@ -48,6 +48,10 @@ DISPOSITIONS = (
     "verification-incomplete",
     "deferred-by-cap",
     "duplicate",
+    # P3 item 5: kept in the bundle, but the verifier judged it the same
+    # defect as a finding already posted on the reviewed PR; the
+    # publisher places it as skipped instead of re-posting.
+    "duplicate-of-posted",
 )
 VERIFICATION_STATUSES = ("complete", "partial", "skipped-low-effort")
 COMPLETION_STATUSES = ("complete", "partial")
@@ -178,6 +182,15 @@ def validate_manifest(value: object) -> Dict[str, Any]:
     verification = as_map(manifest.get("verification"))
     if verification.get("status") not in VERIFICATION_STATUSES:
         die("manifest verification.status is invalid")
+    incremental = manifest.get("incremental")
+    if incremental is not None:
+        incremental = as_map(incremental)
+        delta_from = incremental.get("from")
+        if delta_from is not None and (
+            not isinstance(delta_from, str)
+            or not re.fullmatch(r"[0-9a-f]{40}", delta_from)
+        ):
+            die("manifest incremental.from must be a commit SHA or null")
     rules = manifest.get("rules")
     if rules is not None:
         rules = as_map(rules)
@@ -359,6 +372,19 @@ def validate_finding(value: object, index: int) -> Dict[str, Any]:
     }
     if normalized_suggestion is not None:
         normalized["suggestion"] = normalized_suggestion
+    duplicate_of_posted = finding.get("duplicate_of_posted")
+    if duplicate_of_posted is not None:
+        record = as_map(duplicate_of_posted)
+        normalized["duplicate_of_posted"] = {
+            "comment_id": positive_int(
+                record.get("comment_id"),
+                f"{field}.duplicate_of_posted.comment_id",
+            ),
+            "html_url": safe_text(
+                record.get("html_url", ""),
+                f"{field}.duplicate_of_posted.html_url",
+            ),
+        }
     return normalized
 
 
@@ -503,8 +529,13 @@ def validate_relationships(
     counts = manifest["counts"]
     if counts["reported"] != len(findings):
         die("manifest counts.reported does not match findings.json")
+    # A duplicate-of-posted finding stays in findings.json (the bundle
+    # never drops a finding); its ledger disposition names the earlier
+    # comment it defers to.
     reportable = [
-        record for record in ledger if record["disposition"] == "reportable"
+        record
+        for record in ledger
+        if record["disposition"] in ("reportable", "duplicate-of-posted")
     ]
     if len(reportable) != len(findings):
         die("reportable ledger records do not match findings.json")
@@ -719,6 +750,14 @@ def finding_markdown(finding: Mapping[str, Any]) -> List[str]:
                 for anchor in anchors
             )
             + " -- judged the same defect and folded in."
+        )
+    duplicate_of_posted = finding.get("duplicate_of_posted")
+    if isinstance(duplicate_of_posted, dict):
+        url = str(duplicate_of_posted.get("html_url") or "").strip()
+        lines.append(
+            "Already reported on the pull request"
+            + (f": {url}" if url else "")
+            + " -- not re-posted."
         )
     if finding["summary"].strip() != finding["short_summary"].strip():
         lines.extend(["", escape_markdown(finding["summary"])])
@@ -958,6 +997,8 @@ def jsonl_line(finding: Mapping[str, Any]) -> str:
     }
     if finding.get("suggestion") is not None:
         record["suggestion"] = finding["suggestion"]
+    if finding.get("duplicate_of_posted") is not None:
+        record["duplicate_of_posted"] = finding["duplicate_of_posted"]
     return json.dumps(record, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -1116,6 +1157,10 @@ def sarif_result(
             )
         },
     }
+    if finding.get("duplicate_of_posted") is not None:
+        result["properties"]["duplicate_of_posted"] = finding[
+            "duplicate_of_posted"
+        ]
     suggestion = finding.get("suggestion")
     if isinstance(suggestion, dict):
         result["fixes"] = [

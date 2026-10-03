@@ -27,7 +27,10 @@ contract, or review scope.
 `siblings` lists other candidates in the same file (id, line, category,
 short summary). Judge the claim on its own. If it describes the same defect
 as a sibling -- one root cause, not merely nearby lines -- also return
-`duplicate_of` with that sibling's id.
+`duplicate_of` with that sibling's id. A sibling whose id starts with `H`
+is a historical sibling: a finding already reported on this pull request
+by an earlier review; if the claim describes that same defect, return
+`duplicate_of` with its id the same way.
 
 {% include "partials/review-target.md.j2" %}
 Return exactly one verdict:
