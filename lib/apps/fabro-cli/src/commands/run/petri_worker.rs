@@ -84,6 +84,7 @@ use fabro_petri::providers::{DaytonaCredentials, SandboxProviderConfig};
 use fabro_petri::runtime::{self, RuntimeSpec};
 use fabro_petri::secrets::VaultSecrets;
 use fabro_petri::source::RunSource;
+use fabro_petri::stage_credentials::StageCredentials;
 use fabro_petri::{HttpRunStore, admission};
 use fabro_static::EnvVars;
 use fabro_store::RunProjection;
@@ -171,7 +172,7 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
     let run_tools = run_tool_services(&worker);
     let catalog =
         command_context::load_cli_catalog().context("failed to build worker LLM catalog")?;
-    let runtime = runtime_spec(
+    let mut runtime = runtime_spec(
         catalog.clone(),
         &vault,
         &worker.run_state,
@@ -215,6 +216,7 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
             None
         }
     };
+    runtime.stage_credentials = StageCredentials::for_run(&worker.run_state.spec, github.as_ref())?;
     let mut source = RunSource::for_run(
         worker.run_state.spec.target.as_ref(),
         &worker.run_state.spec.settings.run,
@@ -657,6 +659,7 @@ async fn runtime_spec(
             .with_http_client(fabro_http::http_client().ok())
     });
     Ok(RuntimeSpec {
+        stage_credentials: None,
         sandbox: SandboxProviderConfig::from_lookup(daytona, crate::process_env_var),
         settings_toml: None,
         mcp_catalog_toml: None,

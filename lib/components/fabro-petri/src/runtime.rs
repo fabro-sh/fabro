@@ -32,38 +32,41 @@ use tracing::debug;
 
 use crate::host_tools;
 use crate::providers::{self, SandboxProviderConfig};
+use crate::stage_credentials::StageCredentials;
 
 /// What every Petri runtime Fabro builds is configured with.
 #[derive(Clone, Default)]
 pub struct RuntimeSpec {
+    /// Run-specific GitHub credentials applied to processes at execution.
+    pub stage_credentials: Option<StageCredentials>,
     /// Explicit provider configuration. Factories connect only at acquire.
-    pub sandbox:          SandboxProviderConfig,
+    pub sandbox:           SandboxProviderConfig,
     /// The operator's settings layer, as `~/.fabro/settings.toml` text: the
     /// lowest of the three layers the Fabro frontend reads (`[run.model]`
     /// defaults, `[[run.hooks]]`, `[run.agent.mcps]`, `[run.environment]`
     /// and the `[environments.<id>]` catalog a bundle may name).
-    pub settings_toml:    Option<String>,
+    pub settings_toml:     Option<String>,
     /// The server's MCP catalog, as the TOML text the Fabro frontend
     /// resolves `[run.agent.mcps.<name>] id = "..."` references against: a
     /// table keyed by catalog id, each entry in the inline
     /// `[run.agent.mcps.<name>]` shape. `None` leaves every reference
     /// refused, as the standalone runner refuses it.
-    pub mcp_catalog_toml: Option<String>,
+    pub mcp_catalog_toml:  Option<String>,
     /// The model client the native agent and prompt steps call, and the
     /// catalog the admission pass resolves model selectors against. `None`
     /// leaves every LLM node unpinned and every model call unconfigured.
-    pub model_client:     Option<Client>,
+    pub model_client:      Option<Client>,
     /// Simulate steps (Fabro's `--dry-run` handlers) in local workspaces,
     /// without acquiring the configured Docker or Daytona sandboxes.
-    pub dry_run:          bool,
+    pub dry_run:           bool,
     /// The Fabro home the skills step reads; `None` leaves it to Petri's
     /// own lookup (`FABRO_HOME`, else `$HOME/.fabro`).
-    pub fabro_home:       Option<PathBuf>,
+    pub fabro_home:        Option<PathBuf>,
     /// Fabro's run tools for every native agent session of the run, when
     /// the run enables them (`[run.agent] fabro_tools` and the worker
     /// token's `agent:run_tools` scope); `None` gives the sessions Pebble's
     /// tools alone. See [`crate::host_tools`].
-    pub run_tools:        Option<FabroRunToolServices>,
+    pub run_tools:         Option<FabroRunToolServices>,
 }
 
 impl RuntimeSpec {
