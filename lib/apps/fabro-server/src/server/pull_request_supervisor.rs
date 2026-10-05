@@ -161,7 +161,7 @@ async fn attempt_pull_request_creation(
     run_state: &fabro_store::RunProjection,
     creation: &PullRequestCreation,
 ) -> anyhow::Result<Result<(), String>> {
-    let inputs = match RunPrInputs::extract(run_state, creation.force) {
+    let inputs = match RunPrInputs::extract(state, run_state, creation.force).await {
         Ok(inputs) => inputs,
         Err(err) => return Ok(Err(err.detail().to_string())),
     };
@@ -181,7 +181,7 @@ async fn attempt_pull_request_creation(
         head_branch: inputs.run_branch,
         expected_head_sha: inputs.final_git_sha,
         goal: inputs.goal,
-        diff: inputs.diff,
+        diff: &inputs.diff,
         model: &creation.model,
         draft: true,
         auto_merge: None,

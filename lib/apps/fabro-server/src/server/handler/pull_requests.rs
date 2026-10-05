@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use super::super::{
     PullRequestLink, RequireRunScoped, Response, Router, RunId, State, StatusCode, get, post,
     run_records, warn,
 };
+use crate::final_patch;
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -189,13 +191,16 @@ pub(in crate::server) struct RunPrInputs<'a> {
     pub(in crate::server) base_branch:       &'a str,
     pub(in crate::server) run_branch:        &'a str,
     pub(in crate::server) final_git_sha:     &'a str,
-    pub(in crate::server) diff:              &'a str,
+    pub(in crate::server) diff:              Cow<'a, str>,
     pub(in crate::server) conclusion:        &'a fabro_types::Conclusion,
     pub(in crate::server) normalized_origin: String,
 }
 
 impl<'a> RunPrInputs<'a> {
-    pub(in crate::server) fn extract(
+    /// What a pull request for the run needs, with its final patch resolved
+    /// from the blob table so the description is written from the real diff.
+    pub(in crate::server) async fn extract(
+        state: &AppState,
         run_state: &'a fabro_store::RunProjection,
         force: bool,
     ) -> Result<Self, ApiError> {
@@ -228,10 +233,8 @@ impl<'a> RunPrInputs<'a> {
                     "missing_run_branch",
                 )
             })?;
-        let diff = run_state
-            .conclusion
-            .as_ref()
-            .and_then(|conclusion| conclusion.diff.patch.as_deref())
+        let diff = final_patch::load(state, run_state)
+            .await?
             .filter(|d| !d.trim().is_empty())
             .ok_or_else(|| {
                 ApiError::with_code(
@@ -333,7 +336,7 @@ async fn create_run_pull_request(
     {
         return accepted_pull_request_creation_response(&id, creation.clone());
     }
-    if let Err(err) = RunPrInputs::extract(&run_state, body.force) {
+    if let Err(err) = RunPrInputs::extract(&state, &run_state, body.force).await {
         return err.into_response();
     }
     if let Err(err) = load_server_github_credentials(state.as_ref()).await {
@@ -603,5 +606,77 @@ async fn close_run_pull_request(
             github_pull_request_not_found_error(ctx.number).into_response()
         }
         Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use fabro_types::{DirtyStatus, GitContext, StartRecord, blob_ref};
+
+    use super::RunPrInputs;
+    use crate::test_support::{test_app_state, test_concluded_run_projection};
+
+    /// A finished run with everything a pull request needs and `patch` as
+    /// its final diff.
+    fn pull_request_ready_projection(patch: &str) -> fabro_store::RunProjection {
+        let mut projection = test_concluded_run_projection(Some(patch));
+        projection.spec.git = Some(GitContext {
+            origin_url: "https://github.com/acme/widgets.git".to_string(),
+            branch:     "main".to_string(),
+            sha:        None,
+            dirty:      DirtyStatus::Clean,
+        });
+        projection.start = Some(StartRecord {
+            start_time: chrono::Utc::now(),
+            run_branch: Some("fabro/run/test".to_string()),
+            base_sha:   None,
+        });
+        projection.conclusion.as_mut().unwrap().final_git_commit_sha = Some("abc123".to_string());
+        projection
+    }
+
+    #[tokio::test]
+    async fn extract_reads_a_blob_backed_final_patch() {
+        let state = test_app_state();
+        let text = "diff --git a/src/lib.rs b/src/lib.rs\n+fn x() {}\n";
+        let hash = state
+            .store_ref()
+            .blobs()
+            .write(text.as_bytes())
+            .await
+            .unwrap();
+        let projection = pull_request_ready_projection(&blob_ref::format_blob_ref(&hash));
+
+        let inputs = RunPrInputs::extract(&state, &projection, false)
+            .await
+            .unwrap();
+        assert_eq!(inputs.diff, text);
+    }
+
+    #[tokio::test]
+    async fn extract_judges_emptiness_by_the_resolved_patch() {
+        let state = test_app_state();
+        let hash = state.store_ref().blobs().write(b"\n").await.unwrap();
+        let projection = pull_request_ready_projection(&blob_ref::format_blob_ref(&hash));
+
+        let Err(error) = RunPrInputs::extract(&state, &projection, false).await else {
+            panic!("a whitespace-only saved patch should be empty");
+        };
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(error.code(), Some("empty_diff"));
+    }
+
+    #[tokio::test]
+    async fn extract_reports_a_missing_patch_blob() {
+        let state = test_app_state();
+        let absent = fabro_types::BlobHash::new(b"never written");
+        let projection = pull_request_ready_projection(&blob_ref::format_blob_ref(&absent));
+
+        let Err(error) = RunPrInputs::extract(&state, &projection, false).await else {
+            panic!("a missing patch blob should fail extraction");
+        };
+        assert_eq!(error.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.detail(), "The saved final patch is missing.");
     }
 }

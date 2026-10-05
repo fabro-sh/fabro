@@ -381,6 +381,54 @@ pub fn test_app_state() -> Arc<AppState> {
     ready_test_app_state_builder().build()
 }
 
+/// A succeeded run's projection whose conclusion carries `patch` as its final
+/// diff: patch text, a blob reference, or nothing.
+#[cfg(test)]
+pub(crate) fn test_concluded_run_projection(patch: Option<&str>) -> fabro_store::RunProjection {
+    use fabro_types::{
+        Conclusion, PetriAdmission, RunDiff, RunGraph, RunSpec, RunTiming, StageOutcome,
+        WorkflowSettings, fixtures,
+    };
+
+    let mut projection = fabro_store::RunProjection::new(
+        "Test run".to_string(),
+        RunSpec {
+            run_id:              fixtures::RUN_1,
+            settings:            WorkflowSettings::default(),
+            graph:               RunGraph::new("test"),
+            graph_source:        None,
+            workflow_slug:       None,
+            workflow_version_id: None,
+            target:              None,
+            automation:          None,
+            source_directory:    None,
+            labels:              HashMap::default(),
+            provenance:          fabro_types::test_support::test_run_provenance(),
+            definition_blob:     None,
+            spec_blob:           None,
+            git:                 None,
+            fork_source_ref:     None,
+            admission:           PetriAdmission::default(),
+        },
+        chrono::Utc::now(),
+    );
+    projection.conclusion = Some(Conclusion {
+        timestamp:            chrono::Utc::now(),
+        status:               StageOutcome::Succeeded,
+        timing:               RunTiming::wall_only(1),
+        failure:              None,
+        final_git_commit_sha: None,
+        stages:               Vec::new(),
+        usage:                None,
+        total_retries:        0,
+        diff:                 RunDiff {
+            patch:   patch.map(str::to_string),
+            summary: None,
+        },
+    });
+    projection
+}
+
 pub fn test_app_state_in_process() -> Arc<AppState> {
     ready_test_app_state_builder()
         .in_process_execution()
