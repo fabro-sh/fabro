@@ -488,8 +488,8 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
         run_id: run_id.to_string(),
         run_dir: run_dir.join("petri"),
         execution,
-        // The projector's signal follows each durable append; the managed
-        // run's settle at Petri's finish precedes it.
+        // The coordinator finish is stored before managed status settles;
+        // the projector also reads only durable records.
         store: Arc::new(SettlingStore {
             inner: state
                 .petri_projector
@@ -534,7 +534,7 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
         }
     };
     match run_records::lifecycle(&state, run_id, record).await {
-        Ok(()) => finish(&state, run_id, status, error),
+        Ok(_) => finish(&state, run_id, status, error),
         Err(err) => {
             error!(run_id = %run_id, error = %err, "Failed to persist run outcome");
             release_live_state(&state, run_id);
@@ -669,7 +669,7 @@ async fn fail_before_execution(state: &Arc<AppState>, run_id: RunId, message: &s
     error!(run_id = %run_id, error = message, "Petri run cannot start");
     let (status, error, record) = failed(FailureReason::WorkflowError, message.to_string());
     match run_records::lifecycle(state, run_id, record).await {
-        Ok(()) => finish(state, run_id, status, error),
+        Ok(_) => finish(state, run_id, status, error),
         Err(err) => {
             error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
             release_live_state(state, run_id);
@@ -679,9 +679,9 @@ async fn fail_before_execution(state: &Arc<AppState>, run_id: RunId, message: &s
 
 /// Settle the managed run at its terminal record and release its
 /// scheduler slot. A run that Petri finished settled already, at the
-/// `run.finished` record ([`SettlingStore`]); this refines its status and
-/// error and ends its live state. A run deleted since is gone from the map
-/// and stays gone.
+/// `run.finished` record ([`SettlingStore`]); this preserves that status,
+/// fills any missing failure detail and ends its live state. A run deleted
+/// since is gone from the map and stays gone.
 fn finish(state: &Arc<AppState>, run_id: RunId, status: RunStatus, error: Option<String>) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {

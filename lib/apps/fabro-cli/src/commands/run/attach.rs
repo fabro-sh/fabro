@@ -1034,6 +1034,7 @@ mod tests {
         let server = MockServer::start_async().await;
         let mut state = terminal_run_state_response(run_id);
         state["status"] = serde_json::json!({"kind": "running"});
+        state["conclusion"] = serde_json::Value::Null;
         let state: server_client::RunProjection = serde_json::from_value(state).unwrap();
         let executed = serde_json::json!({
             "run_id": run_id, "stream_seq": 1, "kind": "petri", "id": "executed",
@@ -1097,7 +1098,6 @@ mod tests {
             !task.is_finished(),
             "successful execution does not end attach while publication is pending"
         );
-        waiting.delete_async().await;
         let finished = serde_json::json!({
             "run_id": run_id, "stream_seq": 2, "kind": "petri", "id": "finished",
             "recorded_at": 2000,
@@ -1114,6 +1114,7 @@ mod tests {
                     .body(format!("data: {finished}\n\n"));
             })
             .await;
+        waiting.delete_async().await;
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(5), task)
                 .await

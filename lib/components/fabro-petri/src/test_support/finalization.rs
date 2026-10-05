@@ -10,6 +10,7 @@ use petri_runtime::frontend::CompileInputs;
 use petri_runtime::ir::FinalizationFailure;
 use petri_runtime::{RunOptions, Runtime};
 use petri_store::{Access, LogId, MemoryRunStore, Record, RunKey, RunStore as _};
+use tokio::fs;
 use tokio::sync::{Notify, Semaphore};
 
 use crate::providers::{self, SandboxProviderConfig};
@@ -76,7 +77,7 @@ pub async fn test_run_records(
 ) -> TestRunRecords {
     let root = tempfile::tempdir().expect("the fixture has an isolated directory");
     let workflow = root.path().join("workflow.fabro");
-    tokio::fs::write(
+    fs::write(
         &workflow,
         r#"digraph Finalization {
         graph [goal="Check required publication"]
@@ -88,7 +89,7 @@ pub async fn test_run_records(
     )
     .await
     .expect("the fixture workflow writes");
-    tokio::fs::write(
+    fs::write(
         root.path().join("workflow.toml"),
         "_version = 1\n[workflow]\ngraph = \"workflow.fabro\"\n",
     )
@@ -129,7 +130,7 @@ pub async fn test_run_records(
     )];
     for execution in inspection.executions {
         let id = LogId::Execution(execution.execution);
-        records.push((id.clone(), logs.read(&id).await.expect("execution reads")));
+        records.push((id, logs.read(&id).await.expect("execution reads")));
     }
     let mut blobs = Vec::new();
     for graph in inspection.graphs {

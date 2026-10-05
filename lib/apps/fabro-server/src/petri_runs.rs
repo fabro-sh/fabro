@@ -1087,6 +1087,51 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_rejected_platform_failure_does_not_settle_the_run() {
+        let runtime = Arc::new(HeldWorkerRuntime::default());
+        let (state, app, run_id, token) = held_worker_run(&runtime).await;
+        run_to_running_as_worker(&app, run_id, &token).await;
+        let pool = state.stores.run_summaries.pool();
+        sqlx::query(
+            "CREATE TRIGGER reject_platform_record BEFORE INSERT ON platform_records \
+             BEGIN SELECT RAISE(FAIL, 'scripted append failure'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let response = append_lifecycle_as_worker(
+            &app,
+            run_id,
+            &token,
+            RunLifecycleKind::Failed,
+            RunStatus::Failed {
+                reason: FailureReason::LaunchFailed,
+            },
+        )
+        .await;
+        fabro_test::assert_axum_status(
+            response,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "rejected platform terminal append",
+        )
+        .await;
+        assert_public_result(&state, &app, run_id, RunStatus::Running, None).await;
+        crate::server::persist_run_failure(
+            &state,
+            run_id,
+            FailureReason::LaunchFailed,
+            "worker launch failed".into(),
+        )
+        .await;
+        assert_public_result(&state, &app, run_id, RunStatus::Running, None).await;
+        sqlx::query("DROP TRIGGER reject_platform_record")
+            .execute(&pool)
+            .await
+            .unwrap();
+        runtime.end_worker();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn required_publication_result_agrees_across_worker_api_projection_and_cleanup() {
         use fabro_petri::petri::LogId;
         use fabro_petri::test_support::finalization;
@@ -1177,6 +1222,29 @@ mod tests {
             }
             assert_eq!(concluded_runs(&app).await, 1);
             assert_public_result(&state, &app, run_id, expected, rejection).await;
+            // A host error arriving after cleanup must neither append a
+            // competing terminal record nor replace the useful failure.
+            let platform_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM platform_records WHERE run_id = ?")
+                    .bind(run_id.to_string())
+                    .fetch_one(&state.stores.run_summaries.pool())
+                    .await
+                    .unwrap();
+            crate::server::persist_run_failure(
+                &state,
+                run_id,
+                FailureReason::Terminated,
+                "worker wait failed during teardown".into(),
+            )
+            .await;
+            assert_public_result(&state, &app, run_id, expected, rejection).await;
+            let after_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM platform_records WHERE run_id = ?")
+                    .bind(run_id.to_string())
+                    .fetch_one(&state.stores.run_summaries.pool())
+                    .await
+                    .unwrap();
+            assert_eq!(after_count, platform_count);
             let (rebuilt, _, _) =
                 fabro_petri::test_support::rebuild(&state.db_pool, &state.db_pool, run_id)
                     .await
