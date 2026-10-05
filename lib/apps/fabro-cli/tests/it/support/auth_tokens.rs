@@ -63,6 +63,7 @@ struct TestJwtClaims {
 #[derive(serde::Serialize)]
 struct WorkerTokenClaims {
     iss:    String,
+    aud:    String,
     iat:    u64,
     exp:    u64,
     run_id: String,
@@ -138,6 +139,10 @@ fn derived_jwt_key() -> [u8; 32] {
     key
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Synchronous CLI test setup reads the isolated server audience before spawning a worker."
+)]
 pub(crate) fn issue_test_worker_jwt(storage_dir: &Path, run_id: &str) -> String {
     let runtime_directory = Storage::new(storage_dir).runtime_directory();
     let session_secret = envfile::read_env_file(&runtime_directory.env_path())
@@ -155,6 +160,12 @@ pub(crate) fn issue_test_worker_jwt(storage_dir: &Path, run_id: &str) -> String 
         .expect("current timestamp should be positive");
     let claims = WorkerTokenClaims {
         iss:    WORKER_TOKEN_ISSUER.to_string(),
+        aud:    std::fs::read_to_string(
+            runtime_directory
+                .record_path()
+                .with_file_name("test-worker-audience"),
+        )
+        .expect("test server should publish its worker token audience"),
         iat:    now,
         exp:    now + WORKER_TOKEN_TTL_SECS,
         run_id: run_id.to_string(),

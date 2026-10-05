@@ -28,6 +28,7 @@ use fabro_types::{
 use fabro_vault::{SecretType, Vault};
 use lithos_llm::catalog::ProviderId;
 use object_store::memory::InMemory as MemoryObjectStore;
+use tokio::fs as tokio_fs;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
@@ -791,6 +792,20 @@ pub fn test_auth_mode() -> AuthMode {
 
 pub fn build_test_router(state: Arc<AppState>) -> Router {
     with_test_user(server::build_router(state, test_auth_mode()))
+}
+
+/// The CLI's direct-worker tests sign their own tokens with the isolated
+/// server's test secret. Publish only the non-secret audience so those
+/// tokens address the actual server instance, without overriding the
+/// production fence or persisting any worker credential.
+pub(crate) async fn write_test_worker_audience(state: &AppState) -> anyhow::Result<()> {
+    let path = Storage::new(state.server_storage_dir())
+        .runtime_directory()
+        .record_path()
+        .with_file_name("test-worker-audience");
+    tokio_fs::create_dir_all(path.parent().expect("the runtime path has a parent")).await?;
+    tokio_fs::write(path, state.worker_token_keys().test_audience()).await?;
+    Ok(())
 }
 
 pub fn build_test_router_with_options(state: Arc<AppState>, options: RouterOptions) -> Router {

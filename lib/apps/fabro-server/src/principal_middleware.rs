@@ -568,13 +568,12 @@ mod tests {
     use fabro_types::settings::ServerAuthMethod;
     use fabro_types::{AuthMethod, IdpIdentity, RunId};
     use jsonwebtoken::EncodingKey;
-    use uuid::Uuid;
 
     use super::*;
     use crate::auth::{self, AuthErrorCode};
     use crate::worker_token::{
-        WORKER_RUN_TOOLS_SCOPE, WORKER_TOKEN_ISSUER, WORKER_TOKEN_SCOPE, WorkerScopeSet,
-        WorkerTokenClaims, issue_worker_token, worker_token_header,
+        WORKER_RUN_TOOLS_SCOPE, WORKER_TOKEN_SCOPE, WorkerScopeSet, WorkerTokenClaims,
+        issue_worker_token, worker_token_header,
     };
 
     const TEST_JWT_ISSUER: &str = "https://fabro.example";
@@ -635,24 +634,29 @@ mod tests {
         let secret = state
             .server_secret(EnvVars::SESSION_SECRET)
             .expect("test state should have session secret");
-        issue_worker_claims_with_secret(secret.as_bytes(), run_id, exp, scope)
+        issue_worker_claims_with_secret(state, secret.as_bytes(), run_id, exp, scope)
     }
 
     fn issue_worker_claims_with_secret(
+        state: &AppState,
         secret: &[u8],
         run_id: RunId,
         exp: u64,
         scope: &str,
     ) -> String {
         let worker_key = auth::derive_worker_jwt_key(secret).unwrap();
-        let claims = WorkerTokenClaims {
-            iss: WORKER_TOKEN_ISSUER.to_string(),
-            iat: 1,
-            exp,
-            run_id: run_id.to_string(),
-            scope: scope.to_string(),
-            jti: Uuid::new_v4().simple().to_string(),
-        };
+        let keys = state.worker_token_keys();
+        let token = issue_worker_token(keys, &run_id).unwrap();
+        let mut claims = jsonwebtoken::decode::<WorkerTokenClaims>(
+            &token,
+            keys.decoding_key(),
+            keys.validation(),
+        )
+        .unwrap()
+        .claims;
+        claims.iat = 1;
+        claims.exp = exp;
+        claims.scope = scope.to_string();
         jsonwebtoken::encode(
             &worker_token_header(),
             &claims,
@@ -758,6 +762,7 @@ mod tests {
     fn classifies_invalid_worker_jwt_signature_as_invalid() {
         let state = crate::test_support::test_app_state();
         let token = issue_worker_claims_with_secret(
+            state.as_ref(),
             b"other-principal-middleware-secret-0001",
             RunId::new(),
             u64::MAX / 2,

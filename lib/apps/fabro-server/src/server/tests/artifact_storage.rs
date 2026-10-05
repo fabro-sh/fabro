@@ -25,7 +25,7 @@ async fn artifact_upload_accepts_large_and_exact_limit_content_without_sqlite_or
     let (state, app) = jwt_auth_app();
     let user = issue_test_user_jwt();
     let run = create_run_with_bearer(&app, &user).await;
-    let worker = issue_test_worker_token(&run);
+    let worker = issue_test_worker_token(&state, &run);
     for size in [3 * 1024 * 1024, ARTIFACT_MAX_FILE_BYTES] {
         let bytes = vec![0xa3; size];
         let hash = BlobHash::new(&bytes);
@@ -87,8 +87,8 @@ async fn artifact_upload_rejects_unauthorized_invalid_and_oversized_bodies_witho
     let (state, app) = jwt_auth_app();
     let user = issue_test_user_jwt();
     let run = create_run_with_bearer(&app, &user).await;
-    let worker = issue_test_worker_token(&run);
-    let other_worker = issue_test_worker_token(&RunId::new());
+    let worker = issue_test_worker_token(&state, &run);
+    let other_worker = issue_test_worker_token(&state, &RunId::new());
     let hash = BlobHash::new(b"valid content");
     state
         .artifact_store
@@ -152,7 +152,7 @@ async fn artifact_upload_rejects_unauthorized_invalid_and_oversized_bodies_witho
         .oneshot(upload(
             missing_run,
             &digest,
-            &issue_test_worker_token(&missing_run),
+            &issue_test_worker_token(&state, &missing_run),
             Body::from("valid content"),
         ))
         .await
@@ -246,7 +246,7 @@ async fn artifact_worker_client_uses_the_configured_s3_backend_and_prefix() {
         })
         .await;
     let server = WorkerControlWsTestServer::spawn(app).await;
-    let worker_token = issue_test_worker_token(&run);
+    let worker_token = issue_test_worker_token(&state, &run);
     let mut headers = fabro_http::header::HeaderMap::new();
     headers.insert(
         fabro_http::header::AUTHORIZATION,

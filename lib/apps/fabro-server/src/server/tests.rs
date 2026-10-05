@@ -523,10 +523,10 @@ async fn http_log_records_user_principal_fields() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn http_log_records_worker_principal_fields() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_bearer = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_bearer).await;
-    let worker_bearer = issue_test_worker_token(&run_id);
+    let worker_bearer = issue_test_worker_token(&state, &run_id);
     let (_guard, events) = capture_server_logs();
 
     let response = app
@@ -663,17 +663,14 @@ fn issue_test_user_jwt() -> String {
     )
 }
 
-fn issue_test_worker_token(run_id: &RunId) -> String {
-    let keys = WorkerTokenKeys::from_master_secret(TEST_SESSION_SECRET.as_bytes())
-        .expect("worker keys should derive");
-    crate::worker_token::issue_worker_token(&keys, run_id).expect("worker token should issue")
+fn issue_test_worker_token(state: &AppState, run_id: &RunId) -> String {
+    crate::worker_token::issue_worker_token(state.worker_token_keys(), run_id)
+        .expect("worker token should issue")
 }
 
-fn issue_test_run_tools_worker_token(run_id: &RunId) -> String {
-    let keys = WorkerTokenKeys::from_master_secret(TEST_SESSION_SECRET.as_bytes())
-        .expect("worker keys should derive");
+fn issue_test_run_tools_worker_token(state: &AppState, run_id: &RunId) -> String {
     crate::worker_token::issue_worker_token_with_scopes(
-        &keys,
+        state.worker_token_keys(),
         run_id,
         crate::worker_token::WorkerScopeSet::run_worker_with_agent_run_tools(),
     )
@@ -846,12 +843,12 @@ async fn next_worker_control_frame(
 
 #[tokio::test(flavor = "current_thread")]
 async fn worker_control_stream_rejects_missing_user_and_cross_run_auth() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_bearer = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_bearer).await;
-    let worker_bearer = issue_test_worker_token(&run_id);
+    let worker_bearer = issue_test_worker_token(&state, &run_id);
     let other_run_id = create_run_with_bearer(&app, &user_bearer).await;
-    let other_worker_bearer = issue_test_worker_token(&other_run_id);
+    let other_worker_bearer = issue_test_worker_token(&state, &other_run_id);
     let server = WorkerControlWsTestServer::spawn(app).await;
 
     assert_worker_control_ws_rejected(&server, run_id, None, None, StatusCode::UNAUTHORIZED).await;
@@ -883,7 +880,7 @@ async fn worker_control_stream_start_subscription_delivers_frames() {
     let (state, app) = jwt_auth_app();
     let user_bearer = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_bearer).await;
-    let worker_bearer = issue_test_worker_token(&run_id);
+    let worker_bearer = issue_test_worker_token(&state, &run_id);
     let server = WorkerControlWsTestServer::spawn(app).await;
     let mut socket = connect_worker_control_ws(&server, run_id, &worker_bearer, None).await;
 
@@ -904,7 +901,7 @@ async fn worker_control_stream_after_subscription_delivers_only_later_frames() {
     let (state, app) = jwt_auth_app();
     let user_bearer = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_bearer).await;
-    let worker_bearer = issue_test_worker_token(&run_id);
+    let worker_bearer = issue_test_worker_token(&state, &run_id);
     let first = state
         .worker_control_bus
         .publish(run_id, WorkerControlEnvelope::cancel_run())
@@ -934,7 +931,7 @@ async fn worker_control_stream_acknowledgements_settle_the_waiting_caller() {
     let (state, app) = jwt_auth_app();
     let user_bearer = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_bearer).await;
-    let worker_bearer = issue_test_worker_token(&run_id);
+    let worker_bearer = issue_test_worker_token(&state, &run_id);
     let server = WorkerControlWsTestServer::spawn(app).await;
     let mut socket = connect_worker_control_ws(&server, run_id, &worker_bearer, None).await;
 
@@ -973,10 +970,10 @@ async fn worker_control_stream_acknowledgements_settle_the_waiting_caller() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn worker_control_stream_invalid_cursor_is_http_gone_before_upgrade() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_bearer = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_bearer).await;
-    let worker_bearer = issue_test_worker_token(&run_id);
+    let worker_bearer = issue_test_worker_token(&state, &run_id);
     let server = WorkerControlWsTestServer::spawn(app).await;
 
     assert_worker_control_ws_rejected(
@@ -4108,7 +4105,7 @@ async fn run_tools_worker_cannot_select_server_folder_from_clone_based_parent() 
     let (state, app) = jwt_auth_app();
     let user_token = issue_test_user_jwt();
     let parent_run_id = create_run_with_bearer(&app, &user_token).await;
-    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let worker_token = issue_test_run_tools_worker_token(&state, &parent_run_id);
     let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
     let mut intent = folder_intent(workflow_version_id, missing_target.to_string_lossy());
     intent["environment_id"] = json!("local");
@@ -4147,7 +4144,7 @@ async fn run_tools_worker_cannot_select_server_folder_from_clone_based_parent() 
 async fn run_tools_worker_folder_target_from_missing_parent_run_is_not_found() {
     let dir = tempfile::tempdir().unwrap();
     let (state, app) = jwt_auth_app();
-    let worker_token = issue_test_run_tools_worker_token(&RunId::new());
+    let worker_token = issue_test_run_tools_worker_token(&state, &RunId::new());
     let workflow_version_id = store_workflow_version(&state, MINIMAL_DOT, None).await;
     let mut intent = folder_intent(workflow_version_id, dir.path().to_string_lossy());
     intent["environment_id"] = json!("local");
@@ -4196,7 +4193,7 @@ async fn run_tools_worker_can_select_server_folder_from_local_parent() {
         .unwrap();
     let parent = response_json!(response, StatusCode::CREATED).await;
     let parent_run_id = parent["id"].as_str().unwrap().parse::<RunId>().unwrap();
-    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let worker_token = issue_test_run_tools_worker_token(&state, &parent_run_id);
     let mut child_intent = folder_intent(workflow_version_id, dir.path().to_string_lossy());
     child_intent["environment_id"] = json!("local");
     child_intent["parent_id"] = json!(parent_run_id);
@@ -7316,9 +7313,9 @@ async fn worker_token_accepts_run_scoped_routes_and_falls_back_to_user_jwt() {
     let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_worker_token(&run_id);
+    let worker_token = issue_test_worker_token(&state, &run_id);
     let other_run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let other_worker_token = issue_test_worker_token(&other_run_id);
+    let other_worker_token = issue_test_worker_token(&state, &other_run_id);
     let blob_hash = state
         .store_ref()
         .blobs()
@@ -7422,7 +7419,7 @@ async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
     let user_jwt = issue_test_user_jwt();
     let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
     let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let run_tool_worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let run_tool_worker_token = issue_test_run_tools_worker_token(&state, &parent_run_id);
 
     let response = app
         .clone()
@@ -7575,11 +7572,11 @@ async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
 
 #[tokio::test]
 async fn cross_run_base_worker_remains_forbidden_from_pair_routes() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
     let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_worker_token(&origin_run_id);
+    let worker_token = issue_test_worker_token(&state, &origin_run_id);
 
     let response = app
         .clone()
@@ -7596,11 +7593,11 @@ async fn cross_run_base_worker_remains_forbidden_from_pair_routes() {
 
 #[tokio::test]
 async fn run_tools_worker_cannot_call_user_only_non_mcp_routes() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let origin_run_id = create_run_with_bearer(&app, &user_jwt).await;
     let target_run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_run_tools_worker_token(&origin_run_id);
+    let worker_token = issue_test_run_tools_worker_token(&state, &origin_run_id);
 
     for (method, path) in [
         (Method::POST, format!("/runs/{target_run_id}/approve")),
@@ -7629,10 +7626,10 @@ async fn run_tools_worker_cannot_call_user_only_non_mcp_routes() {
 
 #[tokio::test]
 async fn base_worker_token_is_rejected_by_run_tool_only_routes() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_worker_token(&run_id);
+    let worker_token = issue_test_worker_token(&state, &run_id);
 
     for (method, path) in [
         (Method::GET, "/runs".to_string()),
@@ -7662,10 +7659,10 @@ async fn base_worker_token_is_rejected_by_run_tool_only_routes() {
 
 #[tokio::test]
 async fn worker_token_is_rejected_on_user_only_routes() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_worker_token(&run_id);
+    let worker_token = issue_test_worker_token(&state, &run_id);
     let blob_hash = BlobHash::new(b"blob");
     let user_only_routes = vec![
         (Method::GET, "/runs".to_string()),
@@ -7832,7 +7829,7 @@ async fn worker_started_child_run_requires_approval_before_becoming_runnable() {
     let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let worker_token = issue_test_run_tools_worker_token(&state, &parent_run_id);
     let mut child_intent =
         test_intent_with_bearer(&app, "workflow.fabro", MINIMAL_DOT, None, Some(&user_jwt)).await;
     child_intent["parent_id"] = json!(parent_run_id.to_string());
@@ -7931,10 +7928,10 @@ async fn worker_started_child_run_requires_approval_before_becoming_runnable() {
 
 #[tokio::test]
 async fn denying_pending_child_run_fails_with_approval_denied() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let worker_token = issue_test_run_tools_worker_token(&state, &parent_run_id);
     let mut child_intent =
         test_intent_with_bearer(&app, "workflow.fabro", MINIMAL_DOT, None, Some(&user_jwt)).await;
     child_intent["parent_id"] = json!(parent_run_id.to_string());
@@ -8947,10 +8944,10 @@ fn batch_delete_body(run_ids: &[RunId], force: bool) -> serde_json::Value {
 
 #[tokio::test]
 async fn batch_lifecycle_requires_user_authentication() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_worker_token(&run_id);
+    let worker_token = issue_test_worker_token(&state, &run_id);
     let body = batch_lifecycle_body(&[run_id]);
 
     let unauthenticated = app
@@ -8984,10 +8981,10 @@ async fn batch_lifecycle_requires_user_authentication() {
 
 #[tokio::test]
 async fn batch_delete_requires_user_authentication() {
-    let (_state, app) = jwt_auth_app();
+    let (state, app) = jwt_auth_app();
     let user_jwt = issue_test_user_jwt();
     let run_id = create_run_with_bearer(&app, &user_jwt).await;
-    let worker_token = issue_test_worker_token(&run_id);
+    let worker_token = issue_test_worker_token(&state, &run_id);
     let body = batch_delete_body(&[run_id], false);
 
     let unauthenticated = app
@@ -10637,10 +10634,13 @@ async fn workflow_version_registration_requires_user_or_run_tools_capability() {
     for (token, expected) in [
         (issue_test_user_jwt(), StatusCode::CREATED),
         (
-            issue_test_run_tools_worker_token(&run_id),
+            issue_test_run_tools_worker_token(&state, &run_id),
             StatusCode::CREATED,
         ),
-        (issue_test_worker_token(&run_id), StatusCode::FORBIDDEN),
+        (
+            issue_test_worker_token(&state, &run_id),
+            StatusCode::FORBIDDEN,
+        ),
     ] {
         let response = app
             .clone()
@@ -10805,7 +10805,7 @@ fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
 async fn run_tools_worker_registers_contents_then_creates_by_version_id() {
     let (state, app) = jwt_auth_app();
     let parent_id = create_run_with_bearer(&app, &issue_test_user_jwt()).await;
-    let token = issue_test_run_tools_worker_token(&parent_id);
+    let token = issue_test_run_tools_worker_token(&state, &parent_id);
     let response = app
         .clone()
         .oneshot(json_bearer_request(

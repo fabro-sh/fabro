@@ -22,20 +22,27 @@ pub(crate) struct WorkerTokenKeys {
     encoding:   Arc<EncodingKey>,
     decoding:   Arc<DecodingKey>,
     validation: Arc<Validation>,
+    /// Startup recovery replaces workers. Their credentials must therefore
+    /// be valid only for the server instance that launched them, including
+    /// platform writes made before acquiring or after releasing a lease.
+    audience:   String,
 }
 
 impl WorkerTokenKeys {
     pub(crate) fn from_master_secret(secret: &[u8]) -> Result<Self, KeyDeriveError> {
         let key = auth::derive_worker_jwt_key(secret)?;
+        let audience = Uuid::new_v4().to_string();
         let mut validation = Validation::new(Algorithm::HS256);
         validation.validate_nbf = false;
-        validation.set_required_spec_claims(&["iss", "iat", "exp"]);
+        validation.set_required_spec_claims(&["iss", "iat", "exp", "aud"]);
         validation.set_issuer(&[WORKER_TOKEN_ISSUER]);
+        validation.set_audience(&[&audience]);
 
         Ok(Self {
-            encoding:   Arc::new(EncodingKey::from_secret(&key)),
-            decoding:   Arc::new(DecodingKey::from_secret(&key)),
+            encoding: Arc::new(EncodingKey::from_secret(&key)),
+            decoding: Arc::new(DecodingKey::from_secret(&key)),
             validation: Arc::new(validation),
+            audience,
         })
     }
 
@@ -48,11 +55,17 @@ impl WorkerTokenKeys {
     pub(crate) fn validation(&self) -> &Validation {
         &self.validation
     }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn test_audience(&self) -> &str {
+        &self.audience
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub(crate) struct WorkerTokenClaims {
     pub(crate) iss:    String,
+    pub(crate) aud:    String,
     pub(crate) iat:    u64,
     pub(crate) exp:    u64,
     pub(crate) run_id: String,
@@ -117,6 +130,7 @@ pub(crate) fn issue_worker_token_with_scopes(
         .map_or(0, |duration| duration.as_secs());
     let claims = WorkerTokenClaims {
         iss:    WORKER_TOKEN_ISSUER.to_string(),
+        aud:    keys.audience.clone(),
         iat:    now,
         exp:    now + WORKER_TOKEN_TTL_SECS,
         run_id: run_id.to_string(),
@@ -220,6 +234,7 @@ mod tests {
     ) -> String {
         let claims = WorkerTokenClaims {
             iss:    WORKER_TOKEN_ISSUER.to_string(),
+            aud:    keys.audience.clone(),
             iat:    1,
             exp:    u64::MAX / 2,
             run_id: run_id.to_string(),
@@ -233,6 +248,7 @@ mod tests {
     fn expired_worker_token(keys: &WorkerTokenKeys, run_id: &fabro_types::RunId) -> String {
         let claims = WorkerTokenClaims {
             iss:    WORKER_TOKEN_ISSUER.to_string(),
+            aud:    keys.audience.clone(),
             iat:    1,
             exp:    2,
             run_id: run_id.to_string(),
@@ -276,6 +292,7 @@ mod tests {
 
         assert_eq!(decoded.claims, WorkerTokenClaims {
             iss:    WORKER_TOKEN_ISSUER.to_string(),
+            aud:    keys.audience.clone(),
             iat:    decoded.claims.iat,
             exp:    decoded.claims.exp,
             run_id: run_id.to_string(),
@@ -288,16 +305,49 @@ mod tests {
     }
 
     #[test]
-    fn worker_token_survives_key_rederivation() {
+    fn worker_token_is_rejected_by_a_restarted_server_with_the_same_secret() {
         let run_id = run_id();
         let first = keys(TEST_SECRET);
         let second = keys(TEST_SECRET);
 
         let token = issue_worker_token(&first, &run_id).expect("worker token should issue");
-        let decoded = decode::<WorkerTokenClaims>(&token, &second.decoding, &second.validation)
-            .expect("worker token should decode after re-derivation");
+        assert_eq!(
+            decode_worker_token(&token, &second),
+            Err(JwtError::AccessTokenInvalid)
+        );
+        let replacement = issue_worker_token(&second, &run_id).unwrap();
+        assert_eq!(
+            decode_worker_token(&replacement, &second).unwrap().run_id,
+            run_id
+        );
+    }
 
-        assert_eq!(decoded.claims.run_id, run_id.to_string());
+    #[test]
+    fn worker_token_is_valid_for_clones_of_the_issuing_server_keys() {
+        let keys = keys(TEST_SECRET);
+        let token = issue_worker_token(&keys, &run_id()).unwrap();
+        assert_eq!(
+            decode_worker_token(&token, &keys.clone()).unwrap().run_id,
+            run_id()
+        );
+    }
+
+    #[test]
+    fn worker_token_without_a_server_audience_is_rejected() {
+        let keys = keys(TEST_SECRET);
+        let token = issue_worker_token(&keys, &run_id()).unwrap();
+        let mut claims = serde_json::to_value(
+            decode::<WorkerTokenClaims>(&token, &keys.decoding, &keys.validation)
+                .unwrap()
+                .claims,
+        )
+        .unwrap();
+        claims.as_object_mut().unwrap().remove("aud");
+        let legacy = jsonwebtoken::encode(&worker_token_header(), &claims, &keys.encoding).unwrap();
+        assert_eq!(
+            decode_worker_token(&legacy, &keys),
+            Err(JwtError::AccessTokenInvalid)
+        );
     }
 
     #[test]
