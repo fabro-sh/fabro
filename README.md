@@ -1,4 +1,6 @@
 <div align="left" id="top">
+
+[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/fabro-sh/fabro)
 <a href="https://docs.fabro.sh"><img alt="Fabro" src="docs/public/logo/dark.svg" height="75"></a>
 </div>
 
