@@ -13,7 +13,7 @@ use fabro_types::{
 use petri_execution::events::{Derived, RunEvent, Subject, ViewEvent, WaitState};
 use petri_execution::{ExecutionId, InvocationId};
 use petri_runtime::engine::{Admission, Event};
-use petri_runtime::ir::{Metrics, Status};
+use petri_runtime::ir::{Metrics, Status, UnderlyingFailure};
 use serde_json::Value;
 use tracing::debug;
 
@@ -382,9 +382,12 @@ pub(super) fn failure_message(status: &Status) -> Option<String> {
     match status {
         Status::Failure(info)
         | Status::PartialSuccess {
-            underlying: Some(info),
+            underlying: Some(UnderlyingFailure::Failure(info)),
         } => Some(info.message.clone()),
-        Status::TimedOut => Some("the step timed out".to_string()),
+        Status::TimedOut
+        | Status::PartialSuccess {
+            underlying: Some(UnderlyingFailure::TimedOut),
+        } => Some("the step timed out".to_string()),
         Status::Cancelled => Some("the step was cancelled".to_string()),
         Status::Success | Status::PartialSuccess { underlying: None } | Status::Skipped => None,
     }

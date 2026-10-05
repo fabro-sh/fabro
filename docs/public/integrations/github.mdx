@@ -262,7 +262,7 @@ pull_requests = "write"
 
 Only the listed permissions are requested. If no GitHub credentials are configured, Fabro does not inject a managed token. If configured credentials cannot resolve a token, the execution scope fails to initialize.
 
-GitHub-target runs also receive Git read access to their origin without declaring an integration permission map. In App mode this default token requests only `contents = "read"`, and it is used by Git's credential helper. Declaring integration permissions additionally supplies `GITHUB_TOKEN` to command and agent processes. Explicit workflow or ACP environment values take precedence over the managed `GITHUB_TOKEN`.
+GitHub-target runs also receive Git read access to their origin without declaring an integration permission map. In App mode this default token requests only `contents = "read"`, and it is used by Git's credential helper. Declaring integration permissions additionally supplies `GITHUB_TOKEN` to command and agent processes. The managed token carries exactly the access the run declares, so it replaces any `GITHUB_TOKEN` set in the workflow environment, an ACP agent's environment or the sandbox's own environment. To give a stage different GitHub access, change the declared permissions or repositories instead. One-shot containers a stage runs (such as `docker://` steps) receive the managed `GITHUB_TOKEN` but not the Git credential helper, which reads a store inside the stage's sandbox.
 
 In App mode, the token covers only the run's origin repository unless the run declares [additional repositories](#additional-repositories). Injecting `GITHUB_TOKEN` alone does not make other private repositories reachable.
 

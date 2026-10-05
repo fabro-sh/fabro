@@ -2,10 +2,11 @@
 //!
 //! Git reads a private, renewable store outside the workspace. Processes get
 //! the helper configuration and, when requested, a fresh `GITHUB_TOKEN` at
-//! spawn. A long-lived agent's Git commands read the renewed store.
+//! spawn. A long-lived agent's Git commands read the renewed store. A
+//! one-shot container gets the token alone: the store lives in the scope's
+//! sandbox, which the container does not share.
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,10 +18,11 @@ use fabro_types::{GitHubRepositorySlug, RunSpec, RunTarget};
 use fabro_util::shell;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use petri_runtime::executor::{
-    AcquireContext, DirectoryEntry, EnvError, EnvHandle, ExecEnv, Executor, Masker, PreviewUrl,
-    ProcessHandle, ProcessSpec, ReleaseReport, ScopeOutcome, ScopeSpec,
+    AcquireContext, EnvError, EnvHandle, ExecEnv, Executor, Masker, ProcessSpec, ReleaseReport,
+    ScopeOutcome, ScopeSpec, SpawnEnv, SpawnTarget,
 };
 use petri_runtime::ir::LogStream;
+use smol_str::SmolStr;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time;
@@ -184,7 +186,7 @@ impl Executor for CredentialExecutor {
                 env: env.clone(),
                 task,
             });
-        Ok(handle.with_exec(env))
+        Ok(handle.with_spawn_env(env))
     }
 
     async fn release(&self, handle: EnvHandle, outcome: ScopeOutcome) -> ReleaseReport {
@@ -248,9 +250,8 @@ impl CredentialEnv {
         .map(|_| ())
     }
 
-    fn git_env(&self, spec: &mut ProcessSpec) -> Result<(), EnvError> {
-        let count = spec
-            .env
+    fn git_env(&self, env: &mut BTreeMap<SmolStr, SmolStr>) -> Result<(), EnvError> {
+        let count = env
             .get("GIT_CONFIG_COUNT")
             .map(ToString::to_string)
             .or_else(|| self.inner.ambient_env("GIT_CONFIG_COUNT"))
@@ -288,98 +289,60 @@ impl CredentialEnv {
         for index in 0..count {
             for prefix in ["GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"] {
                 let key = format!("{prefix}{index}");
-                if !spec.env.contains_key(key.as_str()) {
+                if !env.contains_key(key.as_str()) {
                     if let Some(value) = self.inner.ambient_env(&key) {
-                        spec.env.insert(key.into(), value.into());
+                        env.insert(key.into(), value.into());
                     }
                 }
             }
         }
         for (offset, (key, value)) in entries.iter().enumerate() {
-            spec.env.insert(
+            env.insert(
                 format!("GIT_CONFIG_KEY_{}", count + offset).into(),
                 (*key).into(),
             );
-            spec.env.insert(
+            env.insert(
                 format!("GIT_CONFIG_VALUE_{}", count + offset).into(),
                 value.as_str().into(),
             );
         }
-        spec.env.insert(
+        env.insert(
             "GIT_CONFIG_COUNT".into(),
             (count + entries.len()).to_string().into(),
         );
-        spec.env
-            .entry("GIT_TERMINAL_PROMPT".into())
+        env.entry("GIT_TERMINAL_PROMPT".into())
             .or_insert_with(|| "0".into());
         Ok(())
     }
 }
 
 #[async_trait]
-impl ExecEnv for CredentialEnv {
-    async fn spawn(&self, mut spec: ProcessSpec) -> Result<Box<dyn ProcessHandle>, EnvError> {
-        self.refresh().await?;
-        if let Some(tokens) = &self.credentials.api_tokens {
-            if !spec.env.contains_key("GITHUB_TOKEN")
-                && self.inner.ambient_env("GITHUB_TOKEN").is_none()
-            {
-                let resolved = time::timeout(CREDENTIAL_TIMEOUT, tokens.resolve())
-                    .await
-                    .map_err(|_| {
-                        EnvError::backend("github", "resolve", "token resolution timed out")
-                    })?
-                    .map_err(|_| {
-                        EnvError::backend("github", "resolve", "token resolution failed")
-                    })?;
-                self.masker.register_explicit(resolved.token.expose());
-                spec.env
-                    .insert("GITHUB_TOKEN".into(), resolved.token.expose().into());
-            }
+impl SpawnEnv for CredentialEnv {
+    async fn apply(
+        &self,
+        target: SpawnTarget,
+        env: &mut BTreeMap<SmolStr, SmolStr>,
+    ) -> Result<(), EnvError> {
+        // The store and the helper configuration that names it live in the
+        // scope's sandbox; a one-shot container cannot read either.
+        if target == SpawnTarget::Process {
+            self.refresh().await?;
         }
-        self.git_env(&mut spec)?;
-        self.inner.spawn(spec).await
-    }
-    fn workspace_path(&self) -> &str {
-        self.inner.workspace_path()
-    }
-    async fn read_file(&self, path: &Path) -> Result<Option<Vec<u8>>, EnvError> {
-        self.inner.read_file(path).await
-    }
-    async fn read_file_limited(
-        &self,
-        path: &Path,
-        limit: usize,
-    ) -> Result<Option<Vec<u8>>, EnvError> {
-        self.inner.read_file_limited(path, limit).await
-    }
-    async fn write_file(&self, path: &Path, contents: &[u8]) -> Result<(), EnvError> {
-        self.inner.write_file(path, contents).await
-    }
-    async fn list_directory(
-        &self,
-        path: &Path,
-        depth: usize,
-    ) -> Result<Vec<DirectoryEntry>, EnvError> {
-        self.inner.list_directory(path, depth).await
-    }
-    fn grace(&self) -> Duration {
-        self.inner.grace()
-    }
-    fn host_address(&self) -> Result<&str, EnvError> {
-        self.inner.host_address()
-    }
-    fn ambient_env(&self, name: &str) -> Option<String> {
-        self.inner.ambient_env(name)
-    }
-    fn shares_host_filesystem(&self) -> bool {
-        self.inner.shares_host_filesystem()
-    }
-    async fn preview_url(&self, port: u16) -> Result<Option<PreviewUrl>, EnvError> {
-        self.inner.preview_url(port).await
-    }
-    async fn release_preview_url(&self, port: u16) -> Result<(), EnvError> {
-        self.inner.release_preview_url(port).await
+        // The managed token carries exactly the access the run declared, so
+        // it replaces any `GITHUB_TOKEN` the process would otherwise see, as
+        // Fabro's stage environment did before Petri.
+        if let Some(tokens) = &self.credentials.api_tokens {
+            let resolved = time::timeout(CREDENTIAL_TIMEOUT, tokens.resolve())
+                .await
+                .map_err(|_| EnvError::backend("github", "resolve", "token resolution timed out"))?
+                .map_err(|_| EnvError::backend("github", "resolve", "token resolution failed"))?;
+            self.masker.register_explicit(resolved.token.expose());
+            env.insert("GITHUB_TOKEN".into(), resolved.token.expose().into());
+        }
+        if target == SpawnTarget::Process {
+            self.git_env(env)?;
+        }
+        Ok(())
     }
 }
 
@@ -421,6 +384,7 @@ async fn command(
 mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt as _;
+    use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use chrono::Utc;
@@ -580,7 +544,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn declared_api_tokens_reach_processes_and_explicit_environment_wins() {
+    async fn a_container_gets_the_managed_token_but_no_store_configuration() {
+        let dir = tempfile::tempdir().expect("directory");
+        let runtime = providers::standard_runtime(&SandboxProviderConfig::default());
+        let router = runtime.sandbox_router_for(dir.path()).expect("router");
+        let handle = router
+            .acquire(
+                &ScopeSpec::new(ScopeId::new(0), "container-credentials"),
+                &AcquireContext::bare(),
+            )
+            .await
+            .expect("acquire");
+        let store = dir.path().join("store-directory");
+        let secrets = MapSecrets::empty();
+        let env = CredentialEnv {
+            inner:       handle.exec(),
+            credentials: credentials(true),
+            masker:      secrets.masker(),
+            directory:   store.display().to_string(),
+            update:      Mutex::new(()),
+        };
+        let mut container = BTreeMap::from([("GITHUB_TOKEN".into(), "explicit".into())]);
+        env.apply(SpawnTarget::Container, &mut container)
+            .await
+            .expect("apply");
+        assert!(
+            container["GITHUB_TOKEN"].starts_with("scripted-token-generation-"),
+            "the managed token replaces an explicit one in a container too"
+        );
+        assert!(
+            !container.keys().any(|key| key.starts_with("GIT_CONFIG")),
+            "no helper configuration names the scope's store"
+        );
+        assert!(!store.exists(), "a container spawn writes no store");
+        let mut process = BTreeMap::new();
+        fs::create_dir(&store).expect("store directory");
+        env.apply(SpawnTarget::Process, &mut process)
+            .await
+            .expect("apply");
+        assert!(process.contains_key("GIT_CONFIG_COUNT"));
+        assert!(
+            store.join("store").exists(),
+            "a process spawn refreshes the store"
+        );
+        assert!(
+            router
+                .release(handle, ScopeOutcome::Succeeded)
+                .await
+                .is_clean()
+        );
+    }
+
+    #[tokio::test]
+    async fn declared_api_tokens_reach_processes_and_replace_explicit_values() {
         let dir = tempfile::tempdir().expect("directory");
         let runtime = providers::standard_runtime(&SandboxProviderConfig::default());
         let router = runtime.sandbox_router_for(dir.path()).expect("router");
@@ -603,14 +619,14 @@ mod tests {
         .expect("the integration token reaches the child");
         command(
             &env,
-            "test \"$GITHUB_TOKEN\" = command-token-override",
+            "case $GITHUB_TOKEN in scripted-token-generation-*) exit 0;; *) exit 1;; esac",
             vec![(
                 "GITHUB_TOKEN".to_string(),
                 "command-token-override".to_string(),
             )],
         )
         .await
-        .expect("explicit command environment wins");
+        .expect("the managed token replaces an explicit one");
         assert!(
             secrets
                 .masker()

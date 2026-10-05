@@ -21,6 +21,7 @@ test-support = ["dep:petri_testkit"]
 [dependencies]
 fabro-github = { path = "../fabro-github" }
 percent-encoding.workspace = true
+smol_str.workspace = true
 fabro-api = { path = "../../foundation/fabro-api" }
 fabro-client = { path = "../../foundation/fabro-client" }
 fabro-db = { path = "../../foundation/fabro-db" }
