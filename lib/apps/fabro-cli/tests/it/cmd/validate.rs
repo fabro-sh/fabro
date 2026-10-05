@@ -340,7 +340,7 @@ fn validate_reports_missing_template_dependency() {
     cmd.arg(fixture("templates/missing_dependency/workflow.fabro"));
     let mut filters = context.filters();
     filters.push((
-        r#"(?:\.\./)+[^`\s]*?/test/(templates/missing_dependency/)"#.to_string(),
+        r"(?:\.\./)+[^`\s]*?/test/(templates/missing_dependency/)".to_string(),
         "[FIXTURES]/$1".to_string(),
     ));
     filters.push((
