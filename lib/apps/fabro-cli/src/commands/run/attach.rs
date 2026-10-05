@@ -227,7 +227,7 @@ async fn attach_petri_run_with_client(
     for item in &items {
         emit_stream_item(&mut progress_ui, item, opts.json_output)?;
         if let Some(code) = petri_stream::exit_code_of(item) {
-            replayed_exit_code = Some(ExitCode::from(code));
+            replayed_exit_code.get_or_insert(ExitCode::from(code));
         }
     }
     if let Some(exit_code) = replayed_exit_code.or_else(|| {
@@ -1026,5 +1026,101 @@ mod tests {
 
         cancel_mock.assert();
         state_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn required_publication_keeps_attach_open_until_the_committed_result() {
+        let run_id = fabro_types::fixtures::RUN_1;
+        let server = MockServer::start_async().await;
+        let mut state = terminal_run_state_response(run_id);
+        state["status"] = serde_json::json!({"kind": "running"});
+        let state: server_client::RunProjection = serde_json::from_value(state).unwrap();
+        let executed = serde_json::json!({
+            "run_id": run_id, "stream_seq": 1, "kind": "petri", "id": "executed",
+            "recorded_at": 1000,
+            "item": {"origin": "external", "context": {}, "record": {"seq": 5,
+                "body": {"event": "invocation.finished", "invocation": 0,
+                    "result": {"status": "success"}}}}
+        });
+        server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id}/events"));
+                then.status(200).json_body(serde_json::json!({
+                    "data": [executed], "meta": {"has_more": false}, "event_contract_version": 6
+                }));
+            })
+            .await;
+        server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id}/state"));
+                then.status(200)
+                    .json_body(serde_json::to_value(&state).unwrap());
+            })
+            .await;
+        let waiting = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id}/attach"));
+                then.status(200)
+                    .header("Content-Type", "text/event-stream")
+                    .body("");
+            })
+            .await;
+        let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
+        let task = tokio::spawn(async move {
+            attach_petri_run_with_client(
+                &client,
+                &run_id,
+                &state,
+                no_color_styles(),
+                AttachOptions {
+                    auto_approve:   false,
+                    verbose:        false,
+                    kill_on_detach: false,
+                    json_output:    true,
+                },
+                Printer::Default,
+            )
+            .await
+            .unwrap()
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while waiting.calls_async().await == 0 {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            !task.is_finished(),
+            "successful execution does not end attach while publication is pending"
+        );
+        waiting.delete_async().await;
+        let finished = serde_json::json!({
+            "run_id": run_id, "stream_seq": 2, "kind": "petri", "id": "finished",
+            "recorded_at": 2000,
+            "item": {"origin": "external", "context": {}, "record": {"seq": 6,
+                "body": {"event": "run.finished", "status": "failed",
+                    "finalization_failure": {"code": "publish_failed", "message": "the push was rejected"}}}}
+        });
+        let final_stream = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id}/attach"));
+                then.status(200)
+                    .header("Content-Type", "text/event-stream")
+                    .body(format!("data: {finished}\n\n"));
+            })
+            .await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap(),
+            ExitCode::from(1)
+        );
+        final_stream.assert_async().await;
     }
 }

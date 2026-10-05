@@ -5,6 +5,8 @@
 //! view with. Compiled only with the `test-support` feature, which a
 //! dev-dependency turns on.
 
+pub mod finalization;
+
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;
 use std::time::Duration;

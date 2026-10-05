@@ -375,11 +375,22 @@ pub fn run_id_of(key: &str) -> Option<RunId> {
 /// terminal lifecycle record. `None` for any other record.
 #[must_use]
 pub fn finished_run_status(record: &Record) -> Option<RunStatus> {
+    finished_run_result(record).map(|(status, _)| status)
+}
+
+/// The committed overall status and required-finalization failure message.
+/// Execution failure details remain in the invocation records and projection.
+#[must_use]
+pub fn finished_run_result(record: &Record) -> Option<(RunStatus, Option<String>)> {
     let record: CoordinatorRecord = serde_json::from_value(record.record.clone()).ok()?;
     match record.body {
-        CoordinatorEvent::RunFinished { status } => {
-            Some(coordinator::finished_status(&status.to_string()))
-        }
+        CoordinatorEvent::RunFinished {
+            status,
+            finalization_failure,
+        } => Some((
+            coordinator::finished_status(&status.to_string(), finalization_failure.as_ref()),
+            finalization_failure.map(|failure| failure.message),
+        )),
         _ => None,
     }
 }

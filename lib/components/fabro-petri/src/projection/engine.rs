@@ -13,7 +13,7 @@ use fabro_types::{
 use petri_execution::events::{Derived, RunEvent, Subject, ViewEvent, WaitState};
 use petri_execution::{ExecutionId, InvocationId};
 use petri_runtime::engine::{Admission, Event};
-use petri_runtime::ir::{Metrics, Status};
+use petri_runtime::ir::{Metrics, Status, UnderlyingFailure};
 use serde_json::Value;
 use tracing::debug;
 
@@ -382,9 +382,12 @@ pub(super) fn failure_message(status: &Status) -> Option<String> {
     match status {
         Status::Failure(info)
         | Status::PartialSuccess {
-            underlying: Some(info),
+            underlying: Some(UnderlyingFailure::Failure(info)),
         } => Some(info.message.clone()),
-        Status::TimedOut => Some("the step timed out".to_string()),
+        Status::TimedOut
+        | Status::PartialSuccess {
+            underlying: Some(UnderlyingFailure::TimedOut),
+        } => Some("the step timed out".to_string()),
         Status::Cancelled => Some("the step was cancelled".to_string()),
         Status::Success | Status::PartialSuccess { underlying: None } | Status::Skipped => None,
     }
@@ -449,5 +452,28 @@ fn apply_metrics(stage: &mut StageProjection, metrics: &Metrics) {
         if !by_model.is_empty() {
             stage.usage_by_model = by_model;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use petri_runtime::ir::FailureInfo;
+
+    use super::*;
+
+    #[test]
+    fn partial_success_preserves_underlying_failure_and_timeout_messages() {
+        assert_eq!(
+            failure_message(&Status::PartialSuccess {
+                underlying: Some(UnderlyingFailure::Failure(FailureInfo::new("partial work"))),
+            }),
+            Some("partial work".to_string())
+        );
+        assert_eq!(
+            failure_message(&Status::PartialSuccess {
+                underlying: Some(UnderlyingFailure::TimedOut),
+            }),
+            Some("the step timed out".to_string())
+        );
     }
 }
