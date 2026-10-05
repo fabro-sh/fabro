@@ -1103,12 +1103,13 @@ fn attach_json_errors_without_prompting_for_human_input() {
             "recorded_at": "[EPOCH_MS]",
             "body": {
               "event": "run.started",
-              "format_version": 7,
+              "format_version": 9,
               "key": "[ULID]",
               "root": 0,
               "middleware_chain": [
                 "circuit-breaker"
-              ]
+              ],
+              "required_finalization": false
             }
           }
         }

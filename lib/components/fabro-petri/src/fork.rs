@@ -43,7 +43,8 @@ use petri_execution::{
     StoreError as CoordinatorStoreError,
 };
 use petri_runtime::RunOptions;
-use petri_runtime::ir::FiringId;
+use petri_runtime::driver::lifecycle::{ExecutionHooks, HookContext, RunFinished};
+use petri_runtime::ir::{FinalizationFailure, FiringId};
 use petri_store::StoreError;
 use tracing::{debug, info};
 
@@ -169,6 +170,31 @@ pub async fn check(
     Ok(())
 }
 
+/// Declaration-only hooks used while copying a fork's records. The fork
+/// inherits its source's finalization requirement; its worker installs the
+/// actual publisher before resuming. Never execute with these hooks.
+struct ForkFinalizationRequirement {
+    required: bool,
+}
+
+#[async_trait::async_trait]
+impl ExecutionHooks for ForkFinalizationRequirement {
+    fn requires_run_finalization(&self) -> bool {
+        self.required
+    }
+
+    async fn finalize_run(
+        &self,
+        _context: &HookContext,
+        _finished: RunFinished,
+    ) -> Result<(), FinalizationFailure> {
+        Err(FinalizationFailure::new(
+            "finalization_unavailable",
+            "the fork must install its worker publication hooks before execution",
+        ))
+    }
+}
+
 /// Seed the fork: Petri's records, the kept checkpoints and the run branch. The
 /// new run must not exist in the store yet.
 pub async fn fork(request: ForkRequest) -> Result<Forked, ForkError> {
@@ -181,12 +207,17 @@ pub async fn fork(request: ForkRequest) -> Result<Forked, ForkError> {
         .await
         .map_err(ForkError::Open)?;
 
+    let required = host::stored_state(&*source_logs)
+        .await
+        .map_err(ForkError::Seed)?
+        .required_finalization;
     let mut options = RunOptions::new(&request.fork_run_dir);
     options.run_key = Some(fork_key.clone());
     // A fork only copies records and acquires no sandbox, so it needs no
     // provider configuration.
     let runtime = providers::standard_runtime(&SandboxProviderConfig::default())
         .options(options)
+        .hooks(Arc::new(ForkFinalizationRequirement { required }))
         .store(Arc::clone(&request.store));
     let forked = host::fork_from(&runtime, &*source_logs, request.position, ForkOptions {
         rerun_last: request.rerun_last,

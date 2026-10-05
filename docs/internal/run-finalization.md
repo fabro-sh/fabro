@@ -42,6 +42,8 @@ historical-view repair requires a separate, bounded process over preserved
 source records. No publication is invoked by projection or replay.
 
 A committed resume returns the same overall result without publishing again.
+A fork inherits the source run’s required-finalization declaration while seeding
+its records; its worker restores the actual publication hooks before resume.
 Unfinished recovery must restore the same finalization requirement. Petri may
 call the restored finalizer again after interruption, including a crash after
 the callback returns but before the terminal record commits. Existing GitHub
