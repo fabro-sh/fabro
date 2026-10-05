@@ -286,6 +286,9 @@ fn fold_lifecycle(projection: &mut RunProjection, record: &RunLifecycleRecord, a
             settle_control(projection, RunControlAction::Pause);
         }
         Kind::Succeeded | Kind::Failed => {
+            if projection.status.is_terminal() {
+                return;
+            }
             if let Some(status) = record.status {
                 apply_status(projection, status, at);
             }

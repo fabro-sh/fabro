@@ -363,16 +363,6 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
         outcome.status = RunStatus::Failed;
         outcome.failure = Some(failure);
     }
-    // A successful run whose publication failed is a failed run: its work
-    // did not reach where the settings sent it.
-    if let Some(failure) = fabro_hooks
-        .as_ref()
-        .and_then(|hooks| hooks.publish_failure())
-    {
-        outcome.status = RunStatus::Failed;
-        outcome.failure = Some(failure);
-        outcome.publish_failed = true;
-    }
     Ok(outcome)
 }
 
@@ -555,19 +545,27 @@ fn outcome(
             return Err(RunError::Unfinished(reasons));
         }
     };
-    let failure = inspection
+    let execution_failure = inspection
         .invocations
         .iter()
         .find(|invocation| invocation.invocation == inspection.root.invocation)
         .and_then(|root| root.result.as_ref())
         .and_then(|result| result.failure.as_ref())
         .map(|failure| failure.message.clone());
+    let publish_failed = inspection
+        .finalization_failure
+        .as_ref()
+        .is_some_and(|failure| failure.code == "publish_failed");
+    let failure = inspection
+        .finalization_failure
+        .map(|failure| failure.message)
+        .or(execution_failure);
     Ok(RunOutcome {
         status,
         failure,
         complete: inspection.complete,
         incomplete: inspection.incomplete,
-        publish_failed: false,
+        publish_failed,
     })
 }
 

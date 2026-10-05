@@ -31,12 +31,14 @@
 //!   `artifact.collected` record, unless the same file with the same content
 //!   was already collected earlier in the run. A failed write is a recorded
 //!   problem on the transition, never a blocked route.
-//! - `run_finished`: the run's diff, its run branch against its base commit, as
+//! - `finalize_run`: the run's diff, its run branch against its base commit, as
 //!   the `run.diff` platform record with the patch as a blob; for a successful
 //!   run, its publication ([`RunPublisher`]: the platform pushes the run branch
 //!   and opens a pull request), whose failure fails the run before its terminal
-//!   record; then the forwarded point, so the local service runs `run_complete`
-//!   and `run_failed` with the sandbox in place.
+//!   record.
+//! - `run_finished`: best-effort diff preparation for nonpublishing runs, then
+//!   the forwarded point, so the local service runs `run_complete` and
+//!   `run_failed` with the sandbox in place.
 //! - `scope_acquired`: a fresh run's Git target checked out into the workspace
 //!   from inside the scope ([`crate::source`]); a resumed run uses its
 //!   surviving workspace, while an explicit fork fetches the source run's
@@ -100,7 +102,9 @@ use petri_runtime::driver::lifecycle::{
     ScopeReleased, Transition, TransitionError, TransitionReport,
 };
 use petri_runtime::executor::{EnvError, ExecEnv};
-use petri_runtime::ir::{ExecutionId, FailureInfo, RunStatus, ScopeId, Status};
+use petri_runtime::ir::{
+    ExecutionId, FailureInfo, FinalizationFailure, RunStatus, ScopeId, Status,
+};
 use serde_json::json;
 use tokio::sync::{Mutex as AsyncMutex, OnceCell};
 use tokio::{fs, time};
@@ -453,8 +457,6 @@ pub struct FabroHooks {
     /// The checkpoint failure that ended the run, when one did.
     failure:            Mutex<Option<String>>,
     publisher:          Option<Arc<dyn RunPublisher>>,
-    /// Why the run's publication failed, when it did.
-    publish_failure:    Mutex<Option<String>>,
     /// Whether the run continues from its records: a sandbox workspace is
     /// then brought to its snapshot when its scope is first acquired.
     resumed:            bool,
@@ -522,7 +524,6 @@ impl FabroHooks {
             scopes: ScopeEnvs::default(),
             failure: Mutex::default(),
             publisher: spec.publisher,
-            publish_failure: Mutex::default(),
             resumed,
             restore: OnceCell::new(),
             store,
@@ -542,13 +543,6 @@ impl FabroHooks {
     #[must_use]
     pub fn checkpoint_failure(&self) -> Option<String> {
         sync::lock(&self.failure).clone()
-    }
-
-    /// Why the run's publication failed, when it did: the run then fails
-    /// with this message.
-    #[must_use]
-    pub fn publish_failure(&self) -> Option<String> {
-        sync::lock(&self.publish_failure).clone()
     }
 
     /// The run's workspaces on this host, as the hooks reach them.
@@ -1403,23 +1397,6 @@ impl FabroHooks {
         Ok(publication)
     }
 
-    /// Hand a successful run's work to the publisher, before the run's
-    /// terminal record. A failure fails the run with its reason.
-    async fn publish(&self, publisher: &dyn RunPublisher, publication: &Publication) {
-        match publisher.publish(publication).await {
-            Ok(()) => info!(
-                run_id = %self.run_id,
-                branch = publication.run_branch,
-                sha = publication.head_sha,
-                "run published"
-            ),
-            Err(message) => {
-                warn!(run_id = %self.run_id, error = %message, "the run's publication failed");
-                *sync::lock(&self.publish_failure) = Some(message);
-            }
-        }
-    }
-
     /// Hold at a test gate when one is set for this point and node.
     async fn gate(&self, point: &str, node: &str) {
         let Some(dir) = &self.test_gates else {
@@ -1626,33 +1603,53 @@ impl ExecutionHooks for FabroHooks {
         Ok(report)
     }
 
-    async fn run_finished(&self, context: &HookContext, finished: RunFinished) -> Vec<Note> {
-        info!(
-            run_id = %self.run_id,
-            status = ?finished.status,
-            failure = finished.failure.as_deref().unwrap_or(""),
-            "Petri run finished; recording the run's diff and running the run-end hooks"
-        );
+    fn requires_run_finalization(&self) -> bool {
+        self.publisher.is_some() || self.inner.requires_run_finalization()
+    }
+
+    async fn finalize_run(
+        &self,
+        context: &HookContext,
+        finished: RunFinished,
+    ) -> Result<(), FinalizationFailure> {
         let publication = match self.record_run_diff().await {
             Ok(publication) => publication,
             Err(error) => {
                 let message = error.render();
                 warn!(run_id = %self.run_id, error = %message, "the run's diff was not recorded");
                 if self.publisher.is_some() && finished.status == RunStatus::Success {
-                    *sync::lock(&self.publish_failure) = Some(message);
+                    return Err(FinalizationFailure::new("publish_failed", message));
                 }
                 None
             }
         };
         if let Some(publisher) = &self.publisher {
-            if finished.status == RunStatus::Success && self.checkpoint_failure().is_none() {
-                if let Some(publication) = &publication {
-                    self.publish(publisher.as_ref(), publication).await;
-                } else if self.publish_failure().is_none() {
-                    *sync::lock(&self.publish_failure) = Some(
-                        "the run has no recorded branch and checkpoint to publish".to_string(),
-                    );
-                }
+            if finished.status == RunStatus::Success {
+                let publication = publication.ok_or_else(|| {
+                    FinalizationFailure::new(
+                        "publish_failed",
+                        "the run has no recorded branch and checkpoint to publish",
+                    )
+                })?;
+                publisher.publish(&publication).await.map_err(|message| {
+                    warn!(run_id = %self.run_id, error = %message, "the run's publication failed");
+                    FinalizationFailure::new("publish_failed", message)
+                })?;
+                info!(run_id = %self.run_id, branch = publication.run_branch, sha = publication.head_sha, "run published");
+            }
+        }
+        if self.inner.requires_run_finalization() {
+            self.inner.finalize_run(context, finished).await?;
+        }
+        Ok(())
+    }
+
+    async fn run_finished(&self, context: &HookContext, finished: RunFinished) -> Vec<Note> {
+        // Nonpublishing runs keep best-effort diff preparation. Required work
+        // has already run in finalize_run, before Petri commits its outcome.
+        if !self.requires_run_finalization() {
+            if let Err(error) = self.record_run_diff().await {
+                warn!(run_id = %self.run_id, error = %error.render(), "the run's diff was not recorded");
             }
         }
         self.inner.run_finished(context, finished).await

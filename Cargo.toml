@@ -108,13 +108,13 @@ pebble-cli-core = { git = "https://github.com/lithoscomputer/pebble", branch = "
 # petri: the workflow engine Fabro runs its workflows on. Only `fabro-petri`
 # and `fabro-dot` (the DOT parser alone) may depend on these packages; the
 # keys carry the `petri_` prefix so the crate names say where they come from.
-petri_runtime = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-runtime" }
-petri_execution = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-execution" }
-petri_store = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-store" }
-petri_attractor_steps = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-attractor-steps" }
-petri_frontend_attractor = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-frontend-attractor" }
-petri_frontend_fabro = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-frontend-fabro" }
-petri_testkit = { git = "https://github.com/lithoscomputer/petri.git", branch = "main", package = "petri-testkit" }
+petri_runtime = { git = "https://github.com/lithoscomputer/petri.git", rev = "0198e66f6619e147e461c52c138497863d851969", package = "petri-runtime" }
+petri_execution = { git = "https://github.com/lithoscomputer/petri.git", rev = "0198e66f6619e147e461c52c138497863d851969", package = "petri-execution" }
+petri_store = { git = "https://github.com/lithoscomputer/petri.git", rev = "0198e66f6619e147e461c52c138497863d851969", package = "petri-store" }
+petri_attractor_steps = { git = "https://github.com/lithoscomputer/petri.git", rev = "0198e66f6619e147e461c52c138497863d851969", package = "petri-attractor-steps" }
+petri_frontend_attractor = { git = "https://github.com/lithoscomputer/petri.git", rev = "0198e66f6619e147e461c52c138497863d851969", package = "petri-frontend-attractor" }
+petri_frontend_fabro = { git = "https://github.com/lithoscomputer/petri.git", rev = "0198e66f6619e147e461c52c138497863d851969", package = "petri-frontend-fabro" }
+petri_testkit = { git = "https://github.com/lithoscomputer/petri.git", rev = "0198e66f6619e147e461c52c138497863d851969", package = "petri-testkit" }
 sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "ureq", "rustls"] }
 fork = "0.2"
 exec = "0.3"

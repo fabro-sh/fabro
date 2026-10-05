@@ -16,7 +16,7 @@ workspace = true
 # Petri's test kit, re-exported for Fabro crates that check a store
 # implementation against Petri's contract from their own tests. Never on in
 # a normal build.
-test-support = ["dep:petri_testkit"]
+test-support = ["dep:petri_testkit", "dep:tempfile"]
 
 [dependencies]
 fabro-github = { path = "../fabro-github" }
@@ -47,6 +47,7 @@ petri_frontend_attractor.workspace = true
 petri_frontend_fabro.workspace = true
 lithos-llm = { workspace = true, features = ["runtime"] }
 petri_testkit = { workspace = true, optional = true }
+tempfile = { version = "3", optional = true }
 anyhow.workspace = true
 bytes.workspace = true
 async-trait.workspace = true

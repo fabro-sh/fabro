@@ -3582,8 +3582,10 @@ async fn durable_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<O
 fn fail_managed_run(state: &Arc<AppState>, run_id: RunId, reason: FailureReason, message: String) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
-        managed_run.status = RunStatus::Failed { reason };
-        managed_run.error = Some(message);
+        if !managed_run.status.is_terminal() {
+            managed_run.status = RunStatus::Failed { reason };
+            managed_run.error = Some(message);
+        }
         clear_live_run_state(managed_run);
     }
     cleanup_worker_control_bus_for_run(state.as_ref(), run_id);
@@ -3601,7 +3603,9 @@ fn apply_lifecycle_to_managed_run(state: &AppState, run_id: RunId, record: &RunL
     // A settled run is immutable to the lifecycle: the follower still folds
     // the records before the terminal one after Petri's finish or the
     // worker's terminal record settled the run, and none may reopen it.
-    if managed_run.status.is_terminal() && !is_terminal_transition(record) {
+    if managed_run.status.is_terminal()
+        && (!is_terminal_transition(record) || record.status != Some(managed_run.status))
+    {
         return;
     }
     match record.transition {
@@ -3660,7 +3664,9 @@ fn apply_lifecycle_to_managed_run(state: &AppState, run_id: RunId, record: &RunL
             managed_run.status = record.status.unwrap_or(RunStatus::Failed {
                 reason: FailureReason::WorkflowError,
             });
-            managed_run.error.clone_from(&record.reason);
+            if managed_run.error.is_none() {
+                managed_run.error.clone_from(&record.reason);
+            }
             managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_stages.clear();
             cleanup_worker_control_bus_for_run(state, run_id);
@@ -3683,19 +3689,14 @@ fn is_terminal_transition(record: &RunLifecycleRecord) -> bool {
     )
 }
 
-/// Settle the in-memory run at Petri's own finish, as its worker stores
-/// the `run.finished` record: the view reports the run ended from the
-/// moment that record is stored, so the managed run the delete precheck
-/// prefers must not still say running while the worker tears down; a
-/// delete in that window was refused as active. A run already settled
-/// keeps its status. The worker's terminal lifecycle record, a moment
-/// later, refines the status and its error and ends the worker's controls
-/// ([`settle_managed_run_at_terminal_record`]); the worker's exit later
-/// reaps the process and leaves the settled status alone.
+/// Settle the in-memory run after Petri's authoritative finish is durable.
+/// Required publication has completed before this record. Worker teardown
+/// and subsequent lifecycle records cannot change its terminal outcome.
 pub(in crate::server) fn settle_managed_run_at_finish(
     state: &AppState,
     run_id: RunId,
     status: RunStatus,
+    failure: Option<String>,
 ) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     let Some(managed_run) = runs.get_mut(&run_id) else {
@@ -3705,12 +3706,13 @@ pub(in crate::server) fn settle_managed_run_at_finish(
         return;
     }
     managed_run.status = status;
+    managed_run.error = failure;
     managed_run.active_steerable_stages.clear();
     managed_run.active_non_steerable_stages.clear();
 }
 
 /// Settle the in-memory run at the terminal lifecycle record its worker
-/// stores, ahead of the store: the same as [`settle_managed_run_at_finish`]
+/// stores, after the store: the same as [`settle_managed_run_at_finish`]
 /// for a worker that ended the run without Petri's finish (it failed before
 /// the engine ran), and the record's status, error and control cleanup for
 /// one that did. A record that is not terminal is left to the stream

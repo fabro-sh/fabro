@@ -23,7 +23,7 @@ use fabro_api::types::{
     PetriReleaseRequest, WriteBlobResponse,
 };
 use fabro_petri::petri::{Access, Digest, LogId, OwnerId, Record, StoreError};
-use fabro_petri::projection::finished_run_status;
+use fabro_petri::projection::finished_run_result;
 use fabro_petri::run_store::{log_id_text, parse_log_id};
 use fabro_store::{PlatformRecord, PlatformRecordKind, StagePosition, StoredPlatformRecord};
 use fabro_types::BlobHash;
@@ -157,16 +157,13 @@ async fn append_records(
         Ok(writer) => writer,
         Err(err) => return store_error_response(id, &err),
     };
-    // The view ends the run at Petri's own finish, the moment the record
-    // is stored and a pass folds it: the managed run settles first, so a
-    // delete that lands while the worker still tears down is not refused.
-    if log == LogId::Coordinator {
-        if let Some(status) = records.iter().find_map(finished_run_status) {
-            settle_managed_run_at_finish(&state, id, status);
-        }
-    }
     match writer.append(&log, &records).await {
         Ok(()) => {
+            if log == LogId::Coordinator {
+                if let Some((status, failure)) = records.iter().find_map(finished_run_result) {
+                    settle_managed_run_at_finish(&state, id, status, failure);
+                }
+            }
             // The records are durable; the projection trails them from here.
             state.petri_projector.signal(id);
             StatusCode::NO_CONTENT.into_response()
@@ -279,10 +276,6 @@ async fn append_platform_record(
         (Some(execution), Some(firing)) => Some(StagePosition { execution, firing }),
         _ => None,
     };
-    // A terminal lifecycle record ends the run in the view as Petri's
-    // finish does, for a worker that ended the run without one: the
-    // managed run settles before the record is stored.
-    settle_managed_run_at_terminal_record(&state, id, &record);
     let summaries = &state.stores.run_summaries;
     match summaries
         .platform_records()
@@ -290,6 +283,7 @@ async fn append_platform_record(
         .await
     {
         Ok(stored) => {
+            settle_managed_run_at_terminal_record(&state, id, &record);
             summaries.notify_platform_record(id);
             match wire_platform_record(&stored) {
                 Ok(record) => Json(record).into_response(),

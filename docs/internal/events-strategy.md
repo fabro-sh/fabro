@@ -75,9 +75,12 @@ When matching items:
   `run.finished`); its parsed meaning is under `item.derived` (a pending
   question is `derived.parsed.kind == "question"`).
 - A platform record's kind is `item.record.kind`.
-- The run has ended when a platform `run.lifecycle` record's `transition`
-  is `succeeded`, `failed` or `dead`. Petri's `run.finished` precedes it and
-  carries the engine's own status.
+- Petri's coordinator `run.finished` commits the overall result after required
+  finalization and cleanup. Its optional `finalization_failure` carries the
+  host-defined code and message. Invocation and stage results remain execution
+  evidence. A subsequent platform `run.lifecycle` terminal transition reports
+  that same outcome; it cannot replace it. Early worker failures without a
+  Petri finish end at the platform terminal lifecycle record.
 
 Never rebuild an item downstream: pass the `RunStreamItem` through as read.
 
