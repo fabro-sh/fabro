@@ -1065,7 +1065,7 @@ mod tests {
                 when.method("GET")
                     .path(format!("/api/v1/runs/{run_id}/questions"));
                 then.status(200)
-                    .json_body(serde_json::json!({ "data": [] }));
+                    .json_body(serde_json::json!({ "data": [], "meta": { "has_more": false } }));
             })
             .await;
         let waiting = server
@@ -1079,7 +1079,7 @@ mod tests {
             .await;
         let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
         let task = tokio::spawn(async move {
-            attach_petri_run_with_client(
+            Box::pin(attach_petri_run_with_client(
                 &client,
                 &run_id,
                 &state,
@@ -1091,7 +1091,7 @@ mod tests {
                     json_output:    true,
                 },
                 Printer::Default,
-            )
+            ))
             .await
             .unwrap()
         });

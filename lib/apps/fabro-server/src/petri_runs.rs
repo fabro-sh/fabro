@@ -1248,10 +1248,13 @@ mod tests {
                     .await
                     .unwrap();
             assert_eq!(after_count, platform_count);
-            let (rebuilt, _, _) =
-                fabro_petri::test_support::rebuild(&state.db_pool, &state.db_pool, run_id)
-                    .await
-                    .unwrap();
+            let (rebuilt, _, _) = fabro_petri::test_support::rebuild(
+                &state.db_pool,
+                &state.stores.run_summaries.pool(),
+                run_id,
+            )
+            .await
+            .unwrap();
             let rebuilt = rebuilt.unwrap();
             assert_eq!(rebuilt.status, expected);
             assert_eq!(
