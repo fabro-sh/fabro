@@ -3531,7 +3531,22 @@ pub(crate) async fn persist_run_failure(
             )
             .await
             {
-                Ok(_) => fail_managed_run(state, run_id, reason, message),
+                Ok(_) => match run_records::projection(state, run_id).await {
+                    Ok(Some(committed)) if committed.status.is_terminal() => {
+                        let failure = committed
+                            .conclusion
+                            .as_ref()
+                            .and_then(|conclusion| conclusion.failure.as_ref())
+                            .map(|failure| failure.detail.message.clone());
+                        settle_managed_run_at_finish(state, run_id, committed.status, failure);
+                    }
+                    Ok(_) => {
+                        error!(run_id = %run_id, "Stored host failure has no terminal projection");
+                    }
+                    Err(err) => {
+                        error!(run_id = %run_id, error = %err, "Failed to read the committed host failure");
+                    }
+                },
                 Err(err) => {
                     error!(run_id = %run_id, error = %err, "Failed to persist run failure status");
                 }

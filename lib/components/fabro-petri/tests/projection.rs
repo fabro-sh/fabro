@@ -27,7 +27,8 @@ use fabro_petri::providers::SandboxProviderConfig;
 use fabro_petri::runtime::RuntimeSpec;
 use fabro_petri::{SqliteRunStore, providers, test_support as petri_support};
 use fabro_store::platform_records::{
-    PlatformRecord, PlatformRecordStore, RunCreatedRecord, RunLifecycleKind, RunLifecycleRecord,
+    CheckpointRecord, PlatformRecord, PlatformRecordStore, RunCreatedRecord, RunDiffRecord,
+    RunLifecycleKind, RunLifecycleRecord,
 };
 use fabro_store::{BlobStore, test_support};
 use fabro_types::{
@@ -42,7 +43,7 @@ use petri_runtime::frontend::CompileInputs;
 use petri_runtime::ir::RunStatus as PetriRunStatus;
 use petri_store::{RunKey, RunStore};
 use tokio::fs;
-use tokio::time::sleep;
+use tokio::time::{self, sleep};
 
 const COMMAND_WORKFLOW: &str = r#"digraph Command {
     graph [goal="Run one command"]
@@ -1387,14 +1388,30 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
             .await
             .unwrap()
         });
-        tokio::time::timeout(Duration::from_secs(15), finalizer.entered.notified())
+        time::timeout(Duration::from_secs(15), finalizer.entered.notified())
             .await
             .unwrap();
-        projector.settle(scenario.run_id).await;
-        let pending = petri_support::stored_projection(&scenario.pool, scenario.run_id)
-            .await
-            .unwrap()
-            .unwrap();
+        // The driver can still flush its execution journal after entering
+        // finalization. Wait for the exit-stage evidence, rather than racing
+        // that writer while comparing the live view with a full rebuild.
+        let pending = time::timeout(Duration::from_secs(5), async {
+            loop {
+                projector.signal(scenario.run_id);
+                projector.settle(scenario.run_id).await;
+                let pending = petri_support::stored_projection(&scenario.pool, scenario.run_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                if pending.iter_stages().any(|(id, stage)| {
+                    id.node_id() == "exit" && stage.state == StageState::Succeeded
+                }) {
+                    break pending;
+                }
+                time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("execution evidence flushes while publication is held");
         assert_eq!(pending.status, RunStatus::Running);
         assert!(pending.conclusion.is_none());
         assert!(!task.is_finished());
@@ -1408,7 +1425,7 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
         let patch_blob = BlobHash::new(b"final patch");
         let platform = PlatformRecordStore::new(scenario.pool.clone());
         for record in [
-            PlatformRecord::Checkpoint(fabro_store::platform_records::CheckpointRecord {
+            PlatformRecord::Checkpoint(CheckpointRecord {
                 execution:      0,
                 firing:         0,
                 attempt:        Some(1),
@@ -1418,7 +1435,7 @@ async fn required_finalization_projects_only_the_committed_overall_result() {
                 patch_blob:     Some(patch_blob),
                 operation:      None,
             }),
-            PlatformRecord::RunDiff(fabro_store::platform_records::RunDiffRecord {
+            PlatformRecord::RunDiff(RunDiffRecord {
                 base_sha:     None,
                 head_sha:     Some(head_sha.to_string()),
                 diff_summary: Some(summary),

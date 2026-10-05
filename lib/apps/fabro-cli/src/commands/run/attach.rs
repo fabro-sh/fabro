@@ -1060,6 +1060,14 @@ mod tests {
                     .json_body(serde_json::to_value(&state).unwrap());
             })
             .await;
+        server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id}/questions"));
+                then.status(200)
+                    .json_body(serde_json::json!({ "data": [] }));
+            })
+            .await;
         let waiting = server
             .mock_async(|when, then| {
                 when.method("GET")

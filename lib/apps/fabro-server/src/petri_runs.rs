@@ -1044,6 +1044,7 @@ mod tests {
         expected: RunStatus,
         message: Option<&str>,
     ) {
+        state.petri_projector.settle(run_id).await;
         let mut values = Vec::new();
         for suffix in ["", "/state"] {
             let response = app
@@ -1067,7 +1068,9 @@ mod tests {
         }
         assert_eq!(
             values[0]["lifecycle"]["status"],
-            serde_json::to_value(expected).unwrap()
+            serde_json::to_value(expected).unwrap(),
+            "public state: {:#?}",
+            values[1]
         );
         assert_eq!(values[1]["status"], serde_json::to_value(expected).unwrap());
         assert_eq!(state.test_managed_run_status(&run_id), Some(expected));

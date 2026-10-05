@@ -44,8 +44,9 @@ use fabro_types::{GitIdentitySource, RunId, SandboxProviderKind};
 use object_store::local::LocalFileSystem;
 use petri_execution::inspect::{self, RunInspection};
 use petri_store::{Access, MemoryRunStore, RunKey, RunStore as _};
-use tokio::fs;
 use tokio::process::Command;
+use tokio::sync::{Notify, Semaphore};
+use tokio::{fs, time};
 use tokio_util::sync::CancellationToken;
 
 mod support;
@@ -1609,8 +1610,8 @@ async fn a_run_diff_failure_cannot_silently_skip_publication() {
 
 struct GatedPublisher {
     inner:   Arc<RecordingPublisher>,
-    entered: tokio::sync::Notify,
-    release: tokio::sync::Semaphore,
+    entered: Notify,
+    release: Semaphore,
 }
 
 #[async_trait::async_trait]
@@ -1621,7 +1622,11 @@ impl RunPublisher for GatedPublisher {
 
     async fn publish(&self, publication: &Publication) -> Result<(), String> {
         self.entered.notify_one();
-        self.release.acquire().await.unwrap().forget();
+        self.release
+            .acquire()
+            .await
+            .expect("publication gate stays open")
+            .forget();
         self.inner.publish(publication).await
     }
 }
@@ -1631,8 +1636,8 @@ async fn required_publication_blocks_the_terminal_result_and_cleanup() {
     for rejection in [None, Some("the push was rejected")] {
         let publisher = Arc::new(GatedPublisher {
             inner:   RecordingPublisher::new(rejection),
-            entered: tokio::sync::Notify::new(),
-            release: tokio::sync::Semaphore::new(0),
+            entered: Notify::new(),
+            release: Semaphore::new(0),
         });
         let mut harness = Harness::new().await;
         harness.publisher = Some(publisher.clone());
@@ -1649,7 +1654,7 @@ async fn required_publication_blocks_the_terminal_result_and_cleanup() {
                 )
                 .await
         });
-        tokio::time::timeout(
+        time::timeout(
             std::time::Duration::from_secs(15),
             publisher.entered.notified(),
         )
@@ -1673,10 +1678,6 @@ async fn required_publication_blocks_the_terminal_result_and_cleanup() {
                 .iter()
                 .all(|record| record.record["body"]["event"] != "scope.released"),
             "scope cleanup waits for publication"
-        );
-        assert!(
-            pending.invocations[0].result.is_some(),
-            "execution already ended"
         );
         assert!(
             harness.workspace_path(&harness.workspace().await).exists(),
