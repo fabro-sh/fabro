@@ -143,6 +143,13 @@ impl RunScratch {
         self.root.join("runtime")
     }
 
+    /// The lock the run's worker holds for its whole life: while it is
+    /// held, the worker is running.
+    #[must_use]
+    pub fn worker_lock_path(&self) -> PathBuf {
+        self.root.join("worker.lock")
+    }
+
     pub fn create(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(self.worktree_dir())?;
         std::fs::create_dir_all(self.runtime_dir())?;

@@ -11,9 +11,19 @@
 //! to `execution::host`: [`Execution::Start`] runs the admitted graphs
 //! through `run_configured`; [`Execution::Resume`] continues the run from
 //! its records through `resume_configured`, with the same observers a start
-//! installs, as the host's docs require. The outcome is then derived from
+//! installs, as the host's docs require. A run whose creation a crash cut
+//! short (Petri's `HostError::NotStarted`: the key is stored, the root
+//! invocation is not) starts again from its admitted graphs under the same
+//! key, which Petri takes over. The outcome is then derived from
 //! `inspect_run` over a read handle of the same store, so what the caller
 //! reports is what the durable record says.
+//!
+//! A failed write to the run's store ends the run's lifetime, not the run:
+//! Petri records nothing after it and returns `CoordinatorError::StoreFailed`,
+//! and no firing fails for it. [`run`] returns [`RunError::StoreFailed`]
+//! without reading the record back, and [`conclusion`] says
+//! [`Conclusion::Interrupted`]: the caller records no end for the run, and
+//! the run resumes from its records, as after a crash.
 //!
 //! What the caller supplies beyond the runtime: the interviewer its
 //! questions go to ([`interview`](crate::interview) in the worker and the
@@ -45,25 +55,28 @@
 //! projection over Petri's records is the read-side item that follows.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use fabro_types::settings::run::{
     EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentResourcesSettings,
 };
 use fabro_types::settings::size::Size;
 use fabro_types::{FailureReason, RunId, SandboxProviderKind};
+use fabro_util::sync;
 use petri_execution::host::{self, HostError, HostRun};
 use petri_execution::inspect::{self, InspectError, RunInspection};
 use petri_execution::{
-    Access, CancelReason, ExecutionObserver, InterviewDispatcher, Interviewer, InvocationId,
+    Access, CancelReason, CoordinatorError, ExecutionObserver, InterviewDispatcher, Interviewer,
     RECEIPT_FILE, RunKey, RunStore,
 };
+use petri_runtime::driver::ExecutionReport;
 use petri_runtime::driver::lifecycle::ExecutionHooks;
 pub use petri_runtime::executor::Retention;
 use petri_runtime::executor::SecretProvider;
-use petri_runtime::{DaytonaResources, LostSandbox, RunOptions, SandboxBackend};
+use petri_runtime::{DaytonaResources, LostSandbox, RunOptions, Runtime, SandboxBackend};
 use sandbox_driver::NetworkPolicy;
 use tokio::fs;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -80,9 +93,9 @@ pub enum Execution {
     /// Run the admitted graphs from the start; the run must not exist in
     /// the store yet.
     Start(AdmittedGraphs),
-    /// Continue the run from its records; the run must exist in the store
-    /// with its root invocation declared.
-    Resume,
+    /// Continue the run from its records. The admitted graphs start the
+    /// run again when a crash cut its creation short.
+    Resume(AdmittedGraphs),
 }
 
 /// One run to execute.
@@ -159,12 +172,15 @@ pub enum RunError {
     Open(#[source] petri_store::StoreError),
     #[error("the run's record could not be read")]
     Read(#[source] HostError),
-    #[error("the run's record has no root invocation, so there is nothing to resume")]
-    NothingToResume,
     #[error("the run's record could not be inspected")]
     Inspect(#[source] InspectError),
     #[error("the run ended without recording a status; the record says: {}", .0.join("; "))]
     Unfinished(Vec<String>),
+    /// A write to the run's store failed. The lifetime ended there, with
+    /// nothing recorded after the failure; the run did not end, and resumes
+    /// from its records.
+    #[error("the run's store failed: {0}")]
+    StoreFailed(String),
 }
 
 /// How Fabro reports the run: what its read side records as the run's
@@ -179,6 +195,10 @@ pub enum Conclusion {
         reason:  FailureReason,
         message: String,
     },
+    /// The run's store failed, which ended this lifetime of the run and not
+    /// the run: the caller records no terminal event, and the run resumes
+    /// from its records, as after a crash.
+    Interrupted { message: String },
 }
 
 fn network_policy(settings: &EnvironmentNetworkSettings) -> NetworkPolicy {
@@ -217,7 +237,7 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
     }
     // A normal resume requires its original sandbox to survive.
     options.sandbox.lost_sandbox = LostSandbox::Refuse;
-    let resumed = matches!(request.execution, Execution::Resume);
+    let resumed = matches!(request.execution, Execution::Resume(_));
     let mut runtime = request
         .runtime
         .runtime(true)
@@ -266,19 +286,25 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
         .capability(controls.turns());
 
     let dispatcher = InterviewDispatcher::new(request.interviewer);
-    let cancel = request.cancel.clone();
-    let mut cancel_task = None;
-    let with_handle = |handle: petri_execution::CoordinatorHandle, secrets| {
-        dispatcher.wire(handle.clone(), secrets);
-        if let Some(hooks) = &fabro_hooks {
-            hooks.attach(handle.clone());
+    let cancel_task: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+    // What the coordinator's handle is wired to, on a start and a resume
+    // alike: built again when a resume starts the run over.
+    let wiring = || {
+        let cancel = request.cancel.clone();
+        let (dispatcher, fabro_hooks, controls, cancel_task) =
+            (&dispatcher, &fabro_hooks, &controls, &cancel_task);
+        move |handle: petri_execution::CoordinatorHandle, secrets| {
+            dispatcher.wire(handle.clone(), secrets);
+            if let Some(hooks) = fabro_hooks {
+                hooks.attach(handle.clone());
+            }
+            controls.wire(handle.clone());
+            *sync::lock(cancel_task) = Some(tokio::spawn(async move {
+                cancel.cancelled().await;
+                info!("cancelling the Petri run");
+                handle.cancel_root_for(CancelReason::Control);
+            }));
         }
-        controls.wire(handle.clone());
-        cancel_task = Some(tokio::spawn(async move {
-            cancel.cancelled().await;
-            info!("cancelling the Petri run");
-            handle.cancel_root_for(CancelReason::Control);
-        }));
     };
     let mut observers = request.observers;
     observers.push(controls.observer());
@@ -286,25 +312,33 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
     let result = match request.execution {
         Execution::Start(graphs) => {
             info!(run_id = %request.run_id, backend = %backend, "Starting Petri run");
-            let mut host_run = HostRun::new(graphs.graph).with_children(graphs.children);
-            for observer in observers {
-                host_run = host_run.observe(observer);
-            }
-            Box::pin(host::run_configured(&runtime, host_run, with_handle)).await
+            start(&runtime, graphs, observers, wiring()).await
         }
-        Execution::Resume => {
-            check_resumable(request.store.as_ref(), &key).await?;
+        Execution::Resume(graphs) => {
             info!(run_id = %request.run_id, backend = %backend, "Resuming Petri run");
-            Box::pin(host::resume_configured(
+            let outcome = Box::pin(host::resume_configured(
                 &runtime,
                 Vec::new(),
-                observers,
-                with_handle,
+                observers.clone(),
+                wiring(),
             ))
-            .await
+            .await;
+            match outcome {
+                // A crash cut the run's creation short: nothing beyond its
+                // start is stored, so it starts again from its admitted
+                // graphs, and Petri takes the stored prefix over.
+                Err(HostError::NotStarted) => {
+                    info!(
+                        run_id = %request.run_id,
+                        "The Petri run never started; starting it again"
+                    );
+                    start(&runtime, graphs, observers, wiring()).await
+                }
+                outcome => outcome,
+            }
         }
     };
-    if let Some(task) = cancel_task {
+    if let Some(task) = sync::lock(&cancel_task).take() {
         task.abort();
     }
     let receipt = dispatcher.shutdown().await;
@@ -312,6 +346,11 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
     match &result {
         Ok(report) => debug!(status = %report.status, "Petri run ended"),
         Err(error) => warn!(error = %error, "Petri run ended with a host error"),
+    }
+    // The store holds what it held at the failure, and the run is not over:
+    // there is no outcome to read back.
+    if let Err(HostError::Coordinator(CoordinatorError::StoreFailed(message))) = result {
+        return Err(RunError::StoreFailed(message));
     }
     let inspection = inspect(request.store.as_ref(), &key).await?;
     let mut outcome = outcome(inspection, result.err())?;
@@ -379,9 +418,9 @@ pub async fn outcome_of(store: &dyn RunStore, run_id: &str) -> Result<RunOutcome
 }
 
 /// How Fabro reports what [`run`] returned. A cancelled run is a failure
-/// with the cancelled reason, as the legacy executor reports one; every
-/// other shortfall is a workflow error whose message says what the record,
-/// or the host, said.
+/// with the cancelled reason, as the legacy executor reports one; a failed
+/// store interrupted the run; every other shortfall is a workflow error
+/// whose message says what the record, or the host, said.
 #[must_use]
 pub fn conclusion(result: &Result<RunOutcome, RunError>) -> Conclusion {
     match result {
@@ -401,6 +440,9 @@ pub fn conclusion(result: &Result<RunOutcome, RunError>) -> Conclusion {
                 message: failure_message(outcome),
             }
         }
+        Err(error @ RunError::StoreFailed(_)) => Conclusion::Interrupted {
+            message: error.to_string(),
+        },
         Err(error) => Conclusion::Failed {
             reason:  FailureReason::WorkflowError,
             message: error_chain(error),
@@ -469,21 +511,19 @@ pub(crate) fn backend(provider: &SandboxProviderKind) -> Option<SandboxBackend> 
     }
 }
 
-/// Refuse a resume the host would not survive: `resume_configured` indexes
-/// the root invocation of the stored state, so a record with none (the run
-/// was created in the store and nothing more) is refused here with a named
-/// error instead.
-async fn check_resumable(store: &dyn RunStore, key: &RunKey) -> Result<(), RunError> {
-    let logs = store
-        .open(key, Access::Read)
-        .await
-        .map_err(RunError::Open)?;
-    let state = host::stored_state(&*logs).await.map_err(RunError::Read)?;
-    if state.invocations.contains_key(&InvocationId::ROOT) {
-        Ok(())
-    } else {
-        Err(RunError::NothingToResume)
+/// Run the admitted graphs under the run's key: a fresh run, or one whose
+/// creation a crash cut short, which Petri takes over.
+async fn start(
+    runtime: &Runtime,
+    graphs: AdmittedGraphs,
+    observers: Vec<Arc<dyn ExecutionObserver>>,
+    with_handle: impl FnOnce(petri_execution::CoordinatorHandle, Arc<dyn SecretProvider>),
+) -> Result<ExecutionReport, HostError> {
+    let mut host_run = HostRun::new(graphs.graph).with_children(graphs.children);
+    for observer in observers {
+        host_run = host_run.observe(observer);
     }
+    Box::pin(host::run_configured(runtime, host_run, with_handle)).await
 }
 
 /// Read the run back through a handle that holds no lease.
@@ -623,6 +663,13 @@ mod tests {
             reason:  FailureReason::WorkflowError,
             message: "the run ended without recording a status; the record says: no status"
                 .to_string(),
+        });
+    }
+    #[test]
+    fn a_failed_store_concludes_interrupted() {
+        let error = RunError::StoreFailed("could not append: the disk is full".to_string());
+        assert_eq!(conclusion(&Err(error)), Conclusion::Interrupted {
+            message: "the run's store failed: could not append: the disk is full".to_string(),
         });
     }
 }

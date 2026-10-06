@@ -104,4 +104,7 @@ same transaction as the projection that consumed the record. A client that
 resumes from its last `stream_seq` sees every item exactly once.
 
 A worker cannot continue past a record it failed to append: the store's
-error reaches the engine and fails the run.
+error reaches the engine and interrupts the run's lifetime. The worker
+records no terminal lifecycle transition for that interruption. The server
+resumes the run from its durable records, up to three times per server
+process; a fourth interruption fails the run.

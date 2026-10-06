@@ -9,12 +9,16 @@
 //!
 //! The run's record is [`HttpRunStore`] over the worker's client, leased
 //! for this launch: the worker mints one owner id at start, logs it, and
-//! every lease the run takes over the API names it. `--mode start` loads
-//! the admitted graphs through the client's blob read and runs them;
-//! `--mode resume` continues the run from its records. Either way the
+//! every lease the run takes over the API names it. Both modes load the
+//! admitted graphs through the client's blob read: `--mode start` runs them;
+//! `--mode resume` continues the run from its records, and starts it again
+//! from the graphs when a crash cut its creation short. Either way the
 //! worker records the lifecycle transitions Fabro's read side needs
 //! (`starting`, `running`, then `succeeded` or `failed`) as platform
-//! records through the client.
+//! records through the client. A failed write to the run's store ends the
+//! run's lifetime and not the run: the worker records no end for it and
+//! exits with `EX_TEMPFAIL` (75, [`ExitClass::Interrupted`]), and the server
+//! launches a worker to resume it, as after a crash.
 //!
 //! The server's controls arrive over the control channel and go to Petri
 //! through [`PetriControls`]: cancel (and `SIGTERM`/`SIGINT`) fires one
@@ -93,6 +97,7 @@ use fabro_store::platform_records::{
 };
 use fabro_types::settings::run::{ApprovalMode, RunMode};
 use fabro_types::{FailureReason, Principal, RunId, RunNoticeLevel, RunStatus, SuccessReason};
+use fabro_util::exit::{ErrorExt as _, ExitClass};
 use fabro_vault::Vault;
 use fabro_workflow::Error as WorkflowError;
 use fabro_workflow::services::FabroRunToolServices;
@@ -123,7 +128,9 @@ pub(super) struct PetriWorker<'a> {
 
 /// Execute the run to its end. `Ok` when the record says it succeeded;
 /// the failure otherwise, after the terminal event is appended, so the
-/// worker exits as the legacy worker does for a failed run.
+/// worker exits as the legacy worker does for a failed run. A run its
+/// store interrupted gets no terminal event, and its error is classified
+/// [`ExitClass::Interrupted`] for the server to resume the run.
 pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
     let run_id = worker.run_id;
     let admission = worker.run_state.spec.admission.clone();
@@ -180,21 +187,19 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
         run_tools,
     )
     .await?;
+    let client = worker.client.clone_for_reuse();
+    let graphs = admission::load_with(
+        |blob| {
+            let client = client.clone_for_reuse();
+            async move { client.read_run_blob(&run_id, &blob).await }
+        },
+        &admission,
+    )
+    .await
+    .context("loading the admitted graphs")?;
     let execution = match worker.mode {
-        RunWorkerMode::Start => {
-            let client = worker.client.clone_for_reuse();
-            let graphs = admission::load_with(
-                |blob| {
-                    let client = client.clone_for_reuse();
-                    async move { client.read_run_blob(&run_id, &blob).await }
-                },
-                &admission,
-            )
-            .await
-            .context("loading the admitted graphs")?;
-            Execution::Start(graphs)
-        }
-        RunWorkerMode::Resume => Execution::Resume,
+        RunWorkerMode::Start => Execution::Start(graphs),
+        RunWorkerMode::Resume => Execution::Resume(graphs),
     };
 
     let started = Instant::now();
@@ -291,6 +296,14 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
         "Petri run ended"
     );
     let (record, phase, failure) = match engine::conclusion(&result) {
+        Conclusion::Interrupted { message } => {
+            // The run is not over: it continues from its records in the
+            // worker the server launches next. That also holds when the
+            // control channel was lost: a cancel the loss requested is in
+            // the records, or the run was not cancelled.
+            warn!(run_id = %run_id, error = %message, "Petri run interrupted; the server resumes it");
+            return Err(anyhow!("{message}").classify(ExitClass::Interrupted));
+        }
         Conclusion::Succeeded => {
             info!(run_id = %run_id, "Petri run completed");
             (

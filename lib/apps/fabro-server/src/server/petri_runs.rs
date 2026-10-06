@@ -30,14 +30,19 @@
 //! previous server left in flight back to a worker in resume mode, once the
 //! recovery protocol (`fabro_petri::recovery`) has brought every live
 //! workspace to the snapshot its durable state names, or reports the run
-//! failed when it cannot.
+//! failed when it cannot. A run whose store failed under it takes the same
+//! way back ([`resume_after_interruption`]): its worker exits with
+//! `EX_TEMPFAIL` and records no end, since a failed store write ends the
+//! run's lifetime and not the run, and the server resumes it, at most
+//! [`MAX_STORE_INTERRUPTIONS`] times.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use anyhow::Context as _;
 use fabro_config::{
-    EnvironmentImageLayer, EnvironmentLayer, Home, MergeMap, SettingsLayer, Storage,
+    EnvironmentImageLayer, EnvironmentLayer, Home, MergeMap, RunScratch, SettingsLayer, Storage,
 };
 use fabro_interview::ControlInterviewer;
 use fabro_petri::artifacts::StoreArtifactWriter;
@@ -57,7 +62,9 @@ use fabro_static::EnvVars;
 use fabro_store::platform_records::{RunLifecycleKind, RunLifecycleRecord};
 use fabro_types::settings::McpTransport;
 use fabro_types::settings::run::{ApprovalMode, McpServerSettings, RunMode};
-use fabro_types::{FailureReason, RunId, RunRunnableSource, RunStatus, RunTarget, SuccessReason};
+use fabro_types::{
+    FailureReason, RunControlAction, RunId, RunRunnableSource, RunStatus, RunTarget, SuccessReason,
+};
 use fabro_util::error as error_util;
 use fabro_workflow::Error as WorkflowError;
 use lithos_llm::catalog::ProviderId;
@@ -70,7 +77,6 @@ use super::{
     stream_follower,
 };
 use crate::petri_check;
-use crate::petri_runs::PetriRuns;
 use crate::run_compiler::{AdmittedRun, PreparedRun, RunCompilerError};
 
 /// The runtime Petri gets, at create and at execution: the server's run
@@ -391,18 +397,19 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
     {
         return;
     }
-    let execution = match mode {
-        RunExecutionMode::Start => {
-            match admission::load(&state.store_ref().blobs(), &admission).await {
-                Ok(graphs) => Execution::Start(graphs),
-                Err(err) => {
-                    let message = error_util::collect_chain(&err).join(": ");
-                    fail_before_execution(&state, run_id, &message).await;
-                    return;
-                }
-            }
+    // A resume loads the graphs too: they start the run again when a crash
+    // cut its creation short.
+    let graphs = match admission::load(&state.store_ref().blobs(), &admission).await {
+        Ok(graphs) => graphs,
+        Err(err) => {
+            let message = error_util::collect_chain(&err).join(": ");
+            fail_before_execution(&state, run_id, &message).await;
+            return;
         }
-        RunExecutionMode::Resume => Execution::Resume,
+    };
+    let execution = match mode {
+        RunExecutionMode::Start => Execution::Start(graphs),
+        RunExecutionMode::Resume => Execution::Resume(graphs),
     };
     // The run's secrets: a snapshot of the server's vault, as a worker
     // takes one at launch.
@@ -519,6 +526,14 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
         "Petri run ended"
     );
     let (status, error, record) = match engine::conclusion(&result) {
+        // The run's store failed: the run resumes, as after a crash, in a
+        // new in-process run the scheduler starts, or fails when it cannot.
+        Conclusion::Interrupted { message } => {
+            match resume_after_interruption(&state, run_id, &message).await {
+                Ok(()) => return,
+                Err(failure) => failed(FailureReason::WorkflowError, failure),
+            }
+        }
         Conclusion::Succeeded => {
             info!(run_id = %run_id, "Petri run completed");
             (
@@ -552,29 +567,155 @@ pub(crate) async fn execute(state: Arc<AppState>, run_id: RunId) {
     }
 }
 
+/// How many times the run's store may interrupt a run in one server's life.
+/// Each interruption resumes the run; one more fails it, since a store that
+/// keeps failing is not a glitch a resume gets past.
+pub(crate) const MAX_STORE_INTERRUPTIONS: u32 = 3;
+
 /// Bring a Petri run the server left in flight back to its worker after a
 /// restart: the run continues from its records, as Petri's own resume does,
-/// on workspaces that match them.
-///
-/// The lease the previous worker held is released from outside, which
-/// fences that worker should it still be alive. Then the recovery protocol
-/// reads the run's durable execution state: a run with a failed checkpoint
-/// is reported failed here and never resumed; otherwise every live
-/// workspace on this host is verified against, reset to, or restored from
-/// the snapshot its last durable finish names, and a finish with no
-/// snapshot fails the run rather than resume it on stale files. The run is
-/// then asked to start again as a resume (`run.start_requested` with
-/// `resume`, then `run.runnable`, the same pair the API's resume appends),
-/// and a managed run is registered for the scheduler in resume mode when
-/// Petri's store holds the run, else in start mode: a worker that died
-/// before it created the run's record left nothing to continue from, so the
-/// run starts from its admitted graphs.
+/// on workspaces that match them ([`relaunch`]). A run that cannot continue
+/// is reported failed here and never resumed.
 pub(crate) async fn reconcile_on_startup(
     state: &Arc<AppState>,
     run_id: RunId,
     run_state: &fabro_store::RunProjection,
 ) -> anyhow::Result<()> {
-    let key = PetriRuns::key(&run_id);
+    let mode = match relaunch(state, run_id).await? {
+        Relaunch::Worker(mode) => mode,
+        Relaunch::Failed { reason } => {
+            warn!(
+                run_id = %run_id,
+                error = %reason,
+                "Petri run left in flight by the previous server cannot resume; reporting it failed"
+            );
+            let (_, _, record) = failed(FailureReason::WorkflowError, reason);
+            run_records::lifecycle(state, run_id, record).await?;
+            return Ok(());
+        }
+    };
+    info!(
+        run_id = %run_id,
+        mode = super::worker_mode_arg(mode),
+        "Petri run left in flight by the previous server; relaunching its worker"
+    );
+    let mut runs = state.runs.lock().expect("runs lock poisoned");
+    runs.insert(
+        run_id,
+        super::managed_run(
+            run_state.spec.graph_source.clone().unwrap_or_default(),
+            RunStatus::Runnable,
+            run_id.created_at(),
+            run_scratch(state, run_id).root().to_path_buf(),
+            mode,
+        ),
+    );
+    Ok(())
+}
+
+/// Resume a run whose store failed under it, as after a crash: its worker
+/// (or the in-process engine) ended the run's lifetime with nothing
+/// recorded after the failure and no end for the run. The run goes back
+/// to the scheduler through the same [`relaunch`] a restart takes.
+///
+/// `Err` with the failure to record when the run does not resume: it was
+/// deleted or ended meanwhile, a cancel is pending, the server is shutting
+/// down, its store interrupted it more than [`MAX_STORE_INTERRUPTIONS`]
+/// times, or it cannot continue from its records.
+pub(crate) async fn resume_after_interruption(
+    state: &Arc<AppState>,
+    run_id: RunId,
+    message: &str,
+) -> Result<(), String> {
+    let interrupted = format!("The run's store failed: {message}");
+    let interruptions = {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        let Some(managed_run) = runs.get_mut(&run_id) else {
+            return Err(interrupted);
+        };
+        managed_run.store_interruptions += 1;
+        managed_run.store_interruptions
+    };
+    if interruptions > MAX_STORE_INTERRUPTIONS {
+        warn!(
+            run_id = %run_id,
+            interruptions,
+            error = message,
+            "the run's store keeps failing; reporting the run failed"
+        );
+        return Err(format!(
+            "The run's store failed {interruptions} times; the last failure: {message}"
+        ));
+    }
+    if state.is_shutting_down() {
+        return Err(interrupted);
+    }
+    let run_state = match run_records::projection(state, run_id).await {
+        Ok(Some(run_state)) => run_state,
+        Ok(None) => return Err(interrupted),
+        Err(err) => {
+            return Err(format!("{interrupted}; its state could not be read: {err}"));
+        }
+    };
+    if run_state.status.is_terminal() || run_state.pending_control == Some(RunControlAction::Cancel)
+    {
+        return Err(interrupted);
+    }
+    let mode = match relaunch(state, run_id).await {
+        Ok(Relaunch::Worker(mode)) => mode,
+        Ok(Relaunch::Failed { reason }) => return Err(reason),
+        Err(err) => {
+            return Err(format!(
+                "{interrupted}; the run could not be resumed: {err:#}"
+            ));
+        }
+    };
+    warn!(
+        run_id = %run_id,
+        interruptions,
+        error = message,
+        mode = super::worker_mode_arg(mode),
+        "the run's store interrupted it; resuming it as after a crash"
+    );
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        let Some(managed_run) = runs.get_mut(&run_id) else {
+            return Err(interrupted);
+        };
+        managed_run.status = RunStatus::Runnable;
+        managed_run.execution_mode = mode;
+        clear_live_run_state(managed_run);
+    }
+    state.scheduler_notify.notify_one();
+    Ok(())
+}
+
+/// How a run whose lifetime ended short of its end continues.
+enum Relaunch {
+    /// A new worker takes it, in this mode.
+    Worker(RunExecutionMode),
+    /// Its records say it cannot continue.
+    Failed { reason: String },
+}
+
+/// Ready a run whose lifetime ended short of its end for a new worker, as a
+/// crash is recovered.
+///
+/// The previous worker is stopped should it still be running
+/// ([`stop_previous_worker`]), and only then is the lease it held released
+/// from outside. Then the recovery protocol
+/// reads the run's durable execution state: a run with a failed checkpoint
+/// cannot continue; otherwise every live workspace on this host is verified
+/// against, reset to, or restored from the snapshot its last durable finish
+/// names, and a finish with no snapshot cannot continue rather than resume
+/// on stale files. A run that continues is asked to start again as a resume
+/// (`run.start_requested` with `resume`, then `run.runnable`, the same pair
+/// the API's resume appends), in resume mode when Petri's store holds the
+/// run, else in start mode: a worker that died before it created the run's
+/// record left nothing to continue from, so the run starts from its
+/// admitted graphs. The caller registers the run with the scheduler.
+async fn relaunch(state: &Arc<AppState>, run_id: RunId) -> anyhow::Result<Relaunch> {
+    stop_previous_worker(state, run_id).await?;
     let held = match state.petri_runs.release_for_restart(run_id).await {
         Ok(()) => true,
         Err(StoreError::NotFound { .. }) => false,
@@ -582,10 +723,6 @@ pub(crate) async fn reconcile_on_startup(
             return Err(anyhow::Error::new(err).context("releasing the Petri run's lease"));
         }
     };
-    let run_dir = Storage::new(state.server_storage_dir())
-        .run_scratch(&run_id)
-        .root()
-        .to_path_buf();
     let mode = if held {
         let request = RecoveryRequest::for_run(
             run_id,
@@ -607,46 +744,54 @@ pub(crate) async fn reconcile_on_startup(
                 );
                 RunExecutionMode::Resume
             }
-            Recovery::Failed { reason } => {
-                warn!(
-                    run_id = %run_id,
-                    petri_key = %key,
-                    error = %reason,
-                    "Petri run left in flight by the previous server cannot resume; reporting it failed"
-                );
-                let (_, _, record) = failed(FailureReason::WorkflowError, reason);
-                run_records::lifecycle(state, run_id, record).await?;
-                return Ok(());
-            }
+            Recovery::Failed { reason } => return Ok(Relaunch::Failed { reason }),
         }
     } else {
         RunExecutionMode::Start
     };
-    info!(
-        run_id = %run_id,
-        petri_key = %key,
-        mode = super::worker_mode_arg(mode),
-        "Petri run left in flight by the previous server; relaunching its worker"
-    );
     let mut start_requested = RunLifecycleRecord::new(RunLifecycleKind::StartRequested);
     start_requested.source = Some("resume".to_string());
-    let mut runnable = run_records::transition(RunLifecycleKind::Runnable, RunStatus::Runnable);
-    runnable.source = Some(<&'static str>::from(RunRunnableSource::StartRequested).to_string());
+    let runnable = run_records::runnable(RunRunnableSource::StartRequested);
     for record in [start_requested, runnable] {
         run_records::lifecycle(state, run_id, record).await?;
     }
-    let mut runs = state.runs.lock().expect("runs lock poisoned");
-    runs.insert(
-        run_id,
-        super::managed_run(
-            run_state.spec.graph_source.clone().unwrap_or_default(),
-            RunStatus::Runnable,
-            run_id.created_at(),
-            run_dir,
-            mode,
-        ),
-    );
+    Ok(Relaunch::Worker(mode))
+}
+
+/// How long the server waits for a worker it killed to be gone.
+const WORKER_STOP_PATIENCE: Duration = Duration::from_secs(10);
+
+/// Make sure no worker of the run is still running, before its lease is
+/// ended from outside. A worker whose lease was released keeps running
+/// until its next write, beside any successor; and a worker outlives a
+/// server crash, since it leads a process group of its own. So a worker
+/// that still holds the run's worker lock is killed, with its process
+/// group, and the lock is waited on until the kernel frees it at the
+/// worker's exit. `Err` when it is still held after
+/// [`WORKER_STOP_PATIENCE`].
+pub(crate) async fn stop_previous_worker(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        let path = run_scratch(state, run_id).worker_lock_path();
+        let stopped = fabro_proc::stop_lock_holder(&path, WORKER_STOP_PATIENCE)
+            .await
+            .with_context(|| format!("stopping the run's previous worker ({})", path.display()))?;
+        if let Some(pid) = stopped {
+            warn!(
+                run_id = %run_id,
+                pid,
+                "the run's previous worker was still running; stopped it before ending its lease"
+            );
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (state, run_id);
     Ok(())
+}
+
+/// The run's scratch: its worker's run directory and worker lock.
+fn run_scratch(state: &AppState, run_id: RunId) -> RunScratch {
+    Storage::new(state.server_storage_dir()).run_scratch(&run_id)
 }
 
 /// The failed status, its message, and the `failed` lifecycle record for it.
@@ -824,10 +969,7 @@ mod tests {
     async fn in_flight_run() -> (Arc<AppState>, RunId, SettlingLogs, Arc<RecordingLogs>) {
         let state = TestAppStateBuilder::new().in_process_execution().build();
         let run_id = RunId::new();
-        let run_dir = Storage::new(state.server_storage_dir())
-            .run_scratch(&run_id)
-            .root()
-            .to_path_buf();
+        let run_dir = super::run_scratch(&state, run_id).root().to_path_buf();
         state.runs.lock().expect("runs lock poisoned").insert(
             run_id,
             super::super::managed_run(

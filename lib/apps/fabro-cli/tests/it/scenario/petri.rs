@@ -595,6 +595,11 @@ pub(super) async fn settled_stream(server: &RunningServer, run_id: &str) -> Vec<
 /// worker retitles itself `fabro <first 12 of the run id> <phase>`, so that
 /// is what the process table shows.
 fn worker_pid(run_id: &str) -> Option<u32> {
+    worker_pid_other_than(run_id, None)
+}
+
+/// [`worker_pid`], skipping the worker `previous` when given.
+fn worker_pid_other_than(run_id: &str, previous: Option<u32>) -> Option<u32> {
     let short_id: String = run_id.chars().take(12).collect();
     let output = Command::new("pgrep")
         .args(["-f", &format!("^fabro {short_id} ")])
@@ -602,18 +607,24 @@ fn worker_pid(run_id: &str) -> Option<u32> {
         .expect("pgrep runs");
     String::from_utf8_lossy(&output.stdout)
         .lines()
-        .find_map(|line| line.trim().parse().ok())
+        .filter_map(|line| line.trim().parse().ok())
+        .find(|pid| Some(*pid) != previous)
 }
 
 pub(super) fn wait_for_worker(run_id: &str) -> u32 {
+    wait_for_worker_except(run_id, None)
+}
+
+/// Wait for a worker of the run other than `previous`, when given.
+fn wait_for_worker_except(run_id: &str, previous: Option<u32>) -> u32 {
     let deadline = Instant::now() + RUN_TIMEOUT;
     loop {
-        if let Some(pid) = worker_pid(run_id) {
+        if let Some(pid) = worker_pid_other_than(run_id, previous) {
             return pid;
         }
         assert!(
             Instant::now() < deadline,
-            "no worker process appeared for run {run_id}"
+            "no worker process other than {previous:?} appeared for run {run_id}"
         );
         std::thread::sleep(POLL);
     }
@@ -776,6 +787,53 @@ async fn a_petri_run_resumes_in_a_new_worker_after_the_server_restarts() {
         .expect("the run's Petri record inspects");
     assert_eq!(outcome.status, RunStatus::Success, "{outcome:?}");
     assert!(outcome.complete, "{:?}", outcome.incomplete);
+    server.shutdown();
+}
+
+/// A worker outlives a server crash: it leads a process group of its own.
+/// The restarted server stops it before it ends the worker's lease and
+/// launches the resume, so no two workers of the run ever run side by side.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_worker_that_outlives_the_server_is_stopped_before_its_run_resumes() {
+    let context = test_context!();
+    let mut server = RunningServer::start().await;
+    let gate = context.temp_dir.join("survivor.gate");
+    let script = format!("while [ ! -f {} ]; do sleep 0.05; done", gate.display());
+    let workspace = write_petri_workspace(&context, &script);
+    let run_id = run_detached(&context, &server, &workspace);
+
+    wait_for_status(&server, &run_id, &["running"]).await;
+    let worker = wait_for_worker(&run_id);
+    eprintln!("worker {worker} launched");
+    wait_until_gate_is_polled(&gate);
+
+    // The server alone dies: its worker keeps running.
+    server.kill();
+    assert!(
+        fabro_proc::process_running_strict(worker),
+        "the worker outlived the server"
+    );
+
+    server.launch().await;
+    eprintln!("server restarted");
+    let resumed = wait_for_worker_except(&run_id, Some(worker));
+    eprintln!("worker {resumed} launched for the resume");
+    assert!(
+        !fabro_proc::process_running_strict(worker),
+        "the surviving worker {worker} was stopped before the resume's worker launched"
+    );
+    std::fs::write(&gate, "go").expect("the gate opens");
+
+    let status = wait_for_status(&server, &run_id, &["succeeded", "failed"]).await;
+    let names = stream_names(&settled_stream(&server, &run_id).await);
+    assert_eq!(
+        status,
+        "succeeded",
+        "stream: {names:?}\nserver stderr:\n{}",
+        server.stderr_text()
+    );
+    assert_eq!(count_of(&names, "lifecycle:succeeded"), 1, "{names:?}");
+    assert_eq!(count_of(&names, "run.finished"), 1, "{names:?}");
     server.shutdown();
 }
 

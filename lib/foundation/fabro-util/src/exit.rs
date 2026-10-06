@@ -3,6 +3,21 @@ use anyhow::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitClass {
     AuthRequired,
+    /// The command stopped short of its end for a reason a later attempt
+    /// can get past: a run worker whose run's store failed, which leaves
+    /// the run for the server to resume. `EX_TEMPFAIL` from `sysexits.h`.
+    Interrupted,
+}
+
+impl ExitClass {
+    /// The process exit code of an error of this class.
+    #[must_use]
+    pub const fn code(self) -> i32 {
+        match self {
+            Self::AuthRequired => 4,
+            Self::Interrupted => 75,
+        }
+    }
 }
 
 // Keep the wrapper transparent so existing stderr remains unchanged while the
@@ -49,9 +64,7 @@ impl ErrorExt for Error {
 pub fn exit_code_for(err: &Error) -> i32 {
     err.chain()
         .find_map(|cause| cause.downcast_ref::<Classified>())
-        .map_or(1, |classified| match classified.class() {
-            ExitClass::AuthRequired => 4,
-        })
+        .map_or(1, |classified| classified.class().code())
 }
 
 pub fn exit_class_for(err: &Error) -> Option<ExitClass> {
@@ -75,6 +88,13 @@ mod tests {
     fn classified_errors_map_to_exit_4() {
         let err = anyhow!("boom").classify(ExitClass::AuthRequired);
         assert_eq!(exit_code_for(&err), 4);
+    }
+
+    #[test]
+    fn interrupted_errors_map_to_exit_75() {
+        let err = anyhow!("boom").classify(ExitClass::Interrupted);
+        assert_eq!(exit_code_for(&err), 75);
+        assert_eq!(exit_class_for(&err), Some(ExitClass::Interrupted));
     }
 
     #[test]
