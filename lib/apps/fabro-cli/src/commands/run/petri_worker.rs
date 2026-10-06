@@ -216,14 +216,16 @@ pub(super) async fn execute(worker: PetriWorker<'_>) -> Result<()> {
             None
         }
     };
-    runtime.stage_credentials = StageCredentials::for_run(&worker.run_state.spec, github.as_ref())?;
+    let read_tokens = publish::read_token_source(&worker.run_state.spec, github.as_ref());
+    runtime.stage_credentials =
+        StageCredentials::for_run(&worker.run_state.spec, github.as_ref(), read_tokens.clone())?;
     let mut source = RunSource::for_run(
         worker.run_state.spec.target.as_ref(),
         &worker.run_state.spec.settings.run,
         None,
     );
     if let Some(source) = &mut source {
-        source.credentials = publish::source_credentials(&worker.run_state.spec, github.as_ref());
+        source.credentials = read_tokens.map(publish::source_credentials);
     }
     let publisher = publish::GitHubPublisher::for_run(
         run_id,

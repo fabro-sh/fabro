@@ -11,9 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use fabro_github::token_source::InstallationTokenSource;
-use fabro_github::{GitHubCredentials, GitHubRepositoryAccess};
-use fabro_types::settings::run::RunMode;
+use fabro_github::token_source::{InstallationTokenSource, ResolvedToken};
+use fabro_github::{GITHUB_CREDENTIAL_HELPER_KEY, GitHubCredentials, GitHubRepositoryAccess};
+use fabro_static::EnvVars;
+use fabro_types::settings::run::{RunIntegrationsGithubSettings, RunMode};
 use fabro_types::{GitHubRepositorySlug, RunSpec, RunTarget};
 use fabro_util::shell;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -40,12 +41,14 @@ pub struct StageCredentials {
 }
 
 impl StageCredentials {
-    /// Default origin access is read-only. Declared permissions govern the
+    /// Default origin access is `read_tokens`, the read-only source the
+    /// run's workspaces are fetched with. Declared permissions govern the
     /// integration token and additional repositories. Static tokens retain
     /// their existing scope; publication has a separate write-token source.
     pub fn for_run(
         spec: &RunSpec,
         credentials: Option<&GitHubCredentials>,
+        read_tokens: Option<Arc<InstallationTokenSource>>,
     ) -> anyhow::Result<Option<Self>> {
         if spec.settings.run.execution.mode == RunMode::DryRun {
             return Ok(None);
@@ -60,46 +63,34 @@ impl StageCredentials {
             .integrations
             .github
             .resolve_integration()?;
-        let access = GitHubRepositoryAccess::new(
+        let Some(access) = GitHubRepositoryAccess::new(
             Some(&repository.https_url()),
             &integration.additional_repositories,
             integration.permissions.clone(),
-        )?;
+        )?
+        else {
+            return Ok(None);
+        };
         let Some(credentials) = credentials else {
             return Ok(None);
         };
-        let api_tokens = if integration.is_token_requested() {
-            access
-                .as_ref()
-                .map(|access| InstallationTokenSource::for_access(credentials, access))
-                .transpose()?
-        } else {
-            None
-        };
-        let (git_tokens, repositories) = if matches!(
-            integration.permissions.get("contents").map(String::as_str),
-            Some("read" | "write")
-        ) {
-            let Some(access) = access else {
-                return Ok(None);
-            };
-            let Some(tokens) = &api_tokens else {
-                return Ok(None);
-            };
-            (
-                tokens.clone(),
+        let api_tokens = integration
+            .is_token_requested()
+            .then(|| InstallationTokenSource::for_access(credentials, &access))
+            .transpose()?;
+        let contents_declared = integration
+            .permissions
+            .get("contents")
+            .is_some_and(|value| {
+                RunIntegrationsGithubSettings::contents_permission_allows_repository_access(value)
+            });
+        let (git_tokens, repositories) = match (&api_tokens, read_tokens) {
+            (Some(tokens), _) if contents_declared => (
+                Arc::clone(tokens),
                 access.targets().into_iter().cloned().collect(),
-            )
-        } else {
-            (
-                InstallationTokenSource::for_repository(
-                    credentials,
-                    repository.owner().to_string(),
-                    repository.repo().to_string(),
-                    serde_json::json!({"contents":"read"}),
-                )?,
-                vec![repository],
-            )
+            ),
+            (_, Some(tokens)) => (tokens, vec![repository]),
+            (_, None) => return Ok(None),
         };
         Ok(Some(Self {
             git_tokens,
@@ -127,12 +118,14 @@ struct CredentialExecutor {
 
 struct ScopeRefresh {
     env:  Arc<CredentialEnv>,
-    task: JoinHandle<()>,
+    task: Option<JoinHandle<()>>,
 }
 
 impl Drop for ScopeRefresh {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(task) = &self.task {
+            task.abort();
+        }
     }
 }
 
@@ -144,46 +137,40 @@ impl Executor for CredentialExecutor {
         ctx: &AcquireContext,
     ) -> Result<EnvHandle, EnvError> {
         let handle = self.inner.acquire(scope, ctx).await?;
-        let inner = handle.exec();
-        let directory = match command(
-            &inner,
-            "umask 077; mktemp -d /tmp/fabro-git-credentials.XXXXXXXX",
-            Vec::new(),
+        let env = match CredentialEnv::install(
+            handle.exec(),
+            self.credentials.clone(),
+            self.masker.clone(),
         )
         .await
         {
-            Ok(directory) => directory.trim().to_string(),
+            Ok(env) => Arc::new(env),
             Err(error) => {
                 self.inner.release(handle, ScopeOutcome::Failed).await;
                 return Err(error);
             }
         };
-        let env = Arc::new(CredentialEnv {
-            inner,
-            credentials: self.credentials.clone(),
-            masker: self.masker.clone(),
-            directory,
-            update: Mutex::new(()),
-        });
-        if let Err(error) = env.refresh().await {
-            let _ = env.cleanup().await;
-            self.inner.release(handle, ScopeOutcome::Failed).await;
-            return Err(error);
-        }
-        let refresh_env = env.clone();
-        let task = tokio::spawn(async move {
-            loop {
-                time::sleep(REFRESH_INTERVAL).await;
-                if let Err(error) = refresh_env.refresh().await {
-                    warn!(error = %refresh_env.masker.mask(&error.to_string()), "could not refresh the sandbox's GitHub credentials; retrying");
-                }
-            }
-        });
+        // Only minted tokens renew; a static token's store never changes.
+        let task = self
+            .credentials
+            .git_tokens
+            .mints_installation_tokens()
+            .then(|| {
+                let env = Arc::clone(&env);
+                tokio::spawn(async move {
+                    loop {
+                        time::sleep(REFRESH_INTERVAL).await;
+                        if let Err(error) = env.refresh().await {
+                            warn!(error = %env.masker.mask(&error.to_string()), "could not refresh the sandbox's GitHub credentials; retrying");
+                        }
+                    }
+                })
+            });
         self.scopes
             .lock()
             .await
             .insert(handle.instance().to_string(), ScopeRefresh {
-                env: env.clone(),
+                env: Arc::clone(&env),
                 task,
             });
         Ok(handle.with_spawn_env(env))
@@ -193,8 +180,10 @@ impl Executor for CredentialExecutor {
         let mut problems = Vec::new();
         let refresh = self.scopes.lock().await.remove(handle.instance());
         if let Some(mut refresh) = refresh {
-            refresh.task.abort();
-            let _ = (&mut refresh.task).await;
+            if let Some(task) = refresh.task.take() {
+                task.abort();
+                let _ = task.await;
+            }
             if refresh.env.cleanup().await.is_err() {
                 problems.push("could not remove the sandbox's GitHub credential store".to_string());
             }
@@ -210,17 +199,66 @@ struct CredentialEnv {
     credentials: StageCredentials,
     masker:      Masker,
     directory:   String,
-    update:      Mutex<()>,
+    /// The token generation the store holds; `None` before the first write.
+    written:     Mutex<Option<u64>>,
 }
 
 impl CredentialEnv {
-    async fn refresh(&self) -> Result<(), EnvError> {
-        let _update = self.update.lock().await;
-        let token = time::timeout(CREDENTIAL_TIMEOUT, self.credentials.git_tokens.resolve())
+    /// Create the scope's private store directory and write the first store,
+    /// removing the directory again when that write fails.
+    async fn install(
+        inner: Arc<dyn ExecEnv>,
+        credentials: StageCredentials,
+        masker: Masker,
+    ) -> Result<Self, EnvError> {
+        let directory = command(
+            &inner,
+            "umask 077; mktemp -d /tmp/fabro-git-credentials.XXXXXXXX",
+            BTreeMap::new(),
+        )
+        .await?
+        .trim()
+        .to_string();
+        let env = Self {
+            inner,
+            credentials,
+            masker,
+            directory,
+            written: Mutex::new(None),
+        };
+        if let Err(error) = env.refresh().await {
+            let _ = env.cleanup().await;
+            return Err(error);
+        }
+        Ok(env)
+    }
+
+    fn store_path(&self) -> String {
+        shell::shell_quote(&format!("{}/store", self.directory))
+    }
+
+    async fn resolve(
+        &self,
+        tokens: &InstallationTokenSource,
+        operation: &'static str,
+    ) -> Result<ResolvedToken, EnvError> {
+        let resolved = time::timeout(CREDENTIAL_TIMEOUT, tokens.resolve())
             .await
-            .map_err(|_| EnvError::backend("github", "refresh", "token resolution timed out"))?
-            .map_err(|_| EnvError::backend("github", "refresh", "token resolution failed"))?;
-        self.masker.register_explicit(token.token.expose());
+            .map_err(|_| EnvError::backend("github", operation, "token resolution timed out"))?
+            .map_err(|_| EnvError::backend("github", operation, "token resolution failed"))?;
+        self.masker.register_explicit(resolved.token.expose());
+        Ok(resolved)
+    }
+
+    /// Rewrite the store when the token source has minted a new generation.
+    async fn refresh(&self) -> Result<(), EnvError> {
+        let mut written = self.written.lock().await;
+        let token = self
+            .resolve(&self.credentials.git_tokens, "refresh")
+            .await?;
+        if *written == Some(token.snapshot.generation) {
+            return Ok(());
+        }
         let password = utf8_percent_encode(token.token.expose(), NON_ALPHANUMERIC).to_string();
         self.masker.register_explicit(&password);
         let store = self
@@ -234,9 +272,14 @@ impl CredentialEnv {
                 ]
             })
             .collect::<String>();
-        self.masker.register_explicit(&store);
-        let path = shell::shell_quote(&format!("{}/store", self.directory));
-        command(&self.inner, &format!("umask 077; printf '%s' \"$FABRO_GIT_CREDENTIAL_STORE\" > {path}.new && mv -f {path}.new {path}"), vec![("FABRO_GIT_CREDENTIAL_STORE".to_string(), store)]).await?;
+        let path = self.store_path();
+        command(
+            &self.inner,
+            &format!("umask 077; printf '%s' \"$FABRO_GIT_CREDENTIAL_STORE\" > {path}.new && mv -f {path}.new {path}"),
+            BTreeMap::from([("FABRO_GIT_CREDENTIAL_STORE".into(), store.into())]),
+        )
+        .await?;
+        *written = Some(token.snapshot.generation);
         Ok(())
     }
 
@@ -244,7 +287,7 @@ impl CredentialEnv {
         command(
             &self.inner,
             &format!("rm -rf -- {}", shell::shell_quote(&self.directory)),
-            Vec::new(),
+            BTreeMap::new(),
         )
         .await
         .map(|_| ())
@@ -269,13 +312,10 @@ impl CredentialEnv {
                 "credential.https://github.com.useHttpPath",
                 "true".to_string(),
             ),
-            ("credential.https://github.com.helper", String::new()),
+            (GITHUB_CREDENTIAL_HELPER_KEY, String::new()),
             (
-                "credential.https://github.com.helper",
-                format!(
-                    "store --file={}",
-                    shell::shell_quote(&format!("{}/store", self.directory))
-                ),
+                GITHUB_CREDENTIAL_HELPER_KEY,
+                format!("store --file={}", self.store_path()),
             ),
             (
                 "url.https://github.com/.insteadOf",
@@ -323,23 +363,17 @@ impl SpawnEnv for CredentialEnv {
         target: SpawnTarget,
         env: &mut BTreeMap<SmolStr, SmolStr>,
     ) -> Result<(), EnvError> {
-        // The store and the helper configuration that names it live in the
-        // scope's sandbox; a one-shot container cannot read either.
-        if target == SpawnTarget::Process {
-            self.refresh().await?;
-        }
         // The managed token carries exactly the access the run declared, so
         // it replaces any `GITHUB_TOKEN` the process would otherwise see, as
         // Fabro's stage environment did before Petri.
         if let Some(tokens) = &self.credentials.api_tokens {
-            let resolved = time::timeout(CREDENTIAL_TIMEOUT, tokens.resolve())
-                .await
-                .map_err(|_| EnvError::backend("github", "resolve", "token resolution timed out"))?
-                .map_err(|_| EnvError::backend("github", "resolve", "token resolution failed"))?;
-            self.masker.register_explicit(resolved.token.expose());
-            env.insert("GITHUB_TOKEN".into(), resolved.token.expose().into());
+            let resolved = self.resolve(tokens, "resolve").await?;
+            env.insert(EnvVars::GITHUB_TOKEN.into(), resolved.token.expose().into());
         }
+        // The store and the helper configuration that names it live in the
+        // scope's sandbox; a one-shot container cannot read either.
         if target == SpawnTarget::Process {
+            self.refresh().await?;
             self.git_env(env)?;
         }
         Ok(())
@@ -349,16 +383,11 @@ impl SpawnEnv for CredentialEnv {
 async fn command(
     env: &Arc<dyn ExecEnv>,
     script: &str,
-    extra_env: Vec<(String, String)>,
+    extra_env: BTreeMap<SmolStr, SmolStr>,
 ) -> Result<String, EnvError> {
     let spec = ProcessSpec::new("sh", &["-c", script])
         .with_timeout(Some(CREDENTIAL_TIMEOUT))
-        .with_env(
-            extra_env
-                .into_iter()
-                .map(|(key, value)| (key.into(), value.into()))
-                .collect(),
-        );
+        .with_env(extra_env);
     let mut handle = env.spawn(spec).await?;
     let mut stdout = String::new();
     if let Some(mut lines) = handle.lines() {
@@ -412,6 +441,29 @@ mod tests {
         }
     }
 
+    const MANAGED_TOKEN_CHECK: &str =
+        "case $GITHUB_TOKEN in scripted-token-generation-*) exit 0;; *) exit 1;; esac";
+
+    /// A scope acquired through the credential layer over a local sandbox.
+    async fn acquire(
+        name: &str,
+        api: bool,
+    ) -> (tempfile::TempDir, Arc<dyn Executor>, EnvHandle, MapSecrets) {
+        let dir = tempfile::tempdir().expect("directory");
+        let runtime = providers::standard_runtime(&SandboxProviderConfig::default());
+        let router = runtime.sandbox_router_for(dir.path()).expect("router");
+        let secrets = MapSecrets::empty();
+        let executor = credentials(api).executor(router, secrets.masker());
+        let handle = executor
+            .acquire(
+                &ScopeSpec::new(ScopeId::new(0), name),
+                &AcquireContext::bare(),
+            )
+            .await
+            .expect("acquire");
+        (dir, executor, handle, secrets)
+    }
+
     fn credentials(api: bool) -> StageCredentials {
         let tokens = test_support::installation_token_source(
             "acme/private",
@@ -434,7 +486,8 @@ mod tests {
             .expect("target"),
         );
         let pat = GitHubCredentials::Pat("scripted-personal-access-token".to_string());
-        let default = StageCredentials::for_run(&spec, Some(&pat))
+        let read = InstallationTokenSource::pat("scripted-personal-access-token".to_string());
+        let default = StageCredentials::for_run(&spec, Some(&pat), Some(Arc::clone(&read)))
             .expect("policy")
             .expect("credentials");
         assert!(default.api_tokens.is_none());
@@ -451,7 +504,7 @@ mod tests {
             .github
             .additional_repositories
             .insert(GitHubRepositorySlug::try_new("acme/another").expect("slug"));
-        let declared = StageCredentials::for_run(&spec, Some(&pat))
+        let declared = StageCredentials::for_run(&spec, Some(&pat), Some(read))
             .expect("policy")
             .expect("credentials");
         assert!(declared.api_tokens.is_some());
@@ -460,18 +513,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_running_process_reads_renewed_git_credentials_and_release_cleans_up() {
-        let dir = tempfile::tempdir().expect("directory");
-        let runtime = providers::standard_runtime(&SandboxProviderConfig::default());
-        let router = runtime.sandbox_router_for(dir.path()).expect("router");
-        let secrets = MapSecrets::empty();
-        let executor = credentials(false).executor(router, secrets.masker());
-        let handle = executor
-            .acquire(
-                &ScopeSpec::new(ScopeId::new(0), "credentials"),
-                &AcquireContext::bare(),
-            )
-            .await
-            .expect("acquire");
+        let (_dir, executor, handle, secrets) = acquire("credentials", false).await;
         let env = handle.exec();
         let script = "printf 'protocol=https\\nhost=github.com\\npath=acme/private\\n\\n' | git credential fill; printf 'READY\\n'; read answer; printf 'protocol=https\\nhost=github.com\\npath=acme/private\\n\\n' | git credential fill";
         let mut process = env
@@ -494,7 +536,7 @@ mod tests {
             first.contains("fatal:")
         );
         // Another spawn rotates the store while the original process lives.
-        command(&env, "true", Vec::new())
+        command(&env, "true", BTreeMap::new())
             .await
             .expect("refresh via spawn");
         process
@@ -518,12 +560,12 @@ mod tests {
                 .mask(&format!("{first}{second}"))
                 .contains("scripted-token")
         );
-        assert!(command(&env, "printf 'protocol=https\\nhost=github.com\\npath=acme/unrelated\\n\\n' | git credential fill", Vec::new()).await.is_err(), "the helper refuses an undeclared repository");
-        command(&env, "printf 'protocol=https\\nhost=github.com\\npath=acme/private.git\\n\\n' | git credential fill >/dev/null", Vec::new()).await.expect("the .git spelling is authenticated too");
+        assert!(command(&env, "printf 'protocol=https\\nhost=github.com\\npath=acme/unrelated\\n\\n' | git credential fill", BTreeMap::new()).await.is_err(), "the helper refuses an undeclared repository");
+        command(&env, "printf 'protocol=https\\nhost=github.com\\npath=acme/private.git\\n\\n' | git credential fill >/dev/null", BTreeMap::new()).await.expect("the .git spelling is authenticated too");
         let probe = command(
             &env,
             "git config --get credential.https://github.com.helper",
-            Vec::new(),
+            BTreeMap::new(),
         )
         .await
         .expect("helper");
@@ -562,7 +604,7 @@ mod tests {
             credentials: credentials(true),
             masker:      secrets.masker(),
             directory:   store.display().to_string(),
-            update:      Mutex::new(()),
+            written:     Mutex::new(None),
         };
         let mut container = BTreeMap::from([("GITHUB_TOKEN".into(), "explicit".into())]);
         env.apply(SpawnTarget::Container, &mut container)
@@ -597,33 +639,15 @@ mod tests {
 
     #[tokio::test]
     async fn declared_api_tokens_reach_processes_and_replace_explicit_values() {
-        let dir = tempfile::tempdir().expect("directory");
-        let runtime = providers::standard_runtime(&SandboxProviderConfig::default());
-        let router = runtime.sandbox_router_for(dir.path()).expect("router");
-        let secrets = MapSecrets::empty();
-        let executor = credentials(true).executor(router, secrets.masker());
-        let handle = executor
-            .acquire(
-                &ScopeSpec::new(ScopeId::new(0), "api-credentials"),
-                &AcquireContext::bare(),
-            )
-            .await
-            .expect("acquire");
+        let (_dir, executor, handle, secrets) = acquire("api-credentials", true).await;
         let env = handle.exec();
+        command(&env, MANAGED_TOKEN_CHECK, BTreeMap::new())
+            .await
+            .expect("the integration token reaches the child");
         command(
             &env,
-            "case $GITHUB_TOKEN in scripted-token-generation-*) exit 0;; *) exit 1;; esac",
-            Vec::new(),
-        )
-        .await
-        .expect("the integration token reaches the child");
-        command(
-            &env,
-            "case $GITHUB_TOKEN in scripted-token-generation-*) exit 0;; *) exit 1;; esac",
-            vec![(
-                "GITHUB_TOKEN".to_string(),
-                "command-token-override".to_string(),
-            )],
+            MANAGED_TOKEN_CHECK,
+            BTreeMap::from([("GITHUB_TOKEN".into(), "command-token-override".into())]),
         )
         .await
         .expect("the managed token replaces an explicit one");
