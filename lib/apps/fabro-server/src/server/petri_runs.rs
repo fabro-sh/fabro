@@ -580,7 +580,7 @@ pub(crate) async fn reconcile_on_startup(
     run_id: RunId,
     run_state: &fabro_store::RunProjection,
 ) -> anyhow::Result<()> {
-    let mode = match relaunch(state, run_id, run_state).await? {
+    let mode = match relaunch(state, run_id).await? {
         Relaunch::Worker(mode) => mode,
         Relaunch::Failed { reason } => {
             warn!(
@@ -660,7 +660,7 @@ pub(crate) async fn resume_after_interruption(
     {
         return Err(interrupted);
     }
-    let mode = match relaunch(state, run_id, &run_state).await {
+    let mode = match relaunch(state, run_id).await {
         Ok(Relaunch::Worker(mode)) => mode,
         Ok(Relaunch::Failed { reason }) => return Err(reason),
         Err(err) => {
@@ -713,11 +713,7 @@ enum Relaunch {
 /// run, else in start mode: a worker that died before it created the run's
 /// record left nothing to continue from, so the run starts from its
 /// admitted graphs. The caller registers the run with the scheduler.
-async fn relaunch(
-    state: &Arc<AppState>,
-    run_id: RunId,
-    run_state: &fabro_store::RunProjection,
-) -> anyhow::Result<Relaunch> {
+async fn relaunch(state: &Arc<AppState>, run_id: RunId) -> anyhow::Result<Relaunch> {
     stop_previous_worker(state, run_id).await?;
     let held = match state.petri_runs.release_for_restart(run_id).await {
         Ok(()) => true,

@@ -2793,7 +2793,13 @@ async fn delete_run_internal(
     // outlived a server crash, is stopped first.
     petri_runs::stop_previous_worker(state, id)
         .await
-        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{err:#}")))?;
+        .map_err(|err| {
+            error!(run_id = %id, error = %format!("{err:#}"), "Stopping the run's previous worker failed");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to stop the run's previous worker",
+            )
+        })?;
     state.petri_runs.worker_exited(id);
     let delete_outcome = delete_run_sandbox_resource(state, id, force).await?;
 

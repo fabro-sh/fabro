@@ -191,7 +191,7 @@ impl Harness {
             run_id: self.run_id.to_string(),
             run_dir: self.run_dir.clone(),
             execution: if resumed {
-                Execution::Resume
+                Execution::Resume(admit(workflow, settings))
             } else {
                 Execution::Start(admit(workflow, settings))
             },

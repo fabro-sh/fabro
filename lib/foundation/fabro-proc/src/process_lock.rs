@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use tokio::fs::OpenOptions;
 use tokio::time;
 
-use crate::signal::{sigkill, sigkill_process_group};
+use crate::signal;
 
 /// How often [`stop_lock_holder`] checks whether the lock is free.
 const POLL: Duration = Duration::from_millis(20);
@@ -94,8 +94,8 @@ pub async fn stop_lock_holder(path: &Path, patience: Duration) -> io::Result<Loc
     let Some(pid) = holder(&file)? else {
         return Ok(LockHolder::None);
     };
-    sigkill_process_group(pid);
-    sigkill(pid);
+    signal::sigkill_process_group(pid);
+    signal::sigkill(pid);
     let deadline = Instant::now() + patience;
     loop {
         match holder(&file)? {
