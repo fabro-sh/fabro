@@ -107,15 +107,22 @@ fn token_source(
     }
 }
 
-/// The read-only credentials the run's workspaces are fetched with. `None`
-/// when the run has no GitHub target or no credentials resolve; a public
-/// repository is then fetched anonymously.
-pub(super) fn source_credentials(
+/// The read-only token source the run's workspaces are fetched with, and
+/// its stages' Git reads the origin with. `None` when the run has no GitHub
+/// target or no credentials resolve; a public repository is then fetched
+/// anonymously.
+pub(super) fn read_token_source(
     spec: &RunSpec,
     credentials: Option<&GitHubCredentials>,
-) -> Option<Arc<dyn SourceCredentials>> {
-    let tokens = token_source(spec, credentials, serde_json::json!({ "contents": "read" }))?;
-    Some(Arc::new(ReadCredentials(tokens)))
+) -> Option<Arc<InstallationTokenSource>> {
+    token_source(spec, credentials, serde_json::json!({ "contents": "read" }))
+}
+
+/// Fetch credentials over the run's read-only token source.
+pub(super) fn source_credentials(
+    tokens: Arc<InstallationTokenSource>,
+) -> Arc<dyn SourceCredentials> {
+    Arc::new(ReadCredentials(tokens))
 }
 
 /// Fetch credentials resolved from the run's read-only token source.

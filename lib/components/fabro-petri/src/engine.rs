@@ -226,6 +226,11 @@ pub async fn run(request: RunRequest) -> Result<RunOutcome, RunError> {
     if let Some(secrets) = request.secrets {
         runtime = runtime.secrets(SharedSecrets(secrets));
     }
+    if let Some(credentials) = request.runtime.stage_credentials.clone() {
+        let masker = runtime.masker();
+        runtime =
+            runtime.executor_layer(move |executor| credentials.executor(executor, masker.clone()));
+    }
     if let Some(blobs) = &request.blobs {
         runtime = runtime.capability(RunBlobs::output_store(Arc::clone(blobs)));
     }

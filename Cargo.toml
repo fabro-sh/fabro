@@ -70,6 +70,7 @@ jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 hkdf = "0.12"
 hmac = "0.12"
 sha2 = "0.10"
+smol_str = "0.3"
 hex = "0.4"
 insta = "1"
 fabro-test = { path = "lib/foundation/fabro-test" }
