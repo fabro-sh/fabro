@@ -8,9 +8,10 @@ use lithos_llm::catalog::{Catalog, ProviderId};
 use lithos_llm::client::{Client, ClientBuildError, ClientBuilder, ProviderBuildIssue};
 use lithos_llm::credentials::{CredentialError, CredentialProvider};
 use lithos_llm::middleware::{
-    Call, InlineLocalFiles, Middleware, Observer, RetryMiddleware, RetryPolicy, RetryStage,
+    Call, InlineLocalFiles, Middleware, Observer, RetryEvent, RetryMiddleware, RetryPolicy,
+    RetryStage,
 };
-use lithos_llm::types::{Error, ErrorData};
+use lithos_llm::types::ErrorData;
 
 /// The application name lithos reports to providers that ask, such as the
 /// `originator` header on the OpenAI Codex deployment.
@@ -64,20 +65,13 @@ impl RetryListener {
 struct RetryNotifier;
 
 impl Observer for RetryNotifier {
-    fn on_retry(
-        &self,
-        call: &Call,
-        error: &Error,
-        attempt: u32,
-        delay: Duration,
-        stage: RetryStage,
-    ) {
+    fn on_retry(&self, call: &Call, retry: RetryEvent<'_>) {
         if let Some(listener) = call.context().extensions().get::<RetryListener>() {
             listener.notify(RetryNotice {
-                error: ErrorData::from(error),
-                attempt,
-                delay,
-                stage,
+                error:   ErrorData::from(retry.error),
+                attempt: retry.attempt,
+                delay:   retry.delay,
+                stage:   retry.stage,
             });
         }
     }
@@ -146,7 +140,8 @@ impl ClientOptions {
             builder = builder.middleware(retry_middleware(policy));
         }
         if self.inline_attachments {
-            builder = builder.middleware(InlineLocalFiles::new());
+            // Preserve Fabro's existing support for caller-supplied local paths.
+            builder = builder.middleware(InlineLocalFiles::unrestricted());
         }
         for middleware in self.middleware {
             builder = builder.middleware_arc(middleware);
@@ -271,5 +266,96 @@ mod tests {
         assert!(!built.has_provider(&ProviderId::new("anthropic")));
         assert!(built.auth_issues.is_empty());
         assert!(built.build_issues.is_empty(), "{:?}", built.build_issues);
+    }
+
+    #[tokio::test]
+    async fn retry_listener_receives_failed_attempt_details() {
+        use std::sync::Mutex;
+
+        use lithos_llm::middleware::CallContext;
+        use lithos_llm::types::{Error, ErrorKind, Message, Request, RetryClassification, Role};
+
+        use crate::test_support::{self, FailingAdapter};
+
+        let adapter = Arc::new(FailingAdapter::new(|| {
+            Error::new(ErrorKind::RateLimit, "try again").with_retry(RetryClassification::Safe)
+        }));
+        let client = test_support::client_with_adapters(
+            vec![("openai", adapter.clone())],
+            ClientOptions::default().with_retry(Some(test_support::test_retry_policy())),
+        );
+        let notices = Arc::new(Mutex::new(Vec::new()));
+        let captured = notices.clone();
+        let mut context = CallContext::new();
+        context
+            .extensions_mut()
+            .insert(RetryListener::new(move |notice| {
+                captured.lock().unwrap().push(notice);
+            }));
+        let request = Request::builder()
+            .model("openai/gpt-5.4")
+            .message(Message::text(Role::User, "hello"))
+            .build()
+            .unwrap();
+        assert!(
+            client
+                .complete_with_context(request, context)
+                .await
+                .is_err()
+        );
+        assert_eq!(adapter.calls(), 3);
+        let notices = notices.lock().unwrap();
+        assert_eq!(notices.len(), 2);
+        for (notice, attempt) in notices.iter().zip([1, 2]) {
+            assert_eq!(notice.attempt, attempt);
+            assert_eq!(notice.delay, Duration::ZERO);
+            assert_eq!(notice.stage, RetryStage::Request);
+            assert_eq!(notice.error.kind, ErrorKind::RateLimit);
+            assert_eq!(notice.error.message, "try again");
+        }
+    }
+
+    #[tokio::test]
+    async fn standard_client_inlines_caller_supplied_local_files() {
+        use async_trait::async_trait;
+        use lithos_llm::middleware::{Next, Output};
+        use lithos_llm::types::{
+            ContentPart, Error, ImageContent, MediaSource, Message, Request, Role,
+        };
+        use tokio::fs;
+
+        use crate::test_support::{self, ScriptedAdapter};
+
+        struct CheckInline;
+
+        #[async_trait]
+        impl Middleware for CheckInline {
+            async fn handle(&self, call: Call, next: Next) -> Result<Output, Error> {
+                let ContentPart::Image(image) = &call.request().messages()[0].content()[0] else {
+                    panic!("expected an image");
+                };
+                assert_eq!(image.source, MediaSource::base64("aGVsbG8=", "image/png"));
+                next.run(call).await
+            }
+        }
+
+        let directory = fabro_test::isolated_storage_dir();
+        let image = directory.path().join("image.png");
+        fs::write(&image, b"hello").await.unwrap();
+        let adapter = Arc::new(ScriptedAdapter::new(vec![test_support::text_response(
+            "openai", "gpt-5.4", "seen",
+        )]));
+        let client = test_support::client_with_adapters(
+            vec![("openai", adapter)],
+            ClientOptions::standard().with_middleware(Arc::new(CheckInline)),
+        );
+        let request = Request::builder()
+            .model("openai/gpt-5.4")
+            .message(Message::new(Role::User, [ContentPart::Image(
+                ImageContent::new(MediaSource::url(image.to_string_lossy())),
+            )]))
+            .build()
+            .unwrap();
+        client.complete(request).await.unwrap();
     }
 }
