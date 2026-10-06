@@ -454,3 +454,31 @@ fn apply_metrics(stage: &mut StageProjection, metrics: &Metrics) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use petri_runtime::ir::FailureInfo;
+
+    use super::*;
+
+    /// A partial success reports the failure it was converted from, a
+    /// timeout included, and its outcome stays a partial success.
+    #[test]
+    fn a_partial_success_reports_the_failure_it_came_from() {
+        let failed = Status::partial(FailureInfo::new("tests failed"));
+        let timed_out = Status::PartialSuccess {
+            underlying: Some(UnderlyingFailure::TimedOut),
+        };
+        let unexplained = Status::PartialSuccess { underlying: None };
+
+        assert_eq!(failure_message(&failed).as_deref(), Some("tests failed"));
+        assert_eq!(
+            failure_message(&timed_out).as_deref(),
+            Some("the step timed out")
+        );
+        assert_eq!(failure_message(&unexplained), None);
+        for status in [&failed, &timed_out, &unexplained] {
+            assert_eq!(stage_outcome(status), StageOutcome::PartiallySucceeded);
+        }
+    }
+}
